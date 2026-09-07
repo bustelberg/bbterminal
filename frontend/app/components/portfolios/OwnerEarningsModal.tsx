@@ -11,6 +11,7 @@ import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFund
 import LangSwitch from '../LangSwitch';
 import { useLang } from '../../../lib/i18n';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
+import { valuationSubject } from './valuationSubject';
 
 type Tab = 'longequity' | 'quickval' | 'deepval' | 'tables';
 
@@ -142,34 +143,8 @@ export default function OwnerEarningsModal({
   const eyebrow = ['Fundamental', book ? title : null,
     book && sharePct != null ? `${sharePct.toFixed(1)}% of the portfolio` : null,
   ].filter(Boolean).join(' · ');
-  // ⚠ A MISSING CONTROL LOOKS IDENTICAL TO A BROKEN ONE, SO THE ABSENCE EXPLAINS ITSELF. The
-  // fundamentals refresh needs a real model portfolio to scope to, and the Analyse modal only has
-  // one when it was opened WITH an id — `/portfolios` always passes one, the overview panel's
-  // `analyse` state has `id?: number` and an account or ad-hoc basket row carries none. Without
-  // this line the button is simply not there and there is nothing on screen or in the log to say
-  // why, which is exactly the state this codebase keeps removing.
-  /**
-   * What the refresh acts on — DERIVED FROM WHAT THIS MODAL IS SHOWING, not from how it was
-   * opened.
-   *
-   * ⚠⚠ A CONTROL'S SCOPE MUST MATCH ITS SCREEN, OR IT IS A TRAP. Opened on one company, the modal
-   * charts that company; a button beside those charts that quietly refetched the other nineteen
-   * holdings would spend nineteen API calls the reader never asked for, and take minutes to do
-   * something they cannot see. Opened on the whole book (a basket, or a portfolio aggregate) the
-   * same button correctly means all of it.
-   *
-   * ⚠ ONE COMPANY IS SENT AS A BASKET OF ONE, so there is no third code path — see `RefreshScope`.
-   */
-  const scope = useMemo<RefreshScope | undefined>(
-    () => (!isAgg && isin ? { kind: 'company', isin, name: name || isin } : refreshScope),
-    [isAgg, isin, name, refreshScope]);
-
-  useEffect(() => {
-    if (!scope) {
-      trace('fundamentals', 'no Refresh-fundamentals button: this modal is showing neither a '
-        + 'single instrument nor a book (no isin, no basket, no portfolio) to scope the fill to.');
-    }
-  }, [scope]);
+  // ⚠ `scope` IS BUILT FURTHER DOWN, below the tab state — it now follows the company the
+  // valuation tabs are showing, which is not known until the tab and the A/B side are.
   // ⚠ THE LANDING TAB, AND IT IS THE ONE TAB BOTH AN AGGREGATE AND A SINGLE COMPANY HAVE — so
   // where the modal opens never depends on which it was opened for. (It became the landing tab when
   // `fundamentals` was demoted to "Old charts"; that tab is now gone entirely.)
@@ -200,6 +175,59 @@ export default function OwnerEarningsModal({
     setTab(t);
   };
   const hasInstrument = isAgg || !!isin;
+
+  /**
+   * WHICH OF THE TWO COMPANIES QUICK AND DEEP VALUATION ARE SHOWING.
+   *
+   * ⚠ ONE SIDE FOR BOTH TABS, NOT ONE EACH. They are two readings of the same question about the
+   * same company; a reader who values B in Quick and then opens Deep expects Deep to still be
+   * about B, and two independent switches would make "which company is this?" a per-tab fact.
+   *
+   * ⚠ THE RULE IT FEEDS IS IN `valuationSubject`, NOT HERE — `valued` (what the two tabs read,
+   * on every tab, because both stay mounted) and `shown` (what the head names and the refresh
+   * acts on, only on those two tabs) are deliberately NOT the same answer, and as four ternaries
+   * in this component nothing could see the difference. Its docstring carries the reasoning.
+   */
+  const [valueSide, setValueSide] = useState<'a' | 'b'>('a');
+  const { valued, shown, onValuationTab, switchable } =
+    valuationSubject({ isin, name, compare, side: valueSide, tab });
+  /** ⚠ SCALARS, so `scope`'s memo does not re-run on every render — `compare` is built inline by
+   *  `ResearchDashboard` and is a fresh object each time, so `shown` is too. */
+  const shownIsin = shown.isin;
+  const shownName = shown.name;
+
+  // ⚠ A MISSING CONTROL LOOKS IDENTICAL TO A BROKEN ONE, SO THE ABSENCE EXPLAINS ITSELF. The
+  // fundamentals refresh needs a real model portfolio to scope to, and the Analyse modal only has
+  // one when it was opened WITH an id — `/portfolios` always passes one, the overview panel's
+  // `analyse` state has `id?: number` and an account or ad-hoc basket row carries none. Without
+  // this line the button is simply not there and there is nothing on screen or in the log to say
+  // why, which is exactly the state this codebase keeps removing.
+  /**
+   * What the refresh acts on — DERIVED FROM WHAT THIS MODAL IS SHOWING, not from how it was
+   * opened.
+   *
+   * ⚠⚠ A CONTROL'S SCOPE MUST MATCH ITS SCREEN, OR IT IS A TRAP. Opened on one company, the modal
+   * charts that company; a button beside those charts that quietly refetched the other nineteen
+   * holdings would spend nineteen API calls the reader never asked for, and take minutes to do
+   * something they cannot see. Opened on the whole book (a basket, or a portfolio aggregate) the
+   * same button correctly means all of it. ⚠ And on a valuation tab switched to company B it
+   * means B — see `shownIsin`.
+   *
+   * ⚠ ONE COMPANY IS SENT AS A BASKET OF ONE, so there is no third code path — see `RefreshScope`.
+   */
+  const scope = useMemo<RefreshScope | undefined>(
+    () => (!isAgg && isin
+      ? { kind: 'company', isin: shownIsin, name: shownName || shownIsin }
+      : refreshScope),
+    [isAgg, isin, shownIsin, shownName, refreshScope]);
+
+  useEffect(() => {
+    if (!scope) {
+      trace('fundamentals', 'no Refresh-fundamentals button: this modal is showing neither a '
+        + 'single instrument nor a book (no isin, no basket, no portfolio) to scope the fill to.');
+    }
+  }, [scope]);
+
   /**
    * ⚠ HOISTED OUT OF `LongEquityTab` SO IT CAN SIT IN THE TAB ROW. The setting belongs to that tab
    * and governs only its charts, but the row is the modal's — and the row is in the fixed head, so
@@ -251,13 +279,20 @@ export default function OwnerEarningsModal({
               <span>{eyebrow}</span>
               {/* ⚠ NOT WHEN IT IS THE SUBJECT. A company with no name on file is titled BY its ISIN
                   below, where printing it twice would read as two different identifiers. */}
-              {!isAgg && name && <span className="font-mono">{isin}</span>}
+              {/* ⚠⚠ `shownIsin`, NOT `isin` — on a valuation tab switched to company B this line
+                  and the name under it have to be the SAME company, or the head presents B's
+                  valuation under A's identifier, which is the one pairing a reader checks. */}
+              {!isAgg && shownName && shownName !== shownIsin
+                && <span className="font-mono">{shownIsin}</span>}
             </div>
             {/* ⚠ `leading-tight` IS WHAT PAYS FOR THE SIZE. This sits in the modal's FIXED head,
                 above a body that scrolls — every pixel here is taken off the charts for the whole
                 session, not just at the top of the scroll. Default line-height at 2xl would add
                 more than the type itself does. */}
-            <div className="text-2xl font-semibold text-fg-strong truncate leading-tight">{subject}</div>
+            {/* ⚠ `subject` EVERYWHERE EXCEPT THE TWO VALUATION TABS, where the reader may have
+                switched this modal to company B and nothing else on those screens says so. */}
+            <div className="text-2xl font-semibold text-fg-strong truncate leading-tight">
+              {onValuationTab ? (shownName || shownIsin) : subject}</div>
           </div>
           <button type="button" onClick={onClose} aria-label="Close"
             className="text-fg-faint hover:text-fg-strong text-xl leading-none px-1 -mt-1">×</button>
@@ -335,6 +370,28 @@ export default function OwnerEarningsModal({
               is a real cost paid in shares that never leaves the cash-flow statement, so reported
               FCF flatters anyone paying in equity; ticked by default, because the uncorrected
               figure is the flattering one. */}
+          {/* ⚠ IN THE HEAD, WITH THE OTHER TAB-SCOPED CONTROLS, for the same reason the SBC box
+              is: the head is FIXED over a scrolling body, so a switch placed inside Deep Valuation
+              would leave the screen after its first card and changing what you are reading would
+              mean scrolling back up to find the control. ⚠ Rendered only on the two tabs it
+              governs — on Graphs and Tables both companies are already drawn.
+              ⚠ The names are truncated with the full one in `title`: "Taiwan Semiconductor
+              Manufacturing Co Ltd" beside a second of its kind would push the refresh button and
+              the language switch off the row. */}
+          {switchable && compare && (
+            <div role="group" aria-label={chrome.valuing} title={chrome.valuing}
+              className="flex items-center gap-0.5 rounded-lg border border-neutral-700 p-0.5 shrink-0">
+              {([['a', name || (isin ?? '')], ['b', compare.name]] as const).map(([side, label]) => (
+                <button key={side} type="button" onClick={() => setValueSide(side)}
+                  aria-pressed={valueSide === side} title={label}
+                  className={`cursor-pointer max-w-[9rem] truncate px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                    valueSide === side ? 'bg-accent-600 text-fg-strong'
+                      : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           {tab === 'longequity' && (
             <label className="flex items-center gap-2 text-[12px] text-fg-soft cursor-pointer"
               title={chrome.sbcTitle}>
@@ -374,14 +431,25 @@ export default function OwnerEarningsModal({
             recharts' ResponsiveContainer re-measures on the resize that showing it fires. */}
         {(visited.has('quickval') && !isAgg && isin) && (
           <div className={tab === 'quickval' ? undefined : 'hidden'}>
-            <QuickValuationTab isin={isin} name={name} />
+            {/* ⚠⚠ NOT KEYED, WHERE ITS NEIGHBOUR IS, AND THAT IS THE POINT. This tab's own state
+                is a VIEW — which basis is charted, whether the inputs sheet is open — so a swap
+                that remounted it would draw company B on a different basis from the A the reader
+                had just set up, which is the one thing a comparison must not do quietly. Its
+                fetch already keys on the ISIN and blanks everything belonging to the previous
+                company (see `load`). */}
+            <QuickValuationTab isin={valued.isin} name={valued.name} />
           </div>
         )}
         {(visited.has('deepval') && !isAgg && isin) && (
           <div className={tab === 'deepval' ? undefined : 'hidden'}>
-            {/* Keyed on the ISIN: the panel reads its saved assumptions in a state initialiser, so
-                a different instrument has to remount to pick up its own overrides. */}
-            <DeepValuationTab key={isin} isin={isin} name={name} />
+            {/* ⚠ KEYED ON THE ISIN: the panel reads that company's saved assumptions in a state
+                INITIALISER (`localStorage`, keyed per ISIN), so a different instrument has to
+                remount to pick up its own overrides — carrying A's growth rate and exit multiple
+                into B's reverse DCF would produce a complete, confident valuation of the wrong
+                assumptions. ⚠ A swap therefore remounts this even while it is hidden; its three
+                reads are all on `readCache`'s allowlist, so that costs one round trip per company
+                and leaves the tab warm for the click that follows. */}
+            <DeepValuationTab key={valued.isin} isin={valued.isin} name={valued.name} />
           </div>
         )}
         {(visited.has('longequity') && hasInstrument) && (
@@ -406,6 +474,10 @@ export default function OwnerEarningsModal({
                 : { holdings: [{ isin: isin ?? '', weight: 1 }], cadence: 'annual' }}
               holdingsName={subject}
               sbcCorrection={sbcCorrection}
+              // ⚠ THE SAME `compare` THE GRAPHS TAB GETS. Two tabs of one modal over one pair of
+              // companies; passing it to only one of them is how Graphs came to draw A against B
+              // while this table summarised A against ACWI, on the same screen.
+              compare={compare}
               lang={lang} />
           </div>
         )}

@@ -30,6 +30,8 @@ export type FundamentalChromeCopy = {
   cancelling: string;
   sbc: string;
   sbcTitle: string;
+  /** The A/B switch that picks which company Quick and Deep Valuation are showing. */
+  valuing: string;
   periods: string;
   annual: string;
   annualNote: string;
@@ -50,6 +52,7 @@ const EN: FundamentalChromeCopy = {
   cancel: 'Cancel',
   cancelling: 'Cancelling…',
   sbc: 'SBC correction',
+  valuing: 'Which company to value',
   sbcTitle: 'Subtract stock-based compensation from free cash flow before computing FCF margin, '
     + 'FCF yield, cash return on capital and FCF / Net Income. ⚠ No effect on ROIC, which is '
     + 'GuruFocus’s own published ratio — there is no numerator of ours to adjust.',
@@ -84,6 +87,7 @@ const NL: FundamentalChromeCopy = {
   cancel: 'Annuleren',
   cancelling: 'Annuleren…',
   sbc: 'SBC-correctie',
+  valuing: 'Welke onderneming waarderen',
   sbcTitle: 'Trek aandelenbeloning (SBC) van de vrije kasstroom af vóór het berekenen van '
     + 'FCF-marge, FCF-rendement, cash return op kapitaal en FCF / nettowinst. ⚠ Geen effect op '
     + 'ROIC: dat is GuruFocus’ eigen gepubliceerde ratio — er is geen teller van ons om aan te '

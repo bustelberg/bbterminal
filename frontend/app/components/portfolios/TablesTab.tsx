@@ -6,6 +6,11 @@ import { API_URL } from '../../../lib/apiUrl';
 import InfoTip from '../InfoTip';
 import { useBenchInputs, type BenchTarget } from './benchSeries';
 import { CAGR_BENCHMARKS, type CagrBenchmark } from './CagrTable';
+
+/** ⚠ THE SAME SENTINEL `LongEquityTab` USES, and it must stay a value no index is ever called —
+ *  it shares one `useState` with the index names. Not imported from there because that module is
+ *  a heavy chart tab and this is a string; duplicated, and pinned equal by `tablesCompare.test.ts`. */
+const COMPARE_VALUE = '__compare__';
 import { roicByYear, type CashReturnInputs } from './cashReturnData';
 import { investedCapitalBlend } from './investedCapitalData';
 import {
@@ -340,10 +345,26 @@ function MeanCell({ got, copy, unit = 'pct', transform, pending = false }:
   );
 }
 
-export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection, lang }: {
+export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection, lang,
+  compare = null }: {
   holdingsTarget: Target;
   holdingsName: string;
   sbcCorrection: boolean;
+  /**
+   * A second COMPANY to measure against, instead of an index — /research-dashboard's company B.
+   *
+   * ⚠⚠ THE SAME SHAPE AND THE SAME SENTINEL AS `LongEquityTab`, DELIBERATELY. Graphs and Tables
+   * are two tabs of ONE modal showing the same series, one charted and one summarised, and the
+   * file already records why their benchmark defaults must agree: "a summary measured against a
+   * different index from the charts it summarises is a summary of something else." A comparison
+   * company is that same argument with a company in the slot — Graphs drew A against B while this
+   * table drew A against ACWI, on one screen, under one pair of picked names.
+   *
+   * ⚠ A COMPANY IS A ONE-HOLDING BOOK to these endpoints (`benchBody`), so this needs no new
+   * request shape, no new blend rule and no new row maths. It is the `BenchTarget` union's other
+   * arm, which is what that union exists for.
+   */
+  compare?: { isin: string; name: string } | null;
   /** ⚠ PASSED DOWN, NOT READ FROM `useLang` HERE — the choice is global (sidebar, every page) since
    *  2026-08-21 and this tab is one of the surfaces that answers it. See `lib/i18n.ts`; the
    *  remaining gaps are written down in `management/managementCopy.ts::UNTRANSLATED_SURFACES`. */
@@ -356,7 +377,17 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    *  default, because Graphs and Tables are two tabs of ONE modal showing the same series — one
    *  charted and one summarised — and a summary measured against a different index from the charts
    *  it summarises is a summary of something else. */
-  const [bench, setBench] = useState<CagrBenchmark>('ACWI');
+  /**
+   * ⚠ THE COMPARISON COMPANY WINS WHEN THERE IS ONE, and the control follows it. On
+   * /research-dashboard the second company is chosen by the PAGE; opening this tab on ACWI would
+   * summarise against an index while the picker above it names a company and the Graphs tab beside
+   * it draws one. The indices stay selectable underneath, exactly as on Graphs.
+   */
+  const [bench, setBench] = useState<CagrBenchmark | typeof COMPARE_VALUE>(
+    compare ? COMPARE_VALUE : 'ACWI');
+  /** ⚠ DERIVED AT RENDER, never assigned in an effect — that renders once against the wrong series
+   *  and again against the right one, which on a table of CAGRs is two different sets of numbers. */
+  const selected = compare && bench === COMPARE_VALUE ? COMPARE_VALUE : bench;
 
   /**
    * What is on screen. Two independent filters, both defaulting to everything.
@@ -400,7 +431,20 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const benchTarget: BenchTarget = useMemo(
     // ⚠ ANNUAL, WHATEVER THE TAB IS ON. A 5-year window of QUARTERS is fifteen months, and a
     // "5y CAGR" off it would be off by a factor of four — plausible and wrong on every row.
-    () => ({ universe: bench, label: bench, cadence: 'annual' as const }), [bench]);
+    () => (compare && selected === COMPARE_VALUE
+      ? { isin: compare.isin, label: compare.name, cadence: 'annual' as const }
+      : { universe: selected, label: selected, cadence: 'annual' as const }),
+    [compare, selected]);
+  /**
+   * What the comparison column is CALLED.
+   *
+   * ⚠⚠ READ OFF THE TARGET, NEVER OFF `bench`. `bench` is now either an index name or the
+   * `__compare__` sentinel, and printing it would put the literal string "__compare__" in a column
+   * header the moment a company is selected. This is the same trap `BenchTarget` was shaped to
+   * prevent — it carries its own `label` precisely because the universe string was being read as
+   * the display name in 47 places.
+   */
+  const benchLabel = benchTarget.label;
 
   // ── the book ──────────────────────────────────────────────────────────────────────────────
   const [marginData, setMarginData] = useState<MarginInputs | null>(null);
@@ -879,7 +923,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
     target: holdingsTarget,
     portfolioName: holdingsName,
     benchTarget,
-    benchLabel: bench,
+    benchLabel,
     onClose: () => setDrill(null),
   };
   const matrix = drill ? MATRIX_ROWS[drill] : undefined;
@@ -903,10 +947,23 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           })}
           <span className="w-px h-4 bg-neutral-800/40 mx-1" aria-hidden />
           <div className="inline-flex rounded-lg border border-neutral-700 overflow-hidden text-[11px]">
+            {/* ⚠ THE COMPANY FIRST, AND ONLY WHEN THERE IS ONE — the same order as the Graphs
+                tab's select. It is what the reader came to /research-dashboard for; the indices
+                stay beside it so a company can still be measured against its market. */}
+            {compare && (
+              <button type="button" onClick={() => setBench(COMPARE_VALUE)}
+                aria-pressed={selected === COMPARE_VALUE}
+                title={compare.name}
+                className={`cursor-pointer max-w-[9rem] truncate px-2.5 py-0.5 font-medium transition-colors ${
+                  selected === COMPARE_VALUE ? 'bg-accent-600 text-white'
+                    : 'text-fg-muted hover:bg-overlay/5'}`}>
+                {compare.name}
+              </button>
+            )}
             {CAGR_BENCHMARKS.map((b) => (
-              <button key={b} type="button" onClick={() => setBench(b)} aria-pressed={bench === b}
+              <button key={b} type="button" onClick={() => setBench(b)} aria-pressed={selected === b}
                 className={`cursor-pointer px-2.5 py-0.5 font-medium transition-colors ${
-                  bench === b ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
+                  selected === b ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
                 {b}
               </button>
             ))}
@@ -929,7 +986,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
 
       {err && <p className="text-xs text-neg-300">{err}</p>}
       {index.err && (
-        <p className="text-xs text-warn-300">{bench}: {index.err}</p>
+        <p className="text-xs text-warn-300">{benchLabel}: {index.err}</p>
       )}
       {!ready && !err && <p className="text-xs text-fg-subtle">{copy.loading}</p>}
 
@@ -960,7 +1017,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                 <th className="px-2.5 py-1 font-medium text-center border-l border-neutral-800/40"
                   colSpan={shown.length}>{holdingsName}</th>
                 <th className="px-2.5 py-1 font-medium text-center border-l border-neutral-800/40"
-                  colSpan={shown.length}>{bench}</th>
+                  colSpan={shown.length}>{benchLabel}</th>
                 <th className="px-2.5 py-1 font-medium text-center border-l border-neutral-800/40"
                   colSpan={shown.length}>{copy.colExcess}</th>
               </tr>

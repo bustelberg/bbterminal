@@ -58,7 +58,10 @@ const UNCONVERTED = new Set([
   'PriceTargetCalculator.tsx',
   'QuickValuationTab.tsx',
   'ReverseDcfPanel.tsx',
-  'TablesTab.tsx',
+  // ⚠ `TablesTab.tsx` came off 2026-09-07. Every one of its nine ⓘ fields is now an expression
+  // into `tablesCopy`, so nothing quoted is left in the component for this scanner to read — and
+  // that copy carries its own guards: `tablesCopy.test.tsx` caps the row notes at 150 chars and
+  // `tablesCopy.latex.test.ts` renders every formula in strict mode.
   'VolatilityView.tsx',
 ]);
 

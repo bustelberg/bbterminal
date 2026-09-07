@@ -159,7 +159,13 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const load = useCallback(async (blank: boolean, signal?: AbortSignal) => {
     // ⚠ CURRENCY IS CLEARED WITH THE METRICS. It gates the live-price fetch below; left behind
     // from the previous company it would convert this one's close at that one's currency.
-    if (blank) { setMetrics(null); setCurrency(null); setLiveRes(null); }
+    // ⚠⚠ AND SO IS `companyId`, FOR THE SAME REASON AND A SHARPER ONE: it is what the forward-P/E
+    // ↻ POSTs to. Held over from the previous company, that button refreshes THAT company's
+    // indicators, labels its toast with THIS one's name, then re-reads this one's metrics and
+    // truthfully reports "nothing newer" — a write against the wrong company that looks like a
+    // vendor with no update. Latent until the ISIN could change inside one mount, which is what
+    // the modal's A/B valuation switch now does.
+    if (blank) { setMetrics(null); setCurrency(null); setLiveRes(null); setCompanyId(null); }
     setErr(null);
     const r = await apiFetch(
       `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics?cadence=annual`,

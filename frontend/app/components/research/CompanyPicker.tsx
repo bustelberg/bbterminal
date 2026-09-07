@@ -82,7 +82,12 @@ export default function CompanyPicker({ label, value, onPick }: {
 
   return (
     <div ref={box} className="relative">
-      <label className="block text-[10px] uppercase tracking-wide text-fg-faint mb-1">{label}</label>
+      {/* ⚠ BIGGER, AND NO LONGER UPPERCASED — the two go together. At 10px small-caps this was
+          furniture; at a readable size the same styling shouts "COMPANY A — THE SUBJECT" at a
+          reader who is being asked a question, which is the reasoning `OwnerEarningsModal` already
+          records about its own eyebrow: size and ink set a line apart, and small caps on top of
+          that is decoration that stops being harmless once the line carries a sentence. */}
+      <label className="block text-sm font-medium text-fg-soft mb-1.5">{label}</label>
       <div className="flex gap-2">
         <input
           value={q}
