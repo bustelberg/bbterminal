@@ -15,8 +15,8 @@
  * A bar or a percentage would have to be animated against a guess: the endpoint answers once, and
  * its per-phase `timings_ms` arrive WITH the payload, i.e. after the wait is over.
  *
- * ⚠ THE LABEL'S OWN ELLIPSIS IS STRIPPED. Both translations end in one ("Loading composition…",
- * "Samenstelling laden…"), and left in place it would sit beside the animated one as four dots
+ * ⚠ THE LABEL'S OWN ELLIPSIS IS STRIPPED. Both translations end in one ("Loading overview…",
+ * "Overzicht laden…"), and left in place it would sit beside the animated one as four dots
  * that never move followed by three that do.
  */
 import { useEffect, useState } from 'react';
@@ -25,7 +25,7 @@ import { useEffect, useState } from 'react';
 const TICK_MS = 400;
 
 export default function AnalyseLoading({ label }: {
-  /** "Loading composition…", translated by the caller. Its trailing ellipsis is dropped. */
+  /** "Loading overview…", translated by the caller. Its trailing ellipsis is dropped. */
   label: string;
 }) {
   const [n, setN] = useState(1);

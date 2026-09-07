@@ -1227,7 +1227,7 @@ export default function PortfolioOverviewPanel() {
         // changes (clearing inside the effect cascades a render), so a surviving instance would
         // paint the PREVIOUS portfolio's composition for the ~4s the next one takes to load —
         // a complete, plausible, wrong answer with no loading state to warn the reader. The key
-        // forces a fresh mount, so an unloaded modal can only ever show "Loading composition…".
+        // forces a fresh mount, so an unloaded modal can only ever show "Loading overview…".
         // ⚠ THE ROW'S OWN `refreshOne`, PASSED THROUGH — not a second implementation. Offered on
         // exactly the same terms as the row's button (open to every user since 2026-08-19; absent
         // only when there is no AIRS book behind the modal to re-scan), and `refreshSeq` bumps

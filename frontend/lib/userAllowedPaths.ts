@@ -14,12 +14,21 @@
 // places — the API gate refuses them, and the components hide the controls via `useIsAdmin` so a
 // user is never shown a button that 403s.
 //
-// ⚠ `/research-dashboard` NEEDED ONE LINE IN THE API GATE TOO, and the page being here is not what
-// makes it work. Its picker calls `/api/asset-pipeline/search`, which sits in a namespace that is
-// otherwise admin-only — `/grid` alone is 27.56 MB of every ISIN, and `/ingest` and `/store` live
-// there as well. So the search path is allow-listed by EXACT pattern in `_auth_middleware.py`, not
-// by prefix. Adding a page to this list without checking what it FETCHES gives a user a page of
-// 403s, which reads as a broken app rather than as a permission.
+// ⚠⚠ ADDING A PAGE HERE IS HALF THE JOB, AND SO IS REMOVING ONE. A page needs whatever it FETCHES
+// allow-listed in `_auth_middleware.py`; put a page here without that and the user gets a screen of
+// 403s, which reads as a broken app rather than as a permission. The reverse holds too — take a
+// page away and the API paths it alone needed are still open, which is a permission nobody can see.
+//
+// `/research-dashboard` was the worked example of both halves (2026-09-07, removed on request).
+// Its picker called `/api/asset-pipeline/search`, in a namespace otherwise admin-only — `/grid`
+// alone is 27.56 MB of every ISIN, and `/ingest` and `/store` live there too — so that ONE path was
+// allow-listed by EXACT pattern rather than by prefix. That entry went with the page.
+//
+// ⚠ `/earnings` WENT AT THE SAME TIME, AND `/api/earnings` DID NOT. The namespace stays in
+// `_USER_READ_PREFIXES` because /management-dashboard is built on it: the Long Equity tab and the
+// Fundamental modal read `fundamental-blend-metrics`, `universe-period-caps` and the eleven
+// `*-inputs` endpoints. Closing the prefix to match the removed page would take that dashboard's
+// charts down with it — the page and the API namespace are not the same permission.
 //
 // ⚠ AND SINCE 2026-08-06, ONE READ IS RESTRICTED TOO: expanding a row in the Overview table. The
 // summary a user sees is the whole page for them; the book behind a row — positions and their EUR
@@ -27,7 +36,7 @@
 // `expand` + `_ADMIN_ONLY_PATTERNS` in `_auth_middleware.py`), so the page staying in this list is
 // not a statement that everything on it is readable.
 export const USER_ALLOWED_PATHS: readonly string[] = [
-  '/', '/earnings', '/schedule', '/management-dashboard', '/research-dashboard', '/forbidden',
+  '/', '/schedule', '/management-dashboard', '/forbidden',
 ];
 
 /**

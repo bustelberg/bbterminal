@@ -18,7 +18,8 @@ describe('countFor', () => {
 });
 
 describe('memberCountLine', () => {
-  const base = { isAgg: true, ownLabel: 'Bustelberg Offensief', benchLabel: 'AEX' };
+  const base = { isAgg: true, ownLabel: 'Bustelberg Offensief', benchLabel: 'AEX',
+    lang: 'en' as const };
 
   it('says nothing when both lines used every holding they had', () => {
     // ⚠ THE DEFAULT, on twelve of thirteen cards. A line reading "42 of 42" is noise everywhere it
@@ -74,7 +75,7 @@ describe('memberCountLine', () => {
 
 describe('memberCountHow', () => {
   it('explains a survivorship filter as a filter, and names its cost', () => {
-    const how = memberCountHow('positive_only');
+    const how = memberCountHow('positive_only', 'en');
     expect(how).toMatch(/positive in every period/);
     expect(how).toMatch(/survivorship/);
   });
@@ -83,7 +84,7 @@ describe('memberCountHow', () => {
     // ⚠⚠ THE WHOLE POINT OF `rule`. The two constructions withhold members for reasons that have
     // nothing to do with each other, and the FCF sentence on an EPS card would tell the reader
     // their earnings line excludes loss-makers — a confident wrong explanation of a right number.
-    const how = memberCountHow('aggregate');
+    const how = memberCountHow('aggregate', 'en');
     expect(how).toMatch(/market cap/);
     expect(how).not.toMatch(/survivorship/i);
     expect(how).not.toMatch(/positive in every period/);
@@ -98,11 +99,11 @@ describe('memberCountHow', () => {
      * a PER-SHARE metric needs; revenue is a company total already, so that sentence could never
      * be the reason on the one card that can show this count.
      */
-    expect(memberCountHow('aggregate')).not.toMatch(/share count/);
+    expect(memberCountHow('aggregate', 'en')).not.toMatch(/share count/);
   });
 
   it('admits it does not know rather than guessing one of the two', () => {
-    const how = memberCountHow('all');
+    const how = memberCountHow('all', 'en');
     expect(how).not.toMatch(/survivorship/i);
     expect(how).not.toMatch(/share count/);
     expect(how).toMatch(/per-holding table/);

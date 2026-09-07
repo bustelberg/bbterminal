@@ -512,6 +512,9 @@ export function useMgmtCopy(): ManagementCopy {
 export const UNTRANSLATED_SURFACES = [
   'AttributionPanel', 'BucketDetailPanel',
   'AccountTransactions', 'HoldingTimingModal', 'AllocationBandsModal',
-  'QuickValuationTab', 'PriceTargetCalculator',
+  // ⚠ QuickValuationTab's RENDERED chrome is done (`quickValuationCopy.ts`); what is left on it
+  // is the ⓘ prose behind each card, which is the larger, caveat-heavy half.
+  'QuickValuationTab (partly — the headings, tiles and legends are done; the ⓘ cards are not)',
+  'PriceTargetCalculator',
   'PortfolioOverviewPanel (partly — the holdings table is done)',
 ] as const;

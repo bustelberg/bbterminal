@@ -8,6 +8,7 @@ import {
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
+import { useQuickValuationCopy } from './quickValuationCopy';
 import { tiltedAxis } from '../../../lib/chartAxis';
 import { AspectCard } from '../../../lib/tipCard';
 import { workedMean, workedRatio } from './workedFormula';
@@ -261,6 +262,13 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   }, [isin, currency]);
 
   const b = BASIS[basis];
+  // ⚠⚠ TWO LABEL SETS, AND MIXING THEM INSIDE ONE STRING IS THE BUG TO AVOID. `t` / `bl` are the
+  // TRANSLATED words for everything DRAWN on this tab; `b` keeps its ENGLISH ones and is used only
+  // by the ⓘ cards, whose prose is not translated yet. An English sentence with a Dutch metric name
+  // spliced into it — "the cash the business threw off per share" under `FCF per aandeel` — reads
+  // as a rendering fault. See `quickValuationCopy`.
+  const t = useQuickValuationCopy();
+  const bl = t.basis[basis];
   // ⚠ NO YEAR CAP — every fiscal year the company reports, which is what the Graphs tab draws
   // from this same payload. See the ⚠⚠ on `priceVsMetric` for the year the old 10-year slice ate.
   const points = useMemo(() => priceVsMetric(metrics ?? [], b.codes), [metrics, b.codes]);
@@ -722,19 +730,19 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           title={`${BASIS[k].perShare} — ${BASIS[k].what}.`}
           className={`px-2.5 py-1 text-xs font-medium transition-colors ${
             basis === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
-          {BASIS[k].tab}
+          {t.basis[k].tab}
         </button>
       ))}
     </div>
   );
 
   if (err) return <p className="text-xs text-neg-300 py-16 text-center">{err}</p>;
-  if (metrics == null) return <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>;
+  if (metrics == null) return <p className="text-xs text-fg-subtle py-16 text-center">{t.loading}</p>;
   if (!points.some((p) => p.price != null) || !points.some((p) => p.value != null)) {
     return (
       <div className="py-16 flex flex-col items-center gap-3">
         <p className="text-xs text-fg-faint text-center">
-          No share price / {b.perShare} history ingested for {name ?? isin}.
+          {t.noHistory(bl.perShare, name ?? isin)}
         </p>
         {basisSwitch}
       </div>
@@ -762,10 +770,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         card, so the numbers travel with the picture they describe. */}
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
-        <h4 className="text-base font-semibold text-fg-strong">Price vs {b.perShare}</h4>
+        <h4 className="text-base font-semibold text-fg-strong">{t.priceVs(bl.perShare)}</h4>
         {idx.anchor != null && (
           <span className="text-xs text-fg-faint">
-            indexed to 100 at FY{idx.anchor} · log scale
+            {t.indexedAt(String(idx.anchor))}
           </span>
         )}
         {hiddenByLog > 0 && (
@@ -773,7 +781,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           // year vanishing without a word is exactly the observation a reader must not lose.
           <span className="text-xs text-warn-300"
             title="A log axis has no room for zero or a negative value. Those years are also excluded from the trend fit, for the same reason — a loss has no logarithm.">
-            ⚠ {hiddenByLog} {b.negativeYear} year{hiddenByLog > 1 ? 's' : ''} not plottable on a log axis
+            {t.notPlottable(String(hiddenByLog), bl.negativeYear)}
           </span>
         )}
         {/* ⚠ ONE SWITCH, THREE PANELS. It sits on the primary chart, and the yield card and the
@@ -823,13 +831,13 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
        * card each, and forcing them into three columns would leave a third of it empty.
        */}
       <div className="grid grid-cols-[repeat(5,minmax(0,8rem))] gap-2">
-        <Stat label="Price CAGR" value={pct(priceCagr?.pct)} color={chartTheme.accentStrong}
+        <Stat label={t.priceCagr} value={pct(priceCagr?.pct)} color={chartTheme.accentStrong}
           info={<InfoTip content={<AspectCard
             what="Compound annual growth of the fiscal year-end share price."
             where="GuruFocus `Month End Stock Price`, the close at each fiscal year end."
             when={priceCagr ? `${priceCagr.from} → ${priceCagr.to} (${priceCagr.years} years).` : 'Not computable.'}
             how="First to last positive observation. The year-end price, not today's quote." />} />} />
-        <Stat label={`${b.perShare} CAGR`} value={pct(valueCagr?.pct)} color={chartTheme.warn}
+        <Stat label={t.perShareCagr(bl.perShare)} value={pct(valueCagr?.pct)} color={chartTheme.warn}
           info={<InfoTip content={<AspectCard
             what={`Compound annual growth of ${b.what}.`}
             where={b.source}
@@ -853,7 +861,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             distinction it was drawing is carried by the LABELS instead, which travel with the tile
             however the row breaks: "Price CAGR" is observed, "Est. CAGR to FY2035" is not, and the
             word doing that work is `Est.` */}
-        <Stat label="Current share price" value={`${ccy}${fmtPrice(target.currentPrice)}`}
+        <Stat label={t.currentSharePrice} value={`${ccy}${fmtPrice(target.currentPrice)}`}
           info={<InfoTip content={<AspectCard
             what="The price the target is measured from."
             where={priceLive
@@ -871,7 +879,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             ⚠ `Current share price` above stays UNCOLOURED on purpose — it is the live quote, and
             every point plotted here is a fiscal year-end close, so tying it to the price line would
             claim it is on a line it is not on. */}
-        <Stat label={targetYear == null ? 'Price target' : `Price target FY${targetYear}`}
+        <Stat label={targetYear == null ? t.priceTarget : t.priceTargetFy(String(targetYear))}
           value={`${ccy}${fmtPrice(target.forecastPrice)}`} color={chartTheme.accentStrong}
           info={<InfoTip content={<AspectCard
             what={`Where the share price lands if ${b.perShare} reaches the forecast and the market pays the forecast ${b.yieldInline} for it.`}
@@ -885,7 +893,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
               '', '%')}
             when={targetYear == null ? 'At the end of the forecast window.' : `FY${targetYear}, ${PROJECT_YEARS} years past the last reported year.`}
             how="⚠ AN ASSUMPTION, NOT A FORECAST ANYBODY PUBLISHED. Change the growth rate or the demanded yield in the panel and this moves with the dot on the chart — that is what it is for." />} />} />
-        <Stat label={targetYear == null ? 'Est. CAGR' : `Est. CAGR to FY${targetYear}`}
+        <Stat label={targetYear == null ? t.estCagr : t.estCagrTo(String(targetYear))}
           value={pct(target.cagr == null ? null : target.cagr * 100)}
           tone={target.cagr == null ? undefined
             : target.cagr >= 0 ? 'text-pos-500' : 'text-neg-500'}
@@ -910,7 +918,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           // Rebasing off a cash-burn or loss year divides by a negative and flips every later
           // point, so a company with no positive year gets no index at all — see `rebase`.
           <p className="text-xs text-fg-faint py-16 text-center">
-            No fiscal year has both a positive price and positive {b.perShare}, so there is no base to index from.
+            {t.noPositiveBase(bl.perShare)}
           </p>
         ) : (
           <>
@@ -1017,14 +1025,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accentStrong }} />Share price</span>
+              <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accentStrong }} />{t.legendSharePrice}</span>
               <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.warn }} />{b.perShare}</span>
               {fit.r2 != null && (
                 <span className="flex items-center gap-1.5 text-fg-muted"
                   title={`Exponential fit over ${fit.n} year(s)${fit.dropped ? `, ${fit.dropped} dropped (${b.negativeYear} years have no logarithm)` : ''}. R² is how tightly ${b.perShare} hugs a constant-growth line: 1.0 = perfectly steady compounding.`}>
                   <span className="w-3 h-0.5 inline-block rounded"
                     style={{ background: chartTheme.warn, opacity: 0.75 }} />
-                  Trend (R² {fit.r2.toFixed(2)}), dotted = {PROJECT_YEARS}y projection
+                  {t.legendTrend(fit.r2.toFixed(2), String(PROJECT_YEARS))}
                 </span>
               )}
               {/* ⚠ THE DOT IS A SERIES, SO IT IS IN THE LEGEND. A lone unexplained mark on a chart
@@ -1059,12 +1067,12 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
 
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
-        <h4 className="text-base font-semibold text-fg-strong">{b.yieldTitle}</h4>
-        <span className="text-xs text-fg-faint">{b.perShare} ÷ year-end price · average dashed</span>
+        <h4 className="text-base font-semibold text-fg-strong">{bl.yieldTitle}</h4>
+        <span className="text-xs text-fg-faint">{t.yieldCaption(bl.perShare)}</span>
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Stat label="Avg" value={yld(avgYield)} color={chartTheme.accent}
+        <Stat label={t.avg} value={yld(avgYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
             what={`The average ${b.yieldInline} over the years shown — the dashed line.`}
             where="Computed here from the same two lines the chart above plots, not from GuruFocus's own ratio (whose denominator convention we don't control)."
@@ -1080,7 +1088,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             // dashed line on the chart below, which is the third place this one number appears.
             worked={workedMean(yieldValues)}
             how="A simple mean of the yearly yields. A yield doesn't compound, so there is no growth rate to quote." />} />} />
-        <Stat label="Latest" value={yld(latestYield)} color={chartTheme.accent}
+        <Stat label={t.latest} value={yld(latestYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
             what={`The most recent fiscal year's ${b.yieldInline}.`}
             where={`That year's ${b.perShare} ÷ that year's closing price.`}
@@ -1115,14 +1123,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           </ComposedChart>
         </ResponsiveContainer>
         <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{b.yieldTitle} (avg dashed)</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{t.yieldLegend(bl.yieldTitle)}</span>
         </div>
       </div>
     </div>
 
     {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
-    <MultipleHistoryChart height={CHART_HEIGHT} basis={b} currency={currency}
+    <MultipleHistoryChart height={CHART_HEIGHT} basis={b} basisKey={basis} currency={currency}
       forward={forwardHistory} fromYear={MULTIPLE_FROM_YEAR}
       name={name} isin={isin}
       onRefresh={refreshForwardPE} canRefresh={companyId != null}
@@ -1134,7 +1142,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         bottom rather than left floating halfway up a stretched card. */}
     <PriceTargetCalculator
       className="lg:col-start-2 lg:row-start-1"
-      target={target} years={PROJECT_YEARS} currency={currency} basis={b}
+      target={target} years={PROJECT_YEARS} currency={currency} basis={b} basisKey={basis}
       horizonYears={horizonYears} targetYear={targetYear}
       price={{ date: priceDate, live: priceLive, pending: livePending,
         symbol: live?.symbol ?? null, staleDays: live?.stale_days ?? null }}

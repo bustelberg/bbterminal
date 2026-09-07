@@ -238,6 +238,49 @@ describe('forward legs', () => {
     expect(forwardLegs({
       ocfEstimate: null, fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null,
       capex: null, dep: null, normalise: true,
-    })).toEqual({ fcf: null, capex: null, dep: null, vendor: false });
+      // ⚠ `no-estimate` EVEN WITH NOTHING AT ALL, and that is right: there is genuinely no stored
+      // consensus FCF. The card only shows this sentence in the forward mode, which this state
+      // cannot reach — `base` falls back to `reported` when `fwd.fcf` is null.
+    })).toEqual({ fcf: null, capex: null, dep: null, vendor: false, reason: 'no-estimate' });
+  });
+});
+
+describe('⚠⚠ forwardLegs says WHY it refused the vendor figure', () => {
+  /**
+   * `vendor === false` has TWO causes and the ⓘ used to print one sentence for both:
+   * "no consensus free cash flow is stored for this company". On the second cause that is simply
+   * false — one IS stored — and it sends a reader looking for a figure GuruFocus publishes and we
+   * hold. Reported as "guru does have forward fcf for nvidia directly?".
+   */
+  const base = { ocfEstimate: 209827, capex: -6572, dep: 5000, normalise: true };
+
+  it('no stored consensus FCF → `no-estimate`', () => {
+    const r = forwardLegs({ ...base, fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null });
+    expect(r.vendor).toBe(false);
+    expect(r.reason).toBe('no-estimate');
+  });
+
+  it('⚠ a stored consensus FCF with no EBITDA/EBIT → `no-forward-da`, NOT `no-estimate`', () => {
+    // The vendor base nets a FORWARD capex, so its add-back needs a FORWARD D&A
+    // (`EBITDA_est − EBIT_est`). Without those the correction would fall back to the trailing
+    // lines and the two halves would sit on different bases.
+    const r = forwardLegs({ ...base, fcfEstimate: 203255, ebitdaEstimate: null, ebitEstimate: null });
+    expect(r.vendor).toBe(false);
+    expect(r.reason).toBe('no-forward-da');
+  });
+
+  it('the full consensus set → the vendor figure, and no reason to report', () => {
+    const r = forwardLegs({ ...base, fcfEstimate: 203255, ebitdaEstimate: 90000, ebitEstimate: 70000 });
+    expect(r.vendor).toBe(true);
+    expect(r.fcf).toBe(203255);
+    expect(r.reason).toBeUndefined();
+  });
+
+  it('⚠ with `normalise` off the vendor figure is taken even with no pair', () => {
+    // There is no add-back to be inconsistent with, so the forecast is simply the better number.
+    const r = forwardLegs({ ...base, normalise: false, fcfEstimate: 203255,
+      ebitdaEstimate: null, ebitEstimate: null });
+    expect(r.vendor).toBe(true);
+    expect(r.reason).toBeUndefined();
   });
 });

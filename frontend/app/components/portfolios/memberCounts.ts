@@ -1,3 +1,5 @@
+import { type Lang } from '../../../lib/i18n';
+
 /**
  * "36 of 42 companies" — how many holdings a blended line was actually drawn from, and why the
  * others are missing.
@@ -65,6 +67,20 @@ const withheld = (c?: MemberCount): c is MemberCount =>
 export type MemberCountLine = { text: string; rule: string };
 
 /**
+ * ⚠⚠ THE LOCALE IS NOT DECORATION HERE. `toLocaleString('en-US')` prints 1,761; Dutch prints
+ * 1.761, and a thousands separator that reads as a decimal point in the reader's own language is
+ * a wrong number rather than an odd-looking one — on a card whose whole job is to disclose a
+ * count. It follows the language, like the words around it.
+ */
+const LOCALE: Record<Lang, string> = { en: 'en-US', nl: 'nl-NL' };
+
+/** `36 of 42 companies` / `36 van 42 ondernemingen`. */
+const COUNT_OF: Record<Lang, (label: string, n: string, of: string, companies: boolean) => string> = {
+  en: (label, n, of, companies) => `${label}: ${n} of ${of}${companies ? ' companies' : ''}`,
+  nl: (label, n, of, companies) => `${label}: ${n} van ${of}${companies ? ' ondernemingen' : ''}`,
+};
+
+/**
  * The count line under a card's title, or `null` when both lines used everything they had.
  *
  * ⚠ BOTH SIDES, SEPARATELY, AND ONLY THE ONES THAT DROPPED ANYTHING. The book and the index are two
@@ -74,20 +90,21 @@ export type MemberCountLine = { text: string; rule: string };
  *
  * ⚠ THE OWN LINE IS GATED ON `isAgg`. A single company is one member and the count is a tautology.
  */
-export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel }: {
+export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel, lang }: {
   own?: MemberCount;
   bench?: MemberCount;
   isAgg: boolean;
   ownLabel: string;
   benchLabel?: string | null;
+  lang: Lang;
 }): MemberCountLine | null {
   const parts: string[] = [];
   if (isAgg && withheld(own)) {
-    parts.push(`${ownLabel}: ${own.considered} of ${own.total} companies`);
+    parts.push(COUNT_OF[lang](ownLabel, String(own.considered), String(own.total), true));
   }
   if (benchLabel && withheld(bench)) {
-    parts.push(`${benchLabel}: ${bench.considered.toLocaleString('en-US')} of `
-      + `${bench.total.toLocaleString('en-US')}`);
+    parts.push(COUNT_OF[lang](benchLabel, bench.considered.toLocaleString(LOCALE[lang]),
+      bench.total.toLocaleString(LOCALE[lang]), false));
   }
   if (!parts.length) return null;
   // ⚠ THE RULE IS PER METRIC, NOT PER LINE — `_blend_rows` is the one place a book and an index
@@ -97,17 +114,50 @@ export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel }: {
   return { text: parts.join(' · '), rule };
 }
 
-/** What the ⓘ beside the count says, per `rule`. */
-export function memberCountHow(rule: string): string {
+/**
+ * The three fixed fields of the count's ⓘ. They live here beside the `how` they head, so the whole
+ * card is one module rather than three strings in a chart component and a function next door.
+ */
+export const MEMBER_COUNT_CARD: Record<Lang, { what: string; where: string; when: string }> = {
+  en: {
+    what: 'How many companies this line is drawn from.',
+    where: 'The blend, after the metric’s own member rule.',
+    when: 'The window on the chart.',
+  },
+  nl: {
+    what: 'Uit hoeveel ondernemingen deze lijn is getekend.',
+    where: 'De blend, na de eigen ledenregel van deze maatstaf.',
+    when: 'Het venster op de grafiek.',
+  },
+};
+
+/**
+ * What the ⓘ beside the count says, per `rule`, in the reader's language.
+ *
+ * ⚠ NO EM DASHES IN ANY OF IT (2026-09-07, on request: "geen long dashes in info icons"). An ⓘ card
+ * is read inside a narrow popover, where a dash sets a clause adrift from the sentence it
+ * qualifies. The same thought takes a full stop, a colon or a semicolon here.
+ */
+export function memberCountHow(rule: string, lang: Lang): string {
   if (rule === 'positive_only') {
-    return 'This line is drawn from the companies positive in every period '
-      + '— and, where the chart carries an analyst forecast, in every estimated period too, '
-      + 'so the solid half of the line and the dotted half are the same companies. A weighted '
-      + 'year-on-year growth can then be taken over figures that are all positive.\n\n'
-      + 'The cost is survivorship, and it runs one way: cash-burners, recoveries and banks are '
-      + 'excluded, and averaging growth rates is upward-biased on top of that. Read it as how the '
-      + 'survivors grew.\n\n'
-      + 'The excluded companies are still in the per-holding table behind the chart.';
+    return lang === 'nl'
+      ? 'Deze lijn is getekend uit de ondernemingen die in elke periode positief zijn. Draagt de '
+        + 'grafiek een analistenraming, dan geldt dat ook voor elke geraamde periode, zodat de '
+        + 'doorgetrokken helft en de gestippelde helft dezelfde ondernemingen betreffen. Zo kan '
+        + 'een gewogen groei op jaarbasis worden genomen over cijfers die allemaal positief '
+        + 'zijn.\n\n'
+        + 'De prijs is survivorship, en die werkt één kant op: kasverbranders, herstelgevallen en '
+        + 'banken vallen weg, en het middelen van groeivoeten is daarbovenop opwaarts vertekend. '
+        + 'Lees het als de groei van de overblijvers.\n\n'
+        + 'De uitgesloten ondernemingen staan nog steeds in de tabel per positie achter de grafiek.'
+      : 'This line is drawn from the companies positive in every period. Where the chart carries '
+        + 'an analyst forecast the rule spans every estimated period too, so the solid half of the '
+        + 'line and the dotted half are the same companies. A weighted year-on-year growth can '
+        + 'then be taken over figures that are all positive.\n\n'
+        + 'The cost is survivorship, and it runs one way: cash-burners, recoveries and banks are '
+        + 'excluded, and averaging growth rates is upward-biased on top of that. Read it as how '
+        + 'the survivors grew.\n\n'
+        + 'The excluded companies are still in the per-holding table behind the chart.';
   }
   if (rule === 'aggregate') {
     // ⚠⚠ IT USED TO SAY "it needs a share count", WHICH IS THE WRONG REASON FOR THE ONLY
@@ -118,16 +168,27 @@ export function memberCountHow(rule: string): string {
     // out because they have no MARKET CAP in any period they report, so they are in no
     // period's weighted average. A confident wrong explanation of a right number sends the
     // reader to fix a share count that was never the problem.
-    return 'This line adds up what the companies behind it actually earned, in euros. A '
-      + 'company counts in a period only where we have both its figure and its market cap '
-      + 'for that period, so one with no market-cap history is in none of them.\n\n'
-      + 'Nothing was excluded on purpose. The line is not biased by the ones missing — it '
-      + 'simply speaks for fewer companies than the chart names, which is why the count is '
-      + 'here. They are still in the per-holding table behind the chart.';
+    return lang === 'nl'
+      ? 'Deze lijn telt op wat de ondernemingen erachter werkelijk hebben verdiend, in euro’s. '
+        + 'Een onderneming telt in een periode alleen mee wanneer we voor die periode zowel haar '
+        + 'cijfer als haar beurswaarde hebben, dus een onderneming zonder beurswaardehistorie '
+        + 'telt in geen enkele periode mee.\n\n'
+        + 'Er is niets met opzet uitgesloten. De lijn is niet vertekend door wat ontbreekt; zij '
+        + 'spreekt eenvoudigweg voor minder ondernemingen dan de grafiek noemt, en daarom staat '
+        + 'het aantal hier. Ze staan nog steeds in de tabel per positie achter de grafiek.'
+      : 'This line adds up what the companies behind it actually earned, in euros. A company '
+        + 'counts in a period only where we have both its figure and its market cap for that '
+        + 'period, so one with no market-cap history is in none of them.\n\n'
+        + 'Nothing was excluded on purpose. The line is not biased by the ones missing; it '
+        + 'simply speaks for fewer companies than the chart names, which is why the count is '
+        + 'here. They are still in the per-holding table behind the chart.';
   }
 
   // ⚠ THE HONEST FALLBACK. An older payload carries no `rule`, and inventing one of the two
   // explanations for a count whose cause is unknown is the exact failure this module documents.
-  return 'Some companies are not in this line. The per-holding table behind the chart lists every '
-    + 'holding, including the ones the chart could not use.';
+  return lang === 'nl'
+    ? 'Sommige ondernemingen zitten niet in deze lijn. De tabel per positie achter de grafiek '
+      + 'toont elke positie, ook de posities die de grafiek niet kon gebruiken.'
+    : 'Some companies are not in this line. The per-holding table behind the chart lists every '
+      + 'holding, including the ones the chart could not use.';
 }

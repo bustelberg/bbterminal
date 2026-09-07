@@ -10,13 +10,17 @@ import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
 import { isUserAllowedPath } from '../../lib/userAllowedPaths';
+import { useSidebarCopy, type NavKey } from './sidebarCopy';
 import LangSwitch from './LangSwitch';
 import { useLang } from '../../lib/i18n';
 
-type NavItem = { href: string; label: string };
-// A collapsible group: its `href` (if set) makes the header itself a link;
-// `children` are indented sub-pages shown when expanded.
-type NavSection = { label: string; href?: string; children: NavItem[] };
+// ⚠⚠ NO `label` HERE — the name of a page is COPY and lives in `sidebarCopy.ts`, keyed by href.
+// This file owns the ORDER, the sections and the visibility rules, none of which is a language.
+// `NavKey` is what ties the two together: a nav entry whose href has no label will not compile.
+type NavItem = { href: NavKey };
+// A collapsible group: its `href` makes the header itself a link; `children` are indented
+// sub-pages shown when expanded.
+type NavSection = { href: NavKey; children: NavItem[] };
 type NavEntry = NavItem | NavSection;
 
 const isSection = (e: NavEntry): e is NavSection => 'children' in e;
@@ -25,47 +29,46 @@ const isSection = (e: NavEntry): e is NavSection => 'children' in e;
 // derived from `isUserAllowedPath` — the SAME allow-list the route gate
 // (`proxy.ts`) enforces — so the nav can never show a page the user can't open.
 const navItems: NavEntry[] = [
-  { href: '/', label: 'Welcome' },
+  { href: '/' },
   // The AIRS books, their models and the analysis built on them.
-  { href: '/management-dashboard', label: 'Management Dashboard' },
-  // ⚠ BESIDE THE DASHBOARD, AND USER-VISIBLE. It is a reading tool rather than a pipeline tool:
-  // two companies' fundamentals side by side, off the same view the Fundamental button opens.
-  // Filed with the one-off admin tools near the bottom it would read as one of them — and the
-  // people it is for are exactly the ones whose nav stops after a handful of entries.
-  { href: '/research-dashboard', label: 'Research Dashboard' },
+  { href: '/management-dashboard' },
+  // ⚠ BESIDE THE DASHBOARD. It is a reading tool rather than a pipeline tool: two companies'
+  // fundamentals side by side, off the same view the Fundamental button opens. Filed with the
+  // one-off admin tools near the bottom it would read as one of them.
+  { href: '/research-dashboard' },
   // ⚠ NEAR THE TOP, NOT NEAR THE BOTTOM (moved up 2026-08-13; Research Dashboard came in above it
-  // on 2026-08-19, so it is no longer literally second). It is the
-  // page that answers "is the data behind everything else current" — the scheduled strategies, the
-  // pipeline, and now every automatic job — so it is checked FIRST when a number looks wrong.
-  // Fifteen entries down, beside the one-off tools, it read as one of them.
-  { href: '/schedule', label: 'Schedule' },
-  { href: '/earnings', label: 'Earnings Dashboard' },
-  { href: '/backtest', label: 'Backtest' },
-  { href: '/diversifier', label: 'Diversifier' },
+  // on 2026-08-19, so it is no longer literally second). It is the page that answers "is the data
+  // behind everything else current" — the scheduled strategies, the pipeline, and now every
+  // automatic job — so it is checked FIRST when a number looks wrong. Fifteen entries down, beside
+  // the one-off tools, it read as one of them.
+  { href: '/schedule' },
+  { href: '/earnings' },
+  { href: '/backtest' },
+  { href: '/diversifier' },
   {
-    label: 'Universe Overview',
     href: '/universe',
     children: [
-      { href: '/longequity-universe', label: 'LongEquity Universe' },
-      { href: '/sp500', label: 'S&P 500 Universe' },
-      { href: '/acwi', label: 'ACWI Universe' },
-      { href: '/leonteq', label: 'Leonteq Universe' },
+      { href: '/longequity-universe' },
+      { href: '/sp500' },
+      { href: '/acwi' },
+      { href: '/leonteq' },
     ],
   },
-  { href: '/fx-rates', label: 'FX Rates' },
-  { href: '/timezone', label: 'Trading Hours' },
-  { href: '/airs-portfolio', label: 'AIRS Portfolio' },
-  { href: '/request_gurufocus', label: 'Request GuruFocus' },
-  { href: '/benchmarks', label: 'Benchmarks' },
-  { href: '/isin-compare', label: 'ISIN Compare' },
-  { href: '/asset-pipeline', label: 'Asset Pipeline' },
-  { href: '/alphalab', label: 'AlphaLab' },
-  { href: '/signal-lab', label: 'Signal Lab' },
-  { href: '/fees', label: 'Fees' },
-  { href: '/api', label: 'API' },
-  { href: '/network', label: 'Network' },
-  { href: '/documentation', label: 'Documentation' },
+  { href: '/fx-rates' },
+  { href: '/timezone' },
+  { href: '/airs-portfolio' },
+  { href: '/request_gurufocus' },
+  { href: '/benchmarks' },
+  { href: '/isin-compare' },
+  { href: '/asset-pipeline' },
+  { href: '/alphalab' },
+  { href: '/signal-lab' },
+  { href: '/fees' },
+  { href: '/api' },
+  { href: '/network' },
+  { href: '/documentation' },
 ];
+
 
 const AUTH_PAGES = ['/login', '/set-password'];
 
@@ -155,6 +158,9 @@ export default function Sidebar({ initialUser }: Props) {
   // ⚠ THE SHARED PREFERENCE, NOT A LOCAL ONE — `useLang` is an external store, so this switch
   // and any open modal read the same value and move together. See `lib/i18n`.
   const [lang, setLang] = useLang();
+  // The sidebar's own chrome — the account block at the foot and this switch's own label. Reads
+  // the same preference `lang` above does, so the control and the words around it cannot disagree.
+  const t = useSidebarCopy();
   const pathname = usePathname();
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(initialUser?.email ?? null);
@@ -167,7 +173,9 @@ export default function Sidebar({ initialUser }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [viewAsUser, setViewAsUser] = useState(false);
   // Which collapsible nav sections are expanded. Universe Overview starts open.
-  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(['Universe Overview']));
+  // ⚠ KEYED BY HREF, NOT BY LABEL. The label is now translated, so a language flip would change
+  // the key and silently collapse (or re-open) whatever the reader had set. An href does not move.
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(['/universe']));
   // Mobile nav: off-canvas drawer on < lg, static rail on lg+.
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -456,11 +464,11 @@ export default function Sidebar({ initialUser }: Props) {
 
   const isActive = (href: string) =>
     pathname === href || (pathname.startsWith(href + '/') && href !== '/');
-  const toggleSection = (label: string) =>
+  const toggleSection = (key: string) =>
     setOpenSections((prev) => {
       const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
 
@@ -541,7 +549,7 @@ export default function Sidebar({ initialUser }: Props) {
                     : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'
                 }`}
               >
-                {entry.label}
+                {t.nav[entry.href]}
               </Link>
             );
           }
@@ -550,11 +558,11 @@ export default function Sidebar({ initialUser }: Props) {
           // the active route, so the current page is never hidden behind a
           // collapsed group.
           const open =
-            openSections.has(entry.label) ||
+            openSections.has(entry.href) ||
             headerActive ||
             entry.children.some((c) => isActive(c.href));
           return (
-            <div key={entry.label}>
+            <div key={entry.href}>
               <div className={`flex items-center rounded-lg ${headerActive ? 'bg-accent-600/15' : 'hover:bg-overlay/5'}`}>
                 {entry.href ? (
                   <Link
@@ -563,15 +571,15 @@ export default function Sidebar({ initialUser }: Props) {
                       headerActive ? 'text-accent-400' : 'text-fg-muted hover:text-fg-strong'
                     }`}
                   >
-                    {entry.label}
+                    {t.nav[entry.href]}
                   </Link>
                 ) : (
-                  <span className="flex-1 px-3 py-2.5 text-sm font-medium text-fg-muted">{entry.label}</span>
+                  <span className="flex-1 px-3 py-2.5 text-sm font-medium text-fg-muted">{t.nav[entry.href]}</span>
                 )}
                 <button
                   type="button"
-                  onClick={() => toggleSection(entry.label)}
-                  aria-label={open ? `Collapse ${entry.label}` : `Expand ${entry.label}`}
+                  onClick={() => toggleSection(entry.href)}
+                  aria-label={open ? t.collapseSection(t.nav[entry.href]) : t.expandSection(t.nav[entry.href])}
                   className="px-2 py-2.5 text-fg-subtle hover:text-fg-strong transition-colors"
                 >
                   <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} viewBox="0 0 20 20" fill="currentColor">
@@ -591,7 +599,7 @@ export default function Sidebar({ initialUser }: Props) {
                           : 'text-fg-muted hover:text-fg-strong hover:bg-overlay/5'
                       }`}
                     >
-                      {c.label}
+                      {t.nav[c.href]}
                     </Link>
                   ))}
                 </div>
@@ -749,41 +757,38 @@ export default function Sidebar({ initialUser }: Props) {
             it as accepted. `managementCopy`'s `UNTRANSLATED_SURFACES` is the list of what still
             does not answer, so the gap is written down rather than discovered by pressing it. */}
         <div className="px-3 py-2 flex items-center justify-between gap-2">
-          <span className="text-[11px] uppercase tracking-wider text-fg-subtle">Language</span>
-          <LangSwitch lang={lang} onChange={setLang}
-            title={'The interface language. Stored per browser and shared by every screen. '
-              + 'Not every page is translated yet — the Management Dashboard and the Fundamental '
-              + 'modal are the ones that answer today.'} />
+          <span className="text-[11px] uppercase tracking-wider text-fg-subtle">{t.language}</span>
+          <LangSwitch lang={lang} onChange={setLang} title={t.languageTitle} />
         </div>
         <button
           onClick={handleSignOut}
           className="w-full px-3 py-2.5 rounded-lg text-sm font-medium text-fg-subtle hover:text-fg-strong hover:bg-overlay/5 transition-colors text-left"
         >
-          Sign out
+          {t.signOut}
         </button>
         {!showDeleteConfirm ? (
           <button
             onClick={() => setShowDeleteConfirm(true)}
             className="w-full px-3 py-2.5 rounded-lg text-sm font-medium text-fg-subtle hover:text-neg-400 hover:bg-neg-500/10 transition-colors text-left"
           >
-            Delete account
+            {t.deleteAccount}
           </button>
         ) : (
           <div className="px-3 py-2 space-y-2">
-            <p className="text-sm text-neg-400">Are you sure? This cannot be undone.</p>
+            <p className="text-sm text-neg-400">{t.deleteSure}</p>
             <div className="flex gap-2">
               <button
                 onClick={handleDeleteAccount}
                 disabled={deleting}
                 className="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium bg-neg-600 hover:bg-neg-500 text-fg-strong transition-colors disabled:opacity-50"
               >
-                {deleting ? 'Deleting...' : 'Yes, delete'}
+                {deleting ? t.deleting : t.deleteConfirm}
               </button>
               <button
                 onClick={() => setShowDeleteConfirm(false)}
                 className="flex-1 px-2 py-1.5 rounded-lg text-sm font-medium text-fg-muted hover:text-fg-strong hover:bg-overlay/5 transition-colors"
               >
-                Cancel
+                {t.cancel}
               </button>
             </div>
           </div>

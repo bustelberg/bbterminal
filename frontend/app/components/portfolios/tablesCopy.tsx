@@ -363,7 +363,7 @@ const nl: TablesCopy = {
   meanTip: (n, from, to, of) =>
     `Gemiddelde van ${n} jaar over ${from}–${to}`
     + `${of == null ? '' : `, van de ${of} gevraagde`}. Per jaar gewogen met dezelfde wegingen als `
-    + 'de grafiek op Graphs — dit is die lijn, gemiddeld.',
+    + 'de grafiek op Grafieken — dit is die lijn, gemiddeld.',
   showNumbers: 'Toon de cijfers achter deze regel — elke positie, elk jaar, en de getallen waaruit '
     + 'elk cijfer is berekend',
   noCoverage: (from, to) =>
@@ -399,12 +399,12 @@ const nl: TablesCopy = {
       </>}
       {showFcf && <>
         {' '}De groeirijen lopen van eindpunt tot eindpunt en zullen niet overeenkomen met de
-        groeikaarten op het tabblad Graphs, die een trend door alle jaren leggen
+        groeikaarten op het tabblad Grafieken, die een trend door alle jaren leggen
         ({whyLink}).
       </>}
       {showFiltered && <>
         {' '}De rijen <strong>Vrije kasstroom per aandeel</strong> en <strong>Winst per
-        aandeel</strong> gebruiken dezelfde reeks als de grafieken op Graphs — en net als daar alleen de bedrijven waarvan
+        aandeel</strong> gebruiken dezelfde reeks als de grafieken op Grafieken — en net als daar alleen de bedrijven waarvan
         het cijfer in <strong>elke periode positief</strong> is, analistenramingen inbegrepen. De
         overige vallen er volledig uit; lees die twee rijen dus als de groei van de overblijvers.
       </>}

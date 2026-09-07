@@ -1,83 +1,22 @@
-import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { createClient } from '../lib/supabase/server';
 import { isUserAllowedPath } from '../lib/userAllowedPaths';
+import HomeTiles from './components/home/HomeTiles';
+import { HOME_TILE_ORDER } from './components/home/homeTileKeys';
 
-type Tile = {
-  href: string;
-  label: string;
-  description: string;
-  badge?: string;
-};
-
-const tiles: Tile[] = [
-  {
-    href: '/management-dashboard',
-    label: 'Management Dashboard',
-    description: 'The AIRS books: each portfolio on AIRS\'s own returns, its holdings, how they correlate, and the benchmarks to read them against.',
-  },
-  {
-    href: '/earnings',
-    label: 'Earnings Dashboard',
-    description: 'Browse per-company earnings metrics pulled from GuruFocus, with quick refresh by source.',
-  },
-  {
-    href: '/schedule',
-    label: 'Schedule',
-    description: 'The scheduled momentum strategies shared with you — current holdings, returns, and the source-backtest equity curve (read-only).',
-  },
-  {
-    href: '/backtest',
-    label: 'Backtest',
-    description: 'Test a strategy on a template-managed universe over a date range. Start defaults to the universe\'s hard backstop, end defaults to the latest available price data.',
-  },
-  {
-    href: '/universe',
-    label: 'Universe Overview',
-    description: 'Criteria-driven universe screener — apply filters to companies and save labelled, derived universes.',
-  },
-  {
-    href: '/longequity-universe',
-    label: 'LongEquity Universe',
-    description: 'Monthly snapshots of the LongEquity universe, grouped by region and country. Run the ingest pipeline from here.',
-  },
-  {
-    href: '/sp500',
-    label: 'S&P 500 Universe',
-    description: 'Reconstructed S&P 500 memberships over time, with monthly tickers and change history. Freeze a reusable copy here.',
-  },
-  {
-    href: '/acwi',
-    label: 'ACWI Universe',
-    description: 'iShares ACWI holdings and MSCI announcement explorer — review additions, deletions, and net changes.',
-  },
-  {
-    href: '/leonteq',
-    label: 'Leonteq Universe',
-    description: 'Equities Leonteq lists as underlyings for structured products, grouped by sector → industry with GuruFocus links.',
-  },
-  {
-    href: '/fx-rates',
-    label: 'FX Rates',
-    description: 'View FX rate coverage and history, and sync the latest ECB / Yahoo rates into the database.',
-  },
-  {
-    href: '/airs-portfolio',
-    label: 'AIRS Portfolio',
-    description: 'Broker scanner and AIRS Excel upload — parses holdings and computes YTD returns in EUR and local currency.',
-  },
-  {
-    href: '/request_gurufocus',
-    label: 'Request GuruFocus',
-    description: 'Trigger GuruFocus indicator fetches for selected companies and exchanges.',
-  },
-  {
-    href: '/benchmarks',
-    label: 'Benchmarks',
-    description: 'Manage index benchmarks (SPY, ACWI, …) — add tickers, fetch prices, and inspect coverage.',
-  },
-];
-
+/**
+ * The home page.
+ *
+ * ⚠⚠ SERVER COMPONENT FOR THE ROLE, CLIENT COMPONENT FOR THE WORDS. The session and the `view_as`
+ * cookie are server facts and decide WHICH tiles exist; the language is a client fact
+ * (`localStorage`, via `useLang`) and decides what they SAY. Rendering the copy here would leave
+ * the page in English whatever the sidebar switch is set to — which is exactly the failure
+ * `i18n.ts` warns about, a control that moves nothing reading as broken rather than as unfinished.
+ *
+ * ⚠ THE TILE LIST AND ITS COPY LIVE IN `homeCopy.ts`, not here. They used to be one array in this
+ * file, so adding a page put its English copy in one place and its Dutch copy nowhere; keyed by
+ * href in a `Record<HomeTileKey, …>`, a missing translation is now a compile error.
+ */
 export default async function Home() {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -91,41 +30,9 @@ export default async function Home() {
 
   // Derive visibility from the SAME allow-list the route gate uses, so the home
   // page can never advertise a page the user can't open (it used to drift).
-  const visibleTiles = effectiveRole === 'admin'
-    ? tiles
-    : tiles.filter((t) => isUserAllowedPath(t.href));
+  const visible = effectiveRole === 'admin'
+    ? HOME_TILE_ORDER
+    : HOME_TILE_ORDER.filter((href) => isUserAllowedPath(href));
 
-  return (
-    <div className="px-8 py-8 max-w-6xl">
-      <div className="mb-8">
-        <h1 className="text-2xl font-semibold text-fg-strong mb-2">Welcome to BBTerminal</h1>
-        <p className="text-sm text-fg-muted leading-relaxed">
-          Analyse stocks based on data from LongEquity and index universes, enriched with data from GuruFocus.
-        </p>
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {visibleTiles.map(({ href, label, description, badge }) => (
-          <Link
-            key={href}
-            href={href}
-            className="group block bg-card rounded-xl border border-neutral-800/40 p-5 hover:border-accent-500/40 hover:bg-inset transition-colors"
-          >
-            <div className="flex items-start justify-between gap-3 mb-2">
-              <h2 className="text-base font-semibold text-fg-strong group-hover:text-accent-400 transition-colors">
-                {label}
-              </h2>
-              {badge && (
-                <span className="shrink-0 text-xs font-medium px-2 py-0.5 rounded-md bg-warn-500/10 text-warn-400 border border-warn-500/20">
-                  {badge}
-                </span>
-              )}
-            </div>
-            <p className="text-sm text-fg-muted leading-relaxed">
-              {description}
-            </p>
-          </Link>
-        ))}
-      </div>
-    </div>
-  );
+  return <HomeTiles hrefs={visible} />;
 }

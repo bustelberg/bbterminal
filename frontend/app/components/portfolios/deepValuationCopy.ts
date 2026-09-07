@@ -18,6 +18,12 @@ import { v } from '../../../lib/dynamicValue';
  * real Dutch word exists it IS used: rendement, groeivoet, disconteringsvoet, eeuwigdurende groei,
  * afschrijvingen, uitkeringsrendement, koers, aandelen.
  *
+ * ⚠⚠ `P/E` WAS `K/W` IN THIS FILE AND WAS PUT BACK (2026-09-07, on request: "Forward K/W should
+ * still be P/E in dutch"). `koers/winst` is a real Dutch term and the note above already said P/E
+ * stays — the Dutch block simply did not follow its own rule, in 17 places. It is also the rule the
+ * neighbouring tab keeps: `quickValuationCopy` renders `P/E` and `P/FCF` in both languages, and one
+ * modal calling the same ratio two things depending on the tab is worse than either name.
+ *
  * ⚠ NUMBERS AND CURRENCY CODES ARE OPERANDS, NEVER TRANSLATED. Every function here takes its
  * figures pre-formatted from the call site: a `toFixed` on this side would be a second rounding
  * convention, and the two languages would print different numbers for one model.
@@ -181,7 +187,8 @@ export type DeepValuationCopy = {
     vsReportedFcf: string; vsNextFyDerived: (fy: string) => string;
     /** The `how` prose on the base row, whose three branches are three different provenances. */
     fcfWhatReported: string; fcfWhatForward: (fy: string) => string;
-    fcfHowDirect: string; fcfHowDerived: string; fcfHowReported: string;
+    fcfHowDirect: string; fcfHowDerived: string; fcfHowNoForwardDa: string;
+    fcfHowReported: string;
     inMillionsIs: (a: string, b: string) => string; inMillions: string;
     nextFiscalYear: string;
     /** The two corrections, each with a "not reported" branch — an absent line is not a zero. */
@@ -493,6 +500,16 @@ const en: DeepValuationCopy = {
     fcfHowDerived: 'Derived: no consensus free cash flow is stored for this company, so it is the '
       + 'consensus operating cash flow less the last filed capex. That capex leg largely cancels '
       + 'against the growth-capex row below.',
+    // ⚠⚠ THE OTHER REASON THE VENDOR'S FIGURE IS NOT USED, AND IT WAS PRINTING THE ONE ABOVE.
+    // A stored consensus FCF nets a FORWARD capex, so its add-back needs a FORWARD D&A
+    // (`EBITDA_est − EBIT_est`). Without those two estimates the correction would fall back to the
+    // trailing lines and the two halves would sit on different bases — Meta FY2026 lands 10.4bn
+    // short that way. Deriving keeps one basis, and the trailing capex then cancels.
+    fcfHowNoForwardDa: 'Derived, though a consensus free cash flow IS stored. Using it would need '
+      + 'a forecast depreciation to match the forward capex it already nets, and no EBITDA or EBIT '
+      + 'estimate is stored to infer one from. Mixing the vendor base with the last filed '
+      + 'depreciation would put the two halves on different bases. This way the capex leg cancels '
+      + 'against the growth-capex row below and only depreciation is a filed figure.',
     fcfHowReported: 'Operating cash flow minus TOTAL capex, which is why the growth-capex row '
       + 'below adds back rather than subtracting.',
     inMillionsIs: (a, b) => ` In millions: ${v(a)} is ${v(b)}.`,
@@ -624,13 +641,13 @@ const nl: DeepValuationCopy = {
   common: { guruFocus: (vendor) => `GuruFocus, ${v(vendor)}.` },
   egm: {
     reset: 'Zet elke aanname terug op de standaardwaarde',
-    growthRate: 'Groeivoet', exitPE: 'Exit forward K/W', sharePriceNow: 'Koers nu',
-    forwardPE: 'Forward K/W', hurdleRate: 'Rendementseis', dividendYield: 'Dividendrendement',
+    growthRate: 'Groeivoet', exitPE: 'Exit forward P/E', sharePriceNow: 'Koers nu',
+    forwardPE: 'Forward P/E', hurdleRate: 'Rendementseis', dividendYield: 'Dividendrendement',
     showRawData: 'Toon de brongegevens achter deze standaardwaarden',
     expectedReturn: 'Verwacht rendement', priceTarget: 'Koersdoel',
     totalPriceMove: 'Totale koersbeweging',
     atYourHurdle: 'Bij uw rendementseis',
-    maxPE: 'Max. forward K/W', fairValue: 'Reële waarde', fairValueGap: 't.o.v. de koers',
+    maxPE: 'Max. forward P/E', fairValue: 'Reële waarde', fairValueGap: 't.o.v. de koers',
     legGrowth: 'Groei', legYield: 'Dividendrendement', legMultiple: 'Herwaardering',
     cards: {
       growth: {
@@ -638,7 +655,7 @@ const nl: DeepValuationCopy = {
         where: 'De uwe, of de huisstandaard als het veld leeg is.',
       },
       exitPE: {
-        what: 'Aangenomen K/W op het moment van verkoop.',
+        what: 'Aangenomen P/E op het moment van verkoop.',
         where: 'De uwe, of de huisstandaard als het veld leeg is.',
       },
       price: {
@@ -686,7 +703,7 @@ const nl: DeepValuationCopy = {
       },
       fairValue: {
         what: 'Die multiple, op de winst van volgend jaar.',
-        where: 'De consensus-EPS voor volgend jaar × de max. K/W ernaast.',
+        where: 'De consensus-EPS voor volgend jaar × de max. P/E ernaast.',
       },
     },
     everyYearFor: (years) => `Elk jaar, gedurende ${v(years)} jaar.`,
@@ -700,7 +717,7 @@ const nl: DeepValuationCopy = {
     reratingRuns: (from, to) => ` Het herwaarderingsdeel loopt van ${v(from)} naar ${v(to)}.`,
     analystHint: 'De door analisten geïmpliceerde groei — de CAGR van de consensus-EPS-ramingen, '
       + 'niet een gepubliceerde langetermijnvoet. Klik om te gebruiken.',
-    medianPEHint: 'De eigen mediane K/W van deze onderneming over de afgelopen vijf jaar. Klik om '
+    medianPEHint: 'De eigen mediane P/E van deze onderneming over de afgelopen vijf jaar. Klik om '
       + 'te gebruiken.',
     yoursTypedHere: 'De uwe, hier ingetypt.',
     yoursOrDefault: 'De uwe, of de huisstandaard als het veld leeg is.',
@@ -731,16 +748,16 @@ const nl: DeepValuationCopy = {
     reReading: 'Bezig met opnieuw lezen — druk om te annuleren', cancelling: 'Annuleren…',
     reReadOverridden: 'Lees de opgeslagen slotkoers opnieuw — het veld Koers nu overschrijft hem, ',
     reReadStale: 'Deze slotkoers is ouder dan een week — lees hem opnieuw',
-    reReadForwardPE: 'Vraag deze forward K/W opnieuw op bij GuruFocus',
+    reReadForwardPE: 'Vraag deze forward P/E opnieuw op bij GuruFocus',
     reReadNoCompany: 'Geen GuruFocus-onderneming voor deze ISIN, dus er valt niets opnieuw te lezen',
-    reReadForwardPEOverridden: 'Vraag deze forward K/W opnieuw op bij GuruFocus — het veld '
+    reReadForwardPEOverridden: 'Vraag deze forward P/E opnieuw op bij GuruFocus — het veld '
       + 'overschrijft hem, dus het nieuwe cijfer verschijnt op de chip naast dat veld',
     forwardPEWhenTyped: 'Welk moment u er ook mee bedoelt.',
     forwardPEHowTyped: (vendor, date) => `Maak het veld leeg om terug te gaan naar ${vendor}, die `
       + `voor het laatst op ${date} publiceerde.`,
-    forwardPEMoved: (date) => `forward K/W nu ${date}`,
+    forwardPEMoved: (date) => `forward P/E nu ${date}`,
     forwardPEUnchanged: (date) => `nog steeds ${date} — GuruFocus heeft niets nieuwers`,
-    forwardPENone: 'GuruFocus gaf geen forward K/W voor deze onderneming',
+    forwardPENone: 'GuruFocus gaf geen forward P/E voor deze onderneming',
     growthHow: (dflt) => `Procent per jaar. ${dflt}`,
     exitPEHow: (dflt) => `Een multiple, geen percentage. ${dflt}`,
     forwardPEHow: (years) => 'Forward, niet trailing — hij sluit aan op de groeivoet hierboven, die '
@@ -753,8 +770,8 @@ const nl: DeepValuationCopy = {
       `De factoren VERMENIGVULDIGEN, dus de ×-kolom klopt en de %-kolom niet: ${v(added)} opgeteld `
       + `tegenover ${v(compounded)} samengesteld. Het dividendrendement tilt dit cijfer op maar niet `
       + 'de geïmpliceerde koers hieronder, die alleen het kapitaaldeel is.',
-    noForwardPE: 'Geen bruikbare forward K/W, dus er valt niets te herwaarderen.',
-    noCompoundingPath: 'Deze aannames hebben geen samenstellingspad. Controleer de exit-K/W, de '
+    noForwardPE: 'Geen bruikbare forward P/E, dus er valt niets te herwaarderen.',
+    noCompoundingPath: 'Deze aannames hebben geen samenstellingspad. Controleer de exit-P/E, de '
       + 'groei en de rendementseis.',
     fairValueVsPrice: (pct) => `${v(pct)} ten opzichte van de koers van vandaag.`,
     fairValueNoEps: 'Geen consensus-EPS voor volgend jaar, dus er is niets om de multiple op toe '
@@ -771,7 +788,7 @@ const nl: DeepValuationCopy = {
       g: 'aangenomen EPS-groei, per jaar',
       y: 'aangenomen dividendrendement, elk jaar toegepast',
       peExit: 'de forward multiple die u bij verkoop aanneemt',
-      peFwd: 'de forward K/W waarvandaan wordt herwaardeerd',
+      peFwd: 'de forward P/E waarvandaan wordt herwaardeerd',
       n: (years) => `de prognosehorizon, ${v(years)} jaar`,
       p0: 'de koers nu',
       p0Row: 'de koers nu — de regel hierboven',
@@ -871,6 +888,13 @@ const nl: DeepValuationCopy = {
       + 'opgeslagen, dus het is de consensus voor de operationele kasstroom minus de laatst '
       + 'gerapporteerde investeringen. Dat investeringsdeel valt grotendeels weg tegen de regel '
       + 'groei-investeringen hieronder.',
+    fcfHowNoForwardDa: 'Afgeleid, hoewel er WEL een consensus voor de vrije kasstroom is '
+      + 'opgeslagen. Om die te gebruiken is een geraamde afschrijving nodig die past bij de '
+      + 'geraamde investering die er al van is afgetrokken, en er is geen EBITDA- of EBIT-raming '
+      + 'opgeslagen om die uit af te leiden. De prognose van de leverancier combineren met de '
+      + 'laatst gerapporteerde afschrijving zou beide helften op een verschillende basis zetten. '
+      + 'Zo valt het investeringsdeel weg tegen de regel groei-investeringen hieronder en is alleen '
+      + 'de afschrijving een gerapporteerd cijfer.',
     fcfHowReported: 'Operationele kasstroom minus de TOTALE investeringen, en daarom telt de regel '
       + 'groei-investeringen hieronder weer op in plaats van af te trekken.',
     inMillionsIs: (a, b) => ` In miljoenen: ${v(a)} is ${v(b)}.`,
@@ -985,13 +1009,13 @@ const nl: DeepValuationCopy = {
     noCagrOnePoint: 'er is maar één toekomstige raming ingelezen.',
     noCagrNonPositive: 'de eerste of laatste raming is niet positief, dus er valt niets uit samen '
       + 'te stellen.',
-    peSection: 'Exit-K/W — “vijfjaarsmediaan K/W”',
+    peSection: 'Exit-P/E — “vijfjaarsmediaan P/E”',
     peNote: 'De slotkoers van elk jaar gedeeld door de winst per aandeel van dat jaar exclusief '
-      + 'bijzondere posten, en daarvan de mediaan. Afgeleid — de eigen K/W-regel van GuruFocus '
+      + 'bijzondere posten, en daarvan de mediaan. Afgeleid — de eigen P/E-regel van GuruFocus '
       + 'wordt niet ingelezen.',
     noPriceHistory: 'Geen koers-/EPS-historie ingelezen.',
     colFiscalYear: 'Boekjaar', colYearEndPrice: 'Slotkoers jaareinde',
-    colEpsNri: 'EPS excl. bijz. posten', colPE: 'K/W',
+    colEpsNri: 'EPS excl. bijz. posten', colPE: 'P/E',
     excluded: 'uitgesloten',
     excludedTitle: 'Uitgesloten — geen positieve EPS, dus geen betekenisvolle multiple.',
     medianOfUsable: (n) => `Mediaan van ${n} bruikbaar jaar/jaren`,

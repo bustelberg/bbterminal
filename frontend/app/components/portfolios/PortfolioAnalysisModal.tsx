@@ -2646,12 +2646,29 @@ function ViaChips({ names, sources }: { names: string[]; sources?: BookHolding['
 
 /** The headline tile for a NON-EQUITY sleeve: its own return + weight, no benchmark. Replaces the
  *  Return/vs-SP500/Excess/Attribution scorecard, none of which makes sense off the equity book. */
-function SleeveTile({ bucket, slices }: { bucket: string; slices?: AllocSlice[] }) {
+function SleeveTile({ bucket, slices, asOf }: {
+  bucket: string; slices?: AllocSlice[];
+  /** The book's valuation date, so the card can date the figure like every other one here. */
+  asOf?: string | null;
+}) {
+  const copy = useAnalyseCopy();
   const s = (slices ?? []).find((x) => x.bucket === bucket);
   return (
     <div className="bg-elevated border border-neutral-800/40 rounded-lg px-4 py-3 min-w-[10rem] flex flex-col justify-center">
       <div className={`text-2xl font-mono font-semibold ${retTone(s?.return_pct)}`}>{fmtRet(s?.return_pct)}</div>
-      <div className="text-[11px] text-fg-faint">YTD (€)</div>
+      {/* ⚠ BEHIND THE UNIT LINE, NOT BESIDE THE FIGURE (on request). The number is the tile — it is
+          `text-2xl` and it is what the eye lands on — so an icon next to it competes with it at its
+          own size. On the `YTD (€)` caption it reads as an annotation of the label, which is what
+          it is, and the tile keeps one thing in it that is large.
+          ⚠ THE SAME CARD THE EQUITY SCORECARD'S TILES USE — this class is the non-equity twin of
+          that Return tile, and it had no ⓘ while its equity counterpart has one. */}
+      <div className="flex items-center gap-1 text-[11px] text-fg-faint">
+        {copy.sleeve.ytdUnit}
+        <Provenance source="airs_volk" asOf={asOf} kind="formula"
+          what={copy.sleeve.ytdWhat(copy.bucket(bucketLabel(bucket)))}
+          note={copy.sleeve.ytdNote}
+          how={copy.sleeve.ytdHow} />
+      </div>
     </div>
   );
 }
@@ -2988,7 +3005,7 @@ export default function PortfolioAnalysisModal({
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
         // ⚠ WHERE THE WAIT WENT. `apiFetch` already logs the round-trip total, but this endpoint
-        // is one request covering eight different loads — so a 5-second "Loading composition…"
+        // is one request covering eight different loads — so a 5-second "Loading overview…"
         // told you only that it was slow, never which load. The server now reports per phase and
         // this prints it, the same way the AIRS expand has always done.
         const t = (b as ModelPortfolioAnalysis)?.timings_ms;
@@ -3207,7 +3224,13 @@ export default function PortfolioAnalysisModal({
                         place that class's return appears. On Stocks it sat above the sector charts
                         duplicating a figure the Holdings view already carries on its class row. */}
                     {selected !== EQUITY_BUCKET && (
-                      <SleeveTile bucket={selected} slices={data.allocation} />
+                      /* ⚠ THE BOOK SNAPSHOT, NOT `data.as_of` — the same distinction the holdings
+                         table's own `asOf` carries, and for the same reason: this tile shows a
+                         figure the BOOK values, and `data.as_of` is the model COMPOSITION's
+                         effective date. Stamped with the wrong one the card would call a
+                         two-day-old return 216 days old. */
+                      <SleeveTile bucket={selected} slices={data.allocation}
+                        asOf={data.holdings_as_of ?? data.as_of} />
                     )}
                     {/* Attribution (Brinson) is an EQUITY analysis — offered ONLY on the Stocks
                         sleeve, never on a bond/cash/fund sleeve or the whole-portfolio view.

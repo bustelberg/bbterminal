@@ -20,7 +20,7 @@ const en = {
     fxsplit: { label: 'Price vs currency (AIRS)', hint: 'Koers + Valuta + Rest = Result' },
     contribution: { label: 'How the Contribution is built', hint: 'Result ÷ the book’s opening capital' },
   },
-  chrome: { benchmark: 'Benchmark', loading: 'Loading composition…',
+  chrome: { benchmark: 'Benchmark', loading: 'Loading overview…',
     loadError: 'The composition could not be loaded.' },
   bucket: (name: string) => name,
   score: {
@@ -74,7 +74,21 @@ const en = {
     moneyHow: (result: string, capital: string, pct: string) => `Result ÷ Avg capital invested\n\n${result} ÷ ${capital} = ${pct}`,
     contributionHow: (result: string, basis: string, pct: string) => `Result ÷ the book’s opening capital\n\n${result} ÷ ${basis} = ${pct}`,
   },
-  sleeve: { noPrices: (bucket: string) => `No priced holdings in ${bucket}`, performance: 'Performance', currency: 'Currency' },
+  /**
+   * ⚠ THE HEADLINE TILE FOR A NON-EQUITY SLEEVE HAD NO ⓘ (2026-09-07, on request, seen on
+   * Alternatives). It is the twin of the equity Scorecard's Return tile, which has one — so this
+   * was the one class-level return in the modal that named neither its source nor its window.
+   */
+  sleeve: {
+    noPrices: (bucket: string) => `No priced holdings in ${bucket}`,
+    performance: 'Performance',
+    currency: 'Currency',
+    ytdUnit: 'YTD (€)',
+    ytdWhat: (bucket: string) => `${bucket}’s own return so far this year, in euros.`,
+    ytdNote: 'The class as a whole — not the sum of the rows below, which renormalise their '
+      + 'weights within the class and use each instrument’s own return.',
+    ytdHow: 'the class’s result over its restated opening value, from the year’s start',
+  },
   row: {
     thisPosition: 'This position', thisHolding: 'This holding', noSector: 'No sector — a fund, or not classifiable',
     momentumNote: 'signal_engine mom_12_1, EUR', volNote: 'annualised standard deviation of monthly EUR returns',
@@ -206,7 +220,7 @@ const nl: AnalyseCopy = {
     fxsplit: { label: 'Koers versus valuta (AIRS)', hint: 'Koers + Valuta + Rest = Resultaat' },
     contribution: { label: 'Opbouw bijdrage', hint: 'Resultaat ÷ beginkapitaal van het boek' },
   },
-  chrome: { benchmark: 'Benchmark', loading: 'Samenstelling laden…',
+  chrome: { benchmark: 'Benchmark', loading: 'Overzicht laden…',
     loadError: 'De samenstelling kon niet worden geladen.' },
   bucket: (name) => (({ Stocks: 'Aandelen', Bonds: 'Obligaties', Alternatives: 'Alternatieven', Cash: 'Liquiditeiten',
     Unclassified: 'Niet geclassificeerd' } as Record<string, string>)[name] ?? name),
@@ -257,7 +271,17 @@ const nl: AnalyseCopy = {
     moneyHow: (result, capital, pct) => `Resultaat ÷ gemiddeld belegd kapitaal\n\n${result} ÷ ${capital} = ${pct}`,
     contributionHow: (result, basis, pct) => `Resultaat ÷ beginkapitaal van het boek\n\n${result} ÷ ${basis} = ${pct}`,
   },
-  sleeve: { noPrices: (bucket) => `Geen geprijsde posities in ${bucket}`, performance: 'Rendement', currency: 'Valuta' },
+  sleeve: {
+    noPrices: (bucket) => `Geen geprijsde posities in ${bucket}`,
+    performance: 'Rendement',
+    currency: 'Valuta',
+    ytdUnit: 'YTD (€)',
+    ytdWhat: (bucket) => `Het eigen rendement van ${bucket} dit jaar tot nu toe, in euro’s.`,
+    ytdNote: 'De categorie als geheel — niet de som van de regels hieronder, die hun gewicht '
+      + 'binnen de categorie normaliseren en het eigen rendement van elk instrument gebruiken.',
+    ytdHow: 'het resultaat van de categorie ten opzichte van de herrekende beginwaarde, vanaf het '
+      + 'begin van het jaar',
+  },
   row: {
     thisPosition: 'Deze positie', thisHolding: 'Deze positie', noSector: 'Geen sector — een fonds of niet classificeerbaar',
     momentumNote: 'signal_engine mom_12_1, EUR', volNote: 'geannualiseerde standaarddeviatie van maandelijkse EUR-rendementen',
