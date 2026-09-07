@@ -137,24 +137,20 @@ def main() -> int:
     # this assembly carries a single scalar cap per member anyway — see the finding below.
     total_w = sum(float(m.get("weight") or 0.0) for m in members) or 1.0
     accepted: list[tuple[float, str, str, float, float, float, float]] = []
-    refused_base = refused_cap = refused_missing = 0
+    refused_missing = 0
     for m in members:
         at = m.get("points") or {}
-        # ⚠ `.get` WITH A DEFAULT, NEVER `or` — 0.0 is the legitimate "no materiality bar"
-        # value on a one-member line (`base_bar_scale`), and `or` would silently put the
-        # bar back, so this diagnostic would report refusals the blend never made.
-        scale = m.get("scale", fb.base_bar_scale(at, len(members)))
+        # ⚠⚠ THE TWO MAGNITUDE GUARDS WERE REMOVED ON 2026-09-04 and this script still called
+        # them — `fb.base_bar_scale` no longer exists, so every invocation died on an
+        # AttributeError and the one tool for answering "which constituent moved the line" was
+        # unusable in exactly the incident it exists for. `step_growth` now takes two arguments
+        # and refuses only on arithmetic: no anchor, no value, or a non-positive base.
         periods = sorted(at)
         for prev_p, now_p in zip(periods, periods[1:]):
             prev, now = at.get(prev_p), at.get(now_p)
-            g = fb.step_growth(prev, now, scale)
+            g = fb.step_growth(prev, now)
             if g is None:
-                if prev is None or now is None or (prev is not None and prev <= 0):
-                    refused_missing += 1
-                elif prev < fb._MIN_STEP_BASE_FRACTION * scale:   # noqa: SLF001
-                    refused_base += 1
-                else:
-                    refused_cap += 1
+                refused_missing += 1
                 continue
             # ⚠ NORMALISED. `_weight_at` hands back whatever the member carries — for this
             # assembly that is a raw EUR market cap, so the raw product is unreadable and,
@@ -165,8 +161,8 @@ def main() -> int:
                              float(prev), float(now), g, w))
 
     print(f"[3/4] {len(accepted)} accepted steps · refused: "
-          f"{refused_missing} no-anchor/non-positive, {refused_base} immaterial base, "
-          f"{refused_cap} over the growth cap")
+          f"{refused_missing} no-anchor/non-positive "
+          f"(the base and cap heuristics were removed 2026-09-04 — nothing else refuses)")
 
     # ── the distribution, which is how both constants were chosen ──────────────────────────────
     growths = sorted(g for _, _, _, _, _, g, _ in accepted)
@@ -175,8 +171,10 @@ def main() -> int:
             return f"{growths[min(len(growths) - 1, int(len(growths) * q))] * 100:+,.0f}%"
         print(f"      accepted growth distribution: p50 {pct(0.50)} · p99 {pct(0.99)} · "
               f"p99.9 {pct(0.999)} · p99.99 {pct(0.9999)} · max {growths[-1] * 100:+,.0f}%")
-        # ⚠ THE CAP IS 100x = +10,000%, so a 100x REDENOMINATION lands at +9,900% and passes.
-        near = [g for g in growths if 50.0 <= g <= fb._MAX_STEP_GROWTH]   # noqa: SLF001
+        # ⚠⚠ A UNIT BREAK IS NEAR-EXACTLY 100x OR 1000x, WHICH IS WHAT MAKES IT FINDABLE — see
+        # `step_growth`: the right catch is STRUCTURAL, not a threshold on the answer. With the
+        # cap gone these all enter the line at full weight, so they are worth counting.
+        near = [g for g in growths if 50.0 <= g]
         print(f"      steps between +5,000% and the cap: {len(near)}"
               f"{'  <-- a 100x unit change sits in here' if near else ''}")
 
