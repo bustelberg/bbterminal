@@ -21,7 +21,7 @@ import { type EgmBridge } from './egm';
 import {
   bridgeParts, workedCashFlowValued, workedEgmReturn, workedFairValue, workedForwardFcf,
   workedGrowthCapex, workedImpliedGrowth, workedImpliedPrice, workedMarketCap, workedMaxPE,
-  workedPriceMove,
+  workedFairValueGap, workedPriceMove,
 } from './valuationFormulas';
 
 /** Render as `lib/formula` does, but refusing anything KaTeX would only WARN about. */
@@ -61,6 +61,7 @@ describe('every Deep Valuation expression parses in strict mode', () => {
     expect(() => render(workedEgmReturn(BRIDGE, 10, '+5.8%'))).not.toThrow();
     expect(() => render(workedImpliedPrice(220.5, BRIDGE, 10, 375.42))).not.toThrow();
     expect(() => render(workedPriceMove(375.42, 220.5, '+70.3%'))).not.toThrow();
+    expect(() => render(workedFairValueGap(199, 224.41, '-11.3%'))).not.toThrow();
   });
 
   it('the Reverse DCF base, its two corrections and the market cap', () => {
@@ -120,6 +121,7 @@ describe('the percent signs survive', () => {
     for (const tex of [
       workedEgmReturn(BRIDGE, 10, '+5.8%'),
       workedPriceMove(375.42, 220.5, '+70.3%'),
+      workedFairValueGap(199, 224.41, '-11.3%'),
       workedImpliedGrowth({
         fcf: 11430.3, rate: 0.098, perpetuityGrowth: 0.03, years: 10,
         target: 220500, growth: 0.243,
@@ -149,6 +151,8 @@ describe('a missing operand collapses the line rather than guessing', () => {
     expect(workedCashFlowValued(11027.3, 202.3, null, 10825)).not.toContain('G');
     expect(workedMarketCap(220.5, null, null)).toBe('');
     expect(workedPriceMove(375.42, null, '+70.3%')).toBe('');
+    expect(workedFairValueGap(null, 224.41, '-11.3%')).toBe('');
+    expect(workedFairValueGap(199, 0, '-11.3%')).toBe('');
     expect(workedImpliedPrice(null, BRIDGE, 10, 375.42)).toBe('');
   });
 

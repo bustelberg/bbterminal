@@ -70,14 +70,14 @@ export type DeepValuationCopy = {
      * your hurdle.
      */
     atYourHurdle: string;
-    maxPE: string; fairValue: string;
+    maxPE: string; fairValue: string; fairValueGap: string;
     /** The three bridge legs, named where the table prints them. */
     legGrowth: string; legYield: string; legMultiple: string;
     cards: {
       growth: Card; exitPE: Card; price: Card; forwardPE: Card;
       hurdle: Card; dividend: Card;
       expectedReturn: Card; priceTarget: Card; priceMove: Card;
-      maxPE: Card; fairValue: Card;
+      maxPE: Card; fairValue: Card; fairValueGap: Card;
     };
     /** ⚠ A FAIR VALUE WITH NO COMPARISON INVITES THE SUBTRACTION AND ANSWERS NOTHING. The upside
      *  was computed and thrown away for months; it belongs in this card. */
@@ -257,13 +257,13 @@ const en: DeepValuationCopy = {
   common: { guruFocus: (vendor) => `GuruFocus, ${v(vendor)}.` },
   egm: {
     reset: 'Put every assumption back to its default',
-    growthRate: 'Growth rate', exitPE: 'Exit P/E', sharePriceNow: 'Share price now',
+    growthRate: 'Growth rate', exitPE: 'Exit forward P/E', sharePriceNow: 'Share price now',
     forwardPE: 'Forward P/E', hurdleRate: 'Hurdle rate', dividendYield: 'Dividend yield',
     showRawData: 'Show the raw data behind these defaults',
     expectedReturn: 'Expected return', priceTarget: 'Price target',
     totalPriceMove: 'Total price move',
     atYourHurdle: 'At your hurdle rate',
-    maxPE: 'Max P/E', fairValue: 'Fair value',
+    maxPE: 'Max forward P/E', fairValue: 'Fair value', fairValueGap: 'vs. share price',
     legGrowth: 'Growth', legYield: 'Dividend yield', legMultiple: 'Rerating',
     cards: {
       growth: {
@@ -311,6 +311,12 @@ const en: DeepValuationCopy = {
       fairValue: {
         what: 'That multiple, on next year’s earnings.',
         where: 'Next year’s consensus EPS × the max P/E beside it.',
+      },
+      fairValueGap: {
+        what: 'How far today’s price sits from that fair value.',
+        where: 'Fair value ÷ share price − 1.',
+        how: '⚠ NOT A RETURN. It is the gap you would close if the price moved to fair value '
+          + 'today; the expected return above is what you earn over the whole window.',
       },
     },
     everyYearFor: (years) => `Every year, for ${v(years)} years.`,
@@ -392,7 +398,10 @@ const en: DeepValuationCopy = {
     legend: {
       g: 'assumed EPS growth, per year',
       y: 'assumed dividend yield, applied every year',
-      peExit: 'the multiple you assume on sale',
+      // ⚠ BOTH SAY "forward", AND THAT IS THE POINT. They sit in one legend, either side of a
+      // ratio; one naming the convention and the other not reads as two different kinds of
+      // multiple, which is the misreading the row labels were just changed to remove.
+      peExit: 'the forward multiple you assume on sale',
       peFwd: 'the forward P/E it rerates FROM',
       n: (years) => `the forecast horizon, ${v(years)} years`,
       p0: 'the price now',
@@ -615,13 +624,13 @@ const nl: DeepValuationCopy = {
   common: { guruFocus: (vendor) => `GuruFocus, ${v(vendor)}.` },
   egm: {
     reset: 'Zet elke aanname terug op de standaardwaarde',
-    growthRate: 'Groeivoet', exitPE: 'Exit-K/W', sharePriceNow: 'Koers nu',
+    growthRate: 'Groeivoet', exitPE: 'Exit forward K/W', sharePriceNow: 'Koers nu',
     forwardPE: 'Forward K/W', hurdleRate: 'Rendementseis', dividendYield: 'Dividendrendement',
     showRawData: 'Toon de brongegevens achter deze standaardwaarden',
     expectedReturn: 'Verwacht rendement', priceTarget: 'Koersdoel',
     totalPriceMove: 'Totale koersbeweging',
     atYourHurdle: 'Bij uw rendementseis',
-    maxPE: 'Max. K/W', fairValue: 'Reële waarde',
+    maxPE: 'Max. forward K/W', fairValue: 'Reële waarde', fairValueGap: 't.o.v. de koers',
     legGrowth: 'Groei', legYield: 'Dividendrendement', legMultiple: 'Herwaardering',
     cards: {
       growth: {
@@ -667,6 +676,13 @@ const nl: DeepValuationCopy = {
         how: '⚠ EEN ANDER MODEL DAN HET RENDEMENT HIERBOVEN, op dezelfde aannames. Dat vraagt wat '
           + 'de koers van vandaag u oplevert; dit vraagt wat u mag betalen. Hoger dan de '
           + 'exit-multiple wanneer groei en dividend de rendementseis overtreffen.',
+      },
+      fairValueGap: {
+        what: 'Hoe ver de koers van vandaag van die reële waarde af ligt.',
+        where: 'Reële waarde ÷ koers − 1.',
+        how: '⚠ GEEN RENDEMENT. Het is het gat dat u dicht zou lopen als de koers vandaag naar de '
+          + 'reële waarde beweegt; het verwachte rendement hierboven is wat u over de hele '
+          + 'periode verdient.',
       },
       fairValue: {
         what: 'Die multiple, op de winst van volgend jaar.',
@@ -754,7 +770,7 @@ const nl: DeepValuationCopy = {
     legend: {
       g: 'aangenomen EPS-groei, per jaar',
       y: 'aangenomen dividendrendement, elk jaar toegepast',
-      peExit: 'de multiple die u bij verkoop aanneemt',
+      peExit: 'de forward multiple die u bij verkoop aanneemt',
       peFwd: 'de forward K/W waarvandaan wordt herwaardeerd',
       n: (years) => `de prognosehorizon, ${v(years)} jaar`,
       p0: 'de koers nu',

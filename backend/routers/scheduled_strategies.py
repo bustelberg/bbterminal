@@ -649,12 +649,34 @@ def _write_sleeves(strategy_id: int, cash: float, overlay: list[dict]) -> dict:
     ).eq("id", strategy_id).execute()
 
     # Restate the open period + re-price so the new weighting shows at once (no
-    # wait for the daily tick). Best-effort: a strategy with no rebalance yet
-    # just picks the sleeves up on its first one.
+    # wait for the daily tick).
+    #
+    # ⚠⚠ THE OUTCOME IS REPORTED, NEVER SWALLOWED — and it used to be. This block caught
+    # `Exception`, logged a warning nobody reads and returned 200 with the strategy row, so a
+    # restate that FAILED was indistinguishable from one that worked: the editor closed, the
+    # config had genuinely changed, and the card beside it went on showing the old weights —
+    # because the book on screen comes from the SNAPSHOT, not from the config. That is exactly
+    # the "I changed cash and nothing happened, especially in prod" report: production is where
+    # this step has real data to fail on (a truncated read, a statement timeout, a vendor gap)
+    # and local dev is where it always succeeds.
+    #
+    # ⚠ The two non-success cases are NOT the same and must not print the same sentence. A
+    # strategy with no rebalance yet has nothing to restate and will pick the sleeves up on its
+    # first one (`note` — not a failure). A raised exception left the held book disagreeing with
+    # the config it was just told to follow (`error`), and that is the one the editor must
+    # refuse to close on.
+    log = logging.getLogger(__name__)
+    status: dict = {
+        "restated": False, "repriced": False, "snapshot_id": None, "error": None, "note": None,
+    }
     try:
         from routers._schedule_snapshots import (  # noqa: PLC0415
             apply_sleeves_to_snapshot,
             compute_and_save_price_update,
+        )
+        log.info(
+            "[sleeves] strategy=%s cash=%.4f etfs=%s — restating the open period",
+            strategy_id, cash, [o.get("benchmark_id") for o in overlay],
         )
         rebal = (
             supabase.table("current_picks_snapshot")
@@ -667,19 +689,39 @@ def _write_sleeves(strategy_id: int, cash: float, overlay: list[dict]) -> dict:
             .execute()
         ).data
         if rebal:
-            apply_sleeves_to_snapshot(
+            n = apply_sleeves_to_snapshot(
                 int(rebal[0]["snapshot_id"]), etf_overlay=overlay, cash_pct=cash,
             )
-        compute_and_save_price_update(strategy_id, ingest_run_id=None, cash_pct=cash)
+            status["restated"] = n is not None
+            log.info(
+                "[sleeves] strategy=%s restated rebalance snapshot=%s → %s holdings",
+                strategy_id, rebal[0]["snapshot_id"], n,
+            )
+        else:
+            status["note"] = (
+                "Saved — but this strategy has no rebalance yet, so the sleeves apply on its "
+                "first one."
+            )
+            log.info("[sleeves] strategy=%s has no rebalance snapshot to restate", strategy_id)
+        new_id = compute_and_save_price_update(strategy_id, ingest_run_id=None, cash_pct=cash)
+        status["snapshot_id"] = new_id
+        status["repriced"] = new_id is not None
+        log.info("[sleeves] strategy=%s re-priced → snapshot=%s", strategy_id, new_id)
     except Exception as e:
-        logging.getLogger(__name__).warning(
-            "[sleeves] re-price after sleeve change failed for strategy %s: %s: %s",
-            strategy_id, type(e).__name__, e,
+        status["error"] = f"{type(e).__name__}: {e}"
+        log.warning(
+            "[sleeves] restate/re-price FAILED for strategy %s: %s: %s — the config was saved "
+            "but the held book still shows the old sleeves",
+            strategy_id, type(e).__name__, e, exc_info=True,
         )
     updated = (
         supabase.table("scheduled_strategy").select("*").eq("id", strategy_id).execute()
     )
-    return _hydrate(updated.data)[0]
+    out = _hydrate(updated.data)[0]
+    # Carried on the payload so the editor can say what actually happened. Neither sleeve
+    # endpoint declares a `response_model`, so this key needs no contract regeneration.
+    out["sleeve_apply"] = status
+    return out
 
 
 @router.patch("/api/scheduled-strategies/{strategy_id}/cash")
@@ -842,7 +884,16 @@ async def delete_scheduled_strategy(strategy_id: int):
 async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50):
     """Run history for one scheduled strategy. Joins via the new
     `current_picks_snapshot.scheduled_strategy_id` FK so it stays clean
-    even after schema-evolution churn on adjacent tables."""
+    even after schema-evolution churn on adjacent tables.
+
+    ⚠⚠ IT RE-PRICES THE OPEN PERIOD FIRST WHEN THE STORED MARKS LAG THE CLOSES WE ALREADY HOLD.
+    This endpoint is what the /schedule detail panel opens on, and every price the "Current
+    portfolio" card shows is a value COPIED into a snapshot by whichever pass last ran — so the
+    card could sit days behind `metric_data` with nothing wrong on screen and no job in an error
+    state. Worse for a DISABLED strategy, which `_run_momentum_phase` skips entirely: its
+    snapshot is frozen on the day it was switched off and nothing was ever going to move it.
+    See `_schedule_snapshots.ensure_snapshot_fresh` for the anchor (the book's OWN holdings, not
+    the global freshest close) and the once-per-strategy-per-day bound."""
     limit = max(1, min(200, limit))
     admin = _is_admin(request)
 
@@ -860,6 +911,19 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
         # Non-admins may only open a strategy an admin flagged user_visible.
         if not admin and not sched.get("user_visible"):
             raise HTTPException(403, "Not available")
+
+        # ⚠ AFTER the authorization checks and BEFORE the snapshots are read, so the history
+        # below already contains the repair rather than reporting the state it just replaced.
+        # ⚠ A read-only user gets it too: re-marking a book makes this page's figures CURRENT,
+        # it never changes what they say — the refresh/mutate line the auth gate already draws.
+        try:
+            from routers._schedule_snapshots import ensure_snapshot_fresh  # noqa: PLC0415
+            ensure_snapshot_fresh(strategy_id)
+        except Exception as e:  # noqa: BLE001 — a stale book is still a readable book
+            logging.getLogger(__name__).warning(
+                "[schedule] lazy re-price for strategy %s failed, serving what is stored: %s: %s",
+                strategy_id, type(e).__name__, e,
+            )
 
         snap_resp = (
             supabase.table("current_picks_snapshot")

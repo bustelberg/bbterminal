@@ -23,6 +23,22 @@ import type { components } from '../../../lib/api-types';
 /** The reprice endpoint's payload — see `ReloadPrices`. */
 type ReloadResult = components['schemas']['RepriceResult'];
 
+/**
+ * What `PATCH …/sleeves` reports about the half of the work that happens AFTER the config is
+ * written: restating the open period's book and re-pricing it.
+ *
+ * ⚠ Hand-written rather than generated: neither sleeve endpoint declares a `response_model`, so
+ * `api-types.ts` has nothing to say about this key. `note` is not a failure (a strategy with no
+ * rebalance yet), `error` is.
+ */
+type SleeveApply = {
+  restated: boolean;
+  repriced: boolean;
+  snapshot_id: number | null;
+  error: string | null;
+  note: string | null;
+};
+
 type SnapshotResponse = {
   snapshot_id: number;
   as_of_date: string;
@@ -177,13 +193,25 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
           etfs: etfs.map((e) => ({ benchmark_id: e.benchmarkId, weight_pct: parsePct(e.weightPct) })),
         }),
       });
+      const body = await r.json().catch(() => null);
       if (!r.ok) {
         // Full diagnostic to the console; one short line in the UI.
-        const detail = await r.json().catch(() => null);
-        console.warn('[sleeves] save failed', r.status, detail);
-        setErr(typeof detail?.detail === 'string' ? detail.detail : `Save failed (HTTP ${r.status})`);
+        console.warn('[sleeves] save failed', r.status, body);
+        setErr(typeof body?.detail === 'string' ? body.detail : `Save failed (HTTP ${r.status})`);
         return;
       }
+      // ⚠⚠ A 200 IS NOT "IT WORKED". The endpoint saves the config first and then restates the
+      // open period; the restate is the half that puts the new weights in the SNAPSHOT this
+      // card renders, and it can fail on its own (it used to fail silently — see
+      // `_write_sleeves`). Reporting only the HTTP status is what made a failed edit look like
+      // a successful one that simply changed nothing on screen, which is the worst of both.
+      const applied = (body as { sleeve_apply?: SleeveApply } | null)?.sleeve_apply;
+      if (applied?.error) {
+        console.warn('[sleeves] saved, but the restate/re-price failed', applied);
+        setErr('Saved, but the held book couldn’t be restated — see the console.');
+        return;   // stay open: the panel is the only place this line is visible
+      }
+      if (applied?.note) console.info('[sleeves]', applied.note);
       setOpen(false);
       await onChanged?.();
     } catch (e) {
@@ -334,20 +362,42 @@ export default function CurrentPortfolioCard({
    * heatmap warns on. These rows always get the refresh action, even when the
    * persisted snapshot's frozen dates don't yet mark them stale. */
   staleCompanyIds?: number[];
-  /** Called after a successful cash change so the parent reloads the detail
-   * (the re-price creates a NEW snapshot the card then re-reads). */
+  /** Called after a successful cash change so the parent reloads the detail (`/runs`, which is
+   * what hands this card its `snapshotId`). ⚠ It is HALF of the refresh — see `refetchAll`:
+   * the card must also re-read its own snapshot, because a restate can land in the existing
+   * snapshot in place and leave the id unchanged. */
   onCashChanged?: () => void | Promise<void>;
 }) {
-  const { data: snap, loading, error } = useApiData<SnapshotResponse>(
+  const { data: snap, loading, error, reload: reloadSnapshot } = useApiData<SnapshotResponse>(
     snapshotId != null ? `/api/momentum/current-picks/${snapshotId}` : null,
   );
+
+  /**
+   * Re-read everything after a mutation (sleeve edit, re-price, per-stock refresh).
+   *
+   * ⚠⚠ RELOADING THE PARENT IS NOT ENOUGH, AND THAT IS WHY A SLEEVE EDIT COULD LEAVE THE OLD
+   * WEIGHTS ON SCREEN. `onCashChanged` refetches `/runs`, and this card's own fetch is keyed on
+   * `/api/momentum/current-picks/{snapshotId}` — so it re-reads ONLY IF the newest snapshot id
+   * changed. A successful re-price inserts a new snapshot and it does; but when the re-price
+   * fails or is skipped, the edit landed in the rebalance snapshot IN PLACE (same id), the path
+   * is identical, `useApiData`'s effect never re-runs, and the card keeps rendering the copy it
+   * fetched before the edit — a change that is in the database and invisible until a full page
+   * reload. An id is not a version.
+   *
+   * The cost when the id DID change is one wasted refetch. That is the right side to be wrong on.
+   */
+  const refetchAll = useCallback(async () => {
+    await onCashChanged?.();
+    reloadSnapshot();
+  }, [onCashChanged, reloadSnapshot]);
+
   // Per-stock refresh (admin only): fetch one holding's price from GuruFocus
   // now and show the request/response inline. Reloading the detail after a
   // success surfaces the freshly-loaded close (+ re-priced basket).
   // "Why was this picked" — the same modal the Daily-holdings table opens, from
   // the same endpoint. Null = closed.
   const [breakdown, setBreakdown] = useState<BreakdownTarget | null>(null);
-  const { refreshing, results: refreshResults, refresh, clear: clearRefresh } = useStockRefresh(onCashChanged);
+  const { refreshing, results: refreshResults, refresh, clear: clearRefresh } = useStockRefresh(refetchAll);
   const refreshOne = useCallback((companyId: number) => refresh(companyId, strategyId), [refresh, strategyId]);
   const staleSet = useMemo(() => new Set(staleCompanyIds ?? []), [staleCompanyIds]);
 
@@ -491,9 +541,9 @@ export default function CurrentPortfolioCard({
             cashPct={currentCashPct}
             etfSleeves={currentEtfSleeves}
             canEdit={canEditCash}
-            onChanged={onCashChanged}
+            onChanged={refetchAll}
           />
-          <ReloadPrices strategyId={strategyId} canEdit={canEditCash} onDone={onCashChanged} />
+          <ReloadPrices strategyId={strategyId} canEdit={canEditCash} onDone={refetchAll} />
           {totalReturn != null && (
             <span className="text-sm" title="Weighted EUR return of the held portfolio since it was entered">
               <span className="text-fg-subtle text-xs">Total (€) </span>

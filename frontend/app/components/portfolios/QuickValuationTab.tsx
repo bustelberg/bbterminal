@@ -57,9 +57,28 @@ import { onDate } from './asOfLine';
  * yield and the CAGR hanging off it, both labelled "at today's price" and neither measured there.
  * When there is no priced Yahoo listing it falls back to the fiscal close AND SAYS SO — a stale
  * price shown as live is the failure this exists to prevent, so a silent fallback would recreate it.
+ *
+ * ⚠⚠ TYPE ON THIS TAB IS `rem`-SCALED (`text-xs` / `text-base` / `text-lg`), NEVER ABSOLUTE px, AND
+ * THAT WAS THE WHOLE OF WHY IT LOOKED WRONG. This tab and its three children were authored in
+ * `text-[12px]` / `text-[11px]` while `html { font-size: 19px }` (`globals.css`) makes every rem
+ * step in the app land elsewhere: `text-xs` is 0.75rem = **14.25px**. So every caption, label,
+ * input and annotation here rendered ~16–23% smaller than the identical thing one tab over, and
+ * the tab mixed BOTH scales inside itself — `text-xs` values sat next to `text-[12px]` labels in
+ * the same row of the price-target card, a 2.25px difference that reads as sloppy without ever
+ * announcing what it is. Reported exactly that way: "kinda ugly right now for some reason."
+ *
+ * ⚠ IT ALSO BROKE THE RESPONSIVE KNOB. `globals.css` steps the base 19 → 17.5 → 16 → 15px so the
+ * whole UI compacts proportionally on a narrower screen; an absolute px size opts out, so these
+ * four files got relatively LARGER on a phone and smaller on a desktop — out of step in both
+ * directions, from one decision. The comment on that knob already says it: "a per-component font
+ * bump would scale that component out of step with the padding and borders around it."
+ *
+ * ⚠ CHART TICKS ARE THE EXCEPTION AND STAY AT 12. They are SVG `fontSize`, not CSS, and 12 is what
+ * `lib/chartAxis.ts::tiltedAxis` defaults to for every chart in the Long Equity grid. Bumping them
+ * here would put this tab's axes out of step with every other chart in the app — the opposite of
+ * the problem being fixed.
  */
 
-const YEARS = 10;
 /**
  * How far the fitted trend is carried past the last reported year — and therefore the horizon
  * of EVERY forecast on this tab: the dotted projection on the chart, the forecast per-share
@@ -69,10 +88,14 @@ const YEARS = 10;
  * and it makes the CAGR mean something: over two years the answer was dominated by the rerating
  * (today's yield to the assumed one) rather than by the business compounding.
  *
- * ⚠ IT IS ALSO THE HISTORY WINDOW (`YEARS` = 10), SO HALF THE CHART IS NOW EXTRAPOLATION. That
- * is why the projected stretch is drawn as a separate, thinner, dotted series and the panel's
- * info card says in as many words that it is an extrapolation nobody forecast — a decade of
- * compounding an exponential fit is a big claim, and the chart must not let it read as data.
+ * ⚠ IT USED TO BE THE HISTORY WINDOW TOO — a matching `YEARS = 10` — so half the chart was
+ * extrapolation. That is why the projected stretch is drawn as a separate, thinner, dotted series
+ * and the panel's info card says in as many words that it is an extrapolation nobody forecast: a
+ * decade of compounding an exponential fit is a big claim, and the chart must not let it read as
+ * data. ⚠⚠ THE HISTORY CAP IS GONE (see `priceVsMetric`) and this constant did NOT follow it: the
+ * history is now every fiscal year the company reports, as on the Graphs tab, while the forecast
+ * stays ten years. So the extrapolated share of the chart SHRINKS on a long history — which is
+ * the direction this note was worried about — and never grows.
  */
 const PROJECT_YEARS = 10;
 /** All three charts share it, so the grid cells match without any card padding out the gap. */
@@ -238,7 +261,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   }, [isin, currency]);
 
   const b = BASIS[basis];
-  const points = useMemo(() => priceVsMetric(metrics ?? [], b.codes, YEARS), [metrics, b.codes]);
+  // ⚠ NO YEAR CAP — every fiscal year the company reports, which is what the Graphs tab draws
+  // from this same payload. See the ⚠⚠ on `priceVsMetric` for the year the old 10-year slice ate.
+  const points = useMemo(() => priceVsMetric(metrics ?? [], b.codes), [metrics, b.codes]);
   const idx = useMemo(() => rebase(points), [points]);
 
   /**
@@ -287,6 +312,34 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
    * the reverse) — that is the whole point of the pair. Only the AUTHORITY moves, not the display.
    */
   const [cagrStr, setCagrStr] = useState<string | null>(null);
+  /**
+   * THE THREE **CURRENT** FIGURES, NOW EDITABLE TOO (on request: "every one of these should be
+   * adjustable by the user, except Forecast share price").
+   *
+   * ⚠⚠ THEY ARE THREE QUANTITIES BOUND BY ONE EQUATION — `yield = per-share ÷ price` — SO ONLY TWO
+   * CAN EVER BE FREE. Three independently-typed boxes would let a reader state a per-share figure,
+   * a price and a yield that do not satisfy their own identity, and the panel would then have to
+   * silently ignore one of them: the yield row would print a number the two rows above it do not
+   * produce. The forecast side of this panel already solved exactly this (`cagrStr`/`fcfStr`) and
+   * this follows it rather than inventing a second convention.
+   *
+   * ⚠⚠ THE PRICE IS THE FREE ONE; THE PER-SHARE FIGURE AND THE YIELD ARE ONE ASSUMPTION TWO WAYS.
+   * Typing a yield asks "what would the per-share figure have to be for the shares to yield that,
+   * at this price" — which is a question. The alternative binding, deriving the PRICE from a typed
+   * yield, is not: the price is the market's, it is the one live number on the panel, and the
+   * Est. CAGR at the foot is measured FROM it, so a demanded yield would silently rewrite the
+   * thing every return on the card is quoted against.
+   *
+   * ⚠ SO `curPsStr` AND `curYieldStr` CLEAR EACH OTHER, exactly as `cagrStr`/`fcfStr` do, and for
+   * the same two reasons: only one can be authoritative, and mutual clearing is what keeps each
+   * box's TEXT the user's own instead of round-tripping "1.85" back as "1.8" under the caret.
+   *
+   * ⚠ `curPriceStr` IS INDEPENDENT OF BOTH and survives a basis switch — a share price is not
+   * denominated in FCF or EPS. The other two are, and `switchBasis` clears them.
+   */
+  const [curPsStr, setCurPsStr] = useState<string | null>(null);
+  const [curPriceStr, setCurPriceStr] = useState<string | null>(null);
+  const [curYieldStr, setCurYieldStr] = useState<string | null>(null);
   const asNum = (s: string | null) => {
     if (s == null || s.trim() === '') return null;
     const v = parseFloat(s);
@@ -508,7 +561,13 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     // ⚠ THE GROWTH RATE GOES WITH THEM. "12% a year" of FREE CASH FLOW carried onto EPS is a
     // forecast of earnings the user never made — the same trap as the per-share figure, and harder
     // to spot, because a plausible growth rate is plausible on either basis.
+    // ⚠ THE CURRENT PER-SHARE FIGURE AND THE CURRENT YIELD GO TOO — both are denominated in the
+    // basis, so an FCF/share the reader typed would sit under an EPS label as a plausible earnings
+    // figure they never entered, which is the same trap this function already guards for the
+    // forecast side. ⚠ `curPriceStr` DELIBERATELY SURVIVES: a share price is not denominated in
+    // either basis, and clearing it would throw away an unrelated correction on every switch.
     setBasis(next); setFcfStr(null); setYieldStr(null); setCagrStr(null);
+    setCurPsStr(null); setCurYieldStr(null);
   };
   /**
    * The price everything in the calculator is measured FROM, and the date it belongs to.
@@ -542,9 +601,38 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const targetDate = addYears(lastFiscalPriceDate, PROJECT_YEARS);
   const horizonYears = yearsBetween(priceDate, targetDate) ?? PROJECT_YEARS;
 
+  /**
+   * The CURRENT trio, resolved. See the ⚠⚠ on `curPsStr` for why the price is free and the
+   * per-share figure and the yield are one assumption stated two ways.
+   *
+   * ⚠ ORDER MATTERS: the price resolves first, because the yield→per-share derivation divides by
+   * it. A typed yield against a typed price is a coherent question ("what per-share figure does
+   * that yield imply on the price I just entered"); the reverse order would answer it against the
+   * market's price and then redraw everything at the user's.
+   *
+   * ⚠ A NON-POSITIVE PRICE YIELDS NOTHING RATHER THAN Infinity — the same guard `yieldOf` makes.
+   */
+  const effectiveCurrentPrice = asNum(curPriceStr) ?? currentPrice;
+  const psFromYield = (() => {
+    const y = asNum(curYieldStr);
+    if (y == null || effectiveCurrentPrice == null || !(effectiveCurrentPrice > 0)) return null;
+    return y * effectiveCurrentPrice / 100;
+  })();
+  const effectiveCurrentPs = asNum(curPsStr) ?? psFromYield ?? latestPs;
+
   const target = priceTarget(
-    latestPs, currentPrice,
+    effectiveCurrentPs, effectiveCurrentPrice,
     effectiveForecastPs, asNum(yieldStr) ?? avgYield, horizonYears);
+
+  /**
+   * What the yield box SHOWS while it is not the authority — the yield the other two rows imply,
+   * which is exactly `target.currentYield` (`priceTarget` computes it from the same two figures).
+   * `null` while the box IS the authority, so it keeps the user's own unrounded text.
+   *
+   * ⚠ READ OFF `target`, NOT RECOMPUTED. One computation, several readers, is the rule the whole
+   * panel is built on — a second `ps ÷ price` here could disagree with the row above it.
+   */
+  const shownCurrentYieldPct = curYieldStr != null ? null : target.currentYield;
 
   /** The horizon the calculator's target is quoted over — still shown in the panel and named in
    *  the trend legend; nothing is plotted at it since the price-target line was removed. */
@@ -632,7 +720,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <button key={k} type="button" onClick={() => switchBasis(k)}
           aria-pressed={basis === k}
           title={`${BASIS[k].perShare} — ${BASIS[k].what}.`}
-          className={`px-2.5 py-1 text-[12px] font-medium transition-colors ${
+          className={`px-2.5 py-1 text-xs font-medium transition-colors ${
             basis === k ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-overlay/5'}`}>
           {BASIS[k].tab}
         </button>
@@ -645,7 +733,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   if (!points.some((p) => p.price != null) || !points.some((p) => p.value != null)) {
     return (
       <div className="py-16 flex flex-col items-center gap-3">
-        <p className="text-[12px] text-fg-faint text-center">
+        <p className="text-xs text-fg-faint text-center">
           No share price / {b.perShare} history ingested for {name ?? isin}.
         </p>
         {basisSwitch}
@@ -676,14 +764,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">Price vs {b.perShare}</h4>
         {idx.anchor != null && (
-          <span className="text-[12px] text-fg-faint">
+          <span className="text-xs text-fg-faint">
             indexed to 100 at FY{idx.anchor} · log scale
           </span>
         )}
         {hiddenByLog > 0 && (
           // Named, not dropped: on a linear axis these plotted below zero, and a cash-burn or loss
           // year vanishing without a word is exactly the observation a reader must not lose.
-          <span className="text-[12px] text-warn-300"
+          <span className="text-xs text-warn-300"
             title="A log axis has no room for zero or a negative value. Those years are also excluded from the trend fit, for the same reason — a loss has no logarithm.">
             ⚠ {hiddenByLog} {b.negativeYear} year{hiddenByLog > 1 ? 's' : ''} not plottable on a log axis
           </span>
@@ -694,7 +782,47 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <div className="ml-auto self-center">{basisSwitch}</div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      {/**
+       * ⚠⚠ A GRID, NOT THE SHARED FLEX ROW, AND THE REASON IS THAT `Stat` IS `flex-1 basis-0`.
+       * A flex row of `basis-0` children NEVER WRAPS — it shrinks them to `min-w-0` instead — so
+       * `flex-wrap` here was inert and these FIVE tiles simply divided the card between them.
+       * `CardStats`' own sizing note measures that card at ~444px (1920px viewport) and ~316px
+       * (1440px): five ways, that is **63–89px of inner width per tile**. At that width the value
+       * truncates at about five monospace glyphs, so `USD 3,593` and `+34.3%` were being cut, and
+       * the two-line label clamp was eating `EST. CAGR TO FY2036` — which is the tile a reader
+       * opens this card for.
+       *
+       * ⚠⚠ FIVE COLUMNS — ONE ROW, on request ("lets align these tiles horizontally"). It was
+       * three, which put them 3 + 2 across two rows and gave each ~142px; one row divides the same
+       * card five ways instead. Shrinking is still available inside a cell (`min-w-0` survives),
+       * which is what lets that happen at all rather than overflowing the card.
+       *
+       * ⚠ THE COST IS TRUNCATION, AND IT IS REAL AT NARROW WIDTHS. `CardStats`' sizing note
+       * measures this card at ~444px (1920px viewport) and ~316px (1440px); five ways that is
+       * ~82px and ~55px per tile. The value truncates (with the full figure on `title`, as it
+       * always has) and the two-line label clamp bites on the longest labels — `EST. CAGR TO
+       * FY2036` is the one to watch. If it reads badly on a smaller screen the lever is the tile
+       * COUNT, not the font: four fit comfortably, five do not.
+       *
+       * ⚠⚠ THE TRACKS ARE `minmax(0, 8rem)`, NOT `1fr`, AND `grid-cols-3` WAS VISIBLY WRONG. An
+       * `1fr` track takes an equal share of the CARD, but `Stat` caps itself at `max-w-[8rem]` —
+       * so on any card wider than ~470px each tile sat left-aligned in a much wider cell and the
+       * row read as three tiles flung apart with holes between them. Reported as "the tiles are
+       * now very far apart which is odd, they should be next to each other". Capping the TRACK at
+       * the same 8rem the tile caps itself at is what keeps them adjacent: the row is then
+       * `gap-2` apart and left-aligned, and the leftover width stays leftover instead of being
+       * dealt out into the gaps. The `0` minimum is what still lets them shrink on a narrow card.
+       *
+       * ⚠ THE 3+2 BREAK SPLITS THE HISTORY/FORECAST GROUPS, AND THAT IS ALREADY ACCEPTED. The note
+       * on the forecast tiles below records that a divider rule between the two groups was tried
+       * and removed precisely because the row breaks at a width nobody controls — "the distinction
+       * it was drawing is carried by the LABELS instead, which travel with the tile however the row
+       * breaks". A fixed 3-column break is strictly more predictable than what it replaced.
+       *
+       * ⚠ NOT APPLIED TO THE YIELD CARD'S ROW BELOW: two tiles in a flex row already get half the
+       * card each, and forcing them into three columns would leave a third of it empty.
+       */}
+      <div className="grid grid-cols-[repeat(5,minmax(0,8rem))] gap-2">
         <Stat label="Price CAGR" value={pct(priceCagr?.pct)} color={chartTheme.accentStrong}
           info={<InfoTip content={<AspectCard
             what="Compound annual growth of the fiscal year-end share price."
@@ -781,7 +909,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         {idx.anchor == null ? (
           // Rebasing off a cash-burn or loss year divides by a negative and flips every later
           // point, so a company with no positive year gets no index at all — see `rebase`.
-          <p className="text-[12px] text-fg-faint py-16 text-center">
+          <p className="text-xs text-fg-faint py-16 text-center">
             No fiscal year has both a positive price and positive {b.perShare}, so there is no base to index from.
           </p>
         ) : (
@@ -932,7 +1060,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">{b.yieldTitle}</h4>
-        <span className="text-[12px] text-fg-faint">{b.perShare} ÷ year-end price · average dashed</span>
+        <span className="text-xs text-fg-faint">{b.perShare} ÷ year-end price · average dashed</span>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -940,7 +1068,13 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           info={<InfoTip content={<AspectCard
             what={`The average ${b.yieldInline} over the years shown — the dashed line.`}
             where="Computed here from the same two lines the chart above plots, not from GuruFocus's own ratio (whose denominator convention we don't control)."
-            when={`${yieldValues.length} of the last ${YEARS} fiscal years.`}
+            // ⚠ THE SPAN IS NAMED, NOT COUNTED AGAINST A CONSTANT. This read "n of the last 10
+            // fiscal years" off the history cap; with the cap gone there is no fixed denominator
+            // to be `of`, and quoting one that no longer exists is worse than quoting none.
+            when={points.length
+              ? `${yieldValues.length} of the ${points.length} fiscal years shown `
+                + `(FY${points[0].year}–FY${points[points.length - 1].year}).`
+              : 'No fiscal years to average.'}
             // ⚠ `yieldValues` IS WHAT THE MEAN WAS TAKEN OVER — the same array `avgYield` divides,
             // so the addends listed here provably sum to the figure on the tile. It is also the
             // dashed line on the chart below, which is the third place this one number appears.
@@ -1019,10 +1153,36 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       onResetCagr={() => setCagrStr(null)}
       cagrDisabled={trendBasePs == null}
       yieldStr={yieldStr} onYield={setYieldStr} defaultForecastYield={avgYield}
-      onReset={() => { setFcfStr(null); setYieldStr(null); setCagrStr(null); }}
+      onReset={() => {
+        setFcfStr(null); setYieldStr(null); setCagrStr(null);
+        // ⚠ THE HEADER RESET CLEARS THE CURRENT ROWS TOO. It is the card's "put everything back",
+        // and a reset that left three of six typed figures in place would be the more confusing
+        // half-measure — the panel would still be showing a target built on edits it just claimed
+        // to have discarded.
+        setCurPsStr(null); setCurPriceStr(null); setCurYieldStr(null);
+      }}
       // ⚠ `null`, NOT the default's current value — see the ⚠⚠ on `Input`'s `onRevert`. Null means
       // "never typed", which is what keeps the box TRACKING the computed figure as it moves.
-      onResetFcf={() => { setFcfStr(null); setCagrStr(null); }} />
+      onResetFcf={() => { setFcfStr(null); setCagrStr(null); }}
+      /**
+       * ⚠ ONE OBJECT, NOT TWELVE FLAT PROPS. These belong to one identity (`yield = per-share ÷
+       * price`) and are read together by three adjacent rows; passed flat they would be twelve
+       * more names in a list that is already long, with nothing in the signature saying they
+       * interact. See the ⚠⚠ on `curPsStr` for the binding.
+       *
+       * ⚠⚠ `onPs` AND `onYield` CLEAR EACH OTHER, `onPrice` CLEARS NEITHER — that IS the binding,
+       * expressed at the only place that knows it. The panel below never has to decide which of
+       * two live values to believe, exactly as with the forecast pair.
+       */
+      current={{
+        psStr: curPsStr, onPs: (v) => { setCurPsStr(v); setCurYieldStr(null); },
+        defaultPs: latestPs, onResetPs: () => { setCurPsStr(null); setCurYieldStr(null); },
+        priceStr: curPriceStr, onPrice: setCurPriceStr,
+        defaultPrice: currentPrice, onResetPrice: () => setCurPriceStr(null),
+        yieldStr: curYieldStr, onYield: (v) => { setCurYieldStr(v); setCurPsStr(null); },
+        shownYieldPct: shownCurrentYieldPct,
+        onResetYield: () => { setCurYieldStr(null); setCurPsStr(null); },
+      }} />
     </div>
   );
 }

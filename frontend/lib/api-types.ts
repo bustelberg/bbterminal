@@ -7533,6 +7533,15 @@ export interface paths {
          * @description Run history for one scheduled strategy. Joins via the new
          *     `current_picks_snapshot.scheduled_strategy_id` FK so it stays clean
          *     even after schema-evolution churn on adjacent tables.
+         *
+         *     ⚠⚠ IT RE-PRICES THE OPEN PERIOD FIRST WHEN THE STORED MARKS LAG THE CLOSES WE ALREADY HOLD.
+         *     This endpoint is what the /schedule detail panel opens on, and every price the "Current
+         *     portfolio" card shows is a value COPIED into a snapshot by whichever pass last ran — so the
+         *     card could sit days behind `metric_data` with nothing wrong on screen and no job in an error
+         *     state. Worse for a DISABLED strategy, which `_run_momentum_phase` skips entirely: its
+         *     snapshot is frozen on the day it was switched off and nothing was ever going to move it.
+         *     See `_schedule_snapshots.ensure_snapshot_fresh` for the anchor (the book's OWN holdings, not
+         *     the global freshest close) and the once-per-strategy-per-day bound.
          */
         get: operations["list_strategy_runs_api_scheduled_strategies__strategy_id__runs_get"];
         put?: never;

@@ -243,17 +243,86 @@ export function yearsBetween(from: string | null, to: string | null): number | n
   return y > 0 ? y : null;
 }
 
-/** The price and ONE per-share series paired by fiscal year, oldest first, capped to the last
- *  `years` fiscal years either series reports. A year present in only one is KEPT with a null on
- *  the other side — the gap is information (a company that stopped reporting FCF is not a company
- *  with a flat FCF). `codes` selects the basis; see `BASIS`. */
+/**
+ * ⚠⚠ THE FUNDAMENTAL-MODAL HISTORY FLOOR, AND IT IS THE BACKEND'S, NOT A NUMBER PICKED HERE.
+ *
+ * `routers/earnings.py::_BLEND_START = "2015-01-01"` bounds every Long Equity endpoint the Graphs
+ * tab reads, for three stated reasons: it matches the charts' start year, it keeps the read
+ * bounded (a company carries ~7,200 `annuals__` rows back to the 1990s; from 2015 it is ~2,600),
+ * and — the one that bites here — "it also fixes WHERE a level series is rebased to 100: at the
+ * first date on screen, rather than at a 1990s base the viewer cannot see."
+ *
+ * ⚠⚠ `/by-isin/{isin}/metrics` HAS NO SUCH FLOOR. It returns the raw rows, so this tab — the only
+ * consumer of that endpoint that plots a long history — ran NVIDIA back to **1999** while every
+ * card on the Graphs tab beside it began at 2015. Same modal, same company, two start years, and
+ * the caption stated the wrong one with total confidence ("indexed to 100 at FY1999").
+ *
+ * ⚠ IT IS A CLIENT COPY OF A SERVER CONSTANT, WHICH IS A REAL COST — the two can drift, and
+ * nothing would fail if they did. The alternative is worse: filtering server-side would change an
+ * endpoint six other things read, and inferring the floor from a payload that does not carry one
+ * is guessing. If `_BLEND_START` ever moves, this moves with it.
+ *
+ * ⚠ DELIBERATELY NOT MERGED WITH `MULTIPLE_FROM_YEAR` in `QuickValuationTab`, which is also 2015.
+ * That one is a fact about GuruFocus's forward-P/E indicator (its history starts 2015-11-30);
+ * this one is a house display floor. They agree today by coincidence and may not tomorrow.
+ */
+export const HISTORY_FROM_YEAR = 2015;
+
+/**
+ * The price and ONE per-share series paired by fiscal year, oldest first, STARTING at the later of
+ * `HISTORY_FROM_YEAR` and the first year the per-share series reports. A year after that present
+ * in only one is KEPT with a null on the other side — the gap is information (a company that
+ * stopped reporting FCF is not a company with a flat FCF). `codes` selects the basis; see `BASIS`.
+ *
+ * ⚠⚠ THE WINDOW IS THE FUNDAMENTALS' SPAN. NOT A FIXED NUMBER OF YEARS, AND NOT THE UNION — and
+ * both of those were tried, in that order, and each was wrong in its own direction.
+ *
+ * ⚠ IT WAS `all.slice(-10)` OVER THE UNION, WHICH ATE A REAL YEAR OFF THE FAR END. The two series
+ * have different reporting lags: GuruFocus publishes `Month End Stock Price` for a fiscal year the
+ * moment that year ends, while the FCF/EPS for it lands months later with the filing. So the union
+ * routinely carries ONE MORE recent year than the fundamentals do, that price-only year consumed a
+ * slot, and the tenth-oldest — a fully paired year — silently fell off the start. Reported as "why
+ * does this start at 2017? it should start at 2015 since the graphs in Graphs also start in 2015".
+ *
+ * ⚠⚠ AND DROPPING THE CAP ALTOGETHER RAN IT BACK TO 1999, which is the same mistake from the other
+ * end. `/by-isin/{isin}/metrics` carries a price history reaching back decades — GuruFocus has
+ * `Month End Stock Price` for the 1990s — and, for a company like NVIDIA, per-share figures that
+ * reach almost as far. "Every year in the payload" is the right rule for the Graphs tab and the
+ * wrong one here, and for a reason that is NOT about this tab at all: the Graphs cards read the
+ * `*-inputs` endpoints, which are floored server-side at `_BLEND_START`, while this tab reads the
+ * raw `/metrics` and got everything. See `HISTORY_FROM_YEAR` above.
+ *
+ * ⚠ SO TWO RULES COMPOSE, AND BOTH ARE NEEDED. The house floor stops a 1990s history; the
+ * first-reported-year clip stops a leading run of price with no per-share figure beside it, which
+ * is what a company whose fundamentals begin in 2019 would otherwise draw — four years of a lone
+ * line, inside the floor, that the floor cannot catch. `Math.max` of the two.
+ *
+ * ⚠ THE CLIP IS ASYMMETRIC ON PURPOSE. A leading run with no PRICE is left in place: that is a
+ * genuine gap in a series we otherwise have (an unlisted stretch, a listing we cannot price), and
+ * it is the same "gap is information" rule the trailing side keeps. Only the value side clips,
+ * because only the value side defines what the chart is able to say.
+ *
+ * ⚠ AND THE START IS NOT COSMETIC — IT MOVES EVERY POINT. `rebase` anchors on the first year both
+ * series are positive IN WHAT IT IS GIVEN, so the window does not merely shorten the line, it
+ * re-bases both lines against a different year, and the CAGR tiles above measure from there too.
+ *
+ * `years` is kept as an OPT-IN cap applied after the clip: callers that genuinely want a fixed
+ * window still have one, and it is what the cap test pins. No caller passes it today.
+ */
 export function priceVsMetric(
-  metrics: MetricRow[], codes: string[] = FCF_PS_CODES, years = 10,
+  metrics: MetricRow[], codes: string[] = FCF_PS_CODES, years?: number,
 ): YearPoint[] {
   const price = byYear(metrics, PRICE_CODES);
   const value = byYear(metrics, codes);
-  const all = [...new Set([...price.keys(), ...value.keys()])].sort((a, b) => a - b);
-  return all.slice(-years).map((year) => ({
+  // No per-share figure anywhere ⇒ there is no comparison to draw, and a bare price line is not
+  // this chart. The tab's own empty state already says so; handing it years would draw one series.
+  if (!value.size) return [];
+  const start = Math.max(HISTORY_FROM_YEAR, Math.min(...value.keys()));
+  const all = [...new Set([...price.keys(), ...value.keys()])]
+    .filter((y) => y >= start)
+    .sort((a, b) => a - b);
+  const window = years == null ? all : all.slice(-years);
+  return window.map((year) => ({
     year, price: price.get(year) ?? null, value: value.get(year) ?? null,
   }));
 }

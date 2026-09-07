@@ -168,19 +168,59 @@ def compute_and_save_price_update(
         if h.get("company_id") is not None and h["company_id"] < 0
     ]
     latest_by_cid: dict[int, dict] = {}
-    # Chunk to stay under the PostgREST URL-length window (see fetch_in_chunks).
-    for r in fetch_in_chunks(
-        cids,
-        lambda chunk: supabase.table("metric_data")
-        .select("company_id, target_date, numeric_value")
-        .eq("metric_code", "close_price")
-        .in_("company_id", chunk)
-        .order("target_date", desc=True)
-        .execute(),
-    ):
-        cid = r["company_id"]
-        if cid not in latest_by_cid:
-            latest_by_cid[cid] = r
+    # ⚠⚠ COPY FIRST, AND THE POSTGREST FORM BELOW IS THE FALLBACK, NOT THE PLAN. The
+    # PostgREST read is `metric_code=close_price AND company_id IN (…) ORDER BY target_date
+    # DESC` with NO row bound, so the server caps it — 1,000 rows on Supabase cloud, 10,000
+    # locally — and truncates SILENTLY. Sorted newest-first, 1,000 rows over ~25 held names is
+    # only the last ~40 trading days, so a holding whose latest close is older than that window
+    # (the 12:00 `price_slice` runs a ~17-day cycle, and a thin name can sit well past it)
+    # returns NOTHING here, keeps its previous `exit_price_local`, and re-prices to the same
+    # number for ever. It is the classic prod-only shape: locally the cap is 10× and the whole
+    # basket fits.
+    #
+    # `load_latest_close_prices_via_copy` is the purpose-built answer to exactly this question
+    # ("the latest close for a strategy's ~24 held names"): one lateral `ORDER BY target_date
+    # DESC LIMIT 1` per company, one round trip, no row cap. It narrows on `source_code =
+    # 'gurufocus'`, which is a no-op filter (close_price is 100% GuruFocus) that unlocks the
+    # single-seek index path. Returns None when there is no direct-Postgres URL — hence the
+    # fallback.
+    fast: dict[int, dict] | None = None
+    if cids:
+        try:
+            from momentum.data._pg import load_latest_close_prices_via_copy  # noqa: PLC0415
+            fast = load_latest_close_prices_via_copy([int(c) for c in cids])
+        except Exception as e:  # noqa: BLE001 — degrade to the paged read, never fail the tick
+            _log.warning(
+                "[price_update] COPY latest-close failed (%s: %s) — falling back to PostgREST",
+                type(e).__name__, e)
+            fast = None
+    if fast is not None:
+        for cid, row in fast.items():
+            if row.get("price") is None or not row.get("date"):
+                continue
+            latest_by_cid[int(cid)] = {
+                "company_id": int(cid),
+                "target_date": row["date"],
+                "numeric_value": row["price"],
+            }
+    else:
+        # Chunk to stay under the PostgREST URL-length window (see fetch_in_chunks).
+        for r in fetch_in_chunks(
+            cids,
+            lambda chunk: supabase.table("metric_data")
+            .select("company_id, target_date, numeric_value")
+            .eq("metric_code", "close_price")
+            .in_("company_id", chunk)
+            .order("target_date", desc=True)
+            .execute(),
+        ):
+            cid = r["company_id"]
+            if cid not in latest_by_cid:
+                latest_by_cid[cid] = r
+    _log.info(
+        "[price_update] strategy=%s latest close for %s/%s held companies (%s)",
+        strategy_id, len(latest_by_cid), len(cids), "COPY" if fast is not None else "PostgREST",
+    )
 
     # Latest benchmark close per benchmark_id (for ETF overlay holdings).
     latest_by_bid: dict[int, dict] = {}
@@ -368,7 +408,13 @@ def compute_and_save_price_update(
         # the run-history row.
         "period_return_pct": portfolio_return,
     }
-    ins = supabase.table("current_picks_snapshot").insert(new_row).execute()
+    # ⚠ A DUPLICATE `snapshot_id` HERE IS A DRIFTED SEQUENCE, NOT A RACE — measured in production
+    # 2026-09-07, where the 05:00 pipeline failed one strategy of three on
+    # `Key (snapshot_id)=(3408) already exists`. `common.sequences` repairs it and retries once,
+    # or raises an error that names the cause and the file that fixes it.
+    from common.sequences import insert_repairing_sequence  # noqa: PLC0415
+
+    ins = insert_repairing_sequence("current_picks_snapshot", "snapshot_id", new_row)
     if not ins.data:
         return None
     # Best-effort log; signature noise is intentional for debugging later.
@@ -379,6 +425,153 @@ def compute_and_save_price_update(
         portfolio_return or 0.0, is_backfill,
     )
     return int(ins.data[0]["snapshot_id"])
+
+
+# ---------------------------------------------------------------------------
+# Lazy freshness repair for the /schedule "Current portfolio" card
+# ---------------------------------------------------------------------------
+
+#: One repair per strategy per process per UTC day. ⚠ THE COST BEING BOUNDED IS HISTORY, NOT A
+#: VENDOR CALL — this path makes no external request, so the usual reason for a day guard does not
+#: apply. What it bounds is `current_picks_snapshot` GROWTH: the staleness test is self-limiting
+#: while a repair succeeds in advancing the marks, and stops being self-limiting the moment one
+#: cannot (a holding whose close will not read, a book already at the freshest date it can reach).
+#: Without the guard that case inserts a row on every panel open. With it the worst case is one
+#: extra row per strategy per day — the same rate the nightly tick already writes at.
+_LAZY_REPRICED: dict[tuple[int, str], bool] = {}
+
+
+def held_latest_close(holdings: list[dict] | None) -> str | None:
+    """The freshest close WE ALREADY HOLD for this book's own instruments, 'YYYY-MM-DD'.
+
+    ⚠ THE BOOK'S OWN INSTRUMENTS, NOT THE GLOBAL ANCHOR. `_benchmark_etf._behind_the_market` asks
+    the global question because a world index proxy really is behind the market whenever anything
+    is fresher. A strategy is not: a book of European names is a day behind New York every single
+    evening, and measuring it against the global freshest close would declare it stale, re-price
+    it to marks that cannot move, and do that again tomorrow. Its own holdings are the only set
+    whose freshest close it could possibly reach.
+
+    ⚠ `order desc + limit 1` per chunk, so this CANNOT be truncated into a wrong answer — there
+    is only ever one row to return, and it is the same argument `_benchmark_asof` makes. A `max()`
+    taken over an unbounded `.in_()` read would be exactly the 1,000-row trap that froze the exit
+    prices this function exists to detect.
+    """
+    from deps import chunked  # noqa: PLC0415
+
+    cids = [
+        int(h["company_id"]) for h in (holdings or [])
+        if h.get("company_id") is not None and int(h["company_id"]) > 0
+    ]
+    bids = [
+        -int(h["company_id"]) for h in (holdings or [])
+        if h.get("company_id") is not None and int(h["company_id"]) < 0
+    ]
+    best: str | None = None
+
+    def _bump(value) -> None:
+        nonlocal best
+        d = str(value or "")[:10]
+        if d and (best is None or d > best):
+            best = d
+
+    for chunk in chunked(cids):
+        rows = (
+            supabase.table("metric_data")
+            .select("target_date")
+            .eq("metric_code", "close_price")
+            .in_("company_id", chunk)
+            .order("target_date", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
+        if rows:
+            _bump(rows[0].get("target_date"))
+    for chunk in chunked(bids):
+        rows = (
+            supabase.table("benchmark_price")
+            .select("target_date")
+            .in_("benchmark_id", chunk)
+            .order("target_date", desc=True)
+            .limit(1)
+            .execute()
+        ).data or []
+        if rows:
+            _bump(rows[0].get("target_date"))
+    return best
+
+
+def ensure_snapshot_fresh(strategy_id: int) -> int | None:
+    """Re-price a strategy's open period when its stored marks lag closes we ALREADY HOLD.
+
+    Returns the new snapshot id, or None when nothing needed doing. Called by the /schedule
+    strategy-detail read, so opening a strategy shows the book as of the newest data in the
+    database rather than as of whenever a job last happened to write a snapshot.
+
+    ⚠⚠ THE CARD RENDERS A SNAPSHOT, NOT THE DATABASE, AND THAT IS THE WHOLE COMPLAINT. Every
+    price on the "Current portfolio" card is a value COPIED into `current_picks_snapshot` by
+    whichever pass last ran. So the marks can be days behind the closes sitting in `metric_data`
+    with nothing on screen wrong, nothing failing, and no job in an error state — the figures are
+    simply an old photograph of data we hold a newer version of.
+
+    ⚠⚠ AND A DISABLED STRATEGY IS NEVER PHOTOGRAPHED AT ALL. `_run_momentum_phase` selects
+    `enabled = True`, so a strategy switched off keeps the snapshot it had on the day it was
+    switched off — for ever, with an `as of` date that quietly recedes. This lazy path is the only
+    thing that keeps such a book current, and it is also what repairs a hand sleeve edit whose own
+    re-price failed (see `scheduled_strategies._write_sleeves`).
+
+    ⚠ IT IS THE SAME FUNCTION THE NIGHTLY TICK AND THE "Reload prices" BUTTON RUN — a third way
+    to price a book would be a third answer. What this adds is only the DECISION to run it.
+
+    ⚠ IT NEVER RE-SELECTS. `compute_and_save_price_update` re-marks the holdings that are there;
+    re-deciding them is "Force re-rebalance", and `metric_data` is not append-only in
+    `target_date`, so a past basket cannot be reproduced from the live database anyway.
+
+    ⚠ CASH COMES FROM THE LIVE CONFIG, not from the rebalance snapshot's copy of it — the same
+    choice the tick makes, so an admin's sleeve change applies here too instead of being undone.
+
+    ⚠ Best-effort throughout: this sits on a read path, and a book with stale marks is still a
+    readable book. Any failure logs and leaves the stored snapshot alone.
+    """
+    import os  # noqa: PLC0415
+
+    if os.getenv("DISABLE_LAZY_REPRICE"):
+        return None
+    newest = (
+        supabase.table("current_picks_snapshot")
+        .select("snapshot_id, latest_price_date, holdings")
+        .eq("scheduled_strategy_id", strategy_id)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    ).data
+    if not newest:
+        return None
+    stored = str(newest[0].get("latest_price_date") or "")[:10]
+    anchor = held_latest_close(newest[0].get("holdings"))
+    if not anchor or (stored and stored >= anchor):
+        return None
+    guard = (strategy_id, date.today().isoformat())
+    if _LAZY_REPRICED.get(guard):
+        _log.info(
+            "[price_update] strategy=%s marks at %s behind held closes at %s, but this process "
+            "already re-priced it today — leaving it alone",
+            strategy_id, stored or "—", anchor,
+        )
+        return None
+    _LAZY_REPRICED[guard] = True
+    cfg = (
+        supabase.table("scheduled_strategy")
+        .select("config")
+        .eq("id", strategy_id)
+        .limit(1)
+        .execute()
+    ).data
+    cash = float(((cfg or [{}])[0].get("config") or {}).get("cash_pct") or 0.0)
+    _log.warning(
+        "[price_update] strategy=%s marks at %s behind held closes at %s — re-pricing on read",
+        strategy_id, stored or "—", anchor,
+    )
+    return compute_and_save_price_update(strategy_id, ingest_run_id=None, cash_pct=cash)
 
 
 def apply_sleeves_to_snapshot(
@@ -612,7 +805,9 @@ def _seed_snapshot_from_backtest(
         "scheduled_strategy_id": strategy_id,
         "period_return_pct": last.get("portfolio_return_pct"),
     }
-    ins = supabase.table("current_picks_snapshot").insert(row).execute()
+    from common.sequences import insert_repairing_sequence  # noqa: PLC0415
+
+    ins = insert_repairing_sequence("current_picks_snapshot", "snapshot_id", row)
     if not ins.data:
         return None
     seeded_id = int(ins.data[0]["snapshot_id"])

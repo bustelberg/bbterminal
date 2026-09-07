@@ -152,13 +152,17 @@ export default function MultipleHistoryChart({
     <div className={`rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0 ${className}`}>
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">{b.multiple} — forward</h4>
-        <span className="text-[12px] text-fg-faint">since {fromYear} · median dashed</span>
-        <span className="text-[12px] text-fg-muted"
-          title={hasForward
-            ? "GuruFocus's own published forward-P/E indicator, not our arithmetic. Dividing the close by it recovers the CURRENT fiscal year's consensus EPS — so early in a year it looks ~12 months ahead, and by December it prices earnings nearly banked."
-            : 'No analyst publishes a free-cash-flow forecast — capex is not forecast — so there is no forward multiple to draw on this basis, at any date. A forward FCF line is planned.'}>
-          {hasForward ? 'vendor indicator' : 'no forward FCF yet — nobody forecasts capex'}
-        </span>
+        <span className="text-xs text-fg-faint">since {fromYear} · median dashed</span>
+        {/* ⚠ ONLY ON THE BASIS THAT HAS A VENDOR LINE. The FCF basis used to print its own chip
+            here explaining why there is no forward series; the empty state below already says it,
+            and saying it twice in one card — once in the header, once across the middle of it —
+            was the redundancy, not the sentence. Removed on request. */}
+        {hasForward && (
+          <span className="text-xs text-fg-muted"
+            title="GuruFocus's own published forward-P/E indicator, not our arithmetic. Dividing the close by it recovers the CURRENT fiscal year's consensus EPS — so early in a year it looks ~12 months ahead, and by December it prices earnings nearly banked.">
+            vendor indicator
+          </span>
+        )}
         {/* ⚠⚠ ONE CONTROL, THREE STATES, AND IT TURNS INTO THE CANCEL — the same shape and the same
             three WORDS as the share-price Refresh on the Deep Valuation tab. The reader pressed it HERE,
             so this is where stopping it belongs; sending them to the toast in the corner to undo
@@ -178,7 +182,7 @@ export default function MultipleHistoryChart({
               : refreshing ? 'Re-reading — press to cancel'
                 : !canRefresh ? 'No GuruFocus company for this ISIN, so there is nothing to re-read'
                   : 'Ask GuruFocus for this series again'}
-            className={`ml-auto inline-block text-[12px] leading-none ${
+            className={`ml-auto inline-block text-xs leading-none ${
               cancelling ? 'cursor-wait text-fg-faint'
                 : refreshing ? 'text-warn-400 hover:text-neg-400'
                   : !canRefresh ? 'cursor-default text-fg-faint/40'
@@ -220,15 +224,13 @@ export default function MultipleHistoryChart({
 
       <div>
         {data.length < 2 ? (
-          <p className="text-[12px] text-fg-faint py-16 text-center px-6">
+          <p className="text-xs text-fg-faint py-16 text-center px-6">
             {/* ⚠ THE TWO EMPTINESSES ARE DIFFERENT AND ONLY ONE IS EVER FIXABLE. On the FCF basis
                 there is no vendor forward series to read at all — a fact about the market, not
                 about this company. On EPS it means GuruFocus publishes no forward P/E for this
                 listing, which a re-ingest might. */}
             {b.multiple === 'P/FCF'
-              ? 'No forward P/FCF exists — nobody forecasts capex, so no vendor publishes a '
-                + 'free-cash-flow consensus at any date. A forward FCF line is planned; the '
-                + 'trailing measure that used to fill this panel was removed deliberately.'
+              ? 'GuruFocus has no historical forward-FCF series.'
               : `No forward ${b.multiple} published for this listing since ${fromYear}.`}
           </p>
         ) : (
