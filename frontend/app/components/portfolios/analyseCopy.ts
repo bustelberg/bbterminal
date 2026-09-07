@@ -50,7 +50,11 @@ const en = {
   },
   axes: {
     sector: 'Sector', region: 'Region', currency: 'Currency',
-    sectorNote: 'Current weights. Cash, funds and unpriced holdings have no sector.',
+    // ⚠ THE CAVEAT CAME OFF (2026-09-07, on request). It was a STATIC restatement of
+    // `allocation.excludes`, which sits under the same chart and says the same thing with the
+    // measured figure in it: "Excludes 17.8% in funds, bonds and cash — no sector to place". A
+    // fixed sentence beside a live one is the weaker of two, and it appeared even at 0%.
+    sectorNote: 'Current weights.',
     regionNote: "Current weights. The issuer's domicile, else its ISIN country. Not the listing venue.",
     currencyNote: 'Current weights. The reporting currency of the company. Not the listing currency.',
   },
@@ -247,12 +251,12 @@ const nl: AnalyseCopy = {
   },
   axes: {
     sector: 'Sector', region: 'Regio', currency: 'Valuta',
-    sectorNote: 'Actuele wegingen. Liquiditeiten, fondsen en niet-geprijsde posities hebben geen sector.',
+    sectorNote: 'Actuele wegingen.',
     regionNote: 'Actuele wegingen. Vestigingsland van de uitgevende instelling, anders het ISIN-land. Niet de plaats van notering.',
     currencyNote: 'Actuele wegingen. Rapporteringsvaluta van de onderneming. Niet de noteringsvaluta.',
   },
   holdings: {
-    title: 'Posities', name: 'Naam', via: 'Via', sector: 'Sector', momentum: 'Momentum', vol: 'Volatiliteit', beta: 'Bèta',
+    title: 'Posities', name: 'Naam', via: 'Via', sector: 'Sector', momentum: 'Momentum', vol: 'Volatiliteit', beta: 'Beta',
     weightNow: 'Gewicht (nu)', opening: 'Beginwaarde (1 jan)', valueNow: 'Huidige waarde', avgCapital: 'Gem. belegd kapitaal',
     unrealised: 'Ongerealiseerd', realised: 'Gerealiseerd', income: 'Inkomsten', result: 'Resultaat', price: 'Koers', currency: 'Valuta',
     rest: 'Rest', moneyWeighted: 'Geldgewogen', instrumentReturn: 'Instrumentrendement', contribution: 'Bijdrage',
@@ -299,7 +303,7 @@ const nl: AnalyseCopy = {
     betaMissing: 'Een streepje is geen nul — 0 zou betekenen dat de positie onafhankelijk van de markt beweegt.',
     volMissingWhat: (name) => `${name} heeft minder dan vier jaar koershistorie en daarom geen vijfjaarsvolatiliteit.`,
     volWhat: (name) => `Hoe sterk de koers van ${name} op jaarbasis bewoog over de laatste vijf jaar.`,
-    betaMissingWhat: (name, benchmark) => `${name} heeft te weinig overlappende historie met ${benchmark} om bèta te meten.`,
+    betaMissingWhat: (name, benchmark) => `${name} heeft te weinig overlappende historie met ${benchmark} om beta te meten.`,
     betaWhat: (name, benchmark) => `Hoe sterk ${name} beweegt bij elke 1% beweging van ${benchmark}.`,
     betaNote: (benchmark) => `wekelijkse EUR-rendementen versus ${benchmark}, 5 jaar`,
     weightWhat: (name) => `Het HUIDIGE aandeel van ${name} in het boek.`,
@@ -363,7 +367,7 @@ const nl: AnalyseCopy = {
     contributionWhat: (name) => `Wat ${name} vóór verkoop aan het boekrendement toevoegde of ervan aftrok.`,
     momentumTitle: (name) => `12-1-momentum van ${name}, gemeten tot vandaag en niet tot de verkoopdatum, op dezelfde grondslag als aangehouden posities.`,
     volTitle: (name) => `Geannualiseerde vijfjaarsvolatiliteit van ${name} in EUR, gemeten tot vandaag.`,
-    betaTitle: (name, benchmark) => `Vijfjaarsbèta van ${name} tegenover ${benchmark}, op wekelijkse EUR-rendementen.`,
+    betaTitle: (name, benchmark) => `Vijfjaarsbeta van ${name} tegenover ${benchmark}, op wekelijkse EUR-rendementen.`,
   },
   reconciliation: {
     positions: (count) => `${count} posities, alles wat werd aangehouden of verkocht`,

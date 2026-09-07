@@ -510,7 +510,10 @@ export function useMgmtCopy(): ManagementCopy {
  * concentratie, rendement, gewicht, positie, emittent.
  */
 export const UNTRANSLATED_SURFACES = [
-  'AttributionPanel', 'BucketDetailPanel',
+  'AttributionPanel',
+  // ⚠ BucketDetailPanel's rendered chrome is done (`bucketDetailCopy.ts`); what is left on it is
+  // the two paragraph-length column hints (`WEIGHT_HINT` / `WEIGHT_NOW_HINT`).
+  'BucketDetailPanel (partly — the labels and headers are done; the two column hints are not)',
   'AccountTransactions', 'HoldingTimingModal', 'AllocationBandsModal',
   // ⚠ QuickValuationTab's RENDERED chrome is done (`quickValuationCopy.ts`); what is left on it
   // is the ⓘ prose behind each card, which is the larger, caveat-heavy half.

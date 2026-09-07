@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { LANGS, type Lang } from '../../../lib/i18n';
@@ -108,5 +111,35 @@ describe('the type is the contract', () => {
     const en: ManagementCopy = MANAGEMENT_COPY.en;
     expect(Object.keys(en)).toContain('page');
     expect(Object.keys(en).length).toBeGreaterThanOrEqual(5);
+  });
+});
+
+describe('⚠⚠ the dashboard renders no bare Refresh/Cancel literal', () => {
+  /**
+   * THE COPY EXISTED IN BOTH LANGUAGES AND THREE BUTTONS IGNORED IT. `common.refresh` /
+   * `common.refreshAll` / `common.cancel` have been translated since the switch shipped, but the
+   * Benchmarks panel's two buttons and the Overview table's per-row control rendered the English
+   * word inline, so a Dutch reader saw `Refresh` beside `Vernieuwen` on one screen. Reported as
+   * "Refresh should be translated in management dashboard too".
+   *
+   * ⚠ IT SCANS THE JSX ONLY. A `title=` or `aria-label=` may still hold English prose (those are
+   * a separate, larger surface); what this forbids is the WORD ON THE BUTTON — `>Refresh<`,
+   * `{'Refresh'}`, `? 'Cancel' : 'Refresh'`.
+   */
+  const FILES = [
+    '../BenchmarksPanel.tsx',
+    '../PortfolioOverviewPanel.tsx',
+  ];
+
+  it.each(FILES)('%s', (file) => {
+    const src = readFileSync(join(__dirname, file), 'utf8');
+    const offenders = src.split('\n')
+      .map((line, i) => ({ line: line.trim(), n: i + 1 }))
+      // A rendered literal: the word alone on a JSX line, or inside a ternary that produces it.
+      .filter(({ line }) => !line.startsWith('*') && !line.startsWith('//')
+        && (/^\{?'(Refresh|Refresh all|Cancel)'/.test(line)
+          || /^(Refresh|Refresh all|Cancel)$/.test(line)
+          || /\?\s*'(Refresh|Cancel)'\s*:\s*'(Refresh|Cancel)'/.test(line)));
+    expect(offenders.map((o) => `${file}:${o.n} ${o.line.slice(0, 60)}`)).toEqual([]);
   });
 });

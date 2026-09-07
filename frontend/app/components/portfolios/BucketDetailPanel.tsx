@@ -4,12 +4,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
+import { useBucketDetailCopy } from './bucketDetailCopy';
 
 type Attr = ModelPortfolioAttribution;
 type Bucket = NonNullable<Attr['rows']>[number];
 type Name = NonNullable<Bucket['portfolio_holdings']>[number];
 
-const AXIS_LABEL: Record<string, string> = { sector: 'Sector', region: 'Region', currency: 'Currency' };
+// ⚠ THE AXIS LABELS MOVED INTO `bucketDetailCopy`, keyed the same way. The KEY (`sector` |
+// `region` | `currency`) is what the request sends and must stay English.
 
 /** A return / effect, coloured by sign. `—` when it could not be measured — never a 0. */
 function Num({ v, pp }: { v?: number | null; pp?: boolean }) {
@@ -148,6 +150,7 @@ export function Holdings({ rows, startLabel = 'Start of window', weightBasis = '
    */
   startLabel?: string;
 }) {
+  const t = useBucketDetailCopy();
   // Sortable — click a header to toggle direction. Default: weight, largest first. Each table sorts
   // on its OWN state (your names and the index's are independent lists).
   // ⚠ THE COLUMN, ITS HINT AND THE DEFAULT SORT ALL COME FROM ONE FLAG. Three places deciding
@@ -246,7 +249,7 @@ export function Holdings({ rows, startLabel = 'Start of window', weightBasis = '
           {/* Not sortable: the rank IS the position under the ACTIVE sort, so clicking it could
               only mean "sort by the current sort". It renumbers whenever the sort changes. */}
           <th className="pr-1 text-right font-normal">#</th>
-          <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>Name{caret('name')}</th>
+          <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>{t.colName}{caret('name')}</th>
           {/* ⚠ THE QUALIFIER SITS ON ITS OWN LINE, not beside the word. "Weight (Start of year)" is
               ~130px of nowrap text in a 6rem column, and under `table-fixed` that does not shrink
               the column — it spills over Return. A `block` span wraps it instead, so the column
@@ -257,19 +260,19 @@ export function Holdings({ rows, startLabel = 'Start of window', weightBasis = '
               a composition drill-down and an attribution one without re-finding the columns; the
               basis that sent them here shows up as the SORT, not as a different layout. */}
           <th className={`${th} px-1 text-right`} onClick={() => click('weightNow')} title={WEIGHT_NOW_HINT}>
-            Weight{caret('weightNow')}
+            {t.colWeight}{caret('weightNow')}
             <span className="block normal-case whitespace-normal font-normal text-fg-subtle">
-              (now)
+              ({t.colWeightNow})
             </span>
           </th>
           <th className={`${th} px-1 text-right`} onClick={() => click('weight')} title={WEIGHT_HINT}>
-            Weight{caret('weight')}
+            {t.colWeight}{caret('weight')}
             <span className="block normal-case whitespace-normal font-normal text-fg-subtle">
               ({startLabel})
             </span>
           </th>
-          <th className={`${th} px-1 text-right`} onClick={() => click('return')}>Return{caret('return')}</th>
-          <th className={`${th} pl-1 text-right`} onClick={() => click('contrib')}>Contrib.{caret('contrib')}</th>
+          <th className={`${th} px-1 text-right`} onClick={() => click('return')}>{t.colReturn}{caret('return')}</th>
+          <th className={`${th} pl-1 text-right`} onClick={() => click('contrib')}>{t.colContrib}{caret('contrib')}</th>
         </tr>
       </thead>
       <tbody>
@@ -281,8 +284,8 @@ export function Holdings({ rows, startLabel = 'Start of window', weightBasis = '
             are clicked — a total has no position in a sort. */}
         <tr className="border-t border-neutral-800/40 bg-inset font-semibold text-fg-strong">
           <td />
-          <td className="py-1 pr-2 truncate" title={`All ${rows.length} name${rows.length === 1 ? '' : 's'} in this bucket`}>
-            Total <span className="text-fg-faint font-normal">({rows.length})</span>
+          <td className="py-1 pr-2 truncate" title={t.totalTitle(String(rows.length))}>
+            {t.total} <span className="text-fg-faint font-normal">({rows.length})</span>
           </td>
           <td className="py-1 px-1 text-right font-mono tabular-nums" title={WEIGHT_NOW_HINT}>
             {totals.weightNow == null ? '—' : `${totals.weightNow.toFixed(2)}%`}
@@ -321,7 +324,7 @@ export function Holdings({ rows, startLabel = 'Start of window', weightBasis = '
                     as one business (backend `_overlaps`). */}
                 {h.in_both && (
                   <span className="w-2 h-2 rounded-full bg-accent-500 shrink-0 ring-2 ring-accent-500/25"
-                    title="Held in both your portfolio and the benchmark" />
+                    title={t.inBothTitle} />
                 )}
                 <span className={`truncate ${h.in_both ? 'text-fg-strong font-medium' : 'text-fg-soft'}`}>{h.name ?? '—'}</span>
               </span>
@@ -364,6 +367,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
   source?: 'model' | 'book';
   onClose: () => void;
 }) {
+  const t = useBucketDetailCopy();
   const [attr, setAttr] = useState<Attr | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -415,7 +419,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           must stay visible while the tables under it scroll. */}
       <div className="shrink-0 flex items-start justify-between gap-3 mb-2">
         <h4 className="text-sm font-semibold text-fg-strong">
-          {AXIS_LABEL[axis] ?? axis}: <span className="font-mono">{bucket}</span>
+          {t.axis[axis as keyof typeof t.axis] ?? axis}: <span className="font-mono">{bucket}</span>
         </h4>
         <button onClick={onClose}
           className="cursor-pointer text-[12px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 shrink-0">
@@ -428,7 +432,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           give way instead of the body scrolling — see the ⚠⚠ on the root. */}
       <div className="flex-1 min-h-0 overflow-auto">
 
-      {loading && <p className="text-xs text-fg-subtle">Computing attribution…</p>}
+      {loading && <p className="text-xs text-fg-subtle">{t.computing}</p>}
       {error && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>
       )}
@@ -448,8 +452,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
 
           {nonAttributable && (
             <p className="text-[12px] text-fg-faint mb-2">
-              Funds, cash and unclassified holdings are not a sector bet, so this bucket is not
-              decomposed — just the holdings in it.
+              {t.notDecomposed}
             </p>
           )}
 
@@ -460,22 +463,22 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
               <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
                 <div>
                   <p className="text-[12px] font-medium text-fg-muted mb-1">
-                    Your holdings <span className="text-fg-faint">({row.portfolio_holdings?.length ?? 0})</span>
+                    {t.yourHoldings} <span className="text-fg-faint">({row.portfolio_holdings?.length ?? 0})</span>
                     {shared(row.portfolio_holdings) > 0 && (
-                      <span className="text-accent-400"> · {shared(row.portfolio_holdings)} in both</span>
+                      <span className="text-accent-400"> · {t.inBoth(String(shared(row.portfolio_holdings)))}</span>
                     )}
                   </p>
                   {/* ⚠ "Start of year" IS SAFE HERE ONLY BECAUSE THIS PANEL PINS `window=ytd` in
                       its own request (see the fetch above). If that ever becomes a toggle, this
                       label has to follow it — see `Holdings`'s `startLabel`. */}
-                  <Holdings rows={row.portfolio_holdings ?? []} startLabel="Start of year" weightBasis="now" />
+                  <Holdings rows={row.portfolio_holdings ?? []} startLabel={t.startOfYear} weightBasis="now" />
                 </div>
                 <div>
                   <p className="text-[12px] font-medium text-fg-muted mb-1">
-                    {benchmark} constituents{' '}
+                    {t.constituents(benchmark)}{' '}
                     <span className="text-fg-faint">({row.benchmark_holdings?.length ?? 0})</span>
                     {shared(row.benchmark_holdings) > 0 && (
-                      <span className="text-accent-400"> · {shared(row.benchmark_holdings)} in both</span>
+                      <span className="text-accent-400"> · {t.inBoth(String(shared(row.benchmark_holdings)))}</span>
                     )}
                     {/* ⚠ THIS NOTE EXISTS BECAUSE THE BASIS WAS WRONG HERE ONCE AND NOTHING SAID SO.
                         The index bar was weighted by today's caps against a list weighted at the
@@ -485,10 +488,10 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
                         notice if that ever stops being true. */}
                     <span className="text-fg-faint font-normal"
                       title="Market caps as at the window's open, renormalised over the attributable constituents — the same basis the index bar on the composition chart uses, so this total matches it. A return must be weighted by what was held when it started, not by what the constituents are worth today.">
-                      {' '}· weighted at window open
+                      {' '}· {t.weightedAtOpen}
                     </span>
                   </p>
-                  <Holdings rows={row.benchmark_holdings ?? []} startLabel="Start of year" weightBasis="now" />
+                  <Holdings rows={row.benchmark_holdings ?? []} startLabel={t.startOfYear} weightBasis="now" />
                 </div>
               </div>
               {(row.portfolio_holdings ?? []).some((h) => h.in_both) && (
@@ -521,7 +524,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
             </table>
           ) : (
             <p className="text-[12px] text-fg-faint">
-              No holdings behind this bucket in the YTD window.
+              {t.noHoldings}
             </p>
           )}
         </>

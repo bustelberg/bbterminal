@@ -31,6 +31,12 @@ describe('Analyse primary-view copy', () => {
       // label nobody uses; the SENTENCES that explain the tile (`sleeve.ytdWhat/Note/How`) are
       // translated and are not on this list.
       'sleeve.ytdUnit',
+      // ⚠⚠ `Beta`, NOT `Bèta` (2026-09-07, on request). The accented form is the correct Dutch
+      // spelling of the Greek letter's NAME, and it is not what this column is: `Beta` is the
+      // finance term, spelled the same way in both languages and in every screener a reader will
+      // compare this against. `copyParity`'s `FINANCE_EN` already lists it beside `Sharpe` and
+      // `Alpha` for the same reason; this module keeps its own list, so it needs the entry too.
+      'holdings.beta',
     ]);
     expect(Object.keys(en).filter((key) => en[key] === nl[key] && !sameByDesign.has(key))).toEqual([]);
   });

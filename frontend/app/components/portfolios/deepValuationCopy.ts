@@ -679,11 +679,11 @@ const nl: DeepValuationCopy = {
         where: 'Berekend uit de drie regels hierboven.',
       },
       priceTarget: {
-        what: 'De koers aan het einde van het venster.',
+        what: 'De koers aan het einde van de periode.',
         where: 'Berekend uit de koers en de twee aannames.',
       },
       priceMove: {
-        what: 'De totale koersbeweging over het venster.',
+        what: 'De totale koersbeweging over de periode.',
         where: 'Berekend uit de twee regels hierboven.',
       },
       maxPE: {
@@ -867,7 +867,7 @@ const nl: DeepValuationCopy = {
       + 'waarvoor dit model oplost.',
     nextFY: 'Volgend boekjaar', nextFYNone: 'Volgend boekjaar (geen)',
     ttmNote: '\n\nDe laatste twaalf maanden waar vier kwartalen bestaan, anders het laatste '
-      + 'volledige boekjaar — één venster voor alle vier de kasstroomregels.',
+      + 'volledige boekjaar — dezelfde periode voor alle vier de kasstroomregels.',
     normOff: '\n\nVink Normaliseren uit om in plaats daarvan het gerapporteerde cijfer te '
       + 'waarderen.',
     notLikeForLike: '\n\nNiet vergelijkbaar met de geïmpliceerde voet: een andere maatstaf '

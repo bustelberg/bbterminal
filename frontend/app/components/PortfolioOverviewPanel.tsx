@@ -1071,7 +1071,7 @@ export default function PortfolioOverviewPanel() {
                                     one carried no label at all, so it GAINS the word rather than
                                     losing an icon — and the cell is sized for it. The `title` and
                                     `aria-label` above already said both; now the button does. */}
-                                {busy ? 'Cancel' : 'Refresh'}
+                                {busy ? t.common.cancel : t.common.refresh}
                               </button>
                             );
                           })()}
