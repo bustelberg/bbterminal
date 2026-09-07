@@ -28744,7 +28744,7 @@
     },
     "/api/scheduled-strategies/{strategy_id}/runs": {
       "get": {
-        "description": "Run history for one scheduled strategy. Joins via the new\n`current_picks_snapshot.scheduled_strategy_id` FK so it stays clean\neven after schema-evolution churn on adjacent tables.",
+        "description": "Run history for one scheduled strategy. Joins via the new\n`current_picks_snapshot.scheduled_strategy_id` FK so it stays clean\neven after schema-evolution churn on adjacent tables.\n\n\u26a0\u26a0 IT RE-PRICES THE OPEN PERIOD FIRST WHEN THE STORED MARKS LAG THE CLOSES WE ALREADY HOLD.\nThis endpoint is what the /schedule detail panel opens on, and every price the \"Current\nportfolio\" card shows is a value COPIED into a snapshot by whichever pass last ran \u2014 so the\ncard could sit days behind `metric_data` with nothing wrong on screen and no job in an error\nstate. Worse for a DISABLED strategy, which `_run_momentum_phase` skips entirely: its\nsnapshot is frozen on the day it was switched off and nothing was ever going to move it.\nSee `_schedule_snapshots.ensure_snapshot_fresh` for the anchor (the book's OWN holdings, not\nthe global freshest close) and the once-per-strategy-per-day bound.",
         "operationId": "list_strategy_runs_api_scheduled_strategies__strategy_id__runs_get",
         "parameters": [
           {
