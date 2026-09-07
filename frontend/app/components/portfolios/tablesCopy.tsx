@@ -282,7 +282,7 @@ const nl: TablesCopy = {
   colMeasure: 'Maatstaf',
   colExcess: 'Verschil (pp)',
   lastWindowLocked:
-    'Er moet minstens één venster aan blijven — anders resteren alleen de rijlabels.',
+    'Er moet minstens één periode aan blijven — anders resteren alleen de rijlabels.',
   showWindow: (w) => `Toon de ${w}-jaarskolom voor beide zijden en het verschil.`,
   hideRow: (chip) => `${chip} verbergen`,
   showRow: (chip) => `${chip} tonen`,
@@ -380,7 +380,7 @@ const nl: TablesCopy = {
   whyDifferLabel: 'waarom ze verschillen',
   footnote: ({ windows, showEps, showFcf, showPrice, showFiltered, whyLink }) => (
     <>
-      Beide zijden worden per rij over <strong>hetzelfde</strong> venster gemeten — het laatste jaar
+      Beide zijden worden per rij over <strong>dezelfde</strong> periode gemeten — het laatste jaar
       dat ze delen — zodat de kolom Verschil gelijk van gelijk aftrekt. Een streepje betekent dat
       één zijde daar niets heeft; beweeg erover.
       {showPrice && <>

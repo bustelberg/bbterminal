@@ -136,7 +136,7 @@ const nl: AttributionCopy = {
     bucketsHow: (w) => `Elke ${w} die aan een van beide kanten wordt gehouden, op dezelfde manier ingedeeld.`,
     yourWeightHow: (basis) => `${basis}, geherwogen over de toerekenbare posities.`,
     indexWeightHow: (benchmark) =>
-      `Het marktkapitalisatiegewicht van ${benchmark} aan het begin van het venster.`,
+      `Het marktkapitalisatiegewicht van ${benchmark} aan het begin van de periode.`,
     yourReturnHow: (basis) => `Gewogen per positie, waarbij elke positie ${basis} is.`,
     indexReturnHow: (benchmark) => `Gewogen per bestanddeel, in EUR, over ${benchmark}.`,
     allocationHow: 'Wat de over- of onderweging waard was, afgezet tegen het indextotaal.',
@@ -145,7 +145,7 @@ const nl: AttributionCopy = {
     totalHow: 'De drie effecten opgeteld. De kolom telt op tot het meerrendement.',
     returnLegend: (owner) => [
       { sym: 'w_i', is: `het gewicht van elke positie in ${owner}` },
-      { sym: 'r_i', is: 'wat die positie over het venster rendeerde, in EUR' },
+      { sym: 'r_i', is: 'wat die positie over de periode rendeerde, in EUR' },
     ],
     effectLegend: (benchmark) => [
       { sym: 'w_p', is: 'uw gewicht in de groep' },

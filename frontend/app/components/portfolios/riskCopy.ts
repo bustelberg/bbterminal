@@ -637,7 +637,10 @@ const nl: RiskCopy = {
     activeShare: 'Active share', overlap: 'Overlap', offBenchmark: 'Buiten de benchmark',
     stocks: 'Aandelen',
     heldOnly: (n) => `Wat we houden (${n})`, everyName: (n) => `Alle namen (${n})`,
-    colCompany: 'Onderneming', colBook: 'Boek', colActive: 'Actief', notHeld: 'niet gehouden',
+    // ⚠ "Portfolio", NIET "Boek" (2026-09-07, op verzoek). Het is de kolomkop van de tabel in
+    // Risico, en de ⓘ eronder gebruikt hetzelfde woord — anders benoemt één paneel dezelfde kolom
+    // op twee manieren.
+    colCompany: 'Onderneming', colBook: 'Portfolio', colActive: 'Actief', notHeld: 'niet gehouden',
     heldVsIndex: (h, m, bookSrc, benchField, benchVendor) =>
       `${v(h)} ondernemingen en hun gewichten uit ${v(bookSrc)}, tegenover ${v(m)} geprijsde `
       + `indexleden gewogen naar ${v(benchField)} van ${v(benchVendor)}.`,
@@ -653,7 +656,7 @@ const nl: RiskCopy = {
     },
     totalCardHeld: {
       what: 'Alleen de gehouden namen, dus de kolom Actief telt niet op tot nul.',
-      where: 'Boek is per constructie 100%; de benchmarkkolom is wat de index in diezelfde namen '
+      where: 'Portfolio is per constructie 100%; de benchmarkkolom is wat de index in diezelfde namen '
         + 'houdt.',
       how: '⚠ HET TOTAAL IS DE VOLLEDIGE OVERWEGING VAN HET BOEK, en die wordt naam voor naam '
         + 'gedragen door de indexposities die hier niet staan. Schakel naar alle namen om het te '
@@ -760,7 +763,7 @@ const nl: RiskCopy = {
         + 'deed',
       R: (book, bench) => `het eigen rendement van ${v(book)} en van ${v(bench)} in die periode, `
         + 'beide in EUR',
-      aBar: 'het gemiddelde actieve rendement over het venster — de band hierboven ligt daaromheen, '
+      aBar: 'het gemiddelde actieve rendement over de periode — de band hierboven ligt daaromheen, '
         + 'niet om nul',
       T: (n) => `het aantal gepaarde perioden (${v(n)} hier) — de doorsnede van de twee kalenders`,
       f: (n) => `perioden per jaar (${v(n)}), de annualiseringsfactor`,
@@ -855,13 +858,13 @@ const nl: RiskCopy = {
           + 'over gaan.',
       },
       worst: {
-        what: 'De slechtste enkele periode binnen het venster.',
+        what: 'De slechtste afzonderlijke week of maand in de gemeten periode.',
         how: '⚠ NIEMAND HEEFT OOIT "18% GEANNUALISEERDE VOLATILITEIT" MEEGEMAAKT. Men heeft de '
           + 'slechtste week meegemaakt. Bij een boek met dikke staarten liggen die twee ver uiteen, '
           + 'en juist dan misleidt σ op zichzelf.',
       },
       ret: {
-        what: 'Waartegen de selectie over hetzelfde venster is samengesteld.',
+        what: 'Waartegen de selectie over dezelfde periode is samengesteld.',
         how: 'Staat hier zodat de twee ratio\'s ernaast te controleren zijn — een risicogetal '
           + 'zonder het rendement dat het opleverde is een halve zin.',
       },
@@ -905,25 +908,25 @@ const nl: RiskCopy = {
     note: (u) => `Looptijden zijn in ${u} van de gekozen frequentie, niet in kalenderdagen.`,
     cards: {
       maxDrawdown: {
-        what: 'De diepste daling van piek naar dal binnen het venster.',
+        what: 'De diepste daling van piek naar dal binnen de periode.',
         how: '⚠ DE FREQUENTIE STAAT IN HET LABEL omdat zij het antwoord verandert: een daling die '
           + 'binnen een week herstelt is onzichtbaar voor een weekreeks. Zie de vergelijking '
           + 'hieronder.',
       },
       benchMax: {
         what: 'De diepste daling van de index zelf, over dezelfde perioden.',
-        where: 'Dezelfde formule, hetzelfde venster, een andere reeks.',
+        where: 'Dezelfde formule, dezelfde periode, een andere reeks.',
         how: 'Ter vergelijking. ⚠ De index draagt geen survivorship bias van dit boek — hij hield '
           + 'zijn dalers — dus het verschil tussen beide vleit het boek.',
       },
       today: {
         what: 'Hoe ver de selectie op dit moment onder haar eigen hoogste stand staat.',
-        where: 'Bij 0% eindigde het venster op een nieuwe hoogste stand.',
+        where: 'Bij 0% eindigde de periode op een nieuwe hoogste stand.',
         how: '⚠ "Ooit −31%" en "nu 28% onder water" zijn heel verschillende gesprekken, en het '
           + 'tweede is het gesprek dat gevoerd wordt.',
       },
       episodes: {
-        what: 'Afzonderlijke episodes van piek naar dal binnen het venster.',
+        what: 'Afzonderlijke episodes van piek naar dal binnen de gemeten periode.',
         where: 'Een episode eindigt pas wanneer de vorige top weer is bereikt.',
         how: '⚠ ÉÉN GETAL VERBERGT OF HET EEN PATROON WAS OF EEN GEBEURTENIS. Eén −30% en vier '
           + '−25% delen hetzelfde maximum en zijn niet hetzelfde risico. ⚠ Een daling van 40% die '

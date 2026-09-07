@@ -127,7 +127,7 @@ export const MEMBER_COUNT_CARD: Record<Lang, { what: string; where: string; when
   nl: {
     what: 'Uit hoeveel ondernemingen deze lijn is getekend.',
     where: 'De blend, na de eigen ledenregel van deze maatstaf.',
-    when: 'Het venster op de grafiek.',
+    when: 'De periode op de grafiek.',
   },
 };
 
