@@ -408,7 +408,13 @@ def compute_and_save_price_update(
         # the run-history row.
         "period_return_pct": portfolio_return,
     }
-    ins = supabase.table("current_picks_snapshot").insert(new_row).execute()
+    # ⚠ A DUPLICATE `snapshot_id` HERE IS A DRIFTED SEQUENCE, NOT A RACE — measured in production
+    # 2026-09-07, where the 05:00 pipeline failed one strategy of three on
+    # `Key (snapshot_id)=(3408) already exists`. `common.sequences` repairs it and retries once,
+    # or raises an error that names the cause and the file that fixes it.
+    from common.sequences import insert_repairing_sequence  # noqa: PLC0415
+
+    ins = insert_repairing_sequence("current_picks_snapshot", "snapshot_id", new_row)
     if not ins.data:
         return None
     # Best-effort log; signature noise is intentional for debugging later.
@@ -799,7 +805,9 @@ def _seed_snapshot_from_backtest(
         "scheduled_strategy_id": strategy_id,
         "period_return_pct": last.get("portfolio_return_pct"),
     }
-    ins = supabase.table("current_picks_snapshot").insert(row).execute()
+    from common.sequences import insert_repairing_sequence  # noqa: PLC0415
+
+    ins = insert_repairing_sequence("current_picks_snapshot", "snapshot_id", row)
     if not ins.data:
         return None
     seeded_id = int(ins.data[0]["snapshot_id"])

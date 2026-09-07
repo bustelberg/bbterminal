@@ -79,3 +79,32 @@ The script does NOT enforce that your SQL is non-destructive. If your
 migration drops a table or column, it'll drop it on prod too. Write
 additive migrations (`CREATE TABLE`, `ALTER TABLE ADD COLUMN`,
 `CREATE FUNCTION`) when prod has real data you want to keep.
+
+### `resync-sequences.sql` — repair drifted identity/serial sequences
+
+Paste into the **Supabase SQL editor** (prod or local). Two plain `SELECT`s: run
+`[1]` — it reports every sequence about to hand out an id that already exists, and
+returns **no rows** on a healthy database. If it returns rows, run `[2]`, which
+repairs them and returns one row per sequence fixed.
+
+Run it whenever a clone aborts, and whenever anything fails with:
+
+```
+duplicate key value violates unique constraint "<table>_pkey"
+Key (<id>)=(3408) already exists.
+```
+
+That error is not a race or an application bug — it is one number in `pg_sequence`
+being smaller than `MAX(id)`, and it stops *everything* that inserts into that table
+at the same instant. Rows loaded with explicit ids don't advance the sequence, and
+`clone-local-to-prod.ps1` step **[7b]** — the reset that repairs it — is the last
+step, so any abort leaves every sequence in the database drifted at once.
+
+The repair only ever moves a sequence **forward** to `MAX(id)`: it never reassigns
+an id, never touches a row, leaves a sequence already ahead of its table alone, and
+returns zero rows when re-run.
+
+The backend also repairs the single table it just failed to insert into
+(`backend/common/sequences.py`, wired into the `ingest_run` and
+`current_picks_snapshot` writes) — but only that one table, because that is all a
+failing insert proves. After an aborted clone, fix them all in one pass with this.

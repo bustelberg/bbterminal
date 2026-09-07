@@ -358,7 +358,10 @@ def _run_backfill(strategy_id: int) -> None:
                 # because the rebalance grid is shared.
                 "period_return_pct": rec.get("portfolio_return_pct"),
             }
-            supabase.table("current_picks_snapshot").insert(row).execute()
+            # ⚠ Per-row `except` below, so a drifted sequence would otherwise be logged once per
+            # period and the backfill would report "persisted 0" with no cause named.
+            from common.sequences import insert_repairing_sequence  # noqa: PLC0415
+            insert_repairing_sequence("current_picks_snapshot", "snapshot_id", row)
             persisted += 1
         except Exception as e:
             _log.warning(

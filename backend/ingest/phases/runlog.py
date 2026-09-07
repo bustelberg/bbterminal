@@ -143,11 +143,19 @@ def _now_utc_iso() -> str:
 
 
 def _create_run(job_name: str, triggered_by: str) -> int:
-    resp = supabase.table("ingest_run").insert({
+    # ⚠⚠ THE ONE INSERT THAT TAKES THE WHOLE APP DOWN WITH IT. Every pipeline tick and every
+    # /schedule "Run now" opens a run row here first, so when `ingest_run`'s sequence drifted in
+    # production on 2026-09-07 the symptom was not "one insert failed" — it was the scheduler
+    # unable to start anything AND every button flashing "Starting…" and doing nothing, with
+    # /schedule reporting `daily_pipeline` 26 days stale. Two surfaces both accusing the
+    # scheduler, which was never the problem. See `common.sequences`.
+    from common.sequences import insert_repairing_sequence  # noqa: PLC0415
+
+    resp = insert_repairing_sequence("ingest_run", "run_id", {
         "job_name": job_name,
         "triggered_by": triggered_by,
         "status": "running",
-    }).execute()
+    })
     if not resp.data:
         raise RuntimeError("Failed to insert ingest_run row")
     return int(resp.data[0]["run_id"])

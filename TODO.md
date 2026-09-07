@@ -5,6 +5,26 @@ Last updated **2026-09-07**. Delete items as they're done.
 
 ---
 
+## 🔴 ACTION REQUIRED IN PROD — drifted sequences (2026-09-07)
+
+`daily_pipeline` is failing on
+`duplicate key value violates unique constraint "current_picks_snapshot_pkey" · Key
+(snapshot_id)=(3408) already exists`. That is a **drifted sequence**, not an app race — the same
+fault that hit `ingest_run` earlier the same day, from the same aborted clone (step **[7b]**, the
+sequence reset, is the last step of `clone-local-to-prod.ps1`, so an abort drifts everything).
+
+**Fix, once, by hand:** paste `scripts/resync-sequences.sql` into the prod Supabase SQL editor.
+Run `[1]` (reports; no rows = healthy), then `[2]` if it returned any. Forward-only and
+idempotent. Then press **Rebalance now** on /schedule, or let `job_watchdog` (11:00 UTC) heal it.
+
+Code shipped alongside: `backend/common/sequences.py` repairs the single table whose insert just
+failed and retries once, or raises an error naming the cause and this script. Wired into the
+`ingest_run` and `current_picks_snapshot` writes. ⚠ It cannot replace the SQL: a failing insert
+only proves one table drifted, and self-repair needs `SUPABASE_DB_URL` set on Railway — **if it
+isn't, the self-repair degrades to the loud error only** (same unknown as the item below).
+
+---
+
 ## 🧩 /schedule sleeve edit "doesn't take" (2026-09-07)
 
 ### Shipped
