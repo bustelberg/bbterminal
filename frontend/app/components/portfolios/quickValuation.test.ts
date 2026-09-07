@@ -35,15 +35,91 @@ describe('priceVsMetric', () => {
     expect(out[1]).toEqual({ year: 2024, price: 120, value: null });
   });
 
-  it('takes the LAST n fiscal years', () => {
+  it('takes the LAST n fiscal years when a cap is asked for', () => {
     const rows = [2015, 2016, 2017, 2018].flatMap((y) => [m(PRICE, y, y), m(FCF, y, 1)]);
     expect(priceVsMetric(rows, FCF_PS_CODES, 2).map((p) => p.year)).toEqual([2017, 2018]);
   });
 
+  it('draws EVERY paired year from the floor when no cap is asked for', () => {
+    // ⚠ THE DEFAULT USED TO BE 10 AND THE TAB PASSED IT. The Graphs tab draws every year its
+    // endpoints return, so the two tabs of one modal disagreed about when the history begins.
+    const rows = Array.from({ length: 12 }, (_, i) => 2014 + i)
+      .flatMap((y) => [m(PRICE, y, y), m(FCF, y, 1)]);
+    expect(priceVsMetric(rows).map((p) => p.year))
+      .toEqual([2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]);
+  });
+
+  it('honours the 2015 house floor even when BOTH series reach the 1990s', () => {
+    /**
+     * ⚠⚠ THE NVIDIA CASE, AND THE ONE A "start where the fundamentals start" RULE ALONE MISSES.
+     * NVIDIA reports per-share figures nearly as far back as its price, so clipping to the first
+     * value year still began in 1999. The Graphs cards start at 2015 because the `*-inputs`
+     * endpoints are floored server-side at `_BLEND_START = "2015-01-01"`; `/by-isin/{isin}/metrics`
+     * — which this tab reads — is NOT floored and returns the lot. See `HISTORY_FROM_YEAR`.
+     */
+    const rows = Array.from({ length: 27 }, (_, i) => 1999 + i)
+      .flatMap((y) => [m(PRICE, y, 100 + y), m(FCF, y, 5)]);
+    const out = priceVsMetric(rows);
+    expect(out[0].year).toBe(2015);
+    expect(out[out.length - 1].year).toBe(2025);
+    expect(rebase(out).anchor).toBe(2015);
+  });
+
+  it('starts LATER than the floor when the per-share series does', () => {
+    /**
+     * ⚠ THE FLOOR ALONE IS NOT ENOUGH EITHER — the two rules compose. A company whose fundamentals
+     * begin in 2019 would otherwise draw four years of a lone price line INSIDE the floor, which is
+     * the same defect the floor exists to prevent and which the floor cannot catch.
+     */
+    const price = Array.from({ length: 27 }, (_, i) => 1999 + i).map((y) => m(PRICE, y, 100 + y));
+    const fcf = Array.from({ length: 7 }, (_, i) => 2019 + i).map((y) => m(FCF, y, 5));
+    const out = priceVsMetric([...price, ...fcf]);
+    expect(out[0].year).toBe(2019);
+    expect(out).toHaveLength(7);
+  });
+
+  it('keeps a LEADING run with no price — that gap is information, unlike a leading price run', () => {
+    // ⚠ THE CLIP IS ASYMMETRIC. A missing price over years we do have figures for is a real gap
+    // (an unlisted stretch, a listing we cannot price); a price with no figures is just a lone line.
+    const out = priceVsMetric([m(FCF, 2015, 5), m(FCF, 2016, 6), m(PRICE, 2016, 100)]);
+    expect(out.map((p) => p.year)).toEqual([2015, 2016]);
+    expect(out[0]).toEqual({ year: 2015, price: null, value: 5 });
+  });
+
+  it('draws nothing at all when the per-share series is empty', () => {
+    // A bare price line is not this chart; the tab's own empty state covers it.
+    expect(priceVsMetric([m(PRICE, 2023, 100), m(PRICE, 2024, 120)])).toEqual([]);
+  });
+
+  it('a price-only year does not push a paired year off the start', () => {
+    /**
+     * ⚠⚠ THE REPORTED BUG, AND IT IS ABOUT THE UNION. GuruFocus publishes `Month End Stock Price`
+     * for a fiscal year as soon as it ends; the FCF for that year lands months later with the
+     * filing. So the union carries one more recent year than the fundamentals do — and under the
+     * old `slice(-10)` over the union, that price-only year consumed a slot and the oldest PAIRED
+     * year fell off, silently. Here: 2015–2025 paired plus a price-only 2026 is 12 union years,
+     * which the old cap cut to 2017–2026 — exactly the "why does this start at 2017?" report.
+     */
+    const paired = Array.from({ length: 11 }, (_, i) => 2015 + i)
+      .flatMap((y) => [m(PRICE, y, 100 + y), m(FCF, y, 5)]);
+    const out = priceVsMetric([...paired, m(PRICE, 2026, 999)]);
+    expect(out[0].year).toBe(2015);
+    expect(out[0].value).toBe(5);
+    expect(out[out.length - 1]).toEqual({ year: 2026, price: 999, value: null });
+    // And the index therefore bases on 2015, not on whatever survived the slice — `rebase`
+    // anchors inside what it is GIVEN, so a dropped year re-bases both lines.
+    expect(rebase(out).anchor).toBe(2015);
+  });
+
   it('keeps the later observation when a year-end change reports twice', () => {
+    // ⚠ THE FCF ROW IS LOAD-BEARING FIXTURE, NOT PART OF WHAT IS ASSERTED. The window now starts
+    // at the first year the per-share series reports, so a price-only fixture draws nothing at
+    // all — correctly. This test is about `byYear` picking the later of two observations for one
+    // fiscal year; it needs a year the chart is willing to draw for that to be observable.
     const rows: MetricRow[] = [
       { metric_code: PRICE, target_date: '2024-03-31', numeric_value: 90 },
       { metric_code: PRICE, target_date: '2024-12-31', numeric_value: 110 },
+      m(FCF, 2024, 5),
     ];
     expect(priceVsMetric(rows)[0].price).toBe(110);
   });

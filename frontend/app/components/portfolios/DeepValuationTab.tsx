@@ -26,7 +26,8 @@ import { onDate } from './asOfLine';
 // ⚠ AND THE EXPRESSIONS THEMSELVES LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is
 // testable and a tooltip is not — see `valuationFormulas` and its strict-mode render test.
 import {
-  workedEgmReturn, workedFairValue, workedImpliedPrice, workedMaxPE, workedPriceMove,
+  workedEgmReturn, workedFairValue, workedFairValueGap, workedImpliedPrice, workedMaxPE,
+  workedPriceMove,
 } from './valuationFormulas';
 import { useDeepValuationCopy } from './deepValuationCopy';
 
@@ -113,12 +114,25 @@ function Field({
   hintTitle?: string;
   onUseHint?: () => void;
   /**
-   * A control that goes and gets this field's default again — today only the Forward P/E's ↻.
+   * A control that goes and gets this field's default again — today only the Forward P/E's.
    *
    * ⚠⚠ THE SLOT IS RENDERED FOR EVERY FIELD, EMPTY OR NOT, for the same reason the hint chip is
    * always a `<button>`: these six rows are one column and anything that appears on some of them
    * moves the ⓘ on those and not the others. An empty fixed-width span costs nothing and keeps the
    * six ⓘ icons on the single vertical line the note below is about.
+   *
+   * ⚠⚠ AND IT IS SIZED FOR THE WIDEST LABEL, BECAUSE IT WAS SIZED FOR A GLYPH. This slot was
+   * `w-4` — 16px, correct for the ↻ character it was built for and still described in every
+   * comment around it. The control has since become a WORD in three states (`Refresh` / `Cancel`
+   * / `Cancelling…`), and at 11px `Cancelling…` is ~62px, so it overflowed a 16px box by ~23px on
+   * each side, swallowed both 8px gaps and sat hard against the reference chip on its left and
+   * the ⓘ on its right. Reported as the Forward P/E row reading `23.1  22.6  Refresh` with
+   * nothing between them. Fixed-width still — that rule is what keeps the ⓘ column straight —
+   * just fixed at the size of what actually goes in it.
+   *
+   * ⚠ WIDENING HERE CANNOT MOVE THE ⓘ, and that is why this was the safe end to fix: the ⓘ is
+   * the LAST slot, so its distance from the right edge is its own `w-9` and nothing before it.
+   * The label is the flex child that gives up the width.
    */
   action?: React.ReactNode;
 }) {
@@ -147,7 +161,9 @@ function Field({
           </button>
         )}
       </span>
-      <span className="flex w-4 shrink-0 items-center justify-center">{action}</span>
+      {/* ⚠ `w-[4.5rem]` is `Cancelling…` at 11px plus the button's own padding — see the ⚠⚠ on
+          `action`. Do not put it back to a glyph-width box while the label is a word. */}
+      <span className="flex w-[4.5rem] shrink-0 items-center justify-center">{action}</span>
       {/* ⚠⚠ THE ⓘ IS A TRAILING SLOT, NOT A SUFFIX ON THE LABEL. Beside the label its x landed
           wherever that label happened to end — `Growth rate ⓘ` and `Dividend yield ⓘ` are forty
           pixels apart, so a column of four explanations read as scattered punctuation. Last slot,
@@ -702,7 +718,77 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
               hint={measuredPrice == null ? null : measuredPrice.toFixed(2)}
               hintTitle={priceOverride != null
                 ? t.egm.storedCloseBack : t.egm.storedCloseInUse}
-              onUseHint={priceOverride != null ? () => setPriceStr('') : undefined} />
+              onUseHint={priceOverride != null ? () => setPriceStr('') : undefined}
+              /**
+               * ⚠⚠ IT MOVED HERE FROM THE OUTPUT TABLE, IT IS NOT A SECOND ONE. The share price's
+               * Refresh lived in the `Share price now` row of the results table below, sharing that
+               * row's ⓘ cell — a `w-[3.25rem]` column, 52px, holding a 16px icon and a ~54px word
+               * behind 16px of padding. It overflowed by roughly the width of the button, which is
+               * what was reported as cramped; widening that column was not available, because its
+               * width is what lands every ⓘ in all three tables on one vertical line.
+               *
+               * ⚠⚠ AND THE INPUT ROW IS WHERE IT BELONGED ANYWAY — this is the panel's OTHER
+               * measured input, and its twin (the forward P/E) has had its Refresh in exactly this
+               * slot all along. Two vendor facts, two overridable boxes, two identical controls in
+               * one column, instead of one on an input row and one on an output row four tiles
+               * apart. Requested in those words.
+               *
+               * ⚠ THE OUTPUT ROW KEEPS ITS ⓘ. The provenance — which vendor, which date, how stale
+               * — is about the FIGURE and stays behind it; only the action moved.
+               *
+               * ⚠⚠ ONE CONTROL, THREE STATES — AND IT TURNS INTO THE CANCEL. The reader pressed the
+               * button HERE, so this is where the way to stop it belongs; sending them to the toast
+               * in the corner to undo something they started on this row is the same mistake as a
+               * Cancel that does nothing.
+               *   Refresh      idle — amber when the close is over a week old
+               *   Cancel       running — press again to abort the re-read
+               *   Cancelling…  the window after the press, while the fetch unwinds
+               *
+               * ⚠ IT KEYS OFF THE TOAST STORE, NOT A LOCAL FLAG. `cancelRequested` flips on the
+               * press and `status` follows when the work actually stops; a private boolean would
+               * have to be kept in step with both and would be wrong in exactly the window this
+               * button exists to describe.
+               *
+               * ⚠ RENDERED IN ALL THREE STATES, never conditionally. Showing it only when the close
+               * is stale would move the row the moment a refresh cleared the staleness — the reader
+               * would press a button and watch it vanish along with the layout under it.
+               *
+               * ⚠⚠ THE LABEL CHANGES WIDTH ON EVERY PRESS, SO ITS ROOM IS RESERVED RATHER THAN
+               * ASSUMED — `Refresh` / `Cancel` / `Cancelling…` are 7, 6 and 11 characters. The note
+               * that used to sit here said "ONE CHARACTER IN EVERY STATE, in a fixed-width box",
+               * true of the ↻ this began as and quietly false ever since; that sentence outliving
+               * its glyph is how the forward P/E's twin came to sit in a 16px slot holding a ~62px
+               * word. `Field`'s action slot is sized for the longest state — see the ⚠⚠ there.
+               *
+               * ⚠ This is the canonical note for BOTH refresh buttons on this panel; the forward
+               * P/E's points at it. The only differences there are the vendor and the transport.
+               */
+              action={(
+                <button type="button"
+                  onClick={() => (refreshing && jobId ? void cancelJob(jobId) : refreshPrice())}
+                  disabled={cancelling}
+                  aria-label={refreshing ? t.egm.reReadCancel : t.egm.reReadClose}
+                  // ⚠ IT STILL WORKS WITH AN OVERRIDE IN PLACE, AND WOULD LOOK BROKEN WITHOUT
+                  // SAYING SO: the fetch updates the STORED close, which a typed price is hiding,
+                  // so the figure in the box does not move. The refreshed value lands on the chip
+                  // immediately to its left, one click from being used.
+                  title={cancelling ? t.egm.cancelling
+                    : refreshing ? t.egm.reReading
+                      : priceOverride != null
+                        ? t.egm.reReadOverridden + 'so the new figure appears on the chip beside it'
+                        : priceStale ? t.egm.reReadStale
+                          : t.egm.reReadClose}
+                  // ⚠ AMBER WHEN IT IS WORTH PRESSING, faint when it is not — the one thing this
+                  // button says without being hovered, and the reason it is rendered in all three
+                  // states rather than appearing when the close goes stale.
+                  className={`rounded px-1.5 py-0.5 align-middle text-[11px] leading-none ${
+                    cancelling ? 'cursor-wait text-fg-faint'
+                      : refreshing ? 'text-warn-400 hover:bg-overlay/5 hover:text-neg-400'
+                        : priceStale ? 'text-warn-400 hover:bg-overlay/5 hover:text-warn-300'
+                          : 'text-fg-faint hover:bg-overlay/5 hover:text-accent-400'}`}>
+                  {cancelling ? 'Cancelling…' : refreshing ? 'Cancel' : 'Refresh'}
+                </button>
+              )} />
             <Field label={t.egm.forwardPE} value={fwdPeStr} onChange={setFwdPeStr}
               placeholder={src.forwardPE == null ? '' : src.forwardPE.toFixed(1)}
               info={<InfoTip content={<AspectCard
@@ -767,11 +853,14 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       : companyId == null ? t.egm.reReadNoCompany
                         : numOrNull(fwdPeStr) != null ? t.egm.reReadForwardPEOverridden
                           : t.egm.reReadForwardPE}
-                  className={`inline-block align-middle text-[11px] leading-none ${
+                  // ⚠ PADDED LIKE THE REFERENCE CHIP BESIDE IT (`rounded px-1 py-px`), which is the
+                  // other pressable thing on this row. Bare `leading-none` text gave it no
+                  // breathing room and a hit target the height of an 11px line.
+                  className={`rounded px-1.5 py-0.5 align-middle text-[11px] leading-none ${
                     peCancelling ? 'cursor-wait text-fg-faint'
-                      : peRefreshing ? 'text-warn-400 hover:text-neg-400'
+                      : peRefreshing ? 'text-warn-400 hover:bg-overlay/5 hover:text-neg-400'
                         : companyId == null ? 'cursor-default text-fg-faint/40'
-                          : 'text-fg-faint hover:text-accent-400'}`}>
+                          : 'text-fg-faint hover:bg-overlay/5 hover:text-accent-400'}`}>
                   {peCancelling ? 'Cancelling…' : peRefreshing ? 'Cancel' : 'Refresh'}
                 </button>
               )} />
@@ -1009,17 +1098,27 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 </colgroup>
                 <tbody>
                   <tr>
-                    {/* ⚠ THE ⓘ AND THE ↻ SIT BEHIND THE FIGURE, NOT BEHIND THE NAME. Both are
-                        about the NUMBER — where it came from, and how to re-read it — and after
-                        the label they were separated from it by the whole width of the column.
-                        In the trailing slot they also line up with every other ⓘ on the page. */}
+                    {/* ⚠ THE ⓘ SITS BEHIND THE FIGURE, NOT BEHIND THE NAME. It is about the
+                        NUMBER — where it came from and how stale it is — and after the label it
+                        was separated from it by the whole width of the column. In the trailing
+                        slot it also lines up with every other ⓘ on the page.
+                        ⚠⚠ THE REFRESH USED TO SHARE THIS CELL AND NO LONGER DOES. A 52px column
+                        cannot hold a 16px icon and a ~54px word behind 16px of padding, and the
+                        column's width is exactly what keeps those ⓘ aligned, so it could not be
+                        widened to make room. The action moved to the `Share price now` INPUT row,
+                        beside the forward P/E's identical one; the provenance stayed here. */}
                     <td className="truncate pt-1.5 text-fg-muted">{t.egm.sharePriceNow}</td>
 
                     <td className="pt-1.5 pl-2 text-right font-mono tabular-nums text-fg-soft">
                       {money(price)}
                     </td>
                     <td />
-                    <td className="flex items-center gap-0.5 pt-1.5 pl-4">
+                    {/* ⚠ PLAIN `pt-1.5 pl-4`, IDENTICAL TO EVERY OTHER ⓘ CELL ON THE PANEL. It was
+                        a flex row while it held the Refresh too, which is what let its contents
+                        overflow a `table-fixed` column without wrapping or clipping — the cell
+                        simply grew past the table's right edge and nothing said so. One ⓘ, one
+                        cell, same padding as its siblings, so the column width means what it says. */}
+                    <td className="pt-1.5 pl-4">
                       <InfoTip content={<AspectCard
                         what={priceOverride != null ? t.egm.priceTyped
                           : t.egm.priceClosingOf(name ?? isin)}
@@ -1041,51 +1140,6 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         how={priceOverride != null
                           ? t.egm.clearBoxToGoBack(measuredPrice == null ? '' : money(measuredPrice))
                           : priceFromYahoo ? t.egm.rawDataYahoo : t.egm.rawDataNoRefresh} />} />
-                      {/* ⚠⚠ RENDERED ALWAYS, AND THE SAME SIZE IN ALL THREE STATES. Showing it only
-                          when the price is stale would move the row the moment a refresh cleared
-                          the staleness — the reader would press a button and watch it vanish along
-                          with the layout under it. Amber when it is worth pressing, faint when it
-                          is not, and the glyph never changes width. */}
-                      {/**
-                        * ⚠⚠ ONE CONTROL, THREE STATES — AND IT TURNS INTO THE CANCEL. The reader
-                        * pressed the button HERE, so this is where the way to stop it belongs;
-                        * sending them to the toast in the corner to undo something they started
-                        * on this row is the same mistake as a Cancel that does nothing.
-                        *   Refresh      idle — amber when the close is over a week old
-                        *   Cancel       running — press again to abort the re-read
-                        *   ⋯  cancelling — the window after the press, while the fetch unwinds
-                        *
-                        * ⚠ IT KEYS OFF THE TOAST STORE, NOT A LOCAL FLAG. `cancelRequested` flips
-                        * on the press and `status` follows when the work actually stops; a private
-                        * boolean would have to be kept in step with both and would be wrong in
-                        * exactly the window this button exists to describe.
-                        *
-                        * ⚠ ONE CHARACTER IN EVERY STATE, in a fixed-width box. A glyph that
-                        * changed width would move the figure beside it at the moment of the press
-                        * — the layout rule the rest of this panel was fixed to.
-                        */}
-                      <button type="button"
-                        onClick={() => (refreshing && jobId ? void cancelJob(jobId) : refreshPrice())}
-                        disabled={cancelling}
-                        aria-label={refreshing ? t.egm.reReadCancel : t.egm.reReadClose}
-                        // ⚠ IT STILL WORKS WITH AN OVERRIDE IN PLACE, AND WOULD LOOK BROKEN WITHOUT
-                        // SAYING SO: the fetch updates the STORED close, which a typed price is
-                        // hiding, so the figure on screen does not move. The refreshed value lands
-                        // on the chip beside the Share price box, one click from being used.
-                        title={cancelling ? t.egm.cancelling
-                          : refreshing ? t.egm.reReading
-                            : priceOverride != null
-                              ? t.egm.reReadOverridden
-                                + 'so the new figure appears on that box’s chip'
-                              : priceStale ? t.egm.reReadStale
-                                : t.egm.reReadClose}
-                        className={`ml-1 inline-block align-middle text-[11px] leading-none ${
-                          cancelling ? 'cursor-wait text-fg-faint'
-                            : refreshing ? 'text-warn-400 hover:text-neg-400'
-                              : priceStale ? 'text-warn-400 hover:text-warn-300'
-                                : 'text-fg-faint hover:text-accent-400'}`}>
-                        {cancelling ? 'Cancelling…' : refreshing ? 'Cancel' : 'Refresh'}
-                      </button>
                     </td>
                   </tr>
                   <tr>
@@ -1244,13 +1298,39 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         { sym: String.raw`EPS_{\text{FY1}}`, is: t.egm.legend.epsFY1 },
                         { sym: String.raw`PE_{\max}`, is: t.egm.legend.maxPE },
                       ]}
-                      /* ⚠⚠ THE COMPARISON, WHICH `upside` HAS BEEN COMPUTING AND NOBODY HAS BEEN
-                         READING. A fair value printed beside nothing invites the reader to do the
-                         subtraction against a price two rows up; it was already in the result and
-                         had no consumer in the app at all. */
-                      how={r.fairValue == null ? t.egm.fairValueNoEps
-                        : r.upside == null ? undefined
-                          : t.egm.fairValueVsPrice(pct1(r.upside))} />} />
+                      /* ⚠⚠ THE COMPARISON MOVED OUT OF THIS CARD AND ONTO ITS OWN ROW BELOW (on
+                         request). It lived here because `upside` was computed and read by nothing
+                         at all, and a fair value printed beside nothing invites the reader to do
+                         the subtraction against a price two rows up. A visible row answers that
+                         better than a hover — and REPEATING it here would put the same figure in
+                         two places one click apart, which is how two copies of one number come to
+                         disagree. Only the "no consensus EPS" case is left, because that explains
+                         an ABSENT figure, which the row below cannot. */
+                      how={r.fairValue == null ? t.egm.fairValueNoEps : undefined} />} />
+                  </td>
+                </tr>
+                {/* ⚠ THE FIGURE `upside` HAS ALWAYS BEEN, NOW ON SCREEN. `fairValue ÷ price − 1`,
+                    straight off the result — not recomputed here from the two rows above it, which
+                    is the version that drifts. */}
+                <tr>
+                  <td className="truncate py-0.5 pl-3 text-fg-subtle">{t.egm.fairValueGap}</td>
+                  {/* ⚠ SIGN-COLOURED, LIKE EVERY OTHER CONCLUSION ON THIS PANEL. A fair value below
+                      today's price is the finding, not a formatting accident — same rule as the
+                      `Return` row and the price-target card's Est. CAGR. */}
+                  <td className={`py-0.5 pl-2 text-right font-mono tabular-nums font-semibold ${
+                    r.upside == null ? 'text-fg-muted'
+                      : r.upside >= 0 ? 'text-pos-500' : 'text-neg-500'}`}>
+                    {pct1(r.upside)}
+                  </td>
+                  <td />
+                  <td className="py-0.5 pl-4">
+                    <InfoTip content={<AspectCard
+                      what={t.egm.cards.fairValueGap.what}
+                      where={t.egm.cards.fairValueGap.where}
+                      when={t.egm.endOfYear(String(assumptions.years))}
+                      worked={workedFairValueGap(r.fairValue, src.price,
+                        r.upside == null ? '' : pct1(r.upside))}
+                      how={t.egm.cards.fairValueGap.how} />} />
                   </td>
                 </tr>
               </tbody>

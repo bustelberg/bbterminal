@@ -29,9 +29,22 @@ import { sharedSpan, spanNarrows, tileStats, type Span, type TileStats } from '.
  *
  * ⚠ THE NUMBER GOT BIGGER AS THE BOX GOT SMALLER, AND THAT IS THE POINT OF THE EXERCISE. The value
  * is the only thing on a tile anybody reads at a glance; the label and the padding are scaffolding.
- * So the label drops to 9px, the padding to `px-1.5 py-1` and the box to 3.1rem tall, while the
- * value goes UP (`text-base` → `text-lg`). Shrinking everything uniformly would have made the tile
+ * So the label dropped hard, the padding to `px-1.5 py-1` and the box to a fixed height, while the
+ * value went UP (`text-base` → `text-lg`). Shrinking everything uniformly would have made the tile
  * tidier and harder to read, which is the opposite of what a smaller tile is for.
+ *
+ * ⚠⚠ THE LABEL IS NOW `text-[0.7rem]` (13.3px), NOT `text-[9px]`, AND THE UNIT IS HALF THE POINT.
+ * It was the last absolute-px size in this family, and `globals.css` puts the whole UI on a `19px`
+ * rem base with a responsive ladder (19 → 17.5 → 16 → 15) — so an absolute size opts out of that
+ * ladder, reading relatively smaller on a desktop and larger on a phone. 9px against a 14.25px
+ * `text-xs` was also simply too far: reported as "maybe we can make the text in these tiles a bit
+ * bigger", then again after a first pass to 0.6rem, both on the Quick Valuation card.
+ *
+ * ⚠ STILL SHORT OF `text-xs` (14.25px), AND THE LAST HALF-STEP IS NOT FREE. An uppercase label is
+ * the widest text in the app per character, and these tiles are ~55–82px of inner width now that
+ * the Quick Valuation row runs all five across (see the sizing note above). Every point of label
+ * size buys legibility and spends characters-per-line against a two-line clamp — `EST. CAGR TO
+ * FY2036` is the label that runs out first, and it is the one people open this card for.
  *
  * ⚠⚠ THE LABEL GETS **TWO** LINES, ALWAYS RESERVED, AND THAT IS WHAT MAKES THE HEIGHT CONSTANT.
  * One line was tried first and it is the obvious answer: truncate, hang the full text on `title`,
@@ -57,14 +70,20 @@ export function Stat({ label, value, tone, color, info }: {
   label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-800/40 bg-inset px-1.5 py-1 h-[3.1rem]
+    <div className="rounded-lg border border-neutral-800/40 bg-inset px-1.5 py-1 h-[3.9rem]
                     flex-1 basis-0 min-w-0 max-w-[8rem]
                     flex flex-col justify-between overflow-hidden"
       style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
-      {/* ⚠ THE HEIGHT IS ON THE ROW, NOT LEFT TO THE TEXT — two lines’ worth at 9px/leading-tight,
-          reserved whether the label uses them or not. `items-start` keeps the ⓘ beside the FIRST
-          line rather than floating to the middle of a two-line label. */}
-      <div className="flex items-start gap-1 h-[1.2rem] text-[9px] uppercase tracking-wide text-fg-muted leading-tight">
+      {/* ⚠ THE HEIGHT IS ON THE ROW, NOT LEFT TO THE TEXT — two lines’ worth at the label size and
+          `leading-tight`, reserved whether the label uses them or not. `items-start` keeps the ⓘ
+          beside the FIRST line rather than floating to the middle of a two-line label.
+          ⚠⚠ THE THREE NUMBERS MOVE TOGETHER OR THE LABEL CLIPS. `h-[1.8rem]` is 2 × 0.7rem ×
+          leading-tight (1.25) = 1.75rem, plus a hair; the tile's own `h-[3.9rem]` is that row plus
+          the value's line (1.125rem × 1.25), plus `py-1` and the border. Raising the font without
+          raising both heights silently crops the SECOND line of every two-line label — and this
+          component reserves that line precisely because four of the Quick Valuation card's five
+          labels need it. */}
+      <div className="flex items-start gap-1 h-[1.8rem] text-[0.7rem] uppercase tracking-wide text-fg-muted leading-tight">
         <span className="line-clamp-2" title={label}>{label}</span>
         <span className="shrink-0 flex items-center leading-none">{info}</span>
       </div>

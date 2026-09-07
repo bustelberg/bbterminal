@@ -137,6 +137,22 @@ export function workedFairValue(eps: number | null | undefined,
 }
 
 /**
+ * `FV / P_0 − 1` — how far today's price sits from the fair value.
+ *
+ * ⚠ A SIBLING OF `workedPriceMove`, NOT A REUSE OF IT. That one is `P_n / P_0 − 1`, the move to the
+ * IMPLIED price at the end of the window; this is the gap to the fair value TODAY. The arithmetic
+ * is the same shape and the numerators are two different quantities, so sharing the builder would
+ * put `P_n` over a figure that is not it — the one failure this file exists to prevent.
+ */
+export function workedFairValueGap(fairValue: number | null | undefined,
+  price: number | null | undefined, result: string): string {
+  if (!ok(fairValue) || !ok(price) || price === 0) return '';
+  return withWorked(
+    String.raw`\dfrac{FV}{P_0} - 1`,
+    String.raw`\dfrac{${subNum(fairValue, 2)}}{${subNum(price, 2)}} - 1 = ${texEscape(result)}`);
+}
+
+/**
  * `OCF_est − |C|` — next year's free cash flow, derived.
  *
  * ⚠ THE BARS ARE NOT DECORATION. The vendor files capex NEGATIVE; without the magnitude this
