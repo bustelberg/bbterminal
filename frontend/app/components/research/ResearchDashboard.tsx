@@ -35,16 +35,25 @@ export default function ResearchDashboard() {
     <div className="p-6 space-y-4 min-w-0">
       <div>
         <h1 className="text-lg font-semibold text-fg-strong">Research Dashboard</h1>
+        {/* ⚠ THE MECHANISM IS NOT THE SUBTITLE. This line used to explain that company B takes the
+            benchmark line and that the charts therefore compare directly rather than side by side
+            — true, load-bearing, and the reason this page is built the way it is, which is why it
+            lives in the docstring above and in CLAUDE.md. A reader arriving here needs to know
+            what they can do, not how it is wired. */}
         <p className="text-sm text-fg-subtle mt-0.5">
-          Two companies from the asset pipeline, on the same charts. This is the Fundamental view
-          the Management Dashboard opens — the second company takes the benchmark line, so every
-          chart compares them directly rather than side by side.
+          Check out a single company or compare two in /research-dashboard
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 max-w-3xl">
-        <CompanyPicker label="Company A — the subject" value={a} onPick={setA} />
-        <CompanyPicker label="Company B — drawn beside it" value={b} onPick={setB} />
+      {/* ⚠ `mx-auto` IS THE CENTRING — `max-w-3xl` alone only caps the width, and a capped block
+          with no auto margin sits hard left under a full-width panel. */}
+      <div className="grid gap-4 md:grid-cols-2 max-w-3xl mx-auto">
+        {/* ⚠ THE ROLES CAME OFF THE LABELS, NOT OUT OF THE PAGE. "the subject" / "drawn beside it"
+            described what each side becomes; at the label's new size that was a sentence where a
+            field name belongs. Which of the two is optional, and what happens without it, is still
+            said once — in the empty state below, where a reader who has picked neither is looking. */}
+        <CompanyPicker label="Company A" value={a} onPick={setA} />
+        <CompanyPicker label="Company B" value={b} onPick={setB} />
       </div>
 
       {a ? (
