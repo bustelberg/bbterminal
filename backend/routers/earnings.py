@@ -2326,6 +2326,36 @@ def _metric_rows(company_id: int, metric: str = "revenue") -> list[dict]:
 # A metric absent from this map is refused rather than guessed — see `_ttm_by_period`.
 _log = logging.getLogger(__name__)
 
+#: Keys already reported by `_warn_once`. See below.
+_WARNED: set[str] = set()
+
+
+def _warn_once(key: str, msg: str, *args) -> None:
+    """Log a warning the FIRST time this process sees `key`, and never again.
+
+    ⚠⚠ THE FACTS THESE LINES CARRY ARE PROPERTIES OF THE DATA, NOT OF THE REQUEST, SO REPEATING
+    THEM ADDS NOTHING AND COSTS THE WHOLE LOG. `_reject_quarter_outliers` runs per company per
+    metric on every blend, and `_blend_prewarm` walks ~1,500 ACWI constituents across 12 endpoints
+    on startup and after every fundamentals write — so one genuinely interesting line about company
+    226 became the same line dozens of times a day, with the scheduler's real output scrolled off
+    the top between them. Reported as "my whole terminal log is messy" (2026-09-08); the previous
+    round had already cut each event to a single line, which was the other half of the same fix.
+    ⚠ NOT `debug`. These stay at WARNING — a kept level shift WILL step an index and somebody
+    should see it once. What is removed is the repetition, not the signal.
+
+    ⚠ PER PROCESS, WHICH IS THE RIGHT LIFETIME: the underlying figures only change on an ingest,
+    and a deploy restarts the process. A run that fixes a restatement will report it again after
+    the next restart, which is when it is worth re-reading anyway.
+
+    ⚠ THE SET IS BOUNDED BY THE DATA, not by traffic — one entry per (company, metric) pair, so
+    ~20k strings at the very most across every universe. No eviction needed, and adding one would
+    reintroduce the repetition it exists to stop.
+    """
+    if key in _WARNED:
+        return
+    _WARNED.add(key)
+    _log.warning(msg, *args)
+
 _TTM_RULE: dict[str, str] = {
     # Flows — income statement and cash flow.
     "revenue": "sum", "gross_profit": "sum", "operating_income": "sum", "net_income": "sum",
@@ -2612,9 +2642,12 @@ def _drop_quarter_outliers(by_date: dict[str, float], who: str = "?") -> dict[st
         # nothing is removed, and an index built on this line WILL step. That is worth a line
         # somebody sees. The reasoning behind it moved into this comment, where it belongs — a
         # five-sentence explanation of a heuristic is documentation, not a log record.
-        _log.warning("[earnings] %s: level shift kept — %d qtr(s) over %.0fx median %.4g, "
-                     "consecutive to the newest filing (restatement / redenomination / split?)",
-                     who, len(run), _QUARTER_OUTLIER_FACTOR, median)
+        # ⚠ ONCE PER (company, metric). The same shift is re-detected on every blend that touches
+        # this company — see `_warn_once` for why repeating it costs the whole log.
+        _warn_once(f"shift:{who}",
+                   "[earnings] %s: level shift kept — %d qtr(s) over %.0fx median %.4g, "
+                   "consecutive to the newest filing (restatement / redenomination / split?)",
+                   who, len(run), _QUARTER_OUTLIER_FACTOR, median)
     if drop:
         # The fiscal position of each dropped quarter, e.g. {'Q4': 3}. ⚠ A COUNT, NOT A VERDICT:
         # a recurring spike can be a seasonal business OR the vendor filing an annual figure in a
@@ -2835,7 +2868,8 @@ def _metric_by_year(company_id: int, metric: str, cadence: str = "annual") -> di
         rule = _TTM_RULE.get(metric)
         if rule is None:
             # Refused, not guessed. A new metric gets a declared roll-up or no quarterly view.
-            _log.warning("[earnings] no TTM rule for %r — quarterly view omits it", metric)
+            _warn_once(f"ttm-view:{metric}",
+                       "[earnings] no TTM rule for %r — quarterly view omits it", metric)
             return {}
         codes = tuple(c.replace("annuals__", "quarterly__") for c in _metric_codes(metric))
         rows: list[dict] = []
@@ -2919,7 +2953,7 @@ def _codes_and_rule(metric: str, cadence: str) -> tuple[list[str] | None, str | 
         return codes, None
     rule = _TTM_RULE.get(metric)
     if rule is None:
-        _log.warning("[earnings] no TTM rule for %r — omitted", metric)
+        _warn_once(f"ttm:{metric}", "[earnings] no TTM rule for %r — omitted", metric)
         return None, None
     return [c.replace("annuals__", "quarterly__") for c in codes], rule
 
