@@ -145,3 +145,47 @@ export function useLang(): [Lang, (l: Lang) => void] {
 
   return [lang, setLang];
 }
+
+const OWNER_KEY = 'bb:lang:owner';
+
+/**
+ * Bind the stored preference to the reader who chose it, and hand a different reader the DEFAULT.
+ *
+ * ⚠⚠ THE DEFAULT BEING `'nl'` IS ONLY HALF OF "NEW USERS GET DUTCH", AND THE OTHER HALF IS WHOSE
+ * BROWSER THEY ARE IN (2026-09-08, on request). `read()` falls back to `'nl'` only when `bb:lang`
+ * is ABSENT, and `setLang` is the only thing that ever writes it — so a stored value is always
+ * somebody's deliberate press. On a machine where an admin (or an earlier account) once pressed
+ * EN, a brand-new user signs up and reads English, with nothing on screen saying why and no reason
+ * to suspect a setting they never touched. A language is a property of the READER, so it has to
+ * travel with the account rather than with the browser profile.
+ *
+ * ⚠ SIGNING OUT FORGETS BOTH, so the next person at this machine starts from the default even
+ * before they have an identity — which is the state the login and set-password pages render in.
+ *
+ * ⚠ A BROWSER THAT PREDATES THIS KEY LOSES ITS CHOICE EXACTLY ONCE: `owner` is absent, the signed-
+ * in email is not, so the first claim clears and re-owns. That is deliberate rather than tolerated
+ * — the preference cannot be attributed, and the request is that an unattributed reader gets
+ * Dutch. Pressing EN again is one click and sticks for good.
+ *
+ * ⚠ IT NOTIFIES THROUGH THE SAME `listeners` AS `setLang`. Clearing storage without invalidating
+ * `current` would leave every mounted component on the previous reader's language until a reload,
+ * which is the half-applied state that looks like the switch is broken.
+ */
+export function claimLangFor(email: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const owner = window.localStorage.getItem(OWNER_KEY);
+    // Same reader as last time — including "still signed out" (both null). Nothing to do, and this
+    // is the common path: the Sidebar calls this on every auth-state change.
+    if (owner === email) return;
+    window.localStorage.removeItem(KEY);
+    if (email == null) window.localStorage.removeItem(OWNER_KEY);
+    else window.localStorage.setItem(OWNER_KEY, email);
+  } catch (e) {
+    // ⚠ A BLOCKED STORAGE IS NOT A REASON TO FAIL TO RENDER. Fall through to the notify below so
+    // the in-memory snapshot is still consistent with whatever `read()` can see.
+    console.warn('[bb:i18n] could not re-own the language preference:', e);
+  }
+  current = read();
+  listeners.forEach((cb) => cb());
+}

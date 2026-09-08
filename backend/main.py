@@ -85,9 +85,20 @@ app.middleware("http")(_cors_safe_errors)
 # reported them as a CORS error ("No 'Access-Control-Allow-Origin' header")
 # instead of the real status. `:3001` is kept for the parallel-worktree dev
 # server.
+#
+# ⚠⚠ `localhost` AND `127.0.0.1` ARE TWO DIFFERENT ORIGINS TO A BROWSER, AND ONLY ONE WAS LISTED
+# (2026-09-08). Starlette compares the `Origin` header verbatim, so a tab opened at
+# `http://127.0.0.1:3000` — which is what `npm run dev` prints beside the localhost line, and what
+# a bookmark keeps — had every preflight answered `400 Disallowed CORS origin`. ⚠ THE SYMPTOM IS
+# IN THE WRONG PLACE ENTIRELY: the browser reports `TypeError: Failed to fetch` with no response to
+# inspect, which is byte-identical to the backend being down, so the investigation starts at the
+# process and the server log is the only place the truth appears (`OPTIONS … 400`). Measured: the
+# same preflight 200 from `http://localhost:3000` and 400 from `http://127.0.0.1:3000`.
 _cors_origins = [
     "http://localhost:3000",
     "http://localhost:3001",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
     "https://bbterminal.vercel.app",
     "https://bbterminal-api.vercel.app",
 ]

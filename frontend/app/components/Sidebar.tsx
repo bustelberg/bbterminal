@@ -12,7 +12,7 @@ import { apiFetch } from '../../lib/apiFetch';
 import { isUserAllowedPath } from '../../lib/userAllowedPaths';
 import { useSidebarCopy, type NavKey } from './sidebarCopy';
 import LangSwitch from './LangSwitch';
-import { useLang } from '../../lib/i18n';
+import { claimLangFor, useLang } from '../../lib/i18n';
 
 // ⚠⚠ NO `label` HERE — the name of a page is COPY and lives in `sidebarCopy.ts`, keyed by href.
 // This file owns the ORDER, the sections and the visibility rules, none of which is a language.
@@ -70,7 +70,10 @@ const navItems: NavEntry[] = [
 ];
 
 
-const AUTH_PAGES = ['/login', '/set-password'];
+// ⚠ `/auth/confirm` BELONGS HERE AND WAS MISSING. It is a signed-out page like the other two —
+// the whole point is that nobody is authenticated on it yet — so the rail rendered beside it,
+// which on a phone meant the mobile top bar sat above a card whose only control is one button.
+const AUTH_PAGES = ['/login', '/set-password', '/auth/confirm'];
 
 function readViewAsCookie(): boolean {
   if (typeof document === 'undefined') return false;
@@ -186,6 +189,27 @@ export default function Sidebar({ initialUser }: Props) {
   const [storedSessions, setStoredSessions] = useState<StoredSession[]>([]);
   const [switching, setSwitching] = useState(false);
 
+  /**
+   * ⚠⚠ THE LANGUAGE IS CLAIMED FROM THE SERVER-RESOLVED IDENTITY, BEFORE ANY NETWORK CALL. The
+   * claim below in `refresh()` sits behind `await supabase.auth.getUser()`, and on the first load
+   * after this rule shipped that meant: paint the whole app in the previous reader's language,
+   * wait out a Supabase round trip (100 ms to a couple of SECONDS locally), then repaint every
+   * label in Dutch. Reported as "something changes a couple of seconds after load" — and the thing
+   * changing was every string on the page, mid-read.
+   *
+   * `initialUser` comes from the root layout, which already resolved the session server-side, so
+   * it is known at FIRST RENDER. Claiming here collapses the repaint into hydration, which is the
+   * corrected paint `lib/i18n.ts` already documents and accepts.
+   *
+   * ⚠ NON-NULL ONLY. A null `initialUser` is not proof of being signed out — it is also the
+   * transient race `refresh()` exists to absorb — and claiming for `null` here would wipe a live
+   * reader's choice on any load where the server cookie read lost that race. The signed-out claim
+   * stays in the two branches below that actually know.
+   */
+  useEffect(() => {
+    if (initialUser?.email) claimLangFor(initialUser.email);
+  }, [initialUser]);
+
   useEffect(() => {
     const supabase = createClient();
 
@@ -204,6 +228,13 @@ export default function Sidebar({ initialUser }: Props) {
       if (user?.email) {
         // Got a real user — adopt it as the live state.
         setEmail(user.email);
+        // ⚠⚠ THE LANGUAGE FOLLOWS THE ACCOUNT, NOT THE BROWSER PROFILE. `bb:lang` defaults to `nl`
+        // only when NOTHING is stored, and the only thing that ever stores it is somebody pressing
+        // the switch — so a new user signing up on a machine where an earlier account pressed EN
+        // read English, having chosen nothing. ⚠ CALLED ONLY IN THE THREE BRANCHES THAT KNOW THE
+        // ANSWER, never on the transient-null fall-through below: claiming for `null` there would
+        // wipe a live reader's choice on every duplicate-tab token refresh.
+        claimLangFor(user.email);
         const meta = (user.app_metadata ?? {}) as { role?: string };
         const detectedRole: 'admin' | 'user' = meta.role === 'admin' ? 'admin' : 'user';
         setRole(detectedRole);
@@ -223,12 +254,14 @@ export default function Sidebar({ initialUser }: Props) {
         // where a null user should blank the UI.
         setEmail(null);
         setRole(null);
+        claimLangFor(null);
       } else if (initialUser == null) {
         // No initial server-side user AND client also sees none — show
         // the unauthenticated state (no sidebar). This is the standard
         // "logged out" path on auth pages or first visit.
         setEmail(null);
         setRole(null);
+        claimLangFor(null);
       }
       // Otherwise: a transient null on initial mount or a TOKEN_REFRESHED
       // event from a concurrent tab. Leave the sidebar as-is; the next
@@ -646,7 +679,36 @@ export default function Sidebar({ initialUser }: Props) {
           // need the magic-link impersonation flow on first switch.
           const storedEmails = new Set(storedSessions.map((s) => s.email));
           const newUsers = otherUsers.filter((u) => u.email && !storedEmails.has(u.email));
-          const isImpersonating = otherStored.length > 0 && role === 'user';
+          /**
+           * ⚠⚠ IMPERSONATION IS AN ADMIN GETTING *INTO* A USER ACCOUNT, SO THE EVIDENCE IS AN
+           * ADMIN SESSION TO GO BACK TO — NOT MERELY "SOME OTHER SESSION EXISTS". The test was
+           * `otherStored.length > 0 && role === 'user'`, which is true for a brand-new ordinary
+           * user the moment ANY second session is in this browser's `bbterminal_sessions`: signing
+           * up on a shared or previously-used machine badged them **impersonating** on their very
+           * first visit, next to a Delete account button. Nothing was actually impersonated — they
+           * were signed in as themselves — and a non-admin cannot impersonate anyone: the switch
+           * flow goes through `/api/auth/impersonate`, which is admin-only server-side.
+           *
+           * ⚠ IT STILL HAS TO BE TRUE FOR THE REAL CASE, which is why the badge is not simply
+           * `role === 'admin'`: an impersonating admin IS signed in as a `user`, and this badge
+           * plus the menu under it are their only way back.
+           */
+          const adminReturn = otherStored.filter((s) => s.role === 'admin');
+          const isImpersonating = role === 'user' && adminReturn.length > 0;
+          /**
+           * ⚠ AND THE SWITCHER ITSELF IS ADMIN-ONLY, for the same reason. A non-admin was offered
+           * the chevron and the "Switch to (instant)" list, i.e. one click into any other session
+           * whose tokens happen to be in this browser. `switchToStoredSession` calls `setSession()`
+           * with stored tokens, so it never asks the server permission — the gate can only be here.
+           */
+          const canSwitch = role === 'admin' || isImpersonating;
+          if (!canSwitch) {
+            return (
+              <div className="w-full px-3 py-1.5 text-sm text-fg-soft truncate" title={email}>
+                {email}
+              </div>
+            );
+          }
           return (
             <div className="relative" ref={accountMenuRef}>
               <button

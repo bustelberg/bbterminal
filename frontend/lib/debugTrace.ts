@@ -154,7 +154,42 @@ export function traceRequest(
             'color:#6b7280', '');
           return;
         }
-        console.error(`%c[${PREFIX}:api]%c ${method} ${path} — FAILED after ${ms(performance.now() - t0)}`,
+        /**
+         * ⚠⚠ `TypeError: Failed to fetch` IS THE ONE ERROR THAT NAMES NOTHING, AND ITS DURATION
+         * DOES NOT DISAMBIGUATE IT EITHER. It is what the browser raises whenever no response
+         * reached the page, which covers a dead backend and a REJECTED CORS PREFLIGHT alike — and
+         * a rejected preflight is a real, fast, 400-answering round trip, so it lands anywhere
+         * from 5 ms to 300 ms and looks exactly like a refused connection. This comment claimed
+         * the opposite for one afternoon (2026-09-08) and sent the investigation to the wrong
+         * process twice; the backend was up the whole time, answering `OPTIONS /api/jobs 400`
+         * because the tab was on `http://127.0.0.1:3000` and only `http://localhost:3000` was
+         * allow-listed.
+         *
+         * ⚠ SO THE HINT POINTS AT THE SERVER LOG rather than guessing. The browser is the one
+         * place the cause is NOT visible: no response means no status and no body, and CORS
+         * failures are deliberately opaque to script. One `OPTIONS … 400` line at the other end
+         * settles it in a glance.
+         *
+         * ⚠ THE HINT IS APPENDED, THE ORIGINAL ERROR STILL LOGGED. This reads the message, which
+         * is the sniffing `cancelled` above exists to avoid — but that test decides CONTROL FLOW
+         * (is this a failure at all) while this one only adds a sentence, so a wrong guess costs
+         * a misleading hint next to the real error rather than a swallowed failure.
+         *
+         * ⚠ IT GOES IN THE FORMAT STRING, NOT IN A TRAILING ARGUMENT. Passed as an extra argument
+         * it is a VALUE, so the console (and Next's error overlay) renders it quoted with its
+         * newline as a literal `\n` — the advice arrives as one unreadable line inside the error
+         * it was meant to explain. Shipped that way once, in the message that reported this.
+         */
+        const netHint = err instanceof TypeError && /failed to fetch|networkerror|load failed/i
+          .test(err.message)
+          ? '\n  ↳ No HTTP response reached this page, so there is nothing here to inspect —'
+            + ' READ THE BACKEND LOG, which is the only place the cause appears.'
+            + `\n     An "OPTIONS ${path} 400" line there means CORS rejected the preflight:`
+            + ` this page's origin (${typeof location === 'undefined' ? '?' : location.origin})`
+            + " is not in the backend's allow-list — note that localhost and 127.0.0.1 are"
+            + ' different origins. No line at all means nothing was listening.'
+          : '';
+        console.error(`%c[${PREFIX}:api]%c ${method} ${path} — FAILED after ${ms(performance.now() - t0)}${netHint}`,
           'color:#c33', '', err ?? '');
         return;
       }

@@ -5,6 +5,11 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { describeAuthError, hasAuthError } from '@/lib/authError'
+import AuthShell, {
+  AuthNotice,
+  authButtonClass,
+  authSecondaryButtonClass,
+} from '@/app/components/auth/AuthShell'
 
 /**
  * Where an email link lands — and it does NOT sign anyone in until a person clicks.
@@ -128,37 +133,33 @@ function Confirm() {
     router.replace(safeNext)
   }
 
-  return (
-    <div className="min-h-screen bg-scrim flex items-center justify-center p-6">
-      <div className="w-full max-w-sm border border-neutral-800 rounded p-8 space-y-4">
-        <h1 className="font-mono text-base font-bold text-fg-strong">BBTerminal</h1>
+  if (problem) {
+    return (
+      <AuthShell
+        title="That link did not work"
+        subtitle="Nothing is wrong with your account — the link itself is spent or was opened elsewhere."
+      >
+        <div className="space-y-4">
+          <AuthNotice kind="error">{problem}</AuthNotice>
+          <Link href="/login" className={authSecondaryButtonClass}>
+            Request a new link
+          </Link>
+        </div>
+      </AuthShell>
+    )
+  }
 
-        {problem ? (
-          <>
-            <p className="font-mono text-xs text-neg-400 leading-relaxed">{problem}</p>
-            <Link href="/login"
-              className="block text-center bg-neutral-700 hover:bg-neutral-600 text-fg-strong font-mono text-sm rounded px-4 py-2 transition-colors">
-              Request a new link
-            </Link>
-          </>
-        ) : (
-          <>
-            <p className="font-mono text-xs text-fg-subtle leading-relaxed">
-              Press the button to confirm your email address and continue.
-            </p>
-            <button type="button" onClick={confirm} disabled={busy}
-              className="w-full bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 text-fg-strong font-mono text-sm rounded px-4 py-2 transition-colors">
-              {busy ? 'Confirming…' : 'Confirm my email'}
-            </button>
-            {/* ⚠ SAID OUT LOUD. Without a sentence here the extra click reads as a pointless step,
-                and the first thing anyone does with a pointless step is try to remove it. */}
-            <p className="font-mono text-[10px] text-fg-faint leading-relaxed">
-              This step is here because mail scanners open links automatically. Nothing is used up
-              until you press the button.
-            </p>
-          </>
-        )}
-      </div>
-    </div>
+  return (
+    <AuthShell
+      title="Confirm your email"
+      subtitle="One press and you are through to choosing a password."
+      /* ⚠ SAID OUT LOUD. Without a sentence here the extra click reads as a pointless step, and the
+         first thing anyone does with a pointless step is try to remove it. */
+      footer="This step exists because mail scanners open links automatically. Nothing is used up until you press the button."
+    >
+      <button type="button" onClick={confirm} disabled={busy} className={authButtonClass}>
+        {busy ? 'Confirming…' : 'Confirm my email'}
+      </button>
+    </AuthShell>
   )
 }

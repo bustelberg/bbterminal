@@ -4,6 +4,12 @@ import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '../../lib/supabase/client'
 import { describeSendError } from '../../lib/authError'
+import AuthShell, {
+  AuthNotice,
+  authButtonClass,
+  authFieldClass,
+  authLabelClass,
+} from '../components/auth/AuthShell'
 
 const ALLOWED_DOMAIN = 'bustelberg.nl'
 const ALLOWED_EMAILS = (process.env.NEXT_PUBLIC_ALLOWED_EMAILS ?? '')
@@ -94,7 +100,15 @@ function LoginForm() {
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
-        setError(error.message)
+        // ⚠ FULL DETAIL TO THE CONSOLE, ONE SENTENCE TO THE SCREEN — the house rule, and this was
+        // the last place in the flow still printing a library string. "Invalid login credentials"
+        // is Supabase deliberately refusing to say WHICH half was wrong (saying so would enumerate
+        // accounts), so the screen has to turn that into something a person can act on.
+        console.warn('[login] sign-in failed:', error)
+        setError(/invalid login credentials/i.test(error.message)
+          ? 'That email and password did not match. Check them, or email yourself a sign-in link '
+            + 'below if you have not chosen a password yet.'
+          : error.message)
       } else {
         router.push('/')
         router.refresh()
@@ -104,73 +118,92 @@ function LoginForm() {
     setLoading(false)
   }
 
-  return (
-    <div className="min-h-screen bg-page flex items-center justify-center">
-      <div className="w-full max-w-sm bg-card border border-neutral-800/40 rounded-xl p-8">
-        <h1 className="text-lg font-semibold text-fg-strong mb-1">BBTerminal</h1>
-        <p className="text-sm text-fg-subtle mb-6">
-          {mode === 'signin' ? 'Sign in to your account' : 'Request access'}
-        </p>
+  const signin = mode === 'signin'
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+  function switchMode() {
+    setMode(signin ? 'signup' : 'signin')
+    setError(null)
+    setInfo(null)
+  }
+
+  return (
+    <AuthShell
+      title={signin ? 'Welcome back' : 'Request access'}
+      subtitle={signin
+        ? 'Sign in to continue to your terminal.'
+        : 'We will email you a link to confirm your address — no password needed yet.'}
+      footer={
+        <>
+          {signin ? 'First time here?' : 'Already have an account?'}{' '}
+          <button
+            type="button"
+            onClick={switchMode}
+            className="font-medium text-accent-400 hover:text-accent-500 underline underline-offset-2 transition-colors"
+          >
+            {signin ? 'Request access' : 'Sign in instead'}
+          </button>
+        </>
+      }
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="email" className={authLabelClass}>Email</label>
+          <input
+            id="email"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoComplete="email"
+            autoFocus
+            className={authFieldClass}
+            placeholder="you@bustelberg.nl"
+          />
+        </div>
+
+        {signin && (
           <div>
-            <label className="block text-xs font-medium text-fg-muted mb-1.5">Email</label>
+            <label htmlFor="password" className={authLabelClass}>Password</label>
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
               required
-              autoComplete="email"
-              className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors"
-              placeholder="you@bustelberg.nl"
+              autoComplete="current-password"
+              className={authFieldClass}
+              placeholder="••••••••"
             />
           </div>
+        )}
 
-          {mode === 'signin' && (
-            <div>
-              <label className="block text-xs font-medium text-fg-muted mb-1.5">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                autoComplete="current-password"
-                className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2.5 text-sm text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors"
-                placeholder="••••••••"
-              />
-            </div>
-          )}
+        {error && <AuthNotice kind="error">{error}</AuthNotice>}
+        {info && <AuthNotice kind="info">{info}</AuthNotice>}
 
-          {error && <p className="text-xs text-neg-400">{error}</p>}
-          {info  && <p className="text-xs text-pos-400">{info}</p>}
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-accent-600 hover:bg-accent-500 disabled:opacity-50 text-fg-strong text-sm font-medium rounded-lg px-4 py-2.5 transition-colors"
-          >
-            {loading
-              ? 'Please wait...'
-              : mode === 'signin'
+        <button type="submit" disabled={loading} className={authButtonClass}>
+          {loading
+            ? (signin ? 'Signing in…' : 'Sending…')
+            : signin
               ? 'Sign in'
-              : 'Send confirmation link'}
-          </button>
-        </form>
+              : 'Email me a link'}
+        </button>
+      </form>
 
-        <p className="mt-5 text-xs text-fg-faint text-center">
-          {mode === 'signin' ? 'New user?' : 'Already have an account?'}{' '}
+      {/* ⚠ SIGN-IN MODE ONLY. In signup mode the button above already sends a link, so offering a
+          second way to ask for one beside it is two controls doing one thing. */}
+      {signin && (
+        <p className="mt-4 text-xs text-fg-faint text-center leading-relaxed">
+          Forgotten your password?{' '}
           <button
-            onClick={() => {
-              setMode(mode === 'signin' ? 'signup' : 'signin')
-              setError(null)
-              setInfo(null)
-            }}
-            className="text-accent-400 hover:text-accent-300 transition-colors"
+            type="button"
+            onClick={switchMode}
+            className="text-accent-400 hover:text-accent-500 underline underline-offset-2 transition-colors"
           >
-            {mode === 'signin' ? 'Request access' : 'Sign in'}
-          </button>
+            Email yourself a sign-in link
+          </button>{' '}
+          and choose a new one.
         </p>
-      </div>
-    </div>
+      )}
+    </AuthShell>
   )
 }

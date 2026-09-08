@@ -4,6 +4,15 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '../../lib/supabase/client'
+import AuthShell, {
+  AuthNotice,
+  authButtonClass,
+  authFieldClass,
+  authLabelClass,
+  authSecondaryButtonClass,
+} from '../components/auth/AuthShell'
+
+const MIN_LENGTH = 8
 
 /**
  * Choose a permanent password — reachable only with a live session from `/auth/confirm`.
@@ -22,6 +31,7 @@ export default function SetPasswordPage() {
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [reveal, setReveal] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   // `null` = still checking. ⚠ THREE STATES, NOT TWO: rendering the form while the answer is
@@ -40,16 +50,29 @@ export default function SetPasswordPage() {
     return () => { alive = false }
   }, [supabase])
 
+  /**
+   * ⚠⚠ THE TWO RULES ARE CHECKED WHILE TYPING, NOT ONLY AT SUBMIT. Reported from the live form:
+   * fifteen characters in the first box, eight in the second, and the page said nothing until the
+   * button was pressed — so the first thing this screen ever tells a new user is that they got it
+   * wrong. Both rules are decidable from what is on screen, so there is no reason to wait.
+   *
+   * ⚠ THE MISMATCH LINE IS SUPPRESSED WHILE THE SECOND BOX IS EMPTY, and the length line while the
+   * first is. "Too short" under an empty field is a complaint about not having typed yet.
+   */
+  const tooShort = password.length > 0 && password.length < MIN_LENGTH
+  const mismatch = confirm.length > 0 && password !== confirm
+  const ready = password.length >= MIN_LENGTH && password === confirm
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
 
     if (password !== confirm) {
-      setError('Passwords do not match.')
+      setError('The two passwords do not match.')
       return
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.')
+    if (password.length < MIN_LENGTH) {
+      setError(`Password must be at least ${MIN_LENGTH} characters.`)
       return
     }
 
@@ -72,9 +95,15 @@ export default function SetPasswordPage() {
 
   if (signedIn === null) {
     return (
-      <div className="min-h-screen bg-scrim flex items-center justify-center">
-        <p className="font-mono text-xs text-fg-subtle">Checking your sign-in link…</p>
-      </div>
+      <AuthShell title="One moment" subtitle="Checking your sign-in link…">
+        <div className="flex items-center gap-3 text-sm text-fg-subtle">
+          <span
+            aria-hidden
+            className="h-4 w-4 shrink-0 rounded-full border-2 border-accent-300 border-t-accent-600 animate-spin"
+          />
+          This only takes a second.
+        </div>
+      </AuthShell>
     )
   }
 
@@ -82,70 +111,90 @@ export default function SetPasswordPage() {
   // succeed — and the failure would arrive after the work, phrased as a fault in the password.
   if (!signedIn) {
     return (
-      <div className="min-h-screen bg-scrim flex items-center justify-center">
-        <div className="w-full max-w-sm border border-neutral-800 rounded p-8 space-y-4">
-          <h1 className="font-mono text-base font-bold text-fg-strong">BBTerminal</h1>
-          <p className="font-mono text-xs text-fg-subtle leading-relaxed">
-            You are not signed in, so there is no account to set a password on yet. Sign-in links
-            work once, expire after an hour, and must be opened in the same browser you requested
-            them from.
-          </p>
-          <Link href="/login"
-            className="block text-center bg-neutral-700 hover:bg-neutral-600 text-fg-strong font-mono text-sm rounded px-4 py-2 transition-colors">
+      <AuthShell
+        title="This link is no longer active"
+        subtitle="There is no account signed in, so there is nothing to set a password on yet."
+      >
+        <div className="space-y-4">
+          <AuthNotice kind="error">
+            Sign-in links work once, expire after an hour, and have to be opened in the same
+            browser you asked for them from.
+          </AuthNotice>
+          <Link href="/login" className={authSecondaryButtonClass}>
             Request a new link
           </Link>
         </div>
-      </div>
+      </AuthShell>
     )
   }
 
   return (
-    <div className="min-h-screen bg-scrim flex items-center justify-center">
-      <div className="w-full max-w-sm border border-neutral-800 rounded p-8">
-        <h1 className="font-mono text-base font-bold text-fg-strong mb-1">BBTerminal</h1>
-        <p className="font-mono text-xs text-fg-subtle mb-6">
-          Choose a password for your account
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block font-mono text-xs text-fg-muted mb-1">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              autoComplete="new-password"
-              className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm font-mono text-fg-strong placeholder-fg-faint focus:outline-none focus:border-neutral-500"
-              placeholder="Min. 8 characters"
-            />
-          </div>
-          <div>
-            <label className="block font-mono text-xs text-fg-muted mb-1">
-              Confirm password
+    <AuthShell
+      title="Choose a password"
+      subtitle="Last step — pick something you will remember, then you are in."
+      footer={`At least ${MIN_LENGTH} characters. You can change it later from your account menu.`}
+    >
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <div className="flex items-baseline justify-between mb-1.5">
+            {/* ⚠ NOT `${authLabelClass} mb-0`. Tailwind resolves a conflict by stylesheet order,
+                not by position in the class string, so appending an override is a coin toss —
+                this row carries the spacing itself and the label is spelled out. */}
+            <label htmlFor="password" className="block text-xs font-medium text-fg-muted">
+              Password
             </label>
-            <input
-              type="password"
-              value={confirm}
-              onChange={(e) => setConfirm(e.target.value)}
-              required
-              autoComplete="new-password"
-              className="w-full bg-neutral-900 border border-neutral-700 rounded px-3 py-2 text-sm font-mono text-fg-strong placeholder-fg-faint focus:outline-none focus:border-neutral-500"
-              placeholder="••••••••"
-            />
+            {/* ⚠ ONE TOGGLE FOR BOTH FIELDS. Two would let someone reveal the box they typed
+                correctly and keep the other hidden, which is the opposite of what it is for. */}
+            <button
+              type="button"
+              onClick={() => setReveal((v) => !v)}
+              className="text-xs text-accent-400 hover:text-accent-500 transition-colors"
+            >
+              {reveal ? 'Hide' : 'Show'}
+            </button>
           </div>
+          <input
+            id="password"
+            type={reveal ? 'text' : 'password'}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            autoComplete="new-password"
+            autoFocus
+            aria-invalid={tooShort || undefined}
+            className={authFieldClass}
+            placeholder={`Min. ${MIN_LENGTH} characters`}
+          />
+          {tooShort && (
+            <p className="mt-1.5 text-xs text-fg-subtle">
+              {MIN_LENGTH - password.length} more character{MIN_LENGTH - password.length === 1 ? '' : 's'} to go.
+            </p>
+          )}
+        </div>
 
-          {error && <p className="font-mono text-xs text-red-400">{error}</p>}
+        <div>
+          <label htmlFor="confirm" className={authLabelClass}>Confirm password</label>
+          <input
+            id="confirm"
+            type={reveal ? 'text' : 'password'}
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            required
+            autoComplete="new-password"
+            aria-invalid={mismatch || undefined}
+            className={`${authFieldClass} ${mismatch ? 'border-neg-300 focus:border-neg-400 focus:ring-neg-400/25' : ''}`}
+            placeholder="••••••••"
+          />
+          {mismatch && <p className="mt-1.5 text-xs text-neg-400">The two passwords do not match yet.</p>}
+          {ready && <p className="mt-1.5 text-xs text-pos-400">Passwords match.</p>}
+        </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-neutral-700 hover:bg-neutral-600 disabled:opacity-50 text-fg-strong font-mono text-sm rounded px-4 py-2 transition-colors"
-          >
-            {loading ? 'Saving...' : 'Set password & continue'}
-          </button>
-        </form>
-      </div>
-    </div>
+        {error && <AuthNotice kind="error">{error}</AuthNotice>}
+
+        <button type="submit" disabled={loading} className={authButtonClass}>
+          {loading ? 'Saving…' : 'Set password & continue'}
+        </button>
+      </form>
+    </AuthShell>
   )
 }
