@@ -17,10 +17,6 @@ import { useLang, type Lang } from '../../../lib/i18n';
 export type SecurityCopy = {
   title: string;
   intro: string;
-  /** ⚠⚠ THE POLICY, AND IT MUST STAY TRUE. It said "enrolling does not lock anything down yet"
-   *  while that was so; the day the gate shipped that sentence became the one false statement on
-   *  a page whose entire job is to be trusted about exactly this. */
-  policy: string;
   loading: string;
   noneTitle: string;
   noneBody: string;
@@ -49,9 +45,6 @@ export type SecurityCopy = {
   removeConfirm: string;
   removing: string;
   removed: string;
-  /** ⚠ No backup codes exist — this is the entire recovery story, so it is on the page. */
-  recoveryTitle: string;
-  recoveryBody: string;
   /** ⚠ Shown BEFORE anyone scans, when this machine's clock is out. See `clockWarning`. */
   clockWarning: (seconds: number, ahead: boolean) => string;
   /** The `/mfa` gate — a different screen, same feature, so one copy module. */
@@ -69,8 +62,6 @@ export type SecurityCopy = {
 const EN: SecurityCopy = {
   title: 'Two-factor sign-in',
   intro: 'Add an authenticator app so signing in needs your password and a code from your phone.',
-  policy: 'An authenticator is required to use BBTerminal. Your sign-in lasts a month; after that '
-    + 'you sign in again with your password and a code.',
   loading: 'Checking your authenticators…',
   noneTitle: 'No authenticator yet',
   noneBody: 'Set one up to continue — until you do, this is the only page you can open.',
@@ -99,9 +90,6 @@ const EN: SecurityCopy = {
   removeConfirm: 'Remove authenticator',
   removing: 'Removing…',
   removed: 'Authenticator removed.',
-  recoveryTitle: 'If you lose your phone',
-  recoveryBody: 'There are no backup codes. Add a second authenticator on another device while you '
-    + 'can — otherwise an admin has to remove the old one for you before you can sign in again.',
   clockWarning: (seconds, ahead) =>
     `This computer's clock is ${seconds} seconds ${ahead ? 'ahead of' : 'behind'} the server. `
     + 'Codes are only accepted within about 30 seconds, so two-factor will fail until you fix it '
@@ -123,8 +111,6 @@ const NL: SecurityCopy = {
   title: 'Tweestapsverificatie',
   intro: 'Voeg een authenticator-app toe, zodat inloggen je wachtwoord én een code van je telefoon '
     + 'vereist.',
-  policy: 'Een authenticator is verplicht om BBTerminal te gebruiken. Je blijft een maand '
-    + 'ingelogd; daarna log je opnieuw in met je wachtwoord én een code.',
   loading: 'Je authenticators worden opgehaald…',
   noneTitle: 'Nog geen authenticator',
   noneBody: 'Stel er een in om verder te gaan — tot die tijd is dit de enige pagina die je kunt openen.',
@@ -154,9 +140,6 @@ const NL: SecurityCopy = {
   removeConfirm: 'Authenticator verwijderen',
   removing: 'Verwijderen…',
   removed: 'Authenticator verwijderd.',
-  recoveryTitle: 'Als je je telefoon kwijtraakt',
-  recoveryBody: 'Er zijn geen back-upcodes. Voeg nu een tweede authenticator op een ander apparaat '
-    + 'toe — anders moet een beheerder de oude eerst verwijderen voordat je weer kunt inloggen.',
   clockWarning: (seconds, ahead) =>
     `De klok van deze computer loopt ${seconds} seconden ${ahead ? 'voor op' : 'achter op'} de `
     + 'server. Codes worden maar ongeveer 30 seconden geaccepteerd, dus tweestapsverificatie '

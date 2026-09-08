@@ -33,18 +33,6 @@ describe('the security page copy', () => {
     }
   })
 
-  it('⚠⚠ states BOTH halves of the policy, in both languages', () => {
-    // Two facts a reader has to leave with: an authenticator is REQUIRED, and the sign-in lasts a
-    // MONTH. This string said the opposite of the first for as long as the gate was unbuilt — the
-    // one failure mode this screen cannot afford, so both halves are pinned rather than assumed.
-    expect(SECURITY_COPY.en.policy).toMatch(/required/i)
-    expect(SECURITY_COPY.en.policy).toMatch(/month/i)
-    expect(SECURITY_COPY.nl.policy).toMatch(/verplicht/i)
-    expect(SECURITY_COPY.nl.policy).toMatch(/maand/i)
-    // ⚠ And it must no longer claim enrolling changes nothing.
-    expect(SECURITY_COPY.en.policy).not.toMatch(/does not lock|password on its own/i)
-  })
-
   it('⚠⚠ the clock warning blames THIS COMPUTER, never the phone', () => {
     // The measurement that settles it is browser-vs-SERVER, and in practice a phone on automatic
     // time is right while a laptop drifts. The first version of the failure copy assumed the
@@ -64,11 +52,4 @@ describe('the security page copy', () => {
     expect(SECURITY_COPY.nl.clockWarning(59, true)).toMatch(/voor op/i);
     expect(SECURITY_COPY.nl.clockWarning(59, false)).toMatch(/achter op/i);
   });
-
-  it('⚠ states the recovery story, because there are no backup codes', () => {
-    expect(SECURITY_COPY.en.recoveryBody).toMatch(/no backup codes/i)
-    expect(SECURITY_COPY.en.recoveryBody).toMatch(/admin/i)
-    expect(SECURITY_COPY.nl.recoveryBody).toMatch(/back-upcodes/i)
-    expect(SECURITY_COPY.nl.recoveryBody).toMatch(/beheerder/i)
-  })
 })

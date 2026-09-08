@@ -31,20 +31,37 @@ MIGRATIONS = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
 _HASH_RE = re.compile(r"'([0-9a-f]{64})'")
 
 
-def _sql(name_fragment: str) -> str:
-    hits = sorted(MIGRATIONS.glob(f"*{name_fragment}*.sql"))
-    assert hits, f"no migration matching *{name_fragment}*.sql"
-    return "\n".join(p.read_text(encoding="utf-8") for p in hits)
+def _latest_function_sql() -> str:
+    """The NEWEST migration that defines `set_admin_role_on_signup()`.
+
+    ⚠⚠ NEWEST, NOT ALL OF THEM. Earlier migrations still carry the OLD hash list and must not be
+    edited — an applied migration records what a database already DID, and rewriting it makes the
+    file and the history stop describing each other. The only question this test can honestly ask
+    is whether the definition IN FORCE matches the backend, and that is the last one to run.
+    """
+    hits = sorted(
+        p for p in MIGRATIONS.glob("*.sql")
+        if "FUNCTION public.set_admin_role_on_signup" in p.read_text(encoding="utf-8")
+    )
+    assert hits, "no migration defines set_admin_role_on_signup()"
+    return hits[-1].read_text(encoding="utf-8")
 
 
 class TestTheAllowlistIsTheSameEverywhere:
-    def test_the_trigger_function_carries_exactly_the_backend_hashes(self):
-        found = set(_HASH_RE.findall(_sql("admin_email_hash")))
-        assert found == set(_ADMIN_EMAIL_HASHES)
+    def test_the_live_trigger_function_carries_exactly_the_backend_hashes(self):
+        """⚠ The DEFINITION IN FORCE, i.e. the newest one. A hash the backend honours but the
+        trigger does not means a signup that the API treats as admin and the frontend renders as a
+        user — the desync `_resolve_role` exists to warn about."""
+        sql = _latest_function_sql()
+        body = sql[sql.index("admin_hashes"):sql.index("BEGIN")]
+        assert set(_HASH_RE.findall(body)) == set(_ADMIN_EMAIL_HASHES)
 
-    def test_the_repair_migration_carries_them_too(self):
-        found = set(_HASH_RE.findall(_sql("admin_signup_trigger")))
-        assert found == set(_ADMIN_EMAIL_HASHES)
+    def test_there_is_exactly_one_hardcoded_admin(self):
+        """⚠⚠ NARROWED FROM TWO TO ONE (2026-09-08, on request). Pinned as a COUNT because the
+        second address was not merely dropped — with one admin there is no longer a second account
+        able to reset the first's authenticator, so re-adding one is a decision about 2FA recovery
+        and not a tidy-up."""
+        assert len(_ADMIN_EMAIL_HASHES) == 1
 
 
 class TestTheTriggerIsActuallyAttached:
@@ -66,14 +83,23 @@ class TestTheTriggerIsActuallyAttached:
 
 
 class TestWhoIsAnAdmin:
-    @pytest.mark.parametrize("email", ["reinier@bustelberg.nl", "reinier7175@gmail.com"])
-    def test_the_hardcoded_addresses_match(self, email):
-        assert _is_hardcoded_admin_email(email)
+    def test_the_hardcoded_address_matches(self):
+        assert _is_hardcoded_admin_email("reinier7175@gmail.com")
+
+    @pytest.mark.parametrize("email", ["reinier@bustelberg.nl"])
+    def test_the_demoted_address_no_longer_matches(self, email):
+        """⚠⚠ REMOVED FROM THE ALLOWLIST 2026-09-08, on request — and removing it was only half
+        the job. The account carried an EXPLICIT `role: admin` from an earlier backfill, and
+        `_resolve_role` prefers an explicit role to this list on purpose, so the row had to be set
+        to 'user' as well (migration 20260908150000). Pinned in BOTH directions because the two
+        halves fail differently: this one alone leaves the account admin for ever."""
+        assert not _is_hardcoded_admin_email(email)
+        assert _resolve_role(None, email) == "user"
 
     def test_matching_ignores_case_and_padding(self):
         """The trigger lowercases before hashing (`lower(NEW.email)`); the backend must agree, or
         an address typed with a capital is an admin in one half of the app and not the other."""
-        assert _is_hardcoded_admin_email("  REINIER@Bustelberg.NL  ")
+        assert _is_hardcoded_admin_email("  REINIER7175@Gmail.COM  ")
 
     def test_everyone_else_is_a_plain_user(self):
         assert not _is_hardcoded_admin_email("someone.else@bustelberg.nl")
@@ -82,13 +108,13 @@ class TestWhoIsAnAdmin:
 
     def test_a_missing_role_falls_back_to_the_allowlist(self):
         """This is the state a signup produced while the trigger was missing."""
-        assert _resolve_role(None, "reinier@bustelberg.nl") == "admin"
+        assert _resolve_role(None, "reinier7175@gmail.com") == "admin"
 
     def test_an_explicit_user_role_is_an_intentional_demotion(self):
         """⚠ NOT overridden by the allowlist. The frontend renders whatever `app_metadata.role`
         says, so an allowlist that outranked an explicit 'user' would serve admin data to an
         account every screen draws as a regular user — see `_resolve_role`'s own docstring."""
-        assert _resolve_role("user", "reinier@bustelberg.nl") == "user"
+        assert _resolve_role("user", "reinier7175@gmail.com") == "user"
 
     def test_an_explicit_admin_role_stands_on_its_own(self):
         assert _resolve_role("admin", "someone.else@bustelberg.nl") == "admin"
