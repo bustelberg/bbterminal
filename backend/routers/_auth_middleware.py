@@ -238,6 +238,16 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     "/api/earnings/fundamental-coverage/ingest",
 })
 
+# ⚠ THE BENCHMARK PROXY REFRESH, BY PATTERN because the index label sits in the middle of the path.
+# ⚠⚠ IT IS A REFRESH, NOT A MUTATION — the standing line for this tier. Pressing it asks the vendor
+# for closes we do not yet hold and stores them; it cannot change what any figure SAYS, only how
+# current it is. The Analyse modal is user-visible and its ⓘ already tells a reader the tile is
+# stale, so leaving the one action that clears it to admins would be an alarm they cannot silence —
+# the exact failure `provenanceFreshness` was rewritten to avoid.
+# ⚠ `POST` ONLY, and the label is `\w+` rather than `.*`: `PROXY` holds ACWI and SP500, and a
+# permissive segment here would hand every future `/api/benchmarks/proxy/...` route to every user.
+_USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
+
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Overview → one row's Refresh (re-scan this book's AIRS reports).
     re.compile(r"^/api/airs/portfolios/[^/]+/refresh/job$"),
@@ -464,6 +474,7 @@ async def enforce_api_auth(
             or _is_latest_close_refresh(path)
             or (request.method == "POST" and _is_user_refresh(path))
             or (request.method == "POST" and path in _USER_POST_READ_PATHS)
+            or (request.method == "POST" and _USER_PROXY_REFRESH.match(path) is not None)
         )
     else:
         allowed = (

@@ -11,7 +11,9 @@ import {
 import { classWeightedReturn } from './classReturn';
 import { equityParts } from './equityParts';
 import { benchmarkProvenance } from './benchmarkSourceNote';
-import { Provenance, ProvenanceFetchedAt, type SourceKey } from '../../../lib/provenance';
+import {
+  Provenance, ProvenanceFetchedAt, ProvenanceRefresh, type SourceKey,
+} from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
@@ -67,12 +69,58 @@ type Row = Axis['rows'][number];
 
 /** The headline band: return + excess (both sources), so the "did it earn its excess?" read is
  *  answered before scrolling. */
-function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
+function Scorecard({ returns, benchmark, onAttribution, attributionActive, onReload }: {
   returns?: ModelPortfolioAnalysis['returns'];
   benchmark: string;
   onAttribution?: () => void;      // launches the YTD Brinson attribution; omitted for a basket
   attributionActive?: boolean;
+  /** ⚠ RE-READS THE ANALYSIS. Without it a targeted refresh stores new closes the tile never
+   *  shows — the reader presses it, is told it worked, and the number does not move. */
+  onReload?: () => void;
 }) {
+  /**
+   * Make the benchmark tile current from its own ⓘ, without re-scraping the whole book.
+   *
+   * ⚠⚠ ONLY THE PROXY-ETF SOURCE HAS A TARGETED REFRESH. `PROXY` holds ACWI and SP500; AEX and any
+   * window opening before the fund existed fall back to the constituent REBUILD, which is a
+   * different (and much larger) job with no per-figure door. Offering the button there would be a
+   * control that cannot work, so `benchmark_source` decides whether it appears at all.
+   *
+   * ⚠ IT RETURNS A MESSAGE, NEVER THROWS ON A 4xx. The card prints what comes back, so "this index
+   * has no proxy" and "the vendor had nothing newer" both land where the press happened.
+   */
+  const refreshBenchmark = returns?.benchmark_source === 'etf'
+    ? async (): Promise<string | null> => {
+      try {
+        const res = await apiFetch(
+          `${API_URL}/api/benchmarks/proxy/${encodeURIComponent(benchmark)}/refresh`,
+          { method: 'POST' },
+        );
+        const body = await res.json().catch(() => null);
+        if (!res.ok) return body?.detail ?? `HTTP ${res.status}`;
+        // ⚠⚠ RE-READ EVEN WHEN NOTHING NEW ARRIVED. The stored closes may be unchanged, but the
+        // FETCH TIME has moved — and that is what turns the badge blue, because our copy now
+        // matches the source. Reloading only on `refreshed` would leave the icon amber after a
+        // successful refresh, which is the exact complaint this was built to answer.
+        onReload?.();
+        // ⚠ `refreshed: false` IS A SUCCESS. The vendor was asked and had nothing newer — the
+        // commonest outcome before a market closes — and reporting it as an error would teach
+        // people the button is broken.
+        // ⚠⚠ SILENT ON SUCCESS (2026-09-08, on request: "this pop up should not happen"). The
+        // reload above turns the badge blue and drops this very button out of the card — the
+        // reader watches the thing they asked for happen, and a dialog restating it is one more
+        // click for information already on screen. Only a FAILURE has anything to say.
+        //
+        // ⚠ `refreshed: false` IS ALSO SUCCESS. The vendor was asked and had nothing newer, which
+        // still makes our copy current — that is precisely what `proxy_fetched_at` records and
+        // what turns the icon blue.
+        return null;
+      } catch (e) {
+        console.warn('[analyse] benchmark proxy refresh failed:', e);
+        return e instanceof Error ? e.message : String(e);
+      }
+    }
+    : undefined;
   const copy = useAnalyseCopy();
   const r = returns;
   const sp = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
@@ -148,7 +196,8 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive }: {
         <Chip label={copy.score.versusReturn(benchmark)} value={sp(r?.benchmark_ytd_pct)}
           valueClass={tone(r?.benchmark_ytd_pct)}
           prov={<Provenance source={bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind="formula"
-            what={bp.what} note={bp.note} how={bp.how} />} />
+            what={bp.what} note={bp.note} how={bp.how} onRefresh={refreshBenchmark}
+            fetchedAt={r?.benchmark_fetched_at} />} />
       </ProvenanceFetchedAt>
       <span className={op} aria-hidden>=</span>
       <Chip label={copy.score.excess} value={spp(excess)} valueClass={tone(excess)}
@@ -2988,7 +3037,17 @@ export default function PortfolioAnalysisModal({
    * `react-hooks/set-state-in-effect` objects to. Recording what the arriving payload was FOR
    * costs one setState in the response handler, where there is already one.
    */
-  const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${refreshSeq}`;
+  /**
+   * ⚠⚠ A LOCAL RELOAD, BESIDE THE PARENT'S `refreshSeq`. That one bumps when the whole-book scan
+   * the OVERVIEW started finishes; this one is for work the modal itself started — a targeted
+   * benchmark refresh, which stores new closes (or a new fetch time) that the payload on screen
+   * predates. Without it the reader presses Refresh, is told it worked, and nothing moves.
+   *
+   * ⚠ IT IS IN `viewKey` TOO, or `stale` would go true on every reload and every chart would put
+   * up its "these bars belong to a different selection" state for the length of one request.
+   */
+  const [reloadSeq, setReloadSeq] = useState(0);
+  const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${refreshSeq}|${reloadSeq}`;
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const stale = data != null && loadedFor !== viewKey;
 
@@ -3025,7 +3084,7 @@ export default function PortfolioAnalysisModal({
     // rebuilds the composition, prices and FX this payload is derived from, so without it the
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reqKey, benchmark, source, assetFilter, refreshSeq]);
+  }, [reqKey, benchmark, source, assetFilter, refreshSeq, reloadSeq]);
 
   // The selected class (null = nothing selected = the whole portfolio). A basket is never a
   // portfolio-of-classes, so it stays on the whole-basket view.
@@ -3060,6 +3119,26 @@ export default function PortfolioAnalysisModal({
        "this particular number is stale" and is the most misleading outcome available.
        ⚠ Deliberately NOT re-indenting the subtree below: a wrapper is one line, and re-flowing
        ~230 lines of dense JSX would bury it in a diff nobody can read. */
+    /* ⚠⚠ ONE REFRESH ACTION FOR EVERY ⓘ IN HERE (2026-09-08, on request: "most info icons should
+       have it"). Almost every figure in this modal comes from the same rebuild — AIRS composition,
+       the instrument mapping, FX both ways, each holding's price series — so the honest action
+       behind a stale badge on any of them is the book refresh this modal was already handed.
+       ⚠ A CARD WITH A BETTER DOOR STILL WINS: the benchmark tile passes its own `onRefresh`, which
+       asks the vendor for ONE series instead of re-scraping AirSPMS to move one number.
+       ⚠ ABSENT FOR A BASKET, which has no AIRS portfolio behind it — `onRefresh` is undefined
+       there, so the provider supplies nothing and no button appears. A control that cannot work is
+       worse than none. */
+    <ProvenanceRefresh action={onRefresh ? {
+      run: async () => {
+        onRefresh();
+        // ⚠ SILENT, LIKE THE BENCHMARK'S. This starts a background job that already narrates
+        // itself in the progress toast — a dialog here would be a second report of one action,
+        // and the tooltip is gone the moment the pointer moves anyway. ⚠ It returns immediately:
+        // awaiting the job would freeze a popover for minutes, and saying "done" would be a lie
+        // told before the work started.
+        return null;
+      },
+    } : undefined}>
     <ProvenanceFetchedAt at={data?.holdings_fetched_at}>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
       onClick={onClose} role="dialog" aria-modal="true">
@@ -3211,7 +3290,8 @@ export default function PortfolioAnalysisModal({
               {selected && (
                 <div aria-hidden
                   className="col-start-1 row-start-1 invisible h-0 overflow-hidden pointer-events-none">
-                  <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />
+                  <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark}
+                    onReload={() => setReloadSeq((n) => n + 1)} />
                 </div>
               )}
               <div className="col-start-1 row-start-1 min-w-0">
@@ -3301,7 +3381,8 @@ export default function PortfolioAnalysisModal({
                     because a definite cross-size opts out of the column's default `stretch`. */
                 : (
                   <div className="flex flex-col gap-2 self-center min-w-0">
-                    <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark} />
+                    <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark}
+                    onReload={() => setReloadSeq((n) => n + 1)} />
                     {/* ⚠⚠ ITS LAST POINT IS THE `Return` CHIP ABOVE IT, BY CONSTRUCTION. Both read
                         AIRS's own `cumulatief_rendement` — the chart through `value-series`, the
                         chip through `_airs_accounts._year_perf` — so the curve lands on the number
@@ -3523,5 +3604,6 @@ export default function PortfolioAnalysisModal({
       </div>
     </div>
     </ProvenanceFetchedAt>
+    </ProvenanceRefresh>
   );
 }

@@ -12,11 +12,13 @@
  * pill states the freshness. Rendered via {@link InfoTip} so it appears instantly (the native
  * `title=` sits for ~1-2s) and can't be clipped by an overflow ancestor.
  */
+import * as React from 'react';
 import { createContext, useContext } from 'react';
 import InfoTip from '../app/components/InfoTip';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, Legend, TipCard, Worked, type FormulaSymbol } from './tipCard';
 import { ValueBadge } from './dynamicValue';
+import { dialog } from './dialog';
 import { BADGE_NEUTRAL, BADGE_PILL, BADGE_WARN } from './badgeChrome';
 import { trimStop } from './provenanceText';
 import { businessDaysBehind, fetchedToday, lagOwner, snapshotFreshness } from './snapshotAge';
@@ -211,18 +213,86 @@ export type ProvKind = 'copied' | 'formula';
  * it is the same shell with a different field promoted, and it keeps every call site that has not
  * been given a `what` yet rendering correctly rather than showing an empty heading.
  */
+/**
+ * The "make this current" control inside a provenance card.
+ *
+ * ⚠⚠ SUCCESS SAYS NOTHING; ONLY A FAILURE SPEAKS (2026-09-08, on request). A refresh that works
+ * announces itself: the caller re-reads, the badge turns blue and this button drops out of the
+ * card, all in front of the reader who pressed it. A dialog on top of that is one more click for
+ * information already on screen. `run()` resolving to `null` means "it worked, say nothing".
+ *
+ * ⚠ A FAILURE STILL GOES TO THE HOUSE DIALOG, and that is the other half of the same reasoning.
+ * The card used to print its result beside the button — a second, differently-styled status area
+ * inside a HOVER popover, which is the worst possible place for a message somebody needs to read:
+ * it vanishes the moment the pointer leaves. A dialog survives the hover and is where every other
+ * outcome in this app is reported.
+ *
+ * ⚠ ONE ROUND TRIP PER PRESS. Disabled while busy — the vendor call behind this is ~1.3s and a
+ * second press would spend a second call to learn the same thing.
+ *
+ * ⚠⚠ `type="button"` AND `stopPropagation`. This sits in a popover over clickable rows; without
+ * both, pressing Refresh also opens whatever is underneath, which on the Analyse modal is a
+ * drill-down.
+ */
+function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
+  const [busy, setBusy] = React.useState(false);
+  return (
+    <Field label="Update">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={(e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          setBusy(true);
+          void action.run()
+            .then((msg) => { if (msg) void dialog.alert(msg, { title: 'Refresh' }); })
+            // ⚠ A THROW IS AN OUTCOME TOO. Swallowing it leaves the button spinning for ever,
+            // which reads as the app hanging rather than the vendor refusing.
+            .catch((err: unknown) => {
+              console.warn('[provenance] refresh failed:', err);
+              void dialog.alert(err instanceof Error ? err.message : String(err),
+                { title: 'Refresh failed' });
+            })
+            .finally(() => setBusy(false));
+        }}
+        className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-md
+                   bg-accent-200/60 border border-accent-300/60 text-accent-400
+                   hover:bg-accent-200 hover:border-accent-300 active:bg-accent-300/60
+                   disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+      >
+        {/* ⚠ INLINE SVG, NOT AN EMOJI OR A GLYPH. `lib/chartTheme` aside, this app draws its icons;
+            an emoji renders at a different weight on every platform and cannot take `currentColor`. */}
+        <svg className={`w-3 h-3 shrink-0 ${busy ? 'animate-spin' : ''}`} viewBox="0 0 16 16"
+          fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden>
+          <path strokeLinecap="round" d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 2v3h-3" />
+        </svg>
+        {busy ? 'Refreshing…' : (action.label ?? 'Refresh')}
+      </button>
+    </Field>
+  );
+}
+
+
 function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh,
-  worked, legend }: {
+  worked, legend, onRefresh }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
   note?: string; how?: string; kind?: ProvKind;
   worked?: string; legend?: readonly FormulaSymbol[];
   column?: boolean; what?: string;
+  /** See `Provenance`. */
+  onRefresh?: () => Promise<string | null>;
   /** The one verdict — see `provenanceFreshness`. Passed so the card cannot differ from the icon. */
   fresh: { stale: boolean; label: string };
 }) {
   // ⚠ THE COMPOSED LABEL, not the parts — this card names the source once and in full, which is
   // what `sourceLabel` builds. The halves exist for prose that needs them apart; see `sourceField`.
   const s = { label: sourceLabel(source) };
+  // ⚠ THE CARD'S OWN ACTION BEATS THE SURFACE'S. A tile that knows a targeted door (the benchmark
+  // proxy) should use it rather than the whole-book refresh its panel offers everything else.
+  const surface = useContext(RefreshContext);
+  const refreshAction = onRefresh ? { run: onRefresh } : surface;
   // ⚠ THE VERDICT IS PASSED IN, NOT RECOMPUTED. See `provenanceFreshness`: this card recomputing
   // it from `asOf` alone is precisely how it came to contradict the icon that opened it.
   const f = fresh;
@@ -279,6 +349,15 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
                 )
                 : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
         </Field>
+        {/* ⚠⚠ THE ACTION THE AMBER BADGE ALREADY PROMISED. The icon's own aria-label has read
+            "not current; refresh to update" since it was written, and until now there was nowhere
+            to press: the only things that could move a stale figure were a scheduled tick or a
+            whole-book Refresh that re-scrapes AirSPMS to fix one number. Requested 2026-09-08 in
+            those words — "so the user can see its outdated and click refresh on that specific
+            metric".
+            ⚠ ONLY WHEN STALE. A refresh button under a current figure invites a pointless vendor
+            call, and it is the amber badge that makes this an answer rather than a decoration. */}
+        {refreshAction && fresh.stale && <RefreshField action={refreshAction} />}
         {/* ⚠ ONLY WHEN THE BADGE IS AMBER AND WE KNOW BOTH DATES. A "we read this today" line under
             a fresh row is noise; under an amber one it is the difference between an action and a
             dead end. See `whoseLag`. */}
@@ -366,6 +445,36 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
  */
 const FetchedAtContext = createContext<string | null | undefined>(undefined);
 
+/**
+ * The refresh action every ⓘ under here offers, supplied ONCE per surface.
+ *
+ * ⚠⚠ A PROP WOULD HAVE MEANT THREADING IT THROUGH EVERY CARD ON THE DASHBOARD, and most of them
+ * are three components deep inside a panel that has no idea what a refresh is. Requested
+ * 2026-09-08 as "most info icons should have it" — which only works if the surface declares the
+ * action once and the icons pick it up. Same shape as `ProvenanceFetchedAt` directly below, for
+ * exactly the same reason.
+ *
+ * ⚠ A SPECIFIC `onRefresh` PROP STILL WINS. The benchmark tile has a targeted door that refreshes
+ * one series instead of the whole book; where a card knows something better than its surface does,
+ * it says so and that is used.
+ *
+ * ⚠ IT ONLY EVER SHOWS UNDER AN AMBER BADGE. A current figure gets no button, here or by prop.
+ */
+export type ProvenanceRefreshAction = {
+  /** Runs it. Resolve to a message for the reader, or `null` to say nothing. */
+  run: () => Promise<string | null>;
+  /** What the button says, if not "Refresh". */
+  label?: string;
+};
+
+const RefreshContext = createContext<ProvenanceRefreshAction | undefined>(undefined);
+
+export function ProvenanceRefresh({ action, children }: {
+  action?: ProvenanceRefreshAction; children: React.ReactNode;
+}) {
+  return <RefreshContext.Provider value={action}>{children}</RefreshContext.Provider>;
+}
+
 export function ProvenanceFetchedAt({ at, children }: {
   at?: string | null; children: React.ReactNode;
 }) {
@@ -373,7 +482,7 @@ export function ProvenanceFetchedAt({ at, children }: {
 }
 
 export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what,
-  worked, legend }: {
+  worked, legend, onRefresh }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
@@ -387,6 +496,20 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
    *  Answered FIRST, because Source/When/How are all questions about a number the reader has
    *  already identified, and none of them helps someone who cannot tell what they are looking at. */
   what?: string;
+  /**
+   * Make THIS figure current, from inside its own tooltip. Renders a button under `When`, and
+   * ONLY when the badge is amber.
+   *
+   * ⚠ RESOLVE TO AN ERROR STRING OR `null`. The card shows what came back, so a failure is
+   * reported where the press happened instead of vanishing into the console — this is the one
+   * place a reader looks after clicking it.
+   *
+   * ⚠⚠ THE CALLER RELOADS ITS OWN DATA. This component knows nothing about what produced the
+   * figure, so it cannot re-read it; a resolved promise means "the source has been asked", and
+   * whether the number on screen moves is the caller's job. Wiring a refetch in here would make
+   * every ⓘ on the dashboard a data-owner.
+   */
+  onRefresh?: () => Promise<string | null>;
 }) {
   // ⚠ `!column &&` FIRST. A column header must never reach the stale branch, whatever it was
   // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
@@ -417,7 +540,8 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   return (
     <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
       worked={worked} legend={legend}
-      how={how} kind={kind} column={column} what={what} fresh={fresh} />}>
+      how={how} kind={kind} column={column} what={what} fresh={fresh}
+      onRefresh={onRefresh} />}>
       <span
         className={`ml-1 ${fresh.stale ? INFO_ICON_WARN : INFO_ICON}`}
         // ⚠ THE STATE IS IN THE LABEL, NOT ONLY IN THE HUE. A colour is the whole signal for a
