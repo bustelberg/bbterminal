@@ -32,6 +32,21 @@ class TestTheAllowList:
         assert "http://localhost:3000" in got
         assert "https://bbterminal.vercel.app" in got
 
+    def test_both_spellings_of_the_dev_server_are_allowed(self, monkeypatch):
+        """⚠⚠ `localhost` AND `127.0.0.1` ARE DIFFERENT ORIGINS, and for a while only one was here.
+
+        `npm run dev` prints both, a bookmark keeps whichever was clicked, and Starlette compares
+        the `Origin` header verbatim — so a tab on `http://127.0.0.1:3000` got `400 Disallowed CORS
+        origin` on every preflight while the same request from `http://localhost:3000` returned
+        200. ⚠ The browser cannot see any of that: a rejected preflight surfaces as
+        `TypeError: Failed to fetch` with no status and no body, i.e. exactly what a dead backend
+        looks like, so the diagnosis lives in the server log and nowhere else.
+        """
+        got = _origins(monkeypatch, None)
+        for port in (3000, 3001):
+            assert f"http://localhost:{port}" in got
+            assert f"http://127.0.0.1:{port}" in got
+
     def test_an_extra_frontend_is_added(self, monkeypatch):
         got = _origins(monkeypatch, "https://bbterminal-dev.vercel.app")
         assert "https://bbterminal-dev.vercel.app" in got
