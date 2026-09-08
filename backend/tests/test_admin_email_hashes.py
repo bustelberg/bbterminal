@@ -20,7 +20,6 @@ from booting in a test, so the only thing there is to check is what the file say
 """
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 

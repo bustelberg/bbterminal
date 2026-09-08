@@ -1,3 +1,9 @@
+// @vitest-environment happy-dom
+//
+// ⚠ THE ESCAPE HATCH `vitest.config.ts` DOCUMENTS, AND THE FIRST FILE TO NEED IT. The suite runs
+// on `node` because booting a DOM per file cost 50.5s of worker time against 1.0s of assertions —
+// but `claimLangFor` reads and writes `window.localStorage`, which is the whole subject here, so
+// there is nothing left to test without one. Per-file, so the other 91 files pay nothing.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
