@@ -48,7 +48,7 @@ describe('the nav labels', () => {
   it('⚠ but DOES translate the ordinary words', () => {
     // The counterweight to the case above: if this list ever matched too, the "translation" would
     // be a copy of the English map and every one of these tests would still pass.
-    for (const href of ['/', '/schedule', '/fx-rates', '/fees', '/network', '/documentation',
+    for (const href of ['/', '/schedule', '/fx-rates', '/fees', '/network',
       '/timezone', '/earnings'] as const) {
       expect(SIDEBAR_COPY.nl.nav[href], `${href} is untranslated`)
         .not.toBe(SIDEBAR_COPY.en.nav[href]);

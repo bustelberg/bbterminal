@@ -403,41 +403,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/admin/etfs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Etfs
-         * @description Every ETF that carries an ISIN, enriched like a universe member. Admin only.
-         *
-         *     ETFs live in the `benchmark` table (the same rows the diversifier + sector
-         *     overlays reference — an ETF is a benchmark with a tradeable ISIN). This
-         *     returns ONLY benchmarks with an `isin` set — the identifiable, tradeable
-         *     instruments — each with its latest close (native + EUR via the same fx_rate
-         *     source the /fx-rates page + universe members use). Index-only benchmarks
-         *     (no ISIN) are excluded.
-         *
-         *     Each ETF carries the universe-member-style shape (minus the fields that
-         *     don't apply to a fund — exchange/country/industry):
-         *
-         *         benchmark_id, ticker, name, isin, currency, sector,
-         *         latest_close_local, latest_close_eur, latest_close_date, fx_rate_per_eur
-         *
-         *     Response: `{count, etfs:[…]}`, sorted by ticker.
-         */
-        get: operations["list_etfs_api_admin_etfs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/admin/gurufocus-company-name": {
         parameters: {
             query?: never;
@@ -527,37 +492,6 @@ export interface paths {
          *     upstream (likely a GuruFocus auth/quota issue).
          */
         get: operations["gurufocus_probe_api_admin_gurufocus_probe_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/health": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Health
-         * @description Composite go/no-go. Returns a single boolean `is_healthy` plus
-         *     the list of checks that failed. Threshold defaults are
-         *     intentionally permissive — we're guarding against "something is
-         *     obviously broken" cases, not micro-staleness.
-         *
-         *     Checks:
-         *       - DB reachable
-         *       - close_price max date is within the last 6 trading days
-         *       - most recent ingest_run is within the last 8 days
-         *       - that run isn't 'running' for more than 2 hours (a stuck job)
-         *       - that run's status is 'ok' (allows a single transient failure
-         *         downstream — see `is_healthy_strict` for the stricter variant)
-         */
-        get: operations["get_health_api_admin_health_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -661,236 +595,6 @@ export interface paths {
          *     rather than present-and-failing.
          */
         post: operations["admin_run_scheduled_job_api_admin_scheduled_jobs__job_id__run_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/schedules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Schedules
-         * @description List every scheduled strategy with its next rebalance date. Admin
-         *     only. Lightweight (no holdings) — the discovery call: find the
-         *     `strategy_id` to drill into, see when each next rebalances, and how
-         *     fresh its holdings are.
-         *
-         *     `next_rebalance_at` is the UTC tick at which the strategy will next
-         *     re-select its holdings (NULL = a never-run strategy, rebalances on the
-         *     next tick). `as_of_date` / `latest_price_date` / `holdings_count` come
-         *     from its most recent snapshot (absent until the strategy first runs).
-         *
-         *     Query: `enabled_only=true` (default) hides paused strategies; pass
-         *     `false` to see everything.
-         *
-         *     Response: `[{strategy_id, name, enabled, frequency, next_rebalance_at,
-         *     last_run_at, as_of_date, latest_price_date, holdings_count}]`.
-         */
-        get: operations["list_schedules_api_admin_schedules_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/schedules/{strategy_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Schedule
-         * @description One scheduled strategy's CURRENT holdings — the order-ready call your
-         *     IBKR buyer makes. Admin only.
-         *
-         *     Holdings come from the strategy's most recent `current_picks_snapshot`;
-         *     `as_of_date` is the date they were selected and `latest_price_date` the
-         *     most recent close priced into them — gate on these (or `/api/admin/health`)
-         *     so you never trade on stale data. A strategy with no snapshot yet returns
-         *     an empty `holdings` list. 404 when the strategy doesn't exist.
-         *
-         *     Each holding carries everything needed to place an order + the full set of
-         *     per-position marks shown on the /schedule Current-portfolio table:
-         *         company_id, ticker, exchange, country, currency, isin, company_name,
-         *         sector, side, is_cash, score,
-         *         target_weight, current_weight (drift-renormalized),
-         *         entry_price_local, exit_price_local, entry_price_eur, exit_price_eur,
-         *         entry_date, exit_date, entry_fx_rate_eur, exit_fx_rate_eur,
-         *         return_eur_pct
-         *
-         *     Response: `{strategy_id, name, enabled, frequency, next_rebalance_at,
-         *     last_run_at, as_of_date, latest_price_date, holdings_count, holdings:[…]}`.
-         */
-        get: operations["get_schedule_api_admin_schedules__strategy_id__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/schedules/{strategy_id}/performance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Schedule Performance
-         * @description A scheduled strategy's LIVE performance since go-live. Admin only.
-         *
-         *     Returns the strategy's inception (go-live) date, its return since
-         *     inception, the month-to-date return, the latest date the data is current
-         *     through, and the full per-day return series since inception.
-         *
-         *     All figures track the live held portfolio: the frozen backtest curve is
-         *     extended with the snapshot tail the price-update job marks to market
-         *     through the latest priced day (`_extended_curve`), then read at the
-         *     relevant anchors (`_returns_from_backtest`). `daily_returns` is the
-         *     per-day close-to-close series off that same curve from inception onward —
-         *     the same numbers behind the /schedule 'daily returns' table, but for every
-         *     day rather than one month. Returns are GROSS (no fee model on the live
-         *     path). Inception = the strategy's `start_date`, or `created_at` when unset.
-         *
-         *     404 if the strategy doesn't exist; null returns + empty `daily_returns`
-         *     when it has no saved backtest / no live data yet. Response:
-         *         {strategy_id, name, inception_date, as_of_date,
-         *          since_inception_return_pct, mtd_return_pct,
-         *          daily_returns: [{date, return_pct}, ...]}
-         */
-        get: operations["get_schedule_performance_api_admin_schedules__strategy_id__performance_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/schedules/{strategy_id}/risk-metrics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Schedule Risk Metrics
-         * @description A scheduled strategy's BACKTESTED risk-adjusted metrics — Sharpe +
-         *     Sortino — and the period they were computed over. Admin only.
-         *
-         *     Both ratios come from the strategy's source `backtest_run` summary
-         *     (annualized, risk-free = 0, computed off the closed-period daily curve so
-         *     they're comparable across rebalance cadences — see
-         *     `momentum/backtest/_summary.py`). The `period` is the actual span of that
-         *     backtest's daily curve (first → last dated point), i.e. exactly the data
-         *     the ratios were measured over (not the requested config range, which can
-         *     extend past the data). `annualized_return_pct` + `max_drawdown_pct` round
-         *     out the risk picture. 404 if the strategy doesn't exist; null metrics when
-         *     it has no saved backtest. Response:
-         *         {strategy_id, name, backtest_run_id, sharpe_ratio, sortino_ratio,
-         *          annualized_return_pct, max_drawdown_pct,
-         *          period: {start_date, end_date}}
-         */
-        get: operations["get_schedule_risk_metrics_api_admin_schedules__strategy_id__risk_metrics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/universes": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Universes
-         * @description List the **frozen** universes — the discovery call for the membership
-         *     endpoint below. Admin only.
-         *
-         *     By default returns ONLY frozen static snapshots (`frozen_at` set) — the
-         *     reproducible "X (as of YYYY-MM)" universes that are the canonical, usable
-         *     sets across the app. Pass `?include_all=true` to also list the live
-         *     template-managed canonicals (`template_key` set), the LongEquity
-         *     time-series universe, criteria-derived universes (`parent_universe_id`),
-         *     and imported index universes.
-         *
-         *     Single-set model: each universe is a frozen set as of `as_of_date`.
-         *     `is_monthly` is true only for the LongEquity time-series universe; the
-         *     `start_month` / `end_month` / `month_count` fields are populated only when
-         *     `is_monthly` (null otherwise). `member_count` comes from the
-         *     `universe_stats` materialized view (a refreshed-on-pipeline hint; may
-         *     lag). Pick a `universe_id` and pass it to `GET /api/admin/universes/{id}`.
-         *
-         *     Response: `{count, universes:[{universe_id, label, description, kind,
-         *     template_key, frozen_at, parent_universe_id, created_at,
-         *     last_refreshed_at, as_of_date, is_monthly, member_count, start_month,
-         *     end_month, month_count}]}`.
-         */
-        get: operations["list_universes_api_admin_universes_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/admin/universes/{universe_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Universe
-         * @description Full membership of one universe, each member enriched with the same
-         *     per-company attributes the holdings endpoint returns. Admin only.
-         *
-         *     Almost every universe is a single frozen set (one `target_month`), so by
-         *     default you get that set and the `month` param does nothing. The ONE
-         *     exception is the live, multi-month **LongEquity** time-series universe
-         *     (`is_monthly=true`, reachable via `?include_all=true` on the list): there
-         *     `?month=YYYY-MM` selects a historical snapshot, defaulting to its latest
-         *     month. For any single-month universe `month` is IGNORED (you always get
-         *     the frozen set, never an empty wrong-month result). 404 when the universe
-         *     doesn't exist; empty `members` when it has no membership.
-         *
-         *     Each member carries:
-         *         company_id, ticker, exchange, country, currency, isin,
-         *         company_name, sector, industry,
-         *         latest_close_local, latest_close_eur, latest_close_date,
-         *         fx_rate_per_eur
-         *
-         *     Same descriptive fields as a scheduled strategy's holdings; the
-         *     position-specific fields (side / target_weight / score / entry_date)
-         *     don't apply to a universe member, and the holding's entry price becomes
-         *     the latest close (native + EUR).
-         *
-         *     Response: `{universe_id, label, template_key, frozen_at, is_monthly,
-         *     target_month, member_count, members:[…]}`.
-         */
-        get: operations["get_universe_api_admin_universes__universe_id__get"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3584,37 +3288,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/auth/impersonate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Impersonate User
-         * @description Mint a real session for another user (admin only).
-         *
-         *     Two-step server-side dance:
-         *       1. `admin.generate_link({type: "magiclink", email})` produces a
-         *          hashed_token normally embedded in an email.
-         *       2. `auth.verify_otp({token_hash, type: "magiclink"})` consumes the
-         *          hashed_token and returns a fresh `{access_token, refresh_token}`
-         *          for the target user.
-         *
-         *     The frontend then calls `supabase.auth.setSession(...)` with those
-         *     tokens to swap the active session. No URL fragment, no magic-link
-         *     redirect, no race with cookie writes.
-         */
-        post: operations["impersonate_user_api_auth_impersonate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/auth/me": {
         parameters: {
             query?: never;
@@ -3676,6 +3349,53 @@ export interface paths {
          * @description Delete a user (admin only).
          */
         delete: operations["delete_user_api_auth_users__user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/users/{user_id}/mfa/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset User Mfa
+         * @description Remove every authenticator on another user's account (admin only).
+         *
+         *     ⚠⚠ THIS IS THE ENTIRE RECOVERY STORY, BECAUSE SUPABASE TOTP HAS NO BACKUP CODES. A lost phone
+         *     is otherwise a permanent lockout: two-factor is mandatory (`_auth_middleware`), so the person
+         *     cannot sign in to remove the factor, and the factor is what they cannot produce. Without this
+         *     the fix was hand-written SQL against production auth tables, performed under pressure on the
+         *     worst possible day.
+         *
+         *     ⚠⚠ IT REFUSES SELF-SERVICE, AND THAT IS NOT TIDINESS. `/account/security` makes removing your
+         *     OWN authenticator require a current code — proof you still hold it — and an admin resetting
+         *     themselves here would walk straight around that check. The result would be that a stolen
+         *     `aal2` session could strip two-factor off the account and re-enrol on the thief's phone,
+         *     turning a session compromise into a permanent one. Nothing is lost by refusing: an admin who
+         *     is genuinely locked out cannot sign in to press this anyway. Their route back is a SECOND
+         *     admin account, or `REQUIRE_MFA=0` on the host.
+         *
+         *     ⚠⚠ AND IT EVICTS THEIR SESSIONS, WHICH IS THE HALF THAT MAKES IT SAFE. Removing a factor does
+         *     not touch a session that already proved one: the `aal2` claim is in the issued token and the
+         *     refresh keeps it. So a phone stolen WITH the app open would keep working after a "reset" — the
+         *     exact scenario the button is pressed for. GoTrue exposes no admin logout (measured:
+         *     `/admin/users/{id}/logout` and `/sessions` both 404), so the sessions are deleted directly,
+         *     which is what GoTrue itself does on sign-out. Verified: the refresh token then answers
+         *     `refresh_token_not_found`.
+         *
+         *     ⚠ EVICTION IS BEST-EFFORT AND SAID SO IN THE RESPONSE. It needs `SUPABASE_DB_URL`; without it
+         *     the factors still go — which is the ask — and the caller is told the sessions did not. Failing
+         *     the whole reset because the optional half is unavailable would leave somebody locked out to
+         *     protect them from a stale session.
+         */
+        post: operations["reset_user_mfa_api_auth_users__user_id__mfa_reset_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -11176,11 +10896,6 @@ export interface components {
              */
             rescaled?: boolean;
         };
-        /** ImpersonateRequest */
-        ImpersonateRequest: {
-            /** Target User Id */
-            target_user_id: string;
-        };
         /** IndexMember */
         IndexMember: {
             /** Company Id */
@@ -14131,8 +13846,8 @@ export interface operations {
     set_company_illiquid_api_admin_company_illiquid_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14166,8 +13881,8 @@ export interface operations {
     company_price_refresh_api_admin_company_price_refresh_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14201,8 +13916,8 @@ export interface operations {
     copy_status_api_admin_copy_status_get: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14234,8 +13949,8 @@ export interface operations {
             query?: {
                 days?: number;
             };
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14265,39 +13980,8 @@ export interface operations {
     get_egress_ip_api_admin_egress_ip_get: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_etfs_api_admin_etfs_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14327,8 +14011,8 @@ export interface operations {
     gurufocus_company_name_api_admin_gurufocus_company_name_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14362,8 +14046,8 @@ export interface operations {
     gurufocus_exchange_search_api_admin_gurufocus_exchange_search_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14400,39 +14084,8 @@ export interface operations {
                 symbol?: string;
                 endpoint?: string;
             };
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_health_api_admin_health_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14464,8 +14117,8 @@ export interface operations {
             query?: {
                 guru_method?: string;
             };
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14495,8 +14148,8 @@ export interface operations {
     admin_scheduled_jobs_api_admin_scheduled_jobs_get: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path?: never;
             cookie?: never;
@@ -14526,211 +14179,11 @@ export interface operations {
     admin_run_scheduled_job_api_admin_scheduled_jobs__job_id__run_post: {
         parameters: {
             query?: never;
-            header: {
-                authorization: string;
+            header?: {
+                authorization?: string;
             };
             path: {
                 job_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_schedules_api_admin_schedules_get: {
-        parameters: {
-            query?: {
-                enabled_only?: boolean;
-            };
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_schedule_api_admin_schedules__strategy_id__get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path: {
-                strategy_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_schedule_performance_api_admin_schedules__strategy_id__performance_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path: {
-                strategy_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_schedule_risk_metrics_api_admin_schedules__strategy_id__risk_metrics_get: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path: {
-                strategy_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_universes_api_admin_universes_get: {
-        parameters: {
-            query?: {
-                include_all?: boolean;
-            };
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_universe_api_admin_universes__universe_id__get: {
-        parameters: {
-            query?: {
-                month?: string | null;
-            };
-            header: {
-                authorization: string;
-            };
-            path: {
-                universe_id: number;
             };
             cookie?: never;
         };
@@ -18089,41 +17542,6 @@ export interface operations {
             };
         };
     };
-    impersonate_user_api_auth_impersonate_post: {
-        parameters: {
-            query?: never;
-            header: {
-                authorization: string;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ImpersonateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     auth_me_api_auth_me_get: {
         parameters: {
             query?: never;
@@ -18222,6 +17640,39 @@ export interface operations {
         };
     };
     delete_user_api_auth_users__user_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_user_mfa_api_auth_users__user_id__mfa_reset_post: {
         parameters: {
             query?: never;
             header: {

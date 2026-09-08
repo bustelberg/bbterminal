@@ -3,16 +3,16 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase/client';
 import { dialog } from '../../lib/dialog';
-import { useClickOutside } from '../../lib/hooks/useClickOutside';
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
 import { isUserAllowedPath } from '../../lib/userAllowedPaths';
 import { useSidebarCopy, type NavKey } from './sidebarCopy';
 import LangSwitch from './LangSwitch';
 import { claimLangFor, useLang } from '../../lib/i18n';
+import { purgeLegacySessions } from '../../lib/purgeLegacySessions';
 
 // ⚠⚠ NO `label` HERE — the name of a page is COPY and lives in `sidebarCopy.ts`, keyed by href.
 // This file owns the ORDER, the sections and the visibility rules, none of which is a language.
@@ -66,14 +66,13 @@ const navItems: NavEntry[] = [
   { href: '/fees' },
   { href: '/api' },
   { href: '/network' },
-  { href: '/documentation' },
 ];
 
 
 // ⚠ `/auth/confirm` BELONGS HERE AND WAS MISSING. It is a signed-out page like the other two —
 // the whole point is that nobody is authenticated on it yet — so the rail rendered beside it,
 // which on a phone meant the mobile top bar sat above a card whose only control is one button.
-const AUTH_PAGES = ['/login', '/set-password', '/auth/confirm'];
+const AUTH_PAGES = ['/login', '/set-password', '/auth/confirm', '/mfa'];
 
 function readViewAsCookie(): boolean {
   if (typeof document === 'undefined') return false;
@@ -88,64 +87,6 @@ function setViewAsCookie(on: boolean) {
     document.cookie = 'view_as=; path=/; max-age=0; samesite=lax';
   }
 }
-
-// Multi-session store: every account the browser has authenticated with
-// during this session lands here, keyed by email. Lets the user switch
-// between any of them instantly via supabase.auth.setSession() — no need
-// to retype passwords or re-do the magic-link flow more than once per
-// account.
-//
-// Tokens stay in localStorage on the assumption that a single trusted
-// operator (the admin) is on this machine. If you ship to multi-tenant
-// browsers, replace with HTTP-only encrypted server-side storage.
-const SESSIONS_KEY = 'bbterminal_sessions';
-
-type StoredSession = {
-  email: string;
-  user_id: string;
-  role: 'admin' | 'user';
-  access_token: string;
-  refresh_token: string;
-  // ms-since-epoch of last refresh. Mostly for debugging / staleness.
-  saved_at: number;
-};
-
-function readSessions(): StoredSession[] {
-  if (typeof window === 'undefined') return [];
-  try {
-    const raw = localStorage.getItem(SESSIONS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as StoredSession[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-function writeSessions(s: StoredSession[]) {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(s));
-}
-
-function upsertSession(entry: StoredSession): StoredSession[] {
-  const list = readSessions().filter((s) => s.email !== entry.email);
-  list.push(entry);
-  writeSessions(list);
-  return list;
-}
-
-function removeSessionByEmail(email: string): StoredSession[] {
-  const list = readSessions().filter((s) => s.email !== email);
-  writeSessions(list);
-  return list;
-}
-
-function clearAllSessions() {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(SESSIONS_KEY);
-}
-
-type SwitchableUser = { id: string; email: string | null; role: 'admin' | 'user' };
 
 // `initialUser` comes from the root layout's server-side getUser() call,
 // which has already been validated by proxy.ts. Passing it in lets the
@@ -182,12 +123,6 @@ export default function Sidebar({ initialUser }: Props) {
   // Mobile nav: off-canvas drawer on < lg, static rail on lg+.
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Account switcher state
-  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
-  const accountMenuRef = useRef<HTMLDivElement>(null);
-  const [otherUsers, setOtherUsers] = useState<SwitchableUser[]>([]);
-  const [storedSessions, setStoredSessions] = useState<StoredSession[]>([]);
-  const [switching, setSwitching] = useState(false);
 
   /**
    * ⚠⚠ THE LANGUAGE IS CLAIMED FROM THE SERVER-RESOLVED IDENTITY, BEFORE ANY NETWORK CALL. The
@@ -210,6 +145,17 @@ export default function Sidebar({ initialUser }: Props) {
     if (initialUser?.email) claimLangFor(initialUser.email);
   }, [initialUser]);
 
+  /**
+   * ⚠ THE RETIRED SWITCHER'S REFRESH TOKENS, CLEARED ON EVERY LOAD. Deleting the feature left
+   * them sitting in `localStorage` in every browser that had used it — valid, invisible, and
+   * reachable by anything on the origin. The Sidebar mounts in the root layout, so this is the
+   * one place that runs on every authenticated page. See `lib/purgeLegacySessions`.
+   *
+   * ⚠ NOT GATED ON THE USER. It has nothing to do with who is signed in, and the browsers most
+   * likely to be carrying stale tokens are the ones where nobody is.
+   */
+  useEffect(() => { purgeLegacySessions(); }, []);
+
   useEffect(() => {
     const supabase = createClient();
 
@@ -218,12 +164,10 @@ export default function Sidebar({ initialUser }: Props) {
     // We use it to decide whether a null `getUser()` should clear the
     // sidebar or be ignored as a transient race.
     async function refresh(event: string | null = null) {
-      const [userRes, sessionRes] = await Promise.all([
-        supabase.auth.getUser(),
-        supabase.auth.getSession(),
-      ]);
-      const user = userRes.data.user;
-      const session = sessionRes.data.session;
+      // ⚠ `getUser()` ALONE NOW. The parallel `getSession()` existed only to hand raw tokens to
+      // the account switcher's store; with that gone, the sidebar needs an identity and never the
+      // credentials behind it — so this no longer reads them at all.
+      const { data: { user } } = await supabase.auth.getUser();
 
       if (user?.email) {
         // Got a real user — adopt it as the live state.
@@ -238,17 +182,6 @@ export default function Sidebar({ initialUser }: Props) {
         const meta = (user.app_metadata ?? {}) as { role?: string };
         const detectedRole: 'admin' | 'user' = meta.role === 'admin' ? 'admin' : 'user';
         setRole(detectedRole);
-        if (user.id && session) {
-          const updated = upsertSession({
-            email: user.email,
-            user_id: user.id,
-            role: detectedRole,
-            access_token: session.access_token,
-            refresh_token: session.refresh_token,
-            saved_at: Date.now(),
-          });
-          setStoredSessions(updated);
-        }
       } else if (event === 'SIGNED_OUT') {
         // Explicit sign-out — clear the sidebar. This is the ONE case
         // where a null user should blank the UI.
@@ -269,7 +202,6 @@ export default function Sidebar({ initialUser }: Props) {
       // "duplicate tab → sidebar disappears" race.
 
       setChecked(true);
-      if (!user?.email) setStoredSessions(readSessions());
     }
 
     refresh();
@@ -287,40 +219,11 @@ export default function Sidebar({ initialUser }: Props) {
     return () => subscription.unsubscribe();
   }, [initialUser]);
 
-  useClickOutside(accountMenuRef, () => setAccountMenuOpen(false), accountMenuOpen);
-
   // Close the mobile drawer on every route change so tapping a nav link
   // doesn't leave the overlay covering the page.
   useEffect(() => {
     setDrawerOpen(false);
   }, [pathname]);
-
-  // When the admin opens the menu, fetch the user list once so we know who
-  // we can switch to. Skipped for non-admins (they can't list users) and
-  // when impersonating (the menu only shows "Switch back" in that case).
-  useEffect(() => {
-    if (!accountMenuOpen) return;
-    if (role !== 'admin') return;
-    if (otherUsers.length > 0) return;
-    let cancelled = false;
-    (async () => {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-      const r = await apiFetch(`${API_URL}/api/auth/users`, {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      });
-      if (!r.ok) return;
-      const data = await r.json();
-      if (cancelled) return;
-      // Exclude the currently signed-in admin.
-      const list: SwitchableUser[] = (data.users ?? []).filter(
-        (u: SwitchableUser) => u.email && u.email !== email,
-      );
-      setOtherUsers(list);
-    })();
-    return () => { cancelled = true; };
-  }, [accountMenuOpen, role, email, otherUsers.length]);
 
   function toggleViewAs() {
     const next = !viewAsUser;
@@ -330,113 +233,13 @@ export default function Sidebar({ initialUser }: Props) {
     if (next) router.push('/');
   }
 
-  /** First-time sign-in for an account that isn't yet in the multi-session
-   * store. Backend mints fresh `{access_token, refresh_token}` for the
-   * target via the admin magic-link → verify_otp dance; we set them
-   * client-side, store them, and reload. No URL fragment, no redirect
-   * dance through Supabase's verify endpoint. */
-  async function switchToNewUser(target: SwitchableUser) {
-    if (!target.id || switching) return;
-    setSwitching(true);
-    try {
-      const supabase = createClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        await dialog.alert('Not signed in.');
-        return;
-      }
-      const r = await apiFetch(`${API_URL}/api/auth/impersonate`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target_user_id: target.id }),
-      });
-      if (!r.ok) {
-        const body = await r.text();
-        await dialog.alert(`Switch failed:\n${r.status}: ${body}`);
-        return;
-      }
-      const data = await r.json();
-      if (!data.access_token || !data.refresh_token) {
-        await dialog.alert('Server returned no session tokens');
-        return;
-      }
-      const { error } = await supabase.auth.setSession({
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-      });
-      if (error) {
-        await dialog.alert(`Could not establish session: ${error.message}`);
-        return;
-      }
-      // Pre-populate the multi-session store with the new account so it
-      // shows up in the dropdown right after the reload (the mount-time
-      // capture would do it anyway, but storing here too means we never
-      // see the "first time" entry for this account again).
-      upsertSession({
-        email: target.email ?? '',
-        user_id: target.id,
-        role: target.role,
-        access_token: data.access_token,
-        refresh_token: data.refresh_token,
-        saved_at: Date.now(),
-      });
-      setViewAsCookie(false);
-      // Hard reload so the middleware reads the new cookies for the
-      // first server-rendered request.
-      window.location.href = '/';
-    } catch (e) {
-      await dialog.alert(`Switch failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSwitching(false);
-    }
-  }
-
-  /** Switch instantly to a previously-stored account using its tokens.
-   * No magic link, no password — just supabase.auth.setSession() and a
-   * hard reload so the middleware re-reads the new cookies on the
-   * subsequent request. */
-  async function switchToStoredSession(target: StoredSession) {
-    if (switching) return;
-    if (target.email === email) return;
-    setSwitching(true);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.setSession({
-        access_token: target.access_token,
-        refresh_token: target.refresh_token,
-      });
-      if (error) {
-        // Tokens have expired or been revoked — drop the entry from the
-        // store and tell the user to re-authenticate via the user list.
-        const remaining = removeSessionByEmail(target.email);
-        setStoredSessions(remaining);
-        await dialog.alert(
-          `Could not restore ${target.email}: ${error.message}\n\n` +
-          `The stored session is no longer valid. Use the user list to sign in again.`,
-        );
-        return;
-      }
-      // Hard reload so the middleware sees the new cookies on the next
-      // request. router.push wouldn't propagate the cookie change to
-      // the server in time and the middleware would still see the old
-      // user, sometimes redirecting to /forbidden in transit.
-      setViewAsCookie(false);
-      window.location.href = '/';
-    } catch (e) {
-      await dialog.alert(`Switch failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setSwitching(false);
-    }
-  }
-
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    // Wipe the multi-session store so the next login starts clean —
-    // any stored tokens for other accounts may be revoked alongside
-    // the current sign-out, and we don't want to surface dead entries.
-    clearAllSessions();
-    setStoredSessions([]);
+    // ⚠ Belt and braces with the mount-time purge: signing out is the one moment somebody is
+    // deliberately leaving the browser, so it is the last chance to take the retired switcher's
+    // refresh tokens with them.
+    purgeLegacySessions();
     setViewAsCookie(false);
     router.push('/login');
     router.refresh();
@@ -470,7 +273,7 @@ export default function Sidebar({ initialUser }: Props) {
   // Hide sidebar on auth pages always; otherwise wait for the auth check to
   // finish before deciding whether to render. Without this, a flicker of
   // ambiguous state can cause the sidebar to disappear right after a
-  // successful sign-in / impersonation while `getUser()` is still resolving.
+  // successful sign-in while `getUser()` is still resolving.
   if (AUTH_PAGES.includes(pathname)) return null;
   if (!checked) return null;
   if (!email) return null;
@@ -672,145 +475,35 @@ export default function Sidebar({ initialUser }: Props) {
         </div>
       )}
       <div className="p-3 border-t border-neutral-800/60 space-y-1">
-        {email && (() => {
-          // Sessions other than the one we're currently signed in as.
-          const otherStored = storedSessions.filter((s) => s.email !== email);
-          // DB users (admin only) that haven't been stored yet — these
-          // need the magic-link impersonation flow on first switch.
-          const storedEmails = new Set(storedSessions.map((s) => s.email));
-          const newUsers = otherUsers.filter((u) => u.email && !storedEmails.has(u.email));
-          /**
-           * ⚠⚠ IMPERSONATION IS AN ADMIN GETTING *INTO* A USER ACCOUNT, SO THE EVIDENCE IS AN
-           * ADMIN SESSION TO GO BACK TO — NOT MERELY "SOME OTHER SESSION EXISTS". The test was
-           * `otherStored.length > 0 && role === 'user'`, which is true for a brand-new ordinary
-           * user the moment ANY second session is in this browser's `bbterminal_sessions`: signing
-           * up on a shared or previously-used machine badged them **impersonating** on their very
-           * first visit, next to a Delete account button. Nothing was actually impersonated — they
-           * were signed in as themselves — and a non-admin cannot impersonate anyone: the switch
-           * flow goes through `/api/auth/impersonate`, which is admin-only server-side.
-           *
-           * ⚠ IT STILL HAS TO BE TRUE FOR THE REAL CASE, which is why the badge is not simply
-           * `role === 'admin'`: an impersonating admin IS signed in as a `user`, and this badge
-           * plus the menu under it are their only way back.
-           */
-          const adminReturn = otherStored.filter((s) => s.role === 'admin');
-          const isImpersonating = role === 'user' && adminReturn.length > 0;
-          /**
-           * ⚠ AND THE SWITCHER ITSELF IS ADMIN-ONLY, for the same reason. A non-admin was offered
-           * the chevron and the "Switch to (instant)" list, i.e. one click into any other session
-           * whose tokens happen to be in this browser. `switchToStoredSession` calls `setSession()`
-           * with stored tokens, so it never asks the server permission — the gate can only be here.
-           */
-          const canSwitch = role === 'admin' || isImpersonating;
-          if (!canSwitch) {
-            return (
-              <div className="w-full px-3 py-1.5 text-sm text-fg-soft truncate" title={email}>
-                {email}
-              </div>
-            );
-          }
-          return (
-            <div className="relative" ref={accountMenuRef}>
-              <button
-                type="button"
-                onClick={() => setAccountMenuOpen((o) => !o)}
-                className="w-full px-3 py-1.5 rounded-lg text-left flex items-center gap-2 hover:bg-overlay/5 transition-colors"
-                title="Switch account"
-              >
-                <span className="flex-1 min-w-0 truncate text-sm text-fg-soft" title={email}>
-                  {email}
-                </span>
-                {isImpersonating ? (
-                  <span className="text-[10px] uppercase tracking-wider text-warn-400 shrink-0" title="Switch back from the menu">
-                    impersonating
-                  </span>
-                ) : role === 'admin' ? (
-                  <span className="text-[10px] uppercase tracking-wider text-accent-400 shrink-0">admin</span>
-                ) : null}
-                <svg className="w-3 h-3 text-fg-subtle shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                </svg>
-              </button>
-
-              {accountMenuOpen && (
-                <div className="absolute bottom-full left-0 right-0 mb-1 bg-elevated border border-neutral-700 rounded-lg shadow-xl overflow-hidden">
-                  <div className="px-3 py-2 border-b border-neutral-800/60">
-                    <div className="text-[11px] uppercase tracking-wider text-fg-subtle mb-0.5">Signed in as</div>
-                    <div className="text-xs text-fg font-mono truncate">{email}</div>
-                  </div>
-
-                  {/* Stored sessions — instant switch via setSession() */}
-                  {otherStored.length > 0 && (
-                    <div>
-                      <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-fg-subtle border-t border-neutral-800/60">
-                        Switch to (instant)
-                      </div>
-                      {otherStored.map((s) => (
-                        <button
-                          key={s.email}
-                          onClick={() => switchToStoredSession(s)}
-                          disabled={switching}
-                          className="w-full px-3 py-2 text-left hover:bg-overlay/[0.04] transition-colors disabled:opacity-50 flex items-center gap-2"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs text-fg truncate">{s.email}</div>
-                          </div>
-                          <span
-                            className={`text-[10px] uppercase tracking-wider shrink-0 ${
-                              s.role === 'admin' ? 'text-accent-400' : 'text-fg-subtle'
-                            }`}
-                          >
-                            {s.role}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* New (not-yet-stored) DB users — admin only. First click
-                      triggers the magic-link sign-in; the new session lands
-                      in the multi-session store automatically. */}
-                  {role === 'admin' && newUsers.length > 0 && (
-                    <div>
-                      <div className="px-3 pt-2 pb-1 text-[11px] uppercase tracking-wider text-fg-subtle border-t border-neutral-800/60">
-                        Sign in as (first time)
-                      </div>
-                      {newUsers.map((u) => (
-                        <button
-                          key={u.id}
-                          onClick={() => switchToNewUser(u)}
-                          disabled={switching}
-                          className="w-full px-3 py-2 text-left hover:bg-overlay/[0.04] transition-colors disabled:opacity-50 flex items-center gap-2"
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs text-fg truncate">{u.email}</div>
-                          </div>
-                          <span
-                            className={`text-[10px] uppercase tracking-wider shrink-0 ${
-                              u.role === 'admin' ? 'text-accent-400' : 'text-fg-subtle'
-                            }`}
-                          >
-                            {u.role}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Empty-state: admin with no other accounts at all. */}
-                  {role === 'admin' && otherStored.length === 0 && newUsers.length === 0 && (
-                    <div className="px-3 py-2 text-[12px] text-fg-subtle border-t border-neutral-800/60">
-                      No other accounts — add one in{' '}
-                      <Link href="/users" className="text-accent-400 hover:underline" onClick={() => setAccountMenuOpen(false)}>
-                        Users
-                      </Link>.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })()}
+        {/* ⚠ THE ACCOUNT SWITCHER IS GONE (2026-09-08, on request) — the whole impersonation
+            feature went with `POST /api/auth/impersonate`, and this menu was its only entry point.
+            What is left is the one thing it also did: say who you are signed in as. Promotion and
+            demotion live on /users; previewing the non-admin UI is the "View as regular user"
+            toggle above, which changes nothing about the session. */}
+        {email && (
+          <div className="w-full px-3 py-1.5 flex items-center gap-2">
+            <span className="flex-1 min-w-0 truncate text-sm text-fg-soft" title={email}>
+              {email}
+            </span>
+            {role === 'admin' && (
+              <span className="text-[10px] uppercase tracking-wider text-accent-400 shrink-0">
+                admin
+              </span>
+            )}
+          </div>
+        )}
+        {/* ⚠ IN THE ACCOUNT BLOCK, NOT IN `navItems`. It is a property of the READER rather than
+            a page of the app — same argument as the language switch below it — and the main nav is
+            ordered by what the terminal DOES. It also keeps `NavKey` for pages that appear there. */}
+        {email && (
+          <Link
+            href="/account/security"
+            className="block w-full px-3 py-2.5 rounded-lg text-sm font-medium text-fg-subtle
+                       hover:text-fg-strong hover:bg-overlay/5 transition-colors"
+          >
+            {t.security}
+          </Link>
+        )}
         {/* ⚠⚠ GLOBAL, AND THAT IS A DELIBERATE TRADE (2026-08-21, on request). It sets ONE
             stored preference (`lib/i18n`), so flipping it here also changes the Fundamental modal
             opened from anywhere — which is the point: a language is a property of the reader, not

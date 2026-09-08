@@ -20,6 +20,11 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /** ⚠ THE CALLER'S OWN id. The reset endpoint refuses self-service (see its docstring), so
+   *  without this the page would draw a button that always 403s — the one thing the house rule
+   *  about admin controls says never to do. */
+  const [meId, setMeId] = useState<string | null>(null);
+
   const [newEmail, setNewEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'user' | 'admin'>('user');
@@ -30,6 +35,14 @@ export default function UsersPage() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return null;
     return { Authorization: `Bearer ${session.access_token}` };
+  }, []);
+
+  useEffect(() => {
+    void (async () => {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      setMeId(user?.id ?? null);
+    })();
   }, []);
 
   const refresh = useCallback(async () => {
@@ -106,6 +119,59 @@ export default function UsersPage() {
         await dialog.alert(`Update failed:\n${r.status}: ${body}`);
         return;
       }
+      await refresh();
+    } catch (e) {
+      await dialog.alert(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Clear another person's authenticators after they lose their phone.
+   *
+   * ⚠⚠ IT IS THE WHOLE RECOVERY STORY, because Supabase TOTP has no backup codes and two-factor
+   * is mandatory: without a way to do this, a lost phone is a permanent lockout that only hand-
+   * written SQL against production could undo.
+   *
+   * ⚠ THE CONFIRMATION NAMES BOTH CONSEQUENCES. Removing the factor is half of it — the endpoint
+   * also evicts their sessions, so anyone signed in on that account is thrown out. Somebody
+   * pressing this to help a colleague should know it will also end that colleague's live session
+   * on their laptop, and it is the point rather than a side effect: a phone stolen WITH the app
+   * open is exactly what this is for.
+   */
+  async function resetMfa(u: User) {
+    const ok = await dialog.confirm(
+      `Remove every authenticator on ${u.email}?
+
+`
+      + 'They will be signed out everywhere and must set up two-factor again on their next '
+      + 'sign-in. Use this when they have lost the device.',
+    );
+    if (!ok) return;
+    try {
+      const headers = await authHeader();
+      if (!headers) return;
+      const r = await fetch(`${API_URL}/api/auth/users/${u.id}/mfa/reset`, {
+        method: 'POST',
+        headers,
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        await dialog.alert(`Reset failed:
+${r.status}: ${body?.detail ?? ''}`);
+        return;
+      }
+      // ⚠ REPORT WHAT ACTUALLY HAPPENED, including the case where there was nothing to remove —
+      // "done" over a no-op sends somebody away believing a problem is fixed.
+      const n = body?.factors_removed ?? 0;
+      await dialog.alert(
+        n === 0
+          ? `${u.email} had no authenticators — nothing to reset.`
+          : `Removed ${n} authenticator${n === 1 ? '' : 's'} for ${u.email}.`
+            + (body?.sessions_cleared
+              ? ' They have been signed out everywhere.'
+              : ' ⚠ Their existing sessions could NOT be cleared — a device already signed in '
+                + 'keeps working until it expires.'),
+      );
       await refresh();
     } catch (e) {
       await dialog.alert(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -256,6 +322,17 @@ export default function UsersPage() {
                         className="text-xs text-fg-muted hover:text-warn-400"
                       >
                         Demote
+                      </button>
+                    )}
+                    {/* ⚠ NOT ON YOUR OWN ROW. The endpoint refuses it — /account/security is
+                        where you manage your own, and it asks for a current code first. */}
+                    {u.id !== meId && (
+                      <button
+                        onClick={() => resetMfa(u)}
+                        className="text-xs text-fg-muted hover:text-warn-400"
+                        title="Clear their authenticators and sign them out — for a lost device."
+                      >
+                        Reset 2FA
                       </button>
                     )}
                     <button

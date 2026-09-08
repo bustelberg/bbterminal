@@ -6,27 +6,47 @@ Endpoints:
     GET    /api/auth/users                     list all users (admin only)
     POST   /api/auth/users                     create a user (admin only)
     PATCH  /api/auth/users/{user_id}/role      promote/demote (admin only)
+    POST   /api/auth/users/{user_id}/mfa/reset clear another user's authenticators (admin only)
     DELETE /api/auth/users/{user_id}           delete a user (admin only)
-    POST   /api/auth/impersonate               mint a session for another user (admin only)
 
 The `_require_admin` helper checks app_metadata.role == 'admin' on the
-caller's JWT — set by migration 20260502000000_admin_role.sql or by
+caller's JWT — set by the signup trigger (20260908090000_admin_signup_trigger.sql) or by
 PATCH /api/auth/users/{id}/role.
+
+⚠⚠ THERE IS NO `POST /api/auth/impersonate` ANY MORE, AND IT MUST NOT COME BACK (removed
+2026-09-08, on request). It minted a REAL session for another user — `admin.generate_link`
+followed by `verify_otp` — which the frontend then installed with `setSession`. Three things made
+it worth deleting rather than guarding:
+
+  · It was the way around every future authentication rule. A minted session is `aal1` and the
+    target's factors are never challenged, so it would have been a standing MFA bypass the day
+    2FA shipped — see the notes in `lib/sessionStore` history for the client half.
+  · It required the browser to keep the target's `refresh_token` in `localStorage` to be useful,
+    which is the exposure `lib/sessionStore.ts` was written to shrink and is now gone with it.
+  · It produced sessions indistinguishable from the real user's in every log and every audit
+    trail, so "who did this" had no answer.
+
+The supported way to see what a non-admin sees is the `X-View-As` preview (`routers/_authz.py`),
+which changes what is RENDERED and AUTHORIZED without minting anything: same identity, same JWT,
+one header. If someone needs to act as another user, promote/demote through
+PATCH /api/auth/users/{id}/role and let them sign in themselves.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
+import logging
 import time
 
 import httpx
+import jwt
 
 from fastapi import APIRouter, HTTPException, Header
 from pydantic import BaseModel
-from supabase import create_client
 
 from deps import supabase
+
+_log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
@@ -81,6 +101,70 @@ def _resolve_role(role: str | None, email: str | None) -> str:
 # keeps revocation reasonably fresh while making the common case a dict hit.
 _TOKEN_CACHE: dict[str, tuple[float, dict]] = {}
 _TOKEN_CACHE_TTL = 60.0
+
+
+def _token_aal(token: str) -> str | None:
+    """The session's Authenticator Assurance Level: 'aal2' once a second factor was used.
+
+    ⚠⚠ IT HAS TO COME OUT OF THE JWT, BECAUSE IT IS NOT ON THE USER. `supabase.auth.get_user()`
+    returns the user record — id, email, app_metadata — and assurance is a property of the SESSION,
+    not of the person: the same account is `aal1` in one browser and `aal2` in another. So the one
+    call this module already makes cannot answer the question, and the claim has to be read.
+
+    ⚠ THE SIGNATURE IS DELIBERATELY NOT VERIFIED HERE, and that is safe for one specific reason:
+    `verify_token` has ALREADY handed this exact string to GoTrue and been told it is valid. This
+    decode only asks what the token it just authenticated says about itself. Verifying again would
+    need the project's JWT secret in this process — a second copy of a credential, to re-answer a
+    question already answered over the wire. ⚠ It is therefore only ever correct at THIS call site,
+    after that check: decoding an unverified token anywhere else would trust its claims outright.
+
+    ⚠⚠ ON ITS OWN IT CANNOT TELL "SKIPPED THE FACTOR" FROM "HAS NO FACTOR" — measured on the live
+    stack, an account with no authenticator at all still gets `aal1`. See `_has_verified_factor`;
+    the two are only a rule together.
+
+    ⚠ RETURNS None RATHER THAN A DEFAULT on anything unreadable. 'aal1' would be a guess that reads
+    as a fact, and the caller (`_auth_middleware`) decides what an unknown level means — which is
+    where that decision belongs, since it is a policy about denial rather than about parsing.
+    """
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False})
+    except Exception as e:
+        # ⚠ WARNING, NOT DEBUG. A token GoTrue accepted that we cannot parse means the two sides
+        # disagree about what a token is, which is worth seeing before it becomes a lockout.
+        _log.warning("[auth] could not read aal from an accepted token: %s", e)
+        return None
+    aal = claims.get("aal")
+    return aal if isinstance(aal, str) else None
+
+
+def _has_verified_factor(user) -> bool:
+    """Does this account have an authenticator it could have used?
+
+    ⚠⚠ THIS IS THE HALF `aal` DOES NOT CARRY, AND ASSUMING OTHERWISE WAS A LOCKOUT WAITING TO
+    DEPLOY. The first cut of the gate refused any admin whose token said `aal1`, on the belief that
+    an account with no factor would carry no `aal` claim at all. Measured against the live stack it
+    does: a brand-new account with zero authenticators signs in and gets **`aal1`**. So that rule
+    refused EVERY admin — including the ones who had never enrolled and had no way to comply —
+    which is the exact flag-day lockout the design was supposed to avoid.
+
+    The honest test is `aal1` AND a verified factor exists, which is precisely what the browser's
+    `getAuthenticatorAssuranceLevel().nextLevel === 'aal2'` means. Same rule, both sides.
+
+    ⚠ FREE. `verify_token` already holds the user object from the call it makes anyway; GoTrue puts
+    the factors on it (absent → None, never an error). No extra round trip, and it is cached with
+    the rest of the verdict.
+
+    ⚠ VERIFIED ONLY. An abandoned enrolment leaves an `unverified` factor behind (see
+    `mfaFactors.unverifiedIds`), and counting one would lock somebody out with a half-set-up
+    authenticator that can never produce a valid code.
+    """
+    try:
+        return any(getattr(f, "status", None) == "verified" for f in (getattr(user, "factors", None) or []))
+    except Exception as e:
+        # ⚠ FAIL OPEN, AND LOUDLY. Not knowing whether a factor exists is not evidence that one
+        # was skipped — the same distinction `AuthBackendUnavailable` draws.
+        _log.warning("[auth] could not read factors off the user object: %s", e)
+        return False
 
 
 class AuthBackendUnavailable(RuntimeError):
@@ -150,7 +234,15 @@ def verify_token(authorization: str) -> dict | None:
         return None
     role = (getattr(user, "app_metadata", None) or {}).get("role")
     email = getattr(user, "email", None)
-    info = {"id": user.id, "email": email, "role": _resolve_role(role, email)}
+    info = {
+        "id": user.id,
+        "email": email,
+        "role": _resolve_role(role, email),
+        "aal": _token_aal(token),
+        # ⚠ The other half of the MFA rule — see `_has_verified_factor`. Cached with the verdict
+        # because it comes off the user object `get_user` already returned.
+        "has_verified_factor": _has_verified_factor(user),
+    }
     _TOKEN_CACHE[token] = (now + _TOKEN_CACHE_TTL, info)
     return info
 
@@ -286,6 +378,107 @@ async def set_user_role(user_id: str, req: SetRoleRequest, authorization: str = 
     return {"id": user_id, "role": req.role}
 
 
+@router.post("/api/auth/users/{user_id}/mfa/reset")
+async def reset_user_mfa(user_id: str, authorization: str = Header(...)):
+    """Remove every authenticator on another user's account (admin only).
+
+    ⚠⚠ THIS IS THE ENTIRE RECOVERY STORY, BECAUSE SUPABASE TOTP HAS NO BACKUP CODES. A lost phone
+    is otherwise a permanent lockout: two-factor is mandatory (`_auth_middleware`), so the person
+    cannot sign in to remove the factor, and the factor is what they cannot produce. Without this
+    the fix was hand-written SQL against production auth tables, performed under pressure on the
+    worst possible day.
+
+    ⚠⚠ IT REFUSES SELF-SERVICE, AND THAT IS NOT TIDINESS. `/account/security` makes removing your
+    OWN authenticator require a current code — proof you still hold it — and an admin resetting
+    themselves here would walk straight around that check. The result would be that a stolen
+    `aal2` session could strip two-factor off the account and re-enrol on the thief's phone,
+    turning a session compromise into a permanent one. Nothing is lost by refusing: an admin who
+    is genuinely locked out cannot sign in to press this anyway. Their route back is a SECOND
+    admin account, or `REQUIRE_MFA=0` on the host.
+
+    ⚠⚠ AND IT EVICTS THEIR SESSIONS, WHICH IS THE HALF THAT MAKES IT SAFE. Removing a factor does
+    not touch a session that already proved one: the `aal2` claim is in the issued token and the
+    refresh keeps it. So a phone stolen WITH the app open would keep working after a "reset" — the
+    exact scenario the button is pressed for. GoTrue exposes no admin logout (measured:
+    `/admin/users/{id}/logout` and `/sessions` both 404), so the sessions are deleted directly,
+    which is what GoTrue itself does on sign-out. Verified: the refresh token then answers
+    `refresh_token_not_found`.
+
+    ⚠ EVICTION IS BEST-EFFORT AND SAID SO IN THE RESPONSE. It needs `SUPABASE_DB_URL`; without it
+    the factors still go — which is the ask — and the caller is told the sessions did not. Failing
+    the whole reset because the optional half is unavailable would leave somebody locked out to
+    protect them from a stale session.
+    """
+    me = _require_admin(authorization)
+    if me["id"] == user_id:
+        raise HTTPException(
+            400,
+            "Use /account/security to manage your own authenticators — it asks for a current "
+            "code, which this does not.",
+        )
+    try:
+        listed = supabase.auth.admin.mfa.list_factors({"user_id": user_id})
+    except Exception as e:
+        raise HTTPException(500, f"Could not list factors: {e}")
+    # ⚠⚠ IT RETURNS A PLAIN LIST, NOT AN OBJECT WITH `.factors` (measured against supabase-py on
+    # the live stack). The obvious `listed.factors` reads as None, the loop below never runs, and
+    # the endpoint answers `{"ok": true, "factors_removed": 0}` — a SUCCESS that removed nothing,
+    # for a person who has just been told their access is restored. It shipped that way for one
+    # test run, and the test agreed with it because the probe used the same wrong accessor.
+    # Both shapes are accepted so a library change cannot silently reintroduce that.
+    factors = listed if isinstance(listed, list) else (getattr(listed, "factors", None) or [])
+    removed = 0
+    for f in factors:
+        fid = getattr(f, "id", None)
+        if not fid:
+            continue
+        try:
+            supabase.auth.admin.mfa.delete_factor({"user_id": user_id, "id": fid})
+            removed += 1
+        except Exception as e:
+            raise HTTPException(500, f"Could not remove factor {fid}: {e}")
+
+    sessions_cleared = _evict_sessions(user_id)
+    # ⚠ WARNING, NOT INFO. This is one admin removing another person's second factor — the single
+    # most security-relevant thing this router does, and the line somebody will go looking for.
+    _log.warning(
+        "[auth] %s reset two-factor for user %s — %d factor(s) removed, sessions cleared: %s",
+        me.get("email"), user_id, removed, sessions_cleared,
+    )
+    return {
+        "ok": True,
+        "id": user_id,
+        "factors_removed": removed,
+        "sessions_cleared": sessions_cleared,
+    }
+
+
+def _evict_sessions(user_id: str) -> bool:
+    """Delete the user's sessions so an already-signed-in device stops working. Best-effort."""
+    from common.pg import _db_url  # noqa: PLC0415
+
+    url = _db_url()
+    if not url:
+        _log.warning(
+            "[auth] SUPABASE_DB_URL is not set — factors removed for %s but existing sessions "
+            "were NOT evicted; a device already signed in keeps working until the timebox ends.",
+            user_id,
+        )
+        return False
+    try:
+        import psycopg  # noqa: PLC0415
+
+        with psycopg.connect(url, connect_timeout=15) as conn:
+            conn.execute("DELETE FROM auth.sessions WHERE user_id = %s", (user_id,))
+            conn.commit()
+        return True
+    except Exception as e:
+        # ⚠ NOT FATAL. The factors are already gone, which is what was asked for; reporting
+        # failure now would suggest nothing happened.
+        _log.warning("[auth] could not evict sessions for %s: %s", user_id, e)
+        return False
+
+
 @router.delete("/api/auth/users/{user_id}")
 async def delete_user(user_id: str, authorization: str = Header(...)):
     """Delete a user (admin only)."""
@@ -299,72 +492,3 @@ async def delete_user(user_id: str, authorization: str = Header(...)):
     return {"ok": True, "id": user_id}
 
 
-class ImpersonateRequest(BaseModel):
-    target_user_id: str
-
-
-@router.post("/api/auth/impersonate")
-async def impersonate_user(req: ImpersonateRequest, authorization: str = Header(...)):
-    """Mint a real session for another user (admin only).
-
-    Two-step server-side dance:
-      1. `admin.generate_link({type: "magiclink", email})` produces a
-         hashed_token normally embedded in an email.
-      2. `auth.verify_otp({token_hash, type: "magiclink"})` consumes the
-         hashed_token and returns a fresh `{access_token, refresh_token}`
-         for the target user.
-
-    The frontend then calls `supabase.auth.setSession(...)` with those
-    tokens to swap the active session. No URL fragment, no magic-link
-    redirect, no race with cookie writes.
-    """
-    _require_admin(authorization)
-    try:
-        existing = supabase.auth.admin.get_user_by_id(req.target_user_id)
-    except Exception as e:
-        raise HTTPException(404, f"Target user not found: {e}")
-    target = getattr(existing, "user", None) or existing
-    target_email = getattr(target, "email", None)
-    if not target_email:
-        raise HTTPException(404, "Target user has no email")
-
-    try:
-        link_result = supabase.auth.admin.generate_link({
-            "type": "magiclink",
-            "email": target_email,
-            "options": {"redirect_to": "http://localhost"},
-        })
-    except Exception as e:
-        raise HTTPException(500, f"generate_link failed: {e}")
-    properties = getattr(link_result, "properties", None)
-    hashed_token = getattr(properties, "hashed_token", None) if properties else None
-    if not hashed_token:
-        raise HTTPException(500, "generate_link returned no hashed_token")
-
-    # Use a throwaway client for verify_otp — supabase-py is stateful and
-    # verify_otp stores the resulting session on the client, replacing the
-    # service_role auth header. Calling it on the global `supabase` would
-    # silently switch every subsequent DB insert to the impersonated user's
-    # JWT, which is then subject to RLS and fails with 42501.
-    auth_only = create_client(
-        os.environ["SUPABASE_URL"],
-        os.environ["SUPABASE_SERVICE_KEY"],
-    )
-    try:
-        verification = auth_only.auth.verify_otp({
-            "token_hash": hashed_token,
-            "type": "magiclink",
-        })
-    except Exception as e:
-        raise HTTPException(500, f"verify_otp failed: {e}")
-    session = getattr(verification, "session", None)
-    if not session:
-        raise HTTPException(500, "verify_otp returned no session")
-
-    return {
-        "target_email": target_email,
-        "user_id": req.target_user_id,
-        "access_token": getattr(session, "access_token", None),
-        "refresh_token": getattr(session, "refresh_token", None),
-        "expires_at": getattr(session, "expires_at", None),
-    }

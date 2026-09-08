@@ -41,8 +41,7 @@ export type NavKey =
   | '/signal-lab'
   | '/fees'
   | '/api'
-  | '/network'
-  | '/documentation';
+  | '/network';
 
 export type SidebarCopy = {
   nav: Record<NavKey, string>;
@@ -51,6 +50,8 @@ export type SidebarCopy = {
   collapseSection: (label: string) => string;
   language: string;
   languageTitle: string;
+  /** The link to /account/security, in the account block. */
+  security: string;
   signOut: string;
   deleteAccount: string;
   deleteSure: string;
@@ -85,7 +86,6 @@ const EN: SidebarCopy = {
     '/fees': 'Fees',
     '/api': 'API',
     '/network': 'Network',
-    '/documentation': 'Documentation',
   },
   expandSection: (label) => `Expand ${label}`,
   collapseSection: (label) => `Collapse ${label}`,
@@ -93,6 +93,7 @@ const EN: SidebarCopy = {
   languageTitle: 'The interface language. Stored per browser and shared by every screen. '
     + 'Not every page is translated yet — the home page, the Management Dashboard and the '
     + 'Fundamental modal are the ones that answer today.',
+  security: 'Two-factor sign-in',
   signOut: 'Sign out',
   deleteAccount: 'Delete account',
   deleteSure: 'Are you sure? This cannot be undone.',
@@ -129,7 +130,6 @@ const NL: SidebarCopy = {
     '/fees': 'Kosten',
     '/api': 'API',
     '/network': 'Netwerk',
-    '/documentation': 'Documentatie',
   },
   expandSection: (label) => `${label} uitklappen`,
   collapseSection: (label) => `${label} inklappen`,
@@ -137,6 +137,7 @@ const NL: SidebarCopy = {
   languageTitle: 'De taal van de interface. Wordt per browser opgeslagen en geldt op elk scherm. '
     + 'Nog niet elke pagina is vertaald — de startpagina, het Managementdashboard en de '
     + 'Fundamental-modal zijn de schermen die nu meegaan.',
+  security: 'Tweestapsverificatie',
   signOut: 'Uitloggen',
   deleteAccount: 'Account verwijderen',
   deleteSure: 'Weet u het zeker? Dit kan niet ongedaan worden gemaakt.',

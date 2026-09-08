@@ -7995,19 +7995,6 @@
         "title": "HoldingTradeEffect",
         "type": "object"
       },
-      "ImpersonateRequest": {
-        "properties": {
-          "target_user_id": {
-            "title": "Target User Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "target_user_id"
-        ],
-        "title": "ImpersonateRequest",
-        "type": "object"
-      },
       "IndexMember": {
         "properties": {
           "company_id": {
@@ -15703,7 +15690,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -15754,7 +15741,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -15805,7 +15792,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -15856,7 +15843,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -15897,7 +15884,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -15930,47 +15917,6 @@
         ]
       }
     },
-    "/api/admin/etfs": {
-      "get": {
-        "description": "Every ETF that carries an ISIN, enriched like a universe member. Admin only.\n\nETFs live in the `benchmark` table (the same rows the diversifier + sector\noverlays reference \u2014 an ETF is a benchmark with a tradeable ISIN). This\nreturns ONLY benchmarks with an `isin` set \u2014 the identifiable, tradeable\ninstruments \u2014 each with its latest close (native + EUR via the same fx_rate\nsource the /fx-rates page + universe members use). Index-only benchmarks\n(no ISIN) are excluded.\n\nEach ETF carries the universe-member-style shape (minus the fields that\ndon't apply to a fund \u2014 exchange/country/industry):\n\n    benchmark_id, ticker, name, isin, currency, sector,\n    latest_close_local, latest_close_eur, latest_close_date, fx_rate_per_eur\n\nResponse: `{count, etfs:[\u2026]}`, sorted by ticker.",
-        "operationId": "list_etfs_api_admin_etfs_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Etfs",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/api/admin/gurufocus-company-name": {
       "post": {
         "description": "Fetch the company name GuruFocus reports for a (ticker, exchange) \u2014 so a\nmislabeled row can be corrected to what its GuruFocus link actually shows\n(e.g. a row stored as \"TSMC\" whose `TSE:2330` listing GuruFocus calls\n\"Forside Co Ltd\"). One GuruFocus call. Returns `{name, found, symbol, log}`;\nthe caller confirms + writes the rename via PUT /api/companies/{id}.",
@@ -15979,7 +15925,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -16030,7 +15976,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -16101,7 +16047,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -16134,47 +16080,6 @@
         ]
       }
     },
-    "/api/admin/health": {
-      "get": {
-        "description": "Composite go/no-go. Returns a single boolean `is_healthy` plus\nthe list of checks that failed. Threshold defaults are\nintentionally permissive \u2014 we're guarding against \"something is\nobviously broken\" cases, not micro-staleness.\n\nChecks:\n  - DB reachable\n  - close_price max date is within the last 6 trading days\n  - most recent ingest_run is within the last 8 days\n  - that run isn't 'running' for more than 2 hours (a stuck job)\n  - that run's status is 'ok' (allows a single transient failure\n    downstream \u2014 see `is_healthy_strict` for the stricter variant)",
-        "operationId": "get_health_api_admin_health_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Health",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
     "/api/admin/network-diagnostics": {
       "get": {
         "description": "Reachability report for every external service the terminal depends on\n\u2014 backs the /network page. Returns this backend's egress IP, the live\nGuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS\nIP, latency, status, and a plain-language reason). `guru_method=curl`\n(default) probes GuruFocus through the real curl_cffi impersonation ladder\nso the verdict matches what the ingest pipeline experiences in prod;\n`guru_method=plain` uses a bare requests.get to show whether the API still\nbot-challenges fingerprint-less clients. See routers/_network_diag.py.",
@@ -16193,7 +16098,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -16234,7 +16139,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -16284,7 +16189,7 @@
           {
             "in": "header",
             "name": "authorization",
-            "required": true,
+            "required": false,
             "schema": {
               "title": "Authorization",
               "type": "string"
@@ -16312,324 +16217,6 @@
           }
         },
         "summary": "Admin Run Scheduled Job",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/schedules": {
-      "get": {
-        "description": "List every scheduled strategy with its next rebalance date. Admin\nonly. Lightweight (no holdings) \u2014 the discovery call: find the\n`strategy_id` to drill into, see when each next rebalances, and how\nfresh its holdings are.\n\n`next_rebalance_at` is the UTC tick at which the strategy will next\nre-select its holdings (NULL = a never-run strategy, rebalances on the\nnext tick). `as_of_date` / `latest_price_date` / `holdings_count` come\nfrom its most recent snapshot (absent until the strategy first runs).\n\nQuery: `enabled_only=true` (default) hides paused strategies; pass\n`false` to see everything.\n\nResponse: `[{strategy_id, name, enabled, frequency, next_rebalance_at,\nlast_run_at, as_of_date, latest_price_date, holdings_count}]`.",
-        "operationId": "list_schedules_api_admin_schedules_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "enabled_only",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Enabled Only",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Schedules",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/schedules/{strategy_id}": {
-      "get": {
-        "description": "One scheduled strategy's CURRENT holdings \u2014 the order-ready call your\nIBKR buyer makes. Admin only.\n\nHoldings come from the strategy's most recent `current_picks_snapshot`;\n`as_of_date` is the date they were selected and `latest_price_date` the\nmost recent close priced into them \u2014 gate on these (or `/api/admin/health`)\nso you never trade on stale data. A strategy with no snapshot yet returns\nan empty `holdings` list. 404 when the strategy doesn't exist.\n\nEach holding carries everything needed to place an order + the full set of\nper-position marks shown on the /schedule Current-portfolio table:\n    company_id, ticker, exchange, country, currency, isin, company_name,\n    sector, side, is_cash, score,\n    target_weight, current_weight (drift-renormalized),\n    entry_price_local, exit_price_local, entry_price_eur, exit_price_eur,\n    entry_date, exit_date, entry_fx_rate_eur, exit_fx_rate_eur,\n    return_eur_pct\n\nResponse: `{strategy_id, name, enabled, frequency, next_rebalance_at,\nlast_run_at, as_of_date, latest_price_date, holdings_count, holdings:[\u2026]}`.",
-        "operationId": "get_schedule_api_admin_schedules__strategy_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "strategy_id",
-            "required": true,
-            "schema": {
-              "title": "Strategy Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Schedule",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/schedules/{strategy_id}/performance": {
-      "get": {
-        "description": "A scheduled strategy's LIVE performance since go-live. Admin only.\n\nReturns the strategy's inception (go-live) date, its return since\ninception, the month-to-date return, the latest date the data is current\nthrough, and the full per-day return series since inception.\n\nAll figures track the live held portfolio: the frozen backtest curve is\nextended with the snapshot tail the price-update job marks to market\nthrough the latest priced day (`_extended_curve`), then read at the\nrelevant anchors (`_returns_from_backtest`). `daily_returns` is the\nper-day close-to-close series off that same curve from inception onward \u2014\nthe same numbers behind the /schedule 'daily returns' table, but for every\nday rather than one month. Returns are GROSS (no fee model on the live\npath). Inception = the strategy's `start_date`, or `created_at` when unset.\n\n404 if the strategy doesn't exist; null returns + empty `daily_returns`\nwhen it has no saved backtest / no live data yet. Response:\n    {strategy_id, name, inception_date, as_of_date,\n     since_inception_return_pct, mtd_return_pct,\n     daily_returns: [{date, return_pct}, ...]}",
-        "operationId": "get_schedule_performance_api_admin_schedules__strategy_id__performance_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "strategy_id",
-            "required": true,
-            "schema": {
-              "title": "Strategy Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Schedule Performance",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/schedules/{strategy_id}/risk-metrics": {
-      "get": {
-        "description": "A scheduled strategy's BACKTESTED risk-adjusted metrics \u2014 Sharpe +\nSortino \u2014 and the period they were computed over. Admin only.\n\nBoth ratios come from the strategy's source `backtest_run` summary\n(annualized, risk-free = 0, computed off the closed-period daily curve so\nthey're comparable across rebalance cadences \u2014 see\n`momentum/backtest/_summary.py`). The `period` is the actual span of that\nbacktest's daily curve (first \u2192 last dated point), i.e. exactly the data\nthe ratios were measured over (not the requested config range, which can\nextend past the data). `annualized_return_pct` + `max_drawdown_pct` round\nout the risk picture. 404 if the strategy doesn't exist; null metrics when\nit has no saved backtest. Response:\n    {strategy_id, name, backtest_run_id, sharpe_ratio, sortino_ratio,\n     annualized_return_pct, max_drawdown_pct,\n     period: {start_date, end_date}}",
-        "operationId": "get_schedule_risk_metrics_api_admin_schedules__strategy_id__risk_metrics_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "strategy_id",
-            "required": true,
-            "schema": {
-              "title": "Strategy Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Schedule Risk Metrics",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/universes": {
-      "get": {
-        "description": "List the **frozen** universes \u2014 the discovery call for the membership\nendpoint below. Admin only.\n\nBy default returns ONLY frozen static snapshots (`frozen_at` set) \u2014 the\nreproducible \"X (as of YYYY-MM)\" universes that are the canonical, usable\nsets across the app. Pass `?include_all=true` to also list the live\ntemplate-managed canonicals (`template_key` set), the LongEquity\ntime-series universe, criteria-derived universes (`parent_universe_id`),\nand imported index universes.\n\nSingle-set model: each universe is a frozen set as of `as_of_date`.\n`is_monthly` is true only for the LongEquity time-series universe; the\n`start_month` / `end_month` / `month_count` fields are populated only when\n`is_monthly` (null otherwise). `member_count` comes from the\n`universe_stats` materialized view (a refreshed-on-pipeline hint; may\nlag). Pick a `universe_id` and pass it to `GET /api/admin/universes/{id}`.\n\nResponse: `{count, universes:[{universe_id, label, description, kind,\ntemplate_key, frozen_at, parent_universe_id, created_at,\nlast_refreshed_at, as_of_date, is_monthly, member_count, start_month,\nend_month, month_count}]}`.",
-        "operationId": "list_universes_api_admin_universes_get",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "include_all",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Include All",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Universes",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/admin/universes/{universe_id}": {
-      "get": {
-        "description": "Full membership of one universe, each member enriched with the same\nper-company attributes the holdings endpoint returns. Admin only.\n\nAlmost every universe is a single frozen set (one `target_month`), so by\ndefault you get that set and the `month` param does nothing. The ONE\nexception is the live, multi-month **LongEquity** time-series universe\n(`is_monthly=true`, reachable via `?include_all=true` on the list): there\n`?month=YYYY-MM` selects a historical snapshot, defaulting to its latest\nmonth. For any single-month universe `month` is IGNORED (you always get\nthe frozen set, never an empty wrong-month result). 404 when the universe\ndoesn't exist; empty `members` when it has no membership.\n\nEach member carries:\n    company_id, ticker, exchange, country, currency, isin,\n    company_name, sector, industry,\n    latest_close_local, latest_close_eur, latest_close_date,\n    fx_rate_per_eur\n\nSame descriptive fields as a scheduled strategy's holdings; the\nposition-specific fields (side / target_weight / score / entry_date)\ndon't apply to a universe member, and the holding's entry price becomes\nthe latest close (native + EUR).\n\nResponse: `{universe_id, label, template_key, frozen_at, is_monthly,\ntarget_month, member_count, members:[\u2026]}`.",
-        "operationId": "get_universe_api_admin_universes__universe_id__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "universe_id",
-            "required": true,
-            "schema": {
-              "title": "Universe Id",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "month",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Month"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Get Universe",
         "tags": [
           "admin"
         ]
@@ -22157,57 +21744,6 @@
         ]
       }
     },
-    "/api/auth/impersonate": {
-      "post": {
-        "description": "Mint a real session for another user (admin only).\n\nTwo-step server-side dance:\n  1. `admin.generate_link({type: \"magiclink\", email})` produces a\n     hashed_token normally embedded in an email.\n  2. `auth.verify_otp({token_hash, type: \"magiclink\"})` consumes the\n     hashed_token and returns a fresh `{access_token, refresh_token}`\n     for the target user.\n\nThe frontend then calls `supabase.auth.setSession(...)` with those\ntokens to swap the active session. No URL fragment, no magic-link\nredirect, no race with cookie writes.",
-        "operationId": "impersonate_user_api_auth_impersonate_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": true,
-            "schema": {
-              "title": "Authorization",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ImpersonateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Impersonate User",
-        "tags": [
-          "auth"
-        ]
-      }
-    },
     "/api/auth/me": {
       "get": {
         "description": "Return the caller's user info + role. The frontend uses this to\ndecide what to show; the source of truth for access is still the\nmiddleware / per-endpoint admin check, not this endpoint.",
@@ -22384,6 +21920,56 @@
           }
         },
         "summary": "Delete User",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/auth/users/{user_id}/mfa/reset": {
+      "post": {
+        "description": "Remove every authenticator on another user's account (admin only).\n\n\u26a0\u26a0 THIS IS THE ENTIRE RECOVERY STORY, BECAUSE SUPABASE TOTP HAS NO BACKUP CODES. A lost phone\nis otherwise a permanent lockout: two-factor is mandatory (`_auth_middleware`), so the person\ncannot sign in to remove the factor, and the factor is what they cannot produce. Without this\nthe fix was hand-written SQL against production auth tables, performed under pressure on the\nworst possible day.\n\n\u26a0\u26a0 IT REFUSES SELF-SERVICE, AND THAT IS NOT TIDINESS. `/account/security` makes removing your\nOWN authenticator require a current code \u2014 proof you still hold it \u2014 and an admin resetting\nthemselves here would walk straight around that check. The result would be that a stolen\n`aal2` session could strip two-factor off the account and re-enrol on the thief's phone,\nturning a session compromise into a permanent one. Nothing is lost by refusing: an admin who\nis genuinely locked out cannot sign in to press this anyway. Their route back is a SECOND\nadmin account, or `REQUIRE_MFA=0` on the host.\n\n\u26a0\u26a0 AND IT EVICTS THEIR SESSIONS, WHICH IS THE HALF THAT MAKES IT SAFE. Removing a factor does\nnot touch a session that already proved one: the `aal2` claim is in the issued token and the\nrefresh keeps it. So a phone stolen WITH the app open would keep working after a \"reset\" \u2014 the\nexact scenario the button is pressed for. GoTrue exposes no admin logout (measured:\n`/admin/users/{id}/logout` and `/sessions` both 404), so the sessions are deleted directly,\nwhich is what GoTrue itself does on sign-out. Verified: the refresh token then answers\n`refresh_token_not_found`.\n\n\u26a0 EVICTION IS BEST-EFFORT AND SAID SO IN THE RESPONSE. It needs `SUPABASE_DB_URL`; without it\nthe factors still go \u2014 which is the ask \u2014 and the caller is told the sessions did not. Failing\nthe whole reset because the optional half is unavailable would leave somebody locked out to\nprotect them from a stale session.",
+        "operationId": "reset_user_mfa_api_auth_users__user_id__mfa_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": true,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset User Mfa",
         "tags": [
           "auth"
         ]

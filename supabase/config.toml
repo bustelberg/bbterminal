@@ -293,9 +293,28 @@ max_frequency = "5s"
 # 4152127777 = "123456"
 
 # Configure logged in session timeouts.
-# [auth.sessions]
-# Force log out after the specified duration.
-# timebox = "24h"
+#
+# ⚠⚠ A SESSION LASTS ONE MONTH AND THEN ENDS, WHATEVER YOU ARE DOING (2026-09-08, on request).
+# Without this a Supabase session is effectively permanent: the access token expires hourly but the
+# refresh token rotates forever, so somebody who signed in once in January still holds a live
+# session in December and has never been asked for a second factor again. The timebox is what turns
+# "two-factor at sign-in" into "two-factor every month" — GoTrue refuses the refresh once the
+# session is older than this, the person signs in again, and mandatory MFA (`[auth.mfa.totp]`)
+# means that sign-in costs a password AND a code.
+#
+# ⚠ IT IS A HARD AGE LIMIT, NOT AN IDLE TIMER. Using the app does not extend it, which is the
+# point: a stolen refresh token has a bounded life no matter how busy the thief is.
+#
+# ⚠ `inactivity_timeout` IS DELIBERATELY LEFT OFF. It logs people out for not visiting, which for a
+# dashboard somebody opens twice a week is a lockout dressed as a security control — and it does
+# nothing the timebox does not already bound.
+#
+# ⚠ MIRROR IT IN THE PROD DASHBOARD. Like `[auth.mfa]` above, this file configures the LOCAL stack
+# only; `db push` does not carry it. Left unset in production, sessions there never expire and the
+# monthly re-authentication silently does not happen — with nothing on any screen to say so.
+[auth.sessions]
+# Force log out after the specified duration. 720h = 30 days.
+timebox = "720h"
 # Force log out if the user has been inactive longer than the specified duration.
 # inactivity_timeout = "8h"
 
@@ -318,16 +337,37 @@ message_service_sid = ""
 auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 
 # Multi-factor-authentication is available to Supabase Pro plan.
+#
+# ⚠⚠ THIS FILE CONFIGURES THE LOCAL STACK ONLY, AND THE HOSTED PROJECT IS SET IN THE DASHBOARD.
+# Same split-brain as `supabase/templates/*.html`: `supabase start` reads this, `db push` does NOT
+# carry it, and nothing compares the two. Turning TOTP on here and forgetting the dashboard gives
+# the worst possible outcome — enrolment works locally, so the feature looks finished, and in
+# production `mfa.enroll()` fails for every user with a 422 that has nothing to do with their
+# input. Whichever side you change, change both. (2026-09-08 — step 2 of adding 2FA.)
+#
+# ⚠ AND CHECK THE PLAN. The stock comment above is Supabase's own and says Pro; this project is on
+# free tier throughout. If the dashboard will not let you enable it, that is the answer — and it
+# arrives here rather than three steps later with an enrolment screen already built.
 [auth.mfa]
 # Control how many MFA factors can be enrolled at once per user.
 max_enrolled_factors = 10
 
 # Control MFA via App Authenticator (TOTP)
+#
+# ⚠ ENABLING THIS SECURES NOTHING ON ITS OWN. It only makes `mfa.enroll` / `challenge` / `verify`
+# answer. A user who enrols a factor and then signs in with a password still gets an `aal1` session
+# with full access, because nothing reads `aal` yet — `proxy.ts` and `routers/auth.py::verify_token`
+# are steps 4 and 5. Until those land, this is a capability, not a control.
 [auth.mfa.totp]
-enroll_enabled = false
-verify_enabled = false
+enroll_enabled = true
+verify_enabled = true
 
 # Configure MFA via Phone Messaging
+#
+# ⚠ DELIBERATELY OFF, AND NOT AN OVERSIGHT. SMS costs money and inherits the built-in provider's
+# rate cap — the same class of cap that makes `describeSendError` explain "2 emails per hour,
+# project-wide" to people trying to sign in. TOTP has no per-message limit, no provider and no
+# delivery failure mode. Turn this on only with a paid provider configured and a reason.
 [auth.mfa.phone]
 enroll_enabled = false
 verify_enabled = false

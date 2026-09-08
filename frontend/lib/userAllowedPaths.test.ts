@@ -11,6 +11,7 @@ describe('isUserAllowedPath', () => {
     expect(isUserAllowedPath('/')).toBe(true)
     expect(isUserAllowedPath('/schedule')).toBe(true)
     expect(isUserAllowedPath('/management-dashboard')).toBe(true)
+    expect(isUserAllowedPath('/account/security')).toBe(true)
     expect(isUserAllowedPath('/forbidden')).toBe(true)
   })
 
@@ -21,8 +22,32 @@ describe('isUserAllowedPath', () => {
     // ⚠⚠ AND THE REMOVAL HALF IS PINNED BY THE CASES BELOW. Taking a page away leaves any API path
     // it alone needed open — a permission nobody can see, because it grants no reachable screen.
     expect([...USER_ALLOWED_PATHS].sort()).toEqual([
-      '/', '/forbidden', '/management-dashboard', '/schedule',
+      '/', '/account', '/forbidden', '/management-dashboard', '/mfa', '/schedule',
     ])
+  })
+
+  it('⚠⚠ /account is the one entry with no API half, and that is deliberate', () => {
+    // `/account/security` is the two-factor page (added 2026-09-08). It calls
+    // `supabase.auth.mfa.*`, which goes to NEXT_PUBLIC_SUPABASE_URL — it makes no `apiFetch` call
+    // at all, so there is nothing to open in `_auth_middleware.py` and nothing that can 403.
+    // Pinned because a missing second half otherwise reads as an oversight to whoever audits this
+    // list next, and "there is no second half" is only obvious if somebody says so.
+    expect(isUserAllowedPath('/account')).toBe(true)
+    expect(isUserAllowedPath('/account/security')).toBe(true)
+  })
+
+  it('⚠⚠ /mfa is reachable by everyone, or the gate is a trap', () => {
+    // `proxy.ts` sends an unproved session to /mfa. If the ROLE gate could then refuse it, a
+    // non-admin with a factor would be redirected to a page they are not allowed to open and
+    // bounced to /forbidden — locked out of the app by the control meant to let them in.
+    // Like /account it calls Supabase directly, so there is no API half to open either.
+    expect(isUserAllowedPath('/mfa')).toBe(true)
+  })
+
+  it('⚠ every user may reach their OWN account page, admin or not', () => {
+    // These are the reader's own credentials. There is nothing under /account an admin could
+    // usefully do on someone else's behalf, so there is nothing here to gate by role.
+    expect(USER_ALLOWED_PATHS).toContain('/account')
   })
 
   it('⚠ blocks /earnings and /research-dashboard — removed from the user tier 2026-09-07', () => {

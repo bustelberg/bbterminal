@@ -1,39 +1,23 @@
-"""Admin-only programmatic API.
+"""Admin-only maintenance + diagnostics API.
 
-Purpose: let an external script (e.g. a local IBKR re-balancer) pull the
-latest scheduled-strategy portfolio + monitor pipeline health without
-opening the BBTerminal web UI. All endpoints under `/api/admin/` require
-the caller's Bearer JWT to have `app_metadata.role == 'admin'` — same
-gate the UI's admin pages use. Sign-in:
+⚠⚠ THE EXTERNAL TRADING SURFACE IS GONE (2026-09-08, on request). This router existed to let a
+local IBKR re-balancer pull order-ready holdings — `GET /api/admin/schedules` and its three
+siblings, `/universes` (×2), `/etfs` and `/health` — and that script is no longer needed. With it
+went `common/admin_key` and the `X-Admin-Key` credential built for it two hours earlier: a
+standing secret with no caller is a liability, not an asset.
 
-    curl -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
-        -H "apikey: $SUPABASE_ANON_KEY" \
-        -H "Content-Type: application/json" \
-        -d '{"email":"admin@example.com","password":"…"}'
-    → {access_token, refresh_token, expires_at}
+⚠ WHAT IS LEFT IS NOT A PUBLIC API. Every remaining endpoint is a maintenance or diagnostic tool
+reached from inside the app: four back live pages (`company-illiquid` and `company-price-refresh`
+on /schedule, `scheduled-jobs` on its Automatic-jobs card, `network-diagnostics` on /network), and
+the rest are one-off tools an admin drives through the /api explorer. All of them authenticate
+with the caller's own Supabase session, which now means a second factor too.
 
-Then call admin endpoints with:
+⚠ `_load_strategy_row` and `_strategy_snapshots` SURVIVED THE DELETION and are the reason this
+module still knows anything about strategies: `routers/diversifier.py` imports both. They are no
+longer used by anything in this file.
 
-    curl -H "Authorization: Bearer $ACCESS_TOKEN" \
-         "https://<backend>/api/admin/schedules"
-
-Endpoints — the IBKR buy flow is just three:
-    GET /api/admin/schedules         — list strategies + each one's next rebalance date
-                                        (lightweight; no holdings)
-    GET /api/admin/schedules/{id}    — one strategy's CURRENT holdings (order-ready:
-                                        ticker/exchange/country/currency/isin/company_name/
-                                        weight/side/prices) + as_of_date
-    GET /api/admin/health            — composite go/no-go; gate trades on is_healthy_strict
-
-Universe explorer (same per-company shape as holdings):
-    GET /api/admin/universes         — list every universe + its id / kind / month range
-    GET /api/admin/universes/{id}    — full membership for a month (default latest;
-                                        ?month=YYYY-MM), each member with
-                                        ticker/exchange/country/currency/isin/sector +
-                                        latest close (native + EUR)
-
-The remaining endpoints are data-maintenance tools (GuruFocus exchange resolution,
-companies missing/flagged), separate from the buy flow.
+If a programmatic holdings read is ever wanted again, it needs rebuilding — and the thing to
+reconsider first is whether it should be a user-shaped credential at all.
 """
 from __future__ import annotations
 
@@ -45,12 +29,6 @@ from postgrest.exceptions import APIError
 from pydantic import BaseModel
 
 from deps import fetch_in_chunks, supabase
-from routers._admin_health import _max_target_date, _now_utc, _trading_day_age
-from routers._admin_payloads import (
-    _build_portfolio_payload,
-    _enrich_universe_members,
-    _fetch_latest_snapshots_for,
-)
 from routers.auth import _require_admin
 
 router = APIRouter(tags=["admin"])
@@ -85,7 +63,7 @@ class _IlliquidBody(BaseModel):
 
 
 @router.post("/api/admin/company-illiquid")
-async def set_company_illiquid(body: _IlliquidBody, authorization: str = Header(...)):
+async def set_company_illiquid(body: _IlliquidBody, authorization: str = Header(None)):
     """Mark / unmark a company as **illiquid** — a listing that trades
     infrequently, so GuruFocus serves stale prices for it (e.g. Telecom Italia
     savings shares MIL:TITR). Sets `company.illiquid_at` (now / NULL). Illiquid
@@ -103,7 +81,7 @@ async def set_company_illiquid(body: _IlliquidBody, authorization: str = Header(
 
 
 @router.post("/api/admin/gurufocus-company-name")
-async def gurufocus_company_name(body: _GfCompanyNameBody, authorization: str = Header(...)):
+async def gurufocus_company_name(body: _GfCompanyNameBody, authorization: str = Header(None)):
     """Fetch the company name GuruFocus reports for a (ticker, exchange) — so a
     mislabeled row can be corrected to what its GuruFocus link actually shows
     (e.g. a row stored as "TSMC" whose `TSE:2330` listing GuruFocus calls
@@ -123,7 +101,7 @@ class _PriceRefreshBody(BaseModel):
 
 
 @router.post("/api/admin/company-price-refresh")
-async def company_price_refresh(body: _PriceRefreshBody, authorization: str = Header(...)):
+async def company_price_refresh(body: _PriceRefreshBody, authorization: str = Header(None)):
     """Force-refresh ONE holding's prices from GuruFocus (bypassing cache) and
     return a COMPACT view of the actual API request + response — for clearing a
     single stale row straight from the /schedule Price-update / Current-portfolio
@@ -321,7 +299,7 @@ async def company_price_refresh(body: _PriceRefreshBody, authorization: str = He
 @router.post("/api/admin/gurufocus-exchange-search")
 async def gurufocus_exchange_search(
     body: _GuruFocusExchangeSearchBody,
-    authorization: str = Header(...),
+    authorization: str = Header(None),
 ):
     """Probe GuruFocus to find which exchange code ACTUALLY resolves for
     each ticker. Use case: `company.gurufocus_lookup_failed_at` is set on
@@ -424,7 +402,7 @@ async def gurufocus_exchange_search(
 
 @router.get("/api/admin/gurufocus-probe")
 async def gurufocus_probe(
-    authorization: str = Header(...),
+    authorization: str = Header(None),
     symbol: str = "AAPL",
     endpoint: str = "price",
 ):
@@ -490,7 +468,7 @@ async def gurufocus_probe(
 
 
 @router.get("/api/admin/egress-ip")
-async def get_egress_ip(authorization: str = Header(...)):
+async def get_egress_ip(authorization: str = Header(None)):
     """Return the IP this backend currently appears to egress from.
 
     Why: AirSPMS allowlists by IP, Railway hobby/free egress IPs CAN
@@ -541,7 +519,7 @@ async def get_egress_ip(authorization: str = Header(...)):
 
 
 @router.get("/api/admin/network-diagnostics")
-async def network_diagnostics(authorization: str = Header(...), guru_method: str = "curl"):
+async def network_diagnostics(authorization: str = Header(None), guru_method: str = "curl"):
     """Reachability report for every external service the terminal depends on
     — backs the /network page. Returns this backend's egress IP, the live
     GuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS
@@ -557,7 +535,7 @@ async def network_diagnostics(authorization: str = Header(...), guru_method: str
 
 
 @router.get("/api/admin/copy-status")
-async def copy_status(authorization: str = Header(...)):
+async def copy_status(authorization: str = Header(None)):
     """Diagnose the direct-Postgres COPY fast path the heavy loaders use
     (backtests, /companies, FX, freshness). When SUPABASE_DB_URL is unset
     OR the connection fails, those loaders SILENTLY fall back to PostgREST,
@@ -620,114 +598,6 @@ async def copy_status(authorization: str = Header(...)):
         return out
 
     return await asyncio.to_thread(_q)
-
-
-# ─── Schedules ─────────────────────────────────────────────────────
-
-
-@router.get("/api/admin/schedules")
-async def list_schedules(
-    enabled_only: bool = True,
-    authorization: str = Header(...),
-):
-    """List every scheduled strategy with its next rebalance date. Admin
-    only. Lightweight (no holdings) — the discovery call: find the
-    `strategy_id` to drill into, see when each next rebalances, and how
-    fresh its holdings are.
-
-    `next_rebalance_at` is the UTC tick at which the strategy will next
-    re-select its holdings (NULL = a never-run strategy, rebalances on the
-    next tick). `as_of_date` / `latest_price_date` / `holdings_count` come
-    from its most recent snapshot (absent until the strategy first runs).
-
-    Query: `enabled_only=true` (default) hides paused strategies; pass
-    `false` to see everything.
-
-    Response: `[{strategy_id, name, enabled, frequency, next_rebalance_at,
-    last_run_at, as_of_date, latest_price_date, holdings_count}]`."""
-    _require_admin(authorization)
-
-    def _query() -> list[dict]:
-        q = supabase.table("scheduled_strategy").select("*").order("created_at")
-        if enabled_only:
-            q = q.eq("enabled", True)
-        try:
-            rows = q.execute().data or []
-        except APIError as e:
-            raise HTTPException(500, f"DB read failed: {e}")
-        latest = _fetch_latest_snapshots_for([r["id"] for r in rows])
-        out: list[dict] = []
-        for r in rows:
-            snap = latest.get(r["id"])
-            out.append({
-                "strategy_id": r["id"],
-                "name": r.get("name") or f"Strategy #{r['id']}",
-                "enabled": r.get("enabled", True),
-                "frequency": r.get("frequency"),
-                "next_rebalance_at": r.get("next_due_at"),
-                "last_run_at": r.get("last_run_at"),
-                "as_of_date": snap.get("as_of_date") if snap else None,
-                "latest_price_date": snap.get("latest_price_date") if snap else None,
-                "holdings_count": len(snap.get("holdings") or []) if snap else 0,
-            })
-        return out
-
-    return await asyncio.to_thread(_query)
-
-
-@router.get("/api/admin/schedules/{strategy_id}")
-async def get_schedule(strategy_id: int, authorization: str = Header(...)):
-    """One scheduled strategy's CURRENT holdings — the order-ready call your
-    IBKR buyer makes. Admin only.
-
-    Holdings come from the strategy's most recent `current_picks_snapshot`;
-    `as_of_date` is the date they were selected and `latest_price_date` the
-    most recent close priced into them — gate on these (or `/api/admin/health`)
-    so you never trade on stale data. A strategy with no snapshot yet returns
-    an empty `holdings` list. 404 when the strategy doesn't exist.
-
-    Each holding carries everything needed to place an order + the full set of
-    per-position marks shown on the /schedule Current-portfolio table:
-        company_id, ticker, exchange, country, currency, isin, company_name,
-        sector, side, is_cash, score,
-        target_weight, current_weight (drift-renormalized),
-        entry_price_local, exit_price_local, entry_price_eur, exit_price_eur,
-        entry_date, exit_date, entry_fx_rate_eur, exit_fx_rate_eur,
-        return_eur_pct
-
-    Response: `{strategy_id, name, enabled, frequency, next_rebalance_at,
-    last_run_at, as_of_date, latest_price_date, holdings_count, holdings:[…]}`."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        resp = (
-            supabase.table("scheduled_strategy")
-            .select("*")
-            .eq("id", strategy_id)
-            .limit(1)
-            .execute()
-        )
-        if not resp.data:
-            raise HTTPException(404, f"Scheduled strategy #{strategy_id} not found")
-        strat = resp.data[0]
-        snap = _fetch_latest_snapshots_for([strategy_id]).get(strategy_id)
-        payload = _build_portfolio_payload(snap) if snap else None
-        return {
-            "strategy_id": strat["id"],
-            "name": strat.get("name") or f"Strategy #{strat['id']}",
-            "enabled": strat.get("enabled", True),
-            "frequency": strat.get("frequency"),
-            "next_rebalance_at": strat.get("next_due_at"),
-            "last_run_at": strat.get("last_run_at"),
-            "as_of_date": payload.get("as_of_date") if payload else None,
-            "latest_price_date": payload.get("latest_price_date") if payload else None,
-            "holdings_count": len(payload.get("holdings")) if payload else 0,
-            "holdings": payload.get("holdings") if payload else [],
-        }
-
-    return await asyncio.to_thread(_query)
-
-
 def _load_strategy_row(strategy_id: int) -> dict:
     """Fetch one scheduled_strategy row or raise 404. Shared by the
     risk-metrics + performance endpoints."""
@@ -758,468 +628,8 @@ def _strategy_snapshots(strategy_id: int) -> list[dict]:
     ).data or []
 
 
-def _daily_returns_since(pts: list[tuple[str, float]], inception_iso: str) -> list[dict]:
-    """Per-day % returns from a cumulative-return curve `[(date, cum_pct)]`,
-    starting at `inception_iso`. Day N's return is the close-to-close move from
-    the prior curve point — identical to the /schedule monthly-returns heatmap
-    drill-down (`(1+cum[i])/(1+cum[i-1]) - 1`). Period-boundary dates (prior
-    exit == next entry) are de-duped keeping the last cumulative, matching the
-    UI, so no spurious 0% boundary days appear."""
-    if not pts:
-        return []
-    # De-dup by date (keep last cumulative), preserving ascending order.
-    seen: dict[str, int] = {}
-    deduped: list[tuple[str, float]] = []
-    for d, cum in pts:
-        if d in seen:
-            deduped[seen[d]] = (d, cum)
-        else:
-            seen[d] = len(deduped)
-            deduped.append((d, cum))
-    # Baseline = last point on/before inception; the first reported day is the
-    # next point after it (its return spans inception → that day).
-    anchor_idx: int | None = None
-    for i, (d, _cum) in enumerate(deduped):
-        if d <= inception_iso:
-            anchor_idx = i
-        else:
-            break
-    start_i = (anchor_idx + 1) if anchor_idx is not None else 1
-    out: list[dict] = []
-    for i in range(start_i, len(deduped)):
-        f0 = 1 + deduped[i - 1][1] / 100.0
-        f1 = 1 + deduped[i][1] / 100.0
-        if f0 <= 0:
-            continue
-        out.append({"date": deduped[i][0], "return_pct": round((f1 / f0 - 1) * 100.0, 4)})
-    return out
-
-
-@router.get("/api/admin/schedules/{strategy_id}/risk-metrics")
-async def get_schedule_risk_metrics(strategy_id: int, authorization: str = Header(...)):
-    """A scheduled strategy's BACKTESTED risk-adjusted metrics — Sharpe +
-    Sortino — and the period they were computed over. Admin only.
-
-    Both ratios come from the strategy's source `backtest_run` summary
-    (annualized, risk-free = 0, computed off the closed-period daily curve so
-    they're comparable across rebalance cadences — see
-    `momentum/backtest/_summary.py`). The `period` is the actual span of that
-    backtest's daily curve (first → last dated point), i.e. exactly the data
-    the ratios were measured over (not the requested config range, which can
-    extend past the data). `annualized_return_pct` + `max_drawdown_pct` round
-    out the risk picture. 404 if the strategy doesn't exist; null metrics when
-    it has no saved backtest. Response:
-        {strategy_id, name, backtest_run_id, sharpe_ratio, sortino_ratio,
-         annualized_return_pct, max_drawdown_pct,
-         period: {start_date, end_date}}"""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        from routers._schedule_hydration import _curve_stats, _load_backtest_pts  # noqa: PLC0415
-        from routers.momentum.backtest_crud import load_backtest_result_sync  # noqa: PLC0415
-
-        strat = _load_strategy_row(strategy_id)
-        run_id = strat.get("backtest_run_id")
-        cash_pct = float((strat.get("config") or {}).get("cash_pct") or 0.0)
-        base = {
-            "strategy_id": strat["id"],
-            "name": strat.get("name") or f"Strategy #{strat['id']}",
-            "backtest_run_id": run_id,
-            "sharpe_ratio": None,
-            "sortino_ratio": None,
-            "annualized_return_pct": None,
-            "max_drawdown_pct": None,
-            "period": {"start_date": None, "end_date": None},
-        }
-        if not run_id:
-            return base
-        result = load_backtest_result_sync(int(run_id)) or {}
-        summary = result.get("summary") or {}
-        pts = _load_backtest_pts(int(run_id))
-        if pts:
-            period = {"start_date": pts[0][0], "end_date": pts[-1][0]}
-        else:
-            cfg = strat.get("config") or {}
-            period = {"start_date": cfg.get("start_date"), "end_date": cfg.get("end_date")}
-        base.update({
-            # Sharpe/Sortino are cash-INVARIANT (mean & vol both scale by
-            # (1-cash), so the ratio is unchanged) — use the stored values.
-            "sharpe_ratio": summary.get("sharpe_ratio"),
-            "sortino_ratio": summary.get("sortino_ratio"),
-            "annualized_return_pct": summary.get("annualized_return_pct"),
-            "max_drawdown_pct": summary.get("max_drawdown_pct"),
-            "period": period,
-        })
-        # Cash drag DOES scale annualized return + max drawdown. Recompute
-        # annualized off the cash-scaled curve; scale the stored max-drawdown by
-        # the magnitude ratio (preserves its sign convention). No-op at cash=0.
-        if cash_pct > 0 and pts and len(pts) >= 2:
-            scaled = _load_backtest_pts(int(run_id), cash_pct)
-            ann_scaled, mdd_scaled = _curve_stats(scaled)
-            _, mdd_base = _curve_stats(pts)
-            if ann_scaled is not None:
-                base["annualized_return_pct"] = round(ann_scaled, 2)
-            stored_mdd = summary.get("max_drawdown_pct")
-            if stored_mdd is not None and mdd_base and mdd_scaled is not None:
-                base["max_drawdown_pct"] = round(stored_mdd * (mdd_scaled / mdd_base), 2)
-        return base
-
-    return await asyncio.to_thread(_query)
-
-
-@router.get("/api/admin/schedules/{strategy_id}/performance")
-async def get_schedule_performance(strategy_id: int, authorization: str = Header(...)):
-    """A scheduled strategy's LIVE performance since go-live. Admin only.
-
-    Returns the strategy's inception (go-live) date, its return since
-    inception, the month-to-date return, the latest date the data is current
-    through, and the full per-day return series since inception.
-
-    All figures track the live held portfolio: the frozen backtest curve is
-    extended with the snapshot tail the price-update job marks to market
-    through the latest priced day (`_extended_curve`), then read at the
-    relevant anchors (`_returns_from_backtest`). `daily_returns` is the
-    per-day close-to-close series off that same curve from inception onward —
-    the same numbers behind the /schedule 'daily returns' table, but for every
-    day rather than one month. Returns are GROSS (no fee model on the live
-    path). Inception = the strategy's `start_date`, or `created_at` when unset.
-
-    404 if the strategy doesn't exist; null returns + empty `daily_returns`
-    when it has no saved backtest / no live data yet. Response:
-        {strategy_id, name, inception_date, as_of_date,
-         since_inception_return_pct, mtd_return_pct,
-         daily_returns: [{date, return_pct}, ...]}"""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        from routers._schedule_hydration import (  # noqa: PLC0415
-            _extended_curve,
-            _returns_from_backtest,
-        )
-
-        strat = _load_strategy_row(strategy_id)
-        run_id = strat.get("backtest_run_id")
-        # Inception = explicit go-live date, else the creation timestamp.
-        inception_iso = (
-            str(strat["start_date"])[:10]
-            if strat.get("start_date")
-            else str(strat.get("created_at") or "")[:10]
-        )
-        base = {
-            "strategy_id": strat["id"],
-            "name": strat.get("name") or f"Strategy #{strat['id']}",
-            "inception_date": inception_iso or None,
-            "as_of_date": None,
-            "since_inception_return_pct": None,
-            "mtd_return_pct": None,
-            "daily_returns": [],
-        }
-        if not run_id:
-            return base
-        cash_pct = float((strat.get("config") or {}).get("cash_pct") or 0.0)
-        snapshots = _strategy_snapshots(strategy_id)
-        rets = _returns_from_backtest(
-            int(run_id), inception_iso, _now_utc().date(), snapshots, cash_pct=cash_pct
-        )
-        if rets:
-            base.update({
-                "as_of_date": rets.get("as_of_date"),
-                "since_inception_return_pct": rets.get("since_inception_pct"),
-                "mtd_return_pct": rets.get("mtd_return_pct"),
-            })
-        base["daily_returns"] = _daily_returns_since(
-            _extended_curve(int(run_id), snapshots, cash_pct), inception_iso
-        )
-        return base
-
-    return await asyncio.to_thread(_query)
-
-
-# ─── Universes ─────────────────────────────────────────────────────
-
-
-@router.get("/api/admin/universes")
-async def list_universes(
-    include_all: bool = False,
-    authorization: str = Header(...),
-):
-    """List the **frozen** universes — the discovery call for the membership
-    endpoint below. Admin only.
-
-    By default returns ONLY frozen static snapshots (`frozen_at` set) — the
-    reproducible "X (as of YYYY-MM)" universes that are the canonical, usable
-    sets across the app. Pass `?include_all=true` to also list the live
-    template-managed canonicals (`template_key` set), the LongEquity
-    time-series universe, criteria-derived universes (`parent_universe_id`),
-    and imported index universes.
-
-    Single-set model: each universe is a frozen set as of `as_of_date`.
-    `is_monthly` is true only for the LongEquity time-series universe; the
-    `start_month` / `end_month` / `month_count` fields are populated only when
-    `is_monthly` (null otherwise). `member_count` comes from the
-    `universe_stats` materialized view (a refreshed-on-pipeline hint; may
-    lag). Pick a `universe_id` and pass it to `GET /api/admin/universes/{id}`.
-
-    Response: `{count, universes:[{universe_id, label, description, kind,
-    template_key, frozen_at, parent_universe_id, created_at,
-    last_refreshed_at, as_of_date, is_monthly, member_count, start_month,
-    end_month, month_count}]}`."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        q = (
-            supabase.table("universe")
-            .select(
-                "universe_id, label, description, template_key, frozen_at, "
-                "parent_universe_id, created_at, last_refreshed_at, "
-                "as_of_date, is_monthly"
-            )
-        )
-        if not include_all:
-            q = q.not_.is_("frozen_at", "null")
-        rows = q.order("label").execute().data or []
-
-        # Aggregates from the materialized view (best-effort — it may be
-        # unpopulated / stale; the membership endpoint computes the live count).
-        stats: dict[int, dict] = {}
-        try:
-            srows = (
-                supabase.table("universe_stats")
-                .select("universe_id, start_month, end_month, month_count, total_unique_tickers")
-                .execute()
-            ).data or []
-            stats = {int(s["universe_id"]): s for s in srows}
-        except Exception:
-            stats = {}
-
-        out: list[dict] = []
-        for r in rows:
-            uid = int(r["universe_id"])
-            s = stats.get(uid, {})
-            if r.get("template_key"):
-                kind = "template"
-            elif r.get("frozen_at"):
-                kind = "frozen"
-            elif r.get("parent_universe_id"):
-                kind = "derived"
-            else:
-                kind = "index"
-            out.append({
-                "universe_id": uid,
-                "label": r.get("label"),
-                "description": r.get("description"),
-                "kind": kind,
-                "template_key": r.get("template_key"),
-                "frozen_at": r.get("frozen_at"),
-                "parent_universe_id": r.get("parent_universe_id"),
-                "created_at": r.get("created_at"),
-                "last_refreshed_at": r.get("last_refreshed_at"),
-                # Single-set model: as_of_date is the snapshot date; is_monthly
-                # is true only for the LongEquity time-series universe (the
-                # month-range fields below are only meaningful when true).
-                "as_of_date": r.get("as_of_date"),
-                "is_monthly": bool(r.get("is_monthly")),
-                "member_count": s.get("total_unique_tickers"),
-                "start_month": s.get("start_month") if r.get("is_monthly") else None,
-                "end_month": s.get("end_month") if r.get("is_monthly") else None,
-                "month_count": s.get("month_count") if r.get("is_monthly") else None,
-            })
-        return {"count": len(out), "universes": out}
-
-    return await asyncio.to_thread(_query)
-
-
-@router.get("/api/admin/universes/{universe_id}")
-async def get_universe(
-    universe_id: int,
-    month: str | None = None,
-    authorization: str = Header(...),
-):
-    """Full membership of one universe, each member enriched with the same
-    per-company attributes the holdings endpoint returns. Admin only.
-
-    Almost every universe is a single frozen set (one `target_month`), so by
-    default you get that set and the `month` param does nothing. The ONE
-    exception is the live, multi-month **LongEquity** time-series universe
-    (`is_monthly=true`, reachable via `?include_all=true` on the list): there
-    `?month=YYYY-MM` selects a historical snapshot, defaulting to its latest
-    month. For any single-month universe `month` is IGNORED (you always get
-    the frozen set, never an empty wrong-month result). 404 when the universe
-    doesn't exist; empty `members` when it has no membership.
-
-    Each member carries:
-        company_id, ticker, exchange, country, currency, isin,
-        company_name, sector, industry,
-        latest_close_local, latest_close_eur, latest_close_date,
-        fx_rate_per_eur
-
-    Same descriptive fields as a scheduled strategy's holdings; the
-    position-specific fields (side / target_weight / score / entry_date)
-    don't apply to a universe member, and the holding's entry price becomes
-    the latest close (native + EUR).
-
-    Response: `{universe_id, label, template_key, frozen_at, is_monthly,
-    target_month, member_count, members:[…]}`."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        urow = (
-            supabase.table("universe")
-            .select("universe_id, label, description, template_key, frozen_at, parent_universe_id, is_monthly")
-            .eq("universe_id", universe_id)
-            .limit(1)
-            .execute()
-        ).data
-        if not urow:
-            raise HTTPException(404, f"Universe #{universe_id} not found")
-        u = urow[0]
-
-        # `month` is only meaningful for the multi-month LongEquity universe;
-        # for a single-month frozen set it's ignored so a stray ?month= can't
-        # return empty members. Target month = the override (monthly only),
-        # else the universe's latest.
-        is_monthly = bool(u.get("is_monthly"))
-        target_month = month if is_monthly else None
-        if not target_month:
-            latest = (
-                supabase.table("universe_membership")
-                .select("target_month")
-                .eq("universe_id", universe_id)
-                .order("target_month", desc=True)
-                .limit(1)
-                .execute()
-            ).data
-            target_month = latest[0]["target_month"] if latest else None
-
-        # Pull the whole month's membership — paginated, since a broad
-        # universe (e.g. Leonteq ~1.6k names) exceeds PostgREST's single-
-        # response cap.
-        members_raw: list[dict] = []
-        if target_month:
-            offset, page = 0, 1000
-            while True:
-                chunk = (
-                    supabase.table("universe_membership")
-                    .select("company_id, universe_ticker, sector, industry")
-                    .eq("universe_id", universe_id)
-                    .eq("target_month", target_month)
-                    .order("company_id")
-                    .range(offset, offset + page - 1)
-                    .execute()
-                ).data or []
-                members_raw.extend(chunk)
-                if len(chunk) < page:
-                    break
-                offset += page
-
-        members = _enrich_universe_members(members_raw)
-        return {
-            "universe_id": u["universe_id"],
-            "label": u.get("label"),
-            "template_key": u.get("template_key"),
-            "frozen_at": u.get("frozen_at"),
-            "is_monthly": is_monthly,
-            "target_month": target_month,
-            "member_count": len(members),
-            "members": members,
-        }
-
-    return await asyncio.to_thread(_query)
-
-
-@router.get("/api/admin/etfs")
-async def list_etfs(authorization: str = Header(...)):
-    """Every ETF that carries an ISIN, enriched like a universe member. Admin only.
-
-    ETFs live in the `benchmark` table (the same rows the diversifier + sector
-    overlays reference — an ETF is a benchmark with a tradeable ISIN). This
-    returns ONLY benchmarks with an `isin` set — the identifiable, tradeable
-    instruments — each with its latest close (native + EUR via the same fx_rate
-    source the /fx-rates page + universe members use). Index-only benchmarks
-    (no ISIN) are excluded.
-
-    Each ETF carries the universe-member-style shape (minus the fields that
-    don't apply to a fund — exchange/country/industry):
-
-        benchmark_id, ticker, name, isin, currency, sector,
-        latest_close_local, latest_close_eur, latest_close_date, fx_rate_per_eur
-
-    Response: `{count, etfs:[…]}`, sorted by ticker."""
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        rows = (
-            supabase.table("benchmark")
-            .select("benchmark_id, ticker, name, isin, currency, sector")
-            .not_.is_("isin", "null")
-            .order("ticker")
-            .execute()
-        ).data or []
-        if not rows:
-            return {"count": 0, "etfs": []}
-
-        # Latest close per benchmark from benchmark_price. ETFs number in the
-        # dozens, so a per-row limit-1 (newest date) is cheap.
-        latest: dict[int, dict] = {}
-        for r in rows:
-            bid = int(r["benchmark_id"])
-            pr = (
-                supabase.table("benchmark_price")
-                .select("target_date, price")
-                .eq("benchmark_id", bid)
-                .order("target_date", desc=True)
-                .limit(1)
-                .execute()
-            ).data
-            if pr:
-                latest[bid] = {"date": pr[0].get("target_date"), "price": pr[0].get("price")}
-
-        # Latest {ccy}/EUR rate per currency — same source as _enrich_universe_members.
-        fx: dict[str, float] = {}
-        try:
-            from fx_rates import fetch_latest_from_db  # noqa: PLC0415
-            for r in fetch_latest_from_db(supabase):
-                code, rate = r.get("currency"), r.get("rate")
-                if code and rate:
-                    fx[code] = float(rate)
-        except Exception:
-            fx = {}
-
-        out: list[dict] = []
-        for r in rows:
-            bid = int(r["benchmark_id"])
-            cur = r.get("currency")
-            lc = latest.get(bid, {})
-            raw = lc.get("price")
-            local = float(raw) if raw is not None else None
-            rate = 1.0 if cur == "EUR" else (fx.get(cur) if cur else None)
-            eur = (
-                round(local / rate, 4)
-                if rate and local is not None and rate > 0
-                else None
-            )
-            out.append({
-                "benchmark_id": bid,
-                "ticker": r.get("ticker"),
-                "name": r.get("name"),
-                "isin": r.get("isin"),
-                "currency": cur,
-                "sector": r.get("sector"),
-                "latest_close_local": local,
-                "latest_close_eur": eur,
-                "latest_close_date": lc.get("date"),
-                "fx_rate_per_eur": rate,
-            })
-        return {"count": len(out), "etfs": out}
-
-    return await asyncio.to_thread(_query)
-
-
-# ─── Health ────────────────────────────────────────────────────────
-
-
 @router.get("/api/admin/scheduled-jobs")
-async def admin_scheduled_jobs(authorization: str = Header(...)):
+async def admin_scheduled_jobs(authorization: str = Header(None)):
     """EVERY JOB THAT IS SUPPOSED TO RUN BY ITSELF — declared, registered, and last actually run.
 
     ⚠⚠ IT ANSWERS "IS ANYTHING MISSING", WHICH NOTHING ELSE COULD. `/schedule` shows the ingest
@@ -1270,7 +680,7 @@ async def admin_scheduled_jobs(authorization: str = Header(...)):
 
 
 @router.post("/api/admin/scheduled-jobs/{job_id}/run")
-async def admin_run_scheduled_job(job_id: str, authorization: str = Header(...)):
+async def admin_run_scheduled_job(job_id: str, authorization: str = Header(None)):
     """Kick one declared job off NOW, as a cancellable registry job with a progress toast.
 
     ⚠ THE SAME BODY THE SCHEDULER TICK RUNS (`scheduler.JOB_BODIES`), never a second copy — a
@@ -1304,7 +714,7 @@ async def admin_run_scheduled_job(job_id: str, authorization: str = Header(...))
 
 
 @router.get("/api/admin/db-growth")
-async def admin_db_growth(days: int = 7, authorization: str = Header(...)):
+async def admin_db_growth(days: int = 7, authorization: str = Header(None)):
     """HOW FAST THE DATABASE IS GROWING, PER TABLE — bytes on disk, over a window.
 
     ⚠⚠ BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count
@@ -1333,125 +743,6 @@ async def admin_db_growth(days: int = 7, authorization: str = Header(...)):
     # than `latest` and report shrinkage.
     window = max(1, min(int(days), 365))
     return await asyncio.to_thread(growth, window)
-
-
-@router.get("/api/admin/health")
-async def get_health(authorization: str = Header(...)):
-    """Composite go/no-go. Returns a single boolean `is_healthy` plus
-    the list of checks that failed. Threshold defaults are
-    intentionally permissive — we're guarding against "something is
-    obviously broken" cases, not micro-staleness.
-
-    Checks:
-      - DB reachable
-      - close_price max date is within the last 6 trading days
-      - most recent ingest_run is within the last 8 days
-      - that run isn't 'running' for more than 2 hours (a stuck job)
-      - that run's status is 'ok' (allows a single transient failure
-        downstream — see `is_healthy_strict` for the stricter variant)
-    """
-    _require_admin(authorization)
-
-    def _query() -> dict:
-        problems: list[str] = []
-        # 1. DB reachable
-        try:
-            ping = supabase.table("ingest_run").select("run_id").limit(1).execute()
-            _ = ping.data  # noqa: F841 — just want the call to round-trip
-        except Exception as e:
-            return {
-                "is_healthy": False,
-                "is_healthy_strict": False,
-                "checks": {"db_reachable": False},
-                "problems": [f"DB unreachable: {type(e).__name__}: {e}"],
-            }
-
-        # 2. close_price freshness
-        latest_close = _max_target_date("close_price")
-        close_age = _trading_day_age(latest_close)
-        close_fresh = close_age is not None and close_age <= 6
-        if not close_fresh:
-            problems.append(
-                f"close_price stale ({close_age} trading days behind; latest={latest_close})"
-            )
-
-        # 3. Pipeline-run freshness
-        last_run_resp = (
-            supabase.table("ingest_run")
-            .select("run_id, status, started_at, finished_at")
-            .order("started_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        last_run = last_run_resp.data[0] if last_run_resp.data else None
-        run_fresh = False
-        run_succeeded = False
-        run_not_stuck = True
-        if last_run is None:
-            problems.append("No pipeline runs have happened yet")
-        else:
-            try:
-                started = datetime.fromisoformat(last_run["started_at"].replace("Z", "+00:00"))
-                run_age_days = (_now_utc() - started).total_seconds() / 86400
-                run_fresh = run_age_days <= 8
-                if not run_fresh:
-                    problems.append(
-                        f"Last pipeline run is {run_age_days:.1f} days old "
-                        f"(run_id={last_run['run_id']})"
-                    )
-                if last_run["status"] == "running":
-                    age_hours = (_now_utc() - started).total_seconds() / 3600
-                    if age_hours > 2:
-                        run_not_stuck = False
-                        problems.append(
-                            f"Pipeline run #{last_run['run_id']} has been 'running' "
-                            f"for {age_hours:.1f}h — likely stuck"
-                        )
-                run_succeeded = last_run["status"] == "ok"
-                if not run_succeeded and run_not_stuck:
-                    problems.append(
-                        f"Last pipeline run ended with status='{last_run['status']}' "
-                        f"(run_id={last_run['run_id']})"
-                    )
-            except Exception as e:
-                problems.append(f"Failed to interpret last run timestamps: {e}")
-
-        # 4. Latest snapshot exists (don't gate on health — just inform)
-        snap_resp = (
-            supabase.table("current_picks_snapshot")
-            .select("snapshot_id, created_at")
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        has_snapshot = bool(snap_resp.data)
-        if not has_snapshot:
-            problems.append(
-                "No current_picks_snapshot exists yet — pick a scheduled strategy on /schedule"
-            )
-
-        checks = {
-            "db_reachable": True,
-            "close_price_fresh": close_fresh,
-            "pipeline_run_fresh": run_fresh,
-            "pipeline_run_not_stuck": run_not_stuck,
-            "has_snapshot": has_snapshot,
-        }
-        # Loose check: tolerate a single failed run (data may still be
-        # usable). Strict check: every signal must be green.
-        is_healthy = checks["db_reachable"] and close_fresh and run_fresh and run_not_stuck
-        is_healthy_strict = is_healthy and run_succeeded and has_snapshot
-        return {
-            "is_healthy": is_healthy,
-            "is_healthy_strict": is_healthy_strict,
-            "checks": checks,
-            "problems": problems,
-        }
-
-    return await asyncio.to_thread(_query)
-
-
-# ─── Data integrity: companies missing exchange ───────────────────
 
 
 @router.get("/api/admin/companies/missing-exchange")
