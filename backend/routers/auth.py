@@ -51,11 +51,18 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
 
-# SHA-256(lower(email)) hex of hardcoded admin emails.
+# SHA-256(lower(email)) hex of the hardcoded admin email.
 #
-# ⚠ THREE COPIES, CHANGED TOGETHER: this set, the trigger FUNCTION in
-# 20260527010000_admin_email_hash.sql, and the repair UPDATE in
-# 20260908090000_admin_signup_trigger.sql. Pinned by tests/test_admin_email_hashes.py.
+# ⚠ TWO COPIES, CHANGED TOGETHER: this set and the LATEST migration that redefines
+# `set_admin_role_on_signup()` — currently 20260908150000_single_hardcoded_admin.sql. Earlier
+# migrations still carry the OLD list and must not be edited: they record what already ran.
+# Pinned by tests/test_admin_email_hashes.py, which reads the newest definition.
+#
+# ⚠⚠ IT WENT FROM TWO ADDRESSES TO ONE (2026-09-08, on request): reinier7175@gmail.com keeps the
+# automatic grant, reinier@bustelberg.nl was demoted to a plain user by that migration. Dropping
+# the hash alone would have done nothing — the row carried an EXPLICIT role, and `_resolve_role`
+# prefers an explicit role to this allowlist on purpose. ⚠ The cost is that there is now ONE admin,
+# so the two-account 2FA recovery path (one admin resetting the other's authenticator) is gone.
 #
 # ⚠⚠ THE FUNCTION WAS ATTACHED TO NOTHING UNTIL 20260908090000 — both earlier migrations
 # create it and neither wrote CREATE TRIGGER, so a signup never set app_metadata.role and
@@ -64,7 +71,6 @@ router = APIRouter(tags=["auth"])
 # app_metadata.role verbatim, so the account was admin to every endpoint and a plain user
 # on every screen.
 _ADMIN_EMAIL_HASHES: frozenset[str] = frozenset({
-    "9fe083c7c1b2b6273a30b369870280d9cdfd3a89e165e6c2d68035cf1f7f144f",
     "5db5e75947119ef23451bc46919479a90b6bd51cd2e81815f2c7083e20fde36f",
 })
 

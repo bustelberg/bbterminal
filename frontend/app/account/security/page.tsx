@@ -239,14 +239,6 @@ export default function AccountSecurityPage() {
         <p className="mt-1 text-sm text-fg-subtle leading-relaxed">{copy.intro}</p>
       </header>
 
-      {/* ⚠ THE POLICY, AT THE TOP, IN ONE SENTENCE. It used to say the opposite — that enrolling
-          changed nothing — which was true for exactly as long as the gate was unbuilt. A security
-          page that is out of date about its own rules is worse than one that says nothing. */}
-      <p className="rounded-lg border border-accent-300/60 bg-accent-200/50 px-3.5 py-3 text-xs
-                    leading-relaxed text-accent-400">
-        {copy.policy}
-      </p>
-
       {/* ⚠ ABOVE the error slot on purpose: when the clock is out, EVERY code fails, so this is
           the cause and anything below it is a symptom. */}
       {clockSkew != null && (
@@ -476,13 +468,6 @@ export default function AccountSecurityPage() {
         </div>
       )}
 
-      {/* ⚠ ON THE PAGE, NOT IN A RUNBOOK. Supabase TOTP ships no backup codes, so the only
-          recovery is a second authenticator or an admin deleting the factor — and the moment to
-          learn that is while you still have the phone. */}
-      <div className="bg-card-alt border border-neutral-800/30 rounded-xl p-4">
-        <p className="text-xs font-medium text-fg-strong">{copy.recoveryTitle}</p>
-        <p className="mt-1 text-xs text-fg-subtle leading-relaxed">{copy.recoveryBody}</p>
-      </div>
     </div>
   );
 }
