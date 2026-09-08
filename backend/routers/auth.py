@@ -30,8 +30,18 @@ from deps import supabase
 
 router = APIRouter(tags=["auth"])
 
-# SHA-256(lower(email)) hex of hardcoded admin emails. Mirrors the
-# trigger in 20260527010000_admin_email_hash.sql — change both together.
+# SHA-256(lower(email)) hex of hardcoded admin emails.
+#
+# ⚠ THREE COPIES, CHANGED TOGETHER: this set, the trigger FUNCTION in
+# 20260527010000_admin_email_hash.sql, and the repair UPDATE in
+# 20260908090000_admin_signup_trigger.sql. Pinned by tests/test_admin_email_hashes.py.
+#
+# ⚠⚠ THE FUNCTION WAS ATTACHED TO NOTHING UNTIL 20260908090000 — both earlier migrations
+# create it and neither wrote CREATE TRIGGER, so a signup never set app_metadata.role and
+# only that migration's one-shot backfill had ever written it. The fallback below is what
+# kept the API answering correctly, which is also what hid it: the frontend reads
+# app_metadata.role verbatim, so the account was admin to every endpoint and a plain user
+# on every screen.
 _ADMIN_EMAIL_HASHES: frozenset[str] = frozenset({
     "9fe083c7c1b2b6273a30b369870280d9cdfd3a89e165e6c2d68035cf1f7f144f",
     "5db5e75947119ef23451bc46919479a90b6bd51cd2e81815f2c7083e20fde36f",
