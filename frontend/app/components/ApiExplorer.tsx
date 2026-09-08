@@ -71,21 +71,36 @@ const MANUAL_OVERRIDES: Record<string, Partial<Endpoint> & { hide?: boolean }> =
   'POST /api/momentum/current-picks/cron': { hide: true },
 };
 
-/** Display allow-list — scopes this explorer to the EXTERNAL admin API
- * (the IBKR buy flow), the only endpoints meant to be called from outside
- * the web app. The other ~129 endpoints are the app's own internal API
- * (every page calls them); they stay fully functional but are hidden here
- * so /api reads as the external-API console. To surface another endpoint,
- * add its `METHOD path`. An EMPTY set falls back to showing everything. */
+/** Display allow-list — scopes this explorer to the `/api/admin/*` MAINTENANCE endpoints.
+ *
+ * ⚠⚠ IT USED TO BE THE EIGHT ENDPOINTS OF THE EXTERNAL TRADING API, and those were deleted with
+ * the IBKR rebalancer (2026-09-08). Emptying the set was NOT the right consequence: an empty set
+ * is documented below as "show everything", so removing the entries would silently turn a focused
+ * console into a list of all ~137 internal endpoints — every one of which some page already calls
+ * for you. Pointed at the survivors instead, the page keeps a job: the admin tools that have no
+ * button anywhere else.
+ *
+ * ⚠ FOUR OF THESE DO HAVE BUTTONS (`company-illiquid` and `company-price-refresh` on /schedule,
+ * `scheduled-jobs` on its Automatic-jobs card, `network-diagnostics` on /network). They are listed
+ * anyway — seeing the request a page makes is the reason to open an explorer at all.
+ *
+ * To surface another endpoint, add its `METHOD path`. An EMPTY set falls back to showing
+ * everything. */
 const VISIBLE_ENDPOINTS = new Set<string>([
-  'GET /api/admin/schedules',
-  'GET /api/admin/schedules/{strategy_id}',
-  'GET /api/admin/schedules/{strategy_id}/risk-metrics',
-  'GET /api/admin/schedules/{strategy_id}/performance',
-  'GET /api/admin/universes',
-  'GET /api/admin/universes/{universe_id}',
-  'GET /api/admin/etfs',
-  'GET /api/admin/health',
+  'POST /api/admin/company-illiquid',
+  'POST /api/admin/gurufocus-company-name',
+  'POST /api/admin/company-price-refresh',
+  'POST /api/admin/gurufocus-exchange-search',
+  'GET /api/admin/gurufocus-probe',
+  'GET /api/admin/egress-ip',
+  'GET /api/admin/network-diagnostics',
+  'GET /api/admin/copy-status',
+  'GET /api/admin/scheduled-jobs',
+  'POST /api/admin/scheduled-jobs/{job_id}/run',
+  'GET /api/admin/db-growth',
+  'GET /api/admin/companies/missing-exchange',
+  'POST /api/admin/companies/resolve-missing-exchanges',
+  'GET /api/admin/companies/flagged',
 ]);
 
 /** Title-case a tag for the group header (e.g. "admin" → "Admin",

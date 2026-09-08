@@ -1,0 +1,54 @@
+import { describe, expect, it } from 'vitest'
+
+import { SECURITY_COPY, type SecurityCopy } from './securityCopy'
+
+const LANGS = ['en', 'nl'] as const
+
+/** Every plain-string key. The two function keys are exercised separately. */
+const stringKeys = (Object.keys(SECURITY_COPY.en) as (keyof SecurityCopy)[])
+  .filter((k) => typeof SECURITY_COPY.en[k] === 'string')
+
+describe('the security page copy', () => {
+  it('covers every language with no empty string', () => {
+    expect(stringKeys.length).toBeGreaterThan(20)
+    for (const lang of LANGS) {
+      for (const key of stringKeys) {
+        expect(String(SECURITY_COPY[lang][key]).trim(), `${lang}.${key}`).not.toBe('')
+      }
+    }
+  })
+
+  it('⚠ actually translates — it is not the English block copied across', () => {
+    // A copy module that compiles with the source language duplicated is the silent half of a
+    // half-translated screen. These four are ordinary words, so they must differ.
+    for (const key of ['title', 'remove', 'cancel', 'loading'] as const) {
+      expect(SECURITY_COPY.nl[key], key).not.toBe(SECURITY_COPY.en[key])
+    }
+  })
+
+  it('builds the removal heading around the authenticator name in both languages', () => {
+    for (const lang of LANGS) {
+      expect(SECURITY_COPY[lang].removeTitle('iPhone')).toContain('iPhone')
+      expect(SECURITY_COPY[lang].addedOn('8 Sep 2026')).toContain('8 Sep 2026')
+    }
+  })
+
+  it('⚠⚠ states BOTH halves of the policy, in both languages', () => {
+    // Two facts a reader has to leave with: an authenticator is REQUIRED, and the sign-in lasts a
+    // MONTH. This string said the opposite of the first for as long as the gate was unbuilt — the
+    // one failure mode this screen cannot afford, so both halves are pinned rather than assumed.
+    expect(SECURITY_COPY.en.policy).toMatch(/required/i)
+    expect(SECURITY_COPY.en.policy).toMatch(/month/i)
+    expect(SECURITY_COPY.nl.policy).toMatch(/verplicht/i)
+    expect(SECURITY_COPY.nl.policy).toMatch(/maand/i)
+    // ⚠ And it must no longer claim enrolling changes nothing.
+    expect(SECURITY_COPY.en.policy).not.toMatch(/does not lock|password on its own/i)
+  })
+
+  it('⚠ states the recovery story, because there are no backup codes', () => {
+    expect(SECURITY_COPY.en.recoveryBody).toMatch(/no backup codes/i)
+    expect(SECURITY_COPY.en.recoveryBody).toMatch(/admin/i)
+    expect(SECURITY_COPY.nl.recoveryBody).toMatch(/back-upcodes/i)
+    expect(SECURITY_COPY.nl.recoveryBody).toMatch(/beheerder/i)
+  })
+})

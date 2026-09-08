@@ -35,8 +35,17 @@
 // values, mutations, reconciliation — is admin's. Same two places (`PortfolioOverviewPanel`'s
 // `expand` + `_ADMIN_ONLY_PATTERNS` in `_auth_middleware.py`), so the page staying in this list is
 // not a statement that everything on it is readable.
+// ⚠⚠ `/account` IS THE ONE ENTRY WITH NO SECOND HALF, AND THAT IS NOT AN OMISSION. Everything
+// above says a page here also needs its API paths opened in `_auth_middleware.py` — but
+// `/account/security` calls `supabase.auth.mfa.*`, which goes to `NEXT_PUBLIC_SUPABASE_URL`, not
+// to our backend. It makes no `apiFetch` call at all, so there is nothing to allow-list and
+// nothing that will 403. Stated here because the missing half otherwise reads as forgotten.
+//
+// ⚠ THE PREFIX, NOT THE LEAF. `/account` matches `/account/security` as a subroute, so a later
+// `/account/profile` needs no edit here — and there is nothing under `/account` that could ever be
+// admin-only: it is by definition the reader's own account.
 export const USER_ALLOWED_PATHS: readonly string[] = [
-  '/', '/schedule', '/management-dashboard', '/forbidden',
+  '/', '/schedule', '/management-dashboard', '/account', '/mfa', '/forbidden',
 ];
 
 /**

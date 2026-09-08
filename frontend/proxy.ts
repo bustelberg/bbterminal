@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { isUserAllowedPath } from '@/lib/userAllowedPaths'
+import { ENROL_PATH, MFA_PATH, requiresEnrolment, requiresMfa, type AalLevel } from '@/lib/mfaGate'
 
 // Paths that are accessible to anyone — including not-yet-logged-in users
 // (auth flow) and the home page (which any authenticated user can see).
@@ -55,6 +56,57 @@ export async function proxy(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)
+  }
+
+  /**
+   * ⚠⚠ THE SECOND-FACTOR GATE, AND IT RUNS BEFORE THE ROLE GATE ON PURPOSE. A session that has
+   * not proved its factor should be sent to the challenge, not told it lacks permission — the
+   * other order answers "you may not see this" to somebody who may, and hides the one action that
+   * would let them through.
+   *
+   * ⚠ `getAuthenticatorAssuranceLevel()` DECODES THE SESSION LOCALLY — no round trip. It reads the
+   * `aal` claim out of the JWT already in the cookies, which `getUser()` above has just validated
+   * against the auth server, so this adds nothing to the latency of every request.
+   *
+   * ⚠⚠ TWO-FACTOR IS MANDATORY, NOT OFFERED (2026-09-08, on request; it was opt-in for one
+   * afternoon). Two rules, in this order — no authenticator at all sends you to SET ONE UP, and
+   * an unproved one sends you to the CHALLENGE. Getting them the other way round strands a new
+   * account at a code box with nothing that can produce a code.
+   */
+  if (user) {
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    const levels = {
+      currentLevel: aal?.currentLevel as AalLevel,
+      nextLevel: aal?.nextLevel as AalLevel,
+      pathname,
+      isPublic: publicPath,
+    }
+
+    /**
+     * ⚠⚠ ENROLMENT IS CHECKED FIRST, AND THE ORDER IS THE WHOLE DIFFERENCE BETWEEN "REQUIRED" AND
+     * "AVAILABLE". Somebody with no authenticator cannot satisfy a challenge, so sending them to
+     * `/mfa` would be a dead end; they need the SET-UP page. Two-factor is mandatory here — a new
+     * account is stopped at enrolment before it can reach anything else.
+     *
+     * ⚠ NO `?next=`. Enrolling is not a detour on the way somewhere — it is a thing to finish, and
+     * a redirect firing the moment the factor verifies would snatch the page away mid-sentence,
+     * before the reader has seen that it worked or read the recovery warning.
+     */
+    if (requiresEnrolment(levels)) {
+      const url = request.nextUrl.clone()
+      url.pathname = ENROL_PATH
+      url.search = ''
+      return NextResponse.redirect(url)
+    }
+
+    if (requiresMfa(levels)) {
+      const url = request.nextUrl.clone()
+      url.pathname = MFA_PATH
+      // Carry where they were going, so proving the factor resumes the journey instead of
+      // dumping everyone on the home page.
+      url.search = `?next=${encodeURIComponent(pathname + request.nextUrl.search)}`
+      return NextResponse.redirect(url)
+    }
   }
 
   if (user) {

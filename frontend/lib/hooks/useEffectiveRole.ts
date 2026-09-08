@@ -12,7 +12,7 @@ import { createClient } from '../supabase/client';
  *
  *   - `null`    — still loading the user (component should render a
  *                 safe default; usually treat as non-admin).
- *   - `'admin'` — real admin AND not impersonating a user view.
+ *   - `'admin'` — real admin AND not previewing the user view (`view_as`).
  *   - `'user'`  — regular user, OR admin currently in view-as-user mode.
  *
  * The hook is intentionally one-shot (no subscription to auth-state

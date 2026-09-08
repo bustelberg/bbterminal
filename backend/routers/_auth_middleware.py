@@ -52,6 +52,7 @@ token gets 401; an authenticated non-admin hitting an admin path gets 403.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Awaitable, Callable
 
@@ -316,6 +317,56 @@ def _is_latest_close_refresh(path: str) -> bool:
     return _LATEST_CLOSE_REFRESH.match(path) is not None
 
 
+# ⚠⚠ TWO-FACTOR IS REQUIRED OF EVERY PERSON, NOT JUST ADMINS (2026-09-08, on request). It was
+# admin-only for one afternoon, on the reasoning that the blast radius lives there. The ask was
+# simpler and stricter: everyone enrols, so there is no tier to reason about and no account that
+# is the soft way in.
+#
+# ⚠⚠ AND `aal` ALONE CANNOT EXPRESS "OPT-IN", WHICH IS WHY THE FIRST CUT WAS A LOCKOUT ONE DEPLOY
+# AWAY. It refused any session reporting `aal1`, assuming an account with no authenticator would
+# carry no `aal` claim; measured on the live stack it carries `aal1` anyway. That version refused
+# every account in the app, including ones with no way to comply. It survives here as the reason
+# `has_verified_factor` exists — now not to EXEMPT anybody, but to say WHICH of two different
+# things the caller has to go and do.
+#
+# ⚠⚠ AND THERE IS NO LONGER ANY WAY ROUND IT. An `X-Admin-Key` used to let `/api/admin/*` skip
+# this entirely, for the external rebalancer that could not hold a phone; both the script and the
+# credential were deleted on 2026-09-08. Every caller of every `/api/*` endpoint is now a person
+# with a session, and every one of them proves a second factor. Do not re-add a bypass without
+# re-reading why that one existed.
+#
+# ⚠ AN UNREADABLE LEVEL (None) PASSES, and that is the considered choice rather than laziness.
+# `_token_aal` returns None when the token GoTrue just ACCEPTED cannot be parsed here — a
+# disagreement between us and the identity provider, not evidence about the user. Failing closed on
+# it would turn a library change into everyone locked out of production at once, and the same
+# incident that produced `AuthBackendUnavailable` is the argument: "we could not check" and "you
+# did not comply" are different answers. It is logged at WARNING so it cannot be silent.
+#
+# ⚠ THE FRONTEND NORMALLY GETS THERE FIRST (`proxy.ts` → /account/security or /mfa), so anything
+# reaching a 403 here bypassed the UI: a script, a stale tab, or somebody testing. The messages are
+# written to work with no redirect behind them.
+_REQUIRE_MFA = os.environ.get("REQUIRE_MFA", "1") != "0"
+
+
+def _mfa_denial(info: dict) -> JSONResponse | None:
+    """403 when a session has not proved a second factor. None to let the request through."""
+    if not _REQUIRE_MFA:
+        return None
+    aal = info.get("aal")
+    # ⚠ Only `aal1` is a refusal. `aal2` complied; None means we could not tell (see above).
+    if aal != "aal1":
+        return None
+    # ⚠ TWO DIFFERENT ACTIONS, AND NAMING THE WRONG ONE WASTES THE READER'S TIME. Somebody with no
+    # authenticator cannot "enter their code", and somebody who has one does not need to set it up.
+    if info.get("has_verified_factor"):
+        detail = ("Two-factor verification required — sign in again and enter your "
+                  "authenticator code.")
+    else:
+        detail = ("Two-factor sign-in is required. Set up an authenticator app at "
+                  "/account/security, then sign in again.")
+    return JSONResponse({"detail": detail}, status_code=403)
+
+
 def _starts_with_any(path: str, prefixes: tuple[str, ...]) -> bool:
     return any(path.startswith(p) for p in prefixes)
 
@@ -374,6 +425,13 @@ async def enforce_api_auth(
     # re-verifying the token (e.g. /scheduled-strategies returns only
     # `user_visible` rows to non-admins). Set for admins too.
     request.state.auth = info
+
+    # ⚠⚠ BEFORE THE ROLE SPLIT, BECAUSE IT APPLIES TO EVERYONE. Putting it inside the admin branch
+    # (where it started) would leave every read-only user exempt — and a tier that never has to
+    # prove a second factor is the soft way in that requiring one everywhere exists to remove.
+    denied = _mfa_denial(info)
+    if denied is not None:
+        return denied
 
     # Admins can do anything.
     if info.get("role") == "admin":
