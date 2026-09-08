@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { createClient } from '../../lib/supabase/client';
 import { describeMfaError } from '../../lib/mfaError';
 import { safeNext } from '../../lib/mfaGate';
+import { serverSkewSeconds } from '../../lib/totp';
 import AuthShell, {
   AuthNotice, authButtonClass, authFieldClass, authLabelClass,
 } from '../components/auth/AuthShell';
@@ -46,7 +47,24 @@ function MfaChallenge() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const next = safeNext(params.get('next'));
+  const next = safeNext(params.get('next'))
+
+  /**
+   * ⚠ THE SAME PRE-EMPTIVE CHECK AS THE ENROLMENT PAGE, for the same reason: GoTrue's acceptance
+   * window is about 30 seconds and is not configurable, so a machine a minute out rejects every
+   * code the reader can possibly produce. Here it matters more than on enrolment — somebody stuck
+   * at this gate cannot reach ANY page to find out why.
+   */
+  const [clockSkew, setClockSkew] = useState<number | null>(null)
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      const s = await serverSkewSeconds(
+        `${process.env.NEXT_PUBLIC_SUPABASE_URL ?? ''}/auth/v1/health`)
+      if (alive && s != null && Math.abs(s) >= 10) setClockSkew(s)
+    })()
+    return () => { alive = false }
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -161,6 +179,14 @@ function MfaChallenge() {
           />
           <p className="mt-1.5 text-xs text-fg-faint">{copy.codeHint}</p>
         </div>
+
+        {/* ⚠ ABOVE the error: when the clock is out every code fails, so this is the cause and
+            the rejection below it is only the symptom. */}
+        {clockSkew != null && (
+          <AuthNotice kind="error">
+            {copy.clockWarning(Math.abs(clockSkew), clockSkew > 0)}
+          </AuthNotice>
+        )}
 
         {error && <AuthNotice kind="error">{error}</AuthNotice>}
 

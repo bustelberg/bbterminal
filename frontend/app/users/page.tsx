@@ -7,12 +7,34 @@ import { dialog } from '../../lib/dialog';
 import LoadingDots from '../components/LoadingDots';
 import { API_URL } from '../../lib/apiUrl';
 
+/**
+ * ⚠⚠ THERE IS NO PASSWORD FIELD HERE AND THERE WILL NOT BE ONE, hash included. Asked for
+ * (2026-09-08) and declined in `routers/auth.py::_user_detail`: a bcrypt hash is not information
+ * about a person, it is an offline cracking target, and putting one on a screen puts it in
+ * screenshots and in the DOM of a page anybody can shoulder-read. `has_password` answers the
+ * question that actually has an action behind it — an invited user who never chose one signs in
+ * by link, and that is worth seeing.
+ *
+ * ⚠ THE DETAIL FIELDS ARE NULLABLE ON PURPOSE. They come from a direct-Postgres read that needs
+ * `SUPABASE_DB_URL`; without it they are `null`, which is a statement about US. `0` would be a
+ * statement about the ACCOUNT — "no authenticators" — and rendering "unknown" as "off" is the one
+ * direction a two-factor column must never be wrong in.
+ */
 type User = {
   id: string;
   email: string | null;
   role: 'admin' | 'user';
   created_at: string;
   last_sign_in_at: string;
+  mfa_verified: number | null;
+  /** Abandoned enrolments. ⚠ Counted apart from `mfa_verified` — a pending factor protects nothing. */
+  mfa_pending: number | null;
+  mfa_since: string | null;
+  has_password: boolean | null;
+  email_confirmed: boolean | null;
+  banned_until: string | null;
+  /** Live sessions. Answers "are they signed in right now", and drops to 0 after a Reset 2FA. */
+  sessions: number | null;
 };
 
 export default function UsersPage() {
@@ -281,6 +303,12 @@ ${r.status}: ${body?.detail ?? ''}`);
             <tr className="text-fg-subtle text-xs border-b border-neutral-800/40">
               <th className="text-left px-5 py-2.5 font-medium">Email</th>
               <th className="text-left px-3 py-2.5 font-medium">Role</th>
+              <th className="text-left px-3 py-2.5 font-medium" title="Authenticator apps enrolled and verified. Two-factor is required to use the app.">
+                2FA
+              </th>
+              <th className="text-left px-3 py-2.5 font-medium" title="Live sessions. Signing out, a Reset 2FA, or the 30-day timebox each drop this to 0.">
+                Sessions
+              </th>
               <th className="text-left px-3 py-2.5 font-medium">Created</th>
               <th className="text-left px-3 py-2.5 font-medium">Last sign-in</th>
               <th className="text-right px-5 py-2.5 font-medium">Actions</th>
@@ -289,7 +317,28 @@ ${r.status}: ${body?.detail ?? ''}`);
           <tbody>
             {users.map((u) => (
               <tr key={u.id} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
-                <td className="px-5 py-2 text-fg font-mono">{u.email ?? '—'}</td>
+                <td className="px-5 py-2 text-fg font-mono">
+                  <span>{u.email ?? '—'}</span>
+                  {/* ⚠ EXCEPTIONS ONLY, NOT COLUMNS. Every one of these is false for a healthy
+                      account, so a column would be four mostly-empty cells on every row; as
+                      badges they appear exactly when there is something to notice. */}
+                  {u.email_confirmed === false && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-warn-300"
+                      title="Never confirmed their email address.">unconfirmed</span>
+                  )}
+                  {u.has_password === false && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-warn-300"
+                      title="No password set — this account can only sign in with an emailed link.">
+                      link only
+                    </span>
+                  )}
+                  {u.banned_until && (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-neg-400"
+                      title={`Banned until ${u.banned_until} (set in the Supabase dashboard, not here).`}>
+                      banned
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-2">
                   <span
                     className={`inline-block px-2 py-0.5 text-[11px] font-medium rounded-md ${
@@ -300,6 +349,36 @@ ${r.status}: ${body?.detail ?? ''}`);
                   >
                     {u.role}
                   </span>
+                </td>
+                <td className="px-3 py-2">
+                  {u.mfa_verified == null ? (
+                    // ⚠ NOT "off". We could not read it — see the type's note.
+                    <span className="text-xs text-fg-faint" title="Needs SUPABASE_DB_URL on the backend to read.">unknown</span>
+                  ) : u.mfa_verified > 0 ? (
+                    <span className="text-xs text-pos-400"
+                      title={u.mfa_since ? `Since ${u.mfa_since.slice(0, 10)}` : undefined}>
+                      on{u.mfa_verified > 1 ? ` (${u.mfa_verified})` : ''}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-warn-300"
+                      title="No authenticator. They will be sent to /account/security and cannot use the app until they enrol.">
+                      off
+                      {/* ⚠ A PENDING FACTOR IS NOT PROTECTION — it is an abandoned enrolment, and
+                          saying so is the difference between "they are half done" and "they gave
+                          up". Shown beside `off`, never folded into the count. */}
+                      {!!u.mfa_pending && (
+                        <span className="text-fg-faint"
+                          title="Started an enrolment and never finished it.">
+                          {` · ${u.mfa_pending} pending`}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2 font-mono text-xs">
+                  {u.sessions == null
+                    ? <span className="text-fg-faint">—</span>
+                    : <span className={u.sessions > 0 ? 'text-fg' : 'text-fg-faint'}>{u.sessions}</span>}
                 </td>
                 <td className="px-3 py-2 text-fg-subtle font-mono text-xs">
                   {u.created_at ? u.created_at.slice(0, 10) : '—'}
@@ -347,7 +426,7 @@ ${r.status}: ${body?.detail ?? ''}`);
             ))}
             {!loading && users.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-5 py-8 text-center text-sm text-fg-subtle">
+                <td colSpan={7} className="px-5 py-8 text-center text-sm text-fg-subtle">
                   No users yet.
                 </td>
               </tr>

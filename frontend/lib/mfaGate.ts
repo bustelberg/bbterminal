@@ -87,3 +87,33 @@ export function safeNext(next: string | null | undefined, fallback = '/'): strin
   if (next === MFA_PATH || next.startsWith(`${MFA_PATH}/`)) return fallback;
   return next;
 }
+
+/**
+ * Is the two-factor gate enforced in this build?
+ *
+ * ⚠⚠ IT CAN ONLY EVER BE SWITCHED OFF IN DEVELOPMENT, AND THAT IS THE WHOLE DESIGN. A kill switch
+ * for a security control is a way to turn the control off, so the question is not whether it is
+ * convenient but who can reach it. `NODE_ENV` is inlined by Next at BUILD time and is `production`
+ * for every Vercel deployment including previews — so on the deployed app this function is a
+ * constant `true` and no environment variable, however misspelled or copied, can move it. The
+ * failure mode "somebody set it on Vercel and nobody noticed for a month" is not mitigated here,
+ * it is impossible.
+ *
+ * ⚠ WHY IT EXISTS AT ALL: the local stack's clock drifts (Docker Desktop on a laptop that sleeps),
+ * GoTrue's TOTP window is ±1 step and is NOT configurable, so a dev machine a minute out cannot
+ * enrol or verify at all — measured 2026-09-08, 59s behind. That is a local-environment problem
+ * and blocking development on it buys nothing: Railway's clock is correct.
+ *
+ * ⚠⚠ THE BACKEND HAS ITS OWN SWITCH AND YOU NEED BOTH (`REQUIRE_MFA=0` in `backend/.env.local`).
+ * Setting only this one leaves every API call answering 403 while the browser waves you through —
+ * a BROKEN app rather than an open one, which is the right way round for a half-applied override
+ * to fail, but it will look like a bug.
+ */
+export function mfaEnforced(
+  env: { NODE_ENV?: string; NEXT_PUBLIC_DISABLE_MFA?: string } = process.env,
+): boolean {
+  if (env.NODE_ENV === 'production') return true;
+  // ⚠ EXACTLY `'1'`. "true", "yes" and "" are the spellings people reach for, and a control that
+  // silently accepts them turns a typo into an unguarded app.
+  return env.NEXT_PUBLIC_DISABLE_MFA !== '1';
+}

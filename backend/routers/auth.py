@@ -34,6 +34,7 @@ PATCH /api/auth/users/{id}/role and let them sign in themselves.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import time
@@ -310,9 +311,73 @@ class CreateUserRequest(BaseModel):
     role: str = "user"  # 'user' or 'admin'
 
 
+def _user_detail() -> dict[str, dict]:
+    """Per-user state the admin API does not return, keyed by user id. Best-effort.
+
+    ⚠⚠ ONE QUERY, NOT ONE CALL PER USER. `admin.mfa.list_factors` exists but is per-user, so the
+    obvious version is N+1 round trips to GoTrue every time /users loads — fine at six users and
+    quietly awful later. The `auth` schema answers all of it at once.
+
+    ⚠⚠ THE PASSWORD ITSELF IS NOT HERE AND MUST NOT BE, NOT EVEN AS A HASH. Asked for directly
+    (2026-09-08) and declined: a bcrypt hash is not a fact about a person, it is an OFFLINE
+    CRACKING TARGET — put it on a screen and it lives in screenshots, browser history and the DOM
+    of a page anyone shoulder-reading can see, and the only thing anybody can DO with it is attack
+    it. Plaintext does not exist at all, correctly. What an admin actually needs to know is
+    WHETHER a password is set — an invited user who never chose one still signs in by link, and
+    that is the difference `has_password` reports.
+
+    ⚠ `banned_until` IS INCLUDED because Supabase's own dashboard can set it and nothing in this
+    app can, so an account locked there would otherwise look perfectly healthy here.
+    """
+    from common.pg import _db_url  # noqa: PLC0415
+
+    url = _db_url()
+    if not url:
+        # ⚠ NOT AN ERROR. The list still renders with everything the admin API knows; the extra
+        # columns simply say "unknown" rather than taking the page down with them.
+        return {}
+    try:
+        import psycopg  # noqa: PLC0415
+
+        with psycopg.connect(url, connect_timeout=15) as conn:
+            rows = conn.execute("""
+                SELECT u.id::text,
+                       u.encrypted_password IS NOT NULL           AS has_password,
+                       u.email_confirmed_at IS NOT NULL           AS email_confirmed,
+                       u.banned_until,
+                       (SELECT count(*) FROM auth.mfa_factors f
+                         WHERE f.user_id = u.id AND f.status = 'verified')   AS mfa_verified,
+                       (SELECT count(*) FROM auth.mfa_factors f
+                         WHERE f.user_id = u.id AND f.status <> 'verified')  AS mfa_pending,
+                       (SELECT min(f.created_at) FROM auth.mfa_factors f
+                         WHERE f.user_id = u.id AND f.status = 'verified')   AS mfa_since,
+                       (SELECT count(*) FROM auth.sessions s
+                         WHERE s.user_id = u.id)                             AS sessions
+                  FROM auth.users u
+            """).fetchall()
+    except Exception as e:
+        _log.warning("[auth] could not read per-user detail: %s", e)
+        return {}
+    return {
+        r[0]: {
+            "has_password": bool(r[1]),
+            "email_confirmed": bool(r[2]),
+            "banned_until": str(r[3]) if r[3] else None,
+            "mfa_verified": int(r[4]),
+            # ⚠ SURFACED SEPARATELY FROM `mfa_verified`. A pending factor protects NOTHING — it is
+            # an abandoned enrolment — so folding it into the count would report an unprotected
+            # account as covered, which is the one direction this column must never be wrong in.
+            "mfa_pending": int(r[5]),
+            "mfa_since": str(r[6]) if r[6] else None,
+            "sessions": int(r[7]),
+        }
+        for r in rows
+    }
+
+
 @router.get("/api/auth/users")
 async def list_users(authorization: str = Header(...)):
-    """List all users (admin only). Returns id, email, role, created_at."""
+    """List all users (admin only) with their sign-in state. See `_user_detail`."""
     _require_admin(authorization)
     try:
         resp = supabase.auth.admin.list_users()
@@ -320,15 +385,28 @@ async def list_users(authorization: str = Header(...)):
         raise HTTPException(500, f"List users failed: {e}")
     # supabase-py returns a list of User objects (not a wrapper).
     raw_users = resp if isinstance(resp, list) else getattr(resp, "users", []) or []
+    detail = await asyncio.to_thread(_user_detail)
     out: list[dict] = []
     for u in raw_users:
         meta = getattr(u, "app_metadata", None) or {}
+        uid = getattr(u, "id", None)
+        d = detail.get(str(uid), {})
         out.append({
-            "id": getattr(u, "id", None),
+            "id": uid,
             "email": getattr(u, "email", None),
             "role": meta.get("role") or "user",
             "created_at": str(getattr(u, "created_at", "") or ""),
             "last_sign_in_at": str(getattr(u, "last_sign_in_at", "") or ""),
+            # ⚠ `None` WHERE UNKNOWN, NOT A ZERO. Without `SUPABASE_DB_URL` these cannot be read,
+            # and "0 authenticators" is a claim about the account while `null` is a claim about
+            # us — the client renders them differently on purpose.
+            "mfa_verified": d.get("mfa_verified"),
+            "mfa_pending": d.get("mfa_pending"),
+            "mfa_since": d.get("mfa_since"),
+            "has_password": d.get("has_password"),
+            "email_confirmed": d.get("email_confirmed"),
+            "banned_until": d.get("banned_until"),
+            "sessions": d.get("sessions"),
         })
     out.sort(key=lambda u: (u.get("role") != "admin", u.get("email") or ""))
     return {"users": out}

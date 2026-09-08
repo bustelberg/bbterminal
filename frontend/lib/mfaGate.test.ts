@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { MFA_PATH, requiresEnrolment, requiresMfa, safeNext } from './mfaGate'
+import { MFA_PATH, mfaEnforced, requiresEnrolment, requiresMfa, safeNext } from './mfaGate'
 
 const at = (currentLevel: 'aal1' | 'aal2' | null, nextLevel: 'aal1' | 'aal2' | null,
   pathname = '/schedule', isPublic = false) =>
@@ -131,5 +131,28 @@ describe('the two gates together', () => {
     // Done -> neither.
     expect(requiresEnrolment({ nextLevel: 'aal2', pathname: '/schedule', isPublic: false })).toBe(false)
     expect(requiresMfa({ currentLevel: 'aal2', nextLevel: 'aal2', pathname: '/schedule', isPublic: false })).toBe(false)
+  })
+})
+
+describe('mfaEnforced', () => {
+  it('⚠⚠ is TRUE in production whatever the environment says', () => {
+    // The property the whole design rests on: `NODE_ENV` is inlined at build time and is
+    // `production` for every Vercel deployment, so no variable — however misspelled, copied from
+    // a local .env, or set in a panic — can turn the gate off on the deployed app.
+    expect(mfaEnforced({ NODE_ENV: 'production', NEXT_PUBLIC_DISABLE_MFA: '1' })).toBe(true)
+    expect(mfaEnforced({ NODE_ENV: 'production' })).toBe(true)
+  })
+
+  it('can be switched off in development, and only with an exact "1"', () => {
+    expect(mfaEnforced({ NODE_ENV: 'development', NEXT_PUBLIC_DISABLE_MFA: '1' })).toBe(false)
+    // ⚠ NOT truthiness. These are the spellings people reach for, and silently accepting them
+    // would turn a typo into an unguarded app.
+    for (const v of ['true', 'yes', 'TRUE', '0', '', undefined]) {
+      expect(mfaEnforced({ NODE_ENV: 'development', NEXT_PUBLIC_DISABLE_MFA: v }), String(v)).toBe(true)
+    }
+  })
+
+  it('defaults to enforced when nothing is set at all', () => {
+    expect(mfaEnforced({})).toBe(true)
   })
 })
