@@ -3831,6 +3831,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/proxy/{label}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Index Proxy
+         * @description Bring ONE index's proxy-ETF series current, on demand. Admin + user (see `_auth_middleware`).
+         *
+         *     ⚠⚠ THE ⓘ PROMISED AN ACTION AND THERE WAS NOWHERE TO PRESS. A stale benchmark tile in the
+         *     Analyse modal wears an amber `!` whose own aria-label reads "not current; refresh to update" —
+         *     and until now the only things that could move it were the 05:00 price phase and a whole-book
+         *     Refresh, which re-scrapes AirSPMS and re-prices every holding to fix one number. This is the
+         *     targeted door: `ensure_fresh(force=True)` and nothing else.
+         *
+         *     ⚠ `force=True` ON PURPOSE, AND THAT IS THE WHOLE POINT OF A BUTTON. The lazy path declines
+         *     until the series is `_STALE_DAYS` behind and spends at most one vendor call per label per
+         *     process per day — correct for a reader who did not ask, wrong for one who did. See
+         *     `_benchmark_etf.ensure_fresh`, where both guards are documented.
+         *
+         *     ⚠ 404 ON AN UNKNOWN LABEL rather than a silent no-op: `PROXY` is a small map (ACWI, SP500) and
+         *     AEX deliberately has none — every European UCITS line 404s at the vendor — so "nothing
+         *     happened" is a real answer that a caller must be able to tell from "wrong name".
+         */
+        post: operations["refresh_index_proxy_api_benchmarks_proxy__label__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/{benchmark_id}": {
         parameters: {
             query?: never;
@@ -11900,6 +11935,8 @@ export interface components {
         PortfolioAnalysisReturns: {
             /** Benchmark As Of */
             benchmark_as_of?: string | null;
+            /** Benchmark Fetched At */
+            benchmark_fetched_at?: string | null;
             /** Benchmark Since Pct */
             benchmark_since_pct?: number | null;
             /** Benchmark Source */
@@ -18076,6 +18113,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CompanyIngestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_index_proxy_api_benchmarks_proxy__label__refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                label: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

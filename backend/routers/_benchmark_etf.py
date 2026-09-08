@@ -254,12 +254,49 @@ def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, fl
         try:
             if _refresh(ticker, bid, last[0] if last else None):
                 last = _latest(bid)
+            # ⚠⚠ STAMPED WHETHER OR NOT A NEW BAR ARRIVED, AND THAT IS THE POINT. The question this
+            # answers is "is our copy current", and asking a vendor that has published nothing since
+            # makes it current — see `provenanceFreshness`. Stamping only on a changed series would
+            # leave the badge amber forever on exactly the days the vendor is behind, which is the
+            # state this column was added to end.
+            _stamp_fetched(bid)
         except Exception as exc:                                # noqa: BLE001
             # ⚠ A VENDOR FAILURE COSTS FRESHNESS, NEVER THE NUMBER. What we already hold is still
             # a real price series; refusing to answer would blank a tile over a transient 500.
             _log.warning("[bench-etf] %s: refresh failed, serving what is stored: %s: %s",
                          ticker, type(exc).__name__, exc)
     return (bid, last) if last else None
+
+
+def _proxy_fetched_at(benchmark_id: int) -> str | None:
+    """When `ensure_fresh` last asked the vendor about this series, or None if it never has.
+
+    ⚠ NEVER RAISES. A missing timestamp costs one amber badge; an exception here would cost the
+    benchmark tile entirely, over a field that only describes it.
+    """
+    try:
+        got = (supabase.table("benchmark").select("proxy_fetched_at")
+               .eq("benchmark_id", benchmark_id).limit(1).execute())
+        return (got.data[0].get("proxy_fetched_at") if got.data else None)
+    except Exception as exc:                                    # noqa: BLE001
+        _log.warning("[bench-etf] could not read proxy_fetched_at for %s: %s", benchmark_id, exc)
+        return None
+
+
+def _stamp_fetched(benchmark_id: int) -> None:
+    """Record that we asked the vendor about this series just now. Best-effort.
+
+    ⚠ A FAILURE HERE MUST NOT COST THE PRICES. The refresh above has already stored real closes;
+    losing the timestamp costs one amber badge, and raising would throw the work away with it.
+    """
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    try:
+        supabase.table("benchmark").update(
+            {"proxy_fetched_at": datetime.now(timezone.utc).isoformat()}
+        ).eq("benchmark_id", benchmark_id).execute()
+    except Exception as exc:                                    # noqa: BLE001
+        _log.warning("[bench-etf] could not stamp proxy_fetched_at for %s: %s", benchmark_id, exc)
 
 
 def refresh_index_proxies() -> int:
@@ -309,6 +346,7 @@ def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
         return {}
     bid, (end_d, end_p) = fresh
     ticker, ccy = PROXY[label], "USD"
+    fetched_at = _proxy_fetched_at(bid)
 
     wanted = sorted(set(starts))
     # 45 days of run-up so an anchor on a holiday still finds a rate, matching `_window_rows`.
@@ -330,6 +368,12 @@ def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
             "local_pct": (end_p / start_p - 1.0) * 100.0,
             "start_date": start_d,
             "as_of": end_d,
+            # ⚠⚠ WHEN WE LAST ASKED, WHICH IS NOT WHEN THE VENDOR LAST PUBLISHED. The tile's badge
+            # is amber whenever `as_of` trails the calendar — and GuruFocus runs a day or two behind
+            # on index ETFs, so without this it was permanently amber over a figure nothing could
+            # improve. `provenanceFreshness` prefers this the moment it is present: read today =
+            # current, whatever date the newest bar carries. See migration 20260908170000.
+            "fetched_at": fetched_at,
             # ⚠ THE FOUR NUMBERS THE RETURN IS MADE OF, CARRIED SO THE ⓘ CAN SHOW ITS WORKING.
             # The card states the rule and then the same rule with this window's own figures under
             # it; without these it can only assert the method and ask to be believed. `fx_*` is the

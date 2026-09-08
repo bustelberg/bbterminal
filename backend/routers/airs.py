@@ -882,6 +882,9 @@ class PortfolioAnalysisReturns(BaseModel):
     benchmark_ticker: str | None = None
     benchmark_ytd_from: str | None = None       # the close it OPENED on, not the 1-Jan anchor
     benchmark_ytd_as_of: str | None = None      # the ETF's last bar; None on the rebuild path
+    # ⚠ When WE last asked the vendor, so the ⓘ can say "read today = current" instead of comparing
+    # the bar date to the calendar and warning about the vendor's own lag. None on the rebuild path.
+    benchmark_fetched_at: str | None = None
     # The four numbers the ETF return is made of, so the tile's ⓘ can print the formula and then
     # the same formula with these filled in. ⚠ `*_fx` is the ETF currency PER EUR (1.1750 USD/EUR)
     # — the direction the formula divides by. All None on the rebuild path.

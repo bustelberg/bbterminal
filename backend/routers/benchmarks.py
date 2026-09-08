@@ -161,6 +161,48 @@ async def create_benchmark(req: CreateBenchmarkRequest):
     return {**resp.data[0], "prices_loaded": total_loaded, "price_range": f"{parsed[0][0]} to {parsed[-1][0]}"}
 
 
+@router.post("/api/benchmarks/proxy/{label}/refresh")
+async def refresh_index_proxy(label: str):
+    """Bring ONE index's proxy-ETF series current, on demand. Admin + user (see `_auth_middleware`).
+
+    ⚠⚠ THE ⓘ PROMISED AN ACTION AND THERE WAS NOWHERE TO PRESS. A stale benchmark tile in the
+    Analyse modal wears an amber `!` whose own aria-label reads "not current; refresh to update" —
+    and until now the only things that could move it were the 05:00 price phase and a whole-book
+    Refresh, which re-scrapes AirSPMS and re-prices every holding to fix one number. This is the
+    targeted door: `ensure_fresh(force=True)` and nothing else.
+
+    ⚠ `force=True` ON PURPOSE, AND THAT IS THE WHOLE POINT OF A BUTTON. The lazy path declines
+    until the series is `_STALE_DAYS` behind and spends at most one vendor call per label per
+    process per day — correct for a reader who did not ask, wrong for one who did. See
+    `_benchmark_etf.ensure_fresh`, where both guards are documented.
+
+    ⚠ 404 ON AN UNKNOWN LABEL rather than a silent no-op: `PROXY` is a small map (ACWI, SP500) and
+    AEX deliberately has none — every European UCITS line 404s at the vendor — so "nothing
+    happened" is a real answer that a caller must be able to tell from "wrong name".
+    """
+    from routers._benchmark_etf import PROXY, ensure_fresh  # noqa: PLC0415
+
+    if label not in PROXY:
+        raise HTTPException(
+            404,
+            f"{label!r} has no proxy ETF. Indices with one: {', '.join(sorted(PROXY))} — "
+            "the others are rebuilt from constituents and refresh with the index.",
+        )
+    try:
+        got = await asyncio.to_thread(ensure_fresh, label, force=True)
+    except Exception as e:                                          # noqa: BLE001
+        # ⚠ 502, NOT 500. The vendor did not answer; nothing here is broken and a retry may work.
+        raise HTTPException(502, f"Could not refresh {label}: {type(e).__name__}: {e}")
+    if not got:
+        # ⚠ NOT AN ERROR. `ensure_fresh` returns None when the vendor has nothing newer, which is
+        # the commonest outcome of pressing this on a market that has not closed yet. Saying so is
+        # the difference between "we asked and it is current" and a button that looks broken.
+        return {"label": label, "refreshed": False,
+                "detail": "Asked the vendor; it has nothing newer than what we hold."}
+    _rows, (as_of, close) = got
+    return {"label": label, "refreshed": True, "as_of": as_of, "close": close}
+
+
 @router.post("/api/benchmarks/{benchmark_id}/refresh")
 async def refresh_benchmark(benchmark_id: int):
     """Re-fetch prices for an existing benchmark."""

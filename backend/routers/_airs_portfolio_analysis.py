@@ -205,6 +205,10 @@ def _bench_prov(win: dict | None) -> dict:
             # trading day and a reader checking the figure by hand would find the wrong bar.
             "benchmark_ytd_from": w.get("start_date"),
             "benchmark_ytd_as_of": w.get("as_of"),
+            # ⚠ WHEN WE LAST ASKED THE VENDOR — the other half of the freshness verdict. Without
+            # it the tile compares `as_of` to the calendar and stays amber through the vendor's own
+            # publication lag, which no action on the page can clear.
+            "benchmark_fetched_at": w.get("fetched_at"),
             # The marks behind the figure, so the ⓘ can show the formula filled in. Absent on the
             # rebuild path, which has 1,678 of them and no two to quote.
             "benchmark_ytd_open_price": w.get("start_price"),

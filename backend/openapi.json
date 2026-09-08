@@ -10512,6 +10512,17 @@
             ],
             "title": "Benchmark As Of"
           },
+          "benchmark_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Fetched At"
+          },
           "benchmark_since_pct": {
             "anyOf": [
               {
@@ -22567,6 +22578,47 @@
           }
         },
         "summary": "Ingest Company Fundamentals",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/proxy/{label}/refresh": {
+      "post": {
+        "description": "Bring ONE index's proxy-ETF series current, on demand. Admin + user (see `_auth_middleware`).\n\n\u26a0\u26a0 THE \u24d8 PROMISED AN ACTION AND THERE WAS NOWHERE TO PRESS. A stale benchmark tile in the\nAnalyse modal wears an amber `!` whose own aria-label reads \"not current; refresh to update\" \u2014\nand until now the only things that could move it were the 05:00 price phase and a whole-book\nRefresh, which re-scrapes AirSPMS and re-prices every holding to fix one number. This is the\ntargeted door: `ensure_fresh(force=True)` and nothing else.\n\n\u26a0 `force=True` ON PURPOSE, AND THAT IS THE WHOLE POINT OF A BUTTON. The lazy path declines\nuntil the series is `_STALE_DAYS` behind and spends at most one vendor call per label per\nprocess per day \u2014 correct for a reader who did not ask, wrong for one who did. See\n`_benchmark_etf.ensure_fresh`, where both guards are documented.\n\n\u26a0 404 ON AN UNKNOWN LABEL rather than a silent no-op: `PROXY` is a small map (ACWI, SP500) and\nAEX deliberately has none \u2014 every European UCITS line 404s at the vendor \u2014 so \"nothing\nhappened\" is a real answer that a caller must be able to tell from \"wrong name\".",
+        "operationId": "refresh_index_proxy_api_benchmarks_proxy__label__refresh_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "label",
+            "required": true,
+            "schema": {
+              "title": "Label",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Index Proxy",
         "tags": [
           "benchmarks"
         ]
