@@ -94,7 +94,7 @@ function LoginForm() {
         console.warn('[login] send failed:', error)
         setError(describeSendError(error.message))
       } else {
-        setInfo('Check your email for a confirmation link — including the spam folder. '
+        setInfo('Check your email for a confirmation link, including the spam folder. '
           + 'You will be asked to press a button to confirm, then choose a password.')
       }
     } else {
@@ -130,8 +130,8 @@ function LoginForm() {
     <AuthShell
       title={signin ? 'Welcome back' : 'Request access'}
       subtitle={signin
-        ? 'Sign in to continue to your terminal.'
-        : 'We will email you a link to confirm your address — no password needed yet.'}
+        ? 'Sign in to continue'
+        : 'We will email you a link to confirm your address. No password needed yet.'}
       footer={
         <>
           {signin ? 'First time here?' : 'Already have an account?'}{' '}
