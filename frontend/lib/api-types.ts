@@ -3319,7 +3319,7 @@ export interface paths {
         };
         /**
          * List Users
-         * @description List all users (admin only). Returns id, email, role, created_at.
+         * @description List all users (admin only) with their sign-in state. See `_user_detail`.
          */
         get: operations["list_users_api_auth_users_get"];
         put?: never;

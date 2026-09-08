@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createClient } from '../../../lib/supabase/client';
-import { describeMfaError } from '../../../lib/mfaError';
+import { describeMfaError, explainVerdict } from '../../../lib/mfaError';
+import { expectedTotp, explainCode, serverSkewSeconds } from '../../../lib/totp';
 import { useSecurityCopy } from '../../components/account/securityCopy';
+
+/** ⚠ The Supabase origin, not our backend — this page never calls `API_URL`. See the header. */
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 import {
-  CODE_LENGTH, type Factor, groupSecret, isCompleteCode, normaliseCode, suggestName, svgOnly,
-  unverifiedIds, verifiedFactors, verifyOrder,
+  CODE_LENGTH, type Factor, groupSecret, isCompleteCode, normaliseCode, suggestName,
+  qrSvg, unverifiedIds, verifiedFactors, verifyOrder,
 } from '../../components/account/mfaFactors';
 
 /**
@@ -58,6 +62,31 @@ export default function AccountSecurityPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * ⚠⚠ CHECK THE CLOCK BEFORE ANYBODY SCANS, NOT AFTER THREE FAILED CODES. GoTrue accepts a code
+   * for roughly −45s to +30s around its own time and that window is NOT configurable (measured
+   * 2026-09-08; the only TOTP settings it exposes are enroll/verify enabled). So a machine even a
+   * minute out cannot enrol at all — and the reader has no way to know that, because every code
+   * their phone shows is correct. Telling them up front costs one HEAD request; telling them
+   * afterwards costs a deleted authenticator entry and a rescan, three times over.
+   *
+   * ⚠ THE BROWSER IS THE PROXY FOR THE PHONE HERE, and that is sound in the direction that
+   * matters: a phone on automatic time is right, so when this machine disagrees with the server it
+   * is this machine that is wrong. It cannot catch a phone with hand-set time — nothing here can —
+   * which is what the post-failure diagnosis is still for.
+   */
+  const [clockSkew, setClockSkew] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const s = await serverSkewSeconds(`${SUPABASE_URL}/auth/v1/health`);
+      // ⚠ 10s FLOOR. The `Date` header is whole-second and carries the round trip, so a couple of
+      // seconds is noise — warning on it would train people to ignore the banner.
+      if (alive && s != null && Math.abs(s) >= 10) setClockSkew(s);
+    })();
+    return () => { alive = false; };
+  }, []);
+
   async function startEnrol() {
     setError(null);
     setNotice(null);
@@ -99,8 +128,45 @@ export default function AccountSecurityPage() {
         code: normaliseCode(code),
       });
       if (e) {
-        console.warn('[mfa] verify failed:', e);
-        setError(describeMfaError({ message: e.message }));
+        /**
+         * ⚠⚠ DIAGNOSE, DO NOT GUESS. "Invalid TOTP code" is produced by three unrelated faults and
+         * the copy could only ever pick one — it picked the clock, and sent somebody to check a
+         * phone setting that was already correct while the real cause was a stale entry in their
+         * authenticator (2026-09-08). We hold the secret we just enrolled, so we can compute what
+         * it SHOULD be showing and say which of the three it is.
+         *
+         * ⚠ IT IS A DIAGNOSTIC, NOT AN AUTHORISATION. The server already rejected the code; this
+         * only explains why. It can never let anything through.
+         */
+        const verdict = await explainCode(pending.secret, normaliseCode(code));
+        // ⚠ ASKED ONLY ON FAILURE. It is a round trip, and on the happy path there is nothing to
+        // explain — measuring the clock on every successful enrolment would be a request spent to
+        // learn something nobody needs.
+        const skew = await serverSkewSeconds(`${SUPABASE_URL}/auth/v1/health`);
+        console.warn('[mfa] verify failed:', e.message,
+          '\n  diagnosis     :', verdict.kind,
+          verdict.kind === 'clock-skew'
+            ? `— phone is ${verdict.offsetSteps > 0 ? 'AHEAD of' : 'BEHIND'} this browser by `
+              + `${Math.abs(verdict.offsetSteps * 30)}s`
+            : '',
+          '\n  browser vs server:', skew == null ? 'unmeasured'
+            : `${skew > 0 ? '+' : ''}${skew}s (browser ${skew > 0 ? 'ahead of' : 'behind'} server)`,
+          '\n  factor id     :', pending.id,
+          '\n  code typed    :', normaliseCode(code),
+          '\n  secret expects:', await expectedTotp(pending.secret),
+          verdict.kind === 'wrong-secret'
+            ? '\n  → your authenticator is on a DIFFERENT secret. Delete the entry and rescan.'
+            : verdict.kind === 'matches'
+              ? '\n  → the code was right for this secret; the server still refused it.'
+              : skew != null && Math.abs(skew) >= 10
+                // ⚠⚠ THE CONCLUSION THE FIRST VERSION GOT BACKWARDS. A phone/browser disagreement
+                // says nothing about WHICH drifted; the browser/server figure is what settles it,
+                // and here it usually indicts the machine the reader is sitting at.
+                ? `\n  → THIS COMPUTER is ${Math.abs(skew)}s out from the server. Fix its clock, `
+                  + 'not the phone.'
+                : '');
+        setError(explainVerdict(verdict, copy.lang, skew)
+          ?? describeMfaError({ message: e.message }));
         return;
       }
       setPending(null);
@@ -180,6 +246,15 @@ export default function AccountSecurityPage() {
                     leading-relaxed text-accent-400">
         {copy.policy}
       </p>
+
+      {/* ⚠ ABOVE the error slot on purpose: when the clock is out, EVERY code fails, so this is
+          the cause and anything below it is a symptom. */}
+      {clockSkew != null && (
+        <p role="alert" className="rounded-lg border border-warn-500/40 bg-warn-100 px-3.5 py-3
+                                   text-xs leading-relaxed text-warn-300">
+          {copy.clockWarning(Math.abs(clockSkew), clockSkew > 0)}
+        </p>
+      )}
 
       {error && (
         <p role="alert" className="rounded-lg border border-neg-200 bg-neg-100 px-3.5 py-3
@@ -273,7 +348,7 @@ export default function AccountSecurityPage() {
               <div
                 className="bg-white rounded-lg p-3 w-fit border border-neutral-800/30
                            [&_svg]:w-44 [&_svg]:h-44"
-                dangerouslySetInnerHTML={{ __html: svgOnly(pending.qr) }}
+                dangerouslySetInnerHTML={{ __html: qrSvg(pending.qr) }}
               />
 
               <details className="text-xs">

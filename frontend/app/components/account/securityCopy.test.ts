@@ -45,6 +45,26 @@ describe('the security page copy', () => {
     expect(SECURITY_COPY.en.policy).not.toMatch(/does not lock|password on its own/i)
   })
 
+  it('⚠⚠ the clock warning blames THIS COMPUTER, never the phone', () => {
+    // The measurement that settles it is browser-vs-SERVER, and in practice a phone on automatic
+    // time is right while a laptop drifts. The first version of the failure copy assumed the
+    // opposite and sent somebody to change a setting that was already correct.
+    for (const lang of LANGS) {
+      const en = lang === 'en';
+      const msg = SECURITY_COPY[lang].clockWarning(59, false);
+      expect(msg).toContain('59');
+      expect(msg).toMatch(en ? /this computer/i : /deze computer/i);
+      expect(msg).toMatch(en ? /phone is almost certainly fine/i : /telefoon ligt het vrijwel zeker niet/i);
+    }
+  });
+
+  it('⚠ names the direction, since "out by 59s" does not say which way', () => {
+    expect(SECURITY_COPY.en.clockWarning(59, true)).toMatch(/ahead/i);
+    expect(SECURITY_COPY.en.clockWarning(59, false)).toMatch(/behind/i);
+    expect(SECURITY_COPY.nl.clockWarning(59, true)).toMatch(/voor op/i);
+    expect(SECURITY_COPY.nl.clockWarning(59, false)).toMatch(/achter op/i);
+  });
+
   it('⚠ states the recovery story, because there are no backup codes', () => {
     expect(SECURITY_COPY.en.recoveryBody).toMatch(/no backup codes/i)
     expect(SECURITY_COPY.en.recoveryBody).toMatch(/admin/i)

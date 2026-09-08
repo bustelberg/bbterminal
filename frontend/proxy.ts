@@ -1,7 +1,9 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 import { isUserAllowedPath } from '@/lib/userAllowedPaths'
-import { ENROL_PATH, MFA_PATH, requiresEnrolment, requiresMfa, type AalLevel } from '@/lib/mfaGate'
+import {
+  ENROL_PATH, MFA_PATH, mfaEnforced, requiresEnrolment, requiresMfa, type AalLevel,
+} from '@/lib/mfaGate'
 
 // Paths that are accessible to anyone — including not-yet-logged-in users
 // (auth flow) and the home page (which any authenticated user can see).
@@ -73,7 +75,9 @@ export async function proxy(request: NextRequest) {
    * an unproved one sends you to the CHALLENGE. Getting them the other way round strands a new
    * account at a code box with nothing that can produce a code.
    */
-  if (user) {
+  // ⚠ `mfaEnforced()` IS A COMPILE-TIME CONSTANT IN PRODUCTION — see its docstring. This whole
+  // block is dev-only escapable; on Vercel no environment variable can reach it.
+  if (user && mfaEnforced()) {
     const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
     const levels = {
       currentLevel: aal?.currentLevel as AalLevel,

@@ -79,21 +79,49 @@ export function groupSecret(secret: string): string {
 }
 
 /**
- * GoTrue's QR, reduced to the `<svg>` element itself.
+ * GoTrue's QR, made safe to render at whatever size the page wants.
  *
- * ⚠ IT ARRIVES AS A STANDALONE XML DOCUMENT, not a fragment — measured against the live local
- * stack: `<?xml version="1.0"?>` then a `<!DOCTYPE svg …>` then the element. Assigned through
- * `innerHTML` the parser is in HTML mode, where an XML declaration is not a declaration at all:
- * it becomes a bogus comment, and the doctype is dropped. Browsers do that quietly today, which is
- * exactly why it is worth cutting — the page would depend on error recovery nobody chose, in a
- * string from outside this codebase, for the one image the whole flow turns on.
+ * ⚠⚠ IT ARRIVES AS `<svg width="219" height="219">` WITH NO `viewBox`, AND THAT COMBINATION IS A
+ * TRAP. An SVG without a viewBox has no coordinate system to map onto its viewport, so CSS
+ * width/height resizes the WINDOW and not the drawing: ask for anything under 219px and the image
+ * is CLIPPED, not scaled. This page asked for `w-44` — 11rem, and `html{font-size:17.5px}` makes
+ * that 192.5px — so it painted a QR with 12% missing off the right and bottom edges, which is
+ * where two of the three finder patterns live.
  *
- * ⚠ FALLS BACK TO THE INPUT rather than to empty: an unrecognised shape should still be given to
- * the parser, because a QR that renders oddly is recoverable and a blank square is not.
+ * The result is a code that a phone may still partially decode into a WRONG secret, so the app
+ * cheerfully shows six digits that can never verify. Reported as "the code is correct from Google
+ * Auth, wtf is wrong" — and nothing was wrong with the code, the clock, or the server: the phone
+ * had been handed a different secret from the one enrolled.
+ *
+ * ⚠ THE FIX IS A `viewBox`, NOT A BIGGER BOX. Pinning the CSS at 219px would work until somebody
+ * changed the rem scale or the QR's density changed with a longer issuer. Giving it a coordinate
+ * system makes it scale at any size, for ever.
+ *
+ * ⚠ It also drops the XML prolog: GoTrue sends a standalone document (`<?xml …?>`, a DOCTYPE),
+ * and through `innerHTML` the parser is in HTML mode where an XML declaration becomes a bogus
+ * comment. Browsers recover quietly today; depending on that is not a choice anybody made.
+ *
+ * ⚠ FALLS BACK TO THE INPUT rather than to empty — a QR that renders oddly is recoverable, a
+ * blank square is not.
  */
-export function svgOnly(qr: string): string {
-  const at = qr.indexOf('<svg');
-  return at === -1 ? qr : qr.slice(at);
+export function qrSvg(raw: string): string {
+  const at = raw.indexOf('<svg');
+  if (at === -1) return raw;
+  const svg = raw.slice(at);
+  const tagEnd = svg.indexOf('>');
+  if (tagEnd === -1) return svg;
+  const tag = svg.slice(0, tagEnd + 1);
+  if (/viewBox=/i.test(tag)) return svg;      // already scalable — leave it alone
+  const w = /\swidth="(\d+(?:\.\d+)?)"/i.exec(tag);
+  const h = /\sheight="(\d+(?:\.\d+)?)"/i.exec(tag);
+  if (!w || !h) return svg;                   // nothing to derive a coordinate system from
+  // ⚠ The fixed width/height go too. Left in place they still win over CSS in some engines, and
+  // the whole point is to let the page decide the size.
+  const fixed = tag
+    .replace(/\s+width="[^"]*"/i, '')
+    .replace(/\s+height="[^"]*"/i, '')
+    .replace(/<svg/i, `<svg viewBox="0 0 ${w[1]} ${h[1]}"`);
+  return fixed + svg.slice(tagEnd + 1);
 }
 
 /**

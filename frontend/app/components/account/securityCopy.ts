@@ -52,6 +52,8 @@ export type SecurityCopy = {
   /** ⚠ No backup codes exist — this is the entire recovery story, so it is on the page. */
   recoveryTitle: string;
   recoveryBody: string;
+  /** ⚠ Shown BEFORE anyone scans, when this machine's clock is out. See `clockWarning`. */
+  clockWarning: (seconds: number, ahead: boolean) => string;
   /** The `/mfa` gate — a different screen, same feature, so one copy module. */
   challenge: {
     title: string;
@@ -100,6 +102,11 @@ const EN: SecurityCopy = {
   recoveryTitle: 'If you lose your phone',
   recoveryBody: 'There are no backup codes. Add a second authenticator on another device while you '
     + 'can — otherwise an admin has to remove the old one for you before you can sign in again.',
+  clockWarning: (seconds, ahead) =>
+    `This computer's clock is ${seconds} seconds ${ahead ? 'ahead of' : 'behind'} the server. `
+    + 'Codes are only accepted within about 30 seconds, so two-factor will fail until you fix it '
+    + '— sync this machine’s time (Windows: Settings → Time & language → "Sync now"), '
+    + 'then reload. Your phone is almost certainly fine.',
   challenge: {
     title: 'Enter your code',
     body: 'Open your authenticator app and enter the 6-digit code it shows for BBTerminal.',
@@ -150,6 +157,12 @@ const NL: SecurityCopy = {
   recoveryTitle: 'Als je je telefoon kwijtraakt',
   recoveryBody: 'Er zijn geen back-upcodes. Voeg nu een tweede authenticator op een ander apparaat '
     + 'toe — anders moet een beheerder de oude eerst verwijderen voordat je weer kunt inloggen.',
+  clockWarning: (seconds, ahead) =>
+    `De klok van deze computer loopt ${seconds} seconden ${ahead ? 'voor op' : 'achter op'} de `
+    + 'server. Codes worden maar ongeveer 30 seconden geaccepteerd, dus tweestapsverificatie '
+    + 'mislukt tot dit is opgelost — synchroniseer de tijd van deze computer (Windows: '
+    + 'Instellingen → Tijd en taal → "Nu synchroniseren") en herlaad de pagina. Aan je '
+    + 'telefoon ligt het vrijwel zeker niet.',
   challenge: {
     title: 'Voer je code in',
     body: 'Open je authenticator-app en voer de 6-cijferige code in die hij voor BBTerminal toont.',

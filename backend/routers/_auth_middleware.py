@@ -347,6 +347,21 @@ def _is_latest_close_refresh(path: str) -> bool:
 # written to work with no redirect behind them.
 _REQUIRE_MFA = os.environ.get("REQUIRE_MFA", "1") != "0"
 
+# ⚠⚠ PRINTED AT STARTUP BECAUSE THE VALUE IS FROZEN AT STARTUP, AND THAT IS EXACTLY WHAT CATCHES
+# PEOPLE OUT. `uvicorn --reload` watches `.py` files and NOT `.env*`, so writing `REQUIRE_MFA=0`
+# into `backend/.env.local` changes nothing until the process is restarted — and the symptom is a
+# 403 on every read with no hint that the setting you just wrote is not the setting in force
+# (2026-09-08: exactly that, on the portfolios table). One line in the terminal answers it.
+#
+# ⚠ `print`, NOT `logging.info` — the same reason `main.py` prints its CORS allow-list: uvicorn
+# leaves the root logger at WARNING, so an info line is invisible precisely where it is needed.
+# ⚠ ASCII ONLY. Windows consoles encode stdout as cp1252, and a `print` carrying a character it
+# cannot map raises UnicodeEncodeError — at IMPORT time, so the whole backend fails to boot. An
+# arrow in this line did exactly that before it ever ran (caught immediately; it would have been a
+# dead local server with a traceback that names an encoding, not a setting).
+print(f"[auth] REQUIRE_MFA = {_REQUIRE_MFA}"
+      f"{'' if _REQUIRE_MFA else '  <-- two-factor is NOT enforced by this process'}", flush=True)
+
 
 def _mfa_denial(info: dict) -> JSONResponse | None:
     """403 when a session has not proved a second factor. None to let the request through."""

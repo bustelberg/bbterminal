@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  CODE_LENGTH, type Factor, groupSecret, isCompleteCode, normaliseCode, suggestName, svgOnly,
+  CODE_LENGTH, type Factor, groupSecret, isCompleteCode, normaliseCode, qrSvg, suggestName,
   unverifiedIds, verifiedFactors, verifyOrder,
 } from './mfaFactors'
 
@@ -106,22 +106,39 @@ describe('suggestName', () => {
   })
 })
 
-describe('svgOnly', () => {
-  it('⚠ drops the XML prolog GoTrue actually sends', () => {
-    // Measured against the live local stack: the QR arrives as a standalone XML document
-    // beginning `<?xml version="1.0"?>`, not as a fragment. Through `innerHTML` the parser is in
-    // HTML mode, where that becomes a bogus comment — error recovery nobody chose, on the one
-    // image the whole enrolment turns on.
-    const qr = '<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "x" "y">\n<svg><rect/></svg>'
-    expect(svgOnly(qr)).toBe('<svg><rect/></svg>')
+describe('qrSvg', () => {
+  it('⚠⚠ gives the QR a viewBox, or CSS CLIPS it instead of scaling it', () => {
+    // The real tag, measured: `<svg width="219" height="219">` and no viewBox. Without a
+    // coordinate system, CSS width/height resizes the WINDOW, not the drawing — so `w-44`
+    // (192.5px at this app's 17.5px rem) painted a QR with 12% cut off the right and bottom,
+    // taking two of the three finder patterns with it. A phone can partially decode that into a
+    // WRONG secret, and then every code it shows is valid-looking and unverifiable.
+    const raw = '<?xml version="1.0"?>\n'
+      + '<svg width="219" height="219" xmlns="http://www.w3.org/2000/svg"><rect/></svg>'
+    const out = qrSvg(raw)
+    expect(out).toContain('viewBox="0 0 219 219"')
+    expect(out.startsWith('<svg')).toBe(true)
+    // ⚠ The fixed size must GO. Left in, it still beats CSS in some engines.
+    expect(/<svg[^>]*\swidth=/.test(out)).toBe(false)
+    expect(/<svg[^>]*\sheight=/.test(out)).toBe(false)
+    expect(out).toContain('<rect/>')
   })
 
-  it('leaves a bare svg untouched', () => {
-    expect(svgOnly('<svg><rect/></svg>')).toBe('<svg><rect/></svg>')
+  it('leaves an SVG that already scales alone', () => {
+    const raw = '<svg viewBox="0 0 10 10" width="219" height="219"><rect/></svg>'
+    expect(qrSvg(raw)).toBe(raw)
+  })
+
+  it('⚠ drops the XML prolog GoTrue actually sends', () => {
+    // Through `innerHTML` the parser is in HTML mode, where an XML declaration becomes a bogus
+    // comment — error recovery nobody chose, on the one image the whole enrolment turns on.
+    const out = qrSvg('<?xml version="1.0"?>\n<!DOCTYPE svg><svg viewBox="0 0 1 1"><rect/></svg>')
+    expect(out).toBe('<svg viewBox="0 0 1 1"><rect/></svg>')
   })
 
   it('⚠ falls back to the input rather than to empty', () => {
     // A QR that renders oddly is recoverable; a blank square is not.
-    expect(svgOnly('not markup at all')).toBe('not markup at all')
+    expect(qrSvg('not markup at all')).toBe('not markup at all')
+    expect(qrSvg('<svg><rect/></svg>')).toBe('<svg><rect/></svg>')   // no size to derive from
   })
 })
