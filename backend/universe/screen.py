@@ -57,7 +57,10 @@ def _fetch_financials_api(
     from urllib.parse import quote
 
     symbol = _build_symbol(ticker, exchange)
-    url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials", {"order": "desc"})
+    # The legacy financials endpoint can be limited to a recent annual window (Visa starts at
+    # FY2017 with the current entitlement).  Price history is completed separately from daily
+    # closes; this request remains the source for reported financial-statement lines.
+    url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials")
     api = _api_request(url)
     track_api_call(supabase, exchange)
 

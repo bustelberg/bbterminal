@@ -12,11 +12,8 @@
  * from the AIRS returns, with real trades, real costs and real timing. Two different figures, not
  * interchangeable.
  *
- * ⚠⚠ DAILY BY DEFAULT — THE OPPOSITE OF THE OTHER RISK VIEWS. Tracking error, correlation and beta
- * default to weekly because they compare TWO series whose closes are hours apart. A drawdown
- * compares a series with itself, so that bias does not exist, and coarsening does real damage the
- * other way: a dip that recovers inside the period is invisible. The cadence comparison is on
- * screen for exactly that reason — measured, not asserted.
+ * ⚠⚠ DAILY ONLY. A drawdown compares a series with itself, so there is no cross-market close-time
+ * bias to trade off. Coarsening instead hides a fall that recovers inside a week or month.
  *
  * ⚠ AND THE PERCENTAGE IS THE LEAST USEFUL PART. "−31.4%" is one number; "peaked 19 Feb, bottomed
  * 7 Apr after 33 days, back to level 12 Aug after another 91" is a conversation.
@@ -34,13 +31,6 @@ import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum } from './workedFormula';
 import type { PortfolioDrawdown } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
-
-/** ⚠ DAILY FIRST — the order is the recommendation, and it is deliberately not the other views'. */
-const FREQS = [
-  { key: 'daily', label: 'Daily' },
-  { key: 'weekly', label: 'Weekly' },
-  { key: 'monthly', label: 'Monthly' },
-] as const;
 
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const day = (d: string | null | undefined) =>
@@ -88,9 +78,8 @@ export default function DrawdownView({
   const t = useRiskCopy();
   const [data, setData] = useState<PortfolioDrawdown | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>('daily');
 
-  const key = `${benchmark}|${freq}|${holdings.length}`
+  const key = `${benchmark}|daily|${holdings.length}`
     + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
 
   useEffect(() => {
@@ -100,7 +89,7 @@ export default function DrawdownView({
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/portfolio/drawdown`
-          + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`,
+          + `?benchmark=${encodeURIComponent(benchmark)}`,
           { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ holdings }) });
         const b = await r.json().catch(() => null);
@@ -117,10 +106,8 @@ export default function DrawdownView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const unit = data?.frequency === 'daily' ? 'trading days'
-    : data?.frequency === 'monthly' ? 'months' : 'weeks';
+  const unit = 'trading days';
   const worst = data?.worst;
-  const byFreq = data?.by_frequency ?? {};
 
   /**
    * WHAT EVERY CARD HERE IS MEASURED FROM, AND OVER WHAT WINDOW — built once.
@@ -144,22 +131,9 @@ export default function DrawdownView({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-fg-faint">Measured</span>
-        {FREQS.map((x) => (
-          <button key={x.key} type="button" onClick={() => setFreq(x.key)}
-            title={x.key === 'daily'
-              ? 'The most accurate basis for a drawdown — a dip that recovers inside a week or a '
-                + 'month is invisible at those cadences.'
-              : '⚠ Coarser than daily: any fall that recovers within the period is not seen, so '
-                + 'this reads structurally shallower.'}
-            className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-              freq === x.key ? 'bg-accent-600 text-white border-transparent'
-                : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300'}`}>
-            {x.label}
-          </button>
-        ))}
-      </div>
+      <p className="text-[11px] text-fg-faint">
+        Measured from daily EUR returns. Intraperiod recoveries remain visible.
+      </p>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
       {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
@@ -198,10 +172,8 @@ export default function DrawdownView({
                   { sym: 'M_t', is: LEGEND.M },
                   { sym: String.raw`MDD`, is: LEGEND.MDD },
                 ]}
-                /* ⚠ NO `how`. The cadence point is made three times over already: the label
-                   carries the frequency, each cadence button's title says what coarsening costs,
-                   and the comparison table below measures it on this book rather than asserting
-                   it. A fourth statement in a tooltip was the only one nobody could act on. */
+                /* Daily is the only available basis, so the card needs no alternate-cadence
+                   comparison to explain a number the reader cannot select. */
                 />} />} />
             <Tile label={t.dd.benchMax(data.benchmark)}
               value={pct2(data.benchmark_max_drawdown_pct)} tone="text-fg-muted"
@@ -233,30 +205,6 @@ export default function DrawdownView({
                   + '−25%s share a maximum and are not the same risk. ⚠ A 40% fall that bounces 5% '
                   + 'and falls further is ONE drawdown, not two — splitting on direction would '
                   + 'report shallow dips and no crash.'} />} />} />
-          </div>
-
-          {/* ⚠ THE CADENCE COMPARISON, MEASURED IN THE SAME REQUEST. Stating "monthly understates"
-              and leaving the reader to believe it is weaker than showing by how much on their own
-              book — and the gap is percentage points, not noise. */}
-          <div className="rounded-lg border border-neutral-800/40 bg-inset px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-              The same drawdown, measured three ways
-            </div>
-            <div className="flex flex-wrap gap-x-6 gap-y-1">
-              {FREQS.map((x) => (
-                <span key={x.key} className="text-[11px] text-fg-muted">
-                  {x.label}{' '}
-                  <span className={`font-mono tabular-nums ${
-                    freq === x.key ? 'text-fg-strong' : 'text-fg-muted'}`}>
-                    {pct2(byFreq[x.key])}
-                  </span>
-                </span>
-              ))}
-            </div>
-            <p className="text-[10px] text-fg-faint mt-1">
-              Coarser cadences cannot see a fall that recovers inside the period, so they read
-              shallower. Daily is the honest basis for this measure.
-            </p>
           </div>
 
           {worst && (

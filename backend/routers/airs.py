@@ -241,7 +241,7 @@ async def airs_model_portfolios_scan():
 
 
 @router.post("/api/airs/model-portfolios/scan/job")
-async def airs_model_portfolios_scan_job():
+async def airs_model_portfolios_scan_job(force: bool = False):
     """The model-portfolio scan as a CANCELLABLE JOB — phase two of the portfolios page's
     "Refresh all".
 
@@ -315,8 +315,19 @@ async def airs_model_portfolios_scan_job():
             # work in its own right — it is what gives every account its readable name — and a
             # cancel during the count must not throw it away.
             store.save_portfolios(rows)
+            # A regular dashboard refresh repairs only compositions that are absent or whose last
+            # download failed. `force` (Shift + Refresh all) deliberately re-reads every fixed
+            # model. Previously one unpaired book made the recovery scan download all ~58 fixed
+            # models, which was both slow and why operators avoided the very action that healed
+            # the missing pairings.
+            missing_ids = (set() if force else
+                           store.unscanned_position_ids([row["id"] for row in rows]))
+            to_count = rows if force else [row for row in rows if row["id"] in missing_ids]
+            if not force:
+                ctx.progress(0, len(to_count),
+                             f"{len(to_count)} model compositions missing — repairing those only…")
             count_model_portfolio_holdings_sync(
-                rows, on_event,
+                to_count, on_event,
                 on_positions=store.save_positions,
                 on_error=store.save_positions_error,
                 should_stop=lambda: ctx.cancelled,
@@ -324,7 +335,7 @@ async def airs_model_portfolios_scan_job():
         finally:
             _LOCK.release()
 
-        counted = sum(1 for p in rows if p.get("holdings") is not None)
+        counted = sum(1 for p in to_count if p.get("holdings") is not None)
         if ctx.cancelled:
             # ⚠ RAISED, NOT RETURNED — a returned string is a `done` job, and `done` is a word other
             # code ACTS ON. See the same fix on the account job: returning here would paint a green
@@ -332,7 +343,8 @@ async def airs_model_portfolios_scan_job():
             # nothing is lost by raising it.
             raise JobCancelled(f"Cancelled — {at['done']}/{at['total']} counted, "
                                f"{len(rows)} portfolios stored")
-        return f"{len(rows)} portfolios, {counted} with a holdings count"
+        return (f"{len(rows)} portfolios listed; {counted}/{len(to_count)} "
+                f"model compositions {'re-read' if force else 'repaired'}")
 
     job, reused = job_registry.start(
         "airs.models.scan", "Scan model portfolios", _work)
@@ -1327,6 +1339,13 @@ class LedgerPosition(BaseModel):
     mom_state: int | None = None
     mom_pct_rank: float | None = None
     mom_rank_n: int | None = None
+    # What the instrument did AFTER this book fully exited it. This is deliberately a price
+    # return, not a hypothetical book return: the book no longer owned it after `last_sale`.
+    since_close_pct: float | None = None
+    since_close_date: str | None = None
+    since_close_as_of: str | None = None
+    since_close_from: float | None = None
+    since_close_to: float | None = None
 
 
 class RealisedBlock(BaseModel):
@@ -1480,6 +1499,9 @@ class ModelPortfolioAnalysis(BaseModel):
     # Per-holding book detail — the source for a non-equity sleeve's contribution breakdown +
     # currency chart (where sector/region/SP500 say nothing). Empty for a basket or an unpaired model.
     book_holdings: list[BookHoldingDetail] = []
+    # Equity ISINs whose resolver/price data is not in asset_grid yet. The Analyse modal uses this
+    # to kick the existing async asset worker without putting a slow Yahoo call on the read path.
+    asset_data_missing_isins: list[str] = []
     # ⚠ WHY `book_holdings` IS EMPTY, WHEN IT IS. Three different faults rendered as one
     # sentence — "No positions to show for this portfolio" — beside a portfolios list that
     # visibly HAS rows: the model is not paired with a book, the paired book has never been
@@ -1909,7 +1931,7 @@ class TrackingError(BaseModel):
     reason: str | None = None
     benchmark: str
     #: daily | weekly | monthly. ⚠ Weekly is the DEFAULT and the honest one — see `cadence_note`.
-    frequency: str = "weekly"
+    frequency: str = "monthly"
     #: The `f` in the formula: 252 / 52 / 12.
     periods_per_year: float | None = None
     #: `T` — how many active returns the spread was taken over.
@@ -2033,7 +2055,7 @@ class RiskCorrelation(BaseModel):
 
 @router.post("/api/airs/portfolio/risk-correlation", response_model=RiskCorrelation)
 async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                          frequency: str = "weekly", years: int = 5):
+                                          frequency: str = "monthly", years: int = 5):
     """Correlation to the benchmark, and between the positions — the Risk panel's third view.
 
     ⚠ THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` holds
@@ -2855,6 +2877,127 @@ class LinkableContext(BaseModel):
     # holding ISIN -> the portfolios that already HOLD it. A link to one of those is a cycle, so
     # the row's dropdown drops them. Keyed by ISIN and small: few holdings are portfolios.
     excluded_by_isin: dict[str, list[int]]
+
+
+class PortfolioLinkModel(BaseModel):
+    """A target strategy as AIRS calls it, plus our optional reader-facing nickname."""
+    id: int
+    airs_name: str
+    display_name: str | None = None
+    positions: int
+
+
+class PortfolioLinkHolding(BaseModel):
+    """One AIRS holding name which may be a certificate for a model strategy."""
+    isin: str | None = None
+    fonds: str
+    linked_portfolio_id: int | None = None
+
+
+class PortfolioLinksOverview(BaseModel):
+    models: list[PortfolioLinkModel]
+    holdings: list[PortfolioLinkHolding]
+
+
+def _portfolio_links_overview() -> dict:
+    """The global certificate-link editor's data, from the canonical AIRS reference reads.
+
+    Links are facts about a holding name, not about each occurrence of that holding.  Returning
+    every distinct holding lets an admin configure a certificate before its target strategy has
+    been scanned locally; as soon as AIRS positions arrive, look-through uses that saved fact.
+    """
+    from routers._airs_portfolio_links import link_key  # noqa: PLC0415
+    from routers._airs_ref import models as ref_models, positions as ref_positions  # noqa: PLC0415
+    from routers._airs_strategy_map import nickname_for, target_for_alias  # noqa: PLC0415
+
+    models = ref_models()
+    positions = ref_positions()
+    counts: dict[int, int] = {}
+    for position in positions:
+        portfolio_id = position.get("portfolio_id")
+        if isinstance(portfolio_id, int):
+            counts[portfolio_id] = counts.get(portfolio_id, 0) + 1
+
+    saved = (supabase.table("airs_model_portfolio_link")
+             .select("isin,fonds,linked_portfolio_id").execute().data or [])
+    saved_by_key = {
+        link_key(row.get("isin"), row.get("fonds")): row.get("linked_portfolio_id")
+        for row in saved
+    }
+    distinct: dict[tuple[str, str], dict] = {}
+    for position in positions:
+        fonds = str(position.get("fonds") or "").strip()
+        if not fonds:
+            continue
+        isin = position.get("isin") or None
+        key = link_key(isin, fonds)
+        # Keep the first AIRS spelling, but deduplicate the same certificate held in many models.
+        distinct.setdefault(key, {"isin": isin, "fonds": fonds})
+
+    composition: dict[int, list[dict]] = {}
+    for position in positions:
+        composition.setdefault(position["portfolio_id"], []).append(position)
+
+    return {
+        "models": sorted(({
+            "id": model["id"], "airs_name": model.get("name") or str(model["id"]),
+            # A database nickname is an administrator's explicit override; the checked-in map is
+            # the useful default that makes a fresh environment immediately readable.
+            "display_name": nickname_for(model.get("name")) or model.get("display_name"),
+            "positions": counts.get(model["id"], 0),
+        } for model in models), key=lambda model: model["airs_name"].casefold()),
+        "holdings": sorted(({
+            **holding,
+            # Stored links are a deliberate operator decision and win. The map supplies the
+            # reviewed default for every familiar certificate without environment-specific ids.
+            "linked_portfolio_id": (saved_by_key[key] if key in saved_by_key else
+                                      target_for_alias(holding["fonds"], models, composition,
+                                                       0, holding["isin"])),
+        } for key, holding in distinct.items()), key=lambda holding: holding["fonds"].casefold()),
+    }
+
+
+@router.get("/api/airs/model-portfolio-links", response_model=PortfolioLinksOverview)
+async def airs_model_portfolio_links():
+    """All AIRS model names, our nicknames, and the certificate aliases between them."""
+    return await asyncio.to_thread(_portfolio_links_overview)
+
+
+def _save_global_portfolio_link(target_id: int, body: SetLinkRequest) -> dict:
+    """Save a global holding-to-model link, allowing an as-yet-unscanned target.
+
+    The table row picker intentionally requires a populated composition, because choosing an
+    empty target there cannot produce a useful current analysis.  The management editor is where
+    an admin records the durable business mapping first, so it only rejects genuine cycles.
+    """
+    from routers._airs_portfolio_links import link_key  # noqa: PLC0415
+    from routers._airs_ref import models_by_id, positions_for  # noqa: PLC0415
+
+    if target_id not in models_by_id():
+        raise HTTPException(404, "Unknown AIRS model portfolio.")
+    key = link_key(body.isin, body.fonds)
+    if any(link_key(position.get("isin"), position.get("fonds")) == key
+           for position in positions_for(target_id)):
+        raise HTTPException(400, "A model cannot be linked to a certificate it holds itself.")
+
+    existing = (supabase.table("airs_model_portfolio_link")
+                .select("id,isin,fonds").execute().data or [])
+    row_id = next((row["id"] for row in existing
+                   if link_key(row.get("isin"), row.get("fonds")) == key), None)
+    payload = {"isin": body.isin, "fonds": body.fonds,
+               "linked_portfolio_id": target_id,
+               "updated_at": datetime.now(UTC).isoformat()}
+    if row_id:
+        supabase.table("airs_model_portfolio_link").update(payload).eq("id", row_id).execute()
+    else:
+        supabase.table("airs_model_portfolio_link").insert(payload).execute()
+    return {"ok": True, "linked_portfolio_id": target_id}
+
+
+@router.put("/api/airs/model-portfolio-links/{target_id}")
+async def airs_set_global_portfolio_link(target_id: int, body: SetLinkRequest):
+    """Configure which AIRS holding name represents this AIRS model portfolio everywhere."""
+    return await asyncio.to_thread(_save_global_portfolio_link, target_id, body)
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/linkable",

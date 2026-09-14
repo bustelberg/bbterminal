@@ -94,22 +94,9 @@ class TestTheDeclarationIsTheFixedPoint:
 
 
 class TestOptInJobs:
-    def test_an_opt_in_job_is_absent_without_its_env(self):
-        assert not [s for s in registrable({}) if s.optional_env]
+    def test_asset_queue_is_registered_by_default(self):
+        assert "asset_ingest_queue" in {s.id for s in registrable({})}
 
-    def test_and_present_with_it(self):
-        opt = [s for s in SCHEDULED_JOBS if s.optional_env]
-        assert opt, "the fixture assumes at least one opt-in job"
-        env = {s.optional_env: "1" for s in opt}
-        assert len(registrable(env)) == len(SCHEDULED_JOBS)
-
-    def test_an_opt_in_job_that_is_off_reads_OFF_not_MISSING(self):
-        """⚠ THE DEFAULT DEPLOYMENT RUNS THE STANDALONE WORKER, so a permanent red row here would
-        be a false alarm on every page load — and a page with a permanent red row is a page nobody
-        reads."""
-        s = _spec(id="q", optional_env="ASSET_QUEUE_INPROCESS", max_age_hours=None)
-        row = build_rows([s], [], [], NOW, scheduler_running=True)[0]
-        assert row["status"] == "off"
 
 
 class TestTheThreeWayDisagreement:

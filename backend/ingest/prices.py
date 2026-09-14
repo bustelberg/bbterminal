@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 from supabase import Client
 
 from common.retry import retry
-from ingest.metric_upsert import upsert_metric_rows
+from ingest.metric_upsert import changed_rows, upsert_metric_rows
 from ingest._gurufocus_http import (
     cf_get,
     explain_failure,
@@ -606,7 +606,94 @@ def load_prices_into_db(
     company_id: int,
     prices: list[tuple[date, float]],
 ) -> int:
-    return _upsert_metric_rows(supabase, company_id, "close_price", prices)
+    """Store daily closes and fill missing annual share-price observations.
+
+    The legacy GuruFocus ``financials`` endpoint currently returns only FY2017
+    onward for some otherwise long-lived companies (Visa is one example), while
+    its ``price`` endpoint contains the daily history back to the IPO.  The
+    analysis modal reads ``Month End Stock Price`` rather than daily closes, so
+    keeping the latter only in ``close_price`` made those older years invisible.
+
+    Keep GuruFocus's reported fiscal-price observation when it exists; for a
+    missing calendar year, persist the final available trading close of that
+    year under the same canonical annual metric.  Persisting this derived row
+    here matters: portfolio blending reads ``metric_data`` directly and cannot
+    see the response-only fallback used by the single-company dashboard.
+    """
+    loaded = _upsert_metric_rows(supabase, company_id, "close_price", prices)
+    return loaded + _backfill_annual_share_prices(supabase, company_id, prices)
+
+
+_ANNUAL_PRICE_CODE = "annuals__Per Share Data__Month End Stock Price"
+_ANNUAL_PRICE_CODES = (
+    _ANNUAL_PRICE_CODE,
+    "annuals__per_share_data__Month End Stock Price",
+    "annuals__per_share_data_array__Month End Stock Price",
+)
+
+
+def _annual_price_rows(company_id: int, prices: list[tuple[date, float]],
+                       existing_years: set[int]) -> list[dict]:
+    """The last valid trading close in every annual-price year not reported by GF.
+
+    Kept pure so the important rule is testable: a dedicated fiscal-price row
+    always wins, while a partial FY2017+ vendor series does not hide 2015/2016.
+    """
+    last_close: dict[int, tuple[date, float]] = {}
+    for day, value in prices:
+        if day < DATA_CUTOFF:
+            continue
+        prior = last_close.get(day.year)
+        if prior is None or day > prior[0]:
+            last_close[day.year] = (day, float(value))
+    return [
+        {
+            "company_id": company_id,
+            "metric_code": _ANNUAL_PRICE_CODE,
+            "source_code": "gurufocus",
+            "target_date": day.isoformat(),
+            "numeric_value": value,
+            "is_prediction": False,
+        }
+        for year, (day, value) in sorted(last_close.items())
+        if year not in existing_years
+    ]
+
+
+def _backfill_annual_share_prices(
+    supabase: Client, company_id: int, prices: list[tuple[date, float]],
+) -> int:
+    if not prices:
+        return 0
+    try:
+        existing = (
+            supabase.table("metric_data")
+            .select("target_date")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .in_("metric_code", list(_ANNUAL_PRICE_CODES))
+            .limit(100)
+            .execute()
+        ).data or []
+        existing_years = {
+            int(str(row["target_date"])[:4]) for row in existing
+            if str(row.get("target_date") or "")[:4].isdigit()
+        }
+    except Exception as exc:  # A daily price refresh must never fail over a derived convenience row.
+        logging.getLogger(__name__).warning(
+            "[annual_price_backfill] could not inspect existing FY prices for cid=%s: %s: %s",
+            company_id, type(exc).__name__, exc,
+        )
+        return 0
+
+    rows = _annual_price_rows(company_id, prices, existing_years)
+    if not rows:
+        return 0
+    fresh, _unchanged = changed_rows(supabase, rows)
+    return upsert_metric_rows(
+        supabase, fresh, with_retry=True,
+        description=f"metric_data.upsert(company={company_id}, annual share price)",
+    )
 
 
 def load_volume_into_db(

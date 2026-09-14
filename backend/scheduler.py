@@ -2,13 +2,13 @@
 
 One `BackgroundScheduler` cron trigger runs inside the FastAPI process:
 
-    smart_daily   Daily 05:00 UTC — dependency-driven pipeline
+    smart_daily   Daily 05:00 Amsterdam — dependency-driven pipeline
 
 Each tick derives, from the enabled scheduled strategies, exactly what's
 needed and runs only that (`ingest.phases.pipeline._run_smart_pipeline_sync`):
 refresh only the universes those strategies use, keep every strategy's held
 companies priced daily, and rebalance each strategy on the first occurrence
-of its baked `rebalance_weekday` in its period. A Monday 05:00 UTC tick
+of its baked `rebalance_weekday` in its period. A Monday 05:00 Amsterdam tick
 already has Friday's settled close (US close Fri 21:00 UTC + ~8h), so a
 first-Monday rebalance decides on Friday's close. Weekend ticks (and any day
 with no strategy due + fresh held prices) are cheap no-ops via the
@@ -71,7 +71,7 @@ _PIPELINE_STALE_AFTER_SECONDS = 3600
 # ── Stale held-price retry ─────────────────────────────────────────
 # After a price-update, GuruFocus may not yet have published the prior
 # session's closes (the slower EU EOD feeds especially). Rather than wait a
-# full day for the next 05:00 UTC tick, re-run the held-price refresh a few
+# full day for the next 05:00 Amsterdam tick, re-run the held-price refresh a few
 # hours later to pick them up. Bounded per UTC day so a genuinely
 # unpublishable name (market holiday, illiquid stock) can't loop forever —
 # once the day's budget is spent the next daily tick takes over.
@@ -263,7 +263,7 @@ def _pipeline_already_running() -> bool:
 
 def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
     """On startup, schedule a one-shot daily-sequence run when there's catch-up
-    work — so an env that was down across the 05:00 UTC tick (or freshly
+    work — so an env that was down across the 05:00 Amsterdam tick (or freshly
     deployed) converges immediately rather than waiting a day. The sequence
     (price-update → rebalance) is itself scoped + idempotent, so firing it is
     always safe. Idempotent via the fixed job id + `replace_existing=True`.
@@ -302,7 +302,7 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
         if probe_failed:
             _log.warning(
                 "[scheduler] kickstart: could NOT determine whether catch-up is needed — a probe "
-                "failed (database still booting?); not firing. The 05:00 UTC tick is the fallback.",
+                "failed (database still booting?); not firing. The 05:00 Amsterdam tick is the fallback.",
             )
         else:
             _log.info("[scheduler] kickstart: everything current — no-op")
@@ -1680,7 +1680,7 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
 
 
 def _fire_airs_model_prices() -> None:
-    """The 05:00 tick: reprice every AIRS model portfolio. See `_body_airs_model_prices`."""
+    """Legacy manual hook: reprice every AIRS model portfolio."""
     _spawn_body("airs_model_prices")
 
 
@@ -1688,15 +1688,11 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
     """Bring every paired model portfolio's VALUATION current — composition, instruments, FX,
     prices, recompute — without touching the accounts.
 
-    ⚠⚠ IT RUNS THE MODEL HALF AND ONLY THE MODEL HALF. `halves=("model",)` is not a tuning knob;
-    it is what makes 05:00 a safe hour to run at. The account scrape may not run before AIRS has
-    valued the books — see the two ⚠⚠ notes on `_fire_airs_vermogen` — and this job exists
-    precisely because the half that CAN run early was the one nothing scheduled ever did.
+    ⚠⚠ IT RUNS THE MODEL HALF AND ONLY THE MODEL HALF. It is invoked as the final phase of the
+    11:00 AIRS refresh, after the account scrape and model scan have released the AirSPMS session.
 
-    ⚠ THIS IS THE GAP THE 09:30 JOB LEAVES. That one scrapes the accounts and SCANS the model
-    portfolios (their names and compositions); neither pass ever priced them. So a model's YTD
-    moved only when a human opened /portfolios and pressed Refresh on that row — which is why the
-    figures on the Analyse modal could sit weeks behind the book beside them.
+    ⚠ This closes the account refresh's final gap: account and model scans alone do not price the
+    model holdings, so Analyse's YTD and valued-position figures would otherwise lag behind.
 
     ⚠ ONE FUNCTION, THE SAME ONE THE BUTTONS CALL. `refresh_many` fans out over
     `refresh_portfolio_fully`; there is no scheduled copy of "refresh a portfolio" to drift from
@@ -1873,9 +1869,26 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             _log.exception(
                 "[scheduler] airs model-portfolio scan failed: %s: %s", type(e).__name__, e,
             )
+        # The last AIRS phase deliberately starts only after the account and composition browser
+        # work is finished.  A separate 11:00 job would race the same AirSPMS session and either
+        # job could leave a partial refresh behind.
+        try:
+            if stop is not None and stop():
+                raise _Cancelled("stopped before paired-model pricing; stored work is kept")
+            pricing_message, pricing = _body_airs_model_prices(ctx)
+            summary["pricing"] = pricing
+            _log.info("[scheduler] AIRS paired-model pricing: %s", pricing_message)
+        except _Cancelled:
+            raise
+        except Exception as e:
+            failures.append(f"pricing: {type(e).__name__}: {e}")
+            _log.exception(
+                "[scheduler] AIRS paired-model pricing failed: %s: %s", type(e).__name__, e,
+            )
       if failures:
           raise RuntimeError(" · ".join(failures)[:400])
-      return (f"{summary.get('accounts')} account(s), {summary.get('models')} model(s)", summary)
+      return (f"{summary.get('accounts')} account(s), {summary.get('models')} model(s), "
+              f"{(summary.get('pricing') or {}).get('priced', 0)} model(s) priced", summary)
 
 
 def _fire_table_size_sample() -> None:
@@ -1913,7 +1926,6 @@ def _register_bodies() -> None:
     JOB_BODIES.update({
         "fx_sync": _body_fx_sync,
         "airs_vermogen_refresh": _body_airs_vermogen,
-        "airs_model_prices": _body_airs_model_prices,
         "job_watchdog": _body_job_watchdog,
         "history_drift_check": _body_history_drift,
         "benchmark_price_slice": _body_benchmark_price_slice,
@@ -2183,22 +2195,19 @@ def register_scheduler(app) -> None:
                        if spec.interval_seconds is not None
                        else CronTrigger(**(spec.trigger or {})))
             sched.add_job(fn, trigger, id=spec.id, replace_existing=True, **spec.options)
-        # Single daily tick at 05:00 UTC (~07:00 CEST / 06:00 CET) that runs the
+        # Single daily tick at 05:00 Amsterdam that runs the
         # split pipeline's two operations IN ORDER (see `ingest.phases.pipeline`):
         #   1. price-update — re-price the held companies + refresh MTD;
         #   2. rebalance    — rebalance any strategy whose rebalance day has
         #      arrived (a no-op otherwise).
         # They run sequentially in one daemon thread and never overlap (the
         # rebalance also serializes against manual Run-now via the pipeline
-        # lock). 05:00 UTC (was 02:00) gives GuruFocus a few extra hours to
-        # publish the previous day's EUROPEAN EOD closes — at 02:00 UTC the
-        # slower-publishing EU exchanges (XPAR/MIL/XAMS) often still lacked the
-        # prior close, leaving held EU names a day stale until the next tick.
-        # US/Asia closes are long settled by either hour. Monday's tick still
+        # lock). The Amsterdam-local trigger keeps the requested wall-clock time through DST.
+        # Monday's tick still
         # has Friday's settled close, so a first-Monday rebalance decides on
         # Friday's close. Weekend ticks are cheap no-ops via the per-company
         # freshness short-circuit.
-        # If a startup coincides with the tick (e.g. a deploy right at 05:00 UTC),
+        # If a startup coincides with the tick (e.g. a deploy right at 05:00 Amsterdam),
         # `coalesce=True` collapses any backlog into a single run and
         # `misfire_grace_time` gives 10 min of slack — both declared with the schedule.
         _register("daily_pipeline", _fire_daily_sequence)
@@ -2223,9 +2232,6 @@ def register_scheduler(app) -> None:
         # guessed from, so on a deployment where nobody pressed "Scan AIRS" by hand every book
         # was unpaired and Analyse fell back to a basket. See `_fire_airs_vermogen`.
         _register("airs_vermogen_refresh", _fire_airs_vermogen)
-        # ⚠ THE PRICING HALF, AT 05:00 — see `_body_airs_model_prices`. Registered beside the
-        # scrape it deliberately does NOT duplicate.
-        _register("airs_model_prices", _fire_airs_model_prices)
         # ⚠ THE ONE JOB WHOSE SUBJECT IS THE OTHER JOBS — see `_body_job_watchdog`.
         _register("job_watchdog", _fire_job_watchdog)
         # Nightly database-size snapshot — one row per public table, so "how fast is this growing
@@ -2267,17 +2273,12 @@ def register_scheduler(app) -> None:
         # month-end, so it can never drain a region the full price refresh needs.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
         _register("history_drift_check", _fire_history_drift_check)
-        # Asset-pipeline ingest-queue worker — OPT-IN (ASSET_QUEUE_INPROCESS=1).
-        # By default the worker is the STANDALONE `scripts/asset_queue_worker.py`
-        # process, which survives backend restarts (dev --reload / redeploys) and
-        # keeps draining. Run EXACTLY ONE worker — this in-process tick OR the
-        # standalone script, never both (two would compete for the Yahoo throttle
-        # and re-introduce throttle-corrupted resolutions). When enabled: every
-        # 20s drain one slice; max_instances=1 + coalesce run slices back-to-back
-        # without overlap; empty queue → instant no-op.
-        if os.environ.get("ASSET_QUEUE_INPROCESS", "").lower() in ("1", "true", "yes"):
+        # Asset-pipeline ingest-queue worker — ON by default. Analyse queues missing ISINs and a
+        # normal backend deployment must consume them without requiring a second process. A
+        # standalone worker remains supported for deployments that explicitly opt out here.
+        if os.environ.get("ASSET_QUEUE_INPROCESS", "1").lower() not in ("0", "false", "no"):
             _register("asset_ingest_queue", _fire_asset_ingest_queue)
-            _log.info("[scheduler] ASSET_QUEUE_INPROCESS set — in-process ingest-queue worker enabled")
+            _log.info("[scheduler] in-process asset ingest-queue worker enabled")
         sched.start()
         _scheduler = sched
         # Reap any orphan `ingest_run` rows left in `status='running'`

@@ -1,0 +1,291 @@
+{
+  "version": 1,
+  "note": "Reviewed mapping of AIRS codes to BB Terminal names and certificate holdings. Edit this file to review or correct a strategy; no database ids belong here.",
+  "strategies": [
+    {
+      "nickname": "AITopSelectie Offensief",
+      "airs_names": [
+        "AITopSelectie OFF DYN",
+        "AITopSelectie OFF FX"
+      ],
+      "holding_aliases": [
+        "AI-TopSelectie Index"
+      ],
+      "look_through_target": "AITopSelectie OFF FX"
+    },
+    {
+      "nickname": "AzieTopSelectie Offensief",
+      "airs_names": [
+        "AzTopSelectie_DYN",
+        "AztopSelectie_FX"
+      ],
+      "holding_aliases": [
+        "AzieTopSelectie Index"
+      ],
+      "look_through_target": "AztopSelectie_FX"
+    },
+    {
+      "nickname": "DividendTopSelectie Offensief",
+      "airs_names": [
+        "DiTopSelectie OFF DYN",
+        "DiTopSelectie OFF FX"
+      ],
+      "holding_aliases": [
+        "DividendTopSelectie Index"
+      ],
+      "look_through_target": "DiTopSelectie OFF FX"
+    },
+    {
+      "nickname": "EuropaTopSelectie Offensief",
+      "airs_names": [
+        "EuropaTopSelect OFF DYN",
+        "EuropaTopSelect OFF FX"
+      ],
+      "holding_aliases": [
+        "EuropaTopSelectie Index"
+      ],
+      "look_through_target": "EuropaTopSelect OFF FX"
+    },
+    {
+      "nickname": "MomentumTopSelectie",
+      "airs_names": [
+        "MoTopSelectie_DYN",
+        "MoTopSelectie_FX"
+      ],
+      "holding_aliases": [
+        "MomentumTopSelectie Index"
+      ],
+      "look_through_target": "MoTopSelectie_FX"
+    },
+    {
+      "nickname": "ObligatieTopSelectie",
+      "airs_names": [
+        "OBTopSelectie_DYN",
+        "OBTopselectie FX"
+      ],
+      "holding_aliases": [
+        "ObligatieTopSelectie"
+      ],
+      "look_through_target": "OBTopselectie FX"
+    },
+    {
+      "nickname": "StarTopSelectie Offensief",
+      "airs_names": [
+        "StarTopSelectie OFF DYN",
+        "StarTopSelectie OFF FX"
+      ],
+      "holding_aliases": [
+        "Star Selection Index"
+      ],
+      "look_through_target": "StarTopSelectie OFF FX"
+    },
+    {
+      "nickname": "VastgoedTopSelectie Offensief",
+      "airs_names": [
+        "VTopSelectie OFF DY",
+        "VTopSelectie OFF FX"
+      ],
+      "holding_aliases": [
+        "VastgoedTopSelectie index"
+      ],
+      "look_through_target": "VTopSelectie OFF FX"
+    },
+    {
+      "nickname": "MerkenTopSelectie Offensief",
+      "airs_names": [
+        "BUS_MTS_OFF_AFS_DYN",
+        "BUS_MTS_OFF_AFS"
+      ],
+      "holding_aliases": [
+        "MerkenTopSelectie Index"
+      ],
+      "look_through_target": "BUS_MTS_OFF_AFS"
+    },
+    {
+      "nickname": "Bustelberg Beperkt Offensief",
+      "airs_names": [
+        "BUS_BepOffensief_Dyn",
+        "BUS_Bep_offensief_FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg Defensief",
+      "airs_names": [
+        "BUS_Defensief_Dyn",
+        "BUS_Defensief_FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "FamilieTopSelectie Beperkt Offensief",
+      "airs_names": [
+        "BUS_FTS_BEPOFF_DYN",
+        "BUS_FTS_Bepoff_AFS"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "FamilieTopSelectie Defensief",
+      "airs_names": [
+        "BUS_FTS_DEF_DYN",
+        "BUS_FTS_DEF_AFS"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "FamilieTopSelectie Neutraal",
+      "airs_names": [
+        "BUS_FTS_NEU_DYN",
+        "BUS_FTS_NEU_AFS"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "FamilieTopSelectie Offensief",
+      "airs_names": [
+        "BUS_FTS_OFF_DYN",
+        "BUS_FTS_OFF_AFS"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "MerkenTopSelectie Beperkt Offensief",
+      "airs_names": [
+        "BUS_MTS_BEPOFF_AFS_DYN",
+        "BUS_MTS_BEPOFF_AFS"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "MerkenTopSelectie Defensief",
+      "airs_names": [
+        "BUS_MTS_DEF_AFS_DYN",
+        "BUS_MTS_DEF_AFS"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "MerkenTopSelectie Neutraal",
+      "airs_names": [
+        "BUS_MTS_NEU_AFS_DYN",
+        "BUS_MTS_NEU_AFS"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg Neutraal",
+      "airs_names": [
+        "BUS_Neutraal_Dyn",
+        "BUS_Neutraal_FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg Offensief",
+      "airs_names": [
+        "BUS_Offensief_Dyn",
+        "BUS_Offensief_FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg Risico Beperkt Offensief",
+      "airs_names": [
+        "BUS_Ris_bepOff_Kl_AFS_Dy"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "WereldTopSelectie Dividend",
+      "airs_names": [
+        "BUS_WTS_Dividend_Dyn"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg Duurzaam",
+      "airs_names": [
+        "BUS_WTS_Duurzaam_Dyn",
+        "BUS_WTS_Duurzaam_Fx"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg FamilieTopSelectie",
+      "airs_names": [
+        "BUS_WTS_Familie_Dyn"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg Sterke Merken",
+      "airs_names": [
+        "BUS_WTS_StMerken_Dyn",
+        "BUS_WTS_SterkeMerken_Fx"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "DealmakersTopSelectie Offensief",
+      "airs_names": [
+        "DealmakersTopSel OFF DYN",
+        "DealmakersTopSel OFF FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "TolpoortenSelectie Offensief",
+      "airs_names": [
+        "TolpoortenSelect OFF DYN",
+        "TolpoortenSelect OFF FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Toppenberg Beperkt Offensief",
+      "airs_names": [
+        "TOPS_BEOFF_BEH_DYN",
+        "TOPS_BEOFF_BEH"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Toppenberg Defensief",
+      "airs_names": [
+        "TOPS_DEF_BEH_DYN",
+        "TOPS_DEF_BEH"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Toppenberg Offensief",
+      "airs_names": [
+        "TOPS_OFF_BEH_DYN",
+        "TOPS_OFF_BEH"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    }
+  ]
+}

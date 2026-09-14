@@ -827,7 +827,7 @@ class JobStarted(BaseModel):
 @router.post("/api/benchmarks/company/{company_id}/fundamentals/ingest/job",
              response_model=JobStarted)
 async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
-                                          feeds: str = "all"):
+                                          feeds: str = "all", prices: bool = False):
     """The per-row Fetch button — same work as the by-ISIN endpoint above, as a cancellable JOB.
 
     ⚠⚠ KEYED ON `company_id`, AND IT USED TO BE KEYED ON ISIN — WHICH SILENTLY DISABLED THE BUTTON
@@ -883,7 +883,7 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
     feed_label = {"fin": "statements", "est": "estimates", "ind": "indicators"}
 
     def _span(cid: int) -> str | None:
-        """What the grid will now show for this company — the answer the button was pressed for.
+        """The broadest range among the grid's stored metrics.
 
         ⚠ A ROW COUNT IS NOT AN ANSWER. "37,076 rows" is a count of `metric_data` writes: it is
         large, it is true, and it tells the reader nothing about whether the row they were looking
@@ -907,8 +907,36 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
                 "[job] could not read the span for company %s: %s", cid, e)
             return None
 
+    def _reported_eps_span(cid: int) -> str | None:
+        """The range of the actual EPS line, separate from price-history coverage.
+
+        The earlier toast reused ``_span`` and consequently told a reader who had pressed
+        Refresh on the EPS matrix that ING had ``FY2015–FY2026``.  That was the range of *some*
+        metric (normally the daily-price backfill), while GuruFocus's freshly returned EPS array
+        began at FY2017.  A success receipt must name the series the reader is looking at, not the
+        widest unrelated range we happen to store.
+        """
+        codes = (
+            "annuals__Per Share Data__EPS without NRI",
+            "annuals__per_share_data__EPS without NRI",
+            "annuals__per_share_data_array__EPS without NRI",
+        )
+        try:
+            rows = (supabase.table("metric_data").select("target_date")
+                    .eq("company_id", cid).eq("is_prediction", False)
+                    .in_("metric_code", list(codes)).limit(200).execute().data or [])
+            years = sorted({str(r.get("target_date") or "")[:4] for r in rows
+                            if str(r.get("target_date") or "")[:4].isdigit()})
+            if not years:
+                return None
+            return f"FY{years[0]}" if years[0] == years[-1] else f"FY{years[0]}–FY{years[-1]}"
+        except Exception as e:  # noqa: BLE001
+            logging.getLogger(__name__).warning(
+                "[job] could not read reported EPS span for company %s: %s", cid, e)
+            return None
+
     def _work(ctx) -> str:
-        ctx.emit("start", "Looking this company up…", done=0, total=3)
+        ctx.emit("start", "Looking this company up…", done=0, total=4 if prices else 3)
         cid = company_id
         comps = company_rows([cid])
         c = comps.get(cid)
@@ -928,11 +956,21 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         # picks up figures just filed — the two things a Refresh has to do at once. `all` always
         # spends three calls; an un-forced run tests PRESENCE, so it is a no-op on exactly the
         # company a reader pressed it for. See `smart_flags`.
-        todo = {**c, **(smart_flags(cid) if feeds == "smart" else feed_flags(force, feeds, next(
-            (n for n in needs(comps) if n["company_id"] == cid), None) if not force else None))}
+        # An explicit `force=true` wins over smart selection. Previously `feeds=smart&force=true`
+        # still called `smart_flags`, which correctly found Visa's latest FY current but then
+        # incorrectly skipped the forced full-history re-read needed to fill FY2015–2016.
+        # `feed_flags(True, "smart")` deliberately leaves all three feed flags on: a forced smart
+        # press means "refresh this company completely", while unforced smart remains the cheap,
+        # per-feed staleness check.
+        todo = {**c, **(feed_flags(force, feeds, None) if force
+                         else smart_flags(cid) if feeds == "smart"
+                         else feed_flags(False, feeds, next(
+                             (n for n in needs(comps) if n["company_id"] == cid), None)))}
 
         def _step(tag: str, i: int, total: int) -> None:
-            ctx.progress(i - 1, total, f"Fetching {feed_label.get(tag, tag)} ({i} of {total})")
+            offset = 1 if prices else 0
+            ctx.progress(i - 1 + offset, total + offset,
+                         f"Fetching {feed_label.get(tag, tag)} ({i + offset} of {total + offset})")
 
         # ⚠ `refresh_cache=force`, SO THE FLAG MEANS ONE THING ON EVERY INGEST ENDPOINT: go and
         # look. The grid's per-row Fetch does not pass `force`, so its cheap cache-friendly
@@ -947,6 +985,26 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         # bytes would rewrite identical rows, spend zero calls and leave the table exactly as it
         # was — a press that looks like a no-op. The flags are what keep this cheap; this is what
         # makes the calls it does decide to spend actually re-ask the vendor.
+        price_rows = 0
+        price_calls = 0
+        if prices:
+            # Financial statements carry at most a short historical annual price series for some
+            # listings. The price endpoint has the actual daily history and is what creates the
+            # missing FY2015/FY2016 annual observations in `load_prices_into_db`.
+            from ingest.prices import ensure_prices_for_company  # noqa: PLC0415
+
+            ctx.progress(0, 4, "Fetching full share-price history (1 of 4)")
+            pr = ensure_prices_for_company(
+                supabase, cid, c["gurufocus_ticker"],
+                ((c.get("gurufocus_exchange") or {}).get("exchange_code") or ""),
+                force_refresh=force,
+            )
+            price_rows = getattr(pr, "rows_loaded", 0) or 0
+            price_calls = getattr(pr, "api_calls", 0) or 0
+            ctx.spent(price_calls)
+            if getattr(pr, "error", None):
+                raise RuntimeError(f"share-price refresh failed: {pr.error}")
+
         r = ingest_company(todo, refresh_cache=(force or feeds == "smart"),
                            on_step=_step, should_stop=lambda: ctx.cancelled)
         # ⚠ RECORDED BEFORE ANY OF THE EXITS BELOW. A cancelled or failed run has still spent
@@ -967,12 +1025,13 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         # The technical breakdown, kept as the last progress line: the toast shows the human
         # summary and carries this on hover, and the console has both. `fin 36378` becomes
         # `statements 36,378`, which is the same fact in words a reader can act on.
-        detail = " · ".join(
+        detail_parts = ([f"share price {price_rows:,}"] if prices else []) + [
             f"{feed_label.get(d.split()[0], d.split()[0])} {int(d.split()[1]):,}"
-            for d in r["done"] if len(d.split()) == 2)
-        ctx.progress(3, 3, detail or "no new data")
+            for d in r["done"] if len(d.split()) == 2]
+        detail = " · ".join(detail_parts)
+        ctx.progress(4 if prices else 3, 4 if prices else 3, detail or "no new data")
 
-        if not r["done"]:
+        if not r["done"] and not price_rows:
             # ⚠ AN ANSWER, NOT A NON-EVENT. "nothing to do" read as though the button had failed to
             # do anything; what it means is that every feed was already loaded.
             #
@@ -984,9 +1043,16 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
         # constituent of any index, so the cached lines are stale from this moment; the writer
         # clearing them is what makes the cache safe to keep for 30 minutes at a time.
         _blend_cache.invalidate()
+        eps_span = _reported_eps_span(cid)
         span = _span(cid)
-        return (f"{name} — loaded {span}" if span
-                else f"{name} — loaded {r['rows']:,} data points")
+        loaded = r["rows"] + price_rows
+        # The value in the toast must be the EPS range, not the all-metrics span.  Retain the
+        # broad span only when EPS genuinely is unavailable, and label it so it cannot be read as
+        # proof that the EPS card is filled.
+        if eps_span:
+            return f"{name} — reported EPS {eps_span}"
+        return (f"{name} — no reported EPS; other data spans {span}" if span
+                else f"{name} — no reported EPS ({loaded:,} other data points loaded)")
 
     # ⚠ THE LABEL IS RESOLVED BEFORE THE JOB STARTS, so the toast says a company NAME from its very
     # first frame rather than an id the reader would have to look up.
@@ -1083,7 +1149,7 @@ async def benchmark_refresh_job(label: str):
 @router.post("/api/benchmarks/index/{label}/fundamentals/ingest/job",
              response_model=JobStarted)
 async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str = "statements",
-                                        force: bool = False):
+                                        force: bool = False, prices: bool = False):
     """Backfill every constituent missing the data this page shows, as a cancellable JOB.
 
     ⚠ IT REPLACED AN SSE ENDPOINT RATHER THAN JOINING ONE. The old
@@ -1178,7 +1244,8 @@ async def ingest_index_fundamentals_job(label: str, limit: int = 0, feeds: str =
         ctx.emit("info", f"reading the {label} constituents…")
         ids = sorted({m["company_id"] for m in _members(label, require_market_cap=False)
                       if m.get("company_id")})
-        return fill_company_ids(ctx, label, ids, feeds=feeds, force=force, limit=limit)
+        return fill_company_ids(ctx, label, ids, feeds=feeds, force=force, limit=limit,
+                                prices=prices)
 
     job, reused = job_registry.start("fundamentals.index", label, _work)
     return {"job_id": job.id, "label": label, "already_running": reused}

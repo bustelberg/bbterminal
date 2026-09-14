@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import CapexMarginInputsModal from './CapexMarginInputsModal';
 import { capexMarginByYear, type CapexMarginInputs } from './capexMarginData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -93,7 +94,8 @@ export default function CapexMarginCard({ holdingsTarget, holdingsName, benchTar
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : marginByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No capex / revenue figures ingested to compute a margin.</p>
+          <MissingFundamentals message="No capex / revenue figures ingested to compute a margin."
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

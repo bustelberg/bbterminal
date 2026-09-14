@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import { fcfLabel } from './sbcCorrection';
 import MarginInputsModal from './MarginInputsModal';
 import { marginByYear, paddedDomain, type MarginInputs , xToPeriod } from './marginData';
@@ -98,7 +99,8 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : marginByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No revenue / FCF ingested to compute a margin.</p>
+          <MissingFundamentals message="No revenue / FCF ingested to compute a margin."
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

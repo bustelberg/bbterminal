@@ -38,9 +38,10 @@ from routers._fundamental_backfill import ingest_company
 class _Result:
     """The shape `ingest_company` reads off an `EarningsResult` — nothing more."""
 
-    def __init__(self, rows: int = 5, calls: int = 1) -> None:
+    def __init__(self, rows: int = 5, calls: int = 1, error: str | None = None) -> None:
         self.rows_loaded = rows
         self.api_calls = calls
+        self.error = error
 
 
 @pytest.fixture
@@ -123,3 +124,21 @@ class TestASelectedCompanyIsStillReportedHonestly:
         assert r["calls"] == 1
         assert r["error"] is None
         assert r["done"] == ["fin 5"]
+
+    def test_vendor_error_is_not_reported_as_a_successful_zero_row_load(self, calls, monkeypatch):
+        """An empty GuruFocus template is an error, not evidence EPS was loaded."""
+        import ingest.earnings as earnings
+
+        monkeypatch.setattr(
+            earnings, "fetch_financials",
+            lambda *_args, **_kwargs: _Result(rows=0, calls=1,
+                                               error="GuruFocus returned no periods"),
+        )
+
+        r = ingest_company(_company(need_fin=True, need_est=False, need_ind=False),
+                           refresh_cache=True)
+
+        assert r["calls"] == 1
+        assert r["rows"] == 0
+        assert r["done"] == []
+        assert r["error"] == "fin: GuruFocus returned no periods"

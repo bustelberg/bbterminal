@@ -10,6 +10,7 @@ import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
+import { prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { createLiveReload } from '../../lib/liveReload';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
@@ -23,9 +24,22 @@ import {
 } from './portfolios/startWeights';
 
 import type {
-  AirsAccountDetail, AirsAccountIsins, AirsHoldingSegment, AirsPortfolioOverview,
+  AirsAccountDetail, AirsAccountIsins, AirsAccountModelLinks, AirsHoldingSegment,
+  AirsPortfolioOverview,
 } from '../../lib/types/api';
 import { useMgmtCopy } from './management/managementCopy';
+
+function prefetchModelAnalysis(id: number) {
+  const key = `id:${id}|ACWI|book||0|0`;
+  prefetchAnalysis(key, async () => {
+    const response = await apiFetch(
+      `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=ACWI&weight_by=book&source=book`,
+    );
+    const body = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+    return body;
+  });
+}
 
 /**
  * The one table: a portfolio, by the name you gave it, on AIRS's own numbers.
@@ -183,6 +197,9 @@ export default function PortfolioOverviewPanel() {
   // The allocation-policy editor. Mounted only while open — it fetches its own grid, and a policy
   // nobody asked to see is not worth a request on every page load.
   const [showBands, setShowBands] = useState(false);
+  // Certificate aliases are global facts ("Star Selection Index" represents one AIRS model),
+  // so their editor belongs beside Refresh all rather than hidden in one account's holdings.
+  const [showLinks, setShowLinks] = useState(false);
   // The Fixed portfolio to analyse. Its id, not the row's — the modal describes the strategy.
   /** `pf` is the AIRS portefeuille code — what `refreshOne` is keyed on, carried so the modal's
    *  Refresh fires the identical scan the row's does. */
@@ -379,21 +396,26 @@ export default function PortfolioOverviewPanel() {
    * relay, which was only ever a stand-in for the progress line this now has.
    */
   const scanModels = async (force: boolean) => {
-    // ⚠ SKIPPED UNLESS IT WOULD CHANGE SOMETHING. This is the slow half — a list page plus an
-    // edit-page GET and an XLS download for each of ~95 portfolios, minutes every time — and it
-    // describes models, which change when somebody EDITS one, not daily. Running it on every press
-    // would make the routine refresh unusable to keep a nickname current. Missing entirely is the
-    // case that matters (a fresh deployment), and shift-click forces the rest.
-    const have = (rows ?? []).some((r) => r.fixed_portfolio_id != null);
-    if (have && !force) {
-      console.warn('[AIRS models] skipped — models already scanned (shift-click Refresh all to re-scan)');
+    // ⚠ SKIPPED ONLY WHEN EVERY REAL BOOK HAS A MODEL. One existing pairing says nothing about
+    // another account whose model's composition was never stored: TOPS_DEF_BEH_DYN was exactly
+    // that case — several other rows were paired, so this used to skip the scan forever and
+    // Analyse fell back to an empty basket. An unpaired account with real holdings is therefore
+    // a missing-model signal, not a reason to call the whole fleet "already scanned".
+    //
+    // The scan is still the slow half (list + one XLS per model), and a shift-click remains the
+    // explicit way to re-read fully populated models even when no account needs one.
+    const needsModel = (rows ?? []).some((r) =>
+      r.fixed_portfolio_id == null && (r.holdings ?? 0) >= MIN_REAL_HOLDINGS);
+    if (!needsModel && !force) {
+      console.warn('[AIRS models] skipped — every substantial account is paired (shift-click Refresh all to re-scan)');
       return;
     }
     setScanningModels(true);
     console.warn('[AIRS models] scanning Stamgegevens → Model portefeuilles (minutes)…');
     try {
       const { id, done } = await startJob(
-        `${API_URL}/api/airs/model-portfolios/scan/job`, 'Scan model portfolios');
+        `${API_URL}/api/airs/model-portfolios/scan/job?force=${force ? 'true' : 'false'}`,
+        'Scan model portfolios');
       setModelsJob(id);
       const job = await done;
       // ⚠ `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
@@ -869,6 +891,13 @@ export default function PortfolioOverviewPanel() {
           </h3>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          {isAdmin && (
+            <button type="button" onClick={() => setShowLinks(true)}
+              title="Configure which AIRS holding names are certificates for which AIRS model portfolios."
+              className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+              Links
+            </button>
+          )}
           {/* Scan every portfolio that NEEDS it — the backend skips an account whose last pass got
               all four reports within the last few hours, so a press after a full run is seconds
               rather than minutes. Shift-click forces a full re-scan. */}
@@ -1021,6 +1050,14 @@ export default function PortfolioOverviewPanel() {
                         <div className="flex items-stretch gap-1.5">
                           {canAnalyse(r) && (
                             <button
+                              onMouseEnter={() => {
+                                const id = r.fixed_portfolio_id;
+                                if (id != null) prefetchModelAnalysis(id);
+                              }}
+                              onFocus={() => {
+                                const id = r.fixed_portfolio_id;
+                                if (id != null) prefetchModelAnalysis(id);
+                              }}
                               onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}
                               className="inline-flex items-center text-[13px] px-2.5 py-1 rounded-md border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
@@ -1194,6 +1231,9 @@ export default function PortfolioOverviewPanel() {
                     {isOpen && (
                       <tr>
                         <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">
+                          {isAdmin && (
+                            <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
+                          )}
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
                             portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins}
                             canEdit={isAdmin} />
@@ -1249,6 +1289,9 @@ export default function PortfolioOverviewPanel() {
       )}
       {showBands && (
         <AllocationBandsModal canEdit={isAdmin} onClose={() => setShowBands(false)} />
+      )}
+      {showLinks && (
+        <PortfolioLinksModal onClose={() => setShowLinks(false)} />
       )}
     </section>
   );
@@ -1583,6 +1626,268 @@ function SegmentHeader({ s, asOf, stats, altReturnPct, basisKey }: {
               : `Σ (Start wt × Return) of the rows below = ${stats.contributionPct >= 0 ? '+' : ''}${stats.contributionPct.toFixed(2)}pp, ÷ this segment's ${stats.startWeightPct.toFixed(2)}% Start wt${partial ? ', priced rows only' : ''}`} />
       </td>
     </tr>
+  );
+}
+
+type PortfolioLinkModel = {
+  id: number; airs_name: string; display_name: string | null; positions: number;
+};
+type PortfolioLinkHolding = {
+  isin: string | null; fonds: string; linked_portfolio_id: number | null;
+};
+type PortfolioLinksOverview = { models: PortfolioLinkModel[]; holdings: PortfolioLinkHolding[] };
+
+/** Global editor for the certificate aliases AIRS uses in portfolios.  This deliberately shows
+ * AIRS's unmodified model name next to our optional nickname: the former is what an operator can
+ * find in AIRS, while the latter is what readers should see in BB Terminal. */
+function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
+  const [data, setData] = useState<PortfolioLinksOverview | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [filter, setFilter] = useState('');
+  const [aliasFilter, setAliasFilter] = useState('');
+  const [aliasKey, setAliasKey] = useState('');
+  const [nickname, setNickname] = useState('');
+  const [busy, setBusy] = useState<'name' | 'link' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void apiFetch(`${API_URL}/api/airs/model-portfolio-links`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<PortfolioLinksOverview>;
+      })
+      .then((overview) => {
+        if (!live) return;
+        setData(overview);
+        setSelectedId(overview.models[0]?.id ?? null);
+      })
+      .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, []);
+
+  const selected = data?.models.find((model) => model.id === selectedId) ?? null;
+  useEffect(() => {
+    if (!selected || !data) return;
+    setNickname(selected.display_name ?? '');
+    const linked = data.holdings.find((holding) => holding.linked_portfolio_id === selected.id);
+    const key = linked ? JSON.stringify([linked.isin ?? '', linked.fonds]) : '';
+    setAliasKey(key);
+    setAliasFilter(linked?.fonds ?? '');
+    setNotice(null);
+  }, [selectedId, data, selected]);
+
+  const visibleModels = (data?.models ?? []).filter((model) => {
+    const needle = filter.trim().toLocaleLowerCase();
+    return !needle || `${model.airs_name} ${model.display_name ?? ''}`.toLocaleLowerCase().includes(needle);
+  });
+  const aliases = (data?.holdings ?? []).filter((holding) => {
+    const needle = aliasFilter.trim().toLocaleLowerCase();
+    return !needle || `${holding.fonds} ${holding.isin ?? ''}`.toLocaleLowerCase().includes(needle);
+  }).slice(0, 100);
+  const chosenAlias = aliasKey ? (data?.holdings ?? []).find((holding) =>
+    JSON.stringify([holding.isin ?? '', holding.fonds]) === aliasKey) : undefined;
+
+  const saveNickname = async () => {
+    if (!selected) return;
+    setBusy('name'); setError(null); setNotice(null);
+    try {
+      const response = await apiFetch(`${API_URL}/api/airs/model-portfolios/${selected.id}/display-name`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ display_name: nickname.trim() || null }),
+      });
+      if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+      setData((current) => current && ({ ...current, models: current.models.map((model) =>
+        model.id === selected.id ? { ...model, display_name: nickname.trim() || null } : model) }));
+      setNotice('Nickname saved.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(null); }
+  };
+
+  const saveLink = async () => {
+    if (!selected || !chosenAlias) return;
+    setBusy('link'); setError(null); setNotice(null);
+    try {
+      const response = await apiFetch(`${API_URL}/api/airs/model-portfolio-links/${selected.id}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isin: chosenAlias.isin, fonds: chosenAlias.fonds }),
+      });
+      if (!response.ok) throw new Error(await response.text() || `HTTP ${response.status}`);
+      setData((current) => current && ({ ...current, holdings: current.holdings.map((holding) => ({
+        ...holding,
+        linked_portfolio_id: JSON.stringify([holding.isin ?? '', holding.fonds]) === aliasKey
+          ? selected.id
+          : holding.linked_portfolio_id === selected.id ? null : holding.linked_portfolio_id,
+      })) }));
+      setNotice('Certificate link saved. Look-through will use it as soon as AIRS positions are available.');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Portfolio links">
+      <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-card shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-800/70 px-5 py-4">
+          <div>
+            <h2 className="text-[16px] font-semibold text-fg-strong">Links</h2>
+            <p className="mt-0.5 text-[12px] text-fg-faint">Connect the certificate name used as a holding to the AIRS strategy it represents.</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-[13px] text-fg-subtle hover:bg-overlay/10 hover:text-fg">Close</button>
+        </div>
+        {error && <p className="mx-5 mt-3 rounded-md border border-neg-500/30 bg-neg-500/10 px-3 py-2 text-[12px] text-neg-300">{error}</p>}
+        {!data ? <p className="p-5 text-[13px] text-fg-subtle">Loading AIRS portfolio names…</p> : (
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(17rem,0.9fr)_minmax(0,1.4fr)]">
+            <div className="min-h-0 border-r border-neutral-800/70 p-3">
+              <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find AIRS name or nickname"
+                className="mb-2 w-full rounded-md border border-neutral-800/70 bg-page px-2 py-1.5 text-[13px] text-fg focus:border-accent-500" />
+              <div className="max-h-[57vh] space-y-1 overflow-y-auto pr-1">
+                {visibleModels.map((model) => {
+                  const linked = data.holdings.find((holding) => holding.linked_portfolio_id === model.id);
+                  return <button key={model.id} type="button" onClick={() => setSelectedId(model.id)}
+                    className={`w-full rounded-md px-2.5 py-2 text-left transition-colors ${selectedId === model.id ? 'bg-accent-500/15 text-fg' : 'text-fg-subtle hover:bg-overlay/10'}`}>
+                    <div className="text-[13px] font-medium">{model.airs_name}</div>
+                    <div className="mt-0.5 truncate text-[11px] text-fg-faint">{model.display_name || 'No nickname'} · {linked?.fonds || 'No holding alias'}</div>
+                  </button>;
+                })}
+              </div>
+            </div>
+            {selected && <div className="min-h-0 overflow-y-auto p-5 space-y-5">
+              <div>
+                <div className="text-[11px] uppercase tracking-wide text-fg-faint">AIRS portfolio name</div>
+                <div className="mt-1 text-[15px] font-semibold text-fg-strong">{selected.airs_name}</div>
+                <p className="mt-1 text-[12px] text-fg-faint">{selected.positions} locally stored holdings. A link may be configured before this is populated.</p>
+              </div>
+              <div className="flex flex-wrap items-end gap-2">
+                <label className="grid min-w-[16rem] flex-1 gap-1 text-[12px] text-fg-subtle">Nickname in BB Terminal
+                  <input value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="Optional display name"
+                    className="rounded-md border border-neutral-800/70 bg-page px-2 py-1.5 text-[13px] text-fg focus:border-accent-500" />
+                </label>
+                <button type="button" onClick={() => void saveNickname()} disabled={busy != null}
+                  className="rounded-md border border-neutral-700 px-2.5 py-1.5 text-[13px] text-fg-subtle hover:text-accent-300 disabled:opacity-50">{busy === 'name' ? 'Saving…' : 'Save nickname'}</button>
+              </div>
+              <div className="border-t border-neutral-800/70 pt-4">
+                <label className="grid gap-1 text-[12px] text-fg-subtle">Holding name used in other AIRS portfolios
+                  <input value={aliasFilter} onChange={(e) => { setAliasFilter(e.target.value); setAliasKey(''); }} placeholder="Search e.g. Star Selection Index"
+                    className="rounded-md border border-neutral-800/70 bg-page px-2 py-1.5 text-[13px] text-fg focus:border-accent-500" />
+                </label>
+                <select value={aliasKey} onChange={(e) => setAliasKey(e.target.value)} size={Math.min(Math.max(aliases.length, 3), 8)}
+                  className="mt-2 w-full rounded-md border border-neutral-800/70 bg-page px-2 py-1.5 text-[13px] text-fg focus:border-accent-500">
+                  {!aliases.length && <option value="">No AIRS holding matches this search</option>}
+                  {aliases.map((holding) => <option key={JSON.stringify([holding.isin ?? '', holding.fonds])} value={JSON.stringify([holding.isin ?? '', holding.fonds])}>
+                    {holding.fonds}{holding.isin ? ` · ${holding.isin}` : ''}{holding.linked_portfolio_id != null && holding.linked_portfolio_id !== selected.id ? ' · linked elsewhere' : ''}
+                  </option>)}
+                </select>
+                <button type="button" onClick={() => void saveLink()} disabled={busy != null || !chosenAlias}
+                  className="mt-3 rounded-md border border-accent-600/40 bg-accent-500/10 px-3 py-1.5 text-[13px] text-accent-300 hover:bg-accent-500/20 disabled:opacity-50">
+                  {busy === 'link' ? 'Saving…' : 'Save link'}
+                </button>
+                <p className="mt-2 text-[11px] text-fg-faint">Example: select “Star Selection Index” for AIRS model “StarTopSelectie OFF DYN”.</p>
+              </div>
+              {notice && <p className="rounded-md border border-pos-500/25 bg-pos-500/10 px-3 py-2 text-[12px] text-pos-300">{notice}</p>}
+            </div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Admin controls for the TWO identities an AIRS book needs: a reader-facing name and the Fixed
+ * model portfolio whose composition it follows. The model selection is deliberately separate from
+ * a certificate link: this pairs the whole Dynamic account to a strategy; certificate links live
+ * inside the holdings table below. */
+function PortfolioIdentityEditor({ row, onSaved }: {
+  row: AirsPortfolioOverview;
+  onSaved: () => void | Promise<void>;
+}) {
+  const [choices, setChoices] = useState<AirsAccountModelLinks | null>(null);
+  const [name, setName] = useState(row.name_is_custom ? row.name : '');
+  const [modelId, setModelId] = useState(row.fixed_portfolio_id == null ? '' : String(row.fixed_portfolio_id));
+  const [busy, setBusy] = useState<'name' | 'model' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void apiFetch(`${API_URL}/api/airs/account-model-links`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<AirsAccountModelLinks>;
+      })
+      .then((data) => { if (live) setChoices(data); })
+      .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, []);
+
+  const saveName = async () => {
+    setBusy('name'); setError(null);
+    try {
+      const response = await apiFetch(
+        `${API_URL}/api/airs/accounts/${encodeURIComponent(row.dynamic_portefeuille)}/display-name`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_name: name.trim() || null }) },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const saveModel = async () => {
+    setBusy('model'); setError(null);
+    try {
+      const response = await apiFetch(
+        `${API_URL}/api/airs/account-model-links/${encodeURIComponent(row.dynamic_portefeuille)}`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model_portfolio_id: modelId === '' ? null : Number(modelId) }) },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      await onSaved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-accent-600/30 bg-accent-500/[0.04] px-3 py-2.5 space-y-2">
+      <div className="text-[12px] font-medium text-fg-strong">Portfolio identity</div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="grid gap-1 text-[11px] text-fg-faint">
+          Display name
+          <input value={name} onChange={(e) => setName(e.target.value)} disabled={busy != null}
+            placeholder={row.dynamic_portefeuille}
+            className="w-56 rounded-md border border-neutral-800/60 bg-page px-2 py-1 text-[13px] text-fg focus:border-accent-500" />
+        </label>
+        <button type="button" onClick={() => void saveName()} disabled={busy != null}
+          className="rounded-md border border-neutral-800/60 px-2.5 py-1 text-[13px] text-fg-subtle hover:text-accent-300 disabled:opacity-50">
+          {busy === 'name' ? 'Saving…' : 'Save name'}
+        </button>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="grid gap-1 text-[11px] text-fg-faint">
+          Linked AIRS model portfolio
+          <select value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={busy != null || !choices}
+            className="w-80 rounded-md border border-neutral-800/60 bg-page px-2 py-1 text-[13px] text-fg focus:border-accent-500 disabled:opacity-50">
+            <option value="">No linked model</option>
+            {(choices?.models ?? []).map((model) => (
+              <option key={model.id} value={model.id}>{model.name} ({model.positions})</option>
+            ))}
+          </select>
+        </label>
+        <button type="button" onClick={() => void saveModel()} disabled={busy != null || !choices}
+          className="rounded-md border border-accent-600/40 px-2.5 py-1 text-[13px] text-accent-300 hover:bg-accent-500/10 disabled:opacity-50">
+          {busy === 'model' ? 'Saving…' : 'Link model'}
+        </button>
+      </div>
+      {error && <p className="text-[12px] text-neg-300">Could not save: {error}</p>}
+    </div>
   );
 }
 

@@ -19,10 +19,8 @@
  * the server, which reports its date as `return_from`. It is the one point on this line nobody
  * measured, and it is what makes every other point readable.
  *
- * ⚠ IT WAS A VALUE CHART AND THE VALUE HAS NOT GONE — it is on every hover, with that date's
- * holding count. What changed is which of the two quantities the LINE draws: what the book earned
- * rather than what it was worth, because a book's worth moves with the money paid into it and its
- * return does not.
+ * ⚠ THE HOVER IS DELIBERATELY ONLY DATE + RETURN. Value and holding-count diagnostics belong in
+ * the detailed tables; adding them here turns a quick time-series read into a miniature ledger.
  *
  * ⚠ THE HEADER IS THE RETURN AND NOTHING ELSE (2026-09-01, on request): no value chip, no span
  * line. Both facts survive where a reader looks for them — the window on the x axis and in the ⓘ's
@@ -61,25 +59,59 @@ import { AspectCard } from '../../../lib/tipCard';
 import { v } from '../../../lib/dynamicValue';
 import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
-import { lastPerMonth } from './monthEnds';
 import type { BookValueSeries } from '../../../lib/types/api';
 
 /** `2026-08-26` → a UTC timestamp. ⚠ UTC, not local: a date-only string parsed as local time
  *  shifts by an hour twice a year, which is enough to move a point across a tick. */
 const ts = (d: string) => Date.parse(`${d}T00:00:00Z`);
 
+/** True only for the literal last calendar day of a month — not the last observation we happen
+ * to have in it. The return graph is a month-end report with one live point, not a sparse daily
+ * history. */
+const isCalendarMonthEnd = (date: string) => {
+  const [year, month, day] = date.split('-').map(Number);
+  return Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)
+    && day === new Date(Date.UTC(year, month, 0)).getUTCDate();
+};
+
 /** `26 Aug`, from a timestamp. */
 const tick = (t: number) => new Date(t).toLocaleDateString('en-GB', {
   day: 'numeric', month: 'short', timeZone: 'UTC',
 });
 
-const eur = (v: number | null | undefined) =>
-  (v == null ? '—' : `€${Math.round(v).toLocaleString('en-US')}`);
-
 /** ⚠ ALWAYS SIGNED. On a curve pinned at zero the sign is the whole reading, and `2.4%` beside a
  *  line below the baseline is a contradiction the reader has to resolve by squinting. */
 const pct = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
+
+function ReturnTooltip({ active, label, payload }: {
+  active?: boolean;
+  label?: unknown;
+  payload?: { value?: unknown }[];
+}) {
+  if (!active || typeof label !== 'number') return null;
+  const value = payload?.find((p) => typeof p.value === 'number')?.value;
+  return (
+    <div style={{ ...chartTheme.tooltipCard.contentStyle, padding: '7px 10px' }}>
+      <p style={{ color: chartTheme.axisLabel, margin: 0 }}>
+        {new Date(label).toLocaleDateString('en-GB', {
+          day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
+        })}
+      </p>
+      <p style={{ margin: '3px 0 0' }}>Return: {pct(typeof value === 'number' ? value : null)}</p>
+    </div>
+  );
+}
+
+/** A zero-crossing is added only to let the red and green paths meet. It is not an AIRS valuation,
+ * so it must never be rendered as a date dot that looks selectable or measured. */
+function ReturnDot({ cx, cy, fill, payload }: {
+  cx?: number; cy?: number; fill?: string;
+  payload?: { interpolated?: boolean };
+}) {
+  if (payload?.interpolated || cx == null || cy == null) return null;
+  return <circle cx={cx} cy={cy} r={1.5} fill={fill} stroke={fill} />;
+}
 
 export default function BookReturnChart(
   {
@@ -118,7 +150,10 @@ export default function BookReturnChart(
     return () => { alive = false; };
   }, [portfolioId, refreshSeq]);
 
-  const all = data?.returns ?? [];
+  // Do not trust storage order for a charting rule. The server normally returns periods in date
+  // order, but the latest observation must mean the latest DATE, never merely the final array
+  // element (which could otherwise put a backfilled mid-month row back on the graph).
+  const all = [...(data?.returns ?? [])].sort((a, b) => a.date.localeCompare(b.date));
   if (err) return <p className="text-[12px] text-neg-300">{err}</p>;
   if (!data) return <p className="text-[12px] text-fg-subtle">Loading the book’s return…</p>;
   // ⚠ THE ANCHOR ALONE IS NOT A LINE. The server refuses to emit a lone pinned zero for exactly
@@ -132,51 +167,34 @@ export default function BookReturnChart(
     );
   }
 
-  const anchor = all[0];
-  /**
-   * ⚠⚠ ONE POINT A MONTH, ALWAYS — see `monthEnds`. AIRS publishes a month-end row for every month
-   * of the year and then a row per scrape date once we started scraping, so the recent half of this
-   * line is forty-odd points against the earlier half's six, and undrawn that way the chart reads
-   * as two different things joined in the middle. A month-end series is the same shape at a
-   * resolution the whole span can be drawn at.
-   *
-   * ⚠⚠ A SINGLE MOST-RECENT POINT PER MONTH, AND THE CURRENT MONTH IS NOT A SPECIAL CASE
-   * (2026-09-03, on request, after one was tried and removed the same day). Ending on the newest
-   * row is what makes this line agree with the `Return` chip above it — the chip reads that row.
-   * A rule that also asked "is this point TODAY's?" dropped the current month on any morning AIRS
-   * had not published yet, leaving the line at last month's close while the chip and this chart's
-   * own header both stated yesterday's figure: a resolution inventing a disagreement to hide one.
-   *
-   * ⚠⚠ SO A LAST POINT THAT LOOKS A DAY BEHIND IS A STALE READ, NOT A RESOLUTION — see the
-   * `refreshSeq` note at the top of this file, which is what the reported +3.44% against +3.05%
-   * actually was.
-   *
-   * ⚠⚠ THE "All points" TOGGLE THAT USED TO SIT IN THE HEADER CAME OFF, 2026-09-02 ON REQUEST.
-   * The dense view is therefore gone, not hidden: `dense` state, both button labels and both
-   * tooltips went with it. The day-to-day movement it showed is real and is no longer reachable
-   * from this chart — every point is still on the hover of the month that contains it, and the
-   * Risk panel's own drawdown view is where intra-month movement is the subject.
-   *
-   * ⚠ THE ANCHOR SURVIVES THE THINNING, ALWAYS, AND THAT MATTERS MORE NOW THAT THERE IS NO ESCAPE
-   * HATCH. The thinning keeps the LAST point in each month, and the pinned 0% sits on the FIRST
-   * of its own month — so thinning the whole series drops it and the line starts at January's
-   * −1.94% with no baseline on the chart. It is held out and re-attached; everything after it
-   * thins normally.
-   */
-  const points = [anchor, ...lastPerMonth(all.slice(1))];
-
-  // ⚠ THE HEADLINE AND THE ⓘ'S WINDOW COME FROM `all`, NEVER FROM THE THINNED VIEW. The figure the
-  // header reports is the newest AIRS published, which is usually NOT a month end — reading it off
-  // the thinned series would restate both the number and the period it covers.
   const last = all[all.length - 1];
+  // Complete calendar month-ends, plus the single newest observation for the live month. This is
+  // intentionally a complete display rule: no inception anchor, scrape-date or cash-flow marker
+  // may add a visual point between month-ends.
+  const points = all.filter((p) => isCalendarMonthEnd(p.date));
+  if (points.at(-1)?.date !== last.date) points.push(last);
+  const first = points[0] ?? last;
   const rows = points.map((p) => ({ ...p, t: ts(p.date) }));
   const up = (data.return_pct ?? 0) >= 0;
-  // ⚠ THE LINE WEARS THE SIGN OF THE HEADLINE FIGURE beside it, which is the same convention the
-  // Scorecard's own Return chip follows. One book, one verdict, whichever of the two you read.
-  const ink = up ? chartTheme.pos : chartTheme.neg;
-  // ⚠ ONLY THE FLOWS INSIDE THE PLOTTED SPAN. `airs_performance` reaches back further than the
-  // year in hand, and a marker on a date the axis does not carry lands at the wrong x.
-  const marks = (data.flows ?? []).filter((f) => f.date >= anchor.date && f.date <= last.date);
+  /** Two series let Recharts colour each part of the return path by its own sign. A crossing gets
+   * an interpolated 0% point in BOTH series: without it, the green/red segments stop at their last
+   * sampled points and leave a visible gap exactly where the chart changes meaning. */
+  const colouredRows = rows.reduce<Array<(typeof rows)[number] & {
+    positive: number | null; negative: number | null; interpolated: boolean;
+  }>>(
+    (out, row, i) => {
+      const previous = rows[i - 1];
+      if (previous && ((previous.cum_pct < 0 && row.cum_pct > 0)
+        || (previous.cum_pct > 0 && row.cum_pct < 0))) {
+        const share = -previous.cum_pct / (row.cum_pct - previous.cum_pct);
+        out.push({ ...row, t: previous.t + (row.t - previous.t) * share,
+          cum_pct: 0, positive: 0, negative: 0, interpolated: true });
+      }
+      out.push({ ...row,
+        positive: row.cum_pct >= 0 ? row.cum_pct : null,
+        negative: row.cum_pct <= 0 ? row.cum_pct : null, interpolated: false });
+      return out;
+    }, []);
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-3">
@@ -204,10 +222,10 @@ export default function BookReturnChart(
           what="What the book has returned so far this year, from 0% at the start of it."
           where={`AIRS's own Rendementen sheet — the same figure as the Return tile beside this, `
             + `over ${v(all.length - 1)} published points.`}
-          when={`${v(data.return_from ?? anchor.date)} to ${v(last.date)}.`} />} />
+          when={`${v(data.return_from ?? first.date)} to ${v(last.date)}.`} />} />
       </div>
       <ResponsiveContainer width="100%" height={104}>
-        <AreaChart data={rows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+        <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           {/* ⚠⚠ A TIME AXIS, NOT A CATEGORY ONE, AND THE DIFFERENCE IS THE WHOLE SHAPE OF THE
               LINE. The points are irregular — AIRS publishes a month-end for each closed month and
@@ -225,42 +243,17 @@ export default function BookReturnChart(
           <YAxis domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
             width={44} tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-          <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle}
-            labelStyle={{ color: chartTheme.axisLabel }}
-            labelFormatter={(t) => (typeof t === 'number'
-              ? new Date(t).toLocaleDateString('en-GB',
-                { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
-              : String(t))}
-            formatter={(v, _n, p) => {
-              const row = p?.payload as
-                { date?: string; value_eur?: number | null; holdings?: number | null } | undefined;
-              const shown = pct(typeof v === 'number' ? v : null);
-              // ⚠ THE ANCHOR SAYS WHAT IT IS. A 0.00% reading on a date nobody valued the book
-              // reads as a flat day; it is the origin the rest of the line is measured from.
-              if (row?.date === anchor.date) return [`${shown} · start of the year`, 'Return'];
-              // ⚠ THE VALUE ONLY WHERE WE HOLD ONE. AIRS publishes returns for dates we have no
-              // snapshot for, and `€—` beside a real percentage reads as a hole in our data
-              // rather than as a month we simply were not scraping yet.
-              return [row?.value_eur == null ? shown
-                : `${shown} · ${eur(row.value_eur)} · ${row.holdings ?? '—'} holdings`, 'Return'];
-            }} />
+          <Tooltip content={<ReturnTooltip />} />
           {/* ⚠ THE BASELINE IS DRAWN, not just included in the domain. "Start at 0%" is the whole
               claim of this chart, and a gridline the reader has to identify is not the same as a
               rule they can see the line cross. */}
           <ReferenceLine y={0} stroke={chartTheme.axisTick} strokeOpacity={0.55} />
-          {/* ⚠ THE FLOWS ARE STILL MARKED, AND THEY NO LONGER EXPLAIN A STEP. On the value chart
-              they were the difference between a funding and a gain; here the line is already
-              flow-aware, so what they say is "the book got bigger on this date" — which changes
-              what a later percentage is a percentage OF. Marked, never narrated: the sentence the
-              value chart needed above the plot would now be describing something the line does. */}
-          {marks.map((f) => (
-            <ReferenceLine key={f.date} x={ts(f.date)} stroke={chartTheme.warn}
-              strokeDasharray="4 3" strokeOpacity={0.8}
-              label={{ value: (f.deposits_eur ?? 0) >= (f.withdrawals_eur ?? 0) ? 'in' : 'out',
-                position: 'insideTopLeft', fontSize: 10, fill: chartTheme.warn }} />
-          ))}
-          <Area dataKey="cum_pct" type="monotone" stroke={ink} strokeWidth={2}
-            fill={ink} fillOpacity={0.08} dot={{ r: 1.5 }} />
+          <Area dataKey="positive" type="monotone" stroke={chartTheme.pos} strokeWidth={2}
+            fill={chartTheme.pos} fillOpacity={0.08}
+            dot={<ReturnDot fill={chartTheme.pos} />} />
+          <Area dataKey="negative" type="monotone" stroke={chartTheme.neg} strokeWidth={2}
+            fill={chartTheme.neg} fillOpacity={0.08}
+            dot={<ReturnDot fill={chartTheme.neg} />} />
         </AreaChart>
       </ResponsiveContainer>
     </div>

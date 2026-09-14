@@ -1003,6 +1003,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolio-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Links
+         * @description All AIRS model names, our nicknames, and the certificate aliases between them.
+         */
+        get: operations["airs_model_portfolio_links_api_airs_model_portfolio_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/model-portfolio-links/{target_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Airs Set Global Portfolio Link
+         * @description Configure which AIRS holding name represents this AIRS model portfolio everywhere.
+         */
+        put: operations["airs_set_global_portfolio_link_api_airs_model_portfolio_links__target_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios": {
         parameters: {
             query?: never;
@@ -11186,6 +11226,16 @@ export interface components {
              * @default 0
              */
             sales?: number;
+            /** Since Close As Of */
+            since_close_as_of?: string | null;
+            /** Since Close Date */
+            since_close_date?: string | null;
+            /** Since Close From */
+            since_close_from?: number | null;
+            /** Since Close Pct */
+            since_close_pct?: number | null;
+            /** Since Close To */
+            since_close_to?: number | null;
             /** Unsplit Result Eur */
             unsplit_result_eur?: number | null;
             /** Vol 5Y Pct */
@@ -11263,6 +11313,11 @@ export interface components {
             allocation?: components["schemas"]["PortfolioAllocationSlice"][];
             /** As Of */
             as_of?: string | null;
+            /**
+             * Asset Data Missing Isins
+             * @default []
+             */
+            asset_data_missing_isins?: string[];
             /**
              * Axes
              * @default []
@@ -12345,6 +12400,39 @@ export interface components {
             /** Reachable */
             reachable: number;
         };
+        /**
+         * PortfolioLinkHolding
+         * @description One AIRS holding name which may be a certificate for a model strategy.
+         */
+        PortfolioLinkHolding: {
+            /** Fonds */
+            fonds: string;
+            /** Isin */
+            isin?: string | null;
+            /** Linked Portfolio Id */
+            linked_portfolio_id?: number | null;
+        };
+        /**
+         * PortfolioLinkModel
+         * @description A target strategy as AIRS calls it, plus our optional reader-facing nickname.
+         */
+        PortfolioLinkModel: {
+            /** Airs Name */
+            airs_name: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Id */
+            id: number;
+            /** Positions */
+            positions: number;
+        };
+        /** PortfolioLinksOverview */
+        PortfolioLinksOverview: {
+            /** Holdings */
+            holdings: components["schemas"]["PortfolioLinkHolding"][];
+            /** Models */
+            models: components["schemas"]["PortfolioLinkModel"][];
+        };
         /** PortfolioMemberIn */
         PortfolioMemberIn: {
             /** Company Id */
@@ -13306,7 +13394,7 @@ export interface components {
             cadence_note?: string | null;
             /**
              * Frequency
-             * @default weekly
+             * @default monthly
              */
             frequency?: string;
             /** Information Ratio */
@@ -14810,6 +14898,61 @@ export interface operations {
             };
         };
     };
+    airs_model_portfolio_links_api_airs_model_portfolio_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioLinksOverview"];
+                };
+            };
+        };
+    };
+    airs_set_global_portfolio_link_api_airs_model_portfolio_links__target_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                target_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_model_portfolios_stored_api_airs_model_portfolios_get: {
         parameters: {
             query?: never;
@@ -14914,7 +15057,9 @@ export interface operations {
     };
     airs_model_portfolios_scan_job_api_airs_model_portfolios_scan_job_post: {
         parameters: {
-            query?: never;
+            query?: {
+                force?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -14928,6 +15073,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

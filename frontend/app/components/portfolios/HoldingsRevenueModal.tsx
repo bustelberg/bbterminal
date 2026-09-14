@@ -496,9 +496,9 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * WHAT ONE PERIOD CELL IS, and there are exactly four possibilities.
    *
    * ⚠⚠ THE TWO EMPTY ONES ARE OPPOSITE FACTS AND USED TO RENDER IDENTICALLY. A blank period is
-   * either "we asked GuruFocus and it publishes nothing for this period" or "no fetch has ever
-   * covered a period this recent" — the first is about the company, the second about us, and only
-   * one of them is fixed by pressing Refresh. `financials_fetched_at` is what separates them: a
+   * either "our imported GuruFocus data has nothing for this period" or "no fetch has ever
+   * covered a period this recent" — the first is about the stored import, the second about us, and
+   * only one of them is fixed by pressing Refresh. `financials_fetched_at` is what separates them: a
    * period that ENDED before our last fetch was covered by it.
    *
    *   value        a number we hold
@@ -515,8 +515,8 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * What an empty cell says, in one place — the badge and the cell around it read from this, so
    * hovering anywhere in the cell gives the same sentence as hovering the chip.
    *
-   * ⚠ THE DATE IS THE POINT OF `No data`. It is a CONCLUSION ("GuruFocus publishes nothing here"),
-   * and a conclusion without a date is untestable — the vendor may have filled the period in since.
+   * ⚠ THE DATE IS THE POINT OF `No data`. It describes the last import rather than making a claim
+   * about what GuruFocus currently publishes; the vendor may have added the period since.
    * With no stamp it says so rather than implying a recent check: the row's figures prove a fetch
    * happened, they just cannot say when.
    */
@@ -582,12 +582,11 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
           + 'record of asking since. Press Refresh on this row.';
     }
     return (r.financials_fetched_at
-      ? `Checked ${longDate(r.financials_fetched_at)}: we asked GuruFocus for this company and it `
-        + `publishes no ${noun} for this period.`
-      : `We asked GuruFocus for this company — the figures in this row are the answer — and it `
-        + `publishes no ${noun} for this period. We have no record of WHEN we last checked; press `
-        + 'Refresh to stamp it.')
-      + ' Refreshing will not change the answer unless GuruFocus has published something since.';
+      ? `Checked ${longDate(r.financials_fetched_at)}: our imported GuruFocus data has no ${noun} `
+        + 'for this period.'
+      : `Our imported GuruFocus data has no ${noun} for this period. We have no record of WHEN it `
+        + 'was last refreshed; press Refresh to stamp it.')
+      + ' Refreshing asks GuruFocus again and can fill this when its historical response includes the period.';
   };
 
   const cellState = (r: Row, y: string):
@@ -1778,7 +1777,11 @@ export default function HoldingsRevenueModal({
   ) => async (row: Row) => {
     const started = await startJob(
       `${API_URL}/api/benchmarks/company/${row.company_id}/fundamentals/ingest/job`
-      + '?feeds=smart',
+      // A row Refresh is an explicit request to re-read this company. `smart` alone skips Visa
+      // because its latest FY is current, even when its cached annual history starts at FY2017.
+      // Share price also needs the separate DAILY price feed: it is what backfills FY2015–2016
+      // annual price points when the legacy financial-statements response does not contain them.
+      + `?feeds=smart&force=true${metric === 'price_ps' ? '&prices=true' : ''}`,
       `${row.name} fundamentals`);
     void started.done.then(async (job) => {
       if (job.status === 'failed' || row.company_id == null) return;
@@ -1949,7 +1952,9 @@ export default function HoldingsRevenueModal({
                       title="company.market_cap_eur as stored today. Full cap — not free-float, and not capped per constituent the way the published index is. Not backed out to the start of the window either, so a company that has since grown carries its post-growth weight over its whole history.">
                       current full market cap
                     </span>{' '}
-                    · {bench.rows.filter((r) => r.status === 'ok').length} with {noun} feed the line,
+                    · {bench.rows.filter((r) =>
+                      Object.entries(r.revenue).some(([period, value]) =>
+                        value != null && !isEstimatePeriod(period))).length} with reported {noun} feed the historical line,
                     renormalised each period
                   </p>
                   {/* ⚠ THE EXCLUDED-CONSTITUENT LINE WAS REMOVED ON REQUEST (2026-08-10). It named

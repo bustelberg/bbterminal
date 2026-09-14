@@ -167,7 +167,8 @@ const CARDS: MetricCfg[] = [
     noun: 'EPS', unit: 'per_share', kind: 'growth',
     benchmarkMetric: 'eps_nri',
     codes: ['annuals__Per Share Data__EPS without NRI',
-      'annuals__per_share_data__EPS without NRI'],
+      'annuals__per_share_data__EPS without NRI',
+      'annuals__per_share_data_array__EPS without NRI'],
     /**
      * ⚠ THE FORECAST OF **THIS** LINE, not of EPS generally. GuruFocus publishes
      * `annual_per_share_eps_estimate` beside it and the two agree to a cent on almost every company
@@ -274,6 +275,11 @@ export default function LongEquityTab({
   // Bumped after an empty card ingests this company's financials — reloads the metrics (repopulates
   // every growth card) and re-keys the derived cards so they refetch their inputs too.
   const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    const reload = () => setReloadKey((k) => k + 1);
+    window.addEventListener('bb:fundamentals-finished', reload);
+    return () => window.removeEventListener('bb:fundamentals-finished', reload);
+  }, []);
   // ⚠ A SECOND, NARROWER KEY. The growth cards all read ONE metrics fetch, while each derived card
   // owns its own endpoint and refetches on a re-key — so bumping `reloadKey` to refresh one chart
   // reloads twelve. This one refetches the metrics only; nothing else moves.

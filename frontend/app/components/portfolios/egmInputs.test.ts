@@ -90,6 +90,20 @@ describe('egmSource', () => {
     expect(egmSource(rows, TODAY).price).toBeCloseTo(281.365, 6);
   });
 
+  it('derives Forward P/E from the close and FY1 EPS when GuruFocus omits its indicator', () => {
+    const withoutIndicator = rows.filter((r) => r.metric_code !== 'indicator_q_forward_pe_ratio');
+    const s = egmSource(withoutIndicator, TODAY);
+    expect(s.forwardPE).toBeCloseTo(281.365 / 11.46, 9);
+    expect(s.forwardPEOrigin).toBe('derived');
+    expect(s.forwardPEDate).toBe('2026-07-27');
+  });
+
+  it('keeps GuruFocus’s direct Forward P/E when it is available', () => {
+    const s = egmSource(rows, TODAY);
+    expect(s.forwardPE).toBe(25);
+    expect(s.forwardPEOrigin).toBe('vendor');
+  });
+
   it('⚠ converts the percent-unit dividend yield into the decimal the model wants', () => {
     // The field is named `… %` and holds 0.30 for 0.30%, exactly as `ROE %` does. Passing it
     // through unscaled applies a 0.3% payer as a 30% one — on a ten-year compounder, a ~3.4x

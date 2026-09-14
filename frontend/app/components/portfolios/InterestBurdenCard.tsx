@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import InterestBurdenInputsModal from './InterestBurdenInputsModal';
 import { interestBurdenByYear, type InterestBurdenInputs } from './interestBurdenData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -105,7 +106,8 @@ export default function InterestBurdenCard({ holdingsTarget, holdingsName, bench
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No interest / operating-income figures ingested to compute a ratio.</p>
+          <MissingFundamentals message="No interest / operating-income figures ingested to compute a ratio."
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

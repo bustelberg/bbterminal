@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -118,11 +119,10 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">
-          {M.derived
-            ? 'No FCF / capital figures ingested to compute a ratio.'
-            : 'GuruFocus reports no ROIC for these holdings.'}
-        </p>
+          <MissingFundamentals
+            message={M.derived ? 'No FCF / capital figures ingested to compute a ratio.'
+              : 'GuruFocus reports no ROIC for these holdings.'}
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

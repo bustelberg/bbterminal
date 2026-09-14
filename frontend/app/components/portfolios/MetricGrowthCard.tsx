@@ -4,8 +4,6 @@ import { useMemo, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { apiFetch } from '../../../lib/apiFetch';
-import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { logLinearFit } from '../../../lib/trendFit';
 import { AboutCard, AspectCard } from '../../../lib/tipCard';
@@ -13,6 +11,7 @@ import InfoTip from '../InfoTip';
 import { type ChartKey } from './longEquityCopy';
 import HoldingsRevenueModal, { type Target } from './HoldingsRevenueModal';
 import HoldingsIngestPanel from './HoldingsIngestPanel';
+import MissingFundamentals from './MissingFundamentals';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
 import { countFor, MEMBER_COUNT_CARD, memberCountHow, memberCountLine, type MemberCount } from './memberCounts';
@@ -203,7 +202,7 @@ export function pctSince(step: Step | null | undefined, ltmXs?: ReadonlySet<numb
 export { Stat } from './CardStats';
 
 export default function MetricGrowthCard({
-  cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin, onIngested,
+  cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin: _ingestIsin, onIngested,
   blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
   benchNotes, memberCounts, benchCounts,
 }: {
@@ -269,49 +268,11 @@ export default function MetricGrowthCard({
   benchCounts?: Record<string, MemberCount>;
 }) {
   const [showHoldings, setShowHoldings] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [outcome, setOutcome] = useState<string | null>(null);
   const isRatio = cfg.kind === 'ratio';
   /** What this card calls ITS OWN line — read by the hover and by the legend, defined once so the
    *  two cannot drift. ⚠ `ownLabel`, not `own`: a Map called `own` already lives inside the
    *  `chartData` memo, and a component-scope `own` would be silently shadowed there. */
   const ownLabel = holdingsName ?? cfg.title;
-
-  // A GuruFocus ingest outcome → a plain sentence. Every non-success is a real answer (see the
-  // backend's `classify_fetch_outcome`), so it's stated, never swallowed.
-  const explain = (status: string | undefined, detail: string | undefined, http: number) => {
-    switch (status) {
-      case 'unsubscribed': return 'Unsubscribed — this listing’s exchange is outside our GuruFocus subscription.';
-      case 'no_data': return 'No data — GuruFocus has no fundamentals for this listing.';
-      case 'not_equity': return 'Not an equity — fundamentals don’t apply (bond / fund / derivative).';
-      case 'not_found': return 'Not found — couldn’t resolve this ISIN to a GuruFocus listing.';
-      case 'error': return detail || 'Fetch failed.';
-      default: return detail || status || `HTTP ${http}`;
-    }
-  };
-
-  const ingest = async () => {
-    if (!ingestIsin) return;
-    setBusy(true); setOutcome(null);
-    try {
-      const r = await apiFetch(`${API_URL}/api/earnings/fundamental-coverage/ingest`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isin: ingestIsin, name: holdingsName ?? undefined }),
-      });
-      const j = (await r.json().catch(() => null)) as { status?: string; detail?: string } | null;
-      if (r.ok && j?.status === 'ingested') {
-        // Financials landed (revenue AND shares come together) → reload the tab; the chart appears.
-        onIngested?.();
-        return;
-      }
-      // Anything else is a stated reason, and we do NOT reload — nothing changed, so keep it visible.
-      setOutcome(explain(j?.status, j?.detail, r.status));
-    } catch (e) {
-      setOutcome(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   /** See `extractPoints` — the x unit, and why it has to be a year. */
   const reported = useMemo(
@@ -831,26 +792,8 @@ export default function MetricGrowthCard({
         <HoldingsIngestPanel target={holdingsTarget} metric={cfg.benchmarkMetric}
           noun={cfg.noun} onIngested={onReloadMetrics ?? onIngested} />
       ) : points.length === 0 ? (
-        <div className="py-16 flex flex-col items-center gap-3 text-center px-4">
-          <p className="text-[12px] text-fg-faint">No {cfg.noun} ingested for this company.</p>
-          {ingestIsin && (busy ? (
-            <span className="text-xs text-fg-subtle">Fetching from GuruFocus…</span>
-          ) : outcome ? (
-            <>
-              <p className="text-xs text-warn-300 max-w-[28ch]">{outcome}</p>
-              <button type="button" onClick={ingest}
-                className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-soft hover:bg-overlay/5">
-                Try again
-              </button>
-            </>
-          ) : (
-            <button type="button" onClick={ingest}
-              title="Fetch this company's financials from GuruFocus."
-              className="text-xs px-3 py-1 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">
-              Fetch financials from GuruFocus
-            </button>
-          ))}
-        </div>
+        <MissingFundamentals message={`No ${cfg.noun} ingested for this company.`}
+          target={holdingsTarget} name={holdingsName} onDone={onIngested} />
       ) : (
         <>
           <div className="flex flex-wrap gap-2">

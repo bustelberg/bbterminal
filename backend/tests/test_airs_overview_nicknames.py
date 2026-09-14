@@ -69,3 +69,21 @@ class TestNicknames:
     def test_null_data_is_tolerated(self, stub):
         stub(rows=None)
         assert ov._nicknames() == {}
+
+
+class TestOverviewName:
+    def test_exact_dynamic_model_nickname_beats_its_fixed_pair(self):
+        """Saving `AITopSelectie` on the DYN row must name that overview row."""
+        name, custom = ov._overview_name(
+            "A custom dynamic account", {},
+            {"a custom dynamic account": "Custom name"},
+            {"display_name": None},
+        )
+        assert (name, custom) == ("Custom name", True)
+
+    def test_paired_model_remains_the_fallback_when_the_account_has_no_nickname(self):
+        name, custom = ov._overview_name(
+            "An unconfigured account", {}, {},
+            {"display_name": "Fixed strategy name"},
+        )
+        assert (name, custom) == ("Fixed strategy name", False)

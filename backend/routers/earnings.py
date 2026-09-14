@@ -326,6 +326,64 @@ def load_company_metric_rows(company_id: int) -> list[dict]:
         .order("target_date")
     )))
 
+    # GuruFocus's fiscal-statement blob can omit its separate "Month End Stock Price" line for
+    # older years even though its daily `close_price` feed contains those exact historical closes.
+    # Oracle is the concrete case: its fiscal line starts in 2017, while the stored GuruFocus close
+    # series reaches at least January 2015.  A missing fiscal-price field must not be presented as
+    # GuruFocus having no price history when we already hold it.
+    #
+    # Preserve the fiscal YEAR-END date from the reported revenue line and take the last available
+    # daily close on or before it.  That keeps the share-price chart aligned with the neighbouring
+    # financial statements (Oracle's May year-end, not an arbitrary 31 December) and never
+    # overwrites a dedicated Month End Stock Price value when GuruFocus supplied one.
+    from bisect import bisect_right  # noqa: PLC0415
+
+    price_codes = {
+        "annuals__Per Share Data__Month End Stock Price",
+        "annuals__per_share_data__Month End Stock Price",
+        "annuals__per_share_data_array__Month End Stock Price",
+    }
+    revenue_codes = {
+        "annuals__Income Statement__Revenue",
+        "annuals__income_statement__Revenue",
+    }
+    existing_price_years = {
+        str(r.get("target_date"))[:4] for r in rows
+        if r.get("metric_code") in price_codes and r.get("numeric_value") is not None
+    }
+    fiscal_ends: dict[str, str] = {}
+    for r in rows:
+        if r.get("metric_code") not in revenue_codes or r.get("numeric_value") is None:
+            continue
+        end = str(r.get("target_date"))[:10]
+        year = end[:4]
+        if end > fiscal_ends.get(year, ""):
+            fiscal_ends[year] = end
+    closes = sorted(
+        (str(r.get("target_date"))[:10], float(r["numeric_value"])) for r in rows
+        if r.get("metric_code") == "close_price" and r.get("numeric_value") is not None
+    )
+    close_dates = [d for d, _v in closes]
+    # Before the first imported financial statement there is no fiscal year-end to align to. The
+    # price history is still valid, so retain its latest trading close in each calendar year rather
+    # than dropping Oracle's 2015/2016 points altogether. A known fiscal end always wins.
+    period_ends = dict(fiscal_ends)
+    for close_date in close_dates:
+        if close_date[:4] not in fiscal_ends:
+            period_ends[close_date[:4]] = close_date
+    for year, fiscal_end in period_ends.items():
+        if year in existing_price_years:
+            continue
+        at = bisect_right(close_dates, fiscal_end) - 1
+        if at < 0:
+            continue
+        rows.append({
+            "metric_code": "annuals__Per Share Data__Month End Stock Price",
+            "target_date": fiscal_end,
+            "numeric_value": closes[at][1],
+            "is_prediction": False,
+        })
+
     # Analyst estimates (annual_* prefix).
     rows.extend(_paginate(lambda: (
         supabase.table("metric_data")
@@ -769,6 +827,39 @@ def _company_metric_rows(cid: int) -> list[dict]:
     return rows
 
 
+def _annual_price_rows_from_daily(
+    daily: dict[int, dict[str, float]],
+    reported: dict[int, list[dict]],
+) -> list[dict]:
+    """Annual price points absent from the financial-statements response.
+
+    The legacy GuruFocus financials API can start a long-lived listing at
+    FY2017, while its daily close history starts years earlier.  Graphs must
+    still have a 2015 price observation, so take each missing calendar year's
+    final trading close.  A reported fiscal-price point always wins for its
+    year; this helper only supplies the holes.
+    """
+    reported_years = {
+        cid: {str(r.get("target_date") or "")[:4] for r in rows
+              if r.get("numeric_value") is not None}
+        for cid, rows in reported.items()
+    }
+    out: list[dict] = []
+    annual_code = _metric_codes("price_ps")[0]
+    for cid, closes in daily.items():
+        last_by_year: dict[str, tuple[str, float]] = {}
+        for day, value in closes.items():
+            year = day[:4]
+            if year < "2015" or year in reported_years.get(cid, set()):
+                continue
+            if day > last_by_year.get(year, ("", 0.0))[0]:
+                last_by_year[year] = (day, float(value))
+        out.extend({"company_id": cid, "metric_code": annual_code,
+                    "target_date": day, "numeric_value": value}
+                   for day, value in last_by_year.values())
+    return out
+
+
 def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[dict]:
     """The named metrics' rows for MANY companies, in `_blend_rows`' shape.
 
@@ -791,6 +882,12 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
         if rule is None:
             for rows in raw.values():
                 out += rows
+            # `Month End Stock Price` is the one annual chart line for which a daily close is
+            # the same economic observation at a finer frequency.  Fill only years the financials
+            # blob lacks, so Visa/Oracle's reported FY2017+ fiscal closes stay authoritative while
+            # ACWI receives its 2015/2016 points without a multi-thousand-company re-ingest.
+            if m == "price_ps" and cadence == "annual":
+                out += _annual_price_rows_from_daily(_daily_closes_bulk(cids), raw)
             continue
         annual_code = _metric_codes(m)[0]
         for cid, rows in raw.items():
@@ -1794,14 +1891,26 @@ def _blend_rows(rows: list[dict], covered: list[dict],
             ok = eligible.get(code, set())
             rows_for = [r for r in covered
                         if r["company_id"] in ok and per_company.get(r["company_id"])]
-        blend_members = [{"weight": r["weight_pct"],
+        blend_members = []
+        for r in rows_for:
+            points = per_company.get(r["company_id"], {})
+            weights = dict(caps.get(r["company_id"], {})) if caps else None
+            # Historical market-cap rows come from the same short financials response as the
+            # missing annual price line.  For the price chart alone, carry the first known cap
+            # backwards so the 2015 daily-close observations can form an ACWI index.  This is a
+            # fixed early weight proxy, explicitly limited to price years before the first reported
+            # cap; financial charts retain their strict reported-cap rule.
+            if code in _metric_codes("price_ps") and weights and points:
+                first = min(weights)
+                for year in {d[:4] for d in points if d[:4] < first}:
+                    weights.setdefault(year, weights[first])
+            blend_members.append({"weight": r["weight_pct"],
                           # Absent for a portfolio — see the `caps` note on this function.
-                          **({"weights": caps.get(r["company_id"], {})} if caps else {}),
+                          **({"weights": weights} if weights is not None else {}),
                           "points": per_company.get(r["company_id"], {}),
                           "fund_points": fund_for.get(r["company_id"], {}),
                           "fund_base_points": fund_base_for.get(r["company_id"], {}),
-                          "base_points": base_by_company.get(r["company_id"], {})}
-                         for r in rows_for]
+                          "base_points": base_by_company.get(r["company_id"], {})})
         # ⚠ THE COUNT IS THE POINT. Anything dropped above is invisible on the line, so
         # `considered` / `total` ride out to the card — see `_POSITIVE_ONLY_METRICS`.
         considered = len(blend_members)
@@ -2120,7 +2229,10 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     # uses as its earnings side (`_RG_OE_CODE`), so the two cannot disagree about what "earnings"
     # means.
     "eps_nri": ("annuals__Per Share Data__EPS without NRI",
-                "annuals__per_share_data__EPS without NRI"),
+                "annuals__per_share_data__EPS without NRI",
+                # Philips reports this line under a third GuruFocus schema. Omitting it made an
+                # already-ingested FY2017–2025 history render as "No data".
+                "annuals__per_share_data_array__EPS without NRI"),
     "fcf": ("annuals__Cashflow Statement__Free Cash Flow",
             "annuals__cashflow_statement__Free Cash Flow"),
     "sbc": ("annuals__Cashflow Statement__Stock Based Compensation",

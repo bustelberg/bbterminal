@@ -56,6 +56,35 @@ def _nicknames() -> dict[str, str]:
             for r in rows if r.get("display_name")}
 
 
+def _overview_name(account_name: str | None, account_nicknames: dict[str, str],
+                   direct_model_nicknames: dict[str, str],
+                   paired_model: dict | None) -> tuple[str | None, bool]:
+    """The reader-facing name for one AIRS account and whether it was explicitly chosen.
+
+    The Links editor saves a nickname against an AIRS *model* name.  An account can itself have a
+    model row (``AITopSelectie OFF DYN``) while its analysis pairing points to the sibling Fixed
+    model (``AITopSelectie OFF FX``).  Looking only through that pairing discarded the nickname
+    the editor had just saved.  An exact account-name model is the account's own identity and
+    must therefore win before the paired-model fallback.
+    """
+    raw = (account_name or "").strip()
+    key = raw.lower()
+    if account_nicknames.get(key):
+        return account_nicknames[key], True
+    # The checked-in AIRS map covers the shared strategy vocabulary (and works before an admin has
+    # touched Links in a fresh database). It is the reviewed source of truth for these standard
+    # strategies, so it intentionally beats an older model nickname; a per-account name above is
+    # still available for a genuinely bespoke account.
+    from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+    if mapped := nickname_for(raw):
+        return mapped, True
+    if direct_model_nicknames.get(key):
+        return direct_model_nicknames[key], True
+    if (paired_model or {}).get("display_name"):
+        return paired_model["display_name"], False
+    return account_name, False
+
+
 def list_overview() -> list[dict]:
     """One row per AIRS Dynamic portfolio, named by the Fixed portfolio it runs."""
     from ._airs_account_links import list_account_links  # noqa: PLC0415  (circular at import)
@@ -69,6 +98,13 @@ def list_overview() -> list[dict]:
     models = {m["id"]: m for m in (supabase.table("airs_model_portfolio")
                                    .select("id,name,display_name,omschrijving,portfolio_type")
                                    .limit(500).execute().data or [])}
+    # Nicknames saved in Links are keyed by a model's AIRS name.  Keep this separate from the
+    # account-nickname table above: a model nickname decorates only an account with the exact same
+    # AIRS name, never every account that happens to be paired to that strategy.
+    direct_model_nicknames = {
+        (m.get("name") or "").strip().lower(): m["display_name"]
+        for m in models.values() if (m.get("name") or "").strip() and m.get("display_name")
+    }
     # ⚠ THE `airs_model_portfolio_position` READ THAT USED TO SIT HERE IS GONE (2026-08-11). It
     # counted positions per model into a dict that NOTHING READ — the `isins` column moved to the
     # account's own count (see below) and only the *use* was deleted, leaving the query behind. It
@@ -79,15 +115,16 @@ def list_overview() -> list[dict]:
     for a in list_accounts():
         link = links.get(a["portefeuille"]) or {}
         m = models.get(link.get("model_portfolio_id")) if link.get("model_portfolio_id") else None
+        display_name, name_is_custom = _overview_name(
+            a.get("portefeuille"), nicknames, direct_model_nicknames, m)
         out.append({
             # The name a human gave it. Falls back to AIRS's code rather than to a blank: an
             # unlinked book is still a book, and a nameless row is unreadable.
             # Precedence: this book's nickname > the model's display name > AIRS's own code. Every
             # step down is a FALLBACK, never a preference.
-            "name": (nicknames.get((a["portefeuille"] or "").strip().lower())
-                     or (m or {}).get("display_name") or a["portefeuille"]),
+            "name": display_name,
             # True when a human named this row, so the UI can show it as chosen rather than derived.
-            "name_is_custom": (a["portefeuille"] or "").strip().lower() in nicknames,
+            "name_is_custom": name_is_custom,
             "description": (m or {}).get("omschrijving"),
             "dynamic_portefeuille": a["portefeuille"],
             "fixed_name": (m or {}).get("name"),

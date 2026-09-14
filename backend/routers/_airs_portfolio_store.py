@@ -124,6 +124,22 @@ def save_positions_error(portfolio_id: int, error: str) -> None:
      .eq("id", portfolio_id).execute())
 
 
+def unscanned_position_ids(portfolio_ids: list[int]) -> set[int]:
+    """Which listed AIRS models still need their composition downloaded.
+
+    `positions_scanned_at` is written only after a complete answer (including a real empty
+    answer). A null therefore means either never attempted or a previous scanner failure, both of
+    which must be retried. Keeping this query in the store lets the normal Refresh all repair only
+    the gaps instead of re-downloading every fixed model whenever one account is unpaired.
+    """
+    if not portfolio_ids:
+        return set()
+    rows = (supabase.table("airs_model_portfolio")
+            .select("id,positions_scanned_at")
+            .in_("id", portfolio_ids).execute().data or [])
+    return {int(row["id"]) for row in rows if not row.get("positions_scanned_at")}
+
+
 def load_portfolios() -> list[dict]:
     """The stored grid — `holdings` is DERIVED by the view from the positions, so it can
     never disagree with them.

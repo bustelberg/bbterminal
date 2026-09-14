@@ -93,6 +93,31 @@ FILL_WORKERS = 3
 VENDOR_EMPTY_MARKER = "no periods"
 VENDOR_EMPTY_LIMIT = 10
 
+# The two reported lines most readers use to judge whether a Graphs refresh did what it promised.
+# This is a post-run receipt, not the selection sentinel: a bank can validly lack FCF, but the
+# refresh must say so rather than hide it behind a generic 100% progress bar.
+_EPS_CODES = (
+    "annuals__Per Share Data__EPS without NRI",
+    "annuals__per_share_data__EPS without NRI",
+    "annuals__per_share_data_array__EPS without NRI",
+)
+_FCF_CODES = (
+    "annuals__Per Share Data__Free Cash Flow per Share",
+    "annuals__per_share_data__Free Cash Flow per Share",
+)
+
+
+def _reported_coverage(company_ids: list[int], codes: tuple[str, ...]) -> int:
+    """How many refreshed companies hold a reported annual point for one chart line."""
+    covered: set[int] = set()
+    for start in range(0, len(company_ids), 200):
+        rows = (supabase.table("metric_data").select("company_id")
+                .in_("company_id", company_ids[start:start + 200])
+                .in_("metric_code", list(codes))
+                .eq("is_prediction", False).limit(10000).execute().data or [])
+        covered.update(int(row["company_id"]) for row in rows if row.get("company_id") is not None)
+    return len(covered)
+
 
 #: The ONE quarterly line the due detector reads the fiscal-period axis off.
 #:
@@ -632,6 +657,11 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     # halves of one button should describe the same set.
     price_note = _refresh_prices(ctx, label, work) if prices and work else ""
 
+    eps_covered = _reported_coverage([c["company_id"] for c in work], _EPS_CODES)
+    fcf_covered = _reported_coverage([c["company_id"] for c in work], _FCF_CODES)
+    coverage_note = (f"reported EPS {eps_covered}/{len(work)} · "
+                     f"FCF/share {fcf_covered}/{len(work)}")
+    ctx.emit("info", f"{label}: refresh receipt — {coverage_note}")
     summary = (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
                + (f", {failed} failed" if failed else "")
                + f", {rows:,} data points"
@@ -642,6 +672,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                # have to touch; the first number alone would read as a fill that barely worked.
                + (f", {unchanged:,} already stored" if unchanged else "")
                + (f", {calls:,} API calls" if calls else "")
+               + f" · {coverage_note}"
                + (f" · {price_note}" if price_note else ""))
     if stopped:
         # ⚠⚠ THE CANCELLED CARD REPORTS WHAT IT GOT THROUGH, AND THAT IS THE WHOLE ANSWER TO "did

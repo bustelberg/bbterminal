@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import { cashConversionByYear, type CashConversionInputs } from './cashConversionData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -108,7 +109,8 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : marginByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No FCF / net-income figures ingested to compute a conversion.</p>
+          <MissingFundamentals message="No FCF / net-income figures ingested to compute a conversion."
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

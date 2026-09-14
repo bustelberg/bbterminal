@@ -131,6 +131,7 @@ export type DeepValuationCopy = {
     reReadForwardPEOverridden: string;
     forwardPEWhenTyped: string;
     forwardPEHowTyped: (vendor: string, date: string) => string;
+    forwardPEDerivedWhere: string;
     /** What the toast reports. ⚠ THE DATE, NOT "done" — see `refreshForwardPE`. */
     forwardPEMoved: (date: string) => string;
     forwardPEUnchanged: (date: string) => string;
@@ -374,6 +375,7 @@ const en: DeepValuationCopy = {
     forwardPEWhenTyped: 'Whatever moment you mean it to be.',
     forwardPEHowTyped: (vendor, date) => `Clear the box to go back to ${vendor}, which last `
       + `published on ${date}.`,
+    forwardPEDerivedWhere: 'Derived from the stored close ÷ FY1 consensus EPS.',
     forwardPEMoved: (date) => `forward P/E now ${date}`,
     forwardPEUnchanged: (date) => `still ${date} — GuruFocus has nothing newer`,
     forwardPENone: 'GuruFocus returned no forward P/E for this company',
@@ -642,11 +644,11 @@ const nl: DeepValuationCopy = {
   egm: {
     reset: 'Zet elke aanname terug op de standaardwaarde',
     growthRate: 'Groeivoet', exitPE: 'Exit forward P/E', sharePriceNow: 'Koers nu',
-    forwardPE: 'Forward P/E', hurdleRate: 'Rendementseis', dividendYield: 'Dividendrendement',
+    forwardPE: 'Forward P/E', hurdleRate: 'Hurdle rate', dividendYield: 'Dividend yield',
     showRawData: 'Toon de brongegevens achter deze standaardwaarden',
-    expectedReturn: 'Verwacht rendement', priceTarget: 'Koersdoel',
+    expectedReturn: 'Expected return', priceTarget: 'Koersdoel',
     totalPriceMove: 'Totale koersbeweging',
-    atYourHurdle: 'Bij uw rendementseis',
+    atYourHurdle: 'At your hurdle rate',
     maxPE: 'Max. forward P/E', fairValue: 'Reële waarde', fairValueGap: 't.o.v. de koers',
     legGrowth: 'Groei', legYield: 'Dividendrendement', legMultiple: 'Herwaardering',
     cards: {
@@ -755,6 +757,7 @@ const nl: DeepValuationCopy = {
     forwardPEWhenTyped: 'Welk moment u er ook mee bedoelt.',
     forwardPEHowTyped: (vendor, date) => `Maak het veld leeg om terug te gaan naar ${vendor}, die `
       + `voor het laatst op ${date} publiceerde.`,
+    forwardPEDerivedWhere: 'Afgeleid uit de opgeslagen slotkoers ÷ FY1-consensus-EPS.',
     forwardPEMoved: (date) => `forward P/E nu ${date}`,
     forwardPEUnchanged: (date) => `nog steeds ${date} — GuruFocus heeft niets nieuwers`,
     forwardPENone: 'GuruFocus gaf geen forward P/E voor deze onderneming',
@@ -809,12 +812,12 @@ const nl: DeepValuationCopy = {
     reset: 'Zet elke invoer terug op de standaardwaarde',
     showFigures: 'Toon elk ondernemingscijfer dat dit leest, met de bron',
     useThisRate: 'Gebruik deze voet',
-    rowSbc: '− Aandelenbeloning', rowCapex: 'Investeringen',
+    rowSbc: '− Stock-Based Compensation', rowCapex: 'Investeringen',
     rowDA: 'Afschrijvingen', rowGrowthCapex: '+ Groei-investeringen',
     rowDiscountRate: 'Disconteringsvoet', rowPerpetuityGrowth: 'Eeuwigdurende groei',
     rowForecastYears: 'Prognosejaren',
     cards: {
-      sbc: { what: 'Aandelengerelateerde beloning, in mindering gebracht.' },
+      sbc: { what: 'Stock-Based Compensation, in mindering gebracht.' },
       capex: { what: 'Investeringen, als het uitgegeven bedrag.' },
       da: { what: 'Afschrijvingen en amortisatie uit het kasstroomoverzicht.' },
       growthCapex: {
@@ -857,10 +860,10 @@ const nl: DeepValuationCopy = {
       + 'verdiend.\n'
       + 'Laatst gerapporteerd: de vrije kasstroom precies zoals gerapporteerd over het meest '
       + 'recente boekjaar.\n\n'
-      + 'De correcties voor aandelenbeloning en groei-investeringen hieronder werken op beide.',
-    normaliseTitle: 'Waardeer de vrije kasstroom na aftrek van aandelenbeloning en vóór '
+      + 'De correcties voor Stock-Based Compensation en groei-investeringen hieronder werken op beide.',
+    normaliseTitle: 'Waardeer de vrije kasstroom na aftrek van Stock-Based Compensation en vóór '
       + 'groei-investeringen.\n\n'
-      + 'Aandelenbeloning wordt afgetrokken: het is een reële kostenpost die het kasstroomoverzicht '
+      + 'Stock-Based Compensation wordt afgetrokken: het is een reële kostenpost die het kasstroomoverzicht '
       + 'nooit verlaat.\n'
       + 'Groei-investeringen (investeringen boven de afschrijvingen) worden WEER OPGETELD: de '
       + 'gerapporteerde vrije kasstroom heeft ze al afgetrokken, en ze kopen precies de groei '
@@ -926,11 +929,11 @@ const nl: DeepValuationCopy = {
     valuedWhenYours: 'Welke periode u er ook mee bedoelt.',
     valuedHowOverridden: 'Zelf ingetypt, dus de correcties hierboven zijn er niet op toegepast.',
     valuedHowNormOff: 'Normaliseren staat uit, dus dit is de basis-vrije-kasstroom ongewijzigd — '
-      + 'aandelenbeloning wordt niet afgetrokken en groei-investeringen worden niet weer opgeteld.',
+      + 'Stock-Based Compensation wordt niet afgetrokken en groei-investeringen worden niet weer opgeteld.',
     valuedHowAllRan: 'Elke correctie is uitgevoerd; de regels hierboven zijn het geheel.',
     valuedHowPartial: (which) => `${v(which)} niet gerapporteerd, dus die correctie is niet `
       + 'uitgevoerd — een ontbrekende regel is geen nul.',
-    correctionSbc: 'Aandelenbeloning', correctionCapexDep: 'Investeringen of afschrijvingen',
+    correctionSbc: 'Stock-Based Compensation', correctionCapexDep: 'Investeringen of afschrijvingen',
     baseNotUsedNoFcf: 'Voor deze onderneming is geen regel vrije kasstroom ingelezen.',
     baseNotUsedNoConsensus: 'Geen consensus voor de operationele kasstroom, of geen investeringen '
       + 'om ervan af te trekken, dus er valt geen toekomstige basis af te leiden. Minder dan een '

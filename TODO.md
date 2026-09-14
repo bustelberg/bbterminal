@@ -1407,8 +1407,9 @@ cd backend && uv run python scripts/dump_openapi.py && cd ../frontend && npm run
 - `fx_rate`: USD backfilled to 1999-01-04 (596 → 7,045 rows) by opening Apple's dividend chart.
 - `metric_data`: dividend rows for a few companies (whitelisted, ~100 rows each).
 - `gurufocus-raw` Storage: new `dividend.json` / `financials.json` blobs.
-- Throwaway auth users created and deleted; only `reinier7175@gmail.com` +
-  `reinier@bustelberg.nl` remain.
+- Throwaway auth users created and deleted; only the two real accounts remain
+  (the admin `5db5e759…` and the ordinary user `9fe083c7…` — by hash, never by
+  address, see `backend/tests/test_admin_email_hashes.py`).
 
 ---
 

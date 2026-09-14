@@ -52,6 +52,7 @@ from routers._asset_benchmark import index_returns
 from routers._asset_benchmark import members as _members
 from routers._benchmark_index import SP500_LABEL
 
+EQUITY_BUCKET = "Equity"
 CASH_BUCKET = "Cash"
 _log = logging.getLogger(__name__)
 
@@ -93,7 +94,23 @@ _NOT_A_SECTOR = {"equity", "bonds", "commodity", "short commodity", "crypto", "e
 # AIRS's `categorie` classifies what a holding INVESTS IN — an equity ETF is AAND, a bond ETF is
 # OBL — so the ETF wrapper is an ORTHOGONAL axis. Only EQUITY is split into direct vs ETF; a bond
 # ETF is Bonds. Real estate (VAS, the REITs) folds into Alternatives to match the requested buckets.
-_CATEGORIE_TO_CLASS = {"AAND": "Equity", "OBL": "Bonds", "VAS": "Real estate", "ALTBEL": "Alternatives"}
+# AIRS has emitted both short codes and Dutch display labels over time.  The model-position
+# endpoint currently returns the latter (for example, ``Aandelen``), so mapping only the legacy
+# codes silently sends every position to the grid/name fallback and can leave the whole allocation
+# bar as Unclassified when the instrument grid has no row.
+_CATEGORIE_TO_CLASS = {
+    "AAND": "Equity", "AANDELEN": "Equity", "EQUITY": "Equity", "STOCKS": "Equity",
+    "OBL": "Bonds", "OBLIGATIES": "Bonds", "BONDS": "Bonds",
+    "VAS": "Alternatives", "VASTGOED": "Alternatives",
+    "ALTBEL": "Alternatives", "ALTERNATIEVEN": "Alternatives", "ALTERNATIVES": "Alternatives",
+    "LIQUIDITEITEN": "Cash", "CASH": "Cash",
+}
+
+
+def _class_from_categorie(value: object) -> str | None:
+    """Normalize AIRS's legacy codes and its current Dutch category labels."""
+    key = " ".join(str(value or "").strip().upper().split())
+    return _CATEGORIE_TO_CLASS.get(key)
 # Bucket order for the allocation bar. Must match `_airs_holding_isin.BUCKET_ORDER`; a literal here
 # (not an import) to avoid a module-level cycle — `classify_bucket` is imported per-call instead.
 _ALLOC_ORDER = ["Equity", "Bonds", "Alternatives", "Cash", UNKNOWN_BUCKET]
@@ -1217,12 +1234,21 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     Returns None when the model has no paired book, or the book resolves to nothing priceable.
     """
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
-    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+    from routers._airs_holding_isin import (classify_bucket, resolve_account_isins)  # noqa: PLC0415
 
     link = next((a for a in list_account_links()["accounts"]
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
+    # Some AIRS accounts have no asset_grid rows at all.  AITopSelectie OFF DYN is one: its
+    # twenty equity ISINs are valid and present in the paired model, but the grid lookup returns
+    # nothing, so the account resolver quite reasonably labels them Unclassified.  The paired
+    # model's category is the authoritative fallback for the book view in that case.
+    model_categories = {
+        p.get("isin"): _class_from_categorie(p.get("categorie"))
+        for p in ref_positions_for(link["model_portfolio_id"])
+        if p.get("isin") and _class_from_categorie(p.get("categorie"))
+    }
     rows = (resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or [])
     if not rows:
         return None
@@ -1280,13 +1306,22 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             classified_w += w
         if grow and _foreign_listing(grow):
             foreign += 1
+        # `resolve_account_isins` normally supplies this, but older/cached rows and test/import
+        # callers may only carry the raw instrument fields. Never let a missing persisted bucket
+        # turn a plainly identifiable stock into Unclassified in the allocation bar.
+        bucket = r.get("bucket")
+        if bucket == UNKNOWN_BUCKET:
+            bucket = model_categories.get(isin) or bucket
+        if not bucket:
+            bucket = classify_bucket(None, _is_fund(grow, r.get("holding_name") or ""),
+                                    isin, r.get("holding_name") or "", grow)
         items.append((w, b))
         labels.append({"name": r.get("holding_name"), "isin": isin,
-                       "asset_class": r.get("bucket") or UNKNOWN_BUCKET,
+                       "asset_class": bucket,
                        "via_names": r.get("via_names") or []})
         # The book row is already classified by resolve_account_isins (the shared classifier).
-        alloc_items.append((w, r.get("bucket") or UNKNOWN_BUCKET))
-        raw_positions.append((r, w, r.get("bucket") or UNKNOWN_BUCKET))
+        alloc_items.append((w, bucket))
+        raw_positions.append((r, w, bucket))
     if not items:
         return None
     # Per-bucket return = the START-WEIGHTED value change, Σnow ÷ Σstart − 1 (equivalently each
@@ -2027,7 +2062,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         port_items.append((w, b))
         # Asset class from AIRS's `categorie` (what it invests in); then the shared classifier, so a
         # model position and the same holding in the book table land in the identical bucket.
-        ac = "Cash" if not isin else _CATEGORIE_TO_CLASS.get((r.get("categorie") or "").strip().upper())
+        ac = "Cash" if not isin else _class_from_categorie(r.get("categorie"))
         is_etf = bool(row) and (row.get("asset_class") or "").lower() in _FUND_CLASSES
         bucket = overrides.get(isin or "") or classify_bucket(ac, is_etf, isin, r.get("fonds"), row)
         alloc_items.append((w, bucket))
@@ -2041,10 +2076,6 @@ def compute_portfolio_analysis(portfolio_id: int,
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
     bgrid = _grid(bench_isins)
     bench_items: list[tuple[float, tuple[str, str, str]]] = []
-    # Same rows, keyed by ISIN, so the start-of-window caps can be swapped in below without
-    # re-classifying anything: the bucket a constituent sits in does not depend on when it
-    # was weighed.
-    bench_rows: list[tuple[float, tuple[str, str, str], str]] = []
     bench_classified = bench_total = 0.0
     bench_foreign = 0
     for m in bench:
@@ -2059,7 +2090,6 @@ def compute_portfolio_analysis(portfolio_id: int,
         if row and _foreign_listing(row):
             bench_foreign += 1
         bench_items.append((cap, b))
-        bench_rows.append((cap, b, m.get("isin") or ""))
 
     # ── Book weighting override ─────────────────────────────────────────────────────────────
     # The model side is always built (it is the fallback). When the reader asks for book weights
@@ -2202,44 +2232,11 @@ def compute_portfolio_analysis(portfolio_id: int,
     weight_field = ("each position's current EUR value" if weight_basis == "book"
                     else "the model's stated percentage")
 
-    # ⚠⚠ THE BARS NO LONGER USE THIS — see the axis loop below (2026-09-03). What `_basis_axes`
-    # still supplies is `_start_weights`, the per-ISIN weight at the window's open that rides on
-    # the holdings payload as `weight_start_pct`.
-    # ⚠ AND NOTHING RENDERS THAT FIELD TODAY: the "Weight (start)" column came off 2026-08-04.
-    # It is kept because it is a published field and because the Attribution panel is weighed on
-    # exactly this basis, so the payload can still answer "what did this weigh in January" without
-    # a second loader. If it is ever confirmed unused, this call is a whole leg of the modal's
-    # work to delete — measure before assuming it is free.
-    basis_axes = _basis_axes(portfolio_id, source, p.get("positions_datum"), bucket_filter)
-    # ⚠⚠ A CONSTITUENT WITH NO START CAP IS DROPPED, NOT FALLEN BACK TO TODAY'S. The first version
-    # of this used `bench_start.get(isin, cap)`, which quietly re-created the very thing it was
-    # fixing: a handful of names weighed today inside a bar weighed at the open, and a denominator
-    # that then matched neither basis. Measured on SP500 Technology it read 31.92% against the
-    # drill-down's 31.24% — a 0.68pp gap from about two constituents. Dropping them puts the bar on
-    # exactly the constituent set `index_rows` weighs, so the two agree by construction rather than
-    # to within a rounding.
-    # ⚠⚠ TODAY'S CAPS, NOT THE WINDOW'S OPEN (2026-09-03, on request: "Benchmark should also be up
-    # to date daily"). It has to move with the portfolio side below — a book weighed today against
-    # an index weighed in January is a tilt made of two different dates, and every `diff_pct` on
-    # the chart would carry that gap. `_bench_start_caps` and the constituent-dropping rule it
-    # needed go with it: on today's caps every constituent has one.
-    # ⚠⚠ ONE CONSTITUENT LIST FOR THE BAR AND FOR ITS DRILL-DOWN (2026-09-03, on request: "each
-    # company should have a price and marketcap at the start and end, and we use that single list
-    # both for the Sector scorecard and for the drilldown"). They were two: the bar weighed every
-    # member carrying a market cap, the drill-down weighed `index_rows(start)` — the members that
-    # also have a PRICE at both ends, because it has a Return column and a return needs two marks.
-    # Measured on ACWI: 1,849 against 1,845, and the four that differ are Technology-heavy enough
-    # to read 27.95% on the bar against 27.60% one click below it.
-    # ⚠ THE NARROWER LIST WINS, and that is the honest direction. A constituent with no opening
-    # price cannot be shown in the drill-down at all, so including it in the bar means the bar is
-    # a percentage of something the reader cannot go and look at. Dropped: CSG NV (series starts
-    # 2026-01-23), RWE AG (02-12), Kesko Oyj (06-05) — each simply not priced when the year opened.
-    # ⚠ THE WEIGHT IS STILL TODAY'S CAP. This narrows WHO is in the denominator, not WHEN they are
-    # weighed — the bars stay on current values, which is what the axis note promises.
-    priced_both = _bench_window_isins(benchmark_label)
-    bw = _weigh([(cap, b) for cap, b, isin in bench_rows
-                 if not priced_both or isin in priced_both]
-                if priced_both is not None else bench_items)
+    # The Sector/Region/Currency charts are now read-only current-composition views; their former
+    # drilldowns live in Attribution.  They therefore need today's market caps and classification,
+    # not each benchmark constituent's historical start-of-window price.  Avoiding that full-index
+    # history scan removes thousands of price rows from the modal's critical path.
+    bw = _weigh(bench_items)
     _phase("axes")
 
     # ⚠⚠ THE CLASS RETURN IS RE-DERIVED FROM THE ENRICHED ROWS, AND `_book_port_items`' OWN
@@ -2258,10 +2255,8 @@ def compute_portfolio_analysis(portfolio_id: int,
     # is correct rather than missing: it has no sector, no ISIN and no current weight either, which
     # is why the table gives it its own group outside the classes. The figure that accounts for it
     # is `Contribution`, on the book's own capital.
-    enriched_holdings = _with_results(
-        _with_start_weights(book["holdings_detail"] if book else [],
-                            (basis_axes or {}).get("_start_weights") or {}),
-        realised_block, benchmark_label)
+    enriched_holdings = _with_results(book["holdings_detail"] if book else [], realised_block,
+                                      benchmark_label)
     # ⚠ THE SOLD ROWS GET THE SAME THREE INSTRUMENT COLUMNS AS THE HELD ONES. They had blanks
     # because a closed-out position carries no ISIN — not because the figures are meaningless for
     # it. See `_sold_position_isins` for how the identity is recovered and what happens when it
@@ -2359,6 +2354,39 @@ def compute_portfolio_analysis(portfolio_id: int,
                           "reason": e["reason"]} for e in excluded],
         })
 
+    # The modal must not resolve instruments synchronously: that was the source of the long cold
+    # Analyse load. Tell the client which held operating equities still have no resolver/price
+    # record so it can enqueue them on the existing single Yahoo worker. Funds intentionally stay
+    # out because their listing has no meaningful issuer sector or look-through risk profile.
+    asset_data_missing_isins = {
+        h["isin"] for h in enriched_holdings
+        if h.get("isin") and h.get("bucket") == EQUITY_BUCKET and not h.get("is_fund")
+        and h.get("sector") == UNKNOWN_BUCKET
+        and not any(h.get(k) is not None for k in ("mom_12_1_pct", "vol_5y_pct", "beta_5y"))
+    }
+    # Beta is relative to the selected benchmark and cannot be produced from the holding series
+    # alone. A portfolio can therefore have sector/momentum/volatility while every beta is blank
+    # when the benchmark risk ETF has not been ingested yet. Queue that dependency through the same
+    # worker instead of making the client or the analysis endpoint fetch it synchronously.
+    from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+    benchmark_risk_isin = _BENCHMARK_RISK_ETF.get((benchmark_label or "").upper())
+    has_holding_risk = any(h.get("vol_5y_pct") is not None for h in enriched_holdings)
+    has_beta = any(h.get("beta_5y") is not None for h in enriched_holdings)
+    if benchmark_risk_isin and has_holding_risk and not has_beta:
+        asset_data_missing_isins.add(benchmark_risk_isin)
+    asset_data_missing_isins = sorted(asset_data_missing_isins)
+    if asset_data_missing_isins:
+        # Queueing is deliberately the only write on this read path. It is a fast, idempotent
+        # database upsert; all vendor calls stay in the single background worker. Keeping this
+        # server-side means an older frontend bundle, a direct API caller, and production all get
+        # the same automatic enrichment behaviour.
+        try:
+            from asset_pipeline import queue as _asset_queue  # noqa: PLC0415
+            _asset_queue.enqueue(asset_data_missing_isins)
+        except Exception as e:  # noqa: BLE001 — missing enrichment must never break Analyse
+            _log.warning("[analysis] could not queue missing asset data (%s: %s)",
+                         type(e).__name__, e)
+
     return {
         "portfolio_id": portfolio_id,
         "name": p["name"],
@@ -2455,6 +2483,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         # ⚠ THE RESULT COLUMNS ARE GRAFTED ON HERE, so the Holdings table is ONE table that adds
         # up rather than a composition view beside a separate ledger. See `_with_results`.
         "book_holdings": enriched_holdings,
+        "asset_data_missing_isins": asset_data_missing_isins,
         # ⚠ THE HOLDINGS TABLE IS ONLY HALF THE YEAR, AND UNTIL NOW NOTHING SAID SO. Every figure
         # above it is built from positions the book STILL HOLDS; a name sold in March has no row
         # and its result is invisible. Measured on BUS_Offensief_Dyn, that is EUR -28,656 — 41% of
@@ -2744,7 +2773,7 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/windowset/v2"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v4"
 
 
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
@@ -2830,6 +2859,17 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
         return
     isin_of = _sold_position_isins([p.get("name") for p in sold])
     risk = _holding_risk(sorted(set(isin_of.values())), benchmark_label)
+    # A closed row's ordinary Instrument return slot answers a different, useful question: what
+    # the security did AFTER the book sold it. The realised amount remains the book's historical
+    # result; this is a counterfactual price move and must never be blended back into it.
+    #
+    # Sales in this ledger are YTD, so two years safely covers the final sale even around New Year.
+    # One batched EUR-series read keeps this a fixed cost for every sold row, never one query each.
+    try:
+        close_series = _daily_eur(sorted(set(isin_of.values())), years=2)
+    except Exception as e:  # noqa: BLE001 — the risk table must remain usable without this extra view
+        _log.warning("[analysis] post-close return failed (%s: %s)", type(e).__name__, e)
+        close_series = {}
     for p in sold:
         isin = isin_of.get((p.get("name") or "").strip())
         got = risk.get(isin or "") or {}
@@ -2839,6 +2879,20 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
         p["isin"] = isin
         for k in RISK_KEYS:                      # ⚠ the same list as the held rows — see `RISK_KEYS`
             p[k] = got.get(k)
+        sale_date = p.get("last_sale")
+        series = close_series.get(isin or "", [])
+        # The transaction may settle on a non-trading day. Use the first EUR close on or after the
+        # sale, then the latest close we actually hold — never invent a price for either endpoint.
+        after_sale = [(day, value) for day, value in series if sale_date and day >= sale_date and value > 0]
+        if after_sale:
+            first_day, first_price = after_sale[0]
+            last_day, last_price = after_sale[-1]
+            if first_price > 0 and last_price > 0:
+                p["since_close_pct"] = round((last_price / first_price - 1.0) * 100.0, 4)
+                p["since_close_date"] = first_day
+                p["since_close_as_of"] = last_day
+                p["since_close_from"] = first_price
+                p["since_close_to"] = last_price
 
 
 def _holding_risk(isins: list[str], benchmark_label: str,

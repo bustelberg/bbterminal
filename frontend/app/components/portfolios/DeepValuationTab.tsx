@@ -594,8 +594,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     // a Reset button that leaves a typed price in place is the worst kind: it looks like it worked.
     && priceOverride == null && numOrNull(fwdPeStr) == null;
 
-  // The multiple the price implies on the consensus EPS — the vendor's forward P/E is a separate
-  // reading and the two need not agree. Surfaced in the tooltip rather than substituted.
+  // The multiple the price implies on the consensus EPS. It is a reference when GuruFocus supplied
+  // its own Forward P/E, and the automatic EGM fallback when that dedicated indicator is absent.
   const impliedPE = price != null && src.epsNextFY != null && src.epsNextFY > 0
     ? price / src.epsNextFY : null;
 
@@ -794,7 +794,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.forwardPE.what}
                 where={numOrNull(fwdPeStr) != null ? t.egm.yoursTypedHere
-                  : t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE))}
+                  : src.forwardPEOrigin === 'derived' ? t.egm.forwardPEDerivedWhere
+                    : t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE))}
                 /* ⚠⚠ AN OVERRIDDEN FORWARD P/E HAS NO VENDOR DATE, and saying otherwise is worse
                    than saying nothing — the exact ⚠⚠ the share-price card already carries. `where`
                    branched on the override from the start and `when` did not, so a typed multiple

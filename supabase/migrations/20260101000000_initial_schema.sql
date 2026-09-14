@@ -1613,232 +1613,228 @@ SET row_security = off;
 -- Data for Name: country; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-COPY public.country (country_code, country_name) FROM stdin;
-AE	United Arab Emirates
-AT	Austria
-AU	Australia
-BE	Belgium
-BR	Brazil
-CA	Canada
-CH	Switzerland
-CL	Chile
-CN	China
-CO	Colombia
-CZ	Czech Republic
-DE	Germany
-DK	Denmark
-EG	Egypt
-ES	Spain
-FI	Finland
-FR	France
-GB	United Kingdom
-GR	Greece
-HK	Hong Kong
-HU	Hungary
-ID	Indonesia
-IE	Ireland
-IL	Israel
-IN	India
-IS	Iceland
-IT	Italy
-JP	Japan
-KR	South Korea
-KW	Kuwait
-MX	Mexico
-MY	Malaysia
-NL	Netherlands
-NO	Norway
-NZ	New Zealand
-PH	Philippines
-PL	Poland
-PT	Portugal
-QA	Qatar
-RO	Romania
-RU	Russia
-SA	Saudi Arabia
-SE	Sweden
-SG	Singapore
-TH	Thailand
-TR	Turkey
-TW	Taiwan
-US	United States
-ZA	South Africa
-\.
+INSERT INTO public.country (country_code, country_name) VALUES
+    ('AE', 'United Arab Emirates'),
+    ('AT', 'Austria'),
+    ('AU', 'Australia'),
+    ('BE', 'Belgium'),
+    ('BR', 'Brazil'),
+    ('CA', 'Canada'),
+    ('CH', 'Switzerland'),
+    ('CL', 'Chile'),
+    ('CN', 'China'),
+    ('CO', 'Colombia'),
+    ('CZ', 'Czech Republic'),
+    ('DE', 'Germany'),
+    ('DK', 'Denmark'),
+    ('EG', 'Egypt'),
+    ('ES', 'Spain'),
+    ('FI', 'Finland'),
+    ('FR', 'France'),
+    ('GB', 'United Kingdom'),
+    ('GR', 'Greece'),
+    ('HK', 'Hong Kong'),
+    ('HU', 'Hungary'),
+    ('ID', 'Indonesia'),
+    ('IE', 'Ireland'),
+    ('IL', 'Israel'),
+    ('IN', 'India'),
+    ('IS', 'Iceland'),
+    ('IT', 'Italy'),
+    ('JP', 'Japan'),
+    ('KR', 'South Korea'),
+    ('KW', 'Kuwait'),
+    ('MX', 'Mexico'),
+    ('MY', 'Malaysia'),
+    ('NL', 'Netherlands'),
+    ('NO', 'Norway'),
+    ('NZ', 'New Zealand'),
+    ('PH', 'Philippines'),
+    ('PL', 'Poland'),
+    ('PT', 'Portugal'),
+    ('QA', 'Qatar'),
+    ('RO', 'Romania'),
+    ('RU', 'Russia'),
+    ('SA', 'Saudi Arabia'),
+    ('SE', 'Sweden'),
+    ('SG', 'Singapore'),
+    ('TH', 'Thailand'),
+    ('TR', 'Turkey'),
+    ('TW', 'Taiwan'),
+    ('US', 'United States'),
+    ('ZA', 'South Africa');
 
 
 --
 -- Data for Name: currency; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-COPY public.currency (currency_code, currency_name, source, peg_to_usd) FROM stdin;
-AED	UAE Dirham	pegged	3.6725
-AUD	Australian Dollar	ecb	\N
-BRL	Brazilian Real	ecb	\N
-CAD	Canadian Dollar	ecb	\N
-CHF	Swiss Franc	ecb	\N
-CLP	Chilean Peso	ecb	\N
-CNY	Chinese Yuan	ecb	\N
-COP	Colombian Peso	ecb	\N
-CZK	Czech Koruna	ecb	\N
-DKK	Danish Krone	ecb	\N
-EGP	Egyptian Pound	ecb	\N
-EUR	Euro	ecb	\N
-GBP	British Pound	ecb	\N
-HKD	Hong Kong Dollar	ecb	\N
-HUF	Hungarian Forint	ecb	\N
-IDR	Indonesian Rupiah	ecb	\N
-ILS	Israeli Shekel	ecb	\N
-INR	Indian Rupee	ecb	\N
-ISK	Icelandic Krona	ecb	\N
-JPY	Japanese Yen	ecb	\N
-KRW	South Korean Won	ecb	\N
-KWD	Kuwaiti Dinar	pegged	0.306
-MXN	Mexican Peso	ecb	\N
-MYR	Malaysian Ringgit	ecb	\N
-NOK	Norwegian Krone	ecb	\N
-NZD	New Zealand Dollar	ecb	\N
-PHP	Philippine Peso	ecb	\N
-PLN	Polish Zloty	ecb	\N
-QAR	Qatari Riyal	pegged	3.64
-RON	Romanian Leu	ecb	\N
-RUB	Russian Ruble	ecb	\N
-SAR	Saudi Riyal	pegged	3.75
-SEK	Swedish Krona	ecb	\N
-SGD	Singapore Dollar	ecb	\N
-THB	Thai Baht	ecb	\N
-TRY	Turkish Lira	ecb	\N
-TWD	New Taiwan Dollar	yahoo	\N
-USD	US Dollar	ecb	\N
-ZAR	South African Rand	ecb	\N
-\.
+INSERT INTO public.currency (currency_code, currency_name, source, peg_to_usd) VALUES
+    ('AED', 'UAE Dirham', 'pegged', '3.6725'),
+    ('AUD', 'Australian Dollar', 'ecb', NULL),
+    ('BRL', 'Brazilian Real', 'ecb', NULL),
+    ('CAD', 'Canadian Dollar', 'ecb', NULL),
+    ('CHF', 'Swiss Franc', 'ecb', NULL),
+    ('CLP', 'Chilean Peso', 'ecb', NULL),
+    ('CNY', 'Chinese Yuan', 'ecb', NULL),
+    ('COP', 'Colombian Peso', 'ecb', NULL),
+    ('CZK', 'Czech Koruna', 'ecb', NULL),
+    ('DKK', 'Danish Krone', 'ecb', NULL),
+    ('EGP', 'Egyptian Pound', 'ecb', NULL),
+    ('EUR', 'Euro', 'ecb', NULL),
+    ('GBP', 'British Pound', 'ecb', NULL),
+    ('HKD', 'Hong Kong Dollar', 'ecb', NULL),
+    ('HUF', 'Hungarian Forint', 'ecb', NULL),
+    ('IDR', 'Indonesian Rupiah', 'ecb', NULL),
+    ('ILS', 'Israeli Shekel', 'ecb', NULL),
+    ('INR', 'Indian Rupee', 'ecb', NULL),
+    ('ISK', 'Icelandic Krona', 'ecb', NULL),
+    ('JPY', 'Japanese Yen', 'ecb', NULL),
+    ('KRW', 'South Korean Won', 'ecb', NULL),
+    ('KWD', 'Kuwaiti Dinar', 'pegged', '0.306'),
+    ('MXN', 'Mexican Peso', 'ecb', NULL),
+    ('MYR', 'Malaysian Ringgit', 'ecb', NULL),
+    ('NOK', 'Norwegian Krone', 'ecb', NULL),
+    ('NZD', 'New Zealand Dollar', 'ecb', NULL),
+    ('PHP', 'Philippine Peso', 'ecb', NULL),
+    ('PLN', 'Polish Zloty', 'ecb', NULL),
+    ('QAR', 'Qatari Riyal', 'pegged', '3.64'),
+    ('RON', 'Romanian Leu', 'ecb', NULL),
+    ('RUB', 'Russian Ruble', 'ecb', NULL),
+    ('SAR', 'Saudi Riyal', 'pegged', '3.75'),
+    ('SEK', 'Swedish Krona', 'ecb', NULL),
+    ('SGD', 'Singapore Dollar', 'ecb', NULL),
+    ('THB', 'Thai Baht', 'ecb', NULL),
+    ('TRY', 'Turkish Lira', 'ecb', NULL),
+    ('TWD', 'New Taiwan Dollar', 'yahoo', NULL),
+    ('USD', 'US Dollar', 'ecb', NULL),
+    ('ZAR', 'South African Rand', 'ecb', NULL);
 
 
 --
 -- Data for Name: gurufocus_exchange; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-COPY public.gurufocus_exchange (exchange_id, exchange_code, exchange_name, is_us, country_code, currency_code) FROM stdin;
-1	NYSE	New York Stock Exchange	t	US	USD
-2	NASDAQ	NASDAQ	t	US	USD
-3	CBOE	Cboe BZX	t	US	USD
-4	LSE	London Stock Exchange	f	GB	GBP
-5	XTER	Xetra	f	DE	EUR
-6	XPAR	Euronext Paris	f	FR	EUR
-7	XAMS	Euronext Amsterdam	f	NL	EUR
-8	XBRU	Euronext Brussels	f	BE	EUR
-9	XLIS	Euronext Lisbon	f	PT	EUR
-10	MIL	Borsa Italiana	f	IT	EUR
-11	XMAD	Bolsa de Madrid	f	ES	EUR
-12	XSWX	SIX Swiss Exchange	f	CH	CHF
-13	OSTO	Nasdaq Stockholm	f	SE	SEK
-14	OCSE	Nasdaq Copenhagen	f	DK	DKK
-15	OSL	Oslo Bors	f	NO	NOK
-16	OHEL	Nasdaq Helsinki	f	FI	EUR
-17	WAR	Warsaw Stock Exchange	f	PL	PLN
-19	ATH	Athens Exchange	f	GR	EUR
-23	IST	Istanbul Stock Exchange	f	TR	TRY
-24	TSX	Toronto Stock Exchange	f	CA	CAD
-25	TSXV	TSX Venture Exchange	f	CA	CAD
-26	MEX	Bolsa Mexicana de Valores	f	MX	MXN
-27	BMV	Bolsa Mexicana (alt)	f	MX	MXN
-28	BSP	B3 (Brazil)	f	BR	BRL
-30	BOG	Bolsa de Colombia	f	CO	COP
-31	TSE	Tokyo Stock Exchange	f	JP	JPY
-32	HKSE	Hong Kong Stock Exchange	f	HK	HKD
-34	SZSE	Shenzhen Stock Exchange	f	CN	CNY
-37	XKRX	Korea Exchange	f	KR	KRW
-38	NSE	National Stock Exchange India	f	IN	INR
-39	BSE	BSE India	f	IN	INR
-40	ASX	Australian Stock Exchange	f	AU	AUD
-41	NZSE	New Zealand Exchange	f	NZ	NZD
-42	SGX	Singapore Exchange	f	SG	SGD
-48	ADX	Abu Dhabi Securities Exchange	f	AE	AED
-49	DFM	Dubai Financial Market	f	AE	AED
-53	JSE	Johannesburg Stock Exchange	f	ZA	ZAR
-56	FRA	Frankfurt Stock Exchange	f	DE	EUR
-18	WBO	Wiener Boerse	f	AT	EUR
-22	XPRA	Prague Stock Exchange	f	CZ	CZK
-20	DUB	Irish Stock Exchange	f	IE	EUR
-21	BUD	Budapest Stock Exchange	f	HU	HUF
-33	SHSE	Shanghai Stock Exchange	f	CN	CNY
-35	TPE	Taiwan Stock Exchange	f	TW	TWD
-36	ROCO	Gretai Securities Market	f	TW	TWD
-43	XKLS	Bursa Malaysia	f	MY	MYR
-44	ISX	Indonesia Stock Exchange	f	ID	IDR
-45	BKK	Stock Exchange of Thailand	f	TH	THB
-46	PHS	Philippine Stock Exchange	f	PH	PHP
-47	SAU	Saudi Stock Exchange	f	SA	SAR
-50	DSMD	Qatar Exchange	f	QA	QAR
-51	KUW	Kuwait Stock Exchange	f	KW	KWD
-52	XTAE	Tel Aviv Stock Exchange	f	IL	ILS
-54	CAI	Egyptian Exchange	f	EG	EGP
-55	MIC	Moscow Exchange	f	RU	RUB
-29	XSGO	Santiago Stock Exchange	f	CL	CLP
-\.
+INSERT INTO public.gurufocus_exchange (exchange_id, exchange_code, exchange_name, is_us, country_code, currency_code) VALUES
+    ('1', 'NYSE', 'New York Stock Exchange', 't', 'US', 'USD'),
+    ('2', 'NASDAQ', 'NASDAQ', 't', 'US', 'USD'),
+    ('3', 'CBOE', 'Cboe BZX', 't', 'US', 'USD'),
+    ('4', 'LSE', 'London Stock Exchange', 'f', 'GB', 'GBP'),
+    ('5', 'XTER', 'Xetra', 'f', 'DE', 'EUR'),
+    ('6', 'XPAR', 'Euronext Paris', 'f', 'FR', 'EUR'),
+    ('7', 'XAMS', 'Euronext Amsterdam', 'f', 'NL', 'EUR'),
+    ('8', 'XBRU', 'Euronext Brussels', 'f', 'BE', 'EUR'),
+    ('9', 'XLIS', 'Euronext Lisbon', 'f', 'PT', 'EUR'),
+    ('10', 'MIL', 'Borsa Italiana', 'f', 'IT', 'EUR'),
+    ('11', 'XMAD', 'Bolsa de Madrid', 'f', 'ES', 'EUR'),
+    ('12', 'XSWX', 'SIX Swiss Exchange', 'f', 'CH', 'CHF'),
+    ('13', 'OSTO', 'Nasdaq Stockholm', 'f', 'SE', 'SEK'),
+    ('14', 'OCSE', 'Nasdaq Copenhagen', 'f', 'DK', 'DKK'),
+    ('15', 'OSL', 'Oslo Bors', 'f', 'NO', 'NOK'),
+    ('16', 'OHEL', 'Nasdaq Helsinki', 'f', 'FI', 'EUR'),
+    ('17', 'WAR', 'Warsaw Stock Exchange', 'f', 'PL', 'PLN'),
+    ('19', 'ATH', 'Athens Exchange', 'f', 'GR', 'EUR'),
+    ('23', 'IST', 'Istanbul Stock Exchange', 'f', 'TR', 'TRY'),
+    ('24', 'TSX', 'Toronto Stock Exchange', 'f', 'CA', 'CAD'),
+    ('25', 'TSXV', 'TSX Venture Exchange', 'f', 'CA', 'CAD'),
+    ('26', 'MEX', 'Bolsa Mexicana de Valores', 'f', 'MX', 'MXN'),
+    ('27', 'BMV', 'Bolsa Mexicana (alt)', 'f', 'MX', 'MXN'),
+    ('28', 'BSP', 'B3 (Brazil)', 'f', 'BR', 'BRL'),
+    ('30', 'BOG', 'Bolsa de Colombia', 'f', 'CO', 'COP'),
+    ('31', 'TSE', 'Tokyo Stock Exchange', 'f', 'JP', 'JPY'),
+    ('32', 'HKSE', 'Hong Kong Stock Exchange', 'f', 'HK', 'HKD'),
+    ('34', 'SZSE', 'Shenzhen Stock Exchange', 'f', 'CN', 'CNY'),
+    ('37', 'XKRX', 'Korea Exchange', 'f', 'KR', 'KRW'),
+    ('38', 'NSE', 'National Stock Exchange India', 'f', 'IN', 'INR'),
+    ('39', 'BSE', 'BSE India', 'f', 'IN', 'INR'),
+    ('40', 'ASX', 'Australian Stock Exchange', 'f', 'AU', 'AUD'),
+    ('41', 'NZSE', 'New Zealand Exchange', 'f', 'NZ', 'NZD'),
+    ('42', 'SGX', 'Singapore Exchange', 'f', 'SG', 'SGD'),
+    ('48', 'ADX', 'Abu Dhabi Securities Exchange', 'f', 'AE', 'AED'),
+    ('49', 'DFM', 'Dubai Financial Market', 'f', 'AE', 'AED'),
+    ('53', 'JSE', 'Johannesburg Stock Exchange', 'f', 'ZA', 'ZAR'),
+    ('56', 'FRA', 'Frankfurt Stock Exchange', 'f', 'DE', 'EUR'),
+    ('18', 'WBO', 'Wiener Boerse', 'f', 'AT', 'EUR'),
+    ('22', 'XPRA', 'Prague Stock Exchange', 'f', 'CZ', 'CZK'),
+    ('20', 'DUB', 'Irish Stock Exchange', 'f', 'IE', 'EUR'),
+    ('21', 'BUD', 'Budapest Stock Exchange', 'f', 'HU', 'HUF'),
+    ('33', 'SHSE', 'Shanghai Stock Exchange', 'f', 'CN', 'CNY'),
+    ('35', 'TPE', 'Taiwan Stock Exchange', 'f', 'TW', 'TWD'),
+    ('36', 'ROCO', 'Gretai Securities Market', 'f', 'TW', 'TWD'),
+    ('43', 'XKLS', 'Bursa Malaysia', 'f', 'MY', 'MYR'),
+    ('44', 'ISX', 'Indonesia Stock Exchange', 'f', 'ID', 'IDR'),
+    ('45', 'BKK', 'Stock Exchange of Thailand', 'f', 'TH', 'THB'),
+    ('46', 'PHS', 'Philippine Stock Exchange', 'f', 'PH', 'PHP'),
+    ('47', 'SAU', 'Saudi Stock Exchange', 'f', 'SA', 'SAR'),
+    ('50', 'DSMD', 'Qatar Exchange', 'f', 'QA', 'QAR'),
+    ('51', 'KUW', 'Kuwait Stock Exchange', 'f', 'KW', 'KWD'),
+    ('52', 'XTAE', 'Tel Aviv Stock Exchange', 'f', 'IL', 'ILS'),
+    ('54', 'CAI', 'Egyptian Exchange', 'f', 'EG', 'EGP'),
+    ('55', 'MIC', 'Moscow Exchange', 'f', 'RU', 'RUB'),
+    ('29', 'XSGO', 'Santiago Stock Exchange', 'f', 'CL', 'CLP');
 
 
 --
 -- Data for Name: exchange_fee; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-COPY public.exchange_fee (exchange_code, fee_bps, updated_at, is_broker_supported) FROM stdin;
-NYSE	10.0000	2026-05-15 11:32:39.101822+00	t
-NASDAQ	10.0000	2026-05-15 11:32:39.101822+00	t
-CBOE	10.0000	2026-05-15 11:32:39.101822+00	t
-LSE	10.0000	2026-05-15 11:32:39.101822+00	t
-XTER	10.0000	2026-05-15 11:32:39.101822+00	t
-XPAR	10.0000	2026-05-15 11:32:39.101822+00	t
-XAMS	10.0000	2026-05-15 11:32:39.101822+00	t
-XBRU	10.0000	2026-05-15 11:32:39.101822+00	t
-XLIS	10.0000	2026-05-15 11:32:39.101822+00	t
-MIL	10.0000	2026-05-15 11:32:39.101822+00	t
-XMAD	10.0000	2026-05-15 11:32:39.101822+00	t
-XSWX	10.0000	2026-05-15 11:32:39.101822+00	t
-OSTO	10.0000	2026-05-15 11:32:39.101822+00	t
-OCSE	10.0000	2026-05-15 11:32:39.101822+00	t
-OSL	10.0000	2026-05-15 11:32:39.101822+00	t
-OHEL	10.0000	2026-05-15 11:32:39.101822+00	t
-WAR	10.0000	2026-05-15 11:32:39.101822+00	t
-ATH	10.0000	2026-05-20 10:43:57.10074+00	t
-IST	10.0000	2026-05-15 11:32:39.101822+00	t
-TSX	10.0000	2026-05-15 11:32:39.101822+00	t
-TSXV	10.0000	2026-05-15 11:32:39.101822+00	t
-MEX	10.0000	2026-05-20 10:43:57.10074+00	t
-BMV	10.0000	2026-05-20 10:43:57.10074+00	t
-BSP	10.0000	2026-05-20 10:43:57.10074+00	t
-BOG	10.0000	2026-05-15 11:32:39.101822+00	t
-TSE	10.0000	2026-05-15 11:32:39.101822+00	t
-HKSE	10.0000	2026-05-15 11:32:39.101822+00	t
-SZSE	10.0000	2026-05-20 10:43:57.10074+00	t
-XKRX	10.0000	2026-05-15 11:32:39.101822+00	t
-NSE	10.0000	2026-05-15 11:32:39.101822+00	t
-BSE	10.0000	2026-05-15 11:32:39.101822+00	t
-ASX	10.0000	2026-05-15 11:32:39.101822+00	t
-NZSE	10.0000	2026-05-20 10:43:57.10074+00	t
-SGX	10.0000	2026-05-15 11:32:39.101822+00	t
-ADX	10.0000	2026-05-15 11:32:39.101822+00	t
-DFM	10.0000	2026-05-15 11:32:39.101822+00	t
-JSE	10.0000	2026-05-15 11:32:39.101822+00	t
-FRA	10.0000	2026-05-15 11:32:39.101822+00	t
-WBO	10.0000	2026-05-15 11:32:39.101822+00	t
-XPRA	10.0000	2026-05-15 11:32:39.101822+00	t
-DUB	10.0000	2026-05-15 11:32:39.101822+00	t
-BUD	10.0000	2026-05-15 11:32:39.101822+00	t
-SHSE	10.0000	2026-05-20 10:43:57.10074+00	t
-TPE	10.0000	2026-05-15 11:32:39.101822+00	t
-ROCO	10.0000	2026-05-20 10:43:57.10074+00	t
-XKLS	10.0000	2026-05-15 11:32:39.101822+00	t
-ISX	10.0000	2026-05-15 11:32:39.101822+00	t
-BKK	10.0000	2026-05-15 11:32:39.101822+00	t
-PHS	10.0000	2026-05-15 11:32:39.101822+00	t
-SAU	10.0000	2026-05-15 11:32:39.101822+00	t
-DSMD	10.0000	2026-05-15 11:32:39.101822+00	t
-KUW	10.0000	2026-05-15 11:32:39.101822+00	t
-XTAE	10.0000	2026-05-15 11:32:39.101822+00	t
-CAI	10.0000	2026-05-15 11:32:39.101822+00	t
-MIC	10.0000	2026-05-15 11:32:39.101822+00	t
-XSGO	10.0000	2026-05-15 11:32:39.101822+00	t
-\.
+INSERT INTO public.exchange_fee (exchange_code, fee_bps, updated_at, is_broker_supported) VALUES
+    ('NYSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('NASDAQ', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('CBOE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('LSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XTER', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XPAR', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XAMS', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XBRU', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XLIS', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('MIL', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XMAD', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XSWX', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('OSTO', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('OCSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('OSL', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('OHEL', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('WAR', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('ATH', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('IST', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('TSX', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('TSXV', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('MEX', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('BMV', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('BSP', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('BOG', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('TSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('HKSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('SZSE', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('XKRX', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('NSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('BSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('ASX', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('NZSE', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('SGX', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('ADX', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('DFM', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('JSE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('FRA', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('WBO', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XPRA', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('DUB', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('BUD', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('SHSE', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('TPE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('ROCO', '10.0000', '2026-05-20 10:43:57.10074+00', 't'),
+    ('XKLS', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('ISX', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('BKK', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('PHS', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('SAU', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('DSMD', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('KUW', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XTAE', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('CAI', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('MIC', '10.0000', '2026-05-15 11:32:39.101822+00', 't'),
+    ('XSGO', '10.0000', '2026-05-15 11:32:39.101822+00', 't');
 
 
 --

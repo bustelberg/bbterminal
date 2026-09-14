@@ -20,6 +20,8 @@ from booting in a test, so the only thing there is to check is what the file say
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 from pathlib import Path
 
@@ -27,8 +29,29 @@ import pytest
 
 from routers.auth import _ADMIN_EMAIL_HASHES, _is_hardcoded_admin_email, _resolve_role
 
-MIGRATIONS = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
+REPO = Path(__file__).resolve().parents[2]
+MIGRATIONS = REPO / "supabase" / "migrations"
 _HASH_RE = re.compile(r"'([0-9a-f]{64})'")
+
+# ⚠⚠ THE ADDRESSES THEMSELVES ARE NOT IN THIS FILE, WHICH IS THE WHOLE POINT OF THE HASHING.
+# 20260527010000 swapped the plaintext allowlist for SHA-256 "so admin emails no longer appear in
+# source", and this test then put both of them back in plaintext for months — a hash list is only
+# opaque while nothing nearby prints its preimage. So the MECHANISM is exercised against a
+# synthetic allowlist below, and the real addresses are checked only when the person running the
+# suite supplies them (see `TestTheRealAddressesIfYouSupplyThem`).
+_FAKE_ADMIN = "admin@example.test"
+_FAKE_OTHER = "someone.else@example.test"
+_FAKE_HASHES = frozenset({hashlib.sha256(_FAKE_ADMIN.encode("utf-8")).hexdigest()})
+
+
+@pytest.fixture
+def synthetic_allowlist(monkeypatch):
+    """Point `_is_hardcoded_admin_email` at an allowlist whose preimage is public.
+
+    ⚠ `monkeypatch.setattr` on the module global works because both functions read
+    `_ADMIN_EMAIL_HASHES` at CALL time; a `from ... import` copy in this file would not be enough.
+    """
+    monkeypatch.setattr("routers.auth._ADMIN_EMAIL_HASHES", _FAKE_HASHES)
 
 
 def _latest_function_sql() -> str:
@@ -83,38 +106,131 @@ class TestTheTriggerIsActuallyAttached:
 
 
 class TestWhoIsAnAdmin:
-    def test_the_hardcoded_address_matches(self):
-        assert _is_hardcoded_admin_email("reinier7175@gmail.com")
+    """⚠ Against a SYNTHETIC allowlist, not the real one. Every assertion here is about the
+    RULE — how an address is normalised before hashing, and how an explicit role ranks against the
+    allowlist — and none of them needs a real preimage to state it. Substituting a fake list keeps
+    the addresses out of source without losing a single behaviour."""
 
-    @pytest.mark.parametrize("email", ["reinier@bustelberg.nl"])
-    def test_the_demoted_address_no_longer_matches(self, email):
-        """⚠⚠ REMOVED FROM THE ALLOWLIST 2026-09-08, on request — and removing it was only half
-        the job. The account carried an EXPLICIT `role: admin` from an earlier backfill, and
-        `_resolve_role` prefers an explicit role to this list on purpose, so the row had to be set
-        to 'user' as well (migration 20260908150000). Pinned in BOTH directions because the two
-        halves fail differently: this one alone leaves the account admin for ever."""
+    def test_an_address_on_the_list_matches(self, synthetic_allowlist):
+        assert _is_hardcoded_admin_email(_FAKE_ADMIN)
+
+    def test_matching_ignores_case_and_padding(self, synthetic_allowlist):
+        """The trigger lowercases before hashing (`lower(NEW.email)`); the backend must agree, or
+        an address typed with a capital is an admin in one half of the app and not the other."""
+        assert _is_hardcoded_admin_email("  ADMIN@Example.TEST  ")
+
+    def test_everyone_else_is_a_plain_user(self, synthetic_allowlist):
+        assert not _is_hardcoded_admin_email(_FAKE_OTHER)
+        assert not _is_hardcoded_admin_email(None)
+        assert _resolve_role(None, _FAKE_OTHER) == "user"
+
+    def test_a_missing_role_falls_back_to_the_allowlist(self, synthetic_allowlist):
+        """This is the state a signup produced while the trigger was missing."""
+        assert _resolve_role(None, _FAKE_ADMIN) == "admin"
+
+    def test_an_explicit_user_role_is_an_intentional_demotion(self, synthetic_allowlist):
+        """⚠ NOT overridden by the allowlist. The frontend renders whatever `app_metadata.role`
+        says, so an allowlist that outranked an explicit 'user' would serve admin data to an
+        account every screen draws as a regular user — see `_resolve_role`'s own docstring. This is
+        also the ONLY thing that demotes an address still on the list, which is half of what
+        20260908150000 had to do."""
+        assert _resolve_role("user", _FAKE_ADMIN) == "user"
+
+    def test_an_explicit_admin_role_stands_on_its_own(self, synthetic_allowlist):
+        assert _resolve_role("admin", _FAKE_OTHER) == "admin"
+
+
+class TestTheRealAddressesIfYouSupplyThem:
+    """⚠⚠ THE ONE THING A HASH LIST CANNOT BE ASKED IN PUBLIC: whether the RIGHT person is on it.
+    Checking that costs the preimage, which is exactly what must not be committed — so the
+    addresses come from the environment and these two skip when it is empty:
+
+        BB_TEST_ADMIN_EMAIL=... BB_TEST_DEMOTED_EMAIL=... uv run pytest tests/test_admin_email_hashes.py
+
+    ⚠ Skipped in CI by design. The identity is a one-time fact; what regresses is the mechanism
+    above and the three-way agreement pinned at the top of this file, and both of those run always.
+    """
+
+    def test_the_configured_admin_address_matches(self):
+        email = os.environ.get("BB_TEST_ADMIN_EMAIL")
+        if not email:
+            pytest.skip("set BB_TEST_ADMIN_EMAIL to check the real address")
+        assert _is_hardcoded_admin_email(email)
+        assert _resolve_role(None, email) == "admin"
+
+    def test_the_configured_demoted_address_does_not(self):
+        """⚠ Pinned in BOTH directions because the two halves fail differently: dropping the hash
+        alone leaves an account that carries an EXPLICIT `role: admin` from an earlier backfill
+        admin for ever, since `_resolve_role` prefers an explicit role to this list on purpose."""
+        email = os.environ.get("BB_TEST_DEMOTED_EMAIL")
+        if not email:
+            pytest.skip("set BB_TEST_DEMOTED_EMAIL to check the demoted address")
         assert not _is_hardcoded_admin_email(email)
         assert _resolve_role(None, email) == "user"
 
-    def test_matching_ignores_case_and_padding(self):
-        """The trigger lowercases before hashing (`lower(NEW.email)`); the backend must agree, or
-        an address typed with a capital is an admin in one half of the app and not the other."""
-        assert _is_hardcoded_admin_email("  REINIER7175@Gmail.COM  ")
 
-    def test_everyone_else_is_a_plain_user(self):
-        assert not _is_hardcoded_admin_email("someone.else@bustelberg.nl")
-        assert not _is_hardcoded_admin_email(None)
-        assert _resolve_role(None, "someone.else@bustelberg.nl") == "user"
+class TestNoAdminAddressIsCommittedInPlaintext:
+    """⚠⚠ THE RATCHET, AND IT NAMES NOBODY. It collects every email-shaped token in the tracked
+    source and hashes each one against the allowlists — so it fails if an admin address is ever
+    pasted back into a comment, a fixture or a docstring, WITHOUT this file having to contain the
+    address it is defending. That is the property the plaintext version of this test destroyed.
 
-    def test_a_missing_role_falls_back_to_the_allowlist(self):
-        """This is the state a signup produced while the trigger was missing."""
-        assert _resolve_role(None, "reinier7175@gmail.com") == "admin"
+    ⚠ It checks the HISTORICAL hashes too, not just the one in force: `_ADMIN_EMAIL_HASHES` is down
+    to one entry, and the demoted address is no less private for having been demoted. The old
+    lists are still readable in the earlier migrations, which is where the extra hashes come from.
+    """
 
-    def test_an_explicit_user_role_is_an_intentional_demotion(self):
-        """⚠ NOT overridden by the allowlist. The frontend renders whatever `app_metadata.role`
-        says, so an allowlist that outranked an explicit 'user' would serve admin data to an
-        account every screen draws as a regular user — see `_resolve_role`'s own docstring."""
-        assert _resolve_role("user", "reinier7175@gmail.com") == "user"
+    # ⚠ Source only. The repo root also holds an untracked 124 MB `.pgdump`, and reading a database
+    # dump to lint comments would make this test the slowest in the suite for no coverage at all.
+    _ROOTS = ("backend", "frontend/app", "frontend/lib", "supabase/migrations", "docs")
+    _SUFFIXES = {".py", ".ts", ".tsx", ".sql", ".md"}
+    _SKIP_DIRS = {
+        "node_modules", ".venv", ".next", "__pycache__", ".pytest_cache",
+        ".git", "dist", "build", "coverage", ".gurufocus_cache",
+    }
+    _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
-    def test_an_explicit_admin_role_stands_on_its_own(self):
-        assert _resolve_role("admin", "someone.else@bustelberg.nl") == "admin"
+    def _known_hashes(self) -> set[str]:
+        """Every hash the allowlist has ever carried: the live set, plus every 64-hex literal in a
+        migration that defines or repairs the admin role."""
+        hashes = set(_ADMIN_EMAIL_HASHES)
+        for path in MIGRATIONS.glob("*.sql"):
+            sql = path.read_text(encoding="utf-8")
+            if "set_admin_role_on_signup" in sql:
+                hashes.update(_HASH_RE.findall(sql))
+        return hashes
+
+    def _source_files(self):
+        for root in self._ROOTS:
+            base = REPO / root
+            if not base.exists():
+                continue
+            for path in base.rglob("*"):
+                if path.suffix not in self._SUFFIXES or not path.is_file():
+                    continue
+                if self._SKIP_DIRS.intersection(path.parts):
+                    continue
+                yield path
+        for path in REPO.glob("*.md"):
+            yield path
+
+    def test_no_committed_file_contains_an_admin_address(self):
+        known = self._known_hashes()
+        assert known, "no admin hashes found — the scan would pass vacuously"
+        offenders = []
+        for path in self._source_files():
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            for email in set(self._EMAIL_RE.findall(text)):
+                digest = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+                if digest in known:
+                    # ⚠ The file and the line, never the address — a failure message that printed
+                    # the preimage would leak it into CI logs, which is the same disclosure by
+                    # another route.
+                    offenders.append(str(path.relative_to(REPO)))
+        assert not offenders, (
+            "an admin email appears in plaintext in: " + ", ".join(sorted(set(offenders)))
+            + " — refer to it by hash, or use a synthetic address"
+        )

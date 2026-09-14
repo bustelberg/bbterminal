@@ -39,13 +39,13 @@ describe('purgeLegacySessions', () => {
     // ⚠ The app keeps real preferences alongside these (`bb:lang`, and whatever a panel has
     // remembered). A purge that reached wider would log people out of their own settings.
     localStorage.setItem('bb:lang', 'nl')
-    localStorage.setItem('bb:lang:owner', 'reinier@bustelberg.nl')
+    localStorage.setItem('bb:lang:owner', 'reader@bustelberg.nl')
     localStorage.setItem('bbterminal_sessions', '[]')
 
     purgeLegacySessions()
 
     expect(localStorage.getItem('bb:lang')).toBe('nl')
-    expect(localStorage.getItem('bb:lang:owner')).toBe('reinier@bustelberg.nl')
+    expect(localStorage.getItem('bb:lang:owner')).toBe('reader@bustelberg.nl')
     expect(localStorage.getItem('bbterminal_sessions')).toBeNull()
   })
 
