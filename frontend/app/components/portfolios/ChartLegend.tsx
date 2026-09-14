@@ -3,23 +3,21 @@
 /**
  * One legend entry per LINE, with a swatch drawn the way that line is drawn.
  *
- * ⚠⚠ THE CARDS USED TO PACK SEVERAL LINES INTO ONE ENTRY AS PROSE — "FCF / Net Income (avg dashed ·
- * 100% dotted)" was a solid blue swatch standing for three different strokes, two of which are not
- * blue and neither of which is solid. The reader had to parse a sentence to learn which mark on the
- * chart was which, and the swatch beside it was actively misleading: it showed the shape of the
- * series line next to the words describing a reference line.
+ * ⚠⚠ THE CARDS USED TO PACK SEVERAL LINES INTO ONE ENTRY AS PROSE. A solid blue swatch standing
+ * for a dashed average is actively misleading: it shows the shape of the series line next to words
+ * describing a reference line.
  *
  * A legend's whole job is "this mark means this thing". A dashed line gets a dashed swatch, or the
  * legend is a caption.
  *
  * ⚠ THE DASH GEOMETRY MIRRORS THE RECHARTS `strokeDasharray`, NOT AN EYEBALLED APPROXIMATION —
- * `5 3` for an average line, `2 4` for the dotted 100% reference — so a swatch and its line read as
- * the same stroke rather than as two similar-looking ideas. Opacity mirrors `strokeOpacity` for the
- * same reason: a reference line is deliberately recessive, and a legend that shows it at full
- * strength promises a more prominent mark than the chart draws.
+ * `5 3` for an average line — so a swatch and its line read as the same stroke rather than as two
+ * similar-looking ideas. Opacity mirrors `strokeOpacity` for the same reason: a reference line is
+ * deliberately recessive, and a legend that shows it at full strength promises a more prominent
+ * mark than the chart draws.
  */
 
-export type Stroke = 'solid' | 'dashed' | 'dotted' | 'striped';
+export type Stroke = 'solid' | 'dashed' | 'striped';
 
 /** `strokeDasharray` + `strokeOpacity`, as CSS. Keep in step with the `ReferenceLine`s. */
 const SWATCH: Record<Stroke, (c: string) => React.CSSProperties> = {
@@ -28,11 +26,6 @@ const SWATCH: Record<Stroke, (c: string) => React.CSSProperties> = {
   dashed: (c) => ({
     backgroundImage: `repeating-linear-gradient(to right, ${c} 0 5px, transparent 5px 8px)`,
     opacity: 0.6,
-  }),
-  // recharts `strokeDasharray="2 4"` at strokeOpacity 0.5 — the 100% reference on cash conversion.
-  dotted: (c) => ({
-    backgroundImage: `repeating-linear-gradient(to right, ${c} 0 2px, transparent 2px 6px)`,
-    opacity: 0.5,
   }),
   // recharts `strokeDasharray="4 3"` at full strength — the analysts' forecast leg.
   //

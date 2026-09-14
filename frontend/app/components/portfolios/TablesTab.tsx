@@ -15,6 +15,7 @@ import { roicByYear, type CashReturnInputs } from './cashReturnData';
 import { investedCapitalBlend } from './investedCapitalData';
 import { levelFromBlend, type BlendMetricRow } from './fundamentalBlend';
 import { BLEND_CODES, BLEND_METRICS } from './LongEquityTab';
+import { loadBlendMetrics } from './blendMetrics';
 import { traceEmpty } from '../../../lib/debugTrace';
 import {
   CAGR_DECIMALS, cagrExcess, cagrPct, commonEndPeriod, forwardCagr, lineCagr, type Cagr,
@@ -35,7 +36,7 @@ import InterestBurdenInputsModal from './InterestBurdenInputsModal';
 import { COPY, MEASURE_KEYS, type MeasureKey, type TablesCopy } from './tablesCopy';
 import { AspectCard } from '../../../lib/tipCard';
 import { withWorked } from './workedFormula';
-import { latestCommonX, meanExcess, windowMean, type WindowMean } from './windowStats';
+import { latestCommonX, latestX, meanExcess, windowMean, type WindowMean } from './windowStats';
 import {
   meanSub, rateSub, type MeanTransform,
 } from './tablesSubstitution';
@@ -52,7 +53,7 @@ import { type Lang } from '../../../lib/i18n';
  * is not a rate of anything.
  *
  * ⚠ BOTH AXES FILTER, INDEPENDENTLY — the windows (columns) and the measures (rows). Every ROW
- * defaults on and only the 10y WINDOW does (see `shownW`); the state is two Sets over `WINDOWS` and
+ * defaults on and only the 5y WINDOW does (see `shownW`); the state is two Sets over `WINDOWS` and
  * `MEASURES`, and both the chips and the table are built from those same two lists. Two rules that
  * are not symmetric, each for its own reason: the LAST WINDOW cannot be switched off (the
  * expectation row's colspan divides by the count, and a table of nothing but row labels is not a
@@ -244,7 +245,7 @@ function RateCell({ got, copy, span = 1, ownWindow = false, pending = false }:
 { got: Cagr | null; copy: TablesCopy; span?: number; ownWindow?: boolean;
   /** ⚠ IS SOMETHING ACTUALLY COMING? See `arriving` — dots that keep moving after a failed fetch,
    *  or over a value that will never exist, promise an arrival, which is a worse lie than the
-   *  motionless `…` they replaced. */
+   *  static dash they replace. */
   pending?: boolean }) {
   /**
    * ⚠⚠ A SPANNED CELL IS **CENTRED**, NOT RIGHT-ALIGNED, AND THAT IS NOT A STYLE CHOICE. Right
@@ -257,7 +258,7 @@ function RateCell({ got, copy, span = 1, ownWindow = false, pending = false }:
   if (!got) {
     return (
       <td colSpan={span} className={`px-2.5 py-1 ${align} text-fg-faint`}>
-        {pending ? <LoadingDots /> : '…'}
+        {pending ? <LoadingDots /> : '—'}
       </td>
     );
   }
@@ -302,7 +303,7 @@ function MeanCell({ got, copy, unit = 'pct', transform, pending = false }:
   pending?: boolean }) {
   if (!got) {
     return (
-      <td className="px-2.5 py-1 text-right text-fg-faint">{pending ? <LoadingDots /> : '…'}</td>
+      <td className="px-2.5 py-1 text-right text-fg-faint">{pending ? <LoadingDots /> : '—'}</td>
     );
   }
   if (got.mean == null) {
@@ -397,11 +398,11 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    * the same question that most readers were not asking. 5y is one chip away and the chip is
    * already there, so nothing is hidden; what changes is which view you land on.
    *
-   * ⚠ THE DEFAULT IS THE LONGER WINDOW, not the shorter one. These rows are CAGRs, and a ten-year
-   * rate is the one that survives a cycle — a five-year window on this data opens in 2020, so it
-   * starts in the covid trough and reads high for every cyclical in the book.
+   * Graphs deliberately begins in 2017. A ten-year CAGR therefore cannot yet have ten complete
+   * annual intervals, while five years (2020–2025) is available for the current fiscal history.
+   * Keep 10y selectable for the moment the shared series reaches it, but open on the usable window.
    */
-  const [shownW, setShownW] = useState<Set<Window>>(() => new Set<Window>([10]));
+  const [shownW, setShownW] = useState<Set<Window>>(() => new Set<Window>([5]));
   const [shownM, setShownM] = useState<Set<MeasureKey>>(() => new Set(MEASURE_KEYS));
   /** Which row's ground numbers are open, if any — see `MATRIX_ROWS`. */
   const [drill, setDrill] = useState<MeasureKey | null>(null);
@@ -467,7 +468,9 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
       try {
         // ⚠ THE SAME ENDPOINTS THE CARDS USE, so `apiFetch`'s read cache serves them when the Long
         // Equity tab has already loaded them — this tab is usually free to open.
-        const [m, c, gm, cc, ib] = await Promise.all([
+        // A failed derived card must not discard the four payloads that did arrive. The previous
+        // all-or-nothing batch made every ratio cell wait forever when only one endpoint failed.
+        const [m, c, gm, cc, ib] = await Promise.allSettled([
           post<MarginInputs>('margin-inputs', holdingsTarget),
           post<CashReturnInputs>('cash-return-inputs', holdingsTarget),
           // ⚠⚠ `eps_nri` — EXCLUDING non-recurring items, whose paired forecast is
@@ -492,7 +495,16 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           // per period, so it blends by exactly the rule they do and needs nothing new.
         ]);
         if (!alive) return;
-        setMarginData(m); setGrossM(gm); setRoicData(c); setCashConvD(cc); setIntBurden(ib);
+        if (m.status === 'fulfilled') setMarginData(m.value);
+        if (c.status === 'fulfilled') setRoicData(c.value);
+        if (gm.status === 'fulfilled') setGrossM(gm.value);
+        if (cc.status === 'fulfilled') setCashConvD(cc.value);
+        if (ib.status === 'fulfilled') setIntBurden(ib.value);
+        const failed = [m, c, gm, cc, ib].filter(
+          (r): r is PromiseRejectedResult => r.status === 'rejected',
+        );
+        if (failed.length) setErr(failed.map((r) =>
+          r.reason instanceof Error ? r.reason.message : String(r.reason)).join(' · '));
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e));
       }
@@ -507,8 +519,9 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    * payloads the ratio rows and the drill-down are built from; this is a different question asked
    * of a different endpoint, and folding it in would tie a rate row's arrival to a margin row's.
    *
-   * ⚠ SAME BODY AS `LongEquityTab` SENDS (`BLEND_METRICS`), so `apiFetch`'s read cache serves this
-   * for free whenever the reader has already opened Graphs — which is the usual order.
+   * A single company reads the identical `/by-isin/.../metrics` URL Graphs uses; a portfolio goes
+   * through `loadBlendMetrics`, whose per-modal memo is populated by Graphs. Either way, Tables
+   * consumes the already-loaded Graphs response rather than starting a second blend.
    */
   const [bookLine, setBookLine] = useState<BlendMetricRow[] | null>(null);
   const [bookLineErr, setBookLineErr] = useState<string | null>(null);
@@ -518,20 +531,35 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
     void (async () => {
       setBookLine(null); setBookLineErr(null);
       try {
-        const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
-          signal: ctrl.signal,
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ...holdingsTarget, metrics: BLEND_METRICS }),
-        });
-        const b = await r.json().catch(() => null);
-        if (!alive) return;
-        if (!r.ok) {
-          const detail = (b as { detail?: string })?.detail ?? `HTTP ${r.status}`;
-          console.warn(`[bb:tables] blended line: ${detail}`, b);
-          setBookLineErr(detail);
+        const one = holdingsTarget.holdings?.length === 1 ? holdingsTarget.holdings[0] : null;
+        if (one) {
+          // This exact URL is the single-company Graphs request, so its completed response is a
+          // read-cache hit when the user comes here from that tab.
+          const cadence = holdingsTarget.cadence ?? 'annual';
+          const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(one.isin)}`
+            + `/metrics?cadence=${cadence}&metric_keys=${encodeURIComponent(BLEND_METRICS.join(','))}`,
+          { signal: ctrl.signal });
+          const b = await r.json().catch(() => null);
+          if (!alive) return;
+          if (!r.ok) {
+            setBookLineErr((b as { detail?: string })?.detail ?? `HTTP ${r.status}`);
+            return;
+          }
+          setBookLine(((b as { metrics?: BlendMetricRow[] })?.metrics) ?? []);
           return;
         }
-        setBookLine(((b as { metrics?: BlendMetricRow[] })?.metrics) ?? []);
+
+        const cadence = holdingsTarget.cadence === 'quarterly' ? 'quarterly' : 'annual';
+        const out = await loadBlendMetrics<{ metrics?: BlendMetricRow[] }>(
+          holdingsTarget.holdings
+            ? { basket: { holdings: holdingsTarget.holdings }, cadence, metrics: BLEND_METRICS }
+            : { portfolioId: holdingsTarget.portfolio_id, cadence, metrics: BLEND_METRICS },
+          () => {}, ctrl.signal,
+        );
+        if (!alive) return;
+        if (out.kind === 'ready') setBookLine(out.data.metrics ?? []);
+        else if (out.kind === 'none') setBookLine([]);
+        else setBookLineErr(out.message);
       } catch (e) {
         // ⚠ An abort is this component cancelling its own request, not a failure.
         if (alive && (e as Error)?.name !== 'AbortError') {
@@ -599,6 +627,14 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const grossEnd = latestCommonX(book.grossMargin, index.grossMargin);
   const convEnd = latestCommonX(book.cashConv, index.cashConv);
   const coverEnd = latestCommonX(book.intBurden, index.intBurden);
+  // The two standalone cells must not disappear merely because the benchmark does not clear its
+  // coverage floor. Graphs still shows ASML's line in that case; Tables must show its average too.
+  // Only Excess needs a shared endpoint.
+  const marginBookEnd = latestX(book.margin); const marginBenchEnd = latestX(index.margin);
+  const roicBookEnd = latestX(book.roic); const roicBenchEnd = latestX(index.roic);
+  const grossBookEnd = latestX(book.grossMargin); const grossBenchEnd = latestX(index.grossMargin);
+  const convBookEnd = latestX(book.cashConv); const convBenchEnd = latestX(index.cashConv);
+  const coverBookEnd = latestX(book.intBurden); const coverBenchEnd = latestX(index.intBurden);
   /** ⚠⚠ THE METRIC KEY IS PASSED, AND IT IS NOT DECORATION. `buildBlend` applies the positives-only
    *  member rule (`POSITIVE_ONLY_METRICS`) only when it is told which metric it is holding — so
    *  omitting it draws this row over a DIFFERENT set of companies from the card that charts the
@@ -628,17 +664,13 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   };
   const bookBlend = useMemo(() => lineOf('fcf_ps', bookLine), [bookLine]);
   const idxBlend = useMemo(() => lineOf('fcf_ps', benchLine), [benchLine]);
-  const fcfEnd = bookBlend && idxBlend ? commonEndPeriod(bookBlend.level, idxBlend.level) : null;
   /** ⚠ THE SAME `buildBlend` AS EVERY OTHER ROW, ON A DIFFERENT PAYLOAD — which is the whole of
    *  "weighted like the others". A price line assembled any other way (summing values, averaging
    *  levels) would be a second definition of the basket sitting one row from the first. */
   const bookRev = useMemo(() => lineOf('revenue', bookLine), [bookLine]);
   const idxRev = useMemo(() => lineOf('revenue', benchLine), [benchLine]);
-  const revEnd = bookRev && idxRev ? commonEndPeriod(bookRev.level, idxRev.level) : null;
   const bookPrice = useMemo(() => lineOf('price_ps', bookLine), [bookLine]);
   const idxPrice = useMemo(() => lineOf('price_ps', benchLine), [benchLine]);
-  const priceEnd = bookPrice && idxPrice
-    ? commonEndPeriod(bookPrice.level, idxPrice.level) : null;
   const bookEps = useMemo(() => lineOf('eps_nri', bookLine), [bookLine]);
   const idxEps = useMemo(() => lineOf('eps_nri', benchLine), [benchLine]);
   /** ⚠ THE SHARED BASE IS AN **ACTUAL** — `commonEndPeriod` only ever returns a reported period, so
@@ -652,25 +684,21 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    */
   const bookShares = useMemo(() => lineOf('shares', bookLine), [bookLine]);
   const idxShares = useMemo(() => lineOf('shares', benchLine), [benchLine]);
-  const sharesEnd = bookShares && idxShares
-    ? commonEndPeriod(bookShares.level, idxShares.level) : null;
   /** ⚠ FROM `cash-return-inputs`, WHICH THIS TAB ALREADY LOADS for the ROIC row — invested capital
    *  is derived from the same two raw lines, so the row costs no request. `investedCapitalBlend` is
    *  the card's own construction, extracted rather than re-implemented. */
   const bookInvCap = useMemo(
     () => (roicData ? investedCapitalBlend(roicData.rows) : null), [roicData]);
   const idxInvCap = useMemo(() => (bRoic ? investedCapitalBlend(bRoic.rows) : null), [bRoic]);
-  const invCapEnd = bookInvCap && idxInvCap
-    ? commonEndPeriod(bookInvCap.level, idxInvCap.level) : null;
 
   /**
-   * IS THIS ROW'S ANSWER STILL ON ITS WAY? — the gate on every animated `…` in this table.
+   * IS THIS ROW'S ANSWER STILL ON ITS WAY? — the gate on every animated loading indicator here.
    *
    * ⚠⚠ AN EMPTY CELL IS NOT ONE STATE, IT IS THREE, AND ONLY ONE OF THEM IS "WAIT". The row has no
    * value yet; or a fetch FAILED and nothing is coming; or both sides arrived and share no year at
    * all — a bank has no gross profit line, so its gross-margin row is permanently empty and
    * correct. Dots that keep moving over either of the last two promise an arrival, which is a
-   * worse lie than the motionless `…` they replace: the reader waits instead of reading the error
+   * worse lie than a static dash: the reader waits instead of reading the error
    * banner two rows up.
    *
    * ⚠ SO IT ASKS THE ROW'S OWN PAYLOADS, not a table-wide "loading" flag. A per-row question needs
@@ -803,7 +831,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           return (
             <td key={`e${y}`} colSpan={span}
               className={`px-2.5 py-1 ${align} text-fg-faint`}>
-              {pending ? <LoadingDots /> : '…'}
+              {pending ? <LoadingDots /> : '—'}
             </td>
           );
         }
@@ -834,8 +862,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
 
   /** One metric's three cells (book, index, excess) for one window. */
   const meanRow = (
-    k: MeasureKey,
-    a: Map<number, number | null>, b: Map<number, number | null>, endX: number | null,
+    k: MeasureKey, a: Map<number, number | null>, b: Map<number, number | null>,
+    aEnd: number | null, bEnd: number | null, sharedEnd: number | null,
     /** ⚠ NOT DERIVABLE FROM `a`/`b` HERE — both are already-built Maps, and an EMPTY one means
      *  "still loading" and "this book has no such line" alike. See `arriving`. */
     pending: boolean,
@@ -856,27 +884,27 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
         </button>
         {/* ⚠ THE BOOK'S SIDE, NOT THE INDEX'S — see `meanSub`. */}
         <InfoTip className="ml-1" content={tipFor(k, meanSub(
-          a, endX, shown[shown.length - 1] ?? 0, transform,
+          a, aEnd, shown[shown.length - 1] ?? 0, transform,
         ))} />
       </td>
       {shown.map((y) => (
         <MeanCell key={`a${y}`} copy={copy} unit={unit} transform={transform} pending={pending}
-          got={endX == null ? null : windowMean(a, endX, y)} />
+          got={aEnd == null ? null : windowMean(a, aEnd, y)} />
       ))}
       {shown.map((y) => (
         <MeanCell key={`b${y}`} copy={copy} unit={unit} transform={transform} pending={pending}
-          got={endX == null ? null : windowMean(b, endX, y)} />
+          got={bEnd == null ? null : windowMean(b, bEnd, y)} />
       ))}
       {shown.map((y) => {
-        if (endX == null) {
+        if (sharedEnd == null) {
           return (
             <td key={`e${y}`} className="px-2.5 py-1 text-right text-fg-faint">
-              {pending ? <LoadingDots /> : '…'}
+              {pending ? <LoadingDots /> : '—'}
             </td>
           );
         }
-        const wa = windowMean(a, endX, y);
-        const wb = windowMean(b, endX, y);
+        const wa = windowMean(a, sharedEnd, y);
+        const wb = windowMean(b, sharedEnd, y);
         // ⚠ `meanExcess` STILL DECIDES WHETHER THERE IS AN EXCESS AT ALL — it carries the guard
         // that refuses two different windows, and a transformed difference over mismatched years
         // would be exactly as meaningless as an untransformed one.
@@ -1036,16 +1064,18 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
               {/* ⚠ THE RATE ROWS ARE NAMED `CAGR`/`expected`; the two means are named `avg`.
                   They are different questions and the labels are the only thing saying so. */}
               {on('revCagr') && rateRow('revCagr', bookRev, idxRev,
-                (lvl, y) => lineCagr(lvl, y, revEnd ?? undefined),
+                // A side with a current 5y history must remain visible when the other side is
+                // thinner. `cagrExcess` below still refuses to subtract mismatched windows.
+                (lvl, y) => lineCagr(lvl, y),
                 arriving(bookLine, benchLine))}
               {/* ⚠ THE HISTORY OF THE SERIES THE LAST ROW FORECASTS, on the same shared end period
                   (`epsBase`) — so the rate hands over to the expectation instead of ending
                   somewhere else. See the ⚠ where `epsBase` is computed. */}
               {on('epsCagr') && rateRow('epsCagr', bookEps, idxEps,
-                (lvl, y) => lineCagr(lvl, y, epsBase ?? undefined),
+                (lvl, y) => lineCagr(lvl, y),
                 arriving(bookLine, benchLine))}
               {on('fcfCagr') && rateRow('fcfCagr', bookBlend, idxBlend,
-                (lvl, y) => lineCagr(lvl, y, fcfEnd ?? undefined),
+                (lvl, y) => lineCagr(lvl, y),
                 arriving(bookLine, benchLine))}
               {/* ⚠ ITS OWN `priceEnd`, NOT `fcfEnd`. Every row on this table pins both sides to the
                   latest period THEY share, and the price line does not end where the FCF line does:
@@ -1054,7 +1084,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   share FCF may not). Borrowing the neighbouring row's window would silently measure
                   one row over a span its own line does not reach — see `lineCagr`'s ⚠. */}
               {on('priceCagr') && rateRow('priceCagr', bookPrice, idxPrice,
-                (lvl, y) => lineCagr(lvl, y, priceEnd ?? undefined),
+                (lvl, y) => lineCagr(lvl, y),
                 arriving(bookLine, benchLine))}
               {/* ⚠ THE DENOMINATOR OF THE ROIC ROW BELOW, deliberately adjacent to it: capital
                   growing faster than the return on it is a book buying its growth, and neither row
@@ -1062,20 +1092,24 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
               {/* ⚠ `roicData`/`bRoic` — invested capital is DERIVED from the ROIC payload (see
                   `bookInvCap`), so this row waits on that fetch and not on one of its own. */}
               {on('invCapCagr') && rateRow('invCapCagr', bookInvCap, idxInvCap,
-                (lvl, y) => lineCagr(lvl, y, invCapEnd ?? undefined),
+                (lvl, y) => lineCagr(lvl, y),
                 arriving(roicData, bRoic))}
               {/* ⚠ THE WEDGE BETWEEN THE REVENUE ROW AND THE PER-SHARE ROWS — see its note. */}
               {on('sharesCagr') && rateRow('sharesCagr', bookShares, idxShares,
-                (lvl, y) => lineCagr(lvl, y, sharesEnd ?? undefined),
+                (lvl, y) => lineCagr(lvl, y),
                 arriving(bookLine, benchLine))}
               {on('grossMargin')
-                && meanRow('grossMargin', book.grossMargin, index.grossMargin, grossEnd,
+                && meanRow('grossMargin', book.grossMargin, index.grossMargin,
+                  grossBookEnd, grossBenchEnd, grossEnd,
                   arriving(grossM, bGrossM))}
-              {on('fcfMargin') && meanRow('fcfMargin', book.margin, index.margin, marginEnd,
+              {on('fcfMargin') && meanRow('fcfMargin', book.margin, index.margin,
+                marginBookEnd, marginBenchEnd, marginEnd,
                 arriving(marginData, bMargin))}
-              {on('roic') && meanRow('roic', book.roic, index.roic, roicEnd,
+              {on('roic') && meanRow('roic', book.roic, index.roic,
+                roicBookEnd, roicBenchEnd, roicEnd,
                 arriving(roicData, bRoic))}
-              {on('cashConv') && meanRow('cashConv', book.cashConv, index.cashConv, convEnd,
+              {on('cashConv') && meanRow('cashConv', book.cashConv, index.cashConv,
+                convBookEnd, convBenchEnd, convEnd,
                 arriving(cashConvD, bCashConv))}
               {/* ⚠ `'mult'` — THE ONLY NON-PERCENTAGE ROW HERE. See `Unit`: 12.4× printed as
                   12.4% reads as the exact inverse of what it says. */}
@@ -1085,7 +1119,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   year (a burden of 0 has no reciprocal) and lets one high-coverage year run away
                   with the mean. */}
               {on('intCover')
-                && meanRow('intCover', book.intBurden, index.intBurden, coverEnd,
+                && meanRow('intCover', book.intBurden, index.intBurden,
+                  coverBookEnd, coverBenchEnd, coverEnd,
                   arriving(intBurden, bIntBurden), 'mult', coverageFromBurden)}
               {/* ⚠⚠ LAST, AND VISUALLY SEPARATED, BECAUSE IT IS THE ONLY ROW THAT IS NOT A
                   MEASUREMENT. Everything above happened; this is what analysts currently expect,
