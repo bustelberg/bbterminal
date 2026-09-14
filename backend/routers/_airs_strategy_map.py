@@ -11,10 +11,23 @@ def _key(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
 
 
-@lru_cache(maxsize=1)
-def strategies() -> tuple[dict, ...]:
-    path = Path(__file__).resolve().parent.parent / "config" / "airs_strategy_map.json"
+@lru_cache(maxsize=4)
+def _load(path_text: str, modified_ns: int) -> tuple[dict, ...]:
+    """Parse one on-disk revision; the mtime is deliberately part of the cache key."""
+    path = Path(path_text)
     return tuple(json.loads(path.read_text(encoding="utf-8"))["strategies"])
+
+
+def strategies() -> tuple[dict, ...]:
+    """Current checked-in map, reloaded after an operator edits the JSON.
+
+    This used to be cached forever per backend process.  The whole point of a reviewed JSON file
+    is that an operator can correct a name/link without a deploy; stale in-process data made a
+    saved correction invisible until a restart.  ``st_mtime_ns`` keeps unchanged requests cheap
+    while making the very next request see a saved edit.
+    """
+    path = Path(__file__).resolve().parent.parent / "config" / "airs_strategy_map.json"
+    return _load(str(path), path.stat().st_mtime_ns)
 
 
 def nickname_for(airs_name: str | None) -> str | None:
@@ -23,6 +36,13 @@ def nickname_for(airs_name: str | None) -> str | None:
         if wanted in {_key(name) for name in strategy["airs_names"]}:
             return strategy["nickname"]
     return None
+
+
+def is_strategy_holding(name: str | None) -> bool:
+    """Whether a holding name is one of our mapped AIRS strategies/certificates."""
+    wanted = _key(name)
+    return any(wanted in {_key(n) for n in (*s["airs_names"], *s["holding_aliases"])}
+               for s in strategies())
 
 
 def target_for_alias(fonds: str | None, portfolios: list[dict], composition: dict[int, list[dict]],

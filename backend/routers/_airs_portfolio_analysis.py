@@ -1009,7 +1009,8 @@ def _is_fund(grid_row: dict | None, holding_name: str = "") -> bool:
     """
     from routers._airs_holding_isin import _is_etf  # noqa: PLC0415
 
-    return _is_etf(grid_row, holding_name)
+    from routers._airs_strategy_map import is_strategy_holding  # noqa: PLC0415
+    return is_strategy_holding(holding_name) or _is_etf(grid_row, holding_name)
 
 
 def book_unavailable_reason(portfolio_id: int) -> str:

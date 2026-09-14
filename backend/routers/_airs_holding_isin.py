@@ -731,7 +731,10 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         g = grid.get(isin or "") or {}
         # ⚠ THE BOOK'S OWN NAME TOO — the grid carries the vendor's abbreviation, which drops the
         # word "ETF" often enough to matter. See `_is_etf`.
-        is_etf = _is_etf(g, h["holding_name"])
+        # AIRS strategies are certificate/fund wrappers when another portfolio holds them.  The
+        # reviewed strategy map recognises them even before an asset-grid row exists.
+        from routers._airs_strategy_map import is_strategy_holding  # noqa: PLC0415
+        is_etf = is_strategy_holding(h["holding_name"]) or _is_etf(g, h["holding_name"])
         # ⚠ `asset_class=None` ALWAYS now: AIRS's `categorie` came from the paired model position
         # and there is no pairing. The grid and the name carry it (see `classify_bucket`).
         override = overrides.get(isin or "")
