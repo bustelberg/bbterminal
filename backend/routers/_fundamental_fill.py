@@ -466,6 +466,10 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     vendor_down = threading.Event()
     empty_streak = 0
     ok = failed = rows = calls = 0
+    # The summary used to say only "12 failed", while the per-company event holding the reason
+    # had already scrolled out of the toast. Keep a short receipt: the next action differs for an
+    # empty GuruFocus template, an unsubscribed exchange, and a database write failure.
+    failure_samples: list[str] = []
     # Rows the vendor returned that were already stored, so nothing was written for them. Reported
     # separately in the summary — see `ingest.metric_upsert.changed_rows` for why it is usually the
     # larger of the two by orders of magnitude.
@@ -571,6 +575,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                 empty_streak = 0
             if r["error"]:
                 failed += 1
+                if len(failure_samples) < 3:
+                    failure_samples.append(f"{who}: {r['error']}")
             elif not r.get("stopped"):
                 # ⚠ A STOPPED COMPANY IS NOT A LOADED ONE. It ran some of its feeds and is counted
                 # in neither column — the summary reports where the run stopped instead, so nothing
@@ -673,6 +679,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                + (f", {unchanged:,} already stored" if unchanged else "")
                + (f", {calls:,} API calls" if calls else "")
                + f" · {coverage_note}"
+               + (" · failures: " + " | ".join(failure_samples) if failure_samples else "")
                + (f" · {price_note}" if price_note else ""))
     if stopped:
         # ⚠⚠ THE CANCELLED CARD REPORTS WHAT IT GOT THROUGH, AND THAT IS THE WHOLE ANSWER TO "did

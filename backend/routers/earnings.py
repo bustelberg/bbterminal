@@ -279,7 +279,7 @@ _LONGEQUITY_METRIC_CODES = [
 ]
 
 
-def load_company_metric_rows(company_id: int) -> list[dict]:
+def load_company_metric_rows(company_id: int, metric_keys: list[str] | None = None) -> list[dict]:
     """Load the dashboard metric rows for one company (source=gurufocus +
     longequity, dates >= 1998). Returns `{metric_code, target_date,
     numeric_value, is_prediction}` dicts.
@@ -305,26 +305,43 @@ def load_company_metric_rows(company_id: int) -> list[dict]:
             offset += page_size
         return rows
 
-    non_price_codes = [c for c in _DASHBOARD_METRIC_CODES if c != "close_price"]
+    # The Long Equity growth row needs only five reported lines and one EPS-consensus line.  Its
+    # former all-dashboard request also transferred every other statement line and decades of
+    # unrelated observations before any of its four visible charts could render.  Keep the broad
+    # default for dashboard callers, but let that row request its declared metric keys only.
+    requested = list(dict.fromkeys(metric_keys or ()))
+    wanted_codes: set[str] | None = None
+    if requested:
+        wanted_codes = set()
+        for key in requested:
+            wanted_codes.update(_METRIC_CODES.get(key, ()))
+        # A missing fiscal-period price is filled from the latest daily close at the fiscal
+        # revenue date, so the compact price request needs revenue solely for that alignment.
+        if "price_ps" in requested:
+            wanted_codes.update(_METRIC_CODES["revenue"])
+    non_price_codes = (sorted(wanted_codes) if wanted_codes is not None
+                       else [c for c in _DASHBOARD_METRIC_CODES if c != "close_price"])
+    start_date = _GRAPH_START_DATE if requested else "1998-01-01"
     rows = _paginate(lambda: (
         supabase.table("metric_data")
         .select("metric_code,target_date,numeric_value,is_prediction")
         .eq("company_id", company_id)
         .eq("source_code", "gurufocus")
-        .gte("target_date", "1998-01-01")
+        .gte("target_date", start_date)
         .in_("metric_code", non_price_codes)
         .order("target_date")
     ))
 
-    rows.extend(_paginate(lambda: (
-        supabase.table("metric_data")
-        .select("metric_code,target_date,numeric_value,is_prediction")
-        .eq("company_id", company_id)
-        .eq("source_code", "gurufocus")
-        .eq("metric_code", "close_price")
-        .gte("target_date", "1998-01-01")
-        .order("target_date")
-    )))
+    if not requested or "price_ps" in requested:
+        rows.extend(_paginate(lambda: (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .eq("metric_code", "close_price")
+            .gte("target_date", start_date)
+            .order("target_date")
+        )))
 
     # GuruFocus's fiscal-statement blob can omit its separate "Month End Stock Price" line for
     # older years even though its daily `close_price` feed contains those exact historical closes.
@@ -385,25 +402,27 @@ def load_company_metric_rows(company_id: int) -> list[dict]:
         })
 
     # Analyst estimates (annual_* prefix).
-    rows.extend(_paginate(lambda: (
-        supabase.table("metric_data")
-        .select("metric_code,target_date,numeric_value,is_prediction")
-        .eq("company_id", company_id)
-        .eq("source_code", "gurufocus")
-        .eq("is_prediction", True)
-        .gte("target_date", "1998-01-01")
-        .like("metric_code", "annual_%")
-        .order("target_date")
-    )))
+    if not requested:
+        rows.extend(_paginate(lambda: (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .eq("is_prediction", True)
+            .gte("target_date", "1998-01-01")
+            .like("metric_code", "annual_%")
+            .order("target_date")
+        )))
 
-    rows.extend(_paginate(lambda: (
-        supabase.table("metric_data")
-        .select("metric_code,target_date,numeric_value,is_prediction")
-        .eq("company_id", company_id)
-        .eq("source_code", "longequity")
-        .in_("metric_code", _LONGEQUITY_METRIC_CODES)
-        .order("target_date")
-    )))
+    if not requested:
+        rows.extend(_paginate(lambda: (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "longequity")
+            .in_("metric_code", _LONGEQUITY_METRIC_CODES)
+            .order("target_date")
+        )))
     return rows
 
 
@@ -417,7 +436,8 @@ async def get_earnings_metrics(company_id: int):
 
 
 @router.get("/api/earnings/by-isin/{isin}/metrics")
-async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual"):
+async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual",
+                                       metric_keys: str | None = None):
     """Dashboard metrics for a company resolved BY ISIN — the /portfolios
     Fundamental modal bridge (ISIN → `company.isin` → company_id, "Bridge A").
 
@@ -458,8 +478,9 @@ async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual"):
         # `cadence="quarterly"` returns TRAILING-TWELVE-MONTH points under the same metric codes —
         # see `_ttm_metric_rows`. The dashboard and the Long Equity tab share this endpoint, so the
         # default stays annual and only a caller that asks gets the rolled-up view.
+        requested = [k for k in (metric_keys or "").split(",") if k in _METRIC_CODES]
         loader = _ttm_metric_rows if cadence == "quarterly" else load_company_metric_rows
-        rows = await asyncio.to_thread(loader, info["company_id"])
+        rows = await asyncio.to_thread(loader, info["company_id"], requested or None)
         if cadence != "quarterly":
             # ⚠ ANNUAL ONLY. Every point of a quarterly series is already a trailing twelve months,
             # so the newest one needs no second name — see `_ltm_rows` for why it cannot be derived
@@ -734,12 +755,14 @@ async def fundamental_blend(body: FundamentalCoverageRequest, request: Request):
             "series": await asyncio.to_thread(_blend)}
 
 
-# ⚠ THE BLEND WINDOW, PUSHED DOWN TO THE QUERY. It matches the charts' own start year, so the
+# ⚠ THE GRAPHS WINDOW, PUSHED DOWN TO THE QUERY. It matches the charts' own start year, so the
 # rows dropped here are rows nothing renders — and it is what keeps the read bounded (a company
-# carries ~7,200 `annuals__` rows back to the 1990s; from 2015 it is ~2,600). It also fixes WHERE
+# carries ~7,200 `annuals__` rows back to the 1990s; from 2017 it is ~2,600). It also fixes WHERE
 # a level series is rebased to 100: at the first date on screen, rather than at a 1990s base the
 # viewer cannot see.
-_BLEND_START = "2015-01-01"
+_GRAPH_START_YEAR = "2017"
+_GRAPH_START_DATE = f"{_GRAPH_START_YEAR}-01-01"
+_BLEND_START = _GRAPH_START_DATE
 
 # A forecast series -> the ACTUAL series it continues. Both are the same quantity (one measured,
 # one estimated) and the charts index them off a SINGLE base, so the blend must rebase them on a
@@ -850,7 +873,7 @@ def _annual_price_rows_from_daily(
         last_by_year: dict[str, tuple[str, float]] = {}
         for day, value in closes.items():
             year = day[:4]
-            if year < "2015" or year in reported_years.get(cid, set()):
+            if year < _GRAPH_START_YEAR or year in reported_years.get(cid, set()):
                 continue
             if day > last_by_year.get(year, ("", 0.0))[0]:
                 last_by_year[year] = (day, float(value))
@@ -1315,6 +1338,52 @@ _AGGREGATABLE_TOTAL = frozenset({"revenue"})
 _NO_AGGREGATE_FOR_FINANCIALS = frozenset({"fcf_ps"})
 _FINANCIAL_SECTORS = frozenset({"Financials", "Financial Services"})
 
+# A per-share figure only becomes a company total after multiplying it by diluted shares.  The
+# vendor occasionally changes the unit of that share-count field for a historical run (Aegon is a
+# concrete example: 541,447m in 2018, then 5,513m in 2019).  That is not an earnings event; it is a
+# bad unit, and without this check it can dominate an otherwise healthy index's EPS line.
+#
+# The check is deliberately very loose: EPS without NRI and reported net income are not identical,
+# and one unusual year is not enough to reject a company.  Two periods whose reconstructed total is
+# at least 50× away from the corresponding statement total establish a broken share-count series.
+_PER_SHARE_TOTAL_CHECKS = {
+    "eps_nri": "net_income",
+    "fcf_ps": "fcf",
+}
+_SHARE_TOTAL_MISMATCH_FACTOR = 50.0
+_SHARE_TOTAL_BAD_PERIODS = 2
+
+
+def _unreliable_share_count_members(
+        shares: dict[int, dict[str, float]],
+        per_share: dict[str, dict[int, dict[str, float]]],
+        statement_totals: dict[str, dict[int, dict[str, float]]],
+        ) -> set[int]:
+    """Companies whose imported share-count unit is demonstrably inconsistent.
+
+    `per_share[metric] × diluted_shares` and the related statement total use the same reporting
+    currency and both are in millions.  Their exact values may differ (notably EPS excluding
+    non-recurring items), but repeated 50× discrepancies cannot be an accounting distinction.
+    Excluding the affected company from *per-share aggregates* is safer than making the whole
+    benchmark claim an implausible collapse.
+    """
+    bad_members: set[int] = set()
+    for metric, total_metric in _PER_SHARE_TOTAL_CHECKS.items():
+        for cid, values in per_share.get(metric, {}).items():
+            bad = 0
+            for period, value in values.items():
+                n = (shares.get(cid) or {}).get(period)
+                total = (statement_totals.get(total_metric, {}).get(cid) or {}).get(period)
+                if n is None or total is None or not value or not total:
+                    continue
+                ratio = abs(float(value) * float(n) / float(total))
+                if (ratio > _SHARE_TOTAL_MISMATCH_FACTOR
+                        or ratio < 1.0 / _SHARE_TOTAL_MISMATCH_FACTOR):
+                    bad += 1
+            if bad >= _SHARE_TOTAL_BAD_PERIODS:
+                bad_members.add(cid)
+    return bad_members
+
 
 def fundamental_totals(company_ids: list[int], metrics: list[str],
                        weight_by_cid: dict[int, float] | None = None,
@@ -1478,6 +1547,25 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
     need_shares = any(m in _AGGREGATABLE_PER_SHARE or m in _AGGREGATABLE_FORECAST for m in wanted)
     shares = _metric_by_company_period(company_ids, "shares") if need_shares else {}
 
+    # Validate the vendor's diluted-share units before using them to reconstruct a total.  This
+    # only adds two compact bulk reads when a per-share chart is requested, and it prevents a bad
+    # constituent from affecting every year in an aggregate rather than merely showing one bad row.
+    wanted_per_share = {
+        metric for metric in _PER_SHARE_TOTAL_CHECKS
+        if metric in wanted or _FORECAST_METRIC.get(metric) in wanted
+    }
+    per_share_values = {
+        metric: _metric_by_company_period(company_ids, metric)
+        for metric in wanted_per_share
+    }
+    statement_totals = {
+        _PER_SHARE_TOTAL_CHECKS[metric]: _metric_by_company_period(
+            company_ids, _PER_SHARE_TOTAL_CHECKS[metric])
+        for metric in wanted_per_share
+    }
+    unreliable_share_members = _unreliable_share_count_members(
+        shares, per_share_values, statement_totals)
+
     def _shares_at(cid: int, period: str) -> float | None:
         """The share count to multiply a per-share figure by — filed, or the latest before it.
 
@@ -1516,6 +1604,8 @@ def fundamental_totals(company_ids: list[int], metrics: list[str],
             skip = financial if metric in _NO_AGGREGATE_FOR_FINANCIALS else set()
             for cid, by_period in vals.items():
                 if cid in skip:
+                    continue
+                if per_share and cid in unreliable_share_members:
                     continue
                 cur = ccy.get(cid)
                 if not cur:
@@ -2586,7 +2676,7 @@ def _daily_metrics_bulk(company_ids: list[int], metrics: tuple[str, ...],
     return out
 
 
-def _ttm_metric_rows(company_id: int) -> list[dict]:
+def _ttm_metric_rows(company_id: int, metric_keys: list[str] | None = None) -> list[dict]:
     """The metric ROWS a growth card reads, rolled to trailing twelve months.
 
     ⚠ IT DOES NOT CARRY THE FILINGS BEHIND EACH WINDOW, AND SHOULD NOT. `_ttm_by_period` can report
@@ -2603,7 +2693,13 @@ def _ttm_metric_rows(company_id: int) -> list[dict]:
     row: ask for quarterly and the same code carries TTM values at quarter-end dates.
     """
     out: list[dict] = []
+    requested = set(metric_keys or ())
     for metric, rule in _TTM_RULE.items():
+        # Annual analyst estimates deliberately have no TTM equivalent.  A narrowed caller still
+        # gets every requested reported metric that has a declared roll-up, and nothing invented
+        # for the estimate leg.
+        if requested and metric not in requested:
+            continue
         # ⚠ EVERY METRIC WITH A DECLARED ROLL-UP, not a filtered subset. An earlier version gated
         # on `_LONGEQUITY_METRIC_CODES` — which is NINE share-price CAGR codes, not the financial
         # lines — and returned an empty series for every card while looking perfectly reasonable.
@@ -3642,7 +3738,7 @@ async def portfolio_revenue_matrix(body: FundamentalCoverageRequest, metric: str
             # made it possible.
             rev = {p: v for p, v in
                    _metric_by_year(c["company_id"], metric, body.cadence).items()
-                   if p >= "2015"}
+                   if p >= _GRAPH_START_YEAR}
             # ⚠ THE SAME LTM POINT THE CHART DRAWS, so the table explains the line rather than a
             # truncated version of it — see `_ltm_by_company` for what qualifies as one.
             if c["company_id"] in ltm:
@@ -3868,7 +3964,7 @@ async def margin_inputs(body: FundamentalCoverageRequest, request: Request):
                 "status": status, "revenue": rev, "fcf": fcf, "sbc": sbc,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows,
                 "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
@@ -3946,7 +4042,7 @@ async def debt_ratio_inputs(body: FundamentalCoverageRequest, request: Request):
                 "long_term_debt": ltd, "total_assets": ta, "goodwill": gw,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows}
 
     return await asyncio.to_thread(_run)
 
@@ -4035,7 +4131,7 @@ async def cash_return_inputs(body: FundamentalCoverageRequest, request: Request)
                 "roic": roic,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows}
 
     return await asyncio.to_thread(_run)
 
@@ -4115,7 +4211,7 @@ async def interest_burden_inputs(body: FundamentalCoverageRequest, request: Requ
                 "interest_expense": ie, "operating_income": oi,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows,
                 "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
@@ -4196,7 +4292,7 @@ async def sbc_ocf_inputs(body: FundamentalCoverageRequest, request: Request):
                 "sbc": sbc, "ocf": ocf,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows,
                 "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
@@ -4276,7 +4372,7 @@ async def capex_margin_inputs(body: FundamentalCoverageRequest, request: Request
                 "capex": capex, "revenue": rev,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows,
                 "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
@@ -4369,7 +4465,7 @@ async def gross_margin_inputs(body: FundamentalCoverageRequest, request: Request
                 "gross_profit": gp, "revenue": rev,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows,
                 "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
@@ -4459,7 +4555,7 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest, request: Requ
                 "fcf": fcf, "sbc": sbc, "net_income": ni,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows,
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows,
                 "ltm_date": max((d for d, _ in ltm.values()), default=None)}
 
     return await asyncio.to_thread(_run)
@@ -4560,7 +4656,7 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Reques
                 "fcf": fcf, "sbc": sbc, "market_cap": mc,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows}
 
     return await asyncio.to_thread(_run)
 
@@ -4699,7 +4795,7 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest, request: Reque
                 "div_ps": div, "price_ps": price,
             })
         rows.sort(key=lambda r: -r["weight_pct"])
-        return {"years": sorted(y for y in years if y >= "2015"), "rows": rows}
+        return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows}
 
     return await asyncio.to_thread(_run)
 
@@ -4770,7 +4866,7 @@ async def benchmark_margin(label: str = "AEX", cadence: str = "annual"):
         from routers._fundamental_blend import MIN_BLEND_COVERAGE_PCT  # noqa: PLC0415
 
         total_w = sum(w for w, _m in per_member) or 1.0
-        years = sorted({y for _w, m in per_member for y in m if y >= "2015"})
+        years = sorted({y for _w, m in per_member for y in m if y >= _GRAPH_START_YEAR})
         series = []
         for y in years:
             num = sum(w * m[y] for w, m in per_member if y in m)

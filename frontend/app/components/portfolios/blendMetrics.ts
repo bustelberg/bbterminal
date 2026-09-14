@@ -26,6 +26,12 @@ export type BlendHolding = { isin: string; weight: number; name?: string };
 export type BlendTarget = {
   basket?: { holdings: BlendHolding[] };
   portfolioId?: number;
+  /**
+   * Limit the blend to the metric keys the caller actually draws.  Leaving this absent retains
+   * the complete suite for callers that genuinely need it; the Long Equity growth row needs only
+   * five reported lines plus EPS consensus, so reading every statement line first was needless.
+   */
+  metrics?: string[];
   /** 'quarterly' rolls every metric to TRAILING TWELVE MONTHS server-side. Omitted = annual.
    *  ⚠ The PORTFOLIO path needs this explicitly: the derived cards carry the cadence in the body
    *  they already POST, but the blend has its own builder — leave it out and a book's growth cards
@@ -49,10 +55,11 @@ const BASE = `${API_URL}/api/earnings/fundamental-blend-metrics`;
  *  sends its id and is expanded server-side (the frontend never holds its membership). */
 export function blendBody(t: BlendTarget): string {
   const cadence = t.cadence ?? 'annual';
-  return JSON.stringify(t.basket
+  const base = t.basket
     ? { holdings: t.basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })),
       cadence }
-    : { portfolio_id: t.portfolioId, cadence });
+    : { portfolio_id: t.portfolioId, cadence };
+  return JSON.stringify(t.metrics?.length ? { ...base, metrics: t.metrics } : base);
 }
 
 async function viaPost<T>(body: string, signal?: AbortSignal): Promise<BlendResult<T>> {
@@ -83,6 +90,10 @@ export async function loadBlendMetrics<T>(
     trace('fundamental', 'blend for this book served from memory — no re-read of its holdings');
     return cached as BlendResult<T>;
   }
+  // The ordinary streaming route predates narrowed blends and reads every metric per holding.
+  // A named blend is already a small number of bulk reads on the plain endpoint, so sending it
+  // there avoids turning this fast path back into the old per-company, all-code scan.
+  if (target.metrics?.length) return remember(body, await viaPost<T>(body, signal));
   let result: BlendResult<T> | null = null;
   try {
     await runSSE(`${BASE}/stream`, {

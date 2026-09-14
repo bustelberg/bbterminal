@@ -104,7 +104,10 @@ function extractPoints(rows: MetricRow[], codes: string[], cadence: 'annual' | '
     if (!want.has(m.metric_code) || m.numeric_value == null) continue;
     const d = String(m.target_date);
     const y = parseInt(d.slice(0, 4), 10);
-    if (y < 2015) continue;   // charts start from 2015, like the holdings/margin views
+    // Graphs deliberately share one dependable history window.  Some benchmark constituents
+    // have no imported fundamentals before 2017, so rendering a company's 2015–16 values next
+    // to a benchmark that cannot start until 2017 creates a misleading, mismatched chart.
+    if (y < 2017) continue;
     // Annual rows keep one point per calendar year (the latest); TTM rows are already one per
     // quarter, so each gets its own x and nothing collapses.
     const x = cadence === 'quarterly'
@@ -492,6 +495,14 @@ export default function MetricGrowthCard({
   // loss the company made, and letting it flip this card to a linear absolute axis would restate
   // the whole history because of something nobody has reported.
   const crossesZero = !isRatio && seriesCrossesZero(points.map((p) => p.value));
+  /**
+   * A raw level that crosses zero (EPS, FCF/share, or any future level card) is not a growth-index
+   * observation.  An ACWI blend beside it would be indexed growth on the same linear axis, making
+   * unlike quantities look comparable.  For a single company, show its actual history alone.
+   */
+  const omitBenchmarkForRawSeries = !isAgg && crossesZero;
+  const visibleBenchByX = omitBenchmarkForRawSeries ? null : benchByX;
+  const visibleBenchForecastByX = omitBenchmarkForRawSeries ? null : benchForecastByX;
   /** Linear axis + absolute values: a ratio (already comparable, can be negative) or a level series
    *  that changes sign. Everything else keeps the indexed log axis. */
   const linear = isRatio || crossesZero;
@@ -500,15 +511,15 @@ export default function MetricGrowthCard({
     // ⚠ NO REBASE WHEN IT CROSSES ZERO, even though `rebaseSeries` would refuse anyway on its own:
     // deciding it here keeps "which axis" and "indexed or not" one decision instead of two that
     // could disagree — which is precisely how the log-axis-under-absolute-values bug survived.
-    if (linear) return { indexed: null, ownByX: own, benchRawByX: benchByX };
-    return { indexed: rebaseSeries(own, benchByX), ownByX: own, benchRawByX: benchByX };
-  }, [points, linear, benchByX]);
+    if (linear) return { indexed: null, ownByX: own, benchRawByX: visibleBenchByX };
+    return { indexed: rebaseSeries(own, visibleBenchByX), ownByX: own, benchRawByX: visibleBenchByX };
+  }, [points, linear, visibleBenchByX]);
 
   /** ⚠ THE FOURTH ABSENCE, WHICH ONLY THE LEVEL CARDS HAVE: the two series may share no year where
    *  both values are positive, and `rebaseSeries` then refuses rather than inventing a base. The
    *  card still draws — in absolute units, which is the honest fallback — so this says which basis
    *  is on screen instead of reporting an empty series. */
-  const note = benchLabel
+  const note = !omitBenchmarkForRawSeries && benchLabel
     // ⚠ `false` — THIS CARD APPLIES NO FLOOR. `benchByX` is the blended rows as they arrived; the
     // coverage decision was made on the server. Claiming the floor here is a diagnosis this
     // component cannot make — see `benchNote`.
@@ -531,9 +542,10 @@ export default function MetricGrowthCard({
    *  neither decision belongs in a chart component. */
   const countLine = useMemo(() => memberCountLine({
     own: countFor(cfg.codes, memberCounts),
-    bench: countFor(cfg.codes, benchCounts),
-    isAgg, ownLabel, benchLabel, lang,
-  }), [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel, lang]);
+    bench: omitBenchmarkForRawSeries ? undefined : countFor(cfg.codes, benchCounts),
+    isAgg, ownLabel, benchLabel: omitBenchmarkForRawSeries ? null : benchLabel, lang,
+  }), [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel, lang,
+       omitBenchmarkForRawSeries]);
   /**
    * Why the INDEX has no forecast leg, in one short clause.
    *
@@ -569,15 +581,16 @@ export default function MetricGrowthCard({
    * span or not. A log axis chosen off a clipped view would silently drop the loss years outside it.
    */
   const statSpan = useMemo(
-    () => (benchReported?.length
+    () => (!omitBenchmarkForRawSeries && benchReported?.length
       ? sharedSpan(new Map(reported.map((p) => [p.year, p.value])),
                    new Map(benchReported.map((p) => [p.year, p.value])))
       : null),
-    [reported, benchReported]);
+    [reported, benchReported, omitBenchmarkForRawSeries]);
   /** ⚠ THE SAME CLIP ON BOTH SIDES, OR IT IS NOT ONE WINDOW. */
   const ownStat = useMemo(() => clipPoints(reported, statSpan), [reported, statSpan]);
   const benchStat = useMemo(
-    () => clipPoints(benchReported ?? [], statSpan), [benchReported, statSpan]);
+    () => clipPoints(omitBenchmarkForRawSeries ? [] : (benchReported ?? []), statSpan),
+    [benchReported, statSpan, omitBenchmarkForRawSeries]);
 
   const fit = useMemo(() => logLinearFit(ownStat), [ownStat]);          // growth only
   /** The index's own fit, through the IDENTICAL function over its own points — there is no
@@ -620,8 +633,8 @@ export default function MetricGrowthCard({
    * split the two branches have always had; the window is what is new.
    */
   const ratioStats = useMemo(
-    () => pairedSpan(new Map(points.map((p) => [p.year, p.value as number | null])), benchByX),
-    [points, benchByX]);
+    () => pairedSpan(new Map(points.map((p) => [p.year, p.value as number | null])), visibleBenchByX),
+    [points, visibleBenchByX]);
   const avg = ratioStats.own.avg;                                        // ratio only
   const latest = ratioStats.own.latest;
 
@@ -641,7 +654,7 @@ export default function MetricGrowthCard({
     if (plotBench) for (const x of plotBench.keys()) xs.add(x);
     // The forecast reaches PAST every reported year, so it extends the axis rather than
     // filling it. Its seed x already exists (it is the last actual).
-    for (const m of [forecastByX, benchForecastByX]) if (m) for (const x of m.keys()) xs.add(x);
+    for (const m of [forecastByX, visibleBenchForecastByX]) if (m) for (const x of m.keys()) xs.add(x);
     // ⚠ OFF THE **RAW** SERIES, NOT THE PLOTTED ONE. A rebase is one constant per series and
     // divides out of `v / prev`, so the step is the same number either way — but computing it on
     // the raw values means it cannot change when the axis flips to absolute on a sign change, and
@@ -656,7 +669,7 @@ export default function MetricGrowthCard({
     // the number worth reading. FY2027e is then against FY2026e — expectation on expectation,
     // and the row says "analyst est." so it cannot be mistaken for a realised step.
     const fcStep = forecastByX ? stepChanges(forecastByX) : null;
-    const bfcStep = benchForecastByX ? stepChanges(benchForecastByX) : null;
+    const bfcStep = visibleBenchForecastByX ? stepChanges(visibleBenchForecastByX) : null;
     return [...xs].sort((a, b) => a - b).map((year) => {
       const v = plotOwn.get(year) ?? null;
       const b = plotBench ? plotBench.get(year) ?? null : null;
@@ -672,7 +685,7 @@ export default function MetricGrowthCard({
       // whatever ratio the two happened to be at the anchor. That is a wrong number that still
       // draws a plausible line, which is the failure mode this card keeps removing.
       const fc = forecastByX?.get(year) ?? null;
-      const bfc = benchForecastByX?.get(year) ?? null;
+      const bfc = visibleBenchForecastByX?.get(year) ?? null;
       const scaleFc = (x: number | null, k: number) => (x == null ? null
         : linear ? x : (x > 0 ? x * k : null));
       return {
@@ -706,7 +719,8 @@ export default function MetricGrowthCard({
         benchForecast: scaleFc(bfc, benchScale),
       };
     });
-  }, [points, fit, linear, indexed, ownByX, benchRawByX, isAgg, forecastByX, benchForecastByX]);
+  }, [points, fit, linear, indexed, ownByX, benchRawByX, isAgg, forecastByX,
+      visibleBenchForecastByX]);
 
   // Log axis: pad the domain (multiplicatively) so the min/max points + trend endpoints don't clip.
   const logDomain = useMemo(() =>
@@ -771,7 +785,12 @@ export default function MetricGrowthCard({
       )}
 
       {metrics == null ? (
-        <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>
+        /* Reserve the finished chart's footprint.  All five growth cards share this component,
+           so opening a company no longer makes the grid's first two rows jump independently while
+           their one shared metrics request is in flight. */
+        <div className="h-[400px] flex items-center justify-center text-xs text-fg-subtle">
+          Loading…
+        </div>
       ) : points.length === 0 && isAgg && blendNote ? (
         // ⚠ THE HOLDINGS HAVE IT AND THE BLEND COULD NOT DRAW IT. Offering "fetch financials" here
         // would send the reader to spend GuruFocus quota on data that is already in the database.
@@ -1085,10 +1104,10 @@ export default function MetricGrowthCard({
                 {forecastByX && <Line dataKey="forecast" name="forecast" type="monotone"
                   stroke={chartTheme.accent} strokeWidth={2} strokeDasharray="4 3"
                   dot={{ r: 2.5, strokeDasharray: '0' }} connectNulls />}
-                {benchForecastByX && <Line dataKey="benchForecast" name="benchForecast" type="monotone"
+                {visibleBenchForecastByX && <Line dataKey="benchForecast" name="benchForecast" type="monotone"
                   stroke={chartTheme.pos} strokeWidth={2} strokeDasharray="4 3"
                   dot={{ r: 2, strokeDasharray: '0' }} connectNulls />}
-                {benchByX && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
+                {visibleBenchByX && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
@@ -1114,7 +1133,7 @@ export default function MetricGrowthCard({
                 <LegendItem color={chartTheme.accent} stroke="striped"
                   label={`${ownLabel} — analyst est.`} />
               )}
-              {benchForecastByX && (
+              {visibleBenchForecastByX && (
                 <LegendItem color={chartTheme.pos} stroke="striped"
                   label={`${benchLabel} — analyst est.`} />
               )}
@@ -1126,7 +1145,7 @@ export default function MetricGrowthCard({
                   tell "the index has no expectations" from "too few of its members are covered".
                   ⚠ ONLY WHEN WE ASKED AND IT DREW ITS ACTUAL — otherwise this would fire on a card
                   with no forecast configured, or on an index that failed to load at all. */}
-              {cfg.forecastCodes?.length && benchByX && !benchForecastByX && (
+              {cfg.forecastCodes?.length && visibleBenchByX && !visibleBenchForecastByX && (
                 <span className="text-fg-faint"
                   title={'Analysts do not cover enough of this index for a blended consensus. The '
                     + 'floor is the same one every other line on this tab clears, and a forecast '
@@ -1158,7 +1177,7 @@ export default function MetricGrowthCard({
                   in the LTM tooltip header, which is where someone asking "what twelve months is
                   this?" already looks, and it appears only when they actually differ. Do not
                   re-add it here without removing it there. */}
-              {benchByX && (
+              {visibleBenchByX && (
                 <LegendItem color={chartTheme.pos} label={benchLabel}
                   title={isRatio ? undefined
                     : indexed
@@ -1179,8 +1198,8 @@ export default function MetricGrowthCard({
         <HoldingsRevenueModal target={holdingsTarget} metric={cfg.benchmarkMetric} unit={cfg.unit}
           noun={cfg.noun} portfolioName={holdingsName} onClose={() => setShowHoldings(false)}
           seriesLabel={cfg.title}
-          benchLabel={benchByX ? benchLabel : null}
-          benchTarget={benchTarget ?? null} />
+          benchLabel={visibleBenchByX ? benchLabel : null}
+          benchTarget={visibleBenchByX ? (benchTarget ?? null) : null} />
       )}
     </div>
   );

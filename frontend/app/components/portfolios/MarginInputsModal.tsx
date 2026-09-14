@@ -6,8 +6,9 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { marginOf, type MarginInputs, type MarginRow } from './marginData';
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
-import { type BenchTarget } from './benchSeries';
+import { isUniverseTarget, type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
+import PortfolioFundamentalsRefresh from './PortfolioFundamentalsRefresh';
 
 /** The base inputs behind the FCF-SBC margin — THREE rows per company (Revenue, FCF, SBC), each in
  * the company's own reporting currency (millions), followed by the DERIVED margin the card plots.
@@ -38,11 +39,12 @@ const LINES: InputsLine<MarginRow>[] = [
   { label: 'SBC', of: (r, y) => r.sbc[y] },
 ];
 
-export default function MarginInputsModal({ target, portfolioName, benchTarget, benchLabel, onClose }: {
+export default function MarginInputsModal({ target, portfolioName, benchTarget, benchLabel, onRefreshed, onClose }: {
   target: Target; portfolioName?: string | null; onClose: () => void;
   /** The index the chart is drawn against, when one is ticked. Same endpoint, same table. */
   benchTarget?: BenchTarget | null;
   benchLabel?: string | null;
+  onRefreshed?: () => void;
 }) {
   const [data, setData] = useState<MarginInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -76,6 +78,7 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
   const [bench, setBench] = useState<MarginInputs | null>(null);
   const [benchErr, setBenchErr] = useState<string | null>(null);
+  const [benchReloadKey, setBenchReloadKey] = useState(0);
   const benchKey = benchTarget ? `${benchTarget.label}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
@@ -92,7 +95,7 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [benchKey]);
+  }, [benchKey, benchReloadKey]);
 
   /** Fetch a `no_data` holding's financials, then reload. Throws the stated reason otherwise, which
    *  the row renders — a fetch that loaded financials carrying none of these lines is a real
@@ -103,7 +106,9 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
       body: JSON.stringify({ isin, name }),
     });
     const j = (await r.json().catch(() => null)) as { status?: string; detail?: string } | null;
-    if (r.ok && j?.status === 'ingested') { setReloadKey((k) => k + 1); return; }
+    if (r.ok && j?.status === 'ingested') {
+      setReloadKey((k) => k + 1); setBenchReloadKey((k) => k + 1); onRefreshed?.(); return;
+    }
     throw new Error(j?.detail ?? j?.status ?? `HTTP ${r.status}`);
   };
 
@@ -138,7 +143,18 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
 
           {benchTarget && (
             <div className="space-y-1.5">
-              <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
+              <div className="flex items-baseline gap-3">
+                <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
+                {isUniverseTarget(benchTarget) && (
+                  <span className="ml-auto shrink-0">
+                    <PortfolioFundamentalsRefresh
+                      scope={{ kind: 'universe', label: benchTarget.label,
+                        name: benchLabel || benchTarget.label, feeds: 'smart' }}
+                      label="Refresh benchmark"
+                      onDone={() => { setBenchReloadKey((k) => k + 1); onRefreshed?.(); }} />
+                  </span>
+                )}
+              </div>
               {!bench && !benchErr && <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>}
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}
               {bench && (
@@ -152,7 +168,8 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
                     {bench.rows.filter((r) => r.status === 'ok').length} with figures feed the line,
                     renormalised each period
                   </p>
-                  <RatioInputsTable data={bench} lines={LINES} derived={derived} />
+                  <RatioInputsTable data={bench} lines={LINES} derived={derived}
+                    onFetch={fetchFinancials} />
                 </>
               )}
             </div>

@@ -582,7 +582,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
           + 'record of asking since. Press Refresh on this row.';
     }
     return (r.financials_fetched_at
-      ? `Checked ${longDate(r.financials_fetched_at)}: our imported GuruFocus data has no ${noun} `
+      ? `Last successful GuruFocus import: ${longDate(r.financials_fetched_at)}. It has no ${noun} `
         + 'for this period.'
       : `Our imported GuruFocus data has no ${noun} for this period. We have no record of WHEN it `
         + 'was last refreshed; press Refresh to stamp it.')

@@ -36,13 +36,15 @@ import CardHeading from './CardHeading';
  *  sees it. */
 const R = String.raw;
 
-export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
+export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget, onRefreshed }: {
   holdingsTarget: Target; holdingsName?: string | null;
   /** Tab-level toggle. ⚠ This card USED to subtract SBC unconditionally; it now follows
    *  the checkbox, and its title changes with it. */
   sbcCorrection?: boolean;
   /** The index to draw beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
+  /** Re-key the card after its drill-down refresh has populated new inputs. */
+  onRefreshed?: () => void;
 }) {
   const [data, setData] = useState<MarginInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -149,6 +151,7 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
       {showInputs && (
         <MarginInputsModal target={holdingsTarget} portfolioName={holdingsName}
           benchTarget={benchTarget} benchLabel={benchTarget?.label ?? null}
+          onRefreshed={onRefreshed}
           onClose={() => setShowInputs(false)} />
       )}
     </div>

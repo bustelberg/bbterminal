@@ -91,6 +91,20 @@ def _growth(s: dict[str, float]) -> float:
     return s["2025-12-31"] / s["2024-12-31"] - 1
 
 
+def test_repeated_share_unit_mismatches_reject_only_that_member():
+    """A vendor unit switch must not turn a benchmark's EPS history into a collapse."""
+    from routers.earnings import _unreliable_share_count_members
+
+    shares = {1: {"2017": 500_000.0, "2018": 600_000.0},
+              2: {"2017": 100.0, "2018": 100.0}}
+    per_share = {"eps_nri": {1: {"2017": 1.0, "2018": 1.0},
+                              2: {"2017": 2.0, "2018": 2.0}}}
+    totals = {"net_income": {1: {"2017": 2_000.0, "2018": 3_000.0},
+                              2: {"2017": 200.0, "2018": 200.0}}}
+
+    assert _unreliable_share_count_members(shares, per_share, totals) == {1}
+
+
 class TestTheCapIsOneDate:
     def test_a_one_company_book_grows_exactly_like_that_company_in_an_index(self, earnings):
         """⚠⚠ THE INVARIANT. With one member, `w·F/cap(T)` and `F` differ by a CONSTANT, so the two

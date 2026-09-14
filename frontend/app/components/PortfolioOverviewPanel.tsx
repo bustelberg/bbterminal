@@ -1050,6 +1050,16 @@ export default function PortfolioOverviewPanel() {
                         <div className="flex items-stretch gap-1.5">
                           {canAnalyse(r) && (
                             <button
+                              // A click can follow a hover by less than one animation frame, and a
+                              // touch screen has no hover at all. Start the shared request at
+                              // pointer-down as well: React still opens the modal on click, but by
+                              // then the same promise is already in flight. `prefetchAnalysis`
+                              // deduplicates this with hover/focus, so it never creates a second
+                              // backend computation.
+                              onPointerDown={() => {
+                                const id = r.fixed_portfolio_id;
+                                if (id != null) prefetchModelAnalysis(id);
+                              }}
                               onMouseEnter={() => {
                                 const id = r.fixed_portfolio_id;
                                 if (id != null) prefetchModelAnalysis(id);

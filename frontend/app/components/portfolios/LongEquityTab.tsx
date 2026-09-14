@@ -369,7 +369,8 @@ export default function LongEquityTab({
         // Old-charts tab was removed; the point of the module is the single definition).
         if (isAgg) {
           const out = await loadBlendMetrics<MetricsResponse>(
-            { basket, portfolioId, cadence }, (p) => { if (alive) setProgress(p); },
+            { basket, portfolioId, cadence, metrics: BLEND_METRICS },
+            (p) => { if (alive) setProgress(p); },
             ctrl.signal,
           );
           if (!alive) return;
@@ -379,7 +380,8 @@ export default function LongEquityTab({
           return;
         }
         const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}`
-          + `/metrics?cadence=${cadence}`, { signal: ctrl.signal });
+          + `/metrics?cadence=${cadence}&metric_keys=${encodeURIComponent(BLEND_METRICS.join(','))}`,
+        { signal: ctrl.signal });
         if (r.status === 404) { if (alive) setData({ metrics: [] }); return; }
         const b = await r.json().catch(() => null);
         if (!alive) return;
@@ -588,8 +590,8 @@ export default function LongEquityTab({
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
         {...growth} />
       {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
-      <MarginCard key={`margin-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
-      <CashReturnCard key={`cashret-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <MarginCard key={`margin-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} onRefreshed={onIngested} />
+      <CashReturnCard key={`cashret-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} onRefreshed={onIngested} />
       <DebtRatioCard key={`debt-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <InterestBurdenCard key={`intburden-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <MetricGrowthCard key={shares.title} cfg={shares}
