@@ -13,9 +13,7 @@ import { CAGR_BENCHMARKS, type CagrBenchmark } from './CagrTable';
 const COMPARE_VALUE = '__compare__';
 import { roicByYear, type CashReturnInputs } from './cashReturnData';
 import { investedCapitalBlend } from './investedCapitalData';
-import {
-  levelFromBlend, POSITIVE_ONLY_METRICS, type BlendMetricRow,
-} from './fundamentalBlend';
+import { levelFromBlend, type BlendMetricRow } from './fundamentalBlend';
 import { BLEND_CODES, BLEND_METRICS } from './LongEquityTab';
 import { traceEmpty } from '../../../lib/debugTrace';
 import {
@@ -34,7 +32,7 @@ import MarginInputsModal from './MarginInputsModal';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import InterestBurdenInputsModal from './InterestBurdenInputsModal';
-import { COPY, MEASURE_KEYS, RATE_KEYS, type MeasureKey, type TablesCopy } from './tablesCopy';
+import { COPY, MEASURE_KEYS, type MeasureKey, type TablesCopy } from './tablesCopy';
 import { AspectCard } from '../../../lib/tipCard';
 import { withWorked } from './workedFormula';
 import { latestCommonX, meanExcess, windowMean, type WindowMean } from './windowStats';
@@ -138,14 +136,7 @@ const MATRIX_ROWS: Partial<Record<MeasureKey, {
 // ⚠ `matrixPath` AND `blendOf` WENT ON 2026-09-04, and their absence is the change. This tab used
 // to fetch `portfolio-revenue-matrix` five times per side and rebuild each line with `buildBlend`;
 // it now reads the SERVER's line, the one `Graphs` charts. `MATRIX_ROWS` stays — it still names
-// each row's metric for the drill-down and for the positives-only footnote.
-
-/** The rows whose series is drawn from a FILTERED set of companies — see the footnote clause and
- *  `earnings._POSITIVE_ONLY_METRICS`. ⚠ DERIVED FROM `MATRIX_ROWS`, so it names rows by the metric
- *  they actually fetch rather than by a second list that can go stale against it. */
-const POSITIVE_ONLY_ROWS: readonly MeasureKey[] = (
-  Object.entries(MATRIX_ROWS) as [MeasureKey, { metric: string }][]
-).filter(([, v]) => POSITIVE_ONLY_METRICS.has(v.metric)).map(([k]) => k);
+// each row's metric for the drill-down.
 
 /**
  * ALL A RATE ROW NEEDS OF A LINE — the level, by period.
@@ -695,7 +686,6 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const arriving = (bookPayload: unknown, benchPayload: unknown) =>
     !err && !index.err && (bookPayload == null || benchPayload == null);
 
-  const ready = marginData && roicData && bookLine;
   const th = 'px-2.5 py-1 font-medium text-right whitespace-nowrap';
 
   /**
@@ -988,8 +978,6 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
       {index.err && (
         <p className="text-xs text-warn-300">{benchLabel}: {index.err}</p>
       )}
-      {!ready && !err && <p className="text-xs text-fg-subtle">{copy.loading}</p>}
-
       {/* ⚠⚠ `w-fit`, NOT `w-full` — THE STRETCH WAS THE WHITESPACE. Seven columns of short
           percentages under `w-full` are spread across the whole modal, so most of the table is the
           gaps between its own numbers and the eye has to travel the width of the dialog to read one
@@ -1002,11 +990,21 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
       {/* ⚠ ZERO ROWS IS A STATE, NOT A BUG — and unlike zero WINDOWS it costs nothing structurally,
           so the chips stay free rather than the last one locking. It just has to say so: a bordered
           box containing nothing but column headings reads as a failed load. */}
-      {ready && shownM.size === 0 && (
+      {shownM.size === 0 && (
         <p className="text-xs text-fg-subtle">{copy.noRows}</p>
       )}
 
-      {ready && shownM.size > 0 && (
+      {/*
+          Render the grid as soon as this tab opens.  Each row owns a distinct payload and
+          `RateCell` / `MeanCell` already distinguish an in-flight request (animated dots) from
+          a completed absence (a static dash or ellipsis).  Holding the entire table behind the
+          slowest ratio request made the fast Graphs blend invisible even when it was already in
+          the shared read cache.
+
+          The five CAGR rows use the identical `fundamental-blend-metrics` request body as Graphs,
+          so after Graphs has rendered they resolve from that cache with no second API call.
+      */}
+      {shownM.size > 0 && (
         <div className="w-fit max-w-full overflow-auto rounded-lg border border-neutral-800/40">
           <table className="text-xs">
             <thead className="bg-page">
@@ -1105,32 +1103,6 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
           </table>
         </div>
       )}
-
-      {/* ⚠ THE FOOTNOTE FOLLOWS THE CHIPS. It used to assert two things unconditionally — that the
-          headings read "5y/10y" and that the expectation is "centred across both columns" — and
-          either can now be false. A note explaining a row that is switched off, or naming a column
-          that is not on screen, is worse than no note: it is the part of the page a reader turns to
-          precisely when they doubt what they are seeing. */}
-      {/* ⚠ A `<div>`, NOT A `<p>` — AND THAT IS A CORRECTNESS FIX, NOT A STYLING ONE. This footnote
-          embeds an `InfoTip`, whose `TipCard` is built from `<div>`s, and a `<div>` inside a `<p>`
-          is invalid HTML: the browser's parser CLOSES the paragraph at the opening div, so the
-          server's markup and React's tree disagree and hydration fails outright. It only surfaced
-          once the "why they differ" tip was added to the prose. `leading-snug`/`max-w` carry over
-          unchanged; nothing about the rendering was meant to move. */}
-      <div className="text-[11px] text-fg-faint leading-snug max-w-[54rem]">
-        {copy.footnote({
-          windows: shown,
-          showEps: on('epsFwd'),
-          // ⚠ ANY rate row, not just FCF/share — the clause is about every one of them.
-          showFcf: RATE_KEYS.some(on),
-          showPrice: on('priceCagr'),
-          // ⚠ THE ROWS THE MEMBER RULE ACTUALLY APPLIES TO, asked of `POSITIVE_ONLY_ROWS` rather
-          // than listed here — the set lives beside the metric keys it names, so a metric joining
-          // or leaving the rule cannot leave this sentence claiming the wrong rows.
-          showFiltered: POSITIVE_ONLY_ROWS.some(on),
-          whyLink: <InfoTip text={copy.whyDiffer}>{copy.whyDifferLabel}</InfoTip>,
-        })}
-      </div>
 
       {/* ⚠⚠ THE GROUND NUMBERS — the SAME panel the matching Long Equity card opens, never a second
           inspector. See `MATRIX_ROWS`. Each reads the endpoint this table read, so what a reader

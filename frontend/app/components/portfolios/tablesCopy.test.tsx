@@ -12,23 +12,15 @@
  * survives untranslated. Keeping the mechanism with nothing in it is the point — the next genuine
  * overlap has to be added deliberately rather than slipping through as an oversight.
  *
- * Pure — no DOM, rendered through `renderToStaticMarkup` (Node by design; see `vitest.config`).
+ * Pure — no DOM required.
  */
-import { renderToStaticMarkup } from 'react-dom/server';
-
 import { describe, expect, it } from 'vitest';
 
 import { LANGS, type Lang } from '../../../lib/i18n';
-import { COPY, MEASURE_KEYS, RATE_KEYS, type TablesCopy } from './tablesCopy';
+import { COPY, MEASURE_KEYS, RATE_KEYS } from './tablesCopy';
 
 /** Strings that are legitimately identical in both languages. Every entry is a decision. */
 const SHARED = new Set<string>([]);
-
-const foot = (c: TablesCopy, o: Partial<Parameters<TablesCopy['footnote']>[0]> = {}) =>
-  renderToStaticMarkup(<>{c.footnote({
-    windows: [5, 10], showEps: true, showFcf: true, showPrice: true, showFiltered: true,
-    whyLink: 'WHYLINK', ...o,
-  })}</>);
 
 describe('both languages are complete', () => {
   it.each(LANGS)('%s has a non-empty string for every row', (lang: Lang) => {
@@ -109,9 +101,6 @@ describe('both languages are complete', () => {
     check('showRow', en.showRow('X'), nl.showRow('X'));
     check('rateTip', en.rateTip('FY2020', 'FY2025', 5), nl.rateTip('FY2020', 'FY2025', 5));
     check('meanTip', en.meanTip(4, 'FY2021', 'FY2025', 5), nl.meanTip(4, 'FY2021', 'FY2025', 5));
-    check('whyDiffer', en.whyDiffer, nl.whyDiffer);
-    check('whyDifferLabel', en.whyDifferLabel, nl.whyDifferLabel);
-    check('footnote', foot(en), foot(nl));
     for (const k of MEASURE_KEYS) {
       check(`chip.${k}`, en.chip[k], nl.chip[k]);
       check(`rowLabel.${k}`, en.rowLabel[k], nl.rowLabel[k]);
@@ -155,87 +144,6 @@ describe('the interpolated strings actually interpolate', () => {
     expect(c.title([5])).toContain('5');
     // Both windows shown: the heading spells them out rather than printing "5"…
     expect(c.title([5, 10])).not.toBe(c.title([5]));
-  });
-});
-
-describe('the year suffix is one value, used everywhere', () => {
-  /**
-   * ⚠⚠ THE FOOTNOTE NAMES A MARKER THAT IS RENDERED ELSEWHERE. It says the expectation row is
-   * "marked 3y on the figure", while the badge itself is drawn by `RateCell` from
-   * `copy.yearSuffix`. In Dutch those are `3j` — and if the footnote kept a hardcoded `3y` the note
-   * would point at something not on screen, which is the one kind of footnote worse than none:
-   * it is what a reader consults precisely when they doubt what they are seeing.
-   */
-  it.each(LANGS)('%s footnote marks the same suffix the badge uses', (lang: Lang) => {
-    const c = COPY[lang];
-    expect(foot(c)).toContain(`<code class="text-fg-subtle">3${c.yearSuffix}</code>`);
-  });
-
-  it.each(LANGS)('%s footnote names the shown windows with that suffix', (lang: Lang) => {
-    const c = COPY[lang];
-    const html = foot(c, { windows: [10] });
-    expect(html).toContain(`10${c.yearSuffix}`);
-    expect(html).not.toContain(`5${c.yearSuffix}`);
-  });
-});
-
-describe('the footnote follows the chips', () => {
-  /**
-   * ⚠ A NOTE EXPLAINING A ROW THAT IS SWITCHED OFF IS WORSE THAN NO NOTE — the original ⚠ on this
-   * paragraph in `TablesTab`. Both language versions have to honour it, and a translation is
-   * exactly where a conditional gets flattened into prose by accident.
-   */
-  it.each(LANGS)('%s drops the expectation clause when that row is off', (lang: Lang) => {
-    const c = COPY[lang];
-    expect(foot(c, { showEps: false })).not.toContain('2031e');
-    expect(foot(c, { showEps: true })).toContain('2031e');
-  });
-
-  it.each(LANGS)('%s drops the CAGR clause when that row is off', (lang: Lang) => {
-    const c = COPY[lang];
-    expect(foot(c, { showFcf: false })).not.toContain('WHYLINK');
-    expect(foot(c, { showFcf: true })).toContain('WHYLINK');
-  });
-
-  /**
-   * ⚠ ASSERTED ON LENGTH, NOT ON A TOKEN. The other two clauses happen to contain something
-   * language-neutral to look for (`2031e`, the injected `WHYLINK`); this one is prose in both
-   * languages with no shared word, and picking an English phrase to grep for would pass a Dutch
-   * footnote that had quietly lost the clause.
-   */
-  it.each(LANGS)('%s drops the price clause when that row is off', (lang: Lang) => {
-    const c = COPY[lang];
-    expect(foot(c, { showPrice: false }).length)
-      .toBeLessThan(foot(c, { showPrice: true }).length);
-  });
-
-  /**
-   * ⚠⚠ THE MEMBER RULE HAS TO BE SAID IN THE PROSE, IN BOTH LANGUAGES. `fcf_ps` and `eps_nri` are
-   * drawn only from the companies positive in every period — a filter that DELETES COMPANIES and
-   * leaves a line looking exactly like an ordinary one. The cards print their own "n of m"; a
-   * table of rates has nowhere to put one per row, so this sentence is the only place a reader of
-   * this tab can learn it. A translation that quietly loses a conditional clause is exactly how it
-   * would go missing for half the users.
-   */
-  it.each(LANGS)('%s states the positives-only member rule when those rows are on', (lang: Lang) => {
-    const c = COPY[lang];
-    // ⚠ ASSERTED ON LENGTH, NOT ON A TOKEN — the same reason the price-clause test below is:
-    // this clause is prose in both languages and names its rows the way each table labels them
-    // ("EPS" / "Winst per aandeel"), so an English phrase to grep for would pass a Dutch footnote
-    // that had quietly lost the clause. What it must not do is disappear.
-    expect(foot(c, { showFiltered: true }).length)
-      .toBeGreaterThan(foot(c, { showFiltered: false }).length);
-    // ⚠ AND IT MUST NAME BOTH FILTERED ROWS, not just the one the reader happened to open. Two
-    // `<strong>` runs is the shape that says so without pinning either language's wording.
-    expect((foot(c, { showFiltered: true }).match(/<strong>/g) ?? []).length)
-      .toBeGreaterThan((foot(c, { showFiltered: false }).match(/<strong>/g) ?? []).length + 1);
-  });
-
-  it.each(LANGS)('%s only claims the figure is centred when two columns are shown', (lang: Lang) => {
-    const c = COPY[lang];
-    const one = foot(c, { windows: [5] });
-    const two = foot(c, { windows: [5, 10] });
-    expect(two.length).toBeGreaterThan(one.length);
   });
 });
 
