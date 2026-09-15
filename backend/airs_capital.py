@@ -269,7 +269,11 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
             p.sales += 1
             p.realised_result_eur = round(p.realised_result_eur + t.realised_ytd_eur, 2)
             p.prior_year_eur = round(p.prior_year_eur + t.prior_year_eur, 2)
-            p.avg_capital_eur -= t.eur * w
+            # A sale removes the capital that was invested, not the sale proceeds. The difference
+            # is this year's return and must stay in the numerator. Using proceeds made an early
+            # profitable full sale appear to have negative capital, so its money-weighted return
+            # was hidden. `proceeds - Res. YtD` is AIRS's value at the start of this year.
+            p.avg_capital_eur -= (t.eur - t.realised_ytd_eur) * w
             if t.datum:
                 p.first_sale = t.datum if p.first_sale is None else min(p.first_sale, t.datum)
                 p.last_sale = t.datum if p.last_sale is None else max(p.last_sale, t.datum)
