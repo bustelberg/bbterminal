@@ -17991,6 +17991,7 @@ export interface operations {
             query?: {
                 force?: boolean;
                 feeds?: string;
+                prices?: boolean;
             };
             header?: never;
             path: {
@@ -18156,6 +18157,7 @@ export interface operations {
                 limit?: number;
                 feeds?: string;
                 force?: boolean;
+                prices?: boolean;
             };
             header?: never;
             path: {
@@ -19164,6 +19166,7 @@ export interface operations {
         parameters: {
             query?: {
                 cadence?: string;
+                metric_keys?: string | null;
             };
             header?: never;
             path: {

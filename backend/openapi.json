@@ -22390,6 +22390,16 @@
               "title": "Feeds",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "prices",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Prices",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -22667,6 +22677,16 @@
             "schema": {
               "default": false,
               "title": "Force",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "prices",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Prices",
               "type": "boolean"
             }
           }
@@ -24008,6 +24028,22 @@
               "default": "annual",
               "title": "Cadence",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "metric_keys",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Metric Keys"
             }
           }
         ],
