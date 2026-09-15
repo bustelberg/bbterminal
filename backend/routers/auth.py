@@ -58,11 +58,16 @@ router = APIRouter(tags=["auth"])
 # migrations still carry the OLD list and must not be edited: they record what already ran.
 # Pinned by tests/test_admin_email_hashes.py, which reads the newest definition.
 #
-# ⚠⚠ IT WENT FROM TWO ADDRESSES TO ONE (2026-09-08, on request): reinier7175@gmail.com keeps the
-# automatic grant, reinier@bustelberg.nl was demoted to a plain user by that migration. Dropping
-# the hash alone would have done nothing — the row carried an EXPLICIT role, and `_resolve_role`
-# prefers an explicit role to this allowlist on purpose. ⚠ The cost is that there is now ONE admin,
-# so the two-account 2FA recovery path (one admin resetting the other's authenticator) is gone.
+# ⚠⚠ IT WENT FROM TWO ADDRESSES TO ONE (2026-09-08, on request): `5db5e759…` keeps the automatic
+# grant, `9fe083c7…` was demoted to a plain user by that migration. Dropping the hash alone would
+# have done nothing — the row carried an EXPLICIT role, and `_resolve_role` prefers an explicit
+# role to this allowlist on purpose. ⚠ The cost is that there is now ONE admin, so the two-account
+# 2FA recovery path (one admin resetting the other's authenticator) is gone.
+#
+# ⚠⚠ REFER TO THEM BY HASH PREFIX, NEVER BY ADDRESS. 20260527010000 moved to SHA-256 "so admin
+# emails no longer appear in source", and a comment naming the preimage hands that straight back —
+# which is what this one did until 2026-09-14. `tests/test_admin_email_hashes.py` now hashes every
+# email-shaped token under the source roots and fails if one lands in this set.
 #
 # ⚠⚠ THE FUNCTION WAS ATTACHED TO NOTHING UNTIL 20260908090000 — both earlier migrations
 # create it and neither wrote CREATE TRIGGER, so a signup never set app_metadata.role and

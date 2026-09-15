@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import { fcfLabel } from './sbcCorrection';
 import MarginInputsModal from './MarginInputsModal';
 import { marginByYear, paddedDomain, type MarginInputs , xToPeriod } from './marginData';
@@ -35,13 +36,15 @@ import CardHeading from './CardHeading';
  *  sees it. */
 const R = String.raw;
 
-export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
+export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget, onRefreshed }: {
   holdingsTarget: Target; holdingsName?: string | null;
   /** Tab-level toggle. ⚠ This card USED to subtract SBC unconditionally; it now follows
    *  the checkbox, and its title changes with it. */
   sbcCorrection?: boolean;
   /** The index to draw beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
+  /** Re-key the card after its drill-down refresh has populated new inputs. */
+  onRefreshed?: () => void;
 }) {
   const [data, setData] = useState<MarginInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -98,7 +101,8 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : marginByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No revenue / FCF ingested to compute a margin.</p>
+          <MissingFundamentals message="No revenue / FCF ingested to compute a margin."
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
@@ -147,6 +151,7 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
       {showInputs && (
         <MarginInputsModal target={holdingsTarget} portfolioName={holdingsName}
           benchTarget={benchTarget} benchLabel={benchTarget?.label ?? null}
+          onRefreshed={onRefreshed}
           onClose={() => setShowInputs(false)} />
       )}
     </div>

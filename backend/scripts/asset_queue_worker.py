@@ -10,8 +10,8 @@ the queue is empty.
 
 Run EXACTLY ONE worker — this OR the in-process scheduler job, never both (two
 would compete for the Yahoo throttle and re-introduce throttle-corrupted
-resolutions). The in-process job is OFF unless ASSET_QUEUE_INPROCESS=1, so this
-standalone script is the default worker.
+resolutions). The in-process job is ON by default; use this standalone script
+only when the backend is started with ASSET_QUEUE_INPROCESS=0.
 """
 from __future__ import annotations
 

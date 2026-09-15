@@ -273,6 +273,15 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
             rows += n
             unchanged += getattr(r, "rows_unchanged", 0) or 0
             calls += getattr(r, "api_calls", 0) or 0
+            # A fetcher reports a vendor-side failure as an EarningsResult rather than raising:
+            # e.g. GuruFocus can answer HTTP 200 with its empty financials template.  Treating
+            # that as a completed ``fin 0`` made the job/toast look successful even though no
+            # statement had been loaded.  Preserve the calls and prior completed feeds in the
+            # result, but surface this feed's actual failure to the job caller.
+            error = getattr(r, "error", None)
+            if error:
+                return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
+                        "error": f"{tag}: {error}", "stopped": False}
             done.append(f"{tag} {n}")
         return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
                 "error": None, "stopped": False}

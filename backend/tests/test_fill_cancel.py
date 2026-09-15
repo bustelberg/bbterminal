@@ -85,6 +85,10 @@ def rig(monkeypatch):
     monkeypatch.setattr(blend_cache, "invalidate",
                         lambda: state.__setitem__("blend_invalidated",
                                                   state["blend_invalidated"] + 1))
+    # The completion receipt now counts reported EPS/FCF rows.  Its database
+    # read is not part of cancellation semantics, so the pure cancellation
+    # harness supplies the empty receipt explicitly.
+    monkeypatch.setattr(fill, "_reported_coverage", lambda _ids, _codes: 0)
     # ⚠ ONE WORKER, so "which companies ran" is deterministic. Concurrency is what the real thing
     # does; it is not what these assertions are about.
     monkeypatch.setattr(fill, "FILL_WORKERS", 1)

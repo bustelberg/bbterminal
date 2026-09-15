@@ -16,6 +16,7 @@ import { clipPoints, sharedSpan } from './windowStats';
 import { cagrPct } from './lineCagr';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import InvestedCapitalInputsModal from './InvestedCapitalInputsModal';
 import { investedCapitalIndexByYear, investedCapitalSeries } from './investedCapitalData';
 import { paddedLogDomain, stepChanges, xToPeriod, type Step } from './marginData';
@@ -201,7 +202,8 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : points.length === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No invested-capital figures ingested for this {isAgg ? 'portfolio' : 'company'}.</p>
+        <MissingFundamentals message={`No invested-capital figures ingested for this ${isAgg ? 'portfolio' : 'company'}.`}
+          target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <div className="flex flex-wrap gap-2">

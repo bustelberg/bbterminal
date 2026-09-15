@@ -43,7 +43,7 @@ def main() -> int:
     # ⚠ AAPL, DELIBERATELY: the biggest, best-covered company the vendor has. If this one is empty
     # the answer is never "that company has no data", which is exactly the doubt a thin constituent
     # leaves behind.
-    real = _api_request(_build_api_url("stock/AAPL/financials", {"order": "desc"})).data
+    real = _api_request(_build_api_url("stock/AAPL/financials")).data
     canary = _api_request(_build_api_url("stock/AAPL/__canary__")).data
 
     n = _values(real)

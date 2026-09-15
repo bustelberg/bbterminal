@@ -2,6 +2,7 @@
 
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/apiFetch';
+import { dialog } from '../../lib/dialog';
 import { Provenance, type SourceKey } from '../../lib/provenance';
 import { SnapshotAge } from '../../lib/snapshotAge';
 import { VARIANT_FILTERS } from './portfolioVariants';
@@ -1292,6 +1293,10 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
 }) {
   const t = useMgmtCopy().models;
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
+  // A renamed target should read as its new name immediately. The parent reload then replaces this
+  // small optimistic map with the server's canonical display name.
+  const [renamed, setRenamed] = useState<Record<number, string>>({});
 
   // Cash is not a holding, so it cannot be a portfolio.
   if (!p.isin && (p.fonds ?? '').toLowerCase().includes('liquiditeit')) {
@@ -1318,14 +1323,15 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
     : options;
   // The full "Name (count)" — the select clips long *TopSelectie names, so the count also lives
   // in the tooltip where it can never be truncated away.
+  const linkedName = linkedOpt ? (renamed[linkedOpt.id] ?? linkedOpt.name) : undefined;
   const linkedLabel = linkedOpt
-    ? `${linkedOpt.name}${linkedOpt.positions ? ` (${linkedOpt.positions})` : ''}`
+    ? `${linkedName}${linkedOpt.positions ? ` (${linkedOpt.positions})` : ''}`
     : undefined;
 
   const save = async (raw: string) => {
     setBusy(true);
     try {
-      await apiFetch(`${API_URL}${linkBase}/link`, {
+      const response = await apiFetch(`${API_URL}${linkBase}/link`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1336,6 +1342,8 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
           linked_portfolio_id: raw === '' ? null : Number(raw),
         }),
       });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setEditing(false);
       onSaved();
     } finally {
       setBusy(false);
@@ -1350,6 +1358,28 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
         `?isin=${encodeURIComponent(p.isin ?? '')}&fonds=${encodeURIComponent(p.fonds ?? '')}`,
         { method: 'DELETE' },
       );
+      onSaved();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const nameLinkedPortfolio = async () => {
+    if (!linkedOpt) return;
+    const next = await dialog.prompt(
+      `Readable name for ${linkedOpt.code ?? linkedOpt.name}. Leave empty to show AIRS's code.`,
+      { title: 'Name linked portfolio', defaultValue: linkedName ?? '', placeholder: linkedOpt.name },
+    );
+    if (next == null) return;
+    setBusy(true);
+    try {
+      const response = await apiFetch(
+        `${API_URL}/api/airs/model-portfolios/${linkedOpt.id}/display-name`,
+        { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ display_name: next.trim() || null }) },
+      );
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      setRenamed((names) => ({ ...names, [linkedOpt.id]: next.trim() || linkedOpt.code || linkedOpt.name }));
       onSaved();
     } finally {
       setBusy(false);
@@ -1382,25 +1412,46 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
   return (
     <td className="px-3 py-1.5 whitespace-nowrap">
       <span className="inline-flex items-center gap-1.5">
-        <select
-          value={value}
-          disabled={busy}
-          onChange={(e) => void save(e.target.value)}
-          title={linkedLabel}
-          className={`bg-page border rounded-lg px-1.5 py-0.5 text-[12px] w-[15rem] focus:border-accent-500 disabled:opacity-50 ${
-            p.linked_portfolio_id != null
-              ? 'border-accent-600/40 text-accent-400'
-              : 'border-neutral-800/40 text-fg-faint'
-          }`}
-        >
-          <option value="">{t.notAPortfolio}</option>
-          {shown.map((o) => (
-            <option key={o.id} value={o.id}
-              title={o.code && o.code !== o.name ? `${o.name} — AIRS: ${o.code}` : undefined}>
-              {o.name}{o.positions ? ` (${o.positions})` : ''}
-            </option>
-          ))}
-        </select>
+        {editing ? (
+          <select
+            autoFocus value={value}
+            disabled={busy}
+            onChange={(e) => void save(e.target.value)}
+            onBlur={() => setEditing(false)}
+            title={linkedLabel}
+            className={`bg-page border rounded-lg px-1.5 py-0.5 text-[12px] w-[15rem] focus:border-accent-500 disabled:opacity-50 ${
+              p.linked_portfolio_id != null
+                ? 'border-accent-600/40 text-accent-400'
+                : 'border-neutral-800/40 text-fg-faint'
+            }`}
+          >
+            <option value="">{t.notAPortfolio}</option>
+            {shown.map((o) => (
+              <option key={o.id} value={o.id}
+                title={o.code && o.code !== o.name ? `${o.name} — AIRS: ${o.code}` : undefined}>
+                {renamed[o.id] ?? o.name}{o.positions ? ` (${o.positions})` : ''}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <button type="button" disabled={busy} onClick={() => setEditing(true)}
+            title={linkedLabel ? `Linked to ${linkedLabel}. Click to change the link.`
+              : 'Link this certificate to the model portfolio it represents.'}
+            className={`rounded-lg border px-2 py-0.5 text-[12px] transition-colors disabled:opacity-50 ${
+              linkedLabel
+                ? 'border-accent-600/40 text-accent-400 hover:bg-accent-500/10'
+                : 'border-neutral-800/40 text-fg-subtle hover:border-accent-600/40 hover:text-accent-300'
+            }`}>
+            {linkedLabel ?? 'Link certificate…'}
+          </button>
+        )}
+        {linkedOpt && (
+          <button type="button" disabled={busy} onClick={() => void nameLinkedPortfolio()}
+            title={`Set the readable name for ${linkedOpt.code ?? linkedOpt.name}.`}
+            className="text-[12px] text-fg-faint hover:text-accent-400 disabled:opacity-50">
+            ✎
+          </button>
+        )}
 
         {/* The confidence belongs to the GUESS. A low one is not a worse link — it is a link we
             are not sure about, and the two must not look the same. */}

@@ -42,6 +42,19 @@ class TestOneVocabulary:
         assert 'table("asset_grid")' in src
 
 
+class TestAirsCategoryMapping:
+    """AIRS model positions use Dutch display labels in the current feed."""
+
+    @pytest.mark.parametrize("raw, expected", [
+        ("AAND", "Equity"), ("Aandelen", "Equity"),
+        ("OBL", "Bonds"), ("Obligaties", "Bonds"),
+        ("VAS", "Alternatives"), ("Alternatieven", "Alternatives"),
+        ("Liquiditeiten", "Cash"),
+    ])
+    def test_codes_and_display_labels_are_asset_classes(self, raw, expected):
+        assert pa._class_from_categorie(raw) == expected
+
+
 class TestFundsAreNotLookedThrough:
     """⚠ THE BUCKET THAT KEEPS THE CHART HONEST.
 
@@ -734,6 +747,7 @@ class TestBookWeighting:
                     "market_cap_currency": "USD", "asset_class": "equity"},
         })
         monkeypatch.setattr(pa, "_country_by_code", lambda: {})
+        monkeypatch.setattr(pa, "ref_positions_for", lambda _id: [])
 
     def test_weights_come_from_eur_value_not_count(self, monkeypatch):
         self._wire(monkeypatch, rows=[
@@ -769,6 +783,24 @@ class TestBookWeighting:
         out = pa._book_port_items(7, {})
         pw = pa._weigh(out["items"])
         assert set(pw["sector"]) == {"Financials"}   # the grid's word, not AIRS's
+
+    def test_missing_persisted_bucket_uses_the_shared_asset_classifier(self, monkeypatch):
+        self._wire(monkeypatch, rows=[
+            {"isin": "US1", "current_value_eur": 100, "asset_class": None},
+        ])
+        out = pa._book_port_items(7, {})
+        assert out["alloc_items"] == [(100.0, "Equity")]
+
+    def test_unclassified_book_row_uses_paired_model_category_when_grid_is_empty(self, monkeypatch):
+        self._wire(monkeypatch, rows=[
+            {"isin": "US1", "current_value_eur": 100, "bucket": "Unclassified"},
+        ])
+        monkeypatch.setattr(pa, "ref_positions_for", lambda _id: [
+            {"isin": "US1", "categorie": "Aandelen"},
+        ])
+        monkeypatch.setattr(pa, "_grid", lambda _isins: {})
+        out = pa._book_port_items(7, {})
+        assert out["alloc_items"] == [(100.0, "Equity")]
 
     def test_cash_is_its_own_bucket(self, monkeypatch):
         self._wire(monkeypatch, rows=[

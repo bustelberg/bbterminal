@@ -161,6 +161,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
     void watchJob(live.id, `${scope.name} fundamentals`).then((job) => {
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
+        window.dispatchEvent(new Event('bb:fundamentals-finished'));
         onDone?.();
       }
       setBusy(false);
@@ -184,36 +185,13 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
       const holdings = scope.kind === 'company' ? [{ isin: scope.isin }]
         : scope.kind === 'basket' ? scope.holdings.map((h) => ({ isin: h.isin }))
           : null;
-      /**
-       * ⚠⚠ THE INDEX IS NOT FORCED, AND THAT ASYMMETRY IS THE POINT.
-       *
-       * A book is ~20 holdings and `only_due=true` bounds a forced press to the companies that
-       * could plausibly have filed since we last looked — usually none, often a handful. An index
-       * is 206 constituents on the S&P and ~1,900 on ACWI, with no due-filter on that endpoint: a
-       * forced press from a chart drill-down would be a four-figure quota spend nobody asked for.
-       * Un-forced, it fills exactly the constituents MISSING the statements feed, which is what
-       * makes the benchmark line cover more of its index — the reason to press it.
-       *
-       * ⚠ SO IT CANNOT REFRESH A CONSTITUENT WE ALREADY HOLD, EVEN A STALE ONE, and the button
-       * says so. `needs()` answers "is the sentinel row present", not "is it current" — the
-       * deliberate full reload lives on the /benchmarks fundamentals grid, which is that page's
-       * whole subject.
-       */
-      /**
-       * ⚠⚠ WHICH FEED AN INDEX FILL SPENDS ON, AND THE DEFAULT IS STILL `statements`.
-       *
-       * `statements` is one call per constituent and fills every column the fundamentals grid
-       * and the reported side of the Long Equity tab draw. It never asks for a consensus — so an
-       * index's analyst-expectation line can never appear however often that button is pressed.
-       *
-       * `estimates` is the targeted fill for exactly that: one call per constituent MISSING a
-       * consensus and none for the rest. Measured 2026-08-14 on ACWI — 351 of 1,715 charted names
-       * carry one, so it is ~1,364 calls against the ~5,145 that fetching all three feeds for
-       * every constituent would cost, of which two thirds would refill data already held.
-       */
       const url = scope.kind === 'universe'
         ? `${API_URL}/api/benchmarks/index/${encodeURIComponent(scope.label)}/fundamentals/ingest/job`
-          + (scope.feeds ? `?feeds=${scope.feeds}` : '')
+          // This is the Graphs tab's explicit Refresh benchmark control. It must refresh every
+          // series it shows — reported statements (income/balance sheet/cash flow), estimates,
+          // indicators and daily prices — for every reachable constituent. A smart/missing-only
+          // pass leaves existing-but-old FCF/share cells untouched and makes this button lie.
+          + '?force=true&feeds=all&prices=true'
         : holdings
           ? `${API_URL}/api/airs/basket/fundamentals/ingest/job${q}`
           : `${API_URL}/api/airs/model-portfolios/${(scope as { id: number }).id}`
@@ -266,6 +244,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
       // pre-fill book — a refresh button that visibly does nothing.
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
+        window.dispatchEvent(new Event('bb:fundamentals-finished'));
         onDone?.();
       }
     } catch (e) {
@@ -323,28 +302,20 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
             : 'Stop the fill. Work still queued is dropped at once and the three companies in flight '
               + 'stop at their next feed boundary, seconds away. Everything loaded so far is kept — '
               + 'press again later and it carries on from there.')
-          : (scope.kind === 'company'
+          : ((scope.kind === 'company'
             ? `Fetch the latest GuruFocus fundamentals for ${scope.name}, if it could plausibly have `
               + 'filed since we last looked. One API call, and none at all when its next quarter '
               + 'cannot be out yet.'
             : scope.kind === 'universe'
-              // ⚠⚠ IT USED TO SAY WHAT IT WOULD *NOT* DO, AND THAT SENTENCE IS NOW FALSE UNDER
-              // `smart`. The old index fill was un-forced, so it could add a missing constituent
-              // and never update one we already held — press it twice and the second press was free
-              // and changed nothing. Smart mode decides per feed on whether anything NEW can exist
-              // (a filing due, a consensus older than a week), so it does update, and a second
-              // press really is free rather than merely refusing.
-              ? `Refresh the ${scope.name} constituents: for each one, exactly the GuruFocus feeds `
-                + 'it is MISSING or that can plausibly have changed — statements when a new fiscal '
-                + 'period is due, the analyst consensus and the forward-P/E series when our copy is '
-                + 'over a week old. A constituent with nothing new costs no call at all, and one on '
-                + 'an exchange outside the GuruFocus subscription is refused before a call is spent. '
-                + 'It is the per-row Refresh below, run across the index.'
+              ? `Refresh all reachable ${scope.name} constituents: their financial statements, cash `
+                + 'flow and balance sheet, analyst estimates, indicators and daily share prices. '
+                + 'This updates every Graphs card; exchanges outside the GuruFocus subscription are '
+                + 'skipped without spending a call.'
               : `Fetch the latest GuruFocus fundamentals for every company in ${scope.name} that could `
                 + 'plausibly have filed since we last looked — one API call each, and none for a '
                 + 'company whose next quarter cannot be out yet.')
             + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
-            + 'and carry on if you close this.'}
+            + 'and carry on if you close this.')}
         className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors
                     disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
           ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'

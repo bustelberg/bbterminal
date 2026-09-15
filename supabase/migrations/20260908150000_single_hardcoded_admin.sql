@@ -1,5 +1,10 @@
--- ⚠⚠ ONE HARDCODED ADMIN, NOT TWO (2026-09-08, on request). `reinier7175@gmail.com` keeps the
--- automatic grant; `reinier@bustelberg.nl` becomes an ordinary user.
+-- ⚠⚠ ONE HARDCODED ADMIN, NOT TWO (2026-09-08, on request). `5db5e759…` keeps the automatic
+-- grant; `9fe083c7…` becomes an ordinary user.
+--
+-- ⚠ BY HASH PREFIX, NEVER BY ADDRESS (comment redacted 2026-09-14 — the statements below are
+-- untouched). This migration has already run everywhere; naming the preimage of a hash list whose
+-- entire purpose is to keep addresses out of source undid that, and the file said nothing the
+-- hashes do not.
 --
 -- ⚠ TWO HALVES, AND EITHER ALONE IS A NO-OP. Dropping the hash from the trigger only stops FUTURE
 -- signups being promoted — the existing row carries an EXPLICIT `raw_app_meta_data.role = 'admin'`

@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import type { Lang } from '../../../lib/i18n';
 
 /**
@@ -11,13 +10,9 @@ import type { Lang } from '../../../lib/i18n';
  *
  * ⚠ INTERPOLATION IS A FUNCTION PER STRING, NEVER A TEMPLATE WITH `{placeholders}`. Dutch does not
  * share English word order — "the 5-year column" is "de 5-jaarskolom", and the expectation
- * footnote's clauses invert — so a shared skeleton with holes punched in it forces English grammar
- * onto the translation. Each language owns its whole sentence, including where the number goes.
- *
- * ⚠ AND THE FOOTNOTE RETURNS A NODE, for the same reason one step further. It emphasises a word
- * mid-sentence (`same` / `hetzelfde`), and that word does not sit in the same place in the two
- * languages. Splitting the prose into fragments around a fixed `<strong>` would pin both languages
- * to the English clause order.
+ * labels have different word order — so a shared skeleton with holes punched in it forces English
+ * grammar onto the translation. Each language owns its whole sentence, including where the number
+ * goes.
  *
  * ⚠ WHAT IS **NOT** TRANSLATED, ON PURPOSE:
  *  - The dash tooltips (`Cagr.reason`, `WindowMean.reason`). They are produced by `lineCagr.ts` and
@@ -58,9 +53,7 @@ export type MeasureKey = (typeof MEASURE_KEYS)[number];
  * The rows that are RATES — a compounded growth of a level — as opposed to a window mean.
  *
  * ⚠ DECLARED, NOT INFERRED FROM THE `Cagr` SUFFIX. `epsFwd` is a rate too and is deliberately NOT
- * in here: this list exists for the footnote clause about point-to-point vs fitted trend, which is
- * a statement about measuring HISTORY against the Long Equity growth cards. A forecast has no card
- * to disagree with.
+ * in here: the forecast is a rate too but is not a historical level chart.
  */
 export const RATE_KEYS = [
   'revCagr', 'epsCagr', 'fcfCagr', 'priceCagr', 'invCapCagr', 'sharesCagr',
@@ -69,9 +62,7 @@ export const RATE_KEYS = [
 export type TablesCopy = {
   /** ⚠ The heading follows the window chips — see the ⚠ on it in `TablesTab`. */
   title: (windows: readonly number[]) => string;
-  /** The year suffix used on column headings, the `3y` badge AND in the footnote that names it.
-   *  ⚠ ONE VALUE FOR ALL THREE: a footnote pointing at a `3y` marker beside a column reading `3j`
-   *  is a note about a thing that is not on screen. */
+  /** The year suffix used on column headings and the `3y` badge. */
   yearSuffix: string;
   rowsLabel: string;
   loading: string;
@@ -106,7 +97,7 @@ export type TablesCopy = {
    *
    * ⚠ `w` IS NOT DEFINED IN EVERY FORMULA, deliberately. It is the same weight on every row (the
    * holding's own share, or an index constituent's cap for that period), stated once in the
-   * footnote rather than nine times in nine tooltips.
+   * row-specific tooltip rather than nine times in the table body.
    */
   rowFormula: Record<MeasureKey, (sbc: boolean) => string>;
   /** The row's own explanation, on hover, BELOW the worked formula. `sbc` is the checkbox. */
@@ -125,17 +116,6 @@ export type TablesCopy = {
   noCoverage: (from: string, to: string) => string;
   /** The same absence in the Excess column, where naming the window twice would be noise. */
   noCoverageExcess: string;
-  /** The "why they differ" link inside the footnote, and what it says. */
-  whyDiffer: string;
-  whyDifferLabel: string;
-  footnote: (o: {
-    windows: readonly number[]; showEps: boolean; showFcf: boolean; showPrice: boolean;
-    /** Is a row on whose series is drawn from a FILTERED set of companies — FCF/share or EPS?
-     *  ⚠ A member rule nobody can see is the whole hazard (see `_POSITIVE_ONLY_METRICS`), and a
-     *  tooltip on one row is not where a reader comparing two columns will find it. */
-    showFiltered: boolean;
-    whyLink: ReactNode;
-  }) => ReactNode;
 };
 
 const en: TablesCopy = {
@@ -223,54 +203,6 @@ const en: TablesCopy = {
   noCoverageExcess:
     'One side paid no interest at all over this window, so it has no coverage — and a difference '
     + 'against a figure that does not exist would be a number about nothing.',
-  whyDiffer:
-    'Point-to-point is (end/start)^(1/n) − 1: only the two endpoint years matter, so one weak year '
-    + 'at either end swings it. The card\'s log-linear fit uses all of them and reports R² for how '
-    + 'well they line up. Neither is wrong; a wide gap between them means the endpoints are '
-    + 'unrepresentative.',
-  whyDifferLabel: 'why they differ',
-  footnote: ({ windows, showEps, showFcf, showPrice, showFiltered, whyLink }) => (
-    <>
-      Both sides are measured over the <strong>same</strong> window per row — the latest year they
-      share — so the Excess column subtracts like from like. A dash means one side has nothing
-      there; hover it.
-      {/* ⚠ IN THE PROSE, NOT ONLY IN THE ROW'S TOOLTIP. Every other row on this table is a
-          fundamental, where "no dividends" and "no FX" are not questions anyone thinks to ask. A
-          price row invites both, and a reader who assumes either is reading a different number
-          from the one on screen — a return they could check against a statement. */}
-      {showPrice && <>
-        {' '}The share-price row is <strong>price only</strong> — no dividends, on either side —
-        and it chains each holding’s growth in its own currency, so no FX leg is in it. It is the
-        market’s view of this basket, not the book’s EUR return.
-      </>}
-      {showEps && <>
-        {' '}The last row is the <strong>only</strong> one the{' '}
-        {windows.map((w) => `${w}y`).join('/')} heading{windows.length > 1 ? 's do' : ' does'} not
-        apply to: the consensus thins fast (measured on ACWI, 2031e is carried by 166 of 1,761
-        constituents against 2028e’s 1,310), so it is stated over three years and marked{' '}
-        <code className="text-fg-subtle">3y</code> on the figure
-        {windows.length > 1 && ', centred across both columns rather than sitting in either'}.
-      </>}
-      {/* ⚠ EVERY RATE ROW, NOT JUST FCF/SHARE. The clause used to name one row because there was
-          one; with six of them, singling out FCF/share reads as "the others DO match the cards",
-          which is the opposite of true. */}
-      {showFcf && <>
-        {' '}The rate rows are point-to-point and will not match the growth cards on the
-        Graphs tab, which fit a trend through every year ({whyLink}).
-      </>}
-      {/* ⚠⚠ THE MEMBER RULE, IN THE PROSE. Every series on this table is the one the Long Equity
-          chart of the same name draws — same holdings, same weighting, same coverage floor — and
-          that includes a rule which DELETES COMPANIES. A filter nobody can see is the whole
-          hazard: what is left looks exactly like an ordinary line. The cards print their own
-          "n of m"; a table of rates has nowhere to put one per row, so it is said once, here. */}
-      {showFiltered && <>
-        {' '}The <strong>FCF per share</strong> and <strong>EPS</strong> rows are drawn from the
-        same series as the charts on Graphs — and, like them, only from the companies whose
-        figure is <strong>positive in every period</strong>, analyst estimates included. The rest
-        are excluded outright, so read those two rows as how the survivors grew.
-      </>}
-    </>
-  ),
 };
 
 const nl: TablesCopy = {
@@ -372,44 +304,6 @@ const nl: TablesCopy = {
   noCoverageExcess:
     'Eén kant heeft over deze periode helemaal geen rente betaald en heeft dus geen dekking — een '
     + 'verschil met een cijfer dat niet bestaat zou een getal over niets zijn.',
-  whyDiffer:
-    'Van eindpunt tot eindpunt is (eind/begin)^(1/n) − 1: alleen de twee eindjaren tellen, dus één '
-    + 'zwak jaar aan een van beide kanten laat het uitslaan. De log-lineaire fit van de kaart '
-    + 'gebruikt ze allemaal en rapporteert R² voor hoe goed ze op één lijn liggen. Geen van beide '
-    + 'is fout; een groot verschil betekent dat de eindpunten niet representatief zijn.',
-  whyDifferLabel: 'waarom ze verschillen',
-  footnote: ({ windows, showEps, showFcf, showPrice, showFiltered, whyLink }) => (
-    <>
-      Beide zijden worden per rij over <strong>dezelfde</strong> periode gemeten — het laatste jaar
-      dat ze delen — zodat de kolom Verschil gelijk van gelijk aftrekt. Een streepje betekent dat
-      één zijde daar niets heeft; beweeg erover.
-      {showPrice && <>
-        {' '}De koersrij is <strong>alleen koers</strong> — zonder dividend, aan geen van beide
-        zijden — en ketent de groei van elke positie in haar eigen valuta, dus er zit geen
-        valuta-effect in. Het is de blik van de markt op deze mand, niet het eurorendement van het
-        boek.
-      </>}
-      {showEps && <>
-        {' '}De laatste rij is de <strong>enige</strong> waarop de kop{' '}
-        {windows.map((w) => `${w}j`).join('/')} niet van toepassing is: de consensus dunt snel uit
-        (gemeten op ACWI wordt 2031e gedragen door 166 van de 1.761 bestanddelen, tegen 1.310 voor
-        2028e), dus hij wordt over drie jaar gegeven en bij het getal gemarkeerd met{' '}
-        <code className="text-fg-subtle">3j</code>
-        {windows.length > 1 && ', gecentreerd over beide kolommen in plaats van in één ervan'}.
-      </>}
-      {showFcf && <>
-        {' '}De groeirijen lopen van eindpunt tot eindpunt en zullen niet overeenkomen met de
-        groeikaarten op het tabblad Grafieken, die een trend door alle jaren leggen
-        ({whyLink}).
-      </>}
-      {showFiltered && <>
-        {' '}De rijen <strong>Vrije kasstroom per aandeel</strong> en <strong>Winst per
-        aandeel</strong> gebruiken dezelfde reeks als de grafieken op Grafieken — en net als daar alleen de bedrijven waarvan
-        het cijfer in <strong>elke periode positief</strong> is, analistenramingen inbegrepen. De
-        overige vallen er volledig uit; lees die twee rijen dus als de groei van de overblijvers.
-      </>}
-    </>
-  ),
 };
 
 export const COPY: Record<Lang, TablesCopy> = { en, nl };

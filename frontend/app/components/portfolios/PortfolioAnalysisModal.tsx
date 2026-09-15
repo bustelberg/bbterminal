@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
@@ -15,14 +15,14 @@ import {
   Provenance, ProvenanceFetchedAt, ProvenanceRefresh, type SourceKey,
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
+import { loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
-import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import PanelDialog from './PanelDialog';
+import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
-import BucketDetailPanel from './BucketDetailPanel';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateLabel, stateTone } from './momentumState';
@@ -560,7 +560,7 @@ function Chip({ label, value, valueClass, hint, prov }: {
 }
 
 function Chart({ axis, rows, unpricedPct, excluded, benchmark,
-  onBucket, selected, stale = false }: {
+  stale = false }: {
   axis: string;
   rows: Row[];
   /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
@@ -574,8 +574,6 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   unpricedPct?: number | null;
   excluded?: Axis['excluded'];
   benchmark: string;
-  onBucket: (axis: string, bucket: string) => void;
-  selected: string | null;
 }) {
   const copy = useAnalyseCopy();
   const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
@@ -628,11 +626,10 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   const slack = Math.max(0.01, sorted.length * 0.005);
 
   return (
-    <section className={`bg-card border rounded-xl p-4 ${
-      selected ? 'border-accent-500/40' : 'border-neutral-800/40'}`}>
-      {/* ⚠ NO PER-AXIS "Data" BUTTON (removed 2026-08-12, with `CompositionDataModal`). Three of
-          them — one per axis — each opened a table of the same holdings under a different grouping,
-          beside a chart whose bars are already the click target for the per-bucket attribution. */}
+    <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
+      {/* These are deliberately READ-ONLY exposure charts. Attribution is the one drill-down
+          surface: keeping a second holding table here made two controls answer the same question
+          with different grouping and state. */}
       <div className="flex items-baseline gap-2">
         <h4 className="text-sm font-semibold text-fg-strong">{axisLabel}</h4>
       </div>
@@ -707,15 +704,11 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           const p = Math.max(0, r.portfolio_pct ?? 0);
           const b = Math.max(0, r.benchmark_pct ?? 0);
           const tilt = r.diff_pct ?? (p - b);
-          const active = r.bucket === selected;
           return (
-            <button type="button" key={r.bucket}
-              onClick={() => onBucket(axis, r.bucket)}
+            <div key={r.bucket}
               title={copy.allocation.chartRowTitle(r.bucket, p.toFixed(2), benchmark, b.toFixed(2), `${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}`)}
-              className={`group flex cursor-pointer items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left transition-colors ${
-                active ? 'bg-accent-500/10' : 'hover:bg-overlay/[0.03]'}`}>
-              <span className={`w-[6.5rem] shrink-0 truncate text-[12px] ${
-                active ? 'font-medium text-fg-strong' : 'text-fg-muted'}`}>{r.bucket}</span>
+              className="flex items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left">
+              <span className="w-[6.5rem] shrink-0 truncate text-[12px] text-fg-muted">{r.bucket}</span>
               {/* Fixed 0–100% scale — a bar's length IS its share of the sleeve, not its rank
                   against the biggest bucket. */}
               <span className="relative h-[18px] flex-1 rounded bg-inset">
@@ -744,7 +737,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
                   the value ties to its bar without reading the legend. */}
               <span className="w-[3.5rem] shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{pct(p)}</span>
               <span className="w-[3.5rem] shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{pct(b)}</span>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -1375,9 +1368,8 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   }
   const folded: BookHolding[] = [];
   for (const { label, rows: legs } of groups.values()) {
-    // ⚠ ONE LEG IS NOT A COLLAPSE. Folding it would rename a real position after its wrapper and
-    // hide its ISIN, its sector and its Fundamental button, for no reduction in rows.
-    if (legs.length < 2) { kept.push(...legs); continue; }
+    // Keep a wrapper even for a one-leg certificate. The switch is a choice between the
+    // instrument the book holds and its underlying positions, not merely a way to reduce rows.
     const s = sumResults(legs);
     const weight = legs.reduce((a, h) => a + (h.weight_now_pct ?? 0), 0);
     const row: BookHolding = {
@@ -1390,6 +1382,10 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       // wrapper sits in one. `—` is the honest cell.
       isin: null,
       sector: null,
+      // In the collapsed view this row is the fund/certificate the book actually owns. Keeping
+      // it in Equity preserves the asset-allocation total, while this flag places it under the
+      // Stock ETFs subsection instead of among individual companies.
+      is_fund: true,
       weight_now_pct: weight,
       weight_pct: weight,
       start_value_eur: s.opening,
@@ -1451,22 +1447,16 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   /**
    * Whether positions inside a held certificate are listed individually.
    *
-   * ⚠ ON BY DEFAULT, because looking through IS what this table is for — the charts above it are
-   * drawn through the certificates and a table that did not would disagree with them. The toggle
-   * exists for the other question: when a book holds another book, its twenty-odd stocks bury the
-   * handful of positions this book actually chose, and "what do I hold" is answered better by one
-   * line naming the strategy.
+   * OFF by default: the first view answers what this book directly owns. Users can explicitly
+   * switch on look-through to inspect the underlying positions of held certificates.
    */
   const copy = useAnalyseCopy();
-  const [lookThrough, setLookThrough] = useState(true);
-  /** How many rows the fold would remove — 0 when nothing is reached through a certificate, which
-   *  is what hides the toggle rather than offering a control that does nothing. */
-  // ⚠ `Math.max(0, …)` BECAUSE THE FOLD ALSO SPLITS. A position held both directly and through a
-  // certificate becomes two rows before either is folded, so on a book with one such position and
-  // nothing else to collapse the net change can be zero — and a toggle that removes no rows has
-  // nothing to offer.
-  const foldable = useMemo(
-    () => Math.max(0, holdings.length - collapseByCertificate(holdings).length), [holdings]);
+  const [lookThrough, setLookThrough] = useState(false);
+  /** Number of certificates with available underlying routes. Count routes rather than the net
+   *  row reduction: a certificate with one underlying is still a meaningful look-through. */
+  const lookThroughCertificates = useMemo(() => new Set(
+    holdings.flatMap(splitByRoute).map(soleVia).filter((label): label is string => Boolean(label)),
+  ).size, [holdings]);
   const shownHoldings = useMemo(
     () => (lookThrough ? holdings : collapseByCertificate(holdings)), [holdings, lookThrough]);
   // ⚠ ONE PREDICATE, USED IN ALL SIX ROW SHAPES (thead, class row, holding row, sold header, sold
@@ -1647,23 +1637,20 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             the table itself: the Via column names every route in. */}
         <h4 className="text-xs font-medium text-fg-strong">{copy.holdings.title}</h4>
         <span className="flex items-center gap-2">
-          {/* ⚠ HIDDEN WHEN NOTHING WOULD FOLD, rather than offered and inert. A book that holds no
-              other book has no certificate legs to collapse, and a checkbox that visibly changes
-              nothing teaches the reader to distrust the ones that do.
-              ⚠ IT SAYS WHAT IT WILL DO, WITH THE COUNT. "Look through certificates" alone leaves
-              the reader to press it to find out; naming the rows makes it a decision. */}
-          {foldable > 0 && (
-            // ⚠ STILL A CHECKBOX INSIDE THE CHIP, not a button that changes colour. It is a
-            //   two-state toggle whose state has to be readable at rest, and the box is what says
-            //   which state it is in; the chrome only makes it look like the controls beside it.
-            <label className={`${CHIP_SHAPE} ${CHIP_IDLE} flex items-center gap-1.5`}
-              title={copy.actions.lookThroughTitle}>
-              <input type="checkbox" checked={lookThrough}
-                onChange={() => setLookThrough((v) => !v)} className="accent-accent-600" />
-              {copy.actions.lookThrough}
-              <span className="font-mono text-fg-faint">({foldable})</span>
-            </label>
-          )}
+          {/* Always present: this is a view preference, and hiding it from a book that happens not
+              to have a linked certificate makes the control appear to have vanished. */}
+          {/* ⚠ STILL A CHECKBOX INSIDE THE CHIP, not a button that changes colour. It is a
+              two-state toggle whose state has to be readable at rest, and the box is what says
+              which state it is in; the chrome only makes it look like the controls beside it. */}
+          <label className={`${CHIP_SHAPE} ${CHIP_IDLE} flex items-center gap-1.5`}
+            title={copy.actions.lookThroughTitle}>
+            <input type="checkbox" checked={lookThrough}
+              onChange={() => setLookThrough((v) => !v)} className="accent-accent-600" />
+            {copy.actions.lookThrough}
+            {lookThroughCertificates > 0 && (
+              <span className="font-mono text-fg-faint">({lookThroughCertificates})</span>
+            )}
+          </label>
           <ColumnPicker groups={pickedGroups} toggle={toggle} />
         </span>
       </div>
@@ -2475,6 +2462,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         {eur0n(p.prior_year_eur)} {copy.sold.priorYear}
                       </span>
                     )}
+                    <span className={`ml-2 text-[10px] font-mono tabular-nums ${retTone(p.since_close_pct)}`}
+                      title={p.since_close_pct != null
+                        ? `Price return after this book's final sale: ${p.since_close_date} to ${p.since_close_as_of}. This is not part of the book's realised return.`
+                        : p.isin ? `No EUR close series is available after this book's final sale for ${p.isin}.`
+                          : `The instrument behind ${p.name ?? 'this closed position'} could not be identified.`}>
+                      {fmtRet(p.since_close_pct)} after sale
+                    </span>
                   </td>
                   {/* ⚠⚠ MOMENTUM, 5Y VOL AND BETA — REAL FIGURES ON A ROW THE BOOK NO LONGER HOLDS,
                       and they are meaningful for exactly the reason the held rows' are: all three
@@ -2536,6 +2530,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       note={copy.info.moneyNote}
                       how={copy.info.moneyHow(eur0n(p.result_eur), eur0n(p.avg_capital_eur), fmtRet(p.return_pct))} />
                   </td>
+                  {/* Instrument return is the book-period return. A post-sale price move is
+                      deliberately kept beside the closed position's name above, rather than
+                      relabelling this financial-result column. */}
                   <td className="pr-4" />
                   <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>
                     {ppt(p.contribution_pct)}
@@ -2990,8 +2987,6 @@ export default function PortfolioAnalysisModal({
    * that it had opened.
    */
   const [risk, setRisk] = useState(false);
-  // Which composition bar the reader clicked, to drill into its holdings. {axis, bucket}.
-  const [bucket, setBucket] = useState<{ axis: string; bucket: string } | null>(null);
   // Which allocation class the reader picked, to break down. Null = NOTHING selected — the whole
   // portfolio, where the modal shows the book's return vs the benchmark and prompts the reader to
   // click a class. Selecting a class replaces that with the class's OWN return + its breakdown.
@@ -3047,22 +3042,27 @@ export default function PortfolioAnalysisModal({
    * up its "these bars belong to a different selection" state for the length of one request.
    */
   const [reloadSeq, setReloadSeq] = useState(0);
+  const assetRetryCount = useRef(new Map<string, number>());
   const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${refreshSeq}|${reloadSeq}`;
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const stale = data != null && loadedFor !== viewKey;
 
   useEffect(() => {
     let cancelled = false;
+    const analysisKey = viewKey;
     void (async () => {
       try {
-        const r = isBasket
-          ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
-          : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
-            + `?benchmark=${benchmark}&weight_by=${source}&source=${source}`
-            + (assetFilter ? `&bucket=${encodeURIComponent(assetFilter)}` : ''));
-        const b = await r.json().catch(() => null);
+        const b = await loadPrefetchedAnalysis(analysisKey, async () => {
+          const r = isBasket
+            ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
+            : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
+              + `?benchmark=${benchmark}&weight_by=${source}&source=${source}`
+              + (assetFilter ? `&bucket=${encodeURIComponent(assetFilter)}` : ''));
+          const body = await r.json().catch(() => null);
+          if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
+          return body as ModelPortfolioAnalysis;
+        });
         if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
         // ⚠ WHERE THE WAIT WENT. `apiFetch` already logs the round-trip total, but this endpoint
         // is one request covering eight different loads — so a 5-second "Loading overview…"
         // told you only that it was slow, never which load. The server now reports per phase and
@@ -3073,7 +3073,7 @@ export default function PortfolioAnalysisModal({
           trace('analyse', `server phases (ms) — ${total} total`, t);
         }
         setLoadedFor(viewKey);
-        setData(b as ModelPortfolioAnalysis);
+        setData(b);
       } catch (e) {
         traceError('analyse', 'the composition could not be loaded', e);
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -3085,6 +3085,38 @@ export default function PortfolioAnalysisModal({
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqKey, benchmark, source, assetFilter, refreshSeq, reloadSeq]);
+
+  // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
+  // after the fast analysis response; resolving them inline would bring back the slow Analyse
+  // button. Retry the read a few times while the single background Yahoo worker stores metadata
+  // and history, then leave the explicit pending state visible instead of spinning forever.
+  useEffect(() => {
+    if (isBasket || !data?.asset_data_missing_isins?.length) return;
+    const missing = [...new Set(data.asset_data_missing_isins)].sort();
+    const key = `${id ?? ''}|${missing.join(',')}`;
+    const attempt = assetRetryCount.current.get(key) ?? 0;
+    if (attempt >= 4) return;
+    assetRetryCount.current.set(key, attempt + 1);
+    let cancelled = false;
+    void (async () => {
+      if (attempt === 0) {
+        try {
+          await apiFetch(`${API_URL}/api/asset-pipeline/queue`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identifiers: missing }),
+          });
+        } catch (e) {
+          traceError('analyse', 'asset enrichment could not be queued', e);
+        }
+      }
+      if (!cancelled) {
+        window.setTimeout(() => {
+          if (!cancelled) setReloadSeq((n) => n + 1);
+        }, 15000);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [data, id, isBasket]);
 
   // The selected class (null = nothing selected = the whole portfolio). A basket is never a
   // portfolio-of-classes, so it stays on the whole-basket view.
@@ -3194,7 +3226,7 @@ export default function PortfolioAnalysisModal({
             <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
               {copy.chrome.benchmark}
               <select value={benchmark} aria-label={copy.chrome.benchmark}
-                onChange={(e) => { setData(null); setError(null); setBucket(null); setBenchmark(e.target.value); }}
+                onChange={(e) => { setData(null); setError(null); setBenchmark(e.target.value); }}
                 className={`${HEADER_CTL} font-mono w-[7rem] focus:border-accent-500`}>
                 {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
@@ -3253,7 +3285,7 @@ export default function PortfolioAnalysisModal({
                       .reduce((a, p) => a + (p.contribution_pct ?? 0), 0)
                     : null}
                   onSelect={isBasket ? undefined : (b) => {
-                    setWhy(null); setRisk(false); setBucket(null); setAssetFilter(b); }} />
+                    setWhy(null); setRisk(false); setAssetFilter(b); }} />
               )}
               {/* ⚠⚠ ONE SLOT, ONE WIDTH, IN BOTH STATES — this is what lets the row above be
                   centred without the allocation bars moving. Both arms of the ternary occupy the
@@ -3324,7 +3356,7 @@ export default function PortfolioAnalysisModal({
                         two lines of content that tile has and a one-word button does not. */}
                     {selected === EQUITY_BUCKET && (
                       <button type="button"
-                        onClick={() => { setBucket(null); setRisk(false); setWhy(why === 'ytd' ? null : 'ytd'); }}
+                        onClick={() => { setRisk(false); setWhy(why === 'ytd' ? null : 'ytd'); }}
                         title={copy.score.attributionTitle}
                         className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
                           why === 'ytd'
@@ -3344,7 +3376,7 @@ export default function PortfolioAnalysisModal({
                         `ActiveShareRequest`. */}
                     {selected === EQUITY_BUCKET && (
                       <button type="button"
-                        onClick={() => { setBucket(null); setWhy(null); setRisk(!risk); }}
+                        onClick={() => { setWhy(null); setRisk(!risk); }}
                         title={copy.score.riskTitle}
                         className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
                           risk
@@ -3451,6 +3483,14 @@ export default function PortfolioAnalysisModal({
                  — and that was the wrong shape: the sold positions were the only thing standing
                  between this table and a total, so the answer was to give them rows, not their own
                  card. `realised` carries them (and the book's own return to check against). */
+              <>
+              {data.asset_data_missing_isins?.length ? (
+                <div className="mb-3 rounded-lg border border-warn-500/30 bg-warn-500/[0.06] px-3 py-2 text-[12px] text-warn-300">
+                  Instrumentgegevens voor {data.asset_data_missing_isins.length} aandelen worden op de
+                  achtergrond ingelezen. Sector, momentum, volatiliteit en beta verschijnen automatisch
+                  zodra de prijsreeks beschikbaar is.
+                </div>
+              ) : null}
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 onFundamental={setFund}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
@@ -3464,13 +3504,13 @@ export default function PortfolioAnalysisModal({
                    as-of 2026-08-01. Stamped with it, the modal called the row's own +111.74%
                    216 days old while the row called it 2. */
                 asOf={data.holdings_as_of ?? data.as_of} />
+              </>
             ) : sleeve ? (
               /* NON-EQUITY class: its holdings' contribution + a currency chart, no benchmark. */
               <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />
             ) : (
-              /* STOCKS: the sector / region / currency composition versus the benchmark, with the
-                 Brinson attribution ("why", from the Attribution button) or a per-bucket drill-down
-                 (from a bar) docked full-width below — mutually exclusive. */
+              /* STOCKS: read-only sector / region / currency exposure versus the benchmark.
+                 Brinson Attribution is the sole drill-down surface. */
               <>
                 {/* ⚠ NO COVERAGE BANNER HERE — REMOVED ON REQUEST 2026-08-05, not overlooked.
                     These views are weight-based and a sold position has no weight, so the bars
@@ -3484,29 +3524,9 @@ export default function PortfolioAnalysisModal({
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
-                      benchmark={data.benchmark ?? benchmark}
-                      onBucket={(axis, b) => { if (isBasket) return; setWhy(null); setRisk(false); setBucket(
-                        (prev) => prev && prev.axis === axis && prev.bucket === b ? null : { axis, bucket: b }); }}
-                      selected={bucket?.axis === a.axis ? bucket.bucket : null} />
+                      benchmark={data.benchmark ?? benchmark} />
                   ))}
                 </div>
-                {/* ⚠⚠ A DIALOG, NOT AN IN-FLOW DOCK (2026-08-25) — REVERSING THE NOTE THAT USED
-                    TO SIT HERE. That note argued this panel belongs beneath the bar that opened
-                    it, "already beside its context". Two things undid it. The charts sit in a
-                    THREE-COLUMN grid, so the dock lands below all three rather than under the
-                    bar clicked — the adjacency it claimed only ever held for the first chart.
-                    And an in-flow panel PUSHES everything under it, so opening one moves the
-                    rest of the modal out from under the reader, which is the same complaint
-                    that made Risk and Attribution dialogs. The three drill-downs now behave
-                    identically. ⚠ `PanelDialog` still mounts INSIDE this content box — see its
-                    header for why a sibling backdrop would dismiss both at once. */}
-                {bucket && (
-                  <PanelDialog onClose={() => setBucket(null)}>
-                    <BucketDetailPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark}
-                      axis={bucket.axis} bucket={bucket.bucket} source={source}
-                      onClose={() => setBucket(null)} />
-                  </PanelDialog>
-                )}
               </>
             )}
           </>

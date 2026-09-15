@@ -101,14 +101,15 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         id="daily_pipeline",
         label="Daily pipeline (price update → rebalance)",
         fills="metric_data prices/volumes for held companies · current_picks snapshots",
-        cadence="Every day, 05:00 UTC",
-        trigger={"day_of_week": "mon-sun", "hour": 5, "minute": 0, "timezone": "UTC"},
+        cadence="Every day, 05:00 Amsterdam",
+        trigger={"day_of_week": "mon-sun", "hour": 5, "minute": 0,
+                 "timezone": "Europe/Amsterdam"},
         options={"coalesce": True, "misfire_grace_time": 600},
         max_age_hours=30,
         evidence=("price_update", "rebalance"),
         records=False,          # already writes ingest_run — see `records`
-        note="Two ingest_run rows per fire, in order. 05:00 rather than 02:00 so the slower "
-             "European EOD closes are published by run time.",
+        note="Two ingest_run rows per fire, in order. Amsterdam-local so the intended wall-clock "
+             "time stays 05:00 through DST changes.",
     ),
     JobSpec(
         id="job_watchdog",
@@ -267,57 +268,18 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "currencies, so without this the unused ones go stale.",
     ),
     JobSpec(
-        id="airs_model_prices",
-        label="AIRS model portfolios — reprice",
-        fills="airs_model_portfolio_position · asset_execution · fx_rate · asset_price",
-        cadence="Daily, 05:00 Amsterdam",
-        # ⚠⚠ THE PRICING HALF ONLY — `halves=("model",)`, NEVER the accounts scrape. Two ⚠⚠ notes
-        # on `airs_vermogen_refresh` below record why nothing that scrapes AIRS may run at this
-        # hour: a forcing account pass that lands before AIRS has valued the books stores
-        # YESTERDAY's valuation, and since it fires once nothing re-reads it until tomorrow — the
-        # symptom is holdings a full day behind that look perfectly current. The MODEL half has no
-        # such hazard. A composition is a dated set of weights rather than a daily valuation, and
-        # its other four steps talk to OpenFIGI, the ECB and Yahoo, none of which care what time
-        # AIRS runs its batch.
-        #
-        # ⚠ 05:00 AMSTERDAM, NOT UTC, and deliberately unlike the ingest pipeline's 05:00 UTC tick.
-        # This one is about a European working morning ("current when I open the page"), so it must
-        # hold its wall-clock hour across the DST shift; the pipeline's is anchored to market closes
-        # and must not. They are therefore an hour apart for half the year, which is a bonus rather
-        # than the reason.
-        #
-        # ⚠ EVERY PAIRED MODEL, PRICED CONCURRENTLY (`refresh_many`), which is safe because the one
-        # serial resource — the AirSPMS session the composition read needs — is a lock inside
-        # `refresh_portfolio_fully`. The Yahoo legs are what take the time and they overlap.
-        trigger={"hour": 5, "minute": 0, "timezone": "Europe/Amsterdam"},
-        options={"coalesce": True, "misfire_grace_time": 3600},
-        max_age_hours=30,
-        note="Prices every model portfolio: composition, instrument resolve, FX backfill, price "
-             "fetch, YTD recompute. ⚠ Does NOT scrape the accounts — that is the 09:30 job, and "
-             "05:00 is documented as too early for it.",
-    ),
-    JobSpec(
         id="airs_vermogen_refresh",
-        label="AIRS portfolios + model scan",
-        fills="airs_holding · airs_performance · airs_mutatie · airs_model_portfolio*",
-        cadence="Weekdays, 09:30 Amsterdam",
-        # ⚠ MOVED 10:00 → 09:30 ON REQUEST (2026-08-13). It refreshes the COMPLETE table: the job
-        # passes `force=True`, which overrides the incremental `AIRS_FRESH_HOURS` skip, so every
-        # discovered account is re-downloaded rather than only the stale ones.
-        #
-        # ⚠⚠ 09:30 MAY BE BEFORE AIRS HAS VALUED THE BOOKS, AND THERE IS NO SECOND ATTEMPT. The
-        # note on `_fire_airs_vermogen` records that a run at 08:00 lands before the valuation is
-        # ready; 10:00 was on the safe side of that. This job fires once a day and forces, so a
-        # scrape that arrives early stores YESTERDAY's valuation and nothing re-reads it until
-        # tomorrow — the failure is a full day of stale holdings that look perfectly current. If
-        # that shows up, the fix is a second attempt later in the morning, not an earlier one.
-        trigger={"day_of_week": "mon-fri", "hour": 9, "minute": 30,
+        label="AIRS portfolios + models refresh",
+        fills="airs_holding · airs_performance · airs_mutatie · airs_model_portfolio* · asset_price",
+        cadence="Every day, 11:00 Amsterdam",
+        # One sequential AIRS run: account values, model compositions, then model pricing. Keeping
+        # those phases in one job prevents two Playwright/AirSPMS sessions from colliding at 11:00.
+        trigger={"day_of_week": "mon-sun", "hour": 11, "minute": 0,
                  "timezone": "Europe/Amsterdam"},
         options={"coalesce": True, "misfire_grace_time": 3600},
         max_age_hours=80,
-        note="Refreshes EVERY account (force=True), not just the stale ones. Amsterdam-local so "
-             "APScheduler handles the DST shift. ⚠ 09:30 is early relative to AIRS's own "
-             "valuation — if holdings read a day behind, this time is the first thing to check.",
+        note="Refreshes every account (force=True), model composition, and paired-model prices in "
+             "one Amsterdam-local 11:00 run; APScheduler handles DST.",
     ),
     JobSpec(
         id="table_size_sample",
@@ -344,15 +306,15 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         interval_seconds=20,
         options={"max_instances": 1, "coalesce": True, "misfire_grace_time": 30},
         # ⚠ NO OVERDUE THRESHOLD. It fires three times a minute and no-ops on an empty queue, so
-        # "when did it last run" is not a health question — and by default it is not registered at
-        # all, because the STANDALONE worker is the default deployment.
+        # "when did it last run" is not a health question. It is registered by default: the backend
+        # must consume ISINs queued by Analyse in a normal deployment.
         max_age_hours=None,
         # ⚠ THE ONE JOB THAT DOES NOT RECORD — see `records`. Three rows a minute is a write loop,
         # not a history, and its liveness already has a better answer in the queue heartbeat.
         records=False,
-        optional_env="ASSET_QUEUE_INPROCESS",
-        note="⚠ RUN EXACTLY ONE WORKER — this OR scripts/asset_queue_worker.py, never both. Two "
-             "compete for the Yahoo throttle and reintroduce throttle-corrupted resolutions.",
+        note="Runs in the backend scheduler. Deployments that use the standalone "
+             "scripts/asset_queue_worker.py must set ASSET_QUEUE_INPROCESS=0 to avoid two "
+             "consumers competing for the Yahoo throttle.",
     ),
 )
 

@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import CashConversionInputsModal from './CashConversionInputsModal';
 import { cashConversionByYear, type CashConversionInputs } from './cashConversionData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -27,7 +28,7 @@ import CardHeading from './CardHeading';
  *
  * ⚠ 100% IS NOT THE CEILING. Depreciation ahead of capex converts more cash than the accounts book
  * as profit, so a durable reading above 100% is a compliment (ASML 2025: 11,027.3 / 9,609.4 =
- * 114.8%; Apple 88.2%). The reference line sits at 100 because that is the break-even, not the max.
+ * 114.8%; Apple 88.2%).
  *
  * ⚠ A LOSS HAS NO CONVERSION. Net income ≤ 0 is a hole, never a negative percentage: a loss-maker
  * with positive cash flow would read as burning cash, and two companies could show −80% for
@@ -108,7 +109,8 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : marginByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No FCF / net-income figures ingested to compute a conversion.</p>
+          <MissingFundamentals message="No FCF / net-income figures ingested to compute a conversion."
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
@@ -132,10 +134,6 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }} itemSorter={benchmarkFirst}
                   formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.label ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
-                {/* ⚠ 100 IS THE MEANINGFUL LINE ON THIS CHART, NOT 0. Crossing it is the event —
-                    profit converting to cash or not — whereas 0 only matters in the rare year FCF
-                    goes negative. Drawn in recessive grey: it is a reference, not a series. */}
-                <ReferenceLine y={100} stroke={chartTheme.axisTick} strokeDasharray="2 4" strokeOpacity={0.5} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
                 <Line dataKey="margin" name="margin" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
                 {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
@@ -145,12 +143,6 @@ export default function CashConversionCard({ holdingsTarget, holdingsName, sbcCo
               <LegendItem color={chartTheme.accent} label={own} />
               {avg != null && <LegendItem color={chartTheme.accent} stroke="dashed"
                 label={`${own} average`} />}
-              {/* ⚠ ITS OWN ENTRY, because it is its own line — and the one a reader is most
-                  likely to misread: 100% is where profit converts fully into cash, so CROSSING it
-                  is the event this chart exists to show. Packed into the series entry as the words
-                  "100% dotted", beside a solid blue swatch, it named a mark that appears nowhere. */}
-              <LegendItem color={chartTheme.axisTick} stroke="dotted" label="100% — full conversion"
-                title="Profit converting fully into cash. Above this line is better, not an error." />
               {benchByYr && <LegendItem color={chartTheme.pos} label={benchTarget?.label} />}
               {note && (
                 <span className="text-fg-faint" title="An overlay that simply does not appear is indistinguishable from an index that matches this book exactly. Full detail is in the console.">

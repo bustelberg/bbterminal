@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { withWorked, workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import SbcOcfInputsModal from './SbcOcfInputsModal';
 import { sbcOcfByYear, type SbcOcfInputs } from './sbcOcfData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -93,7 +94,8 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">No SBC / operating-cash-flow figures ingested to compute a ratio.</p>
+          <MissingFundamentals message="No SBC / operating-cash-flow figures ingested to compute a ratio."
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}

@@ -32,7 +32,6 @@ from ._common import (
     refuse_unsubscribed,
 )
 
-
 def _extract_financials_dates(data: dict) -> list[date]:
     """Extract all target dates from a financials JSON response."""
     financials = data.get("financials")
@@ -180,7 +179,7 @@ def fetch_financials(
     if not force_refresh:
         cached = _fetch_from_storage(supabase, path)
         if cached is not None:
-            dates = _extract_financials_dates(cached) if isinstance(cached, dict) else []
+            dates = _extract_financials_dates(cached)
             fresh, reason = is_cache_fresh(dates) if dates else (False, "no dates parsed")
             if fresh:
                 need_api = False
@@ -191,7 +190,10 @@ def fetch_financials(
 
     # Fetch from API if needed
     if need_api:
-        url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials", {"order": "desc"})
+        # The current legacy API entitlement returns a short annual statements window for some
+        # companies (Visa: FY2017–FY2025).  Price history is completed from the separate daily
+        # endpoint in `ingest.prices`; do not claim this request can expand it with an order flag.
+        url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials")
         _log(f"Calling {_mask_url(url)} ...")
         api = _api_request(url)
         track_api_call(supabase, exchange)

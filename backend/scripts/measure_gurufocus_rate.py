@@ -65,7 +65,7 @@ def _sample(n: int) -> list[dict]:
 def _url(c: dict) -> tuple[str, str]:
     exch = ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code")
     symbol = _build_symbol(c["gurufocus_ticker"], exch)
-    return exch, _build_api_url(f"stock/{quote(symbol, safe=':')}/financials", {"order": "desc"})
+    return exch, _build_api_url(f"stock/{quote(symbol, safe=':')}/financials")
 
 
 def _raw_latency(comps: list[dict]) -> list[float]:

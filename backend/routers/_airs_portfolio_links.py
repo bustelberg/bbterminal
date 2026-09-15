@@ -278,6 +278,12 @@ def resolve_links(supabase, owner_id: int, rows: list[dict],
         if key in stored:
             out[key] = ResolvedLink(stored[key].get("linked_portfolio_id"), "manual", None, None)
             continue
+        from routers._airs_strategy_map import target_for_alias  # noqa: PLC0415
+        configured = target_for_alias(fonds, portfolios, comp, owner_id, isin)
+        if configured is not None:
+            out[key] = ResolvedLink(configured, "configured", None,
+                                    "configured AIRS strategy map")
+            continue
         g = guess_link(fonds=fonds, isin=isin, owner_id=owner_id,
                        portfolios=portfolios, composition=comp)
         out[key] = (ResolvedLink(g.linked_portfolio_id, "auto", g.confidence, g.reason)
@@ -416,6 +422,9 @@ def expand_members_through_links(supabase, members: list[dict], *,
         key = link_key(isin, fonds)
         if key in stored:
             return stored[key].get("linked_portfolio_id")   # None = explicitly not a portfolio
+        from routers._airs_strategy_map import target_for_alias  # noqa: PLC0415
+        if configured := target_for_alias(fonds, portfolios, comp, cur_owner, isin):
+            return configured
         g = guess_link(fonds=fonds or "", isin=isin, owner_id=cur_owner,
                        portfolios=portfolios, composition=comp)
         return g.linked_portfolio_id if g else None

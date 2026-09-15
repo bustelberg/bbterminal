@@ -180,6 +180,8 @@ export type EgmSource = {
    */
   priceDate: string | null;
   forwardPE: number | null;
+  /** Direct vendor indicator when available; otherwise the current close ÷ FY1 consensus EPS. */
+  forwardPEOrigin: 'vendor' | 'derived' | null;
   /** ⚠ THE OBSERVATION'S OWN DATE. A card's `When` has to name a moment; "latest observation"
    *  describes the SELECTION RULE and says nothing about how old the figure is. Same reason
    *  `priceDate` rides beside `price`. */
@@ -569,11 +571,21 @@ export function reverseDcfSource(metrics: MetricRow[], today: string): ReverseDc
 export function egmSource(metrics: MetricRow[], today: string): EgmSource {
   const eps = nextFyEps(metrics, today);
   const dy = latest(metrics, DIV_YIELD_CODES);
+  const price = latest(metrics, [PRICE_CODE]);
+  const vendorForwardPE = latest(metrics, [FWD_PE_CODE]);
+  // GuruFocus can omit the dedicated Forward P/E indicator even while it has supplied both inputs
+  // to it. The EGM must remain usable in that case: Forward P/E is, by definition, today's close
+  // divided by the FY1 consensus EPS. Keep the direct vendor observation whenever it is usable;
+  // derive only the genuine gap, never a multiple for a loss-making FY1 estimate.
+  const derivedForwardPE = price && eps && price.value > 0 && eps.value > 0
+    ? price.value / eps.value : null;
+  const useVendorForwardPE = vendorForwardPE != null && vendorForwardPE.value > 0;
   return {
-    price: latest(metrics, [PRICE_CODE])?.value ?? null,
-    priceDate: latest(metrics, [PRICE_CODE])?.date ?? null,
-    forwardPE: latest(metrics, [FWD_PE_CODE])?.value ?? null,
-    forwardPEDate: latest(metrics, [FWD_PE_CODE])?.date ?? null,
+    price: price?.value ?? null,
+    priceDate: price?.date ?? null,
+    forwardPE: useVendorForwardPE ? vendorForwardPE.value : derivedForwardPE,
+    forwardPEOrigin: useVendorForwardPE ? 'vendor' : derivedForwardPE != null ? 'derived' : null,
+    forwardPEDate: useVendorForwardPE ? vendorForwardPE.date : price?.date ?? null,
     // ⚠ THE FIELD IS NAMED `… %` AND HOLDS PERCENT UNITS — GuruFocus files 0.3 for 0.3%, exactly
     // as it does for `ROE %`. The model wants a decimal, and passing the percent through unscaled
     // would apply a 0.3% payer as a 30% one: on a ten-year compounder that is a ~3.4x fair value.

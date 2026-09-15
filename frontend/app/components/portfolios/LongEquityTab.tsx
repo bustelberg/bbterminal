@@ -167,7 +167,8 @@ const CARDS: MetricCfg[] = [
     noun: 'EPS', unit: 'per_share', kind: 'growth',
     benchmarkMetric: 'eps_nri',
     codes: ['annuals__Per Share Data__EPS without NRI',
-      'annuals__per_share_data__EPS without NRI'],
+      'annuals__per_share_data__EPS without NRI',
+      'annuals__per_share_data_array__EPS without NRI'],
     /**
      * ⚠ THE FORECAST OF **THIS** LINE, not of EPS generally. GuruFocus publishes
      * `annual_per_share_eps_estimate` beside it and the two agree to a cent on almost every company
@@ -274,6 +275,11 @@ export default function LongEquityTab({
   // Bumped after an empty card ingests this company's financials — reloads the metrics (repopulates
   // every growth card) and re-keys the derived cards so they refetch their inputs too.
   const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    const reload = () => setReloadKey((k) => k + 1);
+    window.addEventListener('bb:fundamentals-finished', reload);
+    return () => window.removeEventListener('bb:fundamentals-finished', reload);
+  }, []);
   // ⚠ A SECOND, NARROWER KEY. The growth cards all read ONE metrics fetch, while each derived card
   // owns its own endpoint and refetches on a re-key — so bumping `reloadKey` to refresh one chart
   // reloads twelve. This one refetches the metrics only; nothing else moves.
@@ -363,7 +369,8 @@ export default function LongEquityTab({
         // Old-charts tab was removed; the point of the module is the single definition).
         if (isAgg) {
           const out = await loadBlendMetrics<MetricsResponse>(
-            { basket, portfolioId, cadence }, (p) => { if (alive) setProgress(p); },
+            { basket, portfolioId, cadence, metrics: BLEND_METRICS },
+            (p) => { if (alive) setProgress(p); },
             ctrl.signal,
           );
           if (!alive) return;
@@ -373,7 +380,8 @@ export default function LongEquityTab({
           return;
         }
         const r = await apiFetch(`${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin ?? '')}`
-          + `/metrics?cadence=${cadence}`, { signal: ctrl.signal });
+          + `/metrics?cadence=${cadence}&metric_keys=${encodeURIComponent(BLEND_METRICS.join(','))}`,
+        { signal: ctrl.signal });
         if (r.status === 404) { if (alive) setData({ metrics: [] }); return; }
         const b = await r.json().catch(() => null);
         if (!alive) return;
@@ -582,8 +590,8 @@ export default function LongEquityTab({
       <MetricGrowthCard key={fcfPs.title} cfg={fcfPs}
         {...growth} />
       {/* Derived cards fetch their own inputs; re-key on reload so an ingest repopulates them too. */}
-      <MarginCard key={`margin-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
-      <CashReturnCard key={`cashret-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
+      <MarginCard key={`margin-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} onRefreshed={onIngested} />
+      <CashReturnCard key={`cashret-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} onRefreshed={onIngested} />
       <DebtRatioCard key={`debt-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <InterestBurdenCard key={`intburden-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} />
       <MetricGrowthCard key={shares.title} cfg={shares}

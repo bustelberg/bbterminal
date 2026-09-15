@@ -317,8 +317,8 @@ def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS,
     """Resolve a bounded slice of the ingest queue RIGHT NOW, rather than leaving it for a worker.
 
     ⚠ "QUEUED FOR INGEST" IS A PROMISE ABOUT A PROCESS THAT MAY NOT EXIST. The in-process worker is
-    OPT-IN (`ASSET_QUEUE_INPROCESS`); the default drainer is the standalone
-    `scripts/asset_queue_worker.py`, which on a single-service deployment is nobody. Measured in
+    ON by default (`ASSET_QUEUE_INPROCESS=0` opts out); a standalone worker may be used when the
+    backend is explicitly configured not to drain the queue itself. Measured in
     production 2026-07-30: the button on the AEX reported "25 queued for ingest (a paced worker drains
     them — minutes to hours)" and nothing ever drained them. A button that reports work no one will
     do is worse than a button that does nothing, because it reads like progress.

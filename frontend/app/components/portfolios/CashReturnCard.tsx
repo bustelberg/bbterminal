@@ -13,6 +13,7 @@ import { pairedSpan, RatioStats } from './CardStats';
 import { workedMean } from './workedFormula';
 import { LegendItem } from './ChartLegend';
 import { type Target } from './HoldingsRevenueModal';
+import MissingFundamentals from './MissingFundamentals';
 import CashReturnInputsModal from './CashReturnInputsModal';
 import { MODES, seriesByYear, type CapitalMode, type CashReturnInputs } from './cashReturnData';
 import { paddedDomain , xToPeriod } from './marginData';
@@ -30,12 +31,14 @@ import CardHeading from './CardHeading';
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
  */
 
-export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
+export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget, onRefreshed }: {
   holdingsTarget: Target; holdingsName?: string | null;
   /** Tab-level toggle — see `sbcCorrection`. ⚠ Has NO effect in ROIC mode. */
   sbcCorrection?: boolean;
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
+  /** Re-key the card after its drill-down refresh has populated new inputs. */
+  onRefreshed?: () => void;
 }) {
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -118,11 +121,10 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       ) : err ? (
         <p className="text-xs text-neg-300 py-16 text-center">{err}</p>
       ) : ratioByYr.size === 0 ? (
-        <p className="text-[12px] text-fg-faint py-16 text-center">
-          {M.derived
-            ? 'No FCF / capital figures ingested to compute a ratio.'
-            : 'GuruFocus reports no ROIC for these holdings.'}
-        </p>
+          <MissingFundamentals
+            message={M.derived ? 'No FCF / capital figures ingested to compute a ratio.'
+              : 'GuruFocus reports no ROIC for these holdings.'}
+            target={holdingsTarget} name={holdingsName} />
       ) : (
         <>
           <RatioStats stats={stats} benchLabel={benchTarget?.label} fmt={pct}
@@ -175,6 +177,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
       {showInputs && (
         <CashReturnInputsModal target={holdingsTarget} portfolioName={holdingsName}
           benchTarget={benchTarget} benchLabel={benchTarget?.label ?? null}
+          onRefreshed={onRefreshed}
           onClose={() => setShowInputs(false)} />
       )}
     </div>

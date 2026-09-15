@@ -38,12 +38,6 @@ import { withWorked, subNum } from './workedFormula';
 import type { RiskCorrelation } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
-const FREQS = [
-  { key: 'weekly', label: 'Weekly' },
-  { key: 'monthly', label: 'Monthly' },
-  { key: 'daily', label: 'Daily' },
-] as const;
-
 const rho2 = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}`);
 
@@ -124,9 +118,8 @@ export default function CorrelationView({
   const t = useRiskCopy();
   const [data, setData] = useState<RiskCorrelation | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
 
-  const key = `${benchmark}|${freq}|${holdings.length}`
+  const key = `${benchmark}|monthly|${holdings.length}`
     + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
 
   useEffect(() => {
@@ -136,7 +129,7 @@ export default function CorrelationView({
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/portfolio/risk-correlation`
-          + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`,
+          + `?benchmark=${encodeURIComponent(benchmark)}`,
           { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ holdings }) });
         const b = await r.json().catch(() => null);
@@ -184,21 +177,10 @@ export default function CorrelationView({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-fg-faint">Measured</span>
-        {FREQS.map((x) => (
-          <button key={x.key} type="button" onClick={() => setFreq(x.key)}
-            title={x.key === 'daily'
-              ? '⚠ Daily closes are not synchronous — the tracker closes at 16:30 London, a US '
-                + 'holding at 21:00 — which mechanically LOWERS every correlation against it.'
-              : undefined}
-            className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-              freq === x.key ? 'bg-accent-600 text-white border-transparent'
-                : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300'}`}>
-            {x.label}
-          </button>
-        ))}
-      </div>
+      <p className="text-[11px] text-fg-faint">
+        Measured from monthly EUR returns. Monthly closes avoid the non-synchronous market-close
+        bias that distorts daily and weekly cross-market correlations.
+      </p>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
       {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
