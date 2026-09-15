@@ -55,6 +55,27 @@ class TestAirsCategoryMapping:
         assert pa._class_from_categorie(raw) == expected
 
 
+class TestSoldInstrumentNameMatching:
+    """Sold rows must keep a price identity after leaving AIRS holdings."""
+
+    @pytest.mark.parametrize(("airs_name", "asset_name"), [
+        ("Automatic Data Proc.", "Automatic Data Processing, Inc."),
+        ("Marsh&Mclennan", "Marsh & McLennan Companies, Inc."),
+        ("Wolters Kluwer", "Wolters Kluwer N.V."),
+        ("Mettler-Toledo International", "Mettler-Toledo International Inc."),
+    ])
+    def test_accepts_unambiguous_shortened_company_names(self, airs_name, asset_name):
+        assert pa._instrument_names_match(airs_name, asset_name)
+
+    @pytest.mark.parametrize(("airs_name", "asset_name"), [
+        ("Meta", "Meta Platforms, Inc."),
+        ("Apple", "Apple Inc."),
+        ("Wolters Kluwer", "Wolters Klaver National Health Network"),
+    ])
+    def test_refuses_short_or_different_company_names(self, airs_name, asset_name):
+        assert not pa._instrument_names_match(airs_name, asset_name)
+
+
 class TestFundsAreNotLookedThrough:
     """⚠ THE BUCKET THAT KEEPS THE CHART HONEST.
 

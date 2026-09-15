@@ -413,6 +413,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const pReturnHow = isBook
     ? 'today’s value against its Beginwaarde'
     : 'the EUR close at the end of the window against the close at the start';
+  const hasRows = (data?.rows?.length ?? 0) > 0;
 
   return (
     <section className="h-full min-h-0 flex flex-col bg-card border border-accent-500/30
@@ -459,10 +460,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {data && (
         <>
           {data.note && (
-            <p className="text-[12px] text-warn-300 mb-2">⚠ {data.note}</p>
+            <p className="text-[12px] text-fg-muted mb-2">{data.note}</p>
           )}
           {/* ⚠ The identity IS the decomposition. If it fails, these are just three columns. */}
-          {!data.reconciles && (
+          {hasRows && !data.reconciles && (
             <p className="text-[12px] text-neg-300 mb-2">
               {/* ⚠ THE ONE FIGURE IN THIS PANEL THAT IS NOT AT `DP`, AND DELIBERATELY SO. Every
                   other number here is a quantity a reader compares; this one is the PROOF that the
@@ -492,6 +493,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
+          {hasRows && <>
           <div className="overflow-auto rounded-lg border border-neutral-800/40 mb-3">
             <table className="w-full text-[12px]">
               <thead className="bg-card">
@@ -716,6 +718,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               weightHow="start-of-window cap weight"
               returnHow="EUR close at the window’s end ÷ its close at the start − 1" />
           </div>
+          </>}
         </>
       )}
       </div>

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import defaultdict
 from datetime import date
@@ -2781,7 +2782,67 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v4"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v5"
+
+
+_INSTRUMENT_NAME_SUFFIXES = frozenset({
+    "ab", "ag", "asa", "bv", "co", "company", "corp", "corporation", "inc",
+    "incorporated", "limited", "ltd", "llc", "lp", "nv", "oyj", "plc", "sa",
+    "se", "spa", "the",
+})
+
+
+def _instrument_name_words(value: str | None) -> tuple[str, ...]:
+    """A conservative comparison key for AIRS and asset names."""
+    words = re.findall(r"[a-z0-9]+", (value or "").casefold())
+    while words and words[0] == "the":
+        words.pop(0)
+    while words and words[-1] in _INSTRUMENT_NAME_SUFFIXES:
+        words.pop()
+    return tuple(words)
+
+
+def _instrument_names_match(holding_name: str, asset_name: str) -> bool:
+    """Whether two names identify the same instrument without fuzzy guessing.
+
+    AIRS sometimes shortens the final word, such as ``Automatic Data Proc.``.
+    Every word must still agree in order. A single-word name is not enough to
+    identify an instrument safely.
+    """
+    left = _instrument_name_words(holding_name)
+    right = _instrument_name_words(asset_name)
+    if len(left) < 2 or len(right) < 2:
+        return False
+    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
+    if len(shorter) > len(longer):
+        return False
+    return all(a.startswith(b) or b.startswith(a)
+               for a, b in zip(shorter, longer))
+
+
+def _asset_execution_isins_by_name(names: list[str]) -> dict[str, str]:
+    """Resolve otherwise unknown sold AIRS names through the asset price universe.
+
+    This path is only used for names absent from holding snapshots. It searches
+    the name prefix in the database, then accepts exactly one conservative match.
+    A tie stays blank rather than assigning another company's price series.
+    """
+    out: dict[str, str] = {}
+    for name in names:
+        words = _instrument_name_words(name)
+        if len(words) < 2:
+            continue
+        pattern = "%".join(words) + "%"
+        rows = (supabase.table("asset_execution").select("isin,name")
+                .ilike("name", pattern).limit(20).execute().data or [])
+        isins = {r["isin"] for r in rows
+                 if r.get("isin") and _instrument_names_match(name, r.get("name") or "")}
+        if len(isins) == 1:
+            out[name] = next(iter(isins))
+        elif len(isins) > 1:
+            _log.info("[analysis] %r matches %d priced instruments; sold row left unlinked",
+                      name, len(isins))
+    return out
 
 
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
@@ -2844,6 +2905,12 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
                       "the sold row is", name, len(found), ", ".join(sorted(found)))
         elif key in pins:
             out[name] = pins[key]["isin"]
+
+    # A fully sold instrument may never appear in an AIRS holding snapshot. Its
+    # name can still identify one priceable asset, so use that database only for
+    # the unresolved names. This lets the after-sale result survive a sale.
+    unresolved = [name for name in wanted if name not in out]
+    out.update(_asset_execution_isins_by_name(unresolved))
     return out
 
 
