@@ -266,7 +266,7 @@ const en: DeepValuationCopy = {
   egm: {
     reset: 'Put every assumption back to its default',
     growthRate: 'Growth rate', exitPE: 'Exit forward P/E', sharePriceNow: 'Share price now',
-    forwardPE: 'Forward P/E', hurdleRate: 'Hurdle rate', dividendYield: 'Dividend yield',
+    forwardPE: 'Forward P/E', hurdleRate: 'Rendementseis', dividendYield: 'Dividendrendement',
     showRawData: 'Show the raw data behind these defaults',
     expectedReturn: 'Expected return', priceTarget: 'Price target',
     totalPriceMove: 'Total price move',
@@ -646,9 +646,9 @@ const nl: DeepValuationCopy = {
     growthRate: 'Groeivoet', exitPE: 'Exit forward P/E', sharePriceNow: 'Koers nu',
     forwardPE: 'Forward P/E', hurdleRate: 'Hurdle rate', dividendYield: 'Dividend yield',
     showRawData: 'Toon de brongegevens achter deze standaardwaarden',
-    expectedReturn: 'Expected return', priceTarget: 'Koersdoel',
+    expectedReturn: 'Verwacht rendement', priceTarget: 'Koersdoel',
     totalPriceMove: 'Totale koersbeweging',
-    atYourHurdle: 'At your hurdle rate',
+    atYourHurdle: 'Bij uw rendementseis',
     maxPE: 'Max. forward P/E', fairValue: 'Reële waarde', fairValueGap: 't.o.v. de koers',
     legGrowth: 'Groei', legYield: 'Dividendrendement', legMultiple: 'Herwaardering',
     cards: {

@@ -85,6 +85,10 @@ class TestTheLadder:
                             lambda isins, anchor, **kw: dict(marks or {}))
         monkeypatch.setattr(pa, "_grid", lambda isins: {})
         monkeypatch.setattr(pa, "_country_by_code", lambda: {})
+        # The book view now consults the paired model's categories only as a
+        # fallback for an empty grid.  These cases supply their own classes,
+        # so keep this otherwise-pure ladder test off the reference database.
+        monkeypatch.setattr(pa, "ref_positions_for", lambda _pid: [])
 
     @staticmethod
     def _row(out, isin):

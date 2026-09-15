@@ -236,10 +236,12 @@ class TestEpsEligibilitySpansTheConsensusToo:
         and the symptom is a filter that covers half its own chart."""
         from routers import earnings as e
         group = e._positive_only_groups()
-        assert set(group[EPS]) == {EPS, "annuals__per_share_data__EPS without NRI", EST}
+        assert set(group[EPS]) == {EPS, "annuals__per_share_data__EPS without NRI",
+                                   "annuals__per_share_data_array__EPS without NRI", EST}
         assert group[EST] == group[EPS]
         # ⚠ AND `eps_nri` IS NOW THE ONLY MEMBER OF THE SET, so it is the only group there is.
         #   `fcf_ps` left on 2026-09-04 when it went back onto the euro aggregate, where a filter
         #   buys nothing — a SUM never divides a member by itself.
         assert FCF not in group
-        assert set(group) == {EPS, "annuals__per_share_data__EPS without NRI", EST}
+        assert set(group) == {EPS, "annuals__per_share_data__EPS without NRI",
+                              "annuals__per_share_data_array__EPS without NRI", EST}
