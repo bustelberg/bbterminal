@@ -3432,6 +3432,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/users/{user_id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set User Password
+         * @description Set another user's password and end their existing sessions (admin only).
+         */
+        patch: operations["set_user_password_api_auth_users__user_id__password_patch"];
+        trace?: never;
+    };
     "/api/auth/users/{user_id}/role": {
         parameters: {
             query?: never;
@@ -13174,6 +13194,11 @@ export interface components {
             /** Linked Portfolio Id */
             linked_portfolio_id?: number | null;
         };
+        /** SetPasswordRequest */
+        SetPasswordRequest: {
+            /** Password */
+            password: string;
+        };
         /** SetRoleRequest */
         SetRoleRequest: {
             /** Role */
@@ -17866,6 +17891,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_user_password_api_auth_users__user_id__password_patch: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPasswordRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

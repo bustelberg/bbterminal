@@ -82,6 +82,7 @@ export default function DialogHost() {
           </div>
           {open.kind === 'prompt' && (
             <input
+              type={open.inputType ?? 'text'}
               ref={inputRef}
               value={value}
               onChange={(e) => setValue(e.target.value)}

@@ -6,6 +6,7 @@ Endpoints:
     GET    /api/auth/users                     list all users (admin only)
     POST   /api/auth/users                     create a user (admin only)
     PATCH  /api/auth/users/{user_id}/role      promote/demote (admin only)
+    PATCH  /api/auth/users/{user_id}/password  set another user's password (admin only)
     POST   /api/auth/users/{user_id}/mfa/reset clear another user's authenticators (admin only)
     DELETE /api/auth/users/{user_id}           delete a user (admin only)
 
@@ -43,7 +44,7 @@ import httpx
 import jwt
 
 from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from deps import supabase
 
@@ -465,6 +466,27 @@ async def set_user_role(user_id: str, req: SetRoleRequest, authorization: str = 
     except Exception as e:
         raise HTTPException(500, f"Update role failed: {e}")
     return {"id": user_id, "role": req.role}
+
+
+class SetPasswordRequest(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+
+
+@router.patch("/api/auth/users/{user_id}/password")
+async def set_user_password(user_id: str, req: SetPasswordRequest,
+                            authorization: str = Header(...)):
+    """Set another user's password and end their existing sessions (admin only)."""
+    me = _require_admin(authorization)
+    if me["id"] == user_id:
+        raise HTTPException(400, "Change your own password from your account settings")
+    try:
+        supabase.auth.admin.update_user_by_id(user_id, {"password": req.password})
+    except Exception as e:
+        raise HTTPException(500, f"Set password failed: {e}")
+    sessions_cleared = _evict_sessions(user_id)
+    _log.warning("[auth] %s set a password for user %s; sessions cleared: %s",
+                 me.get("email"), user_id, sessions_cleared)
+    return {"ok": True, "id": user_id, "sessions_cleared": sessions_cleared}
 
 
 @router.post("/api/auth/users/{user_id}/mfa/reset")

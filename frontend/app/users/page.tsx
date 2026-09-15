@@ -147,6 +147,45 @@ export default function UsersPage() {
     }
   }
 
+  async function setPassword(u: User) {
+    const password = await dialog.prompt(`Set a new password for ${u.email}.`, {
+      title: 'Set password',
+      placeholder: 'At least 8 characters',
+      inputType: 'password',
+      confirmLabel: 'Set password',
+    });
+    if (password == null) return;
+    if (password.length < 8) {
+      await dialog.alert('Use at least 8 characters.', { title: 'Set password' });
+      return;
+    }
+    try {
+      const headers = await authHeader();
+      if (!headers) return;
+      const r = await fetch(`${API_URL}/api/auth/users/${u.id}/password`, {
+        method: 'PATCH',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) {
+        await dialog.alert(`${r.status}: ${body?.detail ?? 'Could not set password.'}`, {
+          title: 'Set password',
+        });
+        return;
+      }
+      await dialog.alert(
+        body?.sessions_cleared
+          ? 'Password updated. They have been signed out everywhere.'
+          : 'Password updated. Existing sessions could not be cleared.',
+        { title: 'Set password' },
+      );
+      await refresh();
+    } catch (e) {
+      await dialog.alert(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   /**
    * Clear another person's authenticators after they lose their phone.
    *
@@ -405,6 +444,14 @@ ${r.status}: ${body?.detail ?? ''}`);
                     )}
                     {/* ⚠ NOT ON YOUR OWN ROW. The endpoint refuses it — /account/security is
                         where you manage your own, and it asks for a current code first. */}
+                    {u.id !== meId && (
+                      <button
+                        onClick={() => setPassword(u)}
+                        className="text-xs text-fg-muted hover:text-accent-300"
+                      >
+                        Set password
+                      </button>
+                    )}
                     {u.id !== meId && (
                       <button
                         onClick={() => resetMfa(u)}
