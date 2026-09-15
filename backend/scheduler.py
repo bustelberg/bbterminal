@@ -2078,7 +2078,11 @@ def _on_job_max_instances(event) -> None:
     now = time.monotonic()
     with _queue_overrun_lock:
         _queue_overruns += len(getattr(event, "scheduled_run_times", ()) or (1,))
-        if now - _queue_overrun_last_log < _QUEUE_OVERRUN_LOG_EVERY_SECONDS:
+        # `0.0` is the deliberately-unset initial value.  `time.monotonic()` can
+        # itself still be below five minutes on a fresh container, so subtracting
+        # it directly would suppress the first useful backpressure signal.
+        if (_queue_overrun_last_log
+                and now - _queue_overrun_last_log < _QUEUE_OVERRUN_LOG_EVERY_SECONDS):
             return
         skipped = _queue_overruns
         _queue_overruns = 0
