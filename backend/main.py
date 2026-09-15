@@ -200,7 +200,12 @@ def _reset_stale_backfills() -> None:
 # Railway container. When Supabase slows (ingest pipeline + many polling
 # clients) those workers stay stuck on in-flight DB calls and new read
 # requests QUEUE behind them, hanging until the client times out (~300s).
-# Give blocking I/O ample headroom so a slow dependency degrades gracefully.
+# Give blocking I/O headroom without consuming the whole process thread budget.
+# Scheduled refreshes own small pools of their own; a 48-thread default executor
+# plus those pools can exhaust a small production container before the scheduler
+# can start even one cheap housekeeping task.  Twenty-four is still well above
+# the standard asyncio default on a small host, and operators with a larger
+# thread budget can raise it explicitly.
 # The benchmark blends behind the Fundamental modal's Long Equity tab cost ~20s to build for ACWI
 # and are dropped by every fundamentals write. They have no per-user dimension, so rebuilding them
 # once in the background spares every viewer of every portfolio the wait. ARMED HERE AND NOWHERE
@@ -215,8 +220,14 @@ def _arm_blend_prewarm() -> None:
 async def _size_io_thread_pool() -> None:
     import asyncio  # noqa: PLC0415
     import concurrent.futures  # noqa: PLC0415
+    raw_workers = os.environ.get("IO_THREAD_WORKERS", "24")
+    try:
+        workers = int(raw_workers)
+    except ValueError:
+        workers = 24
+    workers = max(4, min(48, workers))
     asyncio.get_running_loop().set_default_executor(
-        concurrent.futures.ThreadPoolExecutor(max_workers=48, thread_name_prefix="bb-io")
+        concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="bb-io")
     )
 
 # In-process APScheduler for the scheduled price/volume ingest jobs

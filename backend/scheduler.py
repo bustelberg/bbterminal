@@ -40,6 +40,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
@@ -56,6 +57,25 @@ from scheduled_jobs import BY_ID, ORPHAN_MARKER, SCHEDULED_JOBS
 
 _log = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
+
+# Scheduled work used to create a new daemon thread on every tick.  That makes an
+# overrun multiplicative: a slow 05:00 run is still alive at 06:00, the next
+# wave creates more threads, and eventually even a cheap job cannot call
+# ``Thread.start()``.  The worker count is deliberately small because these
+# bodies are mostly network-bound and several of them fan out internally.
+#
+# A single shared pool gives the scheduler a hard upper bound.  The map is also
+# a per-job admission gate: an interval tick never queues a second copy behind
+# a run that is already working (or waiting for a worker).  Skipping is safer
+# than replaying stale market-data work hours later, and the durable job-health
+# view will report the missed run.
+_SCHEDULED_WORKERS = max(1, min(8, int(os.environ.get("SCHEDULED_JOB_WORKERS", "3"))))
+_scheduled_executor = ThreadPoolExecutor(
+    max_workers=_SCHEDULED_WORKERS, thread_name_prefix="scheduled-job",
+)
+_scheduled_futures: dict[str, Future] = {}
+_scheduled_futures_lock = threading.Lock()
+_scheduled_slots = threading.BoundedSemaphore(_SCHEDULED_WORKERS)
 
 # A one-shot full pipeline fires this many seconds after process start
 # when bootstrap is needed (template never refreshed in this env). The
@@ -484,14 +504,64 @@ def _run_body(job_id: str, ctx=None, triggered_by: str = "auto") -> str:
     return detail
 
 
+def _submit_scheduled_work(name: str, work) -> bool:
+    """Admit one scheduled task to the bounded worker pool.
+
+    APScheduler's own threads only dispatch work; long-running bodies must not
+    consume one of those threads.  Conversely, each tick must *not* create a
+    fresh unbounded worker.  Returning ``False`` means an earlier copy
+    is pending/running, or the process could not create a pool worker; either
+    way the tick is safely dropped and logged instead of raising from the
+    APScheduler callback.
+    """
+    # Do not leave old ticks queued behind a long-running job.  A delayed price
+    # refresh is less useful than tomorrow's on-time one, and an unbounded
+    # executor queue is merely unbounded threads with the failure postponed.
+    if not _scheduled_slots.acquire(blocking=False):
+        _log.warning("[scheduler] %s not started: all %d scheduled workers are busy",
+                     name, _SCHEDULED_WORKERS)
+        return False
+
+    with _scheduled_futures_lock:
+        existing = _scheduled_futures.get(name)
+        if existing is not None and not existing.done():
+            _scheduled_slots.release()
+            _log.warning("[scheduler] %s not started: an earlier run is still pending or running", name)
+            return False
+        # A completed future is no longer an admission lock.  Pop it before
+        # submitting so an exception from submit cannot leave a stale entry.
+        _scheduled_futures.pop(name, None)
+        try:
+            future = _scheduled_executor.submit(work)
+        except RuntimeError as e:
+            _scheduled_slots.release()
+            # This is the exact failure that used to escape from Thread.start
+            # under a container thread limit.  A cron callback must survive it.
+            _log.exception("[scheduler] %s not started: worker pool unavailable: %s", name, e)
+            return False
+        _scheduled_futures[name] = future
+
+    def _finished(done: Future) -> None:
+        with _scheduled_futures_lock:
+            # Do not remove a newer run if this callback arrives after a later
+            # submission (possible only with a manually-completed fake Future
+            # in tests, but the invariant costs nothing to state here).
+            if _scheduled_futures.get(name) is done:
+                _scheduled_futures.pop(name, None)
+            _scheduled_slots.release()
+
+    future.add_done_callback(_finished)
+    return True
+
+
 def _spawn_body(job_id: str) -> None:
-    """The scheduler tick: run the body on a daemon thread, never raising into APScheduler."""
+    """The scheduler tick: run a declared body on bounded background capacity."""
     def _go() -> None:
         try:
             _run_body(job_id)
         except Exception as e:  # noqa: BLE001
             _log.exception("[scheduler] %s failed: %s: %s", job_id, type(e).__name__, e)
-    threading.Thread(target=_go, daemon=True, name=job_id.replace("_", "-")).start()
+    _submit_scheduled_work(job_id, _go)
 
 
 def start_job_now(job_id: str, *, triggered_by: str = "manual"):
@@ -870,7 +940,7 @@ def _fire_daily_sequence() -> None:
                     job_name, type(e).__name__, e,
                 )
 
-    threading.Thread(target=_seq, daemon=True, name="daily-pipeline").start()
+    _submit_scheduled_work("daily_pipeline", _seq)
 
 
 def _fire_price_update_retry() -> None:
@@ -892,7 +962,7 @@ def _fire_price_update_retry() -> None:
                 "[scheduler] stale-price retry failed: %s: %s", type(e).__name__, e,
             )
 
-    threading.Thread(target=_run, daemon=True, name="price-retry").start()
+    _submit_scheduled_work("price_retry", _run)
 
 
 def maybe_schedule_price_retry(*, reason: str = "") -> None:
@@ -993,15 +1063,15 @@ def _fire_asset_price_refresh() -> None:
     "working" about a queue nobody is draining). `is_worker_active()` reads the real heartbeat:
     when a row was last MOVED out of pending.
 
-    Scope is HELD-only (~220 instruments, not the 16k grid). Own daemon thread; never raises.
+    Scope is HELD-only (~220 instruments, not the 16k grid). Bounded scheduler worker; never raises.
 
     Also fired ON STARTUP by `_maybe_kickstart_asset_prices` — see there for why a daily tick
     alone is not enough.
     """
-    threading.Thread(
-        target=_run_asset_price_refresh, args=("daily tick",),
-        name="asset-price-refresh", daemon=True,
-    ).start()
+    _submit_scheduled_work(
+        "asset_price_refresh",
+        lambda: _run_asset_price_refresh("daily tick"),
+    )
 
 
 def _run_asset_price_refresh(trigger: str) -> None:
@@ -1091,10 +1161,10 @@ def _maybe_kickstart_asset_prices() -> None:
     the constant restarts of `uvicorn --reload` cost a couple of round-trips, not 220 Yahoo calls.
     Mirrors `_maybe_kickstart_smart`, which does the same for the GuruFocus pipeline.
     """
-    threading.Thread(
-        target=_run_asset_price_refresh, args=("startup catch-up",),
-        name="asset-price-kickstart", daemon=True,
-    ).start()
+    _submit_scheduled_work(
+        "asset_price_refresh",
+        lambda: _run_asset_price_refresh("startup catch-up"),
+    )
 
 
 def _maybe_kickstart_airs_models() -> None:
@@ -1160,7 +1230,7 @@ def _maybe_kickstart_airs_models() -> None:
             _log.exception("[scheduler] startup model-portfolio scan failed: %s: %s",
                            type(e).__name__, e)
 
-    threading.Thread(target=_run, name="airs-models-kickstart", daemon=True).start()
+    _submit_scheduled_work("airs_models_kickstart", _run)
 
 
 def _fire_history_drift_check() -> None:
@@ -2341,7 +2411,7 @@ def register_scheduler(app) -> None:
         # Supabase (one query per job, then possibly a job start), and a FastAPI startup hook that
         # blocks on the network is a deploy that looks hung — on a host which, per the evidence
         # this was written for, is already restarting more than it should.
-        threading.Thread(target=_boot_gap_pass, daemon=True, name="job-gap-scan").start()
+        _submit_scheduled_work("job_gap_scan", _boot_gap_pass)
 
     @app.on_event("shutdown")
     def _stop_scheduler() -> None:
