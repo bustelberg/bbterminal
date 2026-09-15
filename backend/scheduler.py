@@ -489,6 +489,12 @@ def _reporter(ctx):
     return step
 
 
+def _cancel_requested(ctx) -> bool:
+    """Read cancellation from a job context without assuming it is callable."""
+    value = getattr(ctx, "cancelled", False) if ctx is not None else False
+    return bool(value() if callable(value) else value)
+
+
 class _Cancelled(Exception):
     """Raised by a body that stopped because Cancel was pressed. Translated to the registry's own
     `JobCancelled` by `_run_body`, so a body never has to import the jobs module."""
@@ -1449,7 +1455,7 @@ def _body_benchmark_index_refresh(ctx=None) -> tuple[str, dict]:
                     _log.info("[benchmark_index_refresh] %s", kw.get("message", "")),
                     step(_i - 1, n, f"{_l} · {kw.get('message', '')}"),
                 )[0],
-                should_stop=(lambda: bool(ctx and ctx.cancelled())) if ctx else None,
+                should_stop=(lambda: _cancel_requested(ctx)) if ctx else None,
             )
             done.append(f"{label} ({(summary or {}).get('priced', '?')} priced)")
             step(i, n, f"{label} — {(summary or {}).get('priced', '?')} priced")
@@ -1519,7 +1525,7 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
     # per-universe detail for Railway, the toast gets the same line.
     step(0, n, f"ranking {n} universe(s) as of {as_of}…")
     for i, label in enumerate(_RANKED_UNIVERSES, start=1):
-        if ctx and ctx.cancelled():
+        if _cancel_requested(ctx):
             break
         try:
             result = relative.compute(
@@ -1687,7 +1693,7 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
     for i, label in enumerate(_FUNDAMENTAL_INDICES, start=1):
         # ⚠ A FRESH CTX PER LABEL so its lines carry the index they belong to. This is a pass over
         # ~2,500 companies across three indices; an unlabelled line cannot say which one it is in.
-        log_ctx = _LogCtx(lambda: bool(ctx and ctx.cancelled()), step=step, label=label)
+        log_ctx = _LogCtx(lambda: _cancel_requested(ctx), step=step, label=label)
         try:
             pairs = _fundamental_company_ids(label)
         except Exception as e:  # noqa: BLE001

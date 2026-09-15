@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 import logging
 from concurrent.futures import Future
+from datetime import date
 
 import scheduler as S
 
@@ -71,3 +72,23 @@ def test_queue_worker_prioritises_shared_beta_trackers(monkeypatch):
     S._fire_asset_ingest_queue()
 
     assert calls == [{"priority_isins": list(_BENCHMARK_RISK_ETF.values())}]
+
+
+def test_cancellation_reader_accepts_the_jobs_boolean_property():
+    assert S._cancel_requested(type("Ctx", (), {"cancelled": True})()) is True
+    assert S._cancel_requested(type("Ctx", (), {"cancelled": False})()) is False
+
+
+def test_cancellation_reader_keeps_legacy_callable_contexts_working():
+    assert S._cancel_requested(type("Ctx", (), {"cancelled": lambda _self: True})()) is True
+
+
+def test_relative_momentum_job_accepts_the_jobs_boolean_cancellation(monkeypatch):
+    from routers.momentum import _helpers
+
+    monkeypatch.setattr(_helpers, "latest_db_price_date", lambda: date(2026, 9, 15))
+    message, detail = S._body_relative_momentum_refresh(
+        type("Ctx", (), {"cancelled": True})())
+
+    assert detail["ranked"] == 0
+    assert "nothing" in message

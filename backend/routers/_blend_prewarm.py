@@ -129,8 +129,8 @@ def arm() -> None:
         _armed = True
         _boot_fast_path = True
         threading.Thread(target=_run, name="bb-blend-prewarm", daemon=True).start()
-    _log.warning("[blend-prewarm] armed for %s; warming shared chart prerequisites now",
-                 ", ".join(f"{a}/{b}" for a, b in targets))
+    _log.info("[blend-prewarm] armed for %s; warming shared chart prerequisites now",
+              ", ".join(f"{a}/{b}" for a, b in targets))
     # ⚠ THROUGH `notify()`, NOT BY SETTING THE EVENT HERE. It is the one place that bumps the
     # generation and stamps the clock, and the worker's abandon-check reads both; poking `_wake`
     # directly would start a pass it cannot reason about. `_boot_fast_path` consumes this first
@@ -258,10 +258,8 @@ async def _warm_all(gen: int) -> None:
             return
         t0 = time.perf_counter()
         n = await _warm_one(label, cadence, gen)
-        # ⚠ WARNING, NOT INFO. uvicorn leaves the root logger at WARNING in production, so an info
-        # line here would be invisible exactly where someone is asking "did the prewarm run?".
-        _log.warning("[blend-prewarm] %s/%s warmed %d endpoints in %.1fs",
-                     label, cadence, n, time.perf_counter() - t0)
+        _log.info("[blend-prewarm] %s/%s warmed %d endpoints in %.1fs",
+                  label, cadence, n, time.perf_counter() - t0)
 
 
 async def _warm_boot_critical(gen: int) -> None:
@@ -273,8 +271,8 @@ async def _warm_boot_critical(gen: int) -> None:
             return
         t0 = time.perf_counter()
         n = await _warm_one(label, cadence, gen, endpoints)
-        _log.warning("[blend-prewarm] startup prerequisites %s/%s warmed %d endpoints in %.1fs",
-                     label, cadence, n, time.perf_counter() - t0)
+        _log.info("[blend-prewarm] startup prerequisites %s/%s warmed %d endpoints in %.1fs",
+                  label, cadence, n, time.perf_counter() - t0)
 
 
 def _run() -> None:

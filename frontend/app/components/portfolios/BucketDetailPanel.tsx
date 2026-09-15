@@ -5,6 +5,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { useBucketDetailCopy } from './bucketDetailCopy';
+import LoadingDots from './LoadingDots';
 
 type Attr = ModelPortfolioAttribution;
 type Bucket = NonNullable<Attr['rows']>[number];
@@ -432,7 +433,7 @@ export default function BucketDetailPanel({ id, benchmark, axis, bucket, source 
           give way instead of the body scrolling — see the ⚠⚠ on the root. */}
       <div className="flex-1 min-h-0 overflow-auto">
 
-      {loading && <p className="text-xs text-fg-subtle">{t.computing}</p>}
+      {loading && <p className="text-xs text-fg-subtle">{t.computing} <LoadingDots /></p>}
       {error && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">{error}</div>
       )}

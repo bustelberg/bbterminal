@@ -3127,8 +3127,8 @@ def _metric_by_year(company_id: int, metric: str, cadence: str = "annual") -> di
         rule = _TTM_RULE.get(metric)
         if rule is None:
             # Refused, not guessed. A new metric gets a declared roll-up or no quarterly view.
-            _warn_once(f"ttm-view:{metric}",
-                       "[earnings] no TTM rule for %r — quarterly view omits it", metric)
+            _debug_once(f"ttm-view:{metric}",
+                        "[earnings] no TTM rule for %r; quarterly view omits it", metric)
             return {}
         codes = tuple(c.replace("annuals__", "quarterly__") for c in _metric_codes(metric))
         rows: list[dict] = []
@@ -3229,7 +3229,7 @@ def _codes_and_rule(metric: str, cadence: str) -> tuple[list[str] | None, str | 
         return codes, None
     rule = _TTM_RULE.get(metric)
     if rule is None:
-        _warn_once(f"ttm:{metric}", "[earnings] no TTM rule for %r — omitted", metric)
+        _debug_once(f"ttm:{metric}", "[earnings] no TTM rule for %r; omitted", metric)
         return None, None
     return [c.replace("annuals__", "quarterly__") for c in codes], rule
 

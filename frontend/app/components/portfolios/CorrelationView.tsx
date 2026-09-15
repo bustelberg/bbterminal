@@ -30,6 +30,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useRiskCopy } from './riskCopy';
+import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
@@ -183,7 +184,7 @@ export default function CorrelationView({
       </p>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing}</p>}
+      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
