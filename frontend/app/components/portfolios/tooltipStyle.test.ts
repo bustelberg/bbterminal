@@ -53,10 +53,7 @@ const UNCONVERTED = new Set([
   'ConcentrationView.tsx',
   'DrawdownView.tsx',
   'MetricGrowthCard.tsx',
-  'MultipleHistoryChart.tsx',
   'PortfolioAnalysisModal.tsx',
-  'PriceTargetCalculator.tsx',
-  'QuickValuationTab.tsx',
   'ReverseDcfPanel.tsx',
   // The component's `text={dynamicReason}` fields are runtime copy. This
   // source-only scanner cannot delimit them before the next JSX attribute and

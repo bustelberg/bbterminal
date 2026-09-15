@@ -40,7 +40,7 @@ import type { RiskCorrelation } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
 const rho2 = (v: number | null | undefined) =>
-  (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}`);
+  (v == null ? '—' : v.toFixed(2));
 
 /** ⚠ THE SAME FUNCTION AS `CorrelationMatrix.cellStyle`, kept in step deliberately — see header. */
 function cellStyle(v: number | null, isDiag: boolean): CSSProperties {
@@ -68,28 +68,11 @@ const LEGEND = {
   rho: (bench: string | null | undefined) =>
     `the correlation between the sleeve and ${v(bench)} — the first tile`,
   rhoAnswer: 'the answer: the covariance stripped of both scales, so it lands in −1…+1',
-  // ⚠ IT SAYS WHY THE TWO ARE EQUAL, because the formula visibly provokes the question and the
-  // identity is a theorem rather than a definition — it holds for ONE predictor and no more.
   r2: (bookName: string) =>
-    `the answer: the share of ${v(bookName)}'s variance the index accounts for. ⚠ It EQUALS `
-    + 'ρ² because there is only ONE predictor here: the best-fit slope is ρ·σₚ/σᵦ, so the '
-    + "fitted values carry ρ²σₚ² of the variance and the σ's cancel. Regress on a second "
-    + 'thing as well and the identity stops holding',
-  // ⚠ IT NAMES THE MATRIX. The symbol was defined as "one PAIR of holdings", which is true and
-  // told nobody that the thing being averaged is sitting on the same screen — reported as not
-  // understood. A reader who can see the cell can check the average.
-  rhoIJ: 'how one holding moved against one other — ONE CELL of the matrix below, with i and j '
-    + 'its row and its column',
-  // ⚠⚠ THE DIVISOR IS THE MEASURED COUNT, NOT n(n−1)/2. `mean_rho = sum(pairs)/len(pairs)` and
-  // `pairs` holds only the cells that cleared the overlap floor, so writing the textbook
-  // coefficient stated a denominator the computation does not use — wrong on any book holding
-  // a recently-listed name, and silently so.
-  m: 'how many cells went into the average — the pairs with enough shared history to measure. '
-    + 'The Where line above says how many pairs there could have been, so a gap there is what '
-    + 'was left out rather than measured on ten weeks of overlap',
-  rhoBar: 'the answer: the average of those cells, UNWEIGHTED — it asks whether these NAMES are '
-    + 'alike, not whether the big positions are; weighting by size would answer a different '
-    + 'question and make a concentrated book look better diversified',
+    `the share of ${v(bookName)}'s movement explained by the index`,
+  rhoIJ: 'correlation for one pair of holdings',
+  m: 'number of pairs included',
+  rhoBar: 'average correlation across all included pairs',
 };
 
 function Tile({ label, value, tone, info }: {
@@ -223,8 +206,7 @@ export default function CorrelationView({
                   { sym: String.raw`\rho`, is: LEGEND.rho(data.benchmark) },
                   { sym: String.raw`R^2`, is: LEGEND.r2(portfolioName) },
                 ]}
-                how={'ρ = 0.90 and "81% of the movement" are the same fact and land very '
-                  + 'differently, which is why both are on screen.'} />} />} />
+                how={t.corr.cards.rSquared.how} />} />} />
             <Tile label={t.corr.meanPair}
               value={rho2(data.mean_pair_corr)}
               info={<InfoTip className="ml-0.5" content={<AspectCard

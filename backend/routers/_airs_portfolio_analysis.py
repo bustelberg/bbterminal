@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import defaultdict
 from datetime import date
@@ -1762,7 +1763,9 @@ def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
                 out[b] = {}
                 continue
             led = _position_ledger(b, rec)
-            out[b] = {p["name"]: p for p in (led.get("positions") or []) if p.get("name")}
+            positions = led.get("positions") or []
+            out[b] = {p["name"]: p for p in positions if p.get("name")}
+            out[b].update({p["isin"]: p for p in positions if p.get("isin")})
         except Exception as e:  # noqa: BLE001 — a child book must never break the parent's modal
             _log.warning("[analysis] look-through into %s failed (%s: %s)", b, type(e).__name__, e)
             out[b] = {}
@@ -1783,18 +1786,42 @@ def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None =
     describe only some of it.
     """
     names = h.get("via_holding_names") or []
-    if len(names) != 1 or len(h.get("via_names") or []) != 1:
-        return {}
     # Held directly as well as through the wrapper — `sources` carries one entry per route in, and
     # a `label` of None is the book's own shares.
     srcs = [s for s in (h.get("sources") or []) if s.get("label") is not None]
-    if len(srcs) != 1 or len(srcs) != len(h.get("sources") or []):
+    if not srcs or len(srcs) != len(h.get("sources") or []):
         return {}
+
+    # A holding can arrive through several certificates. Each child book has its own purchases,
+    # so combine their measured rates by the capital represented by this portfolio's slice.
+    if len(srcs) > 1:
+        legs: list[tuple[float, float]] = []
+        for src in srcs:
+            child = (child_ledgers or {}).get(str(src.get("book") or "")) or {}
+            pos = child.get(h.get("isin") or "") or child.get(h.get("name") or "") or {}
+            cap = pos.get("avg_capital_eur")
+            book_val = float(src.get("book_current_value_eur") or 0)
+            share = float(src.get("value_eur") or 0) / book_val if book_val > 0 else None
+            if pos.get("return_pct") is None or cap is None or share is None:
+                return {}
+            legs.append((float(pos["return_pct"]), float(cap) * share))
+        total_cap = sum(cap for _rate, cap in legs)
+        if total_cap <= 0:
+            return {}
+        return {
+            "capital_source": "lookthrough",
+            "capital_book": "multiple child books",
+            "via_holding_name": ", ".join(names),
+            "avg_capital_eur": round(total_cap, 2),
+            "money_weighted_return_pct": sum(rate * cap for rate, cap in legs) / total_cap,
+            "via_avg_capital_eur": total_cap,
+        }
+
     src = srcs[0]
 
     # ── FIRST CHOICE: the child book's OWN position, which has this instrument's real purchases.
     child = (child_ledgers or {}).get(str(src.get("book") or "")) or {}
-    pos = child.get(h.get("name") or "") or {}
+    pos = child.get(h.get("isin") or "") or child.get(h.get("name") or "") or {}
     if pos.get("return_pct") is not None:
         # ⚠ THE RATE TRANSFERS, THE EUROS DO NOT. The child book put its own money in; this book
         # owns a SLICE of that position, so the capital is scaled by the slice — otherwise the
@@ -1856,7 +1883,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     volk = (supabase.table("airs_holding")
             # ⚠ `fund_result_eur`/`fx_result_eur` ARE AIRS's OWN price/currency split of the held
             # result — see `airs_capital.Position`. Read here rather than derived anywhere.
-            .select("holding_name,quantity,start_value_eur,current_value_eur,"
+            .select("holding_name,isin,quantity,start_value_eur,current_value_eur,"
                     "fund_result_eur,fx_result_eur")
             .eq("portefeuille", portefeuille)
             .eq("as_of_date", _book_snapshot_date(portefeuille) or "").execute().data or [])
@@ -1915,6 +1942,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     return {
         "positions": [{
             "name": p.name,
+            "isin": (by_name.get(p.name) or {}).get("isin"),
             "held": p.held,
             "closed_out": p.closed_out,
             # ⚠ BOTH BLANK WHEN THE QUANTITY ARITHMETIC IS REFUSED, not just the ratio. Leaving the
@@ -2365,6 +2393,11 @@ def compute_portfolio_analysis(portfolio_id: int,
         and h.get("sector") == UNKNOWN_BUCKET
         and not any(h.get(k) is not None for k in ("mom_12_1_pct", "vol_5y_pct", "beta_5y"))
     }
+    asset_data_missing_isins.update(
+        p["isin"] for p in (realised_block or {}).get("positions", [])
+        if p.get("closed_out") and p.get("isin") and p.get("last_sale")
+        and p.get("since_close_pct") is None
+    )
     # Beta is relative to the selected benchmark and cannot be produced from the holding series
     # alone. A portfolio can therefore have sector/momentum/volatility while every beta is blank
     # when the benchmark risk ETF has not been ingested yet. Queue that dependency through the same
@@ -2456,6 +2489,9 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
+        "benchmark_caps_from": bench_coverage.get("caps_from"),
+        "benchmark_caps_to": bench_coverage.get("caps_to"),
+        "benchmark_caps_unstamped": bench_coverage.get("caps_unstamped") or 0,
         # ⚠ NAMES WHERE THE GAP IS, because it is not spread evenly — see `_missing_by_country`.
         #   Empty means "could not work it out", which the copy renders as no sentence rather than
         #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.
@@ -2525,6 +2561,8 @@ def _with_results(holdings: list[dict], realised: dict,
     if not holdings:
         return holdings
     basis = realised.get("basis_eur") if realised.get("available") else None
+    flow_return = realised.get("book_ytd_pct") if not basis else None
+    ledger_result = realised.get("ledger_result_eur") if not basis else None
     by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
     # ⚠ THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
     # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
@@ -2616,7 +2654,9 @@ def _with_results(holdings: list[dict], realised: dict,
                     # attribute, and `money_weighted_return_pct` stays null.
                     **_via_capital(h, by_name, child_ledgers),
                     "contribution_pct": (total / basis * 100.0)
-                    if (total is not None and basis) else None,
+                    if (total is not None and basis) else (
+                        total / ledger_result * flow_return
+                        if (total is not None and ledger_result and flow_return is not None) else None),
                     # ⚠ 0%, NOT a dash — same reason as the price leg above, and same direction:
                     # a FALLBACK where nothing could be computed, never an override of a figure
                     # AIRS actually produced.
@@ -2781,7 +2821,70 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v4"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v9"
+
+
+_INSTRUMENT_NAME_SUFFIXES = frozenset({
+    "ab", "ag", "as", "asa", "bv", "co", "companies", "company", "corp", "corporation", "inc",
+    "incorporated", "limited", "ltd", "llc", "lp", "nv", "oyj", "plc", "sa",
+    "se", "spa", "the",
+})
+
+
+def _instrument_name_words(value: str | None) -> tuple[str, ...]:
+    """A conservative comparison key for AIRS and asset names."""
+    text = (value or "").casefold()
+    text = re.sub(r"\ba\s*/\s*s\b", "as", text)
+    text = re.sub(r"\bn\s*\.\s*v\s*\.?", "nv", text)
+    text = re.sub(r"\bb\s*\.\s*v\s*\.?", "bv", text)
+    words = re.findall(r"[a-z0-9]+", text)
+    while words and words[0] == "the":
+        words.pop(0)
+    while words and words[-1] in _INSTRUMENT_NAME_SUFFIXES:
+        words.pop()
+    return tuple(words)
+
+
+def _instrument_names_match(holding_name: str, asset_name: str) -> bool:
+    """Whether two names identify the same instrument without fuzzy guessing.
+
+    AIRS sometimes shortens the final word, such as ``Automatic Data Proc.``.
+    Every word must agree in order. Single-word names require an exact match.
+    """
+    left = _instrument_name_words(holding_name)
+    right = _instrument_name_words(asset_name)
+    if not left or not right:
+        return False
+    if len(left) != len(right):
+        return False
+    if len(left) == 1:
+        return left == right
+    return all(a.startswith(b) or b.startswith(a) for a, b in zip(left, right))
+
+
+def _asset_execution_isins_by_name(names: list[str]) -> dict[str, str]:
+    """Resolve otherwise unknown sold AIRS names through the asset price universe.
+
+    This path is only used for names absent from holding snapshots. It searches
+    the name prefix in the database, then accepts exactly one conservative match.
+    A tie stays blank rather than assigning another company's price series.
+    """
+    out: dict[str, str] = {}
+    for name in names:
+        words = _instrument_name_words(name)
+        if not words:
+            continue
+        pattern = "%".join(words) + "%"
+        rows = (supabase.table("asset_execution").select("isin,name")
+                .ilike("name", pattern).limit(20).execute().data or [])
+        isins = {r["isin"] for r in rows
+                 if r.get("isin") and _instrument_names_match(name, r.get("name") or "")}
+        if len(isins) == 1:
+            out[name] = next(iter(isins))
+        elif len(isins) > 1:
+            _log.info("[analysis] %r matches %d priced instruments; sold row left unlinked",
+                      name, len(isins))
+    return out
 
 
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
@@ -2844,6 +2947,12 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
                       "the sold row is", name, len(found), ", ".join(sorted(found)))
         elif key in pins:
             out[name] = pins[key]["isin"]
+
+    # A fully sold instrument may never appear in an AIRS holding snapshot. Its
+    # name can still identify one priceable asset, so use that database only for
+    # the unresolved names. This lets the after-sale result survive a sale.
+    unresolved = [name for name in wanted if name not in out]
+    out.update(_asset_execution_isins_by_name(unresolved))
     return out
 
 
@@ -3384,6 +3493,9 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
+        "benchmark_caps_from": bench_coverage.get("caps_from"),
+        "benchmark_caps_to": bench_coverage.get("caps_to"),
+        "benchmark_caps_unstamped": bench_coverage.get("caps_unstamped") or 0,
         # ⚠ NAMES WHERE THE GAP IS, because it is not spread evenly — see `_missing_by_country`.
         #   Empty means "could not work it out", which the copy renders as no sentence rather than
         #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.

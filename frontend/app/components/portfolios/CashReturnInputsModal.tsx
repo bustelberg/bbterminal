@@ -97,10 +97,10 @@ export default function CashReturnInputsModal({ target, portfolioName, benchTarg
   /** Fetch a `no_data` holding's financials, then reload. Throws the stated reason otherwise, which
    *  the row renders — a fetch that loaded financials carrying none of these lines is a real
    *  answer, not a failure. */
-  const fetchFinancials = async (isin: string, name: string) => {
+  const fetchFinancials = async (isin: string, name: string, signal?: AbortSignal) => {
     const r = await apiFetch(`${API_URL}/api/earnings/fundamental-coverage/ingest`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isin, name }),
+      body: JSON.stringify({ isin, name }), signal,
     });
     const j = (await r.json().catch(() => null)) as { status?: string; detail?: string } | null;
     if (r.ok && j?.status === 'ingested') {

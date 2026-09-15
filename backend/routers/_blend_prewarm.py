@@ -46,6 +46,7 @@ WHY
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 import threading
@@ -238,7 +239,14 @@ async def _warm_one(label: str, cadence: str, gen: int,
             body.metrics = list(_BLEND_METRICS)
         t0 = time.perf_counter()
         try:
-            await fn(body, _browser_request())
+            # HTTP calls receive Response through FastAPI. The prewarmer calls
+            # the endpoint directly, so supply it only to endpoints that use it.
+            # Most cached endpoints still take just body and request.
+            extra = {}
+            if "response" in inspect.signature(fn).parameters:
+                from starlette.responses import Response  # noqa: PLC0415
+                extra["response"] = Response()
+            await fn(body, _browser_request(), **extra)
         except Exception as exc:                            # noqa: BLE001
             # ⚠ ONE ENDPOINT'S FAILURE IS NOT THE REBUILD'S. A label with no members 404s and
             # always will; the other twelve are still worth warming.

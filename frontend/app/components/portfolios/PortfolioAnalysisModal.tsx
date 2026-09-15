@@ -4,6 +4,10 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
+import { ValueBadge } from '../../../lib/dynamicValue';
+import { startJob } from '../../../lib/stores/jobs';
+import { Field, TipCard } from '../../../lib/tipCard';
+import InfoTip from '../InfoTip';
 import { formatPct, visibleBuckets } from './composition';
 import {
   allocColor, ALWAYS_SHOWN_BUCKETS, bucketLabel, CASH_BUCKET, EQUITY_BUCKET,
@@ -24,9 +28,20 @@ import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import OwnerEarningsModal from './OwnerEarningsModal';
+import LoadingDots from './LoadingDots';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
+
+const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
+
+function saleDateLabel(value: string | null | undefined): string {
+  if (!value) return 'onbekende datum';
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : `${date.getUTCDate()} ${DUTCH_SHORT_MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
 
 /**
  * A model portfolio's composition — sector / region / currency — beside a benchmark index's
@@ -560,7 +575,7 @@ function Chip({ label, value, valueClass, hint, prov }: {
 }
 
 function Chart({ axis, rows, unpricedPct, excluded, benchmark,
-  stale = false }: {
+  portfolioAsOf, benchmarkCapsFrom, benchmarkCapsTo, benchmarkCapsUnstamped = 0, stale = false }: {
   axis: string;
   rows: Row[];
   /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
@@ -574,10 +589,15 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   unpricedPct?: number | null;
   excluded?: Axis['excluded'];
   benchmark: string;
+  portfolioAsOf?: string | null;
+  benchmarkCapsFrom?: string | null;
+  benchmarkCapsTo?: string | null;
+  benchmarkCapsUnstamped?: number;
 }) {
   const copy = useAnalyseCopy();
   const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
   const axisNote = axis === 'sector' ? copy.axes.sectorNote : axis === 'region' ? copy.axes.regionNote : copy.axes.currencyNote;
+  const benchmarkDate = benchmarkCapsTo ?? benchmarkCapsFrom;
   // Sector is an EQUITY-only view; a non-equity selection leaves it with no portfolio side, so say
   // so rather than draw the benchmark's sectors beside an empty portfolio.
   const sectorEmpty = axis === 'sector' && rows.every((r) => (r.portfolio_pct ?? 0) === 0);
@@ -632,6 +652,19 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           with different grouping and state. */}
       <div className="flex items-baseline gap-2">
         <h4 className="text-sm font-semibold text-fg-strong">{axisLabel}</h4>
+        <InfoTip content={<TipCard label="Freshness" title="Composition weights">
+          <Field label="Portfolio">
+            {portfolioAsOf ? <ValueBadge>{portfolioAsOf.slice(0, 10)}</ValueBadge>
+              : <span className="text-fg-muted">not available</span>}
+          </Field>
+          <Field label={benchmark}>
+            {benchmarkDate ? <ValueBadge>{benchmarkDate.slice(0, 10)}</ValueBadge>
+              : <span className="text-fg-muted">not refreshed</span>}
+          </Field>
+          {benchmarkCapsUnstamped > 0 && (
+            <Field label="Caps">{benchmarkCapsUnstamped} without a timestamp</Field>
+          )}
+        </TipCard>} />
       </div>
       <p className="text-[12px] text-fg-faint mt-0.5">{axisNote}</p>
       {/* ⚠ ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
@@ -1350,7 +1383,7 @@ const momSub = (to?: number | null, from?: number | null, pct?: number | null): 
 ${to.toFixed(2)} ÷ ${from.toFixed(2)} − 1 = ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
     : '');
 
-function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
+export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   const groups = new Map<string, { label: string; rows: BookHolding[] }>();
   const kept: BookHolding[] = [];
   // ⚠ SPLIT FIRST, THEN FOLD. A position held BOTH outright and through a certificate — Mastercard
@@ -1361,7 +1394,9 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   for (const h of rows.flatMap(splitByRoute)) {
     const label = soleVia(h);
     if (!label) { kept.push(h); continue; }
-    const key = `${h.bucket ?? ''} ${label}`;
+    // A collapsed row represents the certificate, not one of its underlying buckets.
+    // Grouping by bucket created one row for its cash and another for its equities.
+    const key = label;
     const g = groups.get(key) ?? { label, rows: [] };
     g.rows.push(h);
     groups.set(key, g);
@@ -1385,6 +1420,7 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       // In the collapsed view this row is the fund/certificate the book actually owns. Keeping
       // it in Equity preserves the asset-allocation total, while this flag places it under the
       // Stock ETFs subsection instead of among individual companies.
+      bucket: EQUITY_BUCKET,
       is_fund: true,
       weight_now_pct: weight,
       weight_pct: weight,
@@ -2451,24 +2487,22 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[11px] text-fg-faint tabular-nums">{i + 1}</td>
                   <td className="py-1.5 pr-3 text-fg max-w-0" colSpan={3} title={p.name}>
                     <span className="truncate inline-block max-w-full align-bottom">{p.name}</span>
-                    <span className="ml-2 text-[10px] text-fg-faint">
-                      {p.first_sale === p.last_sale ? p.first_sale : `${p.first_sale} → ${p.last_sale}`}
-                    </span>
-                    {/* ⚠ THE REASON THE REALISED FIGURE IS AIRS'S `Res. YtD` AND NOT proceeds − cost:
-                        part of this gain was made in earlier years and is correctly not counted. */}
-                    {!!p.prior_year_eur && (
-                      <span className="ml-2 text-[10px] text-warn-500"
-                        title={copy.row.priorYear(eur0n(p.prior_year_eur))}>
-                        {eur0n(p.prior_year_eur)} {copy.sold.priorYear}
+                    {p.since_close_pct != null && (
+                      <span className="ml-2 inline-flex items-center gap-1 text-[10px] whitespace-nowrap"
+                        title={`Price return from ${p.since_close_date} to ${p.since_close_as_of}.`}>
+                        <span className={`font-mono tabular-nums ${retTone(p.since_close_pct)}`}>
+                          {fmtRet(p.since_close_pct)}
+                        </span>
+                        <span className="text-fg-faint">return after</span>
+                        <span className="rounded border border-neutral-700/70 bg-overlay/5 px-1 py-px text-fg-muted">
+                          {saleDateLabel(p.since_close_date ?? p.last_sale)}
+                        </span>
+                        <span className="text-fg-faint">until</span>
+                        <span className="rounded border border-neutral-700/70 bg-overlay/5 px-1 py-px text-fg-muted">
+                          {saleDateLabel(p.since_close_as_of)}
+                        </span>
                       </span>
                     )}
-                    <span className={`ml-2 text-[10px] font-mono tabular-nums ${retTone(p.since_close_pct)}`}
-                      title={p.since_close_pct != null
-                        ? `Price return after this book's final sale: ${p.since_close_date} to ${p.since_close_as_of}. This is not part of the book's realised return.`
-                        : p.isin ? `No EUR close series is available after this book's final sale for ${p.isin}.`
-                          : `The instrument behind ${p.name ?? 'this closed position'} could not be identified.`}>
-                      {fmtRet(p.since_close_pct)} after sale
-                    </span>
                   </td>
                   {/* ⚠⚠ MOMENTUM, 5Y VOL AND BETA — REAL FIGURES ON A ROW THE BOOK NO LONGER HOLDS,
                       and they are meaningful for exactly the reason the held rows' are: all three
@@ -2999,6 +3033,7 @@ export default function PortfolioAnalysisModal({
   const [timingFor, setTimingFor] = useState<string | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -3042,6 +3077,21 @@ export default function PortfolioAnalysisModal({
    * up its "these bars belong to a different selection" state for the length of one request.
    */
   const [reloadSeq, setReloadSeq] = useState(0);
+  const refreshBenchmarkData = async () => {
+    setRefreshingBenchmarkData(true);
+    try {
+      const { done } = await startJob(
+        `${API_URL}/api/benchmarks/index/${encodeURIComponent(benchmark)}/refresh/job`,
+        `Refresh ${benchmark} data`,
+      );
+      const job = await done;
+      if (job.status === 'done') setReloadSeq((value) => value + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshingBenchmarkData(false);
+    }
+  };
   const assetRetryCount = useRef(new Map<string, number>());
   const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${refreshSeq}|${reloadSeq}`;
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
@@ -3505,6 +3555,21 @@ export default function PortfolioAnalysisModal({
               /* STOCKS: read-only sector / region / currency exposure versus the benchmark.
                  Brinson Attribution is the sole drill-down surface. */
               <>
+                {stale && (
+                  <p className="mb-3 text-[12px] text-fg-muted" aria-live="polite">
+                    Updating charts <LoadingDots />
+                  </p>
+                )}
+                {!data.benchmark_caps_from && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-fg-muted">
+                    <span>{data.benchmark} weights are waiting for their first daily refresh.</span>
+                    <button type="button" onClick={() => void refreshBenchmarkData()}
+                      disabled={refreshingBenchmarkData}
+                      className="cursor-pointer rounded-lg border border-accent-500/50 px-2 py-1 text-accent-300 disabled:cursor-wait disabled:opacity-60">
+                      {refreshingBenchmarkData ? 'Refreshing benchmark data…' : `Refresh ${data.benchmark} data`}
+                    </button>
+                  </div>
+                )}
                 {/* ⚠ NO COVERAGE BANNER HERE — REMOVED ON REQUEST 2026-08-05, not overlooked.
                     These views are weight-based and a sold position has no weight, so the bars
                     and the attribution below describe only what is still held (measured: 22.5%
@@ -3517,7 +3582,11 @@ export default function PortfolioAnalysisModal({
                   {(data.axes ?? []).map((a) => (
                     <Chart key={a.axis} axis={a.axis} rows={a.rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
-                      benchmark={data.benchmark ?? benchmark} />
+                      benchmark={data.benchmark ?? benchmark}
+                      portfolioAsOf={data.holdings_as_of ?? data.as_of}
+                      benchmarkCapsFrom={data.benchmark_caps_from}
+                      benchmarkCapsTo={data.benchmark_caps_to}
+                      benchmarkCapsUnstamped={data.benchmark_caps_unstamped} />
                   ))}
                 </div>
               </>

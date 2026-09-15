@@ -216,9 +216,18 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     p_w_total = sum(i["weight_pct"] for i in attributable)
     b_w_total = sum(w for rows in b_by_bucket.values() for w, _ in rows)
     if p_w_total <= 0 or b_w_total <= 0:
+        if p_w_total <= 0:
+            note = (
+                "No portfolio holdings have a price return for this period."
+                if source == "model" else
+                "No portfolio holdings have both a start value and a price return for this period."
+            )
+        else:
+            note = f"No {benchmark_label} holdings have a price return for this period."
         return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
                 "window": window, "axis": axis, "start": start, "source": source, "rows": [],
-                "attributable_pct": 0.0, "note": "Nothing in this model can be attributed."}
+                "attributable_pct": 0.0, "note": note,
+                "needs_benchmark_price_refresh": p_w_total > 0 and b_w_total <= 0}
 
     p_by_bucket: dict[str, list[tuple[float, float]]] = {}
     for i in attributable:

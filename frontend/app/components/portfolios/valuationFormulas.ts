@@ -133,7 +133,7 @@ export function workedFairValue(eps: number | null | undefined,
   if (!ok(eps) || !ok(maxPE) || !ok(result)) return '';
   return withWorked(
     String.raw`EPS_{\text{FY1}} \times PE_{\max}`,
-    `${subNum(eps, 2)} \times ${subNum(maxPE, 2)} = ${subNum(result, 2)}`);
+    String.raw`${subNum(eps, 2)} \times ${subNum(maxPE, 2)} = ${subNum(result, 2)}`);
 }
 
 /**

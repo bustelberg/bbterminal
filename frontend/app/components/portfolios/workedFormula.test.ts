@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  subDigits, subNum, subPct2, withWorked, workedBand, workedCagr, workedMean, workedRatio,
+  subDigits, subNum, subPct2, withWorked, workedBand, workedCagr, workedMean, workedPriceCagr, workedRatio,
 } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 
@@ -221,6 +221,13 @@ describe('workedRatio', () => {
     expect(workedRatio(5, null, 'x')).toBe('');
     expect(workedRatio(5, 0, 'x')).toBe('');
     expect(workedRatio(undefined, undefined, 'x')).toBe('');
+  });
+});
+
+describe('workedPriceCagr', () => {
+  it('uses a real fraction for the exponent', () => {
+    expect(workedPriceCagr(7948.94, 210.96, 9.4, 0.472))
+      .toBe(String.raw`\left(\dfrac{7948.94}{210.96}\right)^{\dfrac{1}{9.4}} - 1 = +47.2\%`);
   });
 });
 

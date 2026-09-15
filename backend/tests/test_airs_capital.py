@@ -58,7 +58,16 @@ class TestAverageInvestedCapital:
         p = led.positions[0]
         # Opening = proceeds − Res. YtD (nothing was bought this year, so all of it was held).
         assert p.opening_eur == pytest.approx(3500.0)
-        assert p.avg_capital_eur == pytest.approx(3500.0 - 4000.0 * w, abs=0.01)
+        assert p.avg_capital_eur == pytest.approx(3500.0 * (1.0 - w), abs=0.01)
+
+    def test_an_early_profitable_full_sale_keeps_positive_capital(self):
+        # The realised gain is a return, not capital withdrawn from the denominator.
+        led = build_ledger([], [_sell("Chipotle", 41109.64, 1225, "2026-01-08", ytd=2535.17)],
+                           {}, 100000.0, Y0, date(2026, 12, 31))
+        p = led.positions[0]
+        assert p.opening_eur == pytest.approx(38574.47)
+        assert p.avg_capital_eur > 0
+        assert money_weighted_return_pct(p) is not None
 
     def test_a_flow_dated_outside_the_window_is_clamped(self):
         # ⚠ AIRS occasionally books to a settlement date past the report's end. Unclamped, the

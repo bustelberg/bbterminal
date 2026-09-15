@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { startJob } from '../../../lib/stores/jobs';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
 import { Holdings } from './BucketDetailPanel';
@@ -340,6 +341,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const [axis, setAxis] = useState<Axis>('sector');
   const [data, setData] = useState<ModelPortfolioAttribution | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
   /**
    * The bucket whose names are open, or null.
    *
@@ -366,7 +369,27 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       }
     })();
     return () => { cancelled = true; };
-  }, [id, benchmark, window, axis, source]);
+  }, [id, benchmark, window, axis, source, refreshVersion]);
+
+  const refreshBenchmarkPrices = async () => {
+    setRefreshingPrices(true);
+    try {
+      const { done } = await startJob(
+        `${API_URL}/api/benchmarks/index/${encodeURIComponent(benchmark)}/refresh/job`,
+        `Refresh ${benchmark} prices`,
+      );
+      const job = await done;
+      if (job.status === 'done') {
+        setError(null);
+        setData(null);
+        setRefreshVersion((version) => version + 1);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshingPrices(false);
+    }
+  };
 
   /**
    * The window, spelt out — this is the panel's heading and nothing else reads it.
@@ -413,6 +436,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const pReturnHow = isBook
     ? 'today’s value against its Beginwaarde'
     : 'the EUR close at the end of the window against the close at the start';
+  const hasRows = (data?.rows?.length ?? 0) > 0;
 
   return (
     <section className="h-full min-h-0 flex flex-col bg-card border border-accent-500/30
@@ -459,10 +483,19 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {data && (
         <>
           {data.note && (
-            <p className="text-[12px] text-warn-300 mb-2">⚠ {data.note}</p>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <p className="text-[12px] text-fg-muted">{data.note}</p>
+              {data.needs_benchmark_price_refresh && (
+                <button type="button" onClick={() => void refreshBenchmarkPrices()}
+                  disabled={refreshingPrices}
+                  className="cursor-pointer rounded-lg border border-accent-500/50 px-2 py-1 text-[12px] text-accent-300 disabled:cursor-wait disabled:opacity-60">
+                  {refreshingPrices ? 'Refreshing prices…' : `Refresh ${benchmark} prices`}
+                </button>
+              )}
+            </div>
           )}
           {/* ⚠ The identity IS the decomposition. If it fails, these are just three columns. */}
-          {!data.reconciles && (
+          {hasRows && !data.reconciles && (
             <p className="text-[12px] text-neg-300 mb-2">
               {/* ⚠ THE ONE FIGURE IN THIS PANEL THAT IS NOT AT `DP`, AND DELIBERATELY SO. Every
                   other number here is a quantity a reader compares; this one is the PROOF that the
@@ -492,6 +525,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
+          {hasRows && <>
           <div className="overflow-auto rounded-lg border border-neutral-800/40 mb-3">
             <table className="w-full text-[12px]">
               <thead className="bg-card">
@@ -716,6 +750,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               weightHow="start-of-window cap weight"
               returnHow="EUR close at the window’s end ÷ its close at the start − 1" />
           </div>
+          </>}
         </>
       )}
       </div>

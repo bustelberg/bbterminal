@@ -90,7 +90,7 @@ FILL_WORKERS = 3
 #: `ingest_company`'s dict, three layers that have no other reason to know about it. The string is
 #: written once in `ingest/earnings/financials.py` and asserted from both ends by
 #: `tests/test_financials_empty_payload.py`, so it cannot drift silently.
-VENDOR_EMPTY_MARKER = "no periods"
+VENDOR_EMPTY_MARKER = "did not provide financial statements"
 VENDOR_EMPTY_LIMIT = 10
 
 # The two reported lines most readers use to judge whether a Graphs refresh did what it promised.

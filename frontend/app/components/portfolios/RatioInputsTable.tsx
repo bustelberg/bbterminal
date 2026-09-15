@@ -7,6 +7,7 @@ import {
   type SeriesView, type Weighted,
 } from './marginData';
 import { CapWeightLines } from './capWeightLines';
+import { startLocalJob } from '../../../lib/stores/jobs';
 
 /**
  * THE drill-down table behind every ratio card on the Long Equity tab — one component, eleven
@@ -161,7 +162,7 @@ export function RatioInputsTable<R extends InputsRow>({
    *  {@link InputsViewSwitch}. Ignored outright on a `ratio` card, which has no valid rebase. */
   view?: InputsView;
   /** Holdings only. An index is not curated row by row, so its `no_data` cells just say so. */
-  onFetch?: (isin: string, name: string) => Promise<void>;
+  onFetch?: (isin: string, name: string, signal?: AbortSignal) => Promise<void>;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(
     { key: 'weight', dir: 'desc' });
@@ -278,17 +279,17 @@ export function RatioInputsTable<R extends InputsRow>({
     : { key, dir: (key === 'weight' || key.startsWith('impact:')) ? 'desc' : 'asc' }));
   const caret = (k: SortKey) => (sort.key === k ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : '');
 
-  const fetchOne = async (isin: string, name: string) => {
+  const fetchOne = (isin: string, name: string) => {
     if (!onFetch) return;
     setIngest((s) => ({ ...s, [isin]: { busy: true } }));
-    try {
-      await onFetch(isin, name);
-      setIngest((s) => ({ ...s, [isin]: {} }));
-    } catch (e) {
-      // ⚠ THE REASON STAYS ON THE ROW. A fetch that loaded financials carrying no income statement
-      // is a real answer; swallowing it would read as "nothing happened".
-      setIngest((s) => ({ ...s, [isin]: { msg: e instanceof Error ? e.message : String(e) } }));
-    }
+    startLocalJob(`Fetch financials: ${name}`, 'fundamentals', async (signal) => {
+      try {
+        await onFetch(isin, name, signal);
+        return 'Financial statements updated.';
+      } finally {
+        setIngest((s) => ({ ...s, [isin]: {} }));
+      }
+    });
   };
 
   return (
@@ -356,7 +357,6 @@ export function RatioInputsTable<R extends InputsRow>({
                         <span className="inline-flex items-center gap-2">
                           <button type="button" onClick={() => fetchOne(r.isin, r.name)}
                             className="text-[12px] px-2 py-0.5 rounded-lg border border-accent-600/40 text-accent-400 hover:bg-overlay/5">Fetch financials</button>
-                          {ingest[r.isin]?.msg && <span className="text-[11px] text-warn-300" title={ingest[r.isin]?.msg}>{ingest[r.isin]?.msg}</span>}
                         </span>
                       ) : <span className="text-[12px] text-fg-faint">no figures ingested</span>}
                     </td>

@@ -115,9 +115,9 @@ export const BASIS: Record<Basis, {
     yieldTitle: 'FCF yield',
     yieldInline: 'FCF yield',
     codes: FCF_PS_CODES,
-    source: 'GuruFocus `Free Cash Flow per Share`, as reported.',
+    source: 'GuruFocus Free Cash Flow per Share.',
     what: 'the cash the business threw off per share, after the capital spending needed to keep it running',
-    caveat: '⚠ NOT SBC-ADJUSTED. The FCF-SBC cards on the Graphs tab subtract stock compensation and are a lower number; this one is free cash flow as reported.',
+    caveat: 'Uses reported free cash flow before stock compensation.',
     negativeYear: 'cash-burn',
     multiple: 'P/FCF',
     // ⚠ NO ANALYST FCF CONSENSUS EXISTS, AND THE ANSWER IS TO SHOW NO FORWARD — not to model one.
@@ -171,9 +171,9 @@ export const BASIS: Record<Basis, {
     yieldTitle: 'Earnings yield',
     yieldInline: 'earnings yield',
     codes: EPS_PS_CODES,
-    source: 'GuruFocus `EPS without NRI` — diluted earnings per share with non-recurring items stripped out.',
+    source: 'GuruFocus EPS without NRI.',
     what: 'the accounting profit attributable to one share, after depreciation and other non-cash charges',
-    caveat: '⚠ ACCRUAL, NOT CASH — and the two diverge for real companies, not just in theory: a capital-intensive business earns well and converts little, and revenue booked is not revenue collected. ⚠ The yield built on it is the inverse of the P/E.',
+    caveat: 'EPS is accounting profit, not cash flow. Its yield is the inverse of P/E.',
     negativeYear: 'loss',
     multiple: 'P/E',
     estimateCodes: EPS_EST_CODES,
@@ -266,7 +266,7 @@ export function yearsBetween(from: string | null, to: string | null): number | n
  * That one is a fact about GuruFocus's forward-P/E indicator (its history starts 2015-11-30);
  * this one is a house display floor. They agree today by coincidence and may not tomorrow.
  */
-export const HISTORY_FROM_YEAR = 2015;
+export const HISTORY_FROM_YEAR = 2017;
 
 /**
  * The price and ONE per-share series paired by fiscal year, oldest first, STARTING at the later of

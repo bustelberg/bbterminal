@@ -9,7 +9,7 @@ const en = {
     ytd: 'Year-to-date', since: 'Since-inception', startYear: 'Start of year', inception: 'At inception', hide: 'Hide',
     title: (window: string, benchmark: string) => `${window} performance attribution compared to ${benchmark}`,
     loading: 'Computing attribution', error: 'Attribution could not be computed.',
-    residual: (value: string) => `⚠ The effects do not sum to the excess (residual ${value}). This is NOT a valid decomposition — do not read the rows below as one.`,
+    residual: (value: string) => `The attribution does not reconcile. Difference: ${value}.`,
   },
   headers: { name: 'Name', weight: 'Weight', ret: 'Ret.', contribution: 'Contr.', yourWeight: 'Your weight', indexWeight: 'Index weight', yourReturn: 'Your return', indexReturn: 'Index return', allocation: 'Allocation', selection: 'Selection', interaction: 'Interact.', total: 'Total', totalExcess: 'Total (= the excess)' },
   names: {
@@ -100,7 +100,7 @@ const nl: AttributionCopy = {
     ytd: 'Sinds jaarbegin', since: 'Sinds ingangsdatum', startYear: 'Begin van het jaar', inception: 'Bij ingangsdatum', hide: 'Verbergen',
     title: (window, benchmark) => `${window}: rendementsattributie ten opzichte van ${benchmark}`,
     loading: 'Attributie berekenen', error: 'De attributie kon niet worden berekend.',
-    residual: (value) => `⚠ De effecten tellen niet op tot het meerrendement (restverschil ${value}). Dit is GEEN geldige ontleding — lees de rijen hieronder niet als één geheel.`,
+    residual: (value) => `De attributie sluit niet aan. Verschil: ${value}.`,
   },
   headers: { name: 'Naam', weight: 'Gewicht', ret: 'Rend.', contribution: 'Bijdr.', yourWeight: 'Uw gewicht', indexWeight: 'Indexgewicht', yourReturn: 'Uw rendement', indexReturn: 'Indexrendement', allocation: 'Allocatie', selection: 'Selectie', interaction: 'Interactie', total: 'Totaal', totalExcess: 'Totaal (= het meerrendement)' },
   names: {

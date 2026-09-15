@@ -645,10 +645,8 @@ async def admin_scheduled_jobs(authorization: str = Header(None)):
     that served this request* — which is the honest scope, and the reason `scheduler_running` is
     reported rather than inferred from an empty list.
 
-    ⚠ SIX OF THE EIGHT JOBS REPORT `unknown`, ON PURPOSE. They leave no durable record — only a log
-    line that scrolls away — so "did it run?" genuinely has no answer for them yet. Green would be a
-    fabrication and red would cry wolf; either teaches the reader to stop reading the page. They say
-    so, and `record_run` is what will fill them in.
+    The queue worker reports live queue health instead of a synthetic run record. Other jobs use
+    their durable run history.
     """
     _require_admin(authorization)
 

@@ -206,10 +206,10 @@ export default function MultipleHistoryChart({
         {hasForward && (
           <Stat label={t.forwardTile(bl.multiple)} value={x(latestFwd)} color={FORWARD_COLOR}
             info={<InfoTip content={<AspectCard
-              what="What the market pays today for the fiscal year now in progress."
-              where="GuruFocus `forward_pe_ratio`, published as a time series — read, not computed."
-              when={`Weekly since ${fromYear}. The As-of tile beside this one dates the newest point.`}
-              how="⚠ Its denominator is the CURRENT fiscal year's consensus, not a rolling twelve months — verified by backing the EPS out of price ÷ this ratio (argenx: 23.20 implied vs 23.23 published, against 27.93 for an NTM blend)." />} />} />
+              what={`Forward ${b.multiple} for the current fiscal year.`}
+              where="GuruFocus forward P/E series."
+              when={`Weekly since ${fromYear}.`}
+              how="Uses consensus EPS for the current fiscal year." />} />} />
         )}
         {/* ⚠⚠ THE VENDOR'S OWN PUBLICATION DATE, WHICH NOTHING ON THIS CARD USED TO SHOW. Every
             figure here descends from a series read from GuruFocus with a multi-week lag, and the
@@ -219,17 +219,17 @@ export default function MultipleHistoryChart({
         {hasForward && (
           <Stat label={t.asOf} value={asOf ?? '—'}
             info={<InfoTip content={<AspectCard
-              what="When GuruFocus last published a point in this series."
-              where="The newest observation on the line, not the moment we read it."
+              what="Latest publication date."
+              where="Newest point in this series."
               when={`Weekly since ${fromYear}.`}
-              how="The vendor publishes with a lag of some weeks, so this can sit behind today with nothing wrong. The Refresh above asks for anything newer." />} />} />
+              how="GuruFocus may publish this series with a delay." />} />} />
         )}
         <Stat label={t.median} value={x(median)} color={MEDIAN_COLOR}
           info={<InfoTip content={<AspectCard
-            what={`The middle forward ${b.multiple} over the window — what this has typically cost.`}
-            where="The forward line above. ⚠ It was the median of a TRAILING series until that line was removed; a median of a line nobody can see is worse than none."
+            what={`Median forward ${b.multiple}.`}
+            where="The forward series shown above."
             when={`${fVals.length} weekly observations since ${fromYear}.`}
-            how="⚠ MEDIAN, NOT MEAN. One collapsed-denominator year prints a 300× that no reader would call typical and drags a mean by tens of turns." />} />} />
+            how="The median is less affected by extreme values than the average." />} />} />
       </div>
 
       <div>

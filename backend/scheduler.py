@@ -683,6 +683,33 @@ def job_health(now=None) -> dict:
     except APIError as e:
         runs, err = [], f"{type(e).__name__}: {e}"
     rows = build_rows(specs, registered, runs, now, scheduler_running=running, runnable=runnable)
+    # The queue worker deliberately avoids one durable row per 20-second tick. Its health therefore
+    # comes from the queue itself: pending work plus the timestamp of the last resolved item.
+    for row in rows:
+        if row["id"] != "asset_ingest_queue" or not running or not row["registered"]:
+            continue
+        try:
+            from asset_pipeline import queue as asset_queue  # noqa: PLC0415
+
+            counts = asset_queue.status()
+            activity = asset_queue.last_activity()
+            pending = int(counts.get("pending") or 0)
+            row["observable"] = True
+            row["last_detail"] = (
+                f"{pending} pending · {int(counts.get('done') or 0)} done · "
+                f"{int(counts.get('failed') or 0)} failed"
+                + (f" · last activity {activity}" if activity else " · no activity recorded"))
+            if pending == 0:
+                row["status"] = "ok"
+                row["reason"] = "The queue is empty."
+            elif asset_queue.is_worker_active():
+                row["status"] = "running"
+                row["reason"] = "The queue is draining."
+            else:
+                row["status"] = "error"
+                row["reason"] = "Items are pending, but the queue has not moved an item in 10 minutes."
+        except Exception as e:  # noqa: BLE001 — job health must not fail because the queue is unreadable
+            row["reason"] = f"Could not read queue health: {type(e).__name__}: {e}"
     return {"rows": rows, "running": running, "now": now, "history_error": err}
 
 
@@ -1317,156 +1344,43 @@ def _body_history_drift(ctx=None) -> tuple[str, dict]:
              "names": [str(d) for d in drifted][:20]})
 
 
-# Which rebuilt indices the daily job refreshes.
-#
-# ⚠⚠ ONLY THE ONES WITHOUT A REACHABLE ETF. ACWI and SP500 take their headline from the index ETF's
-# own price series (`routers/_benchmark_etf`), refreshed inside the 05:00 price_update in two calls.
-# Rebuilding their 1,684 and 491 constituents daily would be thousands of paced Yahoo calls to
-# re-derive a number we already hold — and the rebuild is the LESS accurate of the two (full market
-# cap where MSCI float-adjusts, 84% coverage renormalised across the rest). AEX has no reachable
-# UCITS line on GuruFocus, so it IS the rebuild, and its 25 constituents are the entire cost.
-#
-# ⚠ Adding a label here is a real daily Yahoo budget, not a config tweak. Check the constituent
-# count first.
-_REBUILT_INDICES: tuple[str, ...] = ("AEX",)
-
-#: How many index constituents the daily slice brings current. ⚠ AT `DEFAULT_SLEEP_S` (0.4s) this
-#: is ~100 seconds of paced Yahoo calls, and it sets the CYCLE: the union of ACWI + SP500 + AEX is
-#: ~1,900 instruments, so every constituent is re-read about every eight days and the oldest close
-#: on the charts is bounded at roughly that. Raise it to shorten the cycle, not to catch up — a
-#: missed day self-repairs, because staleness IS the queue.
-BENCHMARK_SLICE = 250
-
-
 def _fire_benchmark_price_slice() -> None:
-    """Bring the most-stale index constituents current — the composition charts' own prices."""
+    """Refresh benchmark data used by the Analyse charts."""
     _spawn_body("benchmark_price_slice")
 
 
 def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
-    """The `BENCHMARK_SLICE` most-stale constituents of the benchmarks /management-dashboard can
-    draw, brought up to date. Returns a one-line summary.
-
-    ⚠⚠ IT CLOSES A HOLE NOTHING ELSE COVERED. `asset_price_refresh` is scoped to instruments HELD
-    in a model portfolio and `benchmark_index_refresh` to `_REBUILT_INDICES` (AEX) — so an ACWI or
-    SP500 constituent no book holds was refreshed by NOTHING. Measured 2026-09-03 on the working
-    database: of 1,848 ACWI members, 1,663 last closed in July, 177 in August, 8 in September.
-    That was survivable while those prices only fed a rebuilt headline the index ETF has since
-    replaced; it is not survivable now that the Analyse modal's Sector / Region / Currency bars are
-    weighed on them AND drawn only over constituents priced at both ends of the window — a stale
-    series does not age a bar, it drops a name off the chart.
-
-    ⚠⚠ A SLICE, NOT A FULL PASS, AND THE DATABASE IS THE CURSOR. `refresh_stale` orders most-stale
-    first, so there is no bookmark to keep and a missed day repairs itself on the next one — the
-    same state machine `price_slice` uses on the GuruFocus side, for the same reason. A nightly
-    full pass would be ~1,900 paced calls to re-read prices that mostly have not moved.
-
-    ⚠ SCOPED TO WHAT THIS PAGE ACTUALLY DRAWS. `_RANKED_UNIVERSES` is the Analyse modal's own
-    benchmark picker (and the momentum job's list), so the slice covers exactly the indices a
-    reader can select and nothing else. AEX is in it and costs nothing: it is refreshed in full at
-    06:30, so its constituents are never the most stale and never reach the head of the queue.
-    ⚠ FUNDAMENTALS ARE NOT HERE. The Fundamental modal reads GuruFocus `metric_data` through the
-    template universes, which `benchmark_fundamentals_fill` covers quarterly — companies file
-    quarterly, and a price slice has nothing to say about a filing.
-
-    ⚠ IT STANDS DOWN WHILE THE INGEST WORKER IS LIVE, exactly as `asset_price_refresh` does: Yahoo
-    answers an overloaded caller with an EMPTY list rather than a 429, and an empty answer here
-    would be stored as "no new bars" and leave the name stale for another cycle.
-    """
-    from asset_pipeline import queue  # noqa: PLC0415
-    from asset_pipeline.price_refresh import refresh_stale  # noqa: PLC0415
-    from routers._asset_benchmark import members  # noqa: PLC0415
-
-    step = _reporter(ctx)
-    if queue.is_worker_active():
-        return "skipped — the ingest worker is live", {"skipped": "worker_active"}
-
-    isins: set[str] = set()
-    per_label: dict[str, int] = {}
-    # ⚠ NARRATED PER LABEL, AND THE FIRST LINE COMES BEFORE THE FIRST `members()` CALL. Gathering
-    # the constituents is itself a whole-table read per index; this body used to run start to finish
-    # without emitting anything, so its toast sat on "starting…" for the entire slice.
-    step(0, len(_RANKED_UNIVERSES) + 1, "collecting constituents…")
-    for i, label in enumerate(_RANKED_UNIVERSES, start=1):
-        try:
-            mem, _cov = members(label)
-        except Exception as exc:                                    # noqa: BLE001
-            # ⚠ ONE LABEL'S FAILURE IS NOT THE JOB'S — the same rule the index refresh follows.
-            _log.warning("[benchmark-slice] %s: members unavailable (%s: %s)",
-                         label, type(exc).__name__, exc)
-            per_label[label] = 0
-            step(i, len(_RANKED_UNIVERSES) + 1, f"{label} — members unavailable")
-            continue
-        got = {m["isin"] for m in mem if m.get("isin")}
-        per_label[label] = len(got)
-        isins |= got
-        step(i, len(_RANKED_UNIVERSES) + 1, f"{label} — {len(got)} constituent(s)")
-    if not isins:
-        return "no constituents to refresh", {"considered": 0, **per_label}
-
-    # ⚠ THE FETCH IS ONE BLOCKING CALL over up to `BENCHMARK_SLICE` paced Yahoo requests, so its
-    # line has to be emitted before it starts or the reader waits out the longest phase in silence.
-    step(len(_RANKED_UNIVERSES), len(_RANKED_UNIVERSES) + 1,
-         f"refreshing the {min(BENCHMARK_SLICE, len(isins))} most-stale of {len(isins)}…")
-    res = refresh_stale(isins=isins, limit=BENCHMARK_SLICE)
-    # ⚠ THE CYCLE LENGTH IS LOGGED, because it is the one thing a single healthy-looking run cannot
-    #   show: a slice that has quietly stopped keeping up looks identical to one that never had to.
-    cycle = (len(isins) / BENCHMARK_SLICE) if BENCHMARK_SLICE else 0
-    _log.warning("[benchmark-slice] %d constituent(s) across %s; refreshed %s, cycle ~%.1f days",
-                 len(isins), per_label, res.get("refreshed"), cycle)
-    return (f"{res.get('refreshed', 0)} of {len(isins)} constituent(s) brought current "
-            f"(~{cycle:.0f}-day cycle)"), {**res, "considered": len(isins), **per_label}
-
-
-
-def _fire_benchmark_index_refresh() -> None:
-    """Daily constituent refresh for the indices we REBUILD rather than read off an ETF.
-
-    ⚠⚠ NOTHING ELSE COVERS THESE. `asset_price_refresh` is scoped to instruments HELD IN A MODEL
-    PORTFOLIO, so an index constituent no book holds was refreshed by nothing at all — which is why
-    a rebuilt index could sit on months-old closes while every dashboard around it was current, and
-    say nothing about it. Own daemon thread; never raises into the scheduler."""
-    _spawn_body("benchmark_index_refresh")
-
-
-def _body_benchmark_index_refresh(ctx=None) -> tuple[str, dict]:
-    """Constituents → market caps → two prices each, per label. Returns a one-line summary.
-
-    ⚠ ONE LABEL'S FAILURE IS NOT THE JOB'S. Each is independent — a Yahoo wobble on one index must
-    not cost the others their refresh, and the summary names whichever fell over.
-    """
+    """Refresh benchmark prices and caps, then rank the refreshed universes."""
     from routers._benchmark_refresh import refresh_benchmark  # noqa: PLC0415
 
     step = _reporter(ctx)
-    done: list[str] = []
-    failed: list[str] = []
-    n = len(_REBUILT_INDICES)
-    # ⚠ THE `emit` ARGUMENT WAS ALREADY A PROGRESS CHANNEL AND IT WENT ONLY TO THE LOG. On the
-    # interactive path it is the SSE sender; here it dropped every step into a logger the person
-    # pressing the button cannot see, so a rebuild of ~1,700 constituents narrated nothing.
-    step(0, n, f"rebuilding {n} index(es)…")
-    for i, label in enumerate(_REBUILT_INDICES, start=1):
+    summaries: dict[str, dict] = {}
+    for i, label in enumerate(_RANKED_UNIVERSES, start=1):
         try:
-            # ⚠ THE SAME FUNCTION THE BUTTON RUNS. A second "scheduled" path would be a second
-            # definition of what refreshing an index means, and the two would drift.
-            summary = refresh_benchmark(
-                label,
-                lambda _t, _l=label, _i=i, **kw: (
-                    _log.info("[benchmark_index_refresh] %s", kw.get("message", "")),
-                    step(_i - 1, n, f"{_l} · {kw.get('message', '')}"),
-                )[0],
-                should_stop=(lambda: _cancel_requested(ctx)) if ctx else None,
-            )
-            done.append(f"{label} ({(summary or {}).get('priced', '?')} priced)")
-            step(i, n, f"{label} — {(summary or {}).get('priced', '?')} priced")
-        except Exception as e:  # noqa: BLE001 — one label must not take the others down
-            _log.warning("[benchmark_index_refresh] %s failed: %s: %s", label, type(e).__name__, e)
-            failed.append(f"{label}: {type(e).__name__}")
-            step(i, n, f"{label} — FAILED: {type(e).__name__}")
-    msg = f"refreshed {', '.join(done) or 'nothing'}"
-    if failed:
-        msg += f" · failed {', '.join(failed)}"
-    return msg, {"refreshed": len(done), "failed": len(failed)}
+            step(i - 1, len(_RANKED_UNIVERSES), f"{label}: starting")
+
+            def emit(_kind: str, **fields) -> None:
+                message = str(fields.get("message") or "").strip()
+                if message:
+                    step(i - 1, len(_RANKED_UNIVERSES), f"{label}: {message}")
+
+            summaries[label] = refresh_benchmark(label, emit)
+            step(i, len(_RANKED_UNIVERSES), f"{label}: complete")
+        except Exception as exc:                                    # noqa: BLE001
+            _log.warning("[benchmark-prices] %s failed (%s: %s)",
+                         label, type(exc).__name__, exc)
+            summaries[label] = {"failed": True, "error": str(exc)}
+            step(i, len(_RANKED_UNIVERSES), f"{label}: failed")
+
+    fetched = sum(int(s.get("prices_fetched") or 0) for s in summaries.values())
+    moved = sum(int(s.get("prices_moved") or 0) for s in summaries.values())
+    failed = sum(int(s.get("prices_failed") or 0) for s in summaries.values())
+    _log.info("[benchmark-prices] %s; %d price series fetched, %d updated, %d failed",
+              {label: s.get("priceable", 0) for label, s in summaries.items()}, fetched, moved, failed)
+    rank_detail, rank_summary = _body_relative_momentum_refresh(ctx)
+    return (f"{fetched} price series checked; {moved} updated; {rank_detail}",
+            {"benchmarks": summaries, "prices_fetched": fetched, "prices_moved": moved,
+             "prices_failed": failed, "relative_momentum": rank_summary})
 
 
 #: The universes whose 12-1 returns are ranked into the seven relative-momentum states.
@@ -1485,18 +1399,8 @@ _RANKED_UNIVERSES = ("ACWI", "SP500", "AEX")
 _RANK_COVERAGE_WARN = 70.0
 
 
-def _fire_relative_momentum_refresh() -> None:
-    """Re-rank each benchmark universe's 12-1 momentum for the newest closes we hold.
-
-    ⚠ 07:00 UTC, AFTER `price_update` (05:00) and `benchmark_index_refresh` (06:30). A rank is a
-    statement about a set of prices, so computing it before the day's prices land would stamp
-    today's date on yesterday's closes. Own daemon thread; never raises into the scheduler.
-    """
-    _spawn_body("relative_momentum_refresh")
-
-
 def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
-    """Compute + persist one slice per universe. Returns a one-line summary.
+    """Compute and persist ranks after benchmark prices have refreshed.
 
     ⚠ ONE UNIVERSE'S FAILURE IS NOT THE JOB'S, the same rule as the index refresh beside it: a
     universe with no members or a bad price load must not cost the other two their ranks.
@@ -1564,9 +1468,9 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
                  "failed": len(failed), "thin": len(thin)}
 
 
-# The indices whose constituents get a quarterly fundamentals pass.
+# The indices whose constituents get a due-only fundamentals pass.
 #
-# ⚠ ALL THREE, unlike `_REBUILT_INDICES`. Fundamentals are not prices: the ETF's own series answers
+# ⚠ ALL THREE. Fundamentals are not prices: the ETF's own series answers
 # "what did ACWI return", and answers nothing at all about its constituents' margins — which is the
 # whole of the Long Equity tab and the fundamentals grid. Those exist only per company.
 _FUNDAMENTAL_INDICES: tuple[str, ...] = ("ACWI", "SP500", "AEX")
@@ -2030,8 +1934,6 @@ def _register_bodies() -> None:
         "history_drift_check": _body_history_drift,
         "benchmark_price_slice": _body_benchmark_price_slice,
         "asset_price_refresh": _body_asset_price_refresh,
-        "benchmark_index_refresh": _body_benchmark_index_refresh,
-        "relative_momentum_refresh": _body_relative_momentum_refresh,
         "benchmark_fundamentals_fill": _body_benchmark_fundamentals,
         "table_size_sample": _body_table_size_sample,
     })
@@ -2384,21 +2286,12 @@ def register_scheduler(app) -> None:
         # Daily history-drift probe — the early warning between monthly full
         # refetches. 07:00 UTC: after the 05:00 pipeline sequence and the 06:00
         # asset-price refresh, so it never competes with them for GuruFocus.
-        # Daily constituent refresh for the REBUILT indices (AEX). 06:30 UTC: after the
-        # 05:00 pipeline and before the 07:00 drift probe, so the three never compete.
-        _register("benchmark_index_refresh", _fire_benchmark_index_refresh)
-        # The most-stale constituents of ACWI / SP500 / AEX. 06:45 UTC: between the 06:30 rebuild
-        # and the 07:00 drift probe, so no two Yahoo passes overlap. ⚠ This line was MISSING when
-        # the job shipped — the spec, the fire function and the `JOB_BODIES` entry all existed, so
-        # /schedule listed it and its Run-now button worked, and the only thing absent was the
-        # trigger: a job that looks scheduled from every surface and never fires on its own.
+        # Refresh every benchmark's constituents, prices and caps, then calculate relative
+        # momentum in the same worker. The dependency is explicit: a fixed later clock time could
+        # start ranking while a long ACWI refresh is still in progress.
         _register("benchmark_price_slice", _fire_benchmark_price_slice)
-        # Re-rank the benchmark universes' 12-1 momentum. 07:30 UTC: after the 05:00 pipeline, the
-        # 06:30 index refresh and the 07:00 drift probe, so it ranks the freshest closes the day
-        # has and competes with none of them.
-        _register("relative_momentum_refresh", _fire_relative_momentum_refresh)
-        # Quarterly fundamentals over every benchmark constituent. The 10th, far from
-        # month-end, so it can never drain a region the full price refresh needs.
+        # Weekly due-only fundamentals pass. It fetches only companies whose next filing could
+        # have arrived, rather than re-reading every constituent.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
         _register("history_drift_check", _fire_history_drift_check)
         # Asset-pipeline ingest-queue worker — ON by default. Analyse queues missing ISINs and a

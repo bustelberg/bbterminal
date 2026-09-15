@@ -14,6 +14,7 @@ export type DialogRequest = {
   // prompt
   defaultValue?: string;
   placeholder?: string;
+  inputType?: 'text' | 'password';
   // When set on a prompt/confirm, confirming does NOT close the modal — it
   // swaps the SAME modal to a spinner showing this message (and resolves the
   // promise with the value). The caller then runs its async work and finishes
@@ -103,6 +104,7 @@ export const dialog = {
       title?: string;
       defaultValue?: string;
       placeholder?: string;
+      inputType?: 'text' | 'password';
       confirmLabel?: string;
       cancelLabel?: string;
       chainLoading?: string;
@@ -114,6 +116,7 @@ export const dialog = {
       title: opts?.title,
       defaultValue: opts?.defaultValue,
       placeholder: opts?.placeholder,
+      inputType: opts?.inputType,
       confirmLabel: opts?.confirmLabel ?? 'OK',
       cancelLabel: opts?.cancelLabel ?? 'Cancel',
       chainLoading: opts?.chainLoading,

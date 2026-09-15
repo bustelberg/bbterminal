@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import katex from 'katex';
 import {
-  withWorked, workedBand, workedCagr, workedMean, workedRatio,
+  withWorked, workedBand, workedCagr, workedMean, workedPriceCagr, workedRatio,
 } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 
@@ -76,6 +76,10 @@ describe('every builder emits parseable LaTeX', () => {
     expect(() => render(workedRatio(12.34, 5.6, '£220', '', '%'))).not.toThrow();
   });
 
+  it('workedPriceCagr', () => {
+    expect(() => render(workedPriceCagr(7948.94, 210.96, 9.4, 0.472))).not.toThrow();
+  });
+
   it('workedBand, including the negative lower end', () => {
     expect(() => render(workedBand(BAND))).not.toThrow();
     // ⚠ A NEGATIVE LOWER END IS THE COMMON CASE, and its minus sits beside a `\pm` and inside a
@@ -124,11 +128,13 @@ describe('an unescaped percent would truncate the expression', () => {
   it('every builder escapes it', () => {
     expect(workedMean([55.4, 54.1])).toContain(String.raw`\%`);
     expect(workedCagr(CAGR)).toContain(String.raw`\%`);
+    expect(workedPriceCagr(7948.94, 210.96, 9.4, 0.472)).toContain(String.raw`\%`);
     expect(workedRatio(1, 2, '+5.00%', '', '%')).toContain(String.raw`\%`);
     // ⚠ AND NONE OF THEM LEAVES A BARE ONE. `\%` contains `%`, so a `toContain` check alone would
     // pass on `\% ... %`; this asserts there is no percent that is not preceded by a backslash.
     expect(workedBand(BAND)).toContain(String.raw`\%`);
     for (const tex of [workedMean([55.4, 54.1]), workedCagr(CAGR), workedBand(BAND),
+      workedPriceCagr(7948.94, 210.96, 9.4, 0.472),
       workedRatio(1, 2, '+5.00%', '', '%')]) {
       expect(tex).not.toMatch(/(^|[^\\])%/);
     }

@@ -164,6 +164,11 @@ class TestTheClassComesFromTheGridAndTheName:
         assert classify_bucket(None, True, "IE00B4L5Y983",
                                "iShares Core MSCI World", g) == BUCKET_EQUITY
 
+    def test_high_income_quality_fund_is_an_alternative_fund(self):
+        g = self._grid(asset_class="equity", sector="Financial Services",
+                       name="High Income Quality fund")
+        assert classify_bucket(None, True, "XX0000000000", "High Income Quality fund", g) == BUCKET_ALTS
+
     def test_the_etf_wrapper_never_changes_the_bucket(self):
         """⚠⚠ THE INVARIANT THE MERGE CREATED, AND THE ONE A REVERT WOULD BREAK FIRST. `is_etf` may
         still decide Equity-vs-Unclassified in the fallback, but it may never move a holding

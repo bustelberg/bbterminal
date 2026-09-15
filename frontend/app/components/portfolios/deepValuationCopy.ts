@@ -287,7 +287,7 @@ const en: DeepValuationCopy = {
         how: 'Blank uses the stored close. Every return on the panel moves with this.',
       },
       forwardPE: {
-        what: 'The multiple the rerating leg starts FROM.',
+        what: 'The starting multiple for rerating.',
       },
       hurdle: {
         what: 'The return you require.',
@@ -298,7 +298,7 @@ const en: DeepValuationCopy = {
         how: 'Percent per year. Raw data, no formula.',
       },
       expectedReturn: {
-        what: 'Annual TOTAL return these assumptions imply — dividends included.',
+        what: 'Annual return from these assumptions, including dividends.',
         where: 'Computed from the three rows above.',
       },
       priceTarget: {
@@ -312,19 +312,16 @@ const en: DeepValuationCopy = {
       maxPE: {
         what: 'The most you can pay today and still earn your hurdle rate.',
         where: 'The exit multiple, discounted back at the hurdle instead of at the market.',
-        how: '⚠ A DIFFERENT MODEL FROM THE RETURN ABOVE, on the same assumptions. That one asks '
-          + "what today's price earns you; this asks what you may pay. Above the exit multiple "
-          + 'when growth and dividends outrun the hurdle.',
+        how: 'This uses your hurdle rate to calculate a fair value.',
       },
       fairValue: {
-        what: 'That multiple, on next year’s earnings.',
-        where: 'Next year’s consensus EPS × the max P/E beside it.',
+        what: 'Fair value based on next year’s earnings.',
+        where: 'Next year’s consensus EPS multiplied by the max P/E.',
       },
       fairValueGap: {
-        what: 'How far today’s price sits from that fair value.',
-        where: 'Fair value ÷ share price − 1.',
-        how: '⚠ NOT A RETURN. It is the gap you would close if the price moved to fair value '
-          + 'today; the expected return above is what you earn over the whole window.',
+        what: 'Difference between fair value and the current share price.',
+        where: 'Fair value divided by share price, minus one.',
+        how: 'This is a price gap, not an annual return.',
       },
     },
     everyYearFor: (years) => `Every year, for ${v(years)} years.`,
@@ -336,8 +333,7 @@ const en: DeepValuationCopy = {
     analystsImply: (value) => `; analysts imply ${v(value)}`,
     medianIs: (value) => `; its 5-year median is ${v(value)}`,
     reratingRuns: (from, to) => ` The rerating leg runs ${v(from)} to ${v(to)}.`,
-    analystHint: 'Analysts’ implied growth — the CAGR of the consensus EPS estimates, not a '
-      + 'published long-term rate. Click to use it.',
+    analystHint: 'Growth implied by consensus EPS estimates. Click to use it.',
     medianPEHint: 'This company’s own median P/E over the last five years. Click to use it.',
     yoursTypedHere: 'Yours, typed here.',
     yoursOrDefault: 'Yours, or the house default when blank.',
@@ -347,12 +343,10 @@ const en: DeepValuationCopy = {
     legEarningsGrowth: 'Earnings growth', legMultipleWord: 'Multiple',
     impliedIn: (years) => `Implied in ${years}y`,
     storedCloseBack: 'The stored close. Click to go back to it.',
-    storedCloseInUse: 'The stored close — in use.',
-    impliedPEHint: 'Price ÷ next-year consensus EPS — the multiple the market is actually paying, '
-      + 'computed here rather than read from the vendor. Click to use it.',
+    storedCloseInUse: 'The stored close is in use.',
+    impliedPEHint: 'Current price divided by next-year consensus EPS. Click to use it.',
     dividendBack: 'The yield GuruFocus reports. Click to go back to it.',
-    dividendInUse: 'The yield GuruFocus reports — in use. Click to put it in the box and edit '
-      + 'from it.',
+    dividendInUse: 'The GuruFocus yield is in use. Click to edit it.',
     priceTyped: 'The price you typed, not a close.',
     priceClosingOf: (name) => `Closing stock price of ${name}.`,
     priceWhereTyped: 'Yours, typed into the Share price box.',
@@ -365,44 +359,38 @@ const en: DeepValuationCopy = {
     rawDataYahoo: 'Raw data. Refresh fetches the newest closes from Yahoo.',
     rawDataNoRefresh: 'Raw data. Refresh cannot update this one.',
     reReadClose: 'Re-read the stored close', reReadCancel: 'Cancel the re-read',
-    reReading: 'Re-reading — press to cancel', cancelling: 'Cancelling…',
-    reReadOverridden: 'Re-read the stored close — the Share price box is overriding it, ',
-    reReadStale: 'This close is over a week old — re-read it',
+    reReading: 'Re-reading. Click to cancel.', cancelling: 'Cancelling…',
+    reReadOverridden: 'Re-read the stored close. The Share price box is overriding it. ',
+    reReadStale: 'This close is over a week old. Re-read it.',
     reReadForwardPE: 'Ask GuruFocus for this forward P/E again',
     reReadNoCompany: 'No GuruFocus company for this ISIN, so there is nothing to re-read',
-    reReadForwardPEOverridden: 'Ask GuruFocus for this forward P/E again — the box is overriding '
-      + 'it, so the new figure appears on that box’s chip',
+    reReadForwardPEOverridden: 'Ask GuruFocus for this forward P/E again. The box is overriding it.',
     forwardPEWhenTyped: 'Whatever moment you mean it to be.',
     forwardPEHowTyped: (vendor, date) => `Clear the box to go back to ${vendor}, which last `
       + `published on ${date}.`,
     forwardPEDerivedWhere: 'Derived from the stored close ÷ FY1 consensus EPS.',
     forwardPEMoved: (date) => `forward P/E now ${date}`,
-    forwardPEUnchanged: (date) => `still ${date} — GuruFocus has nothing newer`,
+    forwardPEUnchanged: (date) => `Still ${date}. GuruFocus has nothing newer.`,
     forwardPENone: 'GuruFocus returned no forward P/E for this company',
     growthHow: (dflt) => `Percent per year. ${dflt}`,
     exitPEHow: (dflt) => `A multiple, not a percent. ${dflt}`,
-    forwardPEHow: (years) => 'Forward, not trailing — it matches the growth rate above, which runs '
-      + `from FY1. The multiple leg is (exit ÷ this) ^ (1/${v(years)}) per year.`,
+    forwardPEHow: (years) => `Forward P/E for FY1. The multiple changes over ${v(years)} years.`,
     forwardPEDisagrees: (implied, vendor) =>
       `Price ÷ consensus EPS reads ${v(implied)} against the vendor's ${v(vendor)}. The chip puts `
       + "the market's own figure in.",
     hurdleHow: (dflt) => `Sets the fair value, not the expected return. ${dflt}.`,
-    factorsMultiply: (added, compounded) =>
-      `The factors MULTIPLY, so the × column ties and the % column does not: ${v(added)} added `
-      + `against ${v(compounded)} compounded. The yield lifts this figure but not the implied `
-      + 'price below, which is the capital leg alone.',
+    factorsMultiply: (_added, compounded) =>
+      `The factors compound together. Expected annual return: ${v(compounded)}.`,
     noForwardPE: 'No usable forward P/E, so there is nothing to rerate from.',
     noCompoundingPath: 'These assumptions have no compounding path. Check the exit P/E, growth '
       + 'and hurdle.',
     fairValueVsPrice: (pct) => `${v(pct)} against today’s price.`,
     fairValueNoEps: 'No consensus EPS for next year, so there is nothing to apply the multiple to.',
     priceOnlyFairValue: (fair, mult) =>
-      `Price only; dividends are in the return below. Fair value at the hurdle is ${v(fair)} `
-      + `(${v(mult)}).`,
+      `Price return only. Fair value at your hurdle: ${v(fair)} (${v(mult)}).`,
     priceVsRerating: (implied, from) =>
-      ` Price ÷ EPS reads ${v(implied)} against the ${v(from)} the rerating starts from.`,
-    priceLegOnly: (total) =>
-      `Price leg only. With dividends reinvested the total is ${v(total)}.`,
+      `Current P/E is ${v(implied)}. The model starts at ${v(from)}.`,
+    priceLegOnly: (total) => `Price return only. Total return including dividends: ${v(total)}.`,
     noDividend: 'No dividend, so this is the whole return.',
     legend: {
       g: 'assumed EPS growth, per year',
@@ -414,10 +402,10 @@ const en: DeepValuationCopy = {
       peFwd: 'the forward P/E it rerates FROM',
       n: (years) => `the forecast horizon, ${v(years)} years`,
       p0: 'the price now',
-      p0Row: 'the price now — the row above',
+      p0Row: 'the current price in the row above',
       pn: (years) => `the implied price, ${v(years)} years out`,
-      rerating: 'the whole rerating, applied once — not per year',
-      h: 'the return you require — your input, not a fact about the company',
+      rerating: 'the full rerating, applied once',
+      h: 'the return you require',
       epsFY1: 'next year’s consensus earnings per share',
       maxPE: 'the multiple from the row above',
     },
@@ -484,8 +472,8 @@ const en: DeepValuationCopy = {
       + 'Growth capex (capex above depreciation) is ADDED BACK: reported FCF already subtracted '
       + 'it, and it buys the very growth this model is solving for.',
     nextFY: 'Next FY', nextFYNone: 'Next FY (none)',
-    ttmNote: '\n\nTrailing twelve months where four quarters exist, the last full fiscal year '
-      + 'otherwise — one window for all four cash-flow lines.',
+    ttmNote: '\n\nUses trailing twelve months when four quarters are available. Otherwise it uses '
+      + 'the latest full fiscal year. All four cash-flow lines use the same period.',
     normOff: '\n\nUntick Normalise to value the reported figure instead.',
     notLikeForLike: '\n\nNot like for like with the implied rate: different metric (free cash '
       + 'flow vs earnings and operating cash flow), different horizon (full forecast plus '
@@ -496,52 +484,33 @@ const en: DeepValuationCopy = {
     vsReportedFcf: 'vs reported FCF', vsNextFyDerived: (fy) => `vs ${fy} FCF (derived)`,
     fcfWhatReported: 'Latest reported free cash flow.',
     fcfWhatForward: (fy) => `Consensus free cash flow for ${fy}.`,
-    fcfHowDirect: "The analysts' own forecast, read not derived — it nets a forward capex "
-      + "estimate, which is what GuruFocus's page shows. Year 1 is their work; every year after "
-      + 'it is the rate this panel solves for.',
-    fcfHowDerived: 'Derived: no consensus free cash flow is stored for this company, so it is the '
-      + 'consensus operating cash flow less the last filed capex. That capex leg largely cancels '
-      + 'against the growth-capex row below.',
+    fcfHowDirect: 'Analyst forecast for the next fiscal year.',
+    fcfHowDerived: 'Consensus operating cash flow less the latest reported capex.',
     // ⚠⚠ THE OTHER REASON THE VENDOR'S FIGURE IS NOT USED, AND IT WAS PRINTING THE ONE ABOVE.
     // A stored consensus FCF nets a FORWARD capex, so its add-back needs a FORWARD D&A
     // (`EBITDA_est − EBIT_est`). Without those two estimates the correction would fall back to the
     // trailing lines and the two halves would sit on different bases — Meta FY2026 lands 10.4bn
     // short that way. Deriving keeps one basis, and the trailing capex then cancels.
-    fcfHowNoForwardDa: 'Derived, though a consensus free cash flow IS stored. Using it would need '
-      + 'a forecast depreciation to match the forward capex it already nets, and no EBITDA or EBIT '
-      + 'estimate is stored to infer one from. Mixing the vendor base with the last filed '
-      + 'depreciation would put the two halves on different bases. This way the capex leg cancels '
-      + 'against the growth-capex row below and only depreciation is a filed figure.',
-    fcfHowReported: 'Operating cash flow minus TOTAL capex, which is why the growth-capex row '
-      + 'below adds back rather than subtracting.',
+    fcfHowNoForwardDa: 'Calculated from consensus operating cash flow and reported capex.',
+    fcfHowReported: 'Operating cash flow minus total capex.',
     inMillionsIs: (a, b) => ` In millions: ${v(a)} is ${v(b)}.`,
     inMillions: ' In millions.',
     nextFiscalYear: 'Next fiscal year.',
-    sbcHow: 'A real cost that never leaves the cash flow statement: added back into operating cash '
-      + 'flow as a non-cash charge, so reported free cash flow flatters anyone paying in equity.',
-    sbcAbsent: 'Not reported for this company, so nothing is subtracted — an absent line is not a '
-      + 'zero.',
-    capexHow: 'The first of the two lines the growth-capex row below subtracts.',
-    daHow: "The cash-flow line, not the income statement's. GuruFocus files both and they differ; "
-      + 'capex is a cash figure, so its maintenance proxy has to be one too.',
-    growthCapexAdded: 'Added, not subtracted: the base above already took all capex out. '
-      + 'Maintenance capex sustains the business; the excess buys the growth this model solves '
-      + 'for, so leaving it in charges the same expansion twice.',
-    growthCapexHow: 'Depreciation is a proxy for maintenance capex, weakest for a company building '
-      + 'an asset base for the first time. Floored at zero, so under-investment is not read as a '
-      + 'windfall.',
-    growthCapexAbsent: 'Capex or cash-flow depreciation is not reported for this company, so '
-      + 'nothing is added back — an absent line is not a zero.',
-    valuedWhatYours: 'The figure the model discounts — YOURS.',
+    sbcHow: 'Stock compensation is treated as a cost.',
+    sbcAbsent: 'Not reported for this company.',
+    capexHow: 'Used to calculate growth capex.',
+    daHow: 'Cash-flow depreciation and amortisation.',
+    growthCapexAdded: 'Capex above depreciation is added back as growth spending.',
+    growthCapexHow: 'Depreciation is used as a proxy for maintenance capex.',
+    growthCapexAbsent: 'Capex or cash-flow depreciation is not reported.',
+    valuedWhatYours: 'The figure the model discounts, entered by you.',
     valuedWhat: 'The figure the model actually discounts.',
     valuedWhereYours: 'Yours, typed here.', valuedWhere: 'Computed from the rows above.',
     valuedWhenYours: 'Whatever period you mean it to be.',
     valuedHowOverridden: 'Typed in, so the corrections above do not apply to it.',
-    valuedHowNormOff: 'Normalise is off, so this is the base free cash flow unchanged — stock '
-      + 'compensation is not deducted and growth capex is not added back.',
+    valuedHowNormOff: 'Normalise is off. Stock compensation is not deducted and growth capex is not added back.',
     valuedHowAllRan: 'Every correction ran; the rows above are the whole of it.',
-    valuedHowPartial: (which) => `${v(which)} not reported, so that correction did not run — an `
-      + 'absent line is not a zero.',
+    valuedHowPartial: (which) => `${v(which)} is not reported, so this correction did not run.`,
     correctionSbc: 'Stock compensation', correctionCapexDep: 'Capex or depreciation',
     baseNotUsedNoFcf: 'No free cash flow line is ingested for this company.',
     baseNotUsedNoConsensus: 'No consensus operating cash flow, or no capex to net off it, so no '
@@ -553,14 +522,11 @@ const en: DeepValuationCopy = {
     guruFocusLess: (a, b) => `GuruFocus, ${v(a)} less ${v(b)}.`,
     closeOn: (date) => `close ${v(date)}`, sharesOn: (date) => `shares ${v(date)}`,
     noDatesStored: 'No dates stored.', houseDefault: 'House default.',
-    noWaccStored: 'House default — no WACC stored.',
-    impliedHow: 'Bisected on demand; there is no closed form for g. Not a valuation — what you '
-      + 'would have to believe.',
-    impliedNonPositive: (fcf) => `Free cash flow of ${v(fcf)} is at or below zero, so no growth `
-      + 'rate works — a fact about the company, not an error.',
+    noWaccStored: 'House default. No WACC is stored.',
+    impliedHow: 'Solved from the market cap. This is not a valuation.',
+    impliedNonPositive: (fcf) => `Free cash flow is ${v(fcf)}. No growth rate can be calculated.`,
     impliedMissing: (what) => `Not enough inputs: no ${v(what)} ingested.`,
-    impliedRateTooLow: 'The discount rate must exceed the perpetuity growth — the terminal value '
-      + 'divides by the gap.',
+    impliedRateTooLow: 'The discount rate must exceed perpetuity growth.',
     impliedNoRate: 'No rate between −99% and 1000% a year reconciles that market cap with this '
       + 'cash flow.',
     analystsPrefix: 'analysts ',
@@ -575,13 +541,13 @@ const en: DeepValuationCopy = {
     legend: {
       ocfEst: (fy) => `consensus operating cash flow for ${v(fy)}`,
       capexFiled: 'capital expenditure, last filed',
-      F: 'the cash flow valued — paid in full in year 1, then grown',
+      F: 'the cash flow valued, paid in year 1 and then grown',
       Fforward: (fy) => `free cash flow for ${v(fy)}`,
       Ffiled: 'free cash flow as filed',
       S: 'stock-based compensation', G: 'growth capex, the row above',
-      C: 'capital expenditure, as filed — a negative outflow',
+      C: 'capital expenditure as filed',
       D: 'cash-flow depreciation, the maintenance-capex proxy',
-      g: 'the unknown — the rate this solves for', r: 'the discount rate',
+      g: 'the growth rate being solved for', r: 'the discount rate',
       gInf: 'perpetuity growth, after year n', M: 'the target market cap',
       p0: 'the latest close', N: 'diluted shares outstanding, in millions',
     },
@@ -649,7 +615,7 @@ const nl: DeepValuationCopy = {
     expectedReturn: 'Verwacht rendement', priceTarget: 'Koersdoel',
     totalPriceMove: 'Totale koersbeweging',
     atYourHurdle: 'Bij uw rendementseis',
-    maxPE: 'Max. forward P/E', fairValue: 'Reële waarde', fairValueGap: 't.o.v. de koers',
+    maxPE: 'Max. forward P/E', fairValue: 'Fair value', fairValueGap: 't.o.v. de koers',
     legGrowth: 'Groei', legYield: 'Dividendrendement', legMultiple: 'Herwaardering',
     cards: {
       growth: {
@@ -666,7 +632,7 @@ const nl: DeepValuationCopy = {
           + 'mee.',
       },
       forwardPE: {
-        what: 'De multiple waar het herwaarderingsdeel VANAF loopt.',
+        what: 'De startmultiple voor herwaardering.',
       },
       hurdle: {
         what: 'Het rendement dat u eist.',
@@ -677,7 +643,7 @@ const nl: DeepValuationCopy = {
         how: 'Procent per jaar. Brongegeven, geen formule.',
       },
       expectedReturn: {
-        what: 'Het jaarlijkse TOTAALrendement dat deze aannames impliceren — dividend inbegrepen.',
+        what: 'Jaarlijks rendement uit deze aannames, inclusief dividend.',
         where: 'Berekend uit de drie regels hierboven.',
       },
       priceTarget: {
@@ -692,20 +658,16 @@ const nl: DeepValuationCopy = {
         what: 'Het meeste dat u vandaag kunt betalen en toch uw rendementseis haalt.',
         where: 'De exit-multiple, teruggerekend tegen de rendementseis in plaats van tegen de '
           + 'markt.',
-        how: '⚠ EEN ANDER MODEL DAN HET RENDEMENT HIERBOVEN, op dezelfde aannames. Dat vraagt wat '
-          + 'de koers van vandaag u oplevert; dit vraagt wat u mag betalen. Hoger dan de '
-          + 'exit-multiple wanneer groei en dividend de rendementseis overtreffen.',
+        how: 'Dit gebruikt uw rendementseis om een Fair value te berekenen.',
       },
       fairValueGap: {
-        what: 'Hoe ver de koers van vandaag van die reële waarde af ligt.',
-        where: 'Reële waarde ÷ koers − 1.',
-        how: '⚠ GEEN RENDEMENT. Het is het gat dat u dicht zou lopen als de koers vandaag naar de '
-          + 'reële waarde beweegt; het verwachte rendement hierboven is wat u over de hele '
-          + 'periode verdient.',
+        what: 'Verschil tussen Fair value en de huidige koers.',
+        where: 'Fair value gedeeld door koers, min één.',
+        how: 'Dit is een koersverschil, geen jaarlijks rendement.',
       },
       fairValue: {
-        what: 'Die multiple, op de winst van volgend jaar.',
-        where: 'De consensus-EPS voor volgend jaar × de max. P/E ernaast.',
+        what: 'Fair value op basis van de winst van volgend jaar.',
+        where: 'Consensus-EPS van volgend jaar maal de max. P/E.',
       },
     },
     everyYearFor: (years) => `Elk jaar, gedurende ${v(years)} jaar.`,
@@ -763,16 +725,13 @@ const nl: DeepValuationCopy = {
     forwardPENone: 'GuruFocus gaf geen forward P/E voor deze onderneming',
     growthHow: (dflt) => `Procent per jaar. ${dflt}`,
     exitPEHow: (dflt) => `Een multiple, geen percentage. ${dflt}`,
-    forwardPEHow: (years) => 'Forward, niet trailing — hij sluit aan op de groeivoet hierboven, die '
-      + `vanaf FY1 loopt. Het multiple-deel is (exit ÷ deze) ^ (1/${v(years)}) per jaar.`,
+    forwardPEHow: (years) => `Forward P/E voor FY1. De multiple verandert over ${v(years)} jaar.`,
     forwardPEDisagrees: (implied, vendor) =>
       `Koers ÷ consensus-EPS geeft ${v(implied)} tegenover ${v(vendor)} van de leverancier. De chip `
       + 'zet het eigen cijfer van de markt erin.',
-    hurdleHow: (dflt) => `Bepaalt de reële waarde, niet het verwachte rendement. ${dflt}.`,
-    factorsMultiply: (added, compounded) =>
-      `De factoren VERMENIGVULDIGEN, dus de ×-kolom klopt en de %-kolom niet: ${v(added)} opgeteld `
-      + `tegenover ${v(compounded)} samengesteld. Het dividendrendement tilt dit cijfer op maar niet `
-      + 'de geïmpliceerde koers hieronder, die alleen het kapitaaldeel is.',
+    hurdleHow: (dflt) => `Bepaalt de Fair value, niet het verwachte rendement. ${dflt}.`,
+    factorsMultiply: (_added, compounded) =>
+      `De factoren werken samen. Verwacht jaarlijks rendement: ${v(compounded)}.`,
     noForwardPE: 'Geen bruikbare forward P/E, dus er valt niets te herwaarderen.',
     noCompoundingPath: 'Deze aannames hebben geen samenstellingspad. Controleer de exit-P/E, de '
       + 'groei en de rendementseis.',
@@ -780,12 +739,10 @@ const nl: DeepValuationCopy = {
     fairValueNoEps: 'Geen consensus-EPS voor volgend jaar, dus er is niets om de multiple op toe '
       + 'te passen.',
     priceOnlyFairValue: (fair, mult) =>
-      `Alleen koers; dividend zit in het rendement hieronder. De reële waarde bij de rendementseis `
-      + `is ${v(fair)} (${v(mult)}).`,
+      `Alleen koersrendement. Fair value bij uw rendementseis: ${v(fair)} (${v(mult)}).`,
     priceVsRerating: (implied, from) =>
-      ` Koers ÷ EPS geeft ${v(implied)} tegenover de ${v(from)} waar de herwaardering vandaan loopt.`,
-    priceLegOnly: (total) =>
-      `Alleen het koersdeel. Met herbelegd dividend is het totaal ${v(total)}.`,
+      `De huidige P/E is ${v(implied)}. Het model start bij ${v(from)}.`,
+    priceLegOnly: (total) => `Alleen koersrendement. Totaalrendement inclusief dividend: ${v(total)}.`,
     noDividend: 'Geen dividend, dus dit is het volledige rendement.',
     legend: {
       g: 'aangenomen EPS-groei, per jaar',
@@ -812,12 +769,12 @@ const nl: DeepValuationCopy = {
     reset: 'Zet elke invoer terug op de standaardwaarde',
     showFigures: 'Toon elk ondernemingscijfer dat dit leest, met de bron',
     useThisRate: 'Gebruik deze voet',
-    rowSbc: '− Stock-Based Compensation', rowCapex: 'Investeringen',
+    rowSbc: '− Stock compensation', rowCapex: 'Investeringen',
     rowDA: 'Afschrijvingen', rowGrowthCapex: '+ Groei-investeringen',
     rowDiscountRate: 'Disconteringsvoet', rowPerpetuityGrowth: 'Eeuwigdurende groei',
     rowForecastYears: 'Prognosejaren',
     cards: {
-      sbc: { what: 'Stock-Based Compensation, in mindering gebracht.' },
+      sbc: { what: 'Stock compensation, in mindering gebracht.' },
       capex: { what: 'Investeringen, als het uitgegeven bedrag.' },
       da: { what: 'Afschrijvingen en amortisatie uit het kasstroomoverzicht.' },
       growthCapex: {
@@ -860,10 +817,10 @@ const nl: DeepValuationCopy = {
       + 'verdiend.\n'
       + 'Laatst gerapporteerd: de vrije kasstroom precies zoals gerapporteerd over het meest '
       + 'recente boekjaar.\n\n'
-      + 'De correcties voor Stock-Based Compensation en groei-investeringen hieronder werken op beide.',
-    normaliseTitle: 'Waardeer de vrije kasstroom na aftrek van Stock-Based Compensation en vóór '
+      + 'De correcties voor Stock compensation en groei-investeringen hieronder werken op beide.',
+    normaliseTitle: 'Waardeer de vrije kasstroom na aftrek van Stock compensation en vóór '
       + 'groei-investeringen.\n\n'
-      + 'Stock-Based Compensation wordt afgetrokken: het is een reële kostenpost die het kasstroomoverzicht '
+      + 'Stock compensation wordt afgetrokken: het is een reële kostenpost die het kasstroomoverzicht '
       + 'nooit verlaat.\n'
       + 'Groei-investeringen (investeringen boven de afschrijvingen) worden WEER OPGETELD: de '
       + 'gerapporteerde vrije kasstroom heeft ze al afgetrokken, en ze kopen precies de groei '
@@ -929,11 +886,11 @@ const nl: DeepValuationCopy = {
     valuedWhenYours: 'Welke periode u er ook mee bedoelt.',
     valuedHowOverridden: 'Zelf ingetypt, dus de correcties hierboven zijn er niet op toegepast.',
     valuedHowNormOff: 'Normaliseren staat uit, dus dit is de basis-vrije-kasstroom ongewijzigd — '
-      + 'Stock-Based Compensation wordt niet afgetrokken en groei-investeringen worden niet weer opgeteld.',
+      + 'Stock compensation wordt niet afgetrokken en groei-investeringen worden niet weer opgeteld.',
     valuedHowAllRan: 'Elke correctie is uitgevoerd; de regels hierboven zijn het geheel.',
     valuedHowPartial: (which) => `${v(which)} niet gerapporteerd, dus die correctie is niet `
       + 'uitgevoerd — een ontbrekende regel is geen nul.',
-    correctionSbc: 'Stock-Based Compensation', correctionCapexDep: 'Investeringen of afschrijvingen',
+    correctionSbc: 'Stock compensation', correctionCapexDep: 'Investeringen of afschrijvingen',
     baseNotUsedNoFcf: 'Voor deze onderneming is geen regel vrije kasstroom ingelezen.',
     baseNotUsedNoConsensus: 'Geen consensus voor de operationele kasstroom, of geen investeringen '
       + 'om ervan af te trekken, dus er valt geen toekomstige basis af te leiden. Minder dan een '
@@ -971,7 +928,7 @@ const nl: DeepValuationCopy = {
       F: 'de gewaardeerde kasstroom — in jaar 1 volledig ontvangen, daarna groeiend',
       Fforward: (fy) => `vrije kasstroom voor ${v(fy)}`,
       Ffiled: 'vrije kasstroom zoals gerapporteerd',
-      S: 'aandelengerelateerde beloning', G: 'groei-investeringen, de regel hierboven',
+      S: 'Stock compensation', G: 'groei-investeringen, de regel hierboven',
       C: 'investeringen, zoals gerapporteerd — een negatieve uitstroom',
       D: 'afschrijvingen uit het kasstroomoverzicht, de benadering voor onderhoudsinvesteringen',
       g: 'de onbekende — de voet waarvoor dit oplost', r: 'de disconteringsvoet',

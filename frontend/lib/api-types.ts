@@ -551,10 +551,8 @@ export interface paths {
          *     that served this request* — which is the honest scope, and the reason `scheduler_running` is
          *     reported rather than inferred from an empty list.
          *
-         *     ⚠ SIX OF THE EIGHT JOBS REPORT `unknown`, ON PURPOSE. They leave no durable record — only a log
-         *     line that scrolls away — so "did it run?" genuinely has no answer for them yet. Green would be a
-         *     fabrication and red would cry wolf; either teaches the reader to stop reading the page. They say
-         *     so, and `record_run` is what will fill them in.
+         *     The queue worker reports live queue health instead of a synthetic run record. Other jobs use
+         *     their durable run history.
          */
         get: operations["admin_scheduled_jobs_api_admin_scheduled_jobs_get"];
         put?: never;
@@ -3430,6 +3428,26 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/auth/users/{user_id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set User Password
+         * @description Set another user's password and end their existing sessions (admin only).
+         */
+        patch: operations["set_user_password_api_auth_users__user_id__password_patch"];
         trace?: never;
     };
     "/api/auth/users/{user_id}/role": {
@@ -8804,6 +8822,8 @@ export interface components {
             link_reason?: string | null;
             /** Link Source */
             link_source: string;
+            /** Management Group */
+            management_group: string;
             /**
              * Missing Reports
              * @default []
@@ -11321,6 +11341,15 @@ export interface components {
             bands?: components["schemas"]["AllocationBand"][];
             /** Benchmark */
             benchmark: string;
+            /** Benchmark Caps From */
+            benchmark_caps_from?: string | null;
+            /** Benchmark Caps To */
+            benchmark_caps_to?: string | null;
+            /**
+             * Benchmark Caps Unstamped
+             * @default 0
+             */
+            benchmark_caps_unstamped?: number;
             /** Benchmark Coverage Pct */
             benchmark_coverage_pct?: number | null;
             /**
@@ -11500,6 +11529,11 @@ export interface components {
             missed_winners?: components["schemas"]["AttributionName"][];
             /** Name */
             name?: string | null;
+            /**
+             * Needs Benchmark Price Refresh
+             * @default false
+             */
+            needs_benchmark_price_refresh?: boolean;
             /** Note */
             note?: string | null;
             /** Portfolio Id */
@@ -13173,6 +13207,11 @@ export interface components {
             isin?: string | null;
             /** Linked Portfolio Id */
             linked_portfolio_id?: number | null;
+        };
+        /** SetPasswordRequest */
+        SetPasswordRequest: {
+            /** Password */
+            password: string;
         };
         /** SetRoleRequest */
         SetRoleRequest: {
@@ -17866,6 +17905,43 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_user_password_api_auth_users__user_id__password_patch: {
+        parameters: {
+            query?: never;
+            header: {
+                authorization: string;
+            };
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPasswordRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

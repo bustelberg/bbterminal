@@ -36,17 +36,6 @@ import { withWorked, subNum } from './workedFormula';
 import type { PortfolioVolatility } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
-/**
- * ⚠ MONTHLY FIRST, AND THE ORDER IS THE RECOMMENDATION — the same convention `DrawdownView` uses
- * for putting Daily first. It is also the default; the two are kept together so the control cannot
- * open on its second option.
- */
-const FREQS = [
-  { key: 'monthly', label: 'Monthly' },
-  { key: 'weekly', label: 'Weekly' },
-  { key: 'daily', label: 'Daily' },
-] as const;
-
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const signed2 = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
@@ -88,8 +77,7 @@ export default function VolatilityView({
   const t = useRiskCopy();
   const [data, setData] = useState<PortfolioVolatility | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** ⚠ MONTHLY, ON REQUEST (2026-08-31) — see `FREQS`, whose first entry this must stay. */
-  const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>(FREQS[0].key);
+  const freq = 'monthly';
 
   const key = `${benchmark}|${freq}|${holdings.length}`
     + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
@@ -118,8 +106,7 @@ export default function VolatilityView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const period = data?.frequency === 'daily' ? 'day'
-    : data?.frequency === 'monthly' ? 'month' : 'week';
+  const period = 'month';
 
   /**
    * WHAT EVERY CARD HERE IS MEASURED FROM, AND OVER WHAT WINDOW — built once, seven cards.
@@ -288,15 +275,7 @@ export default function VolatilityView({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-fg-faint">Measured</span>
-        {FREQS.map((x) => (
-          <button key={x.key} type="button" onClick={() => setFreq(x.key)}
-            className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-              freq === x.key ? 'bg-accent-600 text-white border-transparent'
-                : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300'}`}>
-            {x.label}
-          </button>
-        ))}
+        <span className="text-[11px] text-fg-faint">Measured monthly</span>
         {/* ⚠⚠ ANNUALISED IS MARKED ONCE, FOR THE WHOLE VIEW, and that is why the tiles no longer
             carry "(ann.)". It applies to σ, downside deviation, the return and both ratios — but
             only ONE tile ever said so, which left the other four looking like raw-period numbers next

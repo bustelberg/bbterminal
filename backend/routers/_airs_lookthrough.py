@@ -72,8 +72,9 @@ def expand_positions(portfolio_id: int, datum: str | None,
     pos = positions if positions is not None else _positions_of(portfolio_id, datum)
     links = resolve_links(supabase, portfolio_id,
                           [{"isin": r.get("isin"), "fonds": r.get("fonds")} for r in pos])
-    names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
-        ref_models())}
+    from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+    names = {p["id"]: (nickname_for(p.get("name")) or p.get("display_name") or p["name"])
+             for p in ref_models()}
 
     legs: list[dict] = []
     expanded: list[dict] = []

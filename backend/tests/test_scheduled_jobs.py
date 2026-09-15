@@ -97,6 +97,17 @@ class TestOptInJobs:
     def test_asset_queue_is_registered_by_default(self):
         assert "asset_ingest_queue" in {s.id for s in registrable({})}
 
+    def test_benchmark_jobs_are_one_chained_daily_refresh_and_one_weekly_due_fill(self):
+        by_id = {s.id: s for s in SCHEDULED_JOBS}
+        assert "benchmark_index_refresh" not in by_id
+        assert "relative_momentum_refresh" not in by_id
+        assert by_id["benchmark_price_slice"].trigger == {
+            "day_of_week": "mon-sun", "hour": 6, "minute": 30, "timezone": "UTC",
+        }
+        assert by_id["benchmark_fundamentals_fill"].trigger == {
+            "day_of_week": "mon", "hour": 8, "minute": 0, "timezone": "UTC",
+        }
+
 
 
 class TestTheThreeWayDisagreement:
