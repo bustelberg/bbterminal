@@ -66,7 +66,7 @@ THE SHEET, MEASURED ON AITopSelectie OFF DYN (2026-01-01..2026-08-05, 40 rows)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from io import BytesIO
+from io import BytesIO, StringIO
 
 import pandas as pd
 
@@ -77,6 +77,13 @@ import pandas as pd
 # ⚠ AN UNKNOWN CODE RETURNS ZERO BYTES, NOT AN ERROR — see `_download_report_sync`, whose length
 # check is the only thing standing between a typo here and a silent "this book never traded".
 TRANSACTIES_RAPPORT_TYPE = "TRANS"
+
+# AIRS still exports legacy compound-document `.xls` files.  Some otherwise
+# readable exports retain an unused SSAT after an empty short-stream container;
+# xlrd prints that benign structural observation directly to stdout.  Keep the
+# parser's diagnostics out of the service log while allowing all real parse
+# errors to propagate normally.
+_OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 # ⚠⚠ THE PAGE IS `/management-dashboard`. THERE IS NO `/portfolios` ROUTE — it 404s. Several
 # refusals tell a reader to go and load a book's transactions, and an instruction that lands on a
@@ -157,7 +164,14 @@ def parse_transacties(file_bytes: bytes) -> ParsedSheet:
     any reading. That is a different claim from "this row looks unimportant", which is the
     judgement this parser refuses to make.
     """
-    df = pd.read_excel(BytesIO(file_bytes))
+    if file_bytes.startswith(_OLE2_SIGNATURE):
+        # `logfile` is an xlrd argument, forwarded by pandas only for this
+        # legacy format.  Do not redirect process stdout: scans can run beside
+        # HTTP requests, and a global redirect could hide an unrelated error.
+        df = pd.read_excel(BytesIO(file_bytes), engine="xlrd",
+                           engine_kwargs={"logfile": StringIO()})
+    else:
+        df = pd.read_excel(BytesIO(file_bytes))
     # ⚠ HEADERS ARRIVE WITH TRAILING SPACES ON SOME AIRS EXPORTS, and " Fonds" is a different key
     # from "Fonds" to every consumer downstream. Stripped once, here.
     df.columns = [str(c).strip() for c in df.columns]

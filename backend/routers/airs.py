@@ -4264,7 +4264,7 @@ class AllocationBandGrid(BaseModel):
 
 @router.get("/api/airs/allocation-bands", response_model=AllocationBandGrid)
 async def airs_allocation_bands():
-    """The allocation policy — all sixteen cells, nulls where nothing is set."""
+    """The allocation policy — JSON defaults plus any administrator overrides."""
     from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands  # noqa: PLC0415
     from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
 
@@ -4274,19 +4274,10 @@ async def airs_allocation_bands():
 
 @router.put("/api/airs/allocation-bands", response_model=AllocationBandGrid)
 async def airs_set_allocation_bands(body: list[AllocationBand]):
-    """Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).
+    """Save changed allocation cells. Empty cells restore the JSON default.
 
-    ⚠ PARTIAL BY DESIGN — send only the cells you changed. A cell that IS sent and is empty means
-    "clear this row"; a cell that is not sent means nothing at all. Sending the full grid from a
-    stale view therefore deletes everything that changed since it loaded, which is not theoretical:
-    it wiped 15 of 16 seeded rows on 2026-08-04, silently.
-
-    ⚠ VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
-    whole submission with a sentence naming it — landing the first eight and refusing the ninth
-    would leave a policy half-updated while the reader believes all of it took.
-
-    Returns the WHOLE grid as stored, so the editor renders what the database now holds — including
-    any cell somebody else changed while it was open — rather than what it hoped it sent.
+    The request is validated before writing. The response contains the current
+    full policy.
     """
     from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands, save_bands  # noqa: PLC0415
     from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415

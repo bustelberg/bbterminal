@@ -105,10 +105,10 @@ def _fetch_live(portefeuille: str, van: str, tot: str):
     from airs_scanner import download_transacties_sync  # noqa: PLC0415
     from airs_transacties import parse_transacties  # noqa: PLC0415
 
-    # ⚠ LOGGED AT WARNING WHEN IT ACTUALLY GOES OUT TO AIRS. uvicorn leaves the root logger at
-    # WARNING, so an `info` line here is invisible in production — and "why did this take eight
-    # seconds" is exactly the question this line answers. The cached path stays silent.
-    _log.warning("[airs_transacties] %s: downloading TRANS %s..%s (live)", portefeuille, van, tot)
+    # A live download is normal cache-fill work, not an incident.  It can repeat
+    # across a fleet refresh, so leave it available for diagnosis without turning
+    # a healthy Railway log into a warning stream.
+    _log.debug("[airs_transacties] %s: downloading TRANS %s..%s (live)", portefeuille, van, tot)
     return parse_transacties(download_transacties_sync(portefeuille, van, tot))
 
 

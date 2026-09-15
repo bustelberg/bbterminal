@@ -24,17 +24,27 @@ class TestTheGridIsAlwaysComplete:
         assert {(c["variant"], c["bucket"]) for c in out} == {
             (v, b) for v in VARIANTS for b in ab.POLICY_BUCKETS}
 
-    def test_an_unset_cell_is_null_not_zero(self, monkeypatch):
+    def test_an_unoverridden_cell_comes_from_the_versioned_defaults(self, monkeypatch):
         monkeypatch.setattr(ab, "supabase", _FakeDb([]))
-        c = ab.load_bands()[0]
-        assert c["min_pct"] is None and c["default_pct"] is None and c["max_pct"] is None
+        c = next(c for c in ab.load_bands()
+                 if c["variant"] == "Offensief" and c["bucket"] == "Equity")
+        assert (c["min_pct"], c["default_pct"], c["max_pct"]) == (70.0, 89.0, 100.0)
+
+    def test_every_profile_gets_the_requested_default_policy(self, monkeypatch):
+        monkeypatch.setattr(ab, "supabase", _FakeDb([]))
+        got = {(c["variant"], c["bucket"]): (c["min_pct"], c["default_pct"], c["max_pct"])
+               for c in ab.load_bands()}
+        assert got[("Beperkt Offensief", "Bonds")] == (0.0, 9.0, 40.0)
+        assert got[("Neutraal", "Bonds")] == (20.0, 29.0, 60.0)
+        assert got[("Defensief", "Cash")] == (0.0, 1.0, 70.0)
 
     def test_postgres_numerics_arrive_as_STRINGS_and_are_returned_as_numbers(self, monkeypatch):
         # ⚠ PostgREST serialises `numeric` as a string. Passed through untouched, the editor's
         # inputs go stringly-typed and its defaults-sum CONCATENATES instead of adding — "607040".
         monkeypatch.setattr(ab, "supabase", _FakeDb([
             {"variant": "Offensief", "bucket": "Equity",
-             "min_pct": "50", "default_pct": "70.5", "max_pct": "90", "updated_at": "2026-08-04"}]))
+             "min_pct": "50", "default_pct": "70.5", "max_pct": "90", "updated_at": "2026-08-04",
+             "is_override": True}]))
         c = next(x for x in ab.load_bands() if x["variant"] == "Offensief" and x["bucket"] == "Equity")
         assert c["min_pct"] == 50.0 and c["default_pct"] == 70.5
         assert all(isinstance(c[f], float) for f in ("min_pct", "default_pct", "max_pct"))
@@ -137,6 +147,7 @@ class TestSaving:
         ab.save_bands([{"variant": "Neutraal", "bucket": "Bonds", "max_pct": 40}])
         assert db.deleted == []
         assert len(db.upserted) == 1 and db.upserted[0]["max_pct"] == 40.0
+        assert db.upserted[0]["is_override"] is True
 
     def test_the_timestamp_is_a_real_one_not_the_string_now(self, monkeypatch):
         # PostgREST sends JSON, so a SQL expression arrives as six literal characters.

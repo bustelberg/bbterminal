@@ -21,7 +21,10 @@ value. A policy table spelling them its own way is a join waiting to break.
 from __future__ import annotations
 
 import logging
+import json
 from datetime import UTC, datetime
+from functools import lru_cache
+from pathlib import Path
 
 from deps import supabase
 
@@ -58,6 +61,33 @@ _log = logging.getLogger(__name__)
 POLICY_BUCKETS: tuple[str, ...] = (BUCKET_EQUITY, BUCKET_BONDS, BUCKET_ALTS, BUCKET_CASH)
 
 _FIELDS = ("min_pct", "default_pct", "max_pct")
+_DEFAULTS_PATH = Path(__file__).resolve().parents[1] / "config" / "allocation_bands.defaults.json"
+
+
+@lru_cache(maxsize=1)
+def _default_bands() -> dict[tuple[str, str], dict]:
+    """Read and validate the versioned allocation-policy baseline.
+
+    The JSON is the editable-in-code source of truth; database rows are only
+    deliberate exceptions.  Failing loudly on a malformed checked-in policy is
+    safer than quietly serving an empty allocation overlay.
+    """
+    try:
+        raw = json.loads(_DEFAULTS_PATH.read_text(encoding="utf-8"))
+        profiles = raw["profiles"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"invalid allocation defaults at {_DEFAULTS_PATH}: {exc}") from exc
+    out: dict[tuple[str, str], dict] = {}
+    for variant in VARIANTS:
+        for bucket in POLICY_BUCKETS:
+            cell = (profiles.get(variant) or {}).get(bucket)
+            if not isinstance(cell, dict):
+                raise RuntimeError(f"allocation defaults missing {variant} / {bucket}")
+            err = validate_band(cell)
+            if err:
+                raise RuntimeError(f"invalid allocation default {variant} / {bucket}: {err}")
+            out[(variant, bucket)] = {f: _num(cell.get(f)) for f in _FIELDS}
+    return out
 
 
 def _num(v: object) -> float | None:
@@ -73,10 +103,11 @@ def _num(v: object) -> float | None:
 
 
 def load_bands() -> list[dict]:
-    """All sixteen cells, stored values where they exist and nulls where they do not."""
+    """All sixteen cells: JSON defaults plus any stored administrator override."""
     rows = (supabase.table("airs_allocation_band")
-            .select("variant,bucket,min_pct,default_pct,max_pct,updated_at").execute().data or [])
-    stored = {(r["variant"], r["bucket"]): r for r in rows}
+            .select("variant,bucket,min_pct,default_pct,max_pct,updated_at,is_override").execute().data or [])
+    stored = {(r["variant"], r["bucket"]): r for r in rows if r.get("is_override")}
+    defaults = _default_bands()
     # ⚠ Rows for a variant or bucket we no longer recognise are LOGGED, not silently dropped and
     # not silently shown: the grid is fixed, so an orphan is invisible in the editor and would be
     # deleted by the next save without anyone seeing it go.
@@ -87,12 +118,13 @@ def load_bands() -> list[dict]:
     out: list[dict] = []
     for variant in VARIANTS:
         for bucket in POLICY_BUCKETS:
-            r = stored.get((variant, bucket)) or {}
+            r = stored.get((variant, bucket))
+            base = defaults[(variant, bucket)]
             out.append({
                 "variant": variant,
                 "bucket": bucket,
-                **{f: _num(r.get(f)) for f in _FIELDS},
-                "updated_at": r.get("updated_at"),
+                **({f: _num(r.get(f)) for f in _FIELDS} if r else base),
+                "updated_at": r.get("updated_at") if r else None,
             })
     return out
 
@@ -153,7 +185,7 @@ def save_bands(cells: list[dict]) -> int:
         else:
             # ⚠ An ISO timestamp, not the string "now()" — PostgREST sends the payload as JSON, so
             # a SQL expression arrives as six literal characters and the insert fails on the type.
-            upserts.append({"variant": variant, "bucket": bucket, **vals,
+            upserts.append({"variant": variant, "bucket": bucket, **vals, "is_override": True,
                             "updated_at": datetime.now(UTC).isoformat()})
     for variant, bucket in deletes:
         (supabase.table("airs_allocation_band").delete()
