@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+from statistics import median
 from collections import Counter, defaultdict
 # ⚠ ALIASED. Three loops in this file already bind a variable called `date` (they iterate
 # `{date: value}` maps), and importing the type under that name shadows it inside them — the same
@@ -777,6 +778,48 @@ _FORECAST_BASE = {
 # cloud, 10,000 local. A page larger than the cap is silently trimmed — no error, no flag — so
 # this is deliberately at the cloud cap and the loop stops on a SHORT page, never on a count.
 _PAGE = 1000
+
+
+def _usable_metric_row(row: dict) -> bool:
+    """Whether an observation is meaningful to the fundamental readers.
+
+    A literal zero for diluted shares outstanding is GuruFocus's missing-value sentinel, not a
+    real share count. Older stored rows still contain it until their next refresh, so the read path
+    rejects it too rather than allowing an artificial issuance step into a benchmark.
+    """
+    value = row.get("numeric_value")
+    if value is None:
+        return False
+    return not (
+        str(row.get("metric_code") or "").endswith("Shares Outstanding (Diluted Average)")
+        and float(value) <= 0
+    )
+
+
+def _normalise_share_count_rows(rows: list[dict]) -> None:
+    """Normalize 1,000x diluted-share unit switches before any blend consumes raw rows.
+
+    The matrix reader already reaches `_latest_per_year_dated`, but the benchmark graph's bulk
+    path used to hand raw database rows directly to `_blend_rows`. Keeping the repair here makes
+    both surfaces consume the same values.
+    """
+    series: dict[tuple[int | None, str], list[dict]] = defaultdict(list)
+    for row in rows:
+        if (str(row.get("metric_code") or "").endswith("Shares Outstanding (Diluted Average)")
+                and _usable_metric_row(row)):
+            series[(row.get("company_id"), str(row["metric_code"]))].append(row)
+    for points in series.values():
+        values = [abs(float(row["numeric_value"])) for row in points]
+        if len(values) < 3:
+            continue
+        center = median(values)
+        for row in points:
+            value = float(row["numeric_value"])
+            ratio = abs(value) / center
+            if 1 / 2_000 <= ratio <= 1 / 500:
+                row["numeric_value"] = value * 1_000.0
+            elif 500 <= ratio <= 2_000:
+                row["numeric_value"] = value / 1_000.0
 
 
 def _page_metrics(company_id: int, pattern: str, *, exact: bool = False) -> list[dict]:
@@ -1893,6 +1936,8 @@ def _blend_rows(rows: list[dict], covered: list[dict],
     Measured 2026-08-12 on AEX quarterly Revenue: 22 constituents, 639 rows, zero points, while the
     table beside it showed 84–93% of the index reporting each quarter. See `quarter_bucket`.
     """
+    _normalise_share_count_rows(rows)
+
     from routers._fundamental_blend import (  # noqa: PLC0415
         blend_series, explain_empty, period_end, quarter_bucket, year_bucket,
     )
@@ -2558,6 +2603,14 @@ def _warn_once(key: str, msg: str, *args) -> None:
     _WARNED.add(key)
     _log.warning(msg, *args)
 
+
+def _debug_once(key: str, msg: str, *args) -> None:
+    """Keep a forensic data-quality decision available without making it an alert."""
+    if key in _WARNED:
+        return
+    _WARNED.add(key)
+    _log.debug(msg, *args)
+
 _TTM_RULE: dict[str, str] = {
     # Flows — income statement and cash flow.
     "revenue": "sum", "gross_profit": "sum", "operating_income": "sum", "net_income": "sum",
@@ -2845,14 +2898,12 @@ def _drop_quarter_outliers(by_date: dict[str, float], who: str = "?") -> dict[st
     run = _level_shift(flagged, axis)
     drop = flagged - run
     if run:
-        # ⚠⚠ ONE LINE, AND STILL AT `warning` — THIS IS THE RARE HALF (2026-09-03, on request:
-        # the guard's logging "pollutes our terminal now"). A level shift is not a dropped outlier:
-        # nothing is removed, and an index built on this line WILL step. That is worth a line
-        # somebody sees. The reasoning behind it moved into this comment, where it belongs — a
-        # five-sentence explanation of a heuristic is documentation, not a log record.
+        # A kept shift is a forensic data-quality fact, not an actionable runtime alert. ACWI
+        # prewarm encounters hundreds at boot, and one WARNING per company/metric buries failures
+        # and job summaries. Keep the detail at DEBUG for a focused investigation instead.
         # ⚠ ONCE PER (company, metric). The same shift is re-detected on every blend that touches
-        # this company — see `_warn_once` for why repeating it costs the whole log.
-        _warn_once(f"shift:{who}",
+        # this company — see `_debug_once` for why repeating it costs the whole log.
+        _debug_once(f"shift:{who}",
                    "[earnings] %s: level shift kept — %d qtr(s) over %.0fx median %.4g, "
                    "consecutive to the newest filing (restatement / redenomination / split?)",
                    who, len(run), _QUARTER_OUTLIER_FACTOR, median)
@@ -2965,9 +3016,9 @@ def _ttm_by_period(rows: list[dict], rule: str, key: str = "label",
     """
     by_date: dict[str, float] = {}
     for m in rows:
-        v = m.get("numeric_value")
-        if v is None:
+        if not _usable_metric_row(m):
             continue
+        v = m["numeric_value"]
         # Latest observation wins for a given quarter-end — same rule as the annual path.
         by_date[str(m["target_date"])[:10]] = float(v)
     # ⚠ OFF THE ROWS, NOT A PARAMETER. Every caller already has these on the rows it passed
@@ -3100,13 +3151,30 @@ def _latest_per_year_dated(rows: list[dict]) -> dict[str, tuple[str, float]]:
     """
     by: dict[str, tuple[str, float]] = {}
     for m in rows:
-        v = m.get("numeric_value")
-        if v is None:
+        if not _usable_metric_row(m):
             continue
+        v = m["numeric_value"]
         d = str(m["target_date"])[:10]
         y = d[:4]
         if y not in by or d > by[y][0]:
             by[y] = (d, float(v))
+
+    # GuruFocus can switch this field between shares and thousands of shares for only part of a
+    # history. ConocoPhillips is the clear example: FY2017/FY2018 arrived as ~1M before FY2019
+    # resumed the correct ~1,100M. A listed company does not issue 1,000× shares between annual
+    # reports; a split is restated across the comparative history. The direction is unambiguous
+    # against the median, so scale the stored legacy value back into millions. The broad 500–2,000
+    # band catches vendor rounding while leaving ordinary issuance and genuine capital changes intact.
+    if by and all("Shares Outstanding (Diluted Average)" in str(r.get("metric_code") or "")
+                  for r in rows):
+        center = median(abs(v) for _d, v in by.values() if v > 0)
+        if center > 0:
+            by = {
+                y: (d, value * 1_000.0) if 1 / 2_000 <= abs(value) / center <= 1 / 500
+                else (d, value / 1_000.0) if 500.0 <= abs(value) / center <= 2_000
+                else (d, value)
+                for y, (d, value) in by.items()
+            }
     return by
 
 
@@ -3374,6 +3442,8 @@ def _rows_by_company(company_ids: list[int], codes: list[str]) -> dict[int, list
     """
     fast = rows_by_company_via_copy(company_ids, codes, _BLEND_START)
     if fast is not None:
+        for rows in fast.values():
+            _normalise_share_count_rows(rows)
         return fast
 
     raw: dict[int, list[dict]] = defaultdict(list)
@@ -3392,6 +3462,8 @@ def _rows_by_company(company_ids: list[int], codes: list[str]) -> dict[int, list
             for r in page:
                 raw[r["company_id"]].append(r)
             off += len(page)
+    for rows in raw.values():
+        _normalise_share_count_rows(rows)
     return raw
 
 

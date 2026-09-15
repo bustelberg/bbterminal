@@ -6,9 +6,9 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { marginOf, type MarginInputs, type MarginRow } from './marginData';
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
-import { isUniverseTarget, type BenchTarget } from './benchSeries';
+import { type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
-import PortfolioFundamentalsRefresh from './PortfolioFundamentalsRefresh';
+import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
 
 /** The base inputs behind the FCF-SBC margin — THREE rows per company (Revenue, FCF, SBC), each in
  * the company's own reporting currency (millions), followed by the DERIVED margin the card plots.
@@ -145,15 +145,8 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
-                {isUniverseTarget(benchTarget) && (
-                  <span className="ml-auto shrink-0">
-                    <PortfolioFundamentalsRefresh
-                      scope={{ kind: 'universe', label: benchTarget.label,
-                        name: benchLabel || benchTarget.label, feeds: 'smart' }}
-                      label="Refresh benchmark"
-                      onDone={() => { setBenchReloadKey((k) => k + 1); onRefreshed?.(); }} />
-                  </span>
-                )}
+                <BenchmarkFundamentalsRefresh benchTarget={benchTarget} benchLabel={benchLabel}
+                  onDone={() => { setBenchReloadKey((k) => k + 1); onRefreshed?.(); }} />
               </div>
               {!bench && !benchErr && <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>}
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}

@@ -55,6 +55,26 @@ function sizeOf(resp: Response): string | null {
       : `${n} B`;
 }
 
+/** Benchmark Graphs expose their server work as a standard Server-Timing header. This costs no
+ * body clone and makes a slow card distinguishable as a cache miss, database read or blend step. */
+function serverTimingOf(resp: Response): string | null {
+  const raw = resp.headers.get('server-timing');
+  const source = resp.headers.get('x-bb-blend-cache');
+  const gzipBytes = resp.headers.get('x-bb-blend-gzip-bytes');
+  if (!raw && !source) return null;
+  const compact = raw?.replace(/;dur=/g, ' ').replace(/;desc=/g, ' ') ?? '';
+  return `${source ? `cache ${source}` : ''}${compact ? ` · ${compact}` : ''}`
+    + (gzipBytes ? ` · gzip ${sizeOfBytes(gzipBytes)}` : '');
+}
+
+function sizeOfBytes(raw: string): string | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  return n >= 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB`
+    : n >= 1024 ? `${Math.round(n / 1024)} kB`
+      : `${n} B`;
+}
+
 /** The path, without the origin — the origin is the same for every call and eats the line. */
 function shortUrl(url: string): string {
   try {
@@ -194,8 +214,10 @@ export function traceRequest(
         return;
       }
       const size = sizeOf(resp);
+      const serverTiming = serverTimingOf(resp);
       const line = `${method} ${path} → ${resp.status} in ${ms(performance.now() - t0)}`
-        + (size ? ` · ${size}` : '');
+        + (size ? ` · ${size}` : '')
+        + (serverTiming ? ` · ${serverTiming}` : '');
       // A 401 is the one status worth shouting about: it renders as an empty panel, and the cause
       // (an expired session) is nowhere near the symptom.
       if (resp.status === 401 || resp.status === 403) {

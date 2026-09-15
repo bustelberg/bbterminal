@@ -70,7 +70,8 @@ _DEFAULT_TARGETS = "ACWI:annual,SP500:annual,AEX:annual"
 _TARGETS_ENV = "BLEND_PREWARM"
 
 # Long enough to swallow a reader working down a table of per-company Fetch buttons, short enough
-# that a bulk fill's rebuild is ready before anyone reloads the page it finished on.
+# that a bulk fill's rebuild is ready before anyone reloads the page it finished on.  This is for
+# writes only: startup has no preceding write burst to coalesce (see `_boot_fast_path` below).
 _QUIET_SECONDS = 90.0
 
 # ⚠ A REBUILD MUST NOT RACE THE SCHEDULED PIPELINE. Both are heavy, both are in-process, and the
@@ -85,6 +86,10 @@ _wake = threading.Event()
 # it has moved — the cheapest possible "is what I am building already stale?".
 _generation = 0
 _last_notify = 0.0
+# A new worker's cache is certainly empty.  Do not make its first reader wait for the normal
+# write-debounce: first warm the two responses every Long Equity chart needs, then fill the rest
+# from this same background thread.  This flag is consumed exactly once by `_run`.
+_boot_fast_path = False
 
 
 def _targets() -> list[tuple[str, str]]:
@@ -112,7 +117,7 @@ def arm() -> None:
     cache is guaranteed rather than merely possible. Measured cold on ACWI: 4.35s for the growth
     blend alone, ~20s for the tab's whole fan-out.
     """
-    global _armed
+    global _armed, _boot_fast_path
     with _lock:
         if _armed:
             return
@@ -122,14 +127,14 @@ def arm() -> None:
             _armed = True                      # armed-but-idle: `notify()` stays a cheap no-op
             return
         _armed = True
+        _boot_fast_path = True
         threading.Thread(target=_run, name="bb-blend-prewarm", daemon=True).start()
-    _log.warning("[blend-prewarm] armed for %s, first pass in %.0fs",
-                 ", ".join(f"{a}/{b}" for a, b in targets), _QUIET_SECONDS)
+    _log.warning("[blend-prewarm] armed for %s; warming shared chart prerequisites now",
+                 ", ".join(f"{a}/{b}" for a, b in targets))
     # ⚠ THROUGH `notify()`, NOT BY SETTING THE EVENT HERE. It is the one place that bumps the
-    # generation and stamps the clock, and the worker's debounce reads both; poking `_wake`
-    # directly would start a pass the abandon-check cannot reason about. It also means boot gets
-    # the same `_QUIET_SECONDS` grace as a write — the app is serving by then, and the warm
-    # trickles serially behind it rather than competing with startup.
+    # generation and stamps the clock, and the worker's abandon-check reads both; poking `_wake`
+    # directly would start a pass it cannot reason about. `_boot_fast_path` consumes this first
+    # notification without the write debounce; later notifications retain the quiet grace.
     notify()
 
 
@@ -199,6 +204,17 @@ def _endpoints() -> list[tuple[str, object]]:
     ]
 
 
+# These are deliberately the first two entries in `_endpoints`, but name them instead of slicing:
+# a future endpoint inserted at the head must not silently become startup work.  Every derived
+# chart waits for the cap table, and the second response renders the five growth charts together.
+_BOOT_CRITICAL_ENDPOINTS = frozenset({"universe-period-caps", "fundamental-blend-metrics"})
+
+
+def _boot_endpoints() -> list[tuple[str, object]]:
+    """Only the shared responses that make the first Graphs view useful."""
+    return [(name, fn) for name, fn in _endpoints() if name in _BOOT_CRITICAL_ENDPOINTS]
+
+
 # What `LongEquityTab.tsx` names on the growth blend. ⚠ IT MUST MATCH THE CLIENT'S LIST EXACTLY:
 # `cache_key` includes the sorted metrics tuple, so a different list warms an entry the tab will
 # never ask for — a prewarm that costs full price and hits nothing, with no symptom but the wait.
@@ -208,12 +224,13 @@ def _endpoints() -> list[tuple[str, object]]:
 _BLEND_METRICS = ["price_ps", "eps_nri", "eps_nri_estimate", "revenue", "fcf_ps", "shares"]
 
 
-async def _warm_one(label: str, cadence: str, gen: int) -> int:
+async def _warm_one(label: str, cadence: str, gen: int,
+                    endpoints: list[tuple[str, object]] | None = None) -> int:
     """Rebuild one (label, cadence). Returns how many endpoints were warmed."""
     from routers.earnings import FundamentalCoverageRequest  # noqa: PLC0415
 
     done = 0
-    for name, fn in _endpoints():
+    for name, fn in endpoints if endpoints is not None else _endpoints():
         if _generation != gen:
             return done
         body = FundamentalCoverageRequest(universe=label, cadence=cadence)
@@ -247,6 +264,19 @@ async def _warm_all(gen: int) -> None:
                      label, cadence, n, time.perf_counter() - t0)
 
 
+async def _warm_boot_critical(gen: int) -> None:
+    """Warm the shared first-paint dependencies before the full startup rebuild."""
+    endpoints = _boot_endpoints()
+    for label, cadence in _targets():
+        if _generation != gen:
+            _log.warning("[blend-prewarm] startup fast path abandoned at %s — cache changed", label)
+            return
+        t0 = time.perf_counter()
+        n = await _warm_one(label, cadence, gen, endpoints)
+        _log.warning("[blend-prewarm] startup prerequisites %s/%s warmed %d endpoints in %.1fs",
+                     label, cadence, n, time.perf_counter() - t0)
+
+
 def _run() -> None:
     """The worker: wait for quiet, stand off the pipeline, rebuild, repeat.
 
@@ -256,6 +286,30 @@ def _run() -> None:
     """
     while True:
         _wake.wait()
+        # Startup is the one cache-cold event that is not caused by a burst of writes.  Serving
+        # the cap table and growth bundle first turns the first open from "nothing until all chart
+        # work is warm" into a useful, progressively completed view.  The full pass remains off
+        # the request path in this worker thread.
+        global _boot_fast_path
+        if _boot_fast_path:
+            _boot_fast_path = False
+            _wake.clear()
+            gen = _generation
+            try:
+                asyncio.run(_warm_boot_critical(gen))
+                # A write while the fast path ran invalidated what it made; leave the fresh
+                # generation to the ordinary debounced loop rather than warming known-stale data.
+                if _generation == gen:
+                    while _pipeline_busy():
+                        _log.warning("[blend-prewarm] pipeline is running — holding full startup warm %.0fs",
+                                     _PIPELINE_POLL_SECONDS)
+                        time.sleep(_PIPELINE_POLL_SECONDS)
+                    if _generation != gen:
+                        continue
+                    asyncio.run(_warm_all(gen))
+            except Exception as exc:  # noqa: BLE001 — prewarming cannot affect serving
+                _log.warning("[blend-prewarm] startup rebuild failed: %s: %s", type(exc).__name__, exc)
+            continue
         # Quiet period: any `notify()` while we sleep pushes the start back.
         while True:
             wait = _QUIET_SECONDS - (time.monotonic() - _last_notify)

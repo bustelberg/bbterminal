@@ -14,7 +14,7 @@ import { BADGE_TONE, StateBadge } from '../StateBadge';
 import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 import { medianAbs, negativeRunStart, usableStep } from './positiveChain';
-import { type BenchTarget } from './benchSeries';
+import { isUniverseTarget, type BenchTarget } from './benchSeries';
 
 /**
  * Everything behind one growth chart: the per-company figures its line was built from, and — when
@@ -1881,7 +1881,7 @@ export default function HoldingsRevenueModal({
               </h3>
               {scope && (
                 <span className="ml-auto shrink-0">
-                  <PortfolioFundamentalsRefresh scope={scope}
+                  <PortfolioFundamentalsRefresh scope={scope} everything
                     // ⚠ "portfolio" WOULD BE A LIE ON THE SINGLE-COMPANY CARDS, which open this
                     // modal with a basket of one and title it with that company's listing. Named
                     // for what it acts on, as its neighbour below is.
@@ -1912,7 +1912,7 @@ export default function HoldingsRevenueModal({
                     constituents against a book's twenty — so one button doing both would make the
                     cheap press unavailable. It fills only the constituents we are MISSING, which is
                     what raises this table's row count and the line's coverage with it. */}
-                <span className="ml-auto shrink-0">
+                {isUniverseTarget(benchTarget) && <span className="ml-auto shrink-0">
                   <PortfolioFundamentalsRefresh
                     /* ⚠⚠ `smart` — THE PER-ROW REFRESH, RUN ACROSS THE INDEX, AND THE NAME IS NOW
                        HONEST BECAUSE THE BEHAVIOUR IS. It fetches per constituent exactly the feeds
@@ -1927,11 +1927,11 @@ export default function HoldingsRevenueModal({
                        everything has something new, so smart ≈ all until the index is current. The
                        saving is on the second press, not the first. `feeds: 'estimates'` is the
                        cheaper, narrower fill (~1,597) if only the forecast columns are wanted. */
-                    scope={{ kind: 'universe', label: benchTarget.label,
-                      name: benchLabel || benchTarget.label, feeds: 'smart' }}
+                    scope={{ kind: 'universe', label: benchTarget.universe,
+                      name: benchLabel || benchTarget.label }}
                     label="Refresh benchmark"
                     onDone={() => setBenchReload((k) => k + 1)} />
-                </span>
+                </span>}
               </div>
               {!bench && !benchErr && (
                 <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>

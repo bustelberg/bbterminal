@@ -70,6 +70,7 @@ INVALIDATION — TWO MECHANISMS, ON PURPOSE
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import gzip
 import hashlib
@@ -77,6 +78,7 @@ import inspect
 import json
 import logging
 import threading
+import time
 from typing import Any, Callable
 
 from fastapi import Request, Response
@@ -85,8 +87,22 @@ from fastapi.encoders import jsonable_encoder
 # Reused, not reimplemented: one LRU+TTL with one set of eviction semantics. It is generic
 # (`_LruTtlCache[T]`) and already carries the thread-safety the concurrent card loads need.
 from index_universe.templates._cache import _LruTtlCache  # noqa: PLC2701
+from routers._shared_blend_cache import shared_blend_cache
 
 _log = logging.getLogger(__name__)
+
+# Set only while a cached benchmark endpoint is computing. `asyncio.to_thread` copies contextvars
+# into the worker that performs the bulk metric read, letting the response report DB time without
+# plumbing a diagnostics argument through every one of the twelve chart endpoints.
+_request_timing: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar(
+    "blend_request_timing", default=None,
+)
+
+
+def _note_metric_read(seconds: float) -> None:
+    timing = _request_timing.get()
+    if timing is not None:
+        timing["db"] = timing.get("db", 0.0) + seconds
 
 # Generous because `invalidate()` is the real mechanism — fundamentals change only on a deliberate
 # ingest, and that path clears this directly. The TTL only has to catch out-of-process writes.
@@ -156,6 +172,7 @@ def invalidate() -> int:
     _cache.clear()
     _grid_cache.clear()
     _metrics_cache.clear()
+    shared_blend_cache.invalidate()
     # ⚠ THE COVERAGE VERDICTS GO TOO, AND THEY ARE THE ONE AN INGEST MOST OBVIOUSLY MOVES: a
     # company classed `no_metrics` becomes `covered` the moment its financials land, which is
     # exactly what the button that calls this just did.
@@ -265,7 +282,9 @@ def cached_metric_reads(company_ids: list[int], metrics: list[str], cadence: str
 
     if owned:
         try:
+            started = time.perf_counter()
             produced = compute_many(owned)
+            _note_metric_read(time.perf_counter() - started)
             for m in owned:
                 if m in produced:
                     _metrics_cache.put((m, cadence, ids_key), produced[m])
@@ -466,21 +485,64 @@ def cached_blend(endpoint: str) -> Callable:
             key = cache_key(endpoint, body)
             if key is None:                       # a portfolio / explicit holdings — never cached
                 return await fn(body, request, *args, **kwargs)
-            blob = _cache.get(key)
+            started = time.perf_counter()
+            timing: dict[str, float] = {"db": 0.0}
+            source = "memory"
+            build_seconds = 0.0
+            encode_seconds = 0.0
+            # A Redis generation scopes this process's hot cache as well.  Once another replica
+            # has committed an ingest and advanced it, its old local response cannot be served.
+            generation = await asyncio.to_thread(shared_blend_cache.generation)
+            local_key = ("shared", generation, *key) if generation is not None else key
+            shared_key = (shared_blend_cache.key(generation, key)
+                          if generation is not None else None)
+            blob = _cache.get(local_key)
+            if blob is None and shared_key is not None:
+                blob = await asyncio.to_thread(shared_blend_cache.get, shared_key)
+                if blob is not None:
+                    _cache.put(local_key, blob)
+                    source = "redis"
             if blob is None:
                 # ⚠ ENCODED OFF THE EVENT LOOP. `jsonable_encoder` over ~60,000 dicts is 111 ms of
                 # pure Python and gzip another 18 ms; run inline they would block every other card
                 # request in this process for the duration, eleven times over on a cold selection.
-                out = await fn(body, request, *args, **kwargs)
+                source = "miss"
+                token = _request_timing.set(timing)
+                try:
+                    build_started = time.perf_counter()
+                    out = await fn(body, request, *args, **kwargs)
+                    build_seconds = time.perf_counter() - build_started
+                finally:
+                    _request_timing.reset(token)
+                encode_started = time.perf_counter()
                 blob = await asyncio.to_thread(_encode, out)
-                _cache.put(key, blob)
+                encode_seconds = time.perf_counter() - encode_started
+                _cache.put(local_key, blob)
+                if shared_key is not None:
+                    await asyncio.to_thread(shared_blend_cache.put, shared_key, blob)
+            db_seconds = timing["db"]
+            # `blend` is endpoint work other than the measured bulk metric read: period alignment,
+            # weighting, coverage and any executor wait. It is intentionally not labelled pure CPU.
+            blend_seconds = max(0.0, build_seconds - db_seconds)
+            timings = [
+                f'cache;desc="{source}";dur={(time.perf_counter() - started) * 1000:.1f}',
+                f'db;dur={db_seconds * 1000:.1f}',
+                f'blend;dur={blend_seconds * 1000:.1f}',
+                f'gzip;dur={encode_seconds * 1000:.1f}',
+            ]
+            headers = {
+                "Server-Timing": ", ".join(timings),
+                "Timing-Allow-Origin": "*",
+                "X-BB-Blend-Cache": source,
+                "X-BB-Blend-Gzip-Bytes": str(len(blob)),
+            }
             accepts = "gzip" in (
                 (request.headers.get("accept-encoding") if request else "") or "").lower()
             if accepts:
                 return Response(content=blob, media_type="application/json",
-                                headers={"Content-Encoding": "gzip"})
+                                headers={**headers, "Content-Encoding": "gzip"})
             # ⚠ DECOMPRESSED ON THE WAY OUT, never stored twice — the same trade `/grid` makes.
             # This branch is a curl session, not the app.
-            return Response(content=gzip.decompress(blob), media_type="application/json")
+            return Response(content=gzip.decompress(blob), media_type="application/json", headers=headers)
         return wrapper
     return deco

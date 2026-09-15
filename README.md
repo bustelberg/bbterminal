@@ -72,6 +72,9 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 # backend — create backend/.env
 SUPABASE_URL=...
 SUPABASE_SERVICE_KEY=...
+# Optional: a shared Redis connection for benchmark Graphs responses across Railway replicas.
+# Leave unset for local/single-process development; it falls back to the in-memory cache.
+BLEND_CACHE_REDIS_URL=redis://...
 ```
 
 ---
@@ -128,3 +131,7 @@ cd backend && railway up
 ```
 
 Environment variables are managed in each platform's dashboard, not in `.env` files.
+
+For multiple backend replicas, provision a managed Redis instance and set
+`BLEND_CACHE_REDIS_URL` on the backend service. Benchmark Graphs will then share their gzipped
+responses across replicas and an ingest invalidates all of them through a shared generation key.

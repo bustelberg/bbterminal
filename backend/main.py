@@ -143,6 +143,9 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
+    # The Graphs request trace reads these diagnostic response headers across the Vercel→Railway
+    # origin boundary. They contain only timings/cache source and compressed byte count, never data.
+    expose_headers=["Server-Timing", "X-BB-Blend-Cache", "X-BB-Blend-Gzip-Bytes"],
 )
 
 # Domain routers. Order doesn't affect runtime behavior; kept grouped by

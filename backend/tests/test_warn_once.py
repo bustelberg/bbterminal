@@ -56,6 +56,14 @@ class TestItSpeaksOnce:
         assert [r.levelno for r in caplog.records] == [logging.WARNING]
 
 
+class TestDebugOnlyDataQualityNotes:
+    def test_kept_level_shift_stays_available_without_becoming_an_alert(self, caplog):
+        _fresh()
+        with caplog.at_level(logging.DEBUG):
+            E._debug_once("shift:company/metric", "[earnings] level shift kept")
+        assert [r.levelno for r in caplog.records] == [logging.DEBUG]
+
+
 class TestTheCallSites:
     def test_the_three_noisy_ones_are_converted(self):
         """⚠ Pinned on source because the alternative is driving a blend, which needs a database.
@@ -64,7 +72,8 @@ class TestTheCallSites:
         import inspect  # noqa: PLC0415
 
         src = inspect.getsource(E)
-        assert src.count("_warn_once(") >= 4          # the def + three call sites
+        assert src.count("_warn_once(") >= 3          # the def + two actionable call sites
+        assert "_debug_once(f\"shift:{who}\"" in src
         # The exact messages that were flooding the terminal must no longer go straight to _log.
         assert '_log.warning("[earnings] %s: level shift kept' not in src
         assert '_log.warning("[earnings] no TTM rule' not in src

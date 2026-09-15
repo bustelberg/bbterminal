@@ -8,6 +8,7 @@ import { fcfSbcYieldOf, type FcfSbcYieldInputs, type FcfSbcYieldRow } from './fc
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
 import { type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
+import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
 
 /** The base inputs behind the FCF-SBC yield — THREE rows per company (Free Cash Flow, SBC, Market
  * cap), each in the company's own reporting currency (millions). Same columns / Unsubscribed /
@@ -73,6 +74,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
   const [bench, setBench] = useState<FcfSbcYieldInputs | null>(null);
   const [benchErr, setBenchErr] = useState<string | null>(null);
+  const [benchReloadKey, setBenchReloadKey] = useState(0);
   const benchKey = benchTarget ? `${benchTarget.label}|${benchTarget.cadence}` : '';
   useEffect(() => {
     let alive = true;
@@ -89,7 +91,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
     })();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [benchKey]);
+  }, [benchKey, benchReloadKey]);
 
   /** Fetch a `no_data` holding's financials, then reload. Throws the stated reason otherwise, which
    *  the row renders — a fetch that loaded financials carrying none of these lines is a real
@@ -135,7 +137,11 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
 
           {benchTarget && (
             <div className="space-y-1.5">
-              <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
+              <div className="flex items-baseline gap-3">
+                <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
+                <BenchmarkFundamentalsRefresh benchTarget={benchTarget} benchLabel={benchLabel}
+                  onDone={() => setBenchReloadKey((k) => k + 1)} />
+              </div>
               {!bench && !benchErr && <p className="text-xs text-fg-subtle">Loading {benchLabel} constituents…</p>}
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}
               {bench && (

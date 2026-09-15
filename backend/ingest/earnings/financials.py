@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 from itertools import zip_longest
+from statistics import median
 from typing import Any
 from urllib.parse import quote
 
@@ -31,6 +32,39 @@ from ._common import (
     _yyyy_mm_to_month_end,
     refuse_unsubscribed,
 )
+
+
+# GuruFocus occasionally emits a literal zero for a reporting period whose diluted share count is
+# absent. A public company cannot have zero diluted shares; it is a missing-value sentinel.
+_SHARE_COUNT_FIELD = "Shares Outstanding (Diluted Average)"
+
+
+def _normalise_share_count_unit_outliers(rows: list[dict]) -> None:
+    """Repair a vendor's 1,000x share-count unit switch in place.
+
+    A stock split is restated through the comparative series; an isolated 1,000x switch is not a
+    corporate action. The direction is unambiguous against the rest of the series, so scale the
+    affected period back into millions rather than throwing away a valid filing.
+    """
+    by_code: dict[str, list[dict]] = {}
+    for row in rows:
+        if str(row.get("metric_code") or "").endswith(_SHARE_COUNT_FIELD):
+            by_code.setdefault(row["metric_code"], []).append(row)
+    for series in by_code.values():
+        values = [abs(float(row["numeric_value"])) for row in series
+                  if row.get("numeric_value") is not None and float(row["numeric_value"]) > 0]
+        if len(values) < 3:
+            continue
+        center = median(values)
+        for row in series:
+            value = row.get("numeric_value")
+            if value is None or float(value) <= 0:
+                continue
+            ratio = abs(float(value)) / center
+            if 1 / 2_000 <= ratio <= 1 / 500:
+                row["numeric_value"] = float(value) * 1_000.0
+            elif 500 <= ratio <= 2_000:
+                row["numeric_value"] = float(value) / 1_000.0
 
 def _extract_financials_dates(data: dict) -> list[date]:
     """Extract all target dates from a financials JSON response."""
@@ -129,6 +163,8 @@ def _parse_financials(
                         if td is None:
                             continue
                         val = _coerce_float(v)
+                        if path_parts[-1] == _SHARE_COUNT_FIELD and val is not None and val <= 0:
+                            val = None
                         # `val` may be None when GF reported "N/A" for this
                         # period; we still emit the row so the frontend can
                         # show the period exists (with no meaningful value)
@@ -142,6 +178,7 @@ def _parse_financials(
                             "is_prediction": False,
                         })
 
+    _normalise_share_count_unit_outliers(rows)
     return rows
 
 
