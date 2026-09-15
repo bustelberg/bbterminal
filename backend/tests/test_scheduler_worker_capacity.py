@@ -57,3 +57,17 @@ def test_queue_overrun_filter_only_hides_the_expected_apscheduler_message():
                               "Execution of job another_job skipped: maximum number of running instances reached", (), None)
     assert filt.filter(expected) is False
     assert filt.filter(other) is True
+
+
+def test_queue_worker_prioritises_shared_beta_trackers(monkeypatch):
+    from asset_pipeline import queue
+    from routers._asset_financials import _BENCHMARK_RISK_ETF
+
+    calls = []
+    monkeypatch.setattr(queue, "process_slice", lambda **kwargs: calls.append(kwargs) or {
+        "processed": 0, "ok": 0, "failed": 0, "remaining": 0,
+    })
+
+    S._fire_asset_ingest_queue()
+
+    assert calls == [{"priority_isins": list(_BENCHMARK_RISK_ETF.values())}]

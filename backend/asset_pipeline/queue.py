@@ -151,6 +151,7 @@ def _reapply_aliases() -> None:
 
 def process_slice(limit: int = SLICE, verbose: bool = False,
                   isins: list[str] | None = None,
+                  priority_isins: list[str] | None = None,
                   on_each: Callable[[str, str], None] | None = None) -> dict:
     """Process up to `limit` pending ISINs through the throttled resolve+store,
     marking each done/failed. THE worker step (one Yahoo consumer). On a Yahoo
@@ -173,6 +174,27 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
             pend += (supabase.table("asset_ingest_queue").select("isin")
                      .eq("status", "pending").in_("isin", want[i:i + IN_CHUNK_SIZE])
                      .limit(limit - len(pend)).execute().data or [])
+    elif priority_isins:
+        # A benchmark tracker is a shared prerequisite: one missing ETF makes the
+        # beta column blank for every holding, even if all holding price series are
+        # already present.  Keep it ahead of the ordinary FIFO backlog, but fill
+        # the rest of this same slice from that backlog so this cannot reduce queue
+        # throughput or introduce a second Yahoo/OpenFIGI consumer.
+        want = [i.strip().upper() for i in priority_isins if i]
+        pend = []
+        for i in range(0, len(want), IN_CHUNK_SIZE):
+            if len(pend) >= limit:
+                break
+            pend += (supabase.table("asset_ingest_queue").select("isin")
+                     .eq("status", "pending").in_("isin", want[i:i + IN_CHUNK_SIZE])
+                     .limit(limit - len(pend)).execute().data or [])
+        if len(pend) < limit:
+            ordinary = (supabase.table("asset_ingest_queue").select("isin")
+                        .eq("status", "pending").order("added_at").limit(limit).execute().data
+                        or [])
+            chosen = {r["isin"] for r in pend}
+            pend.extend(r for r in ordinary if r["isin"] not in chosen)
+            pend = pend[:limit]
     else:
         pend = (
             supabase.table("asset_ingest_queue").select("isin")

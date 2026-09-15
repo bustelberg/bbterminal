@@ -1212,7 +1212,7 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
                            "start_value_eur": float(r["start_value_eur"]),
                            "current_value_eur": float(r["current_value_eur"])}
         out[mid] = marks
-        _log.warning("[analysis] wrapped book %s (model %s): %d of %d position(s) carry an AIRS "
+        _log.debug("[analysis] wrapped book %s (model %s): %d of %d position(s) carry an AIRS "
                      "return", pf, mid, len(marks), len(child_rows))
     return out
 
@@ -1605,9 +1605,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             # A sparse yfinance series gets an interpolated opening mark, and it has to say so.
             "own_return_estimated": own_est,
         })
-    # WARNING, not info: uvicorn leaves the root logger at WARNING, so an `info` line is invisible
-    # in production — and this is the line that says which of the two return bases each row got.
-    _log.warning(
+    # This is useful when tracing a return mismatch, but it is a normal successful
+    # read and repeats on every modal refresh.  Keep it out of production logs.
+    _log.debug(
         "[analysis] %s: per-holding returns — %d from this book (Beginwaarde -> Huidige waarde + "
         "net income, identical to the expanded row's Return column), %d BLENDED across this book "
         "and the book(s) behind a certificate (opening-value weighted), %d from this book's own "
@@ -1682,7 +1682,7 @@ def _realised_block(portfolio_id: int) -> dict:
 
     ledger = _position_ledger(link["portefeuille"], rec)
     c = contributions(rec)
-    _log.warning("[analysis] %s realised %s over %d name(s); %s%% of the year's movement is "
+    _log.debug("[analysis] %s realised %s over %d name(s); %s%% of the year's movement is "
                  "outside the holdings table", link["portefeuille"], rec.get("realised_ytd_eur"),
                  rec.get("realised_names") or 0,
                  None if c["realised_share_of_result_pct"] is None
@@ -1906,7 +1906,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
         if ratio:
             splits[name] = ratio
     if splits:
-        _log.warning("[analysis] %s: proven split(s) rescaled — %s", portefeuille,
+        _log.debug("[analysis] %s: proven split(s) rescaled — %s", portefeuille,
                      ", ".join(f"{k} {v:.4f}:1" for k, v in splits.items()))
 
     led = build_ledger(volk, trades(sheet), income, rec.get("book_start_eur"),
@@ -1979,7 +1979,7 @@ def _variant_bands(name: str | None, omschrijving: str | None) -> dict:
              # A cell with nothing set is not a band. Sending it would draw a zero-width region at
              # the origin, which reads as "the policy says hold none of this".
              and any(b[f] is not None for f in ("min_pct", "default_pct", "max_pct"))]
-    _log.warning("[analysis] %r -> profile %s, %d band(s) recorded", name, variant, len(bands))
+    _log.debug("[analysis] %r -> profile %s, %d band(s) recorded", name, variant, len(bands))
     return {"variant": variant, "bands": bands}
 
 
@@ -2119,7 +2119,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     if book_note:
         _log.warning("[analysis] portfolio %s has no book view: %s", portfolio_id, book_note)
     else:
-        _log.warning("[analysis] portfolio %s: book view has %d holding(s) from %s",
+        _log.debug("[analysis] portfolio %s: book view has %d holding(s) from %s",
                      portfolio_id, len(book.get("holdings_detail") or []),
                      book.get("portefeuille"))
     weight_basis, weight_note = "model", None

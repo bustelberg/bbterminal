@@ -1051,7 +1051,11 @@ def _fire_asset_ingest_queue() -> None:
     queue is empty. Never raises into the scheduler."""
     try:
         from asset_pipeline import queue as _q  # noqa: PLC0415
-        r = _q.process_slice()
+        from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+        # One tracker is the shared benchmark leg of every beta calculation.  A
+        # regular FIFO backlog can otherwise leave a newly queued tracker behind
+        # thousands of unrelated uploads and blank the entire beta column.
+        r = _q.process_slice(priority_isins=list(_BENCHMARK_RISK_ETF.values()))
         if r.get("processed"):
             _log.info("[scheduler] asset ingest queue: %s processed (%s ok, %s failed, %s remaining)",
                       r.get("processed"), r.get("ok"), r.get("failed"), r.get("remaining"))
