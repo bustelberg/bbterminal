@@ -76,6 +76,12 @@ class TestTheLookThrough:
         assert got["money_weighted_return_pct"] == 11.54       # the stock's
         assert "via_money_weighted_return_pct" not in got      # not the certificate's -3.86%
 
+    def test_it_uses_the_isin_when_the_child_book_shortens_the_name(self):
+        h = _leg("Automat. Data")
+        h["isin"] = "US0530151036"
+        led = {CHILD: {"US0530151036": {"return_pct": 12.9, "avg_capital_eur": 20_000.0}}}
+        assert _via_capital(h, WRAPPER, led)["money_weighted_return_pct"] == 12.9
+
     def test_two_legs_of_one_certificate_get_DIFFERENT_numbers(self):
         """⚠ THE WHOLE TEST OF WHETHER THIS IS A MEASUREMENT. The weight-split shortcut gives every
         leg the same figure; a real look-through cannot, because the child bought them on different
@@ -112,13 +118,19 @@ class TestTheFallback:
 
 
 class TestWhenThereIsNoSingleAnswer:
-    def test_two_certificates_means_no_one_wrapper_figure(self):
-        """A stock reached through two certificates has two invested-capital experiences; naming
-        one picks a winner at random."""
-        h = _leg()
+    def test_two_certificates_are_blended_by_their_measured_capital(self):
+        h = _leg(extra_sources=({"label": "AI", "model_id": 1, "book": "AI",
+                                 "value_eur": 1_000.0, "book_current_value_eur": 10_000.0},))
         h["via_names"] = ["StarTopSelectie Offensief", "AITopSelectie Offensief"]
         h["via_holding_names"] = ["Star Selection Index", "AI Selection Index"]
-        assert _via_capital(h, WRAPPER, CHILD_LEDGER) == {}
+        led = {CHILD: {"Shopify": {"return_pct": 10.0, "avg_capital_eur": 10_000.0}},
+               "AI": {"Shopify": {"return_pct": -5.0, "avg_capital_eur": 20_000.0}}}
+        got = _via_capital(h, WRAPPER, led)
+        assert got["capital_source"] == "lookthrough"
+        first_cap = 10_000.0 * (509.32 / 11243.16)
+        second_cap = 20_000.0 * (1_000.0 / 10_000.0)
+        assert got["money_weighted_return_pct"] == pytest.approx(
+            (10.0 * first_cap - 5.0 * second_cap) / (first_cap + second_cap))
 
     def test_also_held_directly_means_the_row_is_only_partly_the_certificates(self):
         """⚠ `label: None` is the book's OWN shares. The row is then part its own position and part

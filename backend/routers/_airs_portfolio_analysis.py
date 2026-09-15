@@ -1763,7 +1763,9 @@ def _child_book_ledgers(holdings: list[dict]) -> dict[str, dict]:
                 out[b] = {}
                 continue
             led = _position_ledger(b, rec)
-            out[b] = {p["name"]: p for p in (led.get("positions") or []) if p.get("name")}
+            positions = led.get("positions") or []
+            out[b] = {p["name"]: p for p in positions if p.get("name")}
+            out[b].update({p["isin"]: p for p in positions if p.get("isin")})
         except Exception as e:  # noqa: BLE001 — a child book must never break the parent's modal
             _log.warning("[analysis] look-through into %s failed (%s: %s)", b, type(e).__name__, e)
             out[b] = {}
@@ -1784,18 +1786,42 @@ def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None =
     describe only some of it.
     """
     names = h.get("via_holding_names") or []
-    if len(names) != 1 or len(h.get("via_names") or []) != 1:
-        return {}
     # Held directly as well as through the wrapper — `sources` carries one entry per route in, and
     # a `label` of None is the book's own shares.
     srcs = [s for s in (h.get("sources") or []) if s.get("label") is not None]
-    if len(srcs) != 1 or len(srcs) != len(h.get("sources") or []):
+    if not srcs or len(srcs) != len(h.get("sources") or []):
         return {}
+
+    # A holding can arrive through several certificates. Each child book has its own purchases,
+    # so combine their measured rates by the capital represented by this portfolio's slice.
+    if len(srcs) > 1:
+        legs: list[tuple[float, float]] = []
+        for src in srcs:
+            child = (child_ledgers or {}).get(str(src.get("book") or "")) or {}
+            pos = child.get(h.get("isin") or "") or child.get(h.get("name") or "") or {}
+            cap = pos.get("avg_capital_eur")
+            book_val = float(src.get("book_current_value_eur") or 0)
+            share = float(src.get("value_eur") or 0) / book_val if book_val > 0 else None
+            if pos.get("return_pct") is None or cap is None or share is None:
+                return {}
+            legs.append((float(pos["return_pct"]), float(cap) * share))
+        total_cap = sum(cap for _rate, cap in legs)
+        if total_cap <= 0:
+            return {}
+        return {
+            "capital_source": "lookthrough",
+            "capital_book": "multiple child books",
+            "via_holding_name": ", ".join(names),
+            "avg_capital_eur": round(total_cap, 2),
+            "money_weighted_return_pct": sum(rate * cap for rate, cap in legs) / total_cap,
+            "via_avg_capital_eur": total_cap,
+        }
+
     src = srcs[0]
 
     # ── FIRST CHOICE: the child book's OWN position, which has this instrument's real purchases.
     child = (child_ledgers or {}).get(str(src.get("book") or "")) or {}
-    pos = child.get(h.get("name") or "") or {}
+    pos = child.get(h.get("isin") or "") or child.get(h.get("name") or "") or {}
     if pos.get("return_pct") is not None:
         # ⚠ THE RATE TRANSFERS, THE EUROS DO NOT. The child book put its own money in; this book
         # owns a SLICE of that position, so the capital is scaled by the slice — otherwise the
@@ -1857,7 +1883,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     volk = (supabase.table("airs_holding")
             # ⚠ `fund_result_eur`/`fx_result_eur` ARE AIRS's OWN price/currency split of the held
             # result — see `airs_capital.Position`. Read here rather than derived anywhere.
-            .select("holding_name,quantity,start_value_eur,current_value_eur,"
+            .select("holding_name,isin,quantity,start_value_eur,current_value_eur,"
                     "fund_result_eur,fx_result_eur")
             .eq("portefeuille", portefeuille)
             .eq("as_of_date", _book_snapshot_date(portefeuille) or "").execute().data or [])
@@ -1916,6 +1942,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     return {
         "positions": [{
             "name": p.name,
+            "isin": (by_name.get(p.name) or {}).get("isin"),
             "held": p.held,
             "closed_out": p.closed_out,
             # ⚠ BOTH BLANK WHEN THE QUANTITY ARITHMETIC IS REFUSED, not just the ratio. Leaving the
@@ -2534,6 +2561,8 @@ def _with_results(holdings: list[dict], realised: dict,
     if not holdings:
         return holdings
     basis = realised.get("basis_eur") if realised.get("available") else None
+    flow_return = realised.get("book_ytd_pct") if not basis else None
+    ledger_result = realised.get("ledger_result_eur") if not basis else None
     by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
     # ⚠ THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
     # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
@@ -2625,7 +2654,9 @@ def _with_results(holdings: list[dict], realised: dict,
                     # attribute, and `money_weighted_return_pct` stays null.
                     **_via_capital(h, by_name, child_ledgers),
                     "contribution_pct": (total / basis * 100.0)
-                    if (total is not None and basis) else None,
+                    if (total is not None and basis) else (
+                        total / ledger_result * flow_return
+                        if (total is not None and ledger_result and flow_return is not None) else None),
                     # ⚠ 0%, NOT a dash — same reason as the price leg above, and same direction:
                     # a FALLBACK where nothing could be computed, never an override of a figure
                     # AIRS actually produced.
