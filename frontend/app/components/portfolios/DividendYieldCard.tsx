@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CartesianGrid, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { trace } from '../../../lib/debugTrace';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
@@ -49,6 +50,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
   const [data, setData] = useState<DividendYieldInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
+  const dailyCache = useRef(new Map<string, DividendYieldInputs>());
   /**
    * Daily is a PER-CARD override of the tab's cadence, and only these two yield cards offer it.
    *
@@ -66,23 +68,42 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
 
   useEffect(() => {
     let alive = true;
+    const key = JSON.stringify(target);
+    const cached = dailyCache.current.get(key);
+    if (cached) {
+      setErr(null);
+      setData(cached);
+      trace('yield-daily', `Dividend yield ${daily ? 'Daily' : 'tab cadence'} from card cache`, {
+        rows: cached.rows.length,
+      });
+      return () => { alive = false; };
+    }
+    const controller = new AbortController();
+    const started = performance.now();
     void (async () => {
       setData(null); setErr(null);
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/dividend-yield-inputs`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(target),
+          body: key, signal: controller.signal,
         });
         const b = await r.json().catch(() => null);
         if (!alive) return;
         if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as DividendYieldInputs);
+        const next = b as DividendYieldInputs;
+        dailyCache.current.set(key, next);
+        setData(next);
+        trace('yield-daily', `Dividend yield ${daily ? 'Daily' : 'tab cadence'} loaded`, {
+          ms: Math.round(performance.now() - started), rows: next.rows.length,
+          points: next.rows.reduce((n, row) => n + Object.keys(row.price_ps).length, 0),
+          serverTiming: r.headers.get('server-timing'),
+        });
       } catch (e) {
-        if (alive) setErr(e instanceof Error ? e.message : String(e));
+        if (alive && !controller.signal.aborted) setErr(e instanceof Error ? e.message : String(e));
       }
     })();
-    return () => { alive = false; };
-  }, [target]);
+    return () => { alive = false; controller.abort(); };
+  }, [target, daily]);
 
   const yieldByYr = useMemo(() => dividendYieldByYear(data?.rows ?? []), [data]);
   const covByYr = useMemo(() => coverageByYear(data?.rows ?? []), [data]);

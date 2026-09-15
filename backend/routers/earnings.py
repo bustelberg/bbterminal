@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import logging
+import time
 from statistics import median
 from collections import Counter, defaultdict
 # ⚠ ALIASED. Three loops in this file already bind a variable called `date` (they iterate
@@ -27,7 +28,7 @@ from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 from fastapi.responses import StreamingResponse
 
@@ -41,6 +42,7 @@ from ingest.earnings import (
 from ingest.prices import ensure_prices_for_company
 
 router = APIRouter(tags=["earnings"])
+_log = logging.getLogger(__name__)
 
 
 def _get_company_or_404(company_id: int) -> dict:
@@ -4635,7 +4637,7 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest, request: Requ
 
 @router.post("/api/earnings/fcf-sbc-yield-inputs")
 @cached_blend("fcf-sbc-yield-inputs")
-async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Request):
+async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Request, response: Response):
     """The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
     Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
 
@@ -4651,6 +4653,8 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Reques
     members = await _load_and_expand_members(body)
     if not members:
         raise HTTPException(status_code=404, detail="no holdings")
+
+    timings: dict[str, float] = {}
 
     def _run() -> dict:
         total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
@@ -4683,8 +4687,13 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Reques
         # ⚠⚠ AND THE DAILY BRANCH GETS ITS OWN, WHICH IT NEVER HAD. `_prefetch` loads the ANNUAL
         # codes; the daily loop below wants `close_price` and the QUARTERLY codes, so it matched
         # nothing here and fell through to FOUR paged reads per company. See `_daily_closes_bulk`.
+        started = time.perf_counter()
         daily_close = _daily_closes_bulk(cids) if body.cadence == "daily" else {}
-        daily = _daily_metrics_bulk(cids, ('fcf', 'sbc', 'shares'), daily_close)
+        timings["closes_ms"] = (time.perf_counter() - started) * 1000
+        started = time.perf_counter()
+        daily = (_daily_metrics_bulk(cids, ('fcf', 'sbc', 'shares'), daily_close)
+                 if body.cadence == "daily" else {})
+        timings["metrics_ms"] = (time.perf_counter() - started) * 1000
         if body.cadence != "daily":
             _prefetch(cids, ('fcf', 'sbc', 'market_cap',), body.cadence)
         for ci in canon:
@@ -4730,7 +4739,19 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Reques
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows}
 
-    return await asyncio.to_thread(_run)
+    started = time.perf_counter()
+    out = await asyncio.to_thread(_run)
+    total_ms = (time.perf_counter() - started) * 1000
+    if body.cadence == "daily":
+        points = sum(len(row["market_cap"]) for row in out["rows"])
+        response.headers["Server-Timing"] = (
+            f'close;dur={timings.get("closes_ms", 0):.1f}, '
+            f'metrics;dur={timings.get("metrics_ms", 0):.1f}, total;dur={total_ms:.1f}'
+        )
+        _log.info("[yield-daily] fcf-sbc holdings=%d rows=%d points=%d close=%.0fms metrics=%.0fms total=%.0fms",
+                  len(members), len(out["rows"]), points, timings.get("closes_ms", 0),
+                  timings.get("metrics_ms", 0), total_ms)
+    return out
 
 
 @router.get("/api/earnings/by-isin/{isin}/growth-estimates")
@@ -4770,7 +4791,7 @@ async def growth_estimates_by_isin(isin: str, force: bool = False):
 
 @router.post("/api/earnings/dividend-yield-inputs")
 @cached_blend("dividend-yield-inputs")
-async def dividend_yield_inputs(body: FundamentalCoverageRequest, request: Request):
+async def dividend_yield_inputs(body: FundamentalCoverageRequest, request: Request, response: Response):
     """The two base lines behind the dividend yield, per holding: Dividends per Share and the
     fiscal year-end share price, per fiscal year, in the company's own reporting currency.
 
@@ -4795,6 +4816,8 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest, request: Reque
     members = await _load_and_expand_members(body)
     if not members:
         raise HTTPException(status_code=404, detail="no holdings")
+
+    timings: dict[str, float] = {}
 
     def _run() -> dict:
         total_w = sum(abs(float(m.get("weight") or 0)) for m in members) or 1.0
@@ -4828,8 +4851,13 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest, request: Reque
         # `div_ps`/`price_ps`; the daily loop below wanted `close_price` and the QUARTERLY div
         # codes, so it matched nothing here and fell through to one paged read per company per
         # code. Two bulk reads now serve every company — see `_daily_closes_bulk`.
+        started = time.perf_counter()
         daily_close = _daily_closes_bulk(cids) if body.cadence == "daily" else {}
-        daily_div = _daily_metrics_bulk(cids, ('div_ps',), daily_close).get('div_ps', {})
+        timings["closes_ms"] = (time.perf_counter() - started) * 1000
+        started = time.perf_counter()
+        daily_div = (_daily_metrics_bulk(cids, ('div_ps',), daily_close).get('div_ps', {})
+                     if body.cadence == "daily" else {})
+        timings["metrics_ms"] = (time.perf_counter() - started) * 1000
         if body.cadence != "daily":
             _prefetch(cids, ('div_ps', 'price_ps',), body.cadence)
         for ci in canon:
@@ -4869,7 +4897,19 @@ async def dividend_yield_inputs(body: FundamentalCoverageRequest, request: Reque
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows}
 
-    return await asyncio.to_thread(_run)
+    started = time.perf_counter()
+    out = await asyncio.to_thread(_run)
+    total_ms = (time.perf_counter() - started) * 1000
+    if body.cadence == "daily":
+        points = sum(len(row["price_ps"]) for row in out["rows"])
+        response.headers["Server-Timing"] = (
+            f'close;dur={timings.get("closes_ms", 0):.1f}, '
+            f'metrics;dur={timings.get("metrics_ms", 0):.1f}, total;dur={total_ms:.1f}'
+        )
+        _log.info("[yield-daily] dividend holdings=%d rows=%d points=%d close=%.0fms metrics=%.0fms total=%.0fms",
+                  len(members), len(out["rows"]), points, timings.get("closes_ms", 0),
+                  timings.get("metrics_ms", 0), total_ms)
+    return out
 
 
 @router.get("/api/earnings/benchmark-margin")

@@ -213,6 +213,12 @@ describe('the hurdle block — a second model on the same inputs', () => {
     expect(shown(workedFairValue(11.46, 20.608, 236.17))).toContain('236.17');
   });
 
+  it('uses a LaTex multiplication command in the substituted fair-value line', () => {
+    const tex = workedFairValue(10.06, 20.04, 201.6);
+    expect(tex).toContain('10.06 \\times 20.04 = 201.60');
+    expect(shown(tex)).toContain('×');
+  });
+
   it('a missing operand yields no line rather than half a formula', () => {
     expect(workedMaxPE(null, 0.1, 0, 0.1, 10, 20)).toBe('');
     expect(workedMaxPE(20, 0.1, 0, 0.1, 10, null)).toBe('');
