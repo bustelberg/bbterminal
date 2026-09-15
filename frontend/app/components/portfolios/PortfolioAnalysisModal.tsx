@@ -1383,7 +1383,7 @@ const momSub = (to?: number | null, from?: number | null, pct?: number | null): 
 ${to.toFixed(2)} ÷ ${from.toFixed(2)} − 1 = ${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`
     : '');
 
-function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
+export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   const groups = new Map<string, { label: string; rows: BookHolding[] }>();
   const kept: BookHolding[] = [];
   // ⚠ SPLIT FIRST, THEN FOLD. A position held BOTH outright and through a certificate — Mastercard
@@ -1394,7 +1394,9 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   for (const h of rows.flatMap(splitByRoute)) {
     const label = soleVia(h);
     if (!label) { kept.push(h); continue; }
-    const key = `${h.bucket ?? ''} ${label}`;
+    // A collapsed row represents the certificate, not one of its underlying buckets.
+    // Grouping by bucket created one row for its cash and another for its equities.
+    const key = label;
     const g = groups.get(key) ?? { label, rows: [] };
     g.rows.push(h);
     groups.set(key, g);
@@ -1418,6 +1420,7 @@ function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       // In the collapsed view this row is the fund/certificate the book actually owns. Keeping
       // it in Equity preserves the asset-allocation total, while this flag places it under the
       // Stock ETFs subsection instead of among individual companies.
+      bucket: EQUITY_BUCKET,
       is_fund: true,
       weight_now_pct: weight,
       weight_pct: weight,

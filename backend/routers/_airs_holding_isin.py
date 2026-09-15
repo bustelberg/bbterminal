@@ -216,6 +216,8 @@ _BOND_WORDS = re.compile(
 # and without it every REIT silently becomes an ordinary equity.
 _REAL_ESTATE_SECTOR = "real estate"
 
+_ALTERNATIVE_FUND_NAMES = {"high income quality fund"}
+
 
 def _looks_like_bond(*names: str | None) -> bool:
     hay = " ".join(n for n in names if n)
@@ -241,6 +243,10 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
     difference between Equity and Unclassified.
     """
     g = grid or {}
+    names = (name, g.get("name"), g.get("leonteq_name"))
+    if any((candidate or "").strip().casefold() in _ALTERNATIVE_FUND_NAMES
+           for candidate in names):
+        return BUCKET_ALTS
     # 1a. Cash — no instrument at all, or an explicit cash line.
     if asset_class == BUCKET_CASH or (not isin and (name or "").strip().lower() in _CASH_NAMES):
         return BUCKET_CASH
@@ -686,8 +692,9 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
                      for i, h in enumerate(holdings)]
         links = resolve_links(supabase, owner_id, link_rows)
         # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
-        pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
-            ref_models())}
+        from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+        pf_names = {p["id"]: (nickname_for(p.get("name")) or p.get("display_name") or p["name"])
+                    for p in ref_models()}
 
     rows = []
     for i, h in enumerate(holdings):
