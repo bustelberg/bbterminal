@@ -3484,13 +3484,6 @@ export default function PortfolioAnalysisModal({
                  between this table and a total, so the answer was to give them rows, not their own
                  card. `realised` carries them (and the book's own return to check against). */
               <>
-              {data.asset_data_missing_isins?.length ? (
-                <div className="mb-3 rounded-lg border border-warn-500/30 bg-warn-500/[0.06] px-3 py-2 text-[12px] text-warn-300">
-                  Instrumentgegevens voor {data.asset_data_missing_isins.length} aandelen worden op de
-                  achtergrond ingelezen. Sector, momentum, volatiliteit en beta verschijnen automatisch
-                  zodra de prijsreeks beschikbaar is.
-                </div>
-              ) : null}
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 onFundamental={setFund}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}

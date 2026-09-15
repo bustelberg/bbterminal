@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import threading
+import logging
 from concurrent.futures import Future
 
 import scheduler as S
@@ -33,3 +34,40 @@ def test_scheduled_work_deduplicates_a_live_job_and_releases_its_slot(monkeypatc
 
     assert S._submit_scheduled_work("other", lambda: None) is True
     assert len(executor.submitted) == 2
+
+
+def test_queue_overrun_is_one_rate_limited_backpressure_summary(monkeypatch, caplog):
+    monkeypatch.setattr(S, "_queue_overruns", 0)
+    monkeypatch.setattr(S, "_queue_overrun_last_log", 0.0)
+    event = type("Event", (), {
+        "job_id": "asset_ingest_queue",
+        "scheduled_run_times": [object()],
+    })()
+    with caplog.at_level(logging.WARNING):
+        S._on_job_max_instances(event)
+        S._on_job_max_instances(event)
+    assert caplog.text.count("asset ingest queue is still draining") == 1
+
+
+def test_queue_overrun_filter_only_hides_the_expected_apscheduler_message():
+    filt = S._ExpectedQueueOverrunFilter()
+    expected = logging.LogRecord("apscheduler.executors.default", logging.WARNING, "", 0,
+                                 "Execution of job asset_ingest_queue skipped: maximum number of running instances reached", (), None)
+    other = logging.LogRecord("apscheduler.executors.default", logging.WARNING, "", 0,
+                              "Execution of job another_job skipped: maximum number of running instances reached", (), None)
+    assert filt.filter(expected) is False
+    assert filt.filter(other) is True
+
+
+def test_queue_worker_prioritises_shared_beta_trackers(monkeypatch):
+    from asset_pipeline import queue
+    from routers._asset_financials import _BENCHMARK_RISK_ETF
+
+    calls = []
+    monkeypatch.setattr(queue, "process_slice", lambda **kwargs: calls.append(kwargs) or {
+        "processed": 0, "ok": 0, "failed": 0, "remaining": 0,
+    })
+
+    S._fire_asset_ingest_queue()
+
+    assert calls == [{"priority_isins": list(_BENCHMARK_RISK_ETF.values())}]

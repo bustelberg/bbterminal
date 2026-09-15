@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "profiles": {
+    "Offensief": {
+      "Equity": { "min_pct": 70, "default_pct": 89, "max_pct": 100 },
+      "Bonds": { "min_pct": 0, "default_pct": 0, "max_pct": 40 },
+      "Alternatives": { "min_pct": 0, "default_pct": 10, "max_pct": 30 },
+      "Cash": { "min_pct": 0, "default_pct": 1, "max_pct": 30 }
+    },
+    "Beperkt Offensief": {
+      "Equity": { "min_pct": 60, "default_pct": 80, "max_pct": 100 },
+      "Bonds": { "min_pct": 0, "default_pct": 9, "max_pct": 40 },
+      "Alternatives": { "min_pct": 0, "default_pct": 10, "max_pct": 30 },
+      "Cash": { "min_pct": 0, "default_pct": 1, "max_pct": 30 }
+    },
+    "Neutraal": {
+      "Equity": { "min_pct": 40, "default_pct": 60, "max_pct": 80 },
+      "Bonds": { "min_pct": 20, "default_pct": 29, "max_pct": 60 },
+      "Alternatives": { "min_pct": 0, "default_pct": 10, "max_pct": 30 },
+      "Cash": { "min_pct": 0, "default_pct": 1, "max_pct": 30 }
+    },
+    "Defensief": {
+      "Equity": { "min_pct": 20, "default_pct": 40, "max_pct": 80 },
+      "Bonds": { "min_pct": 40, "default_pct": 49, "max_pct": 80 },
+      "Alternatives": { "min_pct": 0, "default_pct": 10, "max_pct": 20 },
+      "Cash": { "min_pct": 0, "default_pct": 1, "max_pct": 70 }
+    }
+  }
+}

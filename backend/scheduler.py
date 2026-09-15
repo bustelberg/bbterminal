@@ -40,10 +40,11 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
-from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MISSED
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -76,6 +77,25 @@ _scheduled_executor = ThreadPoolExecutor(
 _scheduled_futures: dict[str, Future] = {}
 _scheduled_futures_lock = threading.Lock()
 _scheduled_slots = threading.BoundedSemaphore(_SCHEDULED_WORKERS)
+
+# The queue intentionally runs one Yahoo/OpenFIGI slice at a time. A slow slice therefore makes
+# APScheduler print its own warning every 20 seconds; that is an expected backpressure mechanism,
+# not a separate failure per skipped tick. Replace it with the rate-limited summary below.
+_QUEUE_OVERRUN_LOG_EVERY_SECONDS = 300.0
+_queue_overrun_lock = threading.Lock()
+_queue_overruns = 0
+_queue_overrun_last_log = 0.0
+
+
+class _ExpectedQueueOverrunFilter(logging.Filter):
+    """Suppress APScheduler's per-tick warning for the deliberately serial queue worker."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not (
+            "asset_ingest_queue" in message
+            and "maximum number of running instances reached" in message
+        )
 
 # A one-shot full pipeline fires this many seconds after process start
 # when bootstrap is needed (template never refreshed in this env). The
@@ -1031,7 +1051,11 @@ def _fire_asset_ingest_queue() -> None:
     queue is empty. Never raises into the scheduler."""
     try:
         from asset_pipeline import queue as _q  # noqa: PLC0415
-        r = _q.process_slice()
+        from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+        # One tracker is the shared benchmark leg of every beta calculation.  A
+        # regular FIFO backlog can otherwise leave a newly queued tracker behind
+        # thousands of unrelated uploads and blank the entire beta column.
+        r = _q.process_slice(priority_isins=list(_BENCHMARK_RISK_ETF.values()))
         if r.get("processed"):
             _log.info("[scheduler] asset ingest queue: %s processed (%s ok, %s failed, %s remaining)",
                       r.get("processed"), r.get("ok"), r.get("failed"), r.get("remaining"))
@@ -2046,6 +2070,30 @@ def _on_job_missed(event) -> None:
                      event.job_id, type(e).__name__, e)
 
 
+def _on_job_max_instances(event) -> None:
+    """Summarise a serial queue overrun instead of logging one warning per 20-second tick."""
+    if event.job_id != "asset_ingest_queue":
+        return
+    global _queue_overruns, _queue_overrun_last_log
+    now = time.monotonic()
+    with _queue_overrun_lock:
+        _queue_overruns += len(getattr(event, "scheduled_run_times", ()) or (1,))
+        # `0.0` is the deliberately-unset initial value.  `time.monotonic()` can
+        # itself still be below five minutes on a fresh container, so subtracting
+        # it directly would suppress the first useful backpressure signal.
+        if (_queue_overrun_last_log
+                and now - _queue_overrun_last_log < _QUEUE_OVERRUN_LOG_EVERY_SECONDS):
+            return
+        skipped = _queue_overruns
+        _queue_overruns = 0
+        _queue_overrun_last_log = now
+    _log.warning(
+        "[scheduler] asset ingest queue is still draining its previous slice; "
+        "%d 20-second tick(s) skipped (serial Yahoo/OpenFIGI backpressure, not a crash)",
+        skipped,
+    )
+
+
 def _on_job_error(event) -> None:
     """A tick raised out of its callable.
 
@@ -2237,6 +2285,9 @@ def register_scheduler(app) -> None:
             return
 
         sched = BackgroundScheduler(timezone="UTC")
+        executor_log = logging.getLogger("apscheduler.executors.default")
+        if not any(isinstance(f, _ExpectedQueueOverrunFilter) for f in executor_log.filters):
+            executor_log.addFilter(_ExpectedQueueOverrunFilter())
         # ⚠⚠ THE OBSERVERS GO ON BEFORE ANY JOB IS ADDED, AND BEFORE `start()`. Until 2026-09-01
         # nothing listened to either event, which is half of why a production job could sit 20 days
         # stale with a healthy next-run beside it and no explanation anywhere: a dropped fire wrote
@@ -2245,6 +2296,7 @@ def register_scheduler(app) -> None:
         # was not running, which is what `scan_for_missed_ticks` is for.
         sched.add_listener(_on_job_missed, EVENT_JOB_MISSED)
         sched.add_listener(_on_job_error, EVENT_JOB_ERROR)
+        sched.add_listener(_on_job_max_instances, EVENT_JOB_MAX_INSTANCES)
 
         def _register(job_id: str, fn) -> None:
             """Register one declared job — ⚠ THE SCHEDULE COMES FROM `scheduled_jobs.py`.

@@ -878,24 +878,15 @@ export interface paths {
         };
         /**
          * Airs Allocation Bands
-         * @description The allocation policy — all sixteen cells, nulls where nothing is set.
+         * @description The allocation policy — JSON defaults plus any administrator overrides.
          */
         get: operations["airs_allocation_bands_api_airs_allocation_bands_get"];
         /**
          * Airs Set Allocation Bands
-         * @description Apply these cells to the policy. Admin-only (the API gate refuses a non-admin write).
+         * @description Save changed allocation cells. Empty cells restore the JSON default.
          *
-         *     ⚠ PARTIAL BY DESIGN — send only the cells you changed. A cell that IS sent and is empty means
-         *     "clear this row"; a cell that is not sent means nothing at all. Sending the full grid from a
-         *     stale view therefore deletes everything that changed since it loaded, which is not theoretical:
-         *     it wiped 15 of 16 seeded rows on 2026-08-04, silently.
-         *
-         *     ⚠ VALIDATED IN FULL BEFORE ANYTHING IS WRITTEN. A save is ONE intent, so a bad cell rejects the
-         *     whole submission with a sentence naming it — landing the first eight and refusing the ninth
-         *     would leave a policy half-updated while the reader believes all of it took.
-         *
-         *     Returns the WHOLE grid as stored, so the editor renders what the database now holds — including
-         *     any cell somebody else changed while it was open — rather than what it hoped it sent.
+         *     The request is validated before writing. The response contains the current
+         *     full policy.
          */
         put: operations["airs_set_allocation_bands_api_airs_allocation_bands_put"];
         post?: never;

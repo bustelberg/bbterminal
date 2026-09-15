@@ -22,6 +22,21 @@ def _xlsx(df: pd.DataFrame) -> bytes:
     return buf.getvalue()
 
 
+def test_legacy_xls_parser_keeps_xlrd_container_chatter_out_of_service_logs(monkeypatch):
+    """AIRS's valid legacy exports print a benign OLE2 SSAT warning by default."""
+    import airs_transacties as transacties
+
+    captured = {}
+    monkeypatch.setattr(transacties.pd, "read_excel", lambda _source, **kwargs:
+                        captured.update(kwargs) or pd.DataFrame({"Fonds": ["ASML"]}))
+
+    sheet = parse_transacties(transacties._OLE2_SIGNATURE + b"legacy-xls")
+
+    assert sheet.rows == [{"Fonds": "ASML"}]
+    assert captured["engine"] == "xlrd"
+    assert "logfile" in captured["engine_kwargs"]
+
+
 class TestNothingIsLost:
     def test_every_column_survives_in_the_sheets_own_order(self):
         sheet = parse_transacties(_xlsx(pd.DataFrame({
