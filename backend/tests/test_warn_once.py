@@ -72,8 +72,9 @@ class TestTheCallSites:
         import inspect  # noqa: PLC0415
 
         src = inspect.getsource(E)
-        assert src.count("_warn_once(") >= 3          # the def + two actionable call sites
         assert "_debug_once(f\"shift:{who}\"" in src
+        assert '_debug_once(f"ttm-view:{metric}"' in src
+        assert '_debug_once(f"ttm:{metric}"' in src
         # The exact messages that were flooding the terminal must no longer go straight to _log.
         assert '_log.warning("[earnings] %s: level shift kept' not in src
         assert '_log.warning("[earnings] no TTM rule' not in src

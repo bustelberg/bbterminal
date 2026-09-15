@@ -39,6 +39,7 @@ import { dayOf, dayRange } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
 import type { ActiveShare, ActiveShareRow } from '../../../lib/types/api';
 import { useRiskCopy } from './riskCopy';
+import LoadingDots from './LoadingDots';
 import TrackingErrorView from './TrackingErrorView';
 import CorrelationView from './CorrelationView';
 import VolatilityView from './VolatilityView';
@@ -318,7 +319,7 @@ export default function ActiveSharePanel({
       {view === 'active' && (error || !data || !data.available) && (
         <div className="h-full grid place-items-center text-center px-6">
           {error ? <p className="text-xs text-neg-300">{error}</p>
-            : !data ? <p className="text-xs text-fg-subtle">{t.common.computing}</p>
+            : !data ? <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>
               : <p className="text-xs text-fg-muted max-w-md">{data.reason}</p>}
         </div>
       )}

@@ -120,6 +120,7 @@ export default function AccountSecurityPage() {
 
   async function confirmEnrol() {
     if (!pending || !isCompleteCode(code)) return;
+    const firstAuthenticator = verifiedFactors(factors ?? []).length === 0;
     setError(null);
     setBusy(true);
     try {
@@ -174,6 +175,11 @@ export default function AccountSecurityPage() {
       setName('');
       setNotice(copy.enrolled);
       await load();
+      if (firstAuthenticator) {
+        // Verification updates the auth session. Reload so the proxy receives
+        // the new AAL2 cookie before opening the app.
+        window.location.assign('/');
+      }
     } finally {
       setBusy(false);
     }

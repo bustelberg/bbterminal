@@ -2373,7 +2373,10 @@ def compute_portfolio_analysis(portfolio_id: int,
     benchmark_risk_isin = _BENCHMARK_RISK_ETF.get((benchmark_label or "").upper())
     has_holding_risk = any(h.get("vol_5y_pct") is not None for h in enriched_holdings)
     has_beta = any(h.get("beta_5y") is not None for h in enriched_holdings)
-    if benchmark_risk_isin and has_holding_risk and not has_beta:
+    refresh_benchmark_risk = bool(
+        benchmark_risk_isin and has_holding_risk and not has_beta
+    )
+    if refresh_benchmark_risk:
         asset_data_missing_isins.add(benchmark_risk_isin)
     asset_data_missing_isins = sorted(asset_data_missing_isins)
     if asset_data_missing_isins:
@@ -2384,6 +2387,10 @@ def compute_portfolio_analysis(portfolio_id: int,
         try:
             from asset_pipeline import queue as _asset_queue  # noqa: PLC0415
             _asset_queue.enqueue(asset_data_missing_isins)
+            if refresh_benchmark_risk:
+                # A tracker can resolve successfully yet lack enough stored price
+                # history for beta. Refresh this shared dependency explicitly.
+                _asset_queue.enqueue([benchmark_risk_isin], skip_existing=False)
         except Exception as e:  # noqa: BLE001 — missing enrichment must never break Analyse
             _log.warning("[analysis] could not queue missing asset data (%s: %s)",
                          type(e).__name__, e)

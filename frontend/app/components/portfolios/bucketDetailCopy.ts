@@ -46,7 +46,7 @@ const EN: BucketDetailCopy = {
   total: 'Total',
   totalTitle: (n) => `All ${n} names in this bucket`,
   inBothTitle: 'Held in both your portfolio and the benchmark',
-  computing: 'Computing attribution…',
+  computing: 'Computing attribution',
   noHoldings: 'No holdings behind this bucket in the YTD window.',
   notDecomposed: 'Funds, cash and unclassified holdings are not a sector bet, so this bucket is '
     + 'not decomposed — just the holdings in it.',
@@ -75,7 +75,7 @@ const NL: BucketDetailCopy = {
   total: 'Totaal',
   totalTitle: (n) => `Alle ${n} namen in deze categorie`,
   inBothTitle: 'Aangehouden in zowel uw portefeuille als de benchmark',
-  computing: 'Attributie berekenen…',
+  computing: 'Attributie berekenen',
   noHoldings: 'Geen posities achter deze categorie in de YTD-periode.',
   notDecomposed: 'Fondsen, liquiditeiten en niet-geclassificeerde posities zijn geen sectorkeuze, '
     + 'dus deze categorie wordt niet uitgesplitst; alleen de posities erin worden getoond.',

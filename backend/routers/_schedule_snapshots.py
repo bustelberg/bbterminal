@@ -323,9 +323,8 @@ def compute_and_save_price_update(
             if fixed is not None and (
                 not entry_local or abs(float(entry_local) - fixed) > _PRICE_EPS
             ):
-                _log.warning(
-                    "[schedule] %s entry price corrected %s -> %s (benchmark %s as of %s) — a "
-                    "stored entry that disagrees with its own source; see the truncated-read note",
+                _log.debug(
+                    "[schedule] %s entry price corrected %s -> %s (benchmark %s as of %s)",
                     h.get("ticker") or f"benchmark {-cid}", entry_local, fixed, -cid,
                     entry_date_iso)
                 entry_local = fixed

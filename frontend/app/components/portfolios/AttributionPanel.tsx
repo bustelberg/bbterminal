@@ -6,6 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
 import { Holdings } from './BucketDetailPanel';
+import LoadingDots from './LoadingDots';
 import { useAttributionCopy } from './attributionCopy';
 import {
   workedAllocation, workedContribution, workedInteraction, workedReturn,
@@ -451,7 +452,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       )}
       {!data && !error && (
         <div className="h-full grid place-items-center">
-          <p className="text-xs text-fg-subtle">{copy.chrome.loading}</p>
+          <p className="text-xs text-fg-subtle">{copy.chrome.loading} <LoadingDots /></p>
         </div>
       )}
 
