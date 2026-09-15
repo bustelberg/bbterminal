@@ -69,7 +69,7 @@ class TestSoldInstrumentNameMatching:
 
     @pytest.mark.parametrize(("airs_name", "asset_name"), [
         ("Meta", "Meta Platforms, Inc."),
-        ("Apple", "Apple Inc."),
+        ("Apple", "Apple Hospitality REIT Inc."),
         ("Wolters Kluwer", "Wolters Klaver National Health Network"),
     ])
     def test_refuses_short_or_different_company_names(self, airs_name, asset_name):

@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { startJob } from '../../../lib/stores/jobs';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
 import { Holdings } from './BucketDetailPanel';
@@ -340,6 +341,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const [axis, setAxis] = useState<Axis>('sector');
   const [data, setData] = useState<ModelPortfolioAttribution | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [refreshingPrices, setRefreshingPrices] = useState(false);
   /**
    * The bucket whose names are open, or null.
    *
@@ -366,7 +369,27 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       }
     })();
     return () => { cancelled = true; };
-  }, [id, benchmark, window, axis, source]);
+  }, [id, benchmark, window, axis, source, refreshVersion]);
+
+  const refreshBenchmarkPrices = async () => {
+    setRefreshingPrices(true);
+    try {
+      const { done } = await startJob(
+        `${API_URL}/api/benchmarks/index/${encodeURIComponent(benchmark)}/refresh/job`,
+        `Refresh ${benchmark} prices`,
+      );
+      const job = await done;
+      if (job.status === 'done') {
+        setError(null);
+        setData(null);
+        setRefreshVersion((version) => version + 1);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshingPrices(false);
+    }
+  };
 
   /**
    * The window, spelt out — this is the panel's heading and nothing else reads it.
@@ -460,7 +483,16 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {data && (
         <>
           {data.note && (
-            <p className="text-[12px] text-fg-muted mb-2">{data.note}</p>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <p className="text-[12px] text-fg-muted">{data.note}</p>
+              {data.needs_benchmark_price_refresh && (
+                <button type="button" onClick={() => void refreshBenchmarkPrices()}
+                  disabled={refreshingPrices}
+                  className="cursor-pointer rounded-lg border border-accent-500/50 px-2 py-1 text-[12px] text-accent-300 disabled:cursor-wait disabled:opacity-60">
+                  {refreshingPrices ? 'Refreshing prices…' : `Refresh ${benchmark} prices`}
+                </button>
+              )}
+            </div>
           )}
           {/* ⚠ The identity IS the decomposition. If it fails, these are just three columns. */}
           {hasRows && !data.reconciles && (

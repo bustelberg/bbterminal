@@ -24,7 +24,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
-import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { useRiskCopy } from './riskCopy';
@@ -122,7 +121,6 @@ export default function ConcentrationView({
   }, [key]);
 
   const rows = data?.top ?? [];
-  const widest = Math.max(1, ...rows.map((r) => Math.max(r.weight_pct, r.benchmark_pct ?? 0)));
 
   /**
    * WHAT THESE CARDS ARE MEASURED FROM — built once.
@@ -237,85 +235,6 @@ export default function ConcentrationView({
                   + 'count suggests, so this is usually a small fraction of it — which is the '
                   + 'honest comparison, not the raw count.'} />} />} />
           </div>
-
-          {data.benchmark_covered_pct != null && data.benchmark_covered_pct < 99.5 && (
-            <p className="text-[11px] text-fg-faint">
-              {`Priced ${data.benchmark_covered_pct.toFixed(2)}% of ${data.benchmark}'s members — `}
-              the missing weight redistributes over the rest, so the index reads slightly more
-              concentrated than it is.
-            </p>
-          )}
-
-          <div>
-            {/* ⚠⚠ THE CAP IS NAMED. `compute_concentration` truncates this list to `rows[:20]`
-                while every figure above it is computed over ALL of them — so a reader counting the
-                rows to check C₂₀, or looking for a holding they know is in the book, was reading a
-                partial table that looked complete. A silent top-N reads as "everything"; the
-                numbers were never wrong, but the table quietly stopped agreeing with them. */}
-            <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-              {rows.length < (data.issuers ?? 0)
-                ? `Largest ${rows.length} of ${data.issuers} companies, with ${data.benchmark}'s weight in each`
-                : `All ${rows.length} companies, with ${data.benchmark}'s weight in each`}
-              <span className="normal-case tracking-normal">
-                {rows.length < (data.issuers ?? 0)
-                  ? ' — every figure above is over all of them'
-                  : ''}
-              </span>
-            </div>
-            {/* ⚠ ITS OWN SCROLL — twenty rows must not stretch the fixed dialog. */}
-            <div className="overflow-auto">
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium">
-                    <th className="text-left w-6">#</th>
-                    <th className="text-left">Company</th>
-                    <th className="text-right">Weight</th>
-                    <th className="text-right">Cumulative</th>
-                    <th className="text-right">{data.benchmark}</th>
-                    <th className="w-28" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.name}
-                      className="[&>td]:py-1 [&>td]:border-t [&>td]:border-neutral-800/20">
-                      <td className="text-fg-faint tabular-nums">{r.rank}</td>
-                      <td className="text-fg-soft truncate max-w-[16rem]">{r.name}</td>
-                      <td className="text-right font-mono tabular-nums text-fg">
-                        {pct2(r.weight_pct)}
-                      </td>
-                      <td className="text-right font-mono tabular-nums text-fg-muted">
-                        {pct2(r.cumulative_pct)}
-                      </td>
-                      <td className="text-right font-mono tabular-nums text-fg-muted">
-                        {(r.benchmark_pct ?? 0) > 0 ? pct2(r.benchmark_pct) : '—'}
-                      </td>
-                      {/* ⚠ TWO BARS ON ONE SCALE, book over index — so "big position" and "big bet"
-                          are visually different things rather than the same one. */}
-                      <td className="pr-1">
-                        <span className="block h-1.5 rounded-sm" style={{
-                          width: `${(r.weight_pct / widest) * 100}%`,
-                          background: chartTheme.accent,
-                        }} />
-                        <span className="block h-1 rounded-sm mt-0.5" style={{
-                          width: `${((r.benchmark_pct ?? 0) / widest) * 100}%`,
-                          background: chartTheme.pos,
-                        }} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <p className="text-[11px] text-fg-faint leading-relaxed">
-            Folded onto ISSUERS, not lines — two share classes of one company are a single position,
-            which is what stops the ten largest being decided by an identifier.
-            {(data.unresolved ?? 0) > 0
-              && ` ${data.unresolved} holding${data.unresolved === 1 ? '' : 's'} could not be `
-                + 'matched to a company name and each counts as its own company.'}
-          </p>
         </>
       )}
     </div>

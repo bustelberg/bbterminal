@@ -173,77 +173,26 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "caller with an EMPTY result rather than a 429.",
     ),
     JobSpec(
-        id="benchmark_index_refresh",
-        label="Benchmark index refresh (constituent prices + caps)",
-        fills="asset_price + market caps for the REBUILT indices (AEX today)",
-        cadence="Every day, 06:30 UTC",
-        trigger={"day_of_week": "mon-fri", "hour": 6, "minute": 30, "timezone": "UTC"},
-        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
-        max_age_hours=30,
-        note="⚠ NOT the ETF-priced indices. ACWI and SP500 read their headline from the index "
-             "ETF's own series (`_benchmark_etf`), refreshed inside the 05:00 price_update — "
-             "rebuilding 1,684 and 491 constituents daily would be thousands of paced Yahoo calls "
-             "for a number already had in one. AEX has no reachable ETF and IS the rebuild, so its "
-             "25 constituents are the whole cost here. ⚠ `asset_price_refresh` does NOT cover "
-             "this: it is scoped to instruments HELD IN A MODEL PORTFOLIO, so an index "
-             "constituent nothing holds was never refreshed by anything.",
-    ),
-    JobSpec(
         id="benchmark_price_slice",
-        label="Benchmark constituent price slice",
-        fills="asset_price for the most-stale constituents of ACWI / SP500 / AEX",
-        cadence="Every day, 06:45 UTC",
-        trigger={"day_of_week": "mon-sun", "hour": 6, "minute": 45, "timezone": "UTC"},
+        label="Benchmark data refresh",
+        fills="asset_price + market caps for ACWI / SP500 / AEX · relative_momentum ranks",
+        cadence="Every day, 06:30 UTC",
+        trigger={"day_of_week": "mon-sun", "hour": 6, "minute": 30, "timezone": "UTC"},
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
         max_age_hours=30,
-        note="⚠ THE HOLE NOTHING ELSE COVERED. `asset_price_refresh` is scoped to instruments HELD "
-             "in a model portfolio and `benchmark_index_refresh` to the REBUILT indices (AEX), so "
-             "an ACWI or SP500 constituent no book holds was refreshed by nothing — 1,663 of "
-             "1,848 ACWI members last closed in July, measured 2026-09-03. The Analyse modal's "
-             "composition bars are weighed on those prices and drawn only over constituents "
-             "priced at both ends of the window, so a stale series drops a name off the chart "
-             "rather than merely ageing it. A SLICE, not a full pass: most-stale-first, so the "
-             "database is the cursor and a missed day self-repairs (`price_slice`'s own shape). "
-             "~250/day over ~1,900 instruments is an eight-day cycle. Stands down while the "
-             "ingest worker is live — Yahoo answers an overloaded caller with an EMPTY list.",
-    ),
-    JobSpec(
-        id="relative_momentum_refresh",
-        label="Relative momentum ranks (ACWI · SP500 · AEX)",
-        fills="relative_momentum — each universe's 12-1 EUR return, ranked into 7 states",
-        cadence="Every day, 07:30 UTC",
-        trigger={"day_of_week": "mon-sun", "hour": 7, "minute": 30, "timezone": "UTC"},
-        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
-        max_age_hours=30,
-        note="⚠ 07:00, AFTER the 05:00 price_update AND the 06:30 index refresh — the ranks are "
-             "only as current as the closes under them, so running first would rank yesterday's "
-             "prices under today's date. ⚠⚠ ITS FRESHNESS IS BOUNDED BY SOMETHING IT DOES NOT "
-             "CONTROL: `price_update` refreshes HELD companies only, so most ACWI constituents "
-             "move on the month-end `full_price_refresh`, not daily (measured 2026-09-02: 1,680 of "
-             "1,992 members last closed 2026-08-28, 16 at 09-01). A daily run is still right — it "
-             "is cheap, idempotent and picks up every refresh within a day — but the ANSWER only "
-             "moves when the prices do. ⚠ COVERAGE IS THE CANARY: the signal engine drops a name "
-             "whose last close is over 30 days old, so if constituent prices ever stop being "
-             "refreshed this job's coverage falls before anything else shows it. It logs coverage "
-             "per universe and WARNS below 70%. ⚠ Cheap: ~15s and ~2,270 rows for all three.",
+        note="Refreshes each benchmark before calculating its relative-momentum ranks. "
+             "This keeps the ranks on the same data as Analyse.",
     ),
     JobSpec(
         id="benchmark_fundamentals_fill",
-        label="Benchmark fundamentals (quarterly)",
+        label="Benchmark fundamentals",
         fills="metric_data statements for every constituent of ACWI · SP500 · AEX",
-        cadence="Quarterly — the 10th of Jan/Apr/Jul/Oct, 08:00 UTC",
-        trigger={"month": "1,4,7,10", "day": 10, "hour": 8, "minute": 0, "timezone": "UTC"},
+        cadence="Every Monday, 08:00 UTC",
+        trigger={"day_of_week": "mon", "hour": 8, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 21600},
-        # ⚠ A QUARTER PLUS A WEEK. `max_age_hours` is what the /schedule page calls overdue, and a
-        # quarterly job that reads "overdue" for 89 days of every 92 is a red row nobody believes.
-        max_age_hours=24 * 99,
-        note="⚠ QUARTERLY BECAUSE COMPANIES FILE QUARTERLY — a monthly pass would spend quota "
-             "re-reading unchanged figures. ~2,200 GuruFocus calls per pass (ACWI ~1,700 + SP500 "
-             "~490 + AEX 25) against 20,000/month per region. ⚠ BOUNDED BY THE PER-REGION BUDGET, "
-             "the same guard `full_price_refresh` uses: a region at or below its floor is skipped "
-             "for the rest of the pass rather than erroring against an exhausted quota. ⚠ The 10th, "
-             "not month-end, so it can never land in the same window as `full_price_refresh` and "
-             "drain a region out from under it.",
+        max_age_hours=24 * 10,
+        note="Checks every constituent weekly, but only fetches companies with a newly due filing. "
+             "The regional quota reserve still applies.",
     ),
     JobSpec(
         id="history_drift_check",

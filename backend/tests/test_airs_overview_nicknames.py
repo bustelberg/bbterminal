@@ -87,3 +87,17 @@ class TestOverviewName:
             {"display_name": "Fixed strategy name"},
         )
         assert (name, custom) == ("Fixed strategy name", False)
+
+
+class TestManagementGroups:
+    def test_only_the_named_bustelberg_profiles_are_in_bustelberg(self):
+        assert ov._management_group("BUS_Offensief_Dyn") == "bustelberg"
+        assert ov._management_group("BUS_Ris_bepOff_Kl_AFS_Dy") == "topselecties"
+
+    def test_only_the_named_toppenberg_profiles_are_in_toppenberg(self):
+        assert ov._management_group("TOPS_DEF_BEH_DYN") == "toppenberg"
+        assert ov._management_group("TOPS_KM") == "topselecties"
+
+    def test_only_single_variant_building_blocks_lose_a_risk_suffix(self):
+        assert ov._management_name("AITopSelectie Offensief", "topselecties", "AITopSelectie OFF DYN") == "AITopSelectie"
+        assert ov._management_name("FamilieTopSelectie Beperkt Offensief", "topselecties", "BUS_FTS_BEPOFF_DYN") == "FamilieTopSelectie Beperkt Offensief"

@@ -2324,6 +2324,10 @@
             "title": "Link Source",
             "type": "string"
           },
+          "management_group": {
+            "title": "Management Group",
+            "type": "string"
+          },
           "missing_reports": {
             "default": [],
             "items": {
@@ -2421,6 +2425,7 @@
         },
         "required": [
           "name",
+          "management_group",
           "dynamic_portefeuille",
           "link_source"
         ],
@@ -8992,6 +8997,33 @@
             "title": "Benchmark",
             "type": "string"
           },
+          "benchmark_caps_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps From"
+          },
+          "benchmark_caps_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Caps To"
+          },
+          "benchmark_caps_unstamped": {
+            "default": 0,
+            "title": "Benchmark Caps Unstamped",
+            "type": "integer"
+          },
           "benchmark_coverage_pct": {
             "anyOf": [
               {
@@ -9320,6 +9352,11 @@
               }
             ],
             "title": "Name"
+          },
+          "needs_benchmark_price_refresh": {
+            "default": false,
+            "title": "Needs Benchmark Price Refresh",
+            "type": "boolean"
           },
           "note": {
             "anyOf": [
@@ -16317,7 +16354,7 @@
     },
     "/api/admin/scheduled-jobs": {
       "get": {
-        "description": "EVERY JOB THAT IS SUPPOSED TO RUN BY ITSELF \u2014 declared, registered, and last actually run.\n\n\u26a0\u26a0 IT ANSWERS \"IS ANYTHING MISSING\", WHICH NOTHING ELSE COULD. `/schedule` shows the ingest\npipeline's own history and `scheduler.list_scheduled_jobs()` shows what APScheduler is holding\nright now \u2014 and BOTH look healthy in the one case that matters, a job that is not registered at\nall. `list_scheduled_jobs()` is empty under `DISABLE_SCHEDULER`, empty before startup finishes,\nand empty of any job whose `add_job` threw; none of those is distinguishable from an idle\nscheduler by looking at the list. The declaration in `scheduled_jobs.py` is what makes an\nabsence visible, and this endpoint is the join.\n\n\u26a0 THE READ IS PER-PROCESS AND SAYS SO. The scheduler is in-process by design (one instance,\n`DISABLE_SCHEDULER=1` on any replica), so `registered`/`next_run_at` describe *the container\nthat served this request* \u2014 which is the honest scope, and the reason `scheduler_running` is\nreported rather than inferred from an empty list.\n\n\u26a0 SIX OF THE EIGHT JOBS REPORT `unknown`, ON PURPOSE. They leave no durable record \u2014 only a log\nline that scrolls away \u2014 so \"did it run?\" genuinely has no answer for them yet. Green would be a\nfabrication and red would cry wolf; either teaches the reader to stop reading the page. They say\nso, and `record_run` is what will fill them in.",
+        "description": "EVERY JOB THAT IS SUPPOSED TO RUN BY ITSELF \u2014 declared, registered, and last actually run.\n\n\u26a0\u26a0 IT ANSWERS \"IS ANYTHING MISSING\", WHICH NOTHING ELSE COULD. `/schedule` shows the ingest\npipeline's own history and `scheduler.list_scheduled_jobs()` shows what APScheduler is holding\nright now \u2014 and BOTH look healthy in the one case that matters, a job that is not registered at\nall. `list_scheduled_jobs()` is empty under `DISABLE_SCHEDULER`, empty before startup finishes,\nand empty of any job whose `add_job` threw; none of those is distinguishable from an idle\nscheduler by looking at the list. The declaration in `scheduled_jobs.py` is what makes an\nabsence visible, and this endpoint is the join.\n\n\u26a0 THE READ IS PER-PROCESS AND SAYS SO. The scheduler is in-process by design (one instance,\n`DISABLE_SCHEDULER=1` on any replica), so `registered`/`next_run_at` describe *the container\nthat served this request* \u2014 which is the honest scope, and the reason `scheduler_running` is\nreported rather than inferred from an empty list.\n\nThe queue worker reports live queue health instead of a synthetic run record. Other jobs use\ntheir durable run history.",
         "operationId": "admin_scheduled_jobs_api_admin_scheduled_jobs_get",
         "parameters": [
           {

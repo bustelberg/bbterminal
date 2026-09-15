@@ -35,7 +35,7 @@ type TabCopy = { label: string; note: string };
 export type ManagementCopy = {
   page: {
     title: string;
-    tabs: { overview: TabCopy; cross: TabCopy; benchmarks: TabCopy };
+    tabs: { bustelberg: TabCopy; toppenberg: TabCopy; topselecties: TabCopy };
   };
   common: {
     loading: string;
@@ -164,18 +164,9 @@ const en: ManagementCopy = {
   page: {
     title: 'Management Dashboard',
     tabs: {
-      overview: {
-        label: 'Overview',
-        note: 'Each portfolio on its own — its holdings, weights and returns.',
-      },
-      cross: {
-        label: 'Cross-portfolio',
-        note: 'How the portfolios move together. A pairwise view: no single portfolio has this number.',
-      },
-      benchmarks: {
-        label: 'Benchmarks',
-        note: 'The indices the portfolios are measured against, cap-weighted and rebuilt from our own constituents.',
-      },
+      bustelberg: { label: 'Bustelberg', note: 'Bustelberg risk-profile portfolios.' },
+      toppenberg: { label: 'Toppenberg', note: 'Toppenberg risk-profile portfolios.' },
+      topselecties: { label: 'TopSelecties', note: 'Building blocks without risk-profile labels.' },
     },
   },
   common: {
@@ -309,18 +300,9 @@ const nl: ManagementCopy = {
   page: {
     title: 'Managementdashboard',
     tabs: {
-      overview: {
-        label: 'Overzicht',
-        note: 'Elke portefeuille apart — de posities, wegingen en rendementen.',
-      },
-      cross: {
-        label: 'Portefeuille-onderling',
-        note: 'Hoe de portefeuilles samen bewegen. Een paarsgewijze weergave: geen enkele portefeuille heeft dit getal op zichzelf.',
-      },
-      benchmarks: {
-        label: 'Benchmarks',
-        note: 'De indices waaraan de portefeuilles worden afgemeten, marktkapitalisatie-gewogen en opnieuw opgebouwd uit onze eigen constituenten.',
-      },
+      bustelberg: { label: 'Bustelberg', note: 'Bustelberg-portefeuilles per risicoprofiel.' },
+      toppenberg: { label: 'Toppenberg', note: 'Toppenberg-portefeuilles per risicoprofiel.' },
+      topselecties: { label: 'TopSelecties', note: 'Bouwstenen zonder risicoprofiel in de naam.' },
     },
   },
   common: {

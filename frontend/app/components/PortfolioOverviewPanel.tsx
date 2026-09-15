@@ -165,7 +165,21 @@ const REPORT_LABELS: Record<string, string> = {
 };
 
 
-export default function PortfolioOverviewPanel() {
+export type PortfolioCollection = 'bustelberg' | 'toppenberg' | 'topselecties';
+
+const collectionTitle: Record<PortfolioCollection, string> = {
+  bustelberg: 'Bustelberg portfolios',
+  toppenberg: 'Toppenberg portfolios',
+  topselecties: 'Building blocks',
+};
+
+const collectionNameOrder: Record<PortfolioCollection, string[]> = {
+  bustelberg: ['Bustelberg Defensief', 'Bustelberg Neutraal', 'Bustelberg Beperkt Offensief', 'Bustelberg Offensief'],
+  toppenberg: ['Toppenberg Defensief', 'Toppenberg Beperkt Offensief', 'Toppenberg Offensief'],
+  topselecties: [],
+};
+
+export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
   // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so every
   // component in one render gets the same value — passing copy down would add a prop to each
   // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
@@ -842,11 +856,12 @@ export default function PortfolioOverviewPanel() {
    * model scan, so nothing is paired; that filter hid all 44 and the page read as a failed scan.
    * Whatever the rule, if it would leave nothing it does not apply.
    */
-  const substantial = (rows ?? []).filter(canAnalyse).length;
+  const collectionRows = (rows ?? []).filter((r) => r.management_group === collection);
+  const substantial = collectionRows.filter(canAnalyse).length;
   const effectiveHideSmall = hideSmall && substantial > 0;
 
   const view = (() => {
-    const base = (rows ?? []).filter((r) => (effectiveHideSmall ? canAnalyse(r) : true));
+    const base = collectionRows.filter((r) => (effectiveHideSmall ? canAnalyse(r) : true));
     const dir = sortDir === 'asc' ? 1 : -1;
     const val = (r: AirsPortfolioOverview): string | number | null => (
       sortKey === 'name' ? (r.name ?? '')
@@ -854,6 +869,14 @@ export default function PortfolioOverviewPanel() {
           : r.latest_month_pct ?? null);
     return [...base].sort((a, b) => {
       const x = val(a), y = val(b);
+      if (sortKey === 'name' && sortDir === 'asc') {
+        const order = collectionNameOrder[collection];
+        const aRank = order.indexOf(a.name);
+        const bRank = order.indexOf(b.name);
+        if (aRank !== bRank && (aRank >= 0 || bRank >= 0)) {
+          return (aRank < 0 ? order.length : aRank) - (bRank < 0 ? order.length : bRank);
+        }
+      }
       // ⚠ ABSENT SORTS TO THE BOTTOM IN BOTH DIRECTIONS. A portfolio with no return has no
       // value here — it is not a very small one. Letting null fall through to a numeric
       // compare would park every unlinked book at the top of an ascending sort and read as "these
@@ -887,7 +910,7 @@ export default function PortfolioOverviewPanel() {
       <div className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h3 className="text-[15px] font-semibold text-fg-strong">
-            Portfolios{rows ? ` · ${view.length}` : ''}
+            {collectionTitle[collection]}{rows ? ` · ${view.length}` : ''}
           </h3>
         </div>
         <div className="flex items-center gap-3 flex-wrap">

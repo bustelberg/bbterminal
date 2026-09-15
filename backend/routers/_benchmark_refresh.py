@@ -72,6 +72,7 @@ from datetime import date, datetime, timezone
 
 from deps import IN_CHUNK_SIZE, supabase
 from routers._benchmark_fill import (
+    _RESOLVE_PER_PRESS,
     _NEEDS_CAP,
     _NEEDS_RESOLVE,
     _NO_ISIN,
@@ -218,8 +219,13 @@ def _constituents(label: str, emit) -> tuple[list[dict], dict, dict]:
 
     if buckets[_NEEDS_RESOLVE]:
         _queue.enqueue(buckets[_NEEDS_RESOLVE])
-        emit("progress", message=f"  resolving {len(buckets[_NEEDS_RESOLVE])} unmapped ISIN(s)…")
-        d = _drain_now(buckets[_NEEDS_RESOLVE])
+        now = min(_RESOLVE_PER_PRESS, len(buckets[_NEEDS_RESOLVE]))
+        emit("progress", message=(
+            f"  queued {len(buckets[_NEEDS_RESOLVE])} unmapped ISIN(s); resolving {now} now"))
+        d = _drain_now(
+            buckets[_NEEDS_RESOLVE],
+            on_each=lambda isin, outcome: emit("progress", message=f"  {isin}: {outcome}"),
+        )
         if d.get("worker_live"):
             emit("progress", message="  the ingest worker is already draining the queue — left to it")
         else:

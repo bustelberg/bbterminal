@@ -65,7 +65,8 @@ describe('⚠ the Dutch is actually Dutch', () => {
    *     button beside it ("Vernieuwen vanuit AIRS") IS translated, so the pair is not lazy.
    */
   const SAME_BY_DESIGN = new Set([
-    'page.tabs.benchmarks.label', 'benchmarks.title', 'benchmarks.colBenchmark',
+    'page.tabs.bustelberg.label', 'page.tabs.toppenberg.label', 'page.tabs.topselecties.label',
+    'benchmarks.title', 'benchmarks.colBenchmark',
     'benchmarks.colYtdEur', 'overview.colSector', 'overview.colIsin', 'models.scanAirs',
   ]);
 

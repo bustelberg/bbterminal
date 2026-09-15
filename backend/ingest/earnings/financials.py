@@ -267,7 +267,7 @@ def fetch_financials(
             # ⚠ THE TEST IS "DOES IT CARRY ANY PERIOD", the same question the freshness check asks
             # of the cache — not a size or a key count, both of which this payload passes.
             result.cache_status = "api_empty"
-            result.error = "GuruFocus returned no periods (empty template) — cache left untouched"
+            result.error = "GuruFocus did not provide financial statements. Please try again later."
             _log(result.error)
             return result
         else:

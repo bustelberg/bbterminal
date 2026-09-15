@@ -2366,6 +2366,11 @@ def compute_portfolio_analysis(portfolio_id: int,
         and h.get("sector") == UNKNOWN_BUCKET
         and not any(h.get(k) is not None for k in ("mom_12_1_pct", "vol_5y_pct", "beta_5y"))
     }
+    asset_data_missing_isins.update(
+        p["isin"] for p in (realised_block or {}).get("positions", [])
+        if p.get("closed_out") and p.get("isin") and p.get("last_sale")
+        and p.get("since_close_pct") is None
+    )
     # Beta is relative to the selected benchmark and cannot be produced from the holding series
     # alone. A portfolio can therefore have sector/momentum/volatility while every beta is blank
     # when the benchmark risk ETF has not been ingested yet. Queue that dependency through the same
@@ -2457,6 +2462,9 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
+        "benchmark_caps_from": bench_coverage.get("caps_from"),
+        "benchmark_caps_to": bench_coverage.get("caps_to"),
+        "benchmark_caps_unstamped": bench_coverage.get("caps_unstamped") or 0,
         # ⚠ NAMES WHERE THE GAP IS, because it is not spread evenly — see `_missing_by_country`.
         #   Empty means "could not work it out", which the copy renders as no sentence rather than
         #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.
@@ -2782,11 +2790,11 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v5"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v9"
 
 
 _INSTRUMENT_NAME_SUFFIXES = frozenset({
-    "ab", "ag", "asa", "bv", "co", "company", "corp", "corporation", "inc",
+    "ab", "ag", "as", "asa", "bv", "co", "companies", "company", "corp", "corporation", "inc",
     "incorporated", "limited", "ltd", "llc", "lp", "nv", "oyj", "plc", "sa",
     "se", "spa", "the",
 })
@@ -2794,7 +2802,11 @@ _INSTRUMENT_NAME_SUFFIXES = frozenset({
 
 def _instrument_name_words(value: str | None) -> tuple[str, ...]:
     """A conservative comparison key for AIRS and asset names."""
-    words = re.findall(r"[a-z0-9]+", (value or "").casefold())
+    text = (value or "").casefold()
+    text = re.sub(r"\ba\s*/\s*s\b", "as", text)
+    text = re.sub(r"\bn\s*\.\s*v\s*\.?", "nv", text)
+    text = re.sub(r"\bb\s*\.\s*v\s*\.?", "bv", text)
+    words = re.findall(r"[a-z0-9]+", text)
     while words and words[0] == "the":
         words.pop(0)
     while words and words[-1] in _INSTRUMENT_NAME_SUFFIXES:
@@ -2806,18 +2818,17 @@ def _instrument_names_match(holding_name: str, asset_name: str) -> bool:
     """Whether two names identify the same instrument without fuzzy guessing.
 
     AIRS sometimes shortens the final word, such as ``Automatic Data Proc.``.
-    Every word must still agree in order. A single-word name is not enough to
-    identify an instrument safely.
+    Every word must agree in order. Single-word names require an exact match.
     """
     left = _instrument_name_words(holding_name)
     right = _instrument_name_words(asset_name)
-    if len(left) < 2 or len(right) < 2:
+    if not left or not right:
         return False
-    shorter, longer = (left, right) if len(left) <= len(right) else (right, left)
-    if len(shorter) > len(longer):
+    if len(left) != len(right):
         return False
-    return all(a.startswith(b) or b.startswith(a)
-               for a, b in zip(shorter, longer))
+    if len(left) == 1:
+        return left == right
+    return all(a.startswith(b) or b.startswith(a) for a, b in zip(left, right))
 
 
 def _asset_execution_isins_by_name(names: list[str]) -> dict[str, str]:
@@ -2830,7 +2841,7 @@ def _asset_execution_isins_by_name(names: list[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for name in names:
         words = _instrument_name_words(name)
-        if len(words) < 2:
+        if not words:
             continue
         pattern = "%".join(words) + "%"
         rows = (supabase.table("asset_execution").select("isin,name")
@@ -3451,6 +3462,9 @@ def compute_basket_analysis(holdings, benchmark_label: str = SP500_LABEL, name: 
         "benchmark_universe_members": bench_coverage.get("universe_members") or 0,
         "benchmark_priced": bench_coverage.get("priced") or 0,
         "benchmark_coverage_pct": bench_coverage.get("covered_pct"),
+        "benchmark_caps_from": bench_coverage.get("caps_from"),
+        "benchmark_caps_to": bench_coverage.get("caps_to"),
+        "benchmark_caps_unstamped": bench_coverage.get("caps_unstamped") or 0,
         # ⚠ NAMES WHERE THE GAP IS, because it is not spread evenly — see `_missing_by_country`.
         #   Empty means "could not work it out", which the copy renders as no sentence rather than
         #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.

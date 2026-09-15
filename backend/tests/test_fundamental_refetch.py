@@ -132,7 +132,7 @@ class TestASelectedCompanyIsStillReportedHonestly:
         monkeypatch.setattr(
             earnings, "fetch_financials",
             lambda *_args, **_kwargs: _Result(rows=0, calls=1,
-                                               error="GuruFocus returned no periods"),
+                                               error="GuruFocus did not provide financial statements. Please try again later."),
         )
 
         r = ingest_company(_company(need_fin=True, need_est=False, need_ind=False),
@@ -141,4 +141,4 @@ class TestASelectedCompanyIsStillReportedHonestly:
         assert r["calls"] == 1
         assert r["rows"] == 0
         assert r["done"] == []
-        assert r["error"] == "fin: GuruFocus returned no periods"
+        assert r["error"] == "fin: GuruFocus did not provide financial statements. Please try again later."

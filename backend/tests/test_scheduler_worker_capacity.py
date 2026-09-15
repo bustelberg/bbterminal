@@ -92,3 +92,22 @@ def test_relative_momentum_job_accepts_the_jobs_boolean_cancellation(monkeypatch
 
     assert detail["ranked"] == 0
     assert "nothing" in message
+
+
+def test_benchmark_refresh_ranks_only_after_all_benchmarks_are_refreshed(monkeypatch):
+    from routers import _benchmark_refresh
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        _benchmark_refresh, "refresh_benchmark",
+        lambda label, _emit: events.append(label) or {"priceable": 1, "prices_fetched": 1},
+    )
+    monkeypatch.setattr(
+        S, "_body_relative_momentum_refresh",
+        lambda _ctx: (events.append("ranks") or "ranked 3 universes", {"ranked": 3}),
+    )
+
+    _, detail = S._body_benchmark_price_slice()
+
+    assert events == ["ACWI", "SP500", "AEX", "ranks"]
+    assert detail["relative_momentum"] == {"ranked": 3}

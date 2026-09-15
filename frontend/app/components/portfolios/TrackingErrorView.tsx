@@ -35,13 +35,6 @@ import { oneSigmaBand } from './activeBand';
 import type { TrackingError } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
-/** ⚠ WEEKLY FIRST AND SELECTED BY DEFAULT — see the ⚠ on `daily`. Order is the recommendation. */
-const FREQS = [
-  { key: 'weekly', label: 'Weekly', f: 52 },
-  { key: 'monthly', label: 'Monthly', f: 12 },
-  { key: 'daily', label: 'Daily', f: 252 },
-] as const;
-
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
 /**
@@ -87,7 +80,7 @@ export default function TrackingErrorView({
 }) {
   const [data, setData] = useState<TrackingError | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [freq, setFreq] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
+  const freq = 'monthly';
 
   // ⚠ A STRING KEY, NOT THE ARRAY — `holdings` is rebuilt on every parent render, so depending on
   // its identity would refetch for ever.
@@ -118,7 +111,7 @@ export default function TrackingErrorView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  const f = FREQS.find((x) => x.key === freq)!;
+  const periodsPerYear = 12;
 
   /**
    * ⚠⚠ THE READING THE NUMBER DOES NOT GIVE ANYONE ON ITS OWN — see `activeBand`. A tracking error
@@ -165,17 +158,7 @@ export default function TrackingErrorView({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-fg-faint">{t.common.measured}</span>
-        {FREQS.map((x) => (
-          <button key={x.key} type="button" onClick={() => setFreq(x.key)}
-            title={x.key === 'daily' ? `f = ${x.f}. ${t.common.dailyNote}`
-              : t.common.freqNote(x.f)}
-            className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-              freq === x.key ? 'bg-accent-600 text-white border-transparent'
-                : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300'}`}>
-            {t.common[x.key]}
-          </button>
-        ))}
+        <span className="text-[11px] text-fg-faint">{t.common.measured} {t.common.monthly}</span>
       </div>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
@@ -276,7 +259,7 @@ export default function TrackingErrorView({
                 renormalised over, never carried at zero.
               </>
             )}
-            {` Differenced against ${data.benchmark}'s investable tracker, f = ${f.f}.`}
+            {` Differenced against ${data.benchmark}'s investable tracker, f = ${periodsPerYear}.`}
           </p>
         </>
       )}

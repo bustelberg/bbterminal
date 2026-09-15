@@ -27,8 +27,46 @@ WHAT IT JOINS, AND WHY EACH SIDE IS THERE
 from __future__ import annotations
 
 import asyncio
+import re
 
 from deps import supabase
+
+
+_MANAGEMENT_GROUPS = {
+    "busdefensiefdyn": "bustelberg",
+    "busneutraaldyn": "bustelberg",
+    "busbepoffensiefdyn": "bustelberg",
+    "busoffensiefdyn": "bustelberg",
+    "topsdefbehdyn": "toppenberg",
+    "topsbeoffbehdyn": "toppenberg",
+    "topsoffbehdyn": "toppenberg",
+}
+_SINGLE_RISK_PROFILE_ACCOUNTS = {
+    "aitopselectieoffdyn",
+    "aztopselectiedyn",
+    "ditopselectieoffdyn",
+    "europatopselectoffdyn",
+    "startopselectieoffdyn",
+    "vtopselectieoffdy",
+    "busrisbepoffklafsdy",
+    "dealmakerstopseloffdyn",
+    "tolpoortenselectoffdyn",
+}
+_RISK_PROFILE_SUFFIX = re.compile(r"\s+(?:beperkt\s+offensief|offensief|neutraal|defensief)\s*$", re.I)
+
+
+def _management_group(account_name: str | None) -> str:
+    """The dashboard collection for an AIRS dynamic portfolio."""
+    key = re.sub(r"[^a-z0-9]+", "", (account_name or "").casefold())
+    return _MANAGEMENT_GROUPS.get(key, "topselecties")
+
+
+def _management_name(name: str | None, group: str, account_name: str | None) -> str | None:
+    """Remove a redundant risk suffix only from single-variant building blocks."""
+    key = re.sub(r"[^a-z0-9]+", "", (account_name or "").casefold())
+    if group != "topselecties" or key not in _SINGLE_RISK_PROFILE_ACCOUNTS or not name:
+        return name
+    return _RISK_PROFILE_SUFFIX.sub("", name).strip() or name
 
 
 def _nicknames() -> dict[str, str]:
@@ -117,12 +155,15 @@ def list_overview() -> list[dict]:
         m = models.get(link.get("model_portfolio_id")) if link.get("model_portfolio_id") else None
         display_name, name_is_custom = _overview_name(
             a.get("portefeuille"), nicknames, direct_model_nicknames, m)
+        management_group = _management_group(a.get("portefeuille"))
+        display_name = _management_name(display_name, management_group, a.get("portefeuille"))
         out.append({
             # The name a human gave it. Falls back to AIRS's code rather than to a blank: an
             # unlinked book is still a book, and a nameless row is unreadable.
             # Precedence: this book's nickname > the model's display name > AIRS's own code. Every
             # step down is a FALLBACK, never a preference.
             "name": display_name,
+            "management_group": management_group,
             # True when a human named this row, so the UI can show it as chosen rather than derived.
             "name_is_custom": name_is_custom,
             "description": (m or {}).get("omschrijving"),

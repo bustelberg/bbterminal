@@ -3,7 +3,7 @@
   "note": "Reviewed mapping of AIRS codes to BB Terminal names and certificate holdings. Edit this file to review or correct a strategy; no database ids belong here.",
   "strategies": [
     {
-      "nickname": "AITopSelectie Offensief",
+      "nickname": "AITopSelectie",
       "airs_names": [
         "AITopSelectie OFF DYN",
         "AITopSelectie OFF FX"
@@ -14,7 +14,7 @@
       "look_through_target": "AITopSelectie OFF FX"
     },
     {
-      "nickname": "AzieTopSelectie Offensief",
+      "nickname": "AzieTopSelectie",
       "airs_names": [
         "AzTopSelectie_DYN",
         "AztopSelectie_FX"
@@ -25,7 +25,7 @@
       "look_through_target": "AztopSelectie_FX"
     },
     {
-      "nickname": "DividendTopSelectie Offensief",
+      "nickname": "DividendTopSelectie",
       "airs_names": [
         "DiTopSelectie OFF DYN",
         "DiTopSelectie OFF FX"
@@ -36,7 +36,7 @@
       "look_through_target": "DiTopSelectie OFF FX"
     },
     {
-      "nickname": "EuropaTopSelectie Offensief",
+      "nickname": "EuropaTopSelectie",
       "airs_names": [
         "EuropaTopSelect OFF DYN",
         "EuropaTopSelect OFF FX"
@@ -69,7 +69,7 @@
       "look_through_target": "OBTopselectie FX"
     },
     {
-      "nickname": "StarTopSelectie Offensief",
+      "nickname": "StarTopSelectie",
       "airs_names": [
         "StarTopSelectie OFF DYN",
         "StarTopSelectie OFF FX"
@@ -80,7 +80,7 @@
       "look_through_target": "StarTopSelectie OFF FX"
     },
     {
-      "nickname": "VastgoedTopSelectie Offensief",
+      "nickname": "VastgoedTopSelectie",
       "airs_names": [
         "VTopSelectie OFF DY",
         "VTopSelectie OFF FX"
@@ -201,7 +201,7 @@
       "look_through_target": null
     },
     {
-      "nickname": "Bustelberg Risico Beperkt Offensief",
+      "nickname": "Bustelberg Risico",
       "airs_names": [
         "BUS_Ris_bepOff_Kl_AFS_Dy"
       ],
@@ -243,7 +243,7 @@
       "look_through_target": null
     },
     {
-      "nickname": "DealmakersTopSelectie Offensief",
+      "nickname": "DealmakersTopSelectie",
       "airs_names": [
         "DealmakersTopSel OFF DYN",
         "DealmakersTopSel OFF FX"
@@ -252,7 +252,7 @@
       "look_through_target": null
     },
     {
-      "nickname": "TolpoortenSelectie Offensief",
+      "nickname": "TolpoortenSelectie",
       "airs_names": [
         "TolpoortenSelect OFF DYN",
         "TolpoortenSelect OFF FX"

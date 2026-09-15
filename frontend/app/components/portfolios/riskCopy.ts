@@ -432,8 +432,8 @@ const en: RiskCopy = {
     identityBroken: (pp) => `⚠ σₐ measured and σₐ implied by ρ differ by ${pp}pp — the two series `
       + 'are no longer identical. This is a bug, not a market fact.',
     pairsMeasured: (measured, possible, minObs, holdings) =>
-      `${v(measured)} of ${v(possible)} possible pairs — the ones with at least ${v(minObs)} `
-      + `overlapping returns, across ${v(holdings)} holdings.`,
+      `${v(measured)} of ${v(possible)} pairs with at least ${v(minObs)} shared returns, across `
+      + `${v(holdings)} holdings.`,
     thinPairs: (n) => `A pair with fewer than ${n} overlapping returns is left blank rather than `
       + 'tinted — over ten weeks a correlation is noise with a sign, and a coloured cell looks '
       + 'exactly as authoritative as one measured over five years.',
@@ -445,15 +445,12 @@ const en: RiskCopy = {
       },
       rSquared: {
         what: "The share of the book's movement the index explains.",
-        where: 'ρ², nothing more.',
-        how: 'ρ = 0.90 and "81% of the movement" are the same fact and land very differently, '
-          + 'which is why both are on screen.',
+        where: 'Calculated from the correlation above.',
+        how: 'Higher values mean the portfolio moved more like the index.',
       },
       meanPair: {
-        what: 'How alike the holdings are to each other — the diversification check.',
-        how: '⚠ UNWEIGHTED ON PURPOSE. It asks whether these NAMES are alike, which is a question '
-          + 'about the selection; weighting by position size would answer a different one and make '
-          + 'a concentrated book look better diversified.',
+        what: 'The average correlation between holdings.',
+        how: 'Each pair has the same weight.',
       },
       activeVol: {
         what: 'The same tracking error the view beside this one reports.',
@@ -526,10 +523,8 @@ const en: RiskCopy = {
   dd: {
     maxDrawdown: (f) => `Max drawdown (${f})`, benchMax: (b) => `${b} max drawdown`,
     today: 'Today', episodes: (pct) => `Falls over ${pct}%`,
-    provenance: "⚠ Reconstructed from today's holdings, not the client's realised experience. "
-      + "Names since sold are absent and today's weights were chosen with hindsight, so this reads "
-      + "shallower than what was actually lived through. The client's own figure comes from the "
-      + 'AIRS returns.',
+    provenance: "Based on today's holdings. Sold positions are not included, so this may differ "
+      + "from the client's actual drawdown. AIRS returns show the client's figure.",
     threeWays: 'The same drawdown, measured three ways',
     threeWaysNote: 'Coarser cadences cannot see a fall that recovers inside the period, so they '
       + 'read shallower. Daily is the honest basis for this measure.',
@@ -793,8 +788,8 @@ const nl: RiskCopy = {
     identityBroken: (pp) => `⚠ De gemeten σₐ en de uit ρ afgeleide σₐ verschillen ${pp}pp — de twee `
       + 'reeksen zijn niet langer identiek. Dit is een fout in de software, geen marktfeit.',
     pairsMeasured: (measured, possible, minObs, holdings) =>
-      `${v(measured)} van ${v(possible)} mogelijke paren — die met minstens ${v(minObs)} `
-      + `overlappende rendementen, over ${v(holdings)} posities.`,
+      `${v(measured)} van ${v(possible)} paren met minstens ${v(minObs)} overlappende rendementen, `
+      + `over ${v(holdings)} posities.`,
     thinPairs: (n) => `Een paar met minder dan ${n} overlappende rendementen blijft leeg in plaats `
       + 'van gekleurd — over tien weken is een correlatie ruis met een teken, en een gekleurde cel '
       + 'oogt even gezaghebbend als een die over vijf jaar is gemeten.',
@@ -806,15 +801,12 @@ const nl: RiskCopy = {
       },
       rSquared: {
         what: 'Het deel van de beweging van het boek dat de index verklaart.',
-        where: 'ρ², meer niet.',
-        how: 'ρ = 0,90 en "81% van de beweging" zijn hetzelfde feit en komen heel verschillend aan; '
-          + 'daarom staan ze allebei op het scherm.',
+        where: 'Berekend uit de correlatie hierboven.',
+        how: 'Een hogere waarde betekent dat de portefeuille meer met de index meebewoog.',
       },
       meanPair: {
-        what: 'Hoezeer de posities op elkaar lijken — de spreidingstoets.',
-        how: '⚠ BEWUST ONGEWOGEN. De vraag is of deze NAMEN op elkaar lijken, en dat gaat over de '
-          + 'selectie; wegen naar positiegrootte beantwoordt een andere vraag en laat een '
-          + 'geconcentreerd boek beter gespreid lijken dan het is.',
+        what: 'De gemiddelde correlatie tussen posities.',
+        how: 'Elk paar weegt even zwaar.',
       },
       activeVol: {
         what: 'Dezelfde tracking error die de weergave hiernaast rapporteert.',
@@ -892,10 +884,8 @@ const nl: RiskCopy = {
   dd: {
     maxDrawdown: (f) => `Maximale drawdown (${f})`, benchMax: (b) => `Maximale drawdown ${b}`,
     today: 'Vandaag', episodes: (pct) => `Dalingen boven ${pct}%`,
-    provenance: '⚠ Gereconstrueerd uit de huidige posities, niet de werkelijke ervaring van de '
-      + 'klant. Namen die inmiddels zijn verkocht ontbreken en de huidige gewichten zijn met kennis '
-      + 'achteraf gekozen, dus dit valt ondieper uit dan wat werkelijk is meegemaakt. Het eigen '
-      + 'cijfer van de klant komt uit de AIRS-rendementen.',
+    provenance: 'Gebaseerd op de huidige posities. Verkochte posities ontbreken, dus dit kan '
+      + 'afwijken van de werkelijke drawdown van de klant. AIRS-rendementen tonen het eigen cijfer.',
     threeWays: 'Dezelfde drawdown, op drie manieren gemeten',
     threeWaysNote: 'Grovere frequenties zien een daling die binnen de periode herstelt niet, dus '
       + 'vallen ze ondieper uit. Dagelijks is de eerlijke basis voor deze maatstaf.',

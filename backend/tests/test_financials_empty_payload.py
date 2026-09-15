@@ -73,7 +73,7 @@ class TestAnEmptyTemplateIsRefused:
 
     def test_it_says_why(self, fin, monkeypatch):
         res, _wrote = _run(fin, monkeypatch, EMPTY)
-        assert "no periods" in (res.error or "")
+        assert "did not provide financial statements" in (res.error or "")
 
     def test_a_payload_WITH_periods_is_cached_and_stamped_as_before(self, fin, monkeypatch):
         # ⚠ THE CONTROL. The guard must key on "carries a period", not on size or key count —

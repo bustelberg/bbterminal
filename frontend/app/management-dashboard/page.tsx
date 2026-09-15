@@ -22,7 +22,7 @@ import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
  * row can answer. Benchmarks are not portfolios at all — they are indices rebuilt from our own
  * constituents, the yardstick the other two are measured against rather than another thing we hold.
  */
-type TabKey = 'overview' | 'cross' | 'benchmarks';
+type TabKey = 'bustelberg' | 'toppenberg' | 'topselecties';
 
 /**
  * ⚠ THE ORDER LIVES HERE, THE WORDS LIVE IN `managementCopy`. A tab's label and its hover are
@@ -32,9 +32,9 @@ type TabKey = 'overview' | 'cross' | 'benchmarks';
  * ⚠⚠ `cross` AND `benchmarks` WERE TAKEN OFF THE PAGE ON 2026-09-01, ON REQUEST AND EXPLICITLY
  * "FOR NOW". Nothing behind them was deleted: `CorrelationMatrix.tsx`, `BenchmarksPanel.tsx` and
  * `benchmarks/FundamentalGridPane.tsx` are untouched on disk, every `/api/benchmarks/index/*`
- * route still serves, and the scheduled jobs that keep that data current (`benchmark_index_refresh`
- * 06:30 Mon-Fri, `benchmark_fundamentals_fill` quarterly, the held-ETF leg of the 05:00
- * `price_update`) are unchanged. `TabKey` still names all three, and their copy is still translated
+ * route still serves, and the scheduled jobs that keep that data current (`benchmark_price_slice`
+ * daily, `benchmark_fundamentals_fill` weekly, the held-ETF leg of the 05:00 `price_update`) are
+ * unchanged. `TabKey` still names all three, and their copy is still translated
  * in both languages, so putting one back is: add it to this array and re-add its two lines below.
  *
  * ⚠⚠ AND THE BENCHMARK DATA IS STILL READ, JUST NOT THROUGH THESE ROUTES. The Fundamental modal's
@@ -46,11 +46,11 @@ type TabKey = 'overview' | 'cross' | 'benchmarks';
  * does remove the only on-demand "fill this now" control. The schedule is what keeps it current;
  * a gap now waits for the next tick instead of a button. See `docs/airs-portfolios.md`.
  */
-const TAB_ORDER: TabKey[] = ['overview'];
+const TAB_ORDER: TabKey[] = ['bustelberg', 'toppenberg', 'topselecties'];
 
 export default function Page() {
   const t = useMgmtCopy();
-  const [tab, select] = useState<TabKey>('overview');
+  const [tab, select] = useState<TabKey>('bustelberg');
   /**
    * ⚠⚠ THE LAZY-MOUNT LATCH WENT WITH THE TWO TABS (2026-09-01) AND COMES BACK WITH THEM. It was a
    * `seen` set: a pane was not rendered until its tab had been opened, and after that stayed
@@ -79,8 +79,7 @@ export default function Page() {
       // panes as "lazy" — true while they were tabs, and after they were removed it would have had
       // the first line in the console describing a page that no longer exists, which is the one
       // line whose whole job is to be trusted.
-      panels: { Overview: ['PortfolioOverviewPanel'] },
-      tabsRemoved: ['cross', 'benchmarks'],
+      panels: { portfolios: ['PortfolioOverviewPanel'] },
       silence: "localStorage.setItem('bb.debug','0') to quiet these traces",
     });
   }, []);
@@ -98,7 +97,6 @@ export default function Page() {
             button is a control that cannot do anything, and a reader who presses it and sees
             nothing move learns to distrust the ones that work. It comes back on its own the
             moment `TAB_ORDER` grows — see the note there. */}
-        {TAB_ORDER.length > 1 && (
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden text-xs">
           {TAB_ORDER.map((k) => (
             <button key={k} type="button" onClick={() => select(k)} title={t.page.tabs[k].note}
@@ -110,14 +108,11 @@ export default function Page() {
             </button>
           ))}
         </div>
-        )}
 
         {/* ⚠ HIDDEN, NOT UNMOUNTED. Unmounting throws away the table's expanded rows, sort and
             filters — and refetches the panel — on a switch a reader makes to glance at one thing
             and come back. */}
-        <div className={tab === 'overview' ? '' : 'hidden'}>
-          <PortfolioOverviewPanel />
-        </div>
+        <PortfolioOverviewPanel collection={tab} />
       </div>
     </div>
   );

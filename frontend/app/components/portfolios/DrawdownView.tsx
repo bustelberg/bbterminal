@@ -147,10 +147,7 @@ export default function DrawdownView({
               client report carries, and a reader who takes it for the client's own drawdown has
               been misled by the panel rather than by the data. */}
           <p className="text-[11px] text-warn-300 leading-relaxed">
-            ⚠ Reconstructed from today&apos;s holdings, not the client&apos;s realised experience.
-            Names since sold are absent and today&apos;s weights were chosen with hindsight, so this
-            reads shallower than what was actually lived through. The client&apos;s own figure comes
-            from the AIRS returns.
+            {t.dd.provenance}
           </p>
 
           <div className="flex flex-wrap gap-2">

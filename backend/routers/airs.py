@@ -1487,6 +1487,9 @@ class ModelPortfolioAnalysis(BaseModel):
     benchmark_universe_members: int = 0
     benchmark_priced: int = 0
     benchmark_coverage_pct: float | None = None
+    benchmark_caps_from: str | None = None
+    benchmark_caps_to: str | None = None
+    benchmark_caps_unstamped: int = 0
     # Where the coverage gap is, worst first, at most 3. Empty = the breakdown could not be worked
     # out; it never means "nothing missing" — that is what `benchmark_coverage_pct` says.
     benchmark_missing_countries: list[dict] = Field(default_factory=list)
@@ -2480,6 +2483,9 @@ class ModelPortfolioAttribution(BaseModel):
     source: str = "model"
     # Set when there is nothing to attribute (e.g. `source=book` but no paired book).
     note: str | None = None
+    # The attribution needs two closes for every benchmark constituent. This lets the client offer
+    # the relevant repair action without guessing from the wording of `note`.
+    needs_benchmark_price_refresh: bool = False
     start: str | None = None
     portfolio_return_pct: float = 0.0
     benchmark_return_pct: float = 0.0
@@ -3693,6 +3699,7 @@ class AirsPortfolioOverview(BaseModel):
     """
 
     name: str
+    management_group: str
     # True when a human named THIS account (`airs_account_display_name`), rather than the name
     # being borrowed from a paired model or falling back to AIRS's own code.
     name_is_custom: bool = False
