@@ -230,6 +230,19 @@ export function workedRatio(a: number | null | undefined, b: number | null | und
     + `{${subNum(b, ratioDigits(b))}${tex(bUnit)}} = ${tex(result)}`;
 }
 
+export function workedPriceCagr(
+  forecastPrice: number | null | undefined,
+  currentPrice: number | null | undefined,
+  years: number,
+  cagr: number | null | undefined,
+): string {
+  if (forecastPrice == null || currentPrice == null || cagr == null
+      || forecastPrice <= 0 || currentPrice <= 0 || years <= 0) return '';
+  return String.raw`\left(\dfrac{${forecastPrice.toFixed(2)}}{${currentPrice.toFixed(2)}}\right)`
+    + String.raw`^{\dfrac{1}{${years.toFixed(1)}}} - 1 = `
+    + tex(`${cagr >= 0 ? '+' : ''}${(cagr * 100).toFixed(1)}%`);
+}
+
 /**
  * `ā f ± TE = +3.12% ± 12.41% ⟹ [−9.29%, +15.53%]`
  *

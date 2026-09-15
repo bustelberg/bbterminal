@@ -11,7 +11,7 @@ import { chartTheme } from '../../../lib/chartTheme';
 import { useQuickValuationCopy } from './quickValuationCopy';
 import { tiltedAxis } from '../../../lib/chartAxis';
 import { AspectCard } from '../../../lib/tipCard';
-import { workedMean, workedRatio } from './workedFormula';
+import { workedMean, workedPriceCagr, workedRatio } from './workedFormula';
 import InfoTip from '../InfoTip';
 import { Stat } from './MetricGrowthCard';
 import QuickValuationInputsModal from './QuickValuationInputsModal';
@@ -104,7 +104,7 @@ const CHART_HEIGHT = 320;
 /** Where the multiple-history chart opens. GuruFocus's forward-P/E indicator starts 2015-11-30 —
  *  earlier years would draw a trailing line with no forward beside it, which is the one comparison
  *  that chart exists to make. */
-const MULTIPLE_FROM_YEAR = 2015;
+const MULTIPLE_FROM_YEAR = 2017;
 
 /** `GET /api/asset-pipeline/latest-close/isin/{isin}` — the fields this tab reads. */
 type LatestClose = {
@@ -841,14 +841,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           info={<InfoTip content={<AspectCard
             what="Compound annual growth of the fiscal year-end share price."
             where="GuruFocus `Month End Stock Price`, the close at each fiscal year end."
-            when={priceCagr ? `${priceCagr.from} → ${priceCagr.to} (${priceCagr.years} years).` : 'Not computable.'}
+            when={priceCagr ? `${priceCagr.from} to ${priceCagr.to} (${priceCagr.years} years).` : 'Not available.'}
             how="First to last positive observation. The year-end price, not today's quote." />} />} />
         <Stat label={t.perShareCagr(bl.perShare)} value={pct(valueCagr?.pct)} color={chartTheme.warn}
           info={<InfoTip content={<AspectCard
             what={`Compound annual growth of ${b.what}.`}
             where={b.source}
-            when={valueCagr ? `${valueCagr.from} → ${valueCagr.to} (${valueCagr.years} years).` : 'Not computable.'}
-            how={`Per SHARE, so buybacks flatter it and issuance dilutes it — which is the point: it is what accrues to one share you own. A gap to the price CAGR is the rerating, and a rerating is not repeatable. ${b.caveat}`} />} />} />
+            when={valueCagr ? `${valueCagr.from} to ${valueCagr.to} (${valueCagr.years} years).` : 'Not available.'}
+            how={`Per share, so buybacks and new shares affect it. ${b.caveat}`} />} />} />
         {/* ⚠⚠ THE CONCLUSION, ON THE CHART THAT ARGUES FOR IT. The two CAGRs to the left are what
             HAPPENED; these three are what the assumptions in the panel IMPLY, and the reader was
             having to hold a number from one card in their head while looking at the other. They are
@@ -869,14 +869,14 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             word doing that work is `Est.` */}
         <Stat label={t.currentSharePrice} value={`${ccy}${fmtPrice(target.currentPrice)}`}
           info={<InfoTip content={<AspectCard
-            what="The price the target is measured from."
+            what="Current share price."
             where={priceLive
-              ? `yfinance (\`asset_price\`)${live?.symbol ? ` — ${live.symbol}` : ''}, converted into ${currency ?? 'the reporting currency'}.`
-              : 'GuruFocus `Month End Stock Price` — the close at the last fiscal year end.'}
+              ? `yfinance asset_price${live?.symbol ? ` (${live.symbol})` : ''}.`
+              : 'GuruFocus Month End Stock Price.'}
             when={priceLive
               ? `Its close of ${priceDate ?? 'an unknown date'}.`
-              : '⚠ NOT TODAY’S QUOTE. This ISIN has no priced Yahoo listing we could convert, so the fiscal close stands in — it can be up to a year old.'}
-            how="⚠ THE ONE NON-FISCAL FIGURE ON THIS CARD when it is live: every plotted point is a fiscal year-end close, and this is today's. Same figure as the panel's row of the same name." />} />} />
+              : 'Fiscal year end.'}
+            how="Used with the latest reported figure to calculate the current yield." />} />} />
         {/* ⚠ THE SAME COLOUR AS THE DOT IT DESCRIBES (`chartTheme.accentStrong`, the price line's,
             which is what the `ReferenceDot` below is stroked with) — the tile and the mark on the
             plot are one fact, and a tile whose bar matches nothing on the chart is a tile the eye
@@ -888,32 +888,28 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <Stat label={targetYear == null ? t.priceTarget : t.priceTargetFy(String(targetYear))}
           value={`${ccy}${fmtPrice(target.forecastPrice)}`} color={chartTheme.accentStrong}
           info={<InfoTip content={<AspectCard
-            what={`Where the share price lands if ${b.perShare} reaches the forecast and the market pays the forecast ${b.yieldInline} for it.`}
-            where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline} — both editable in the Price target panel.`}
+            what={`Target share price from forecast ${b.perShare} and ${b.yieldInline}.`}
+            where={`${b.perShare} divided by ${b.yieldInline}.`}
             // ⚠ THIS TILE ALREADY CARRIED ITS NUMBERS, INLINE IN `where`, WHERE THEY READ AS PROSE.
             // Moving them into the block gives them the same monospaced, selectable shape every
             // other worked formula now has — and puts them directly under the symbols they fill in
             // rather than trailing an em dash at the end of a sentence.
             worked={workedRatio(target.forecastPs, target.forecastYield,
-              target.forecastPrice == null ? '' : `${ccy}${fmtPrice(target.forecastPrice)}`,
+              target.forecastPrice == null ? '' : fmtPrice(target.forecastPrice),
               '', '%')}
             when={targetYear == null ? 'At the end of the forecast window.' : `FY${targetYear}, ${PROJECT_YEARS} years past the last reported year.`}
-            how="⚠ AN ASSUMPTION, NOT A FORECAST ANYBODY PUBLISHED. Change the growth rate or the demanded yield in the panel and this moves with the dot on the chart — that is what it is for." />} />} />
+            how="This is based on your forecast inputs." />} />} />
         <Stat label={targetYear == null ? t.estCagr : t.estCagrTo(String(targetYear))}
           value={pct(target.cagr == null ? null : target.cagr * 100)}
           tone={target.cagr == null ? undefined
             : target.cagr >= 0 ? 'text-pos-500' : 'text-neg-500'}
           info={<InfoTip content={<AspectCard
-            what="The annual return the target implies, from today's price."
-            where="Price target ÷ current share price, annualised."
-            when={`Over ${horizonYears.toFixed(1)} years — ⚠ NOT ${PROJECT_YEARS}. The forecast sits ${PROJECT_YEARS} years past the last REPORTED year; from a live price that is up to a year nearer, and holding the divisor at the full horizon would understate the return by exactly the reporting lag.`}
-            worked={target.forecastPrice != null && target.currentPrice != null
-              && target.currentPrice > 0 && target.cagr != null
-              ? `(${target.forecastPrice.toFixed(2)} ÷ ${target.currentPrice.toFixed(2)})`
-                + ` ^ (1 ÷ ${horizonYears.toFixed(1)}) − 1`
-                + ` = ${pct(target.cagr * 100)}`
-              : ''}
-            how={`⚠ THE PRICE RETURN, WHICH IS NOT THE ${b.perShare} GROWTH RATE. It carries the rerating too: the gap between today’s ${b.yieldInline} and the forecast one. Excludes dividends.`} />} />} />
+            what="Annualised return from the current price to the target price."
+            where="(target price / current price)^(1 / years) - 1."
+            when={`${horizonYears.toFixed(1)} years to FY${targetYear ?? 'target'}.`}
+            worked={workedPriceCagr(target.forecastPrice, target.currentPrice,
+              horizonYears, target.cagr)}
+            how="Price return only. Dividends are excluded." />} />} />
       </div>
 
       {/* ⚠ INDEXED, NOT DUAL-AXIS. €700 of price and €20 of earnings share no axis, and two
@@ -1080,8 +1076,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       <div className="flex flex-wrap gap-2">
         <Stat label={t.avg} value={yld(avgYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
-            what={`The average ${b.yieldInline} over the years shown — the dashed line.`}
-            where="Computed here from the same two lines the chart above plots, not from GuruFocus's own ratio (whose denominator convention we don't control)."
+            what={`Average ${b.yieldInline}.`}
+            where="Calculated from the charted fiscal years."
             // ⚠ THE SPAN IS NAMED, NOT COUNTED AGAINST A CONSTANT. This read "n of the last 10
             // fiscal years" off the history cap; with the cap gone there is no fixed denominator
             // to be `of`, and quoting one that no longer exists is worse than quoting none.
@@ -1093,18 +1089,18 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             // so the addends listed here provably sum to the figure on the tile. It is also the
             // dashed line on the chart below, which is the third place this one number appears.
             worked={workedMean(yieldValues)}
-            how="A simple mean of the yearly yields. A yield doesn't compound, so there is no growth rate to quote." />} />} />
+            how="Simple average of yearly yields." />} />} />
         <Stat label={t.latest} value={yld(latestYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
-            what={`The most recent fiscal year's ${b.yieldInline}.`}
-            where={`That year's ${b.perShare} ÷ that year's closing price.`}
-            when="The last fiscal year with a price — up to a year ago, not today."
+            what={`Latest fiscal-year ${b.yieldInline}.`}
+            where={`${b.perShare} divided by that year's closing price.`}
+            when="Latest fiscal year with both values."
             // ⚠ BOTH OPERANDS OFF THE SAME POINT — see `latestYieldPoint`. The FY label is in the
             // expression because that year is not necessarily the newest one on either line.
             worked={workedRatio(latestYieldPoint?.value, latestYieldPoint?.price,
               latestYield == null ? '' : `${yld(latestYield)}   (FY${latestYieldPoint?.year})`,
               '', ` ${ccy}`)}
-            how="Above the average = the shares are cheaper on this measure than they usually have been, on the year-end price." />} />} />
+            how="A higher yield means a lower price relative to this measure." />} />} />
       </div>
 
       {/* ⚠ A YIELD, NOT A MULTIPLE — SO NEGATIVES STAY. A cash-burn or loss year is −5% here, which

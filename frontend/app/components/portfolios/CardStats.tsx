@@ -70,9 +70,9 @@ export function Stat({ label, value, tone, color, info }: {
   label: string; value: string; tone?: string; color?: string; info?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-800/40 bg-inset px-1.5 py-1 h-[3.9rem]
+    <div className="rounded-xl border border-neutral-800/50 bg-card/70 px-2 py-1.5 h-[4.35rem]
                     flex-1 basis-0 min-w-0 max-w-[8rem]
-                    flex flex-col justify-between overflow-hidden"
+                    flex flex-col justify-between overflow-hidden shadow-sm"
       style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
       {/* ⚠ THE HEIGHT IS ON THE ROW, NOT LEFT TO THE TEXT — two lines’ worth at the label size and
           `leading-tight`, reserved whether the label uses them or not. `items-start` keeps the ⓘ
@@ -83,12 +83,12 @@ export function Stat({ label, value, tone, color, info }: {
           raising both heights silently crops the SECOND line of every two-line label — and this
           component reserves that line precisely because four of the Quick Valuation card's five
           labels need it. */}
-      <div className="flex items-start gap-1 h-[1.8rem] text-[0.7rem] uppercase tracking-wide text-fg-muted leading-tight">
+      <div className="flex items-start gap-1 h-[2rem] text-[11px] font-medium tracking-normal text-fg-muted leading-snug">
         <span className="line-clamp-2" title={label}>{label}</span>
         <span className="shrink-0 flex items-center leading-none">{info}</span>
       </div>
       <div title={value}
-        className={`font-mono text-lg font-semibold leading-tight truncate ${color ? '' : (tone ?? 'text-fg-strong')}`}
+        className={`font-mono text-[1.05rem] font-semibold leading-tight truncate ${color ? '' : (tone ?? 'text-fg-strong')}`}
         style={color ? { color } : undefined}>{value}</div>
     </div>
   );

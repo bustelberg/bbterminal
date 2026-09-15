@@ -1,7 +1,7 @@
 'use client';
 
 import { AspectCard } from '../../../lib/tipCard';
-import { workedRatio } from './workedFormula';
+import { workedPriceCagr, workedRatio } from './workedFormula';
 import InfoTip from '../InfoTip';
 import { type BASIS, type Basis, type PriceTarget } from './quickValuation';
 import { useQuickValuationCopy } from './quickValuationCopy';
@@ -319,17 +319,15 @@ export default function PriceTargetCalculator({
 
       <Row label={t.pt.current(bl.perShare)}
         info={<InfoTip content={<AspectCard
-          what={`The latest reported figure — ${b.what}.`}
-          where={current.psStr != null ? 'Yours, typed here.'
+          what={`Latest reported ${b.perShare}.`}
+          where={current.psStr != null ? 'Entered here.'
             : current.yieldStr != null
-              ? `Derived from the yield you typed, at the current price — ${b.source}`
-              : `${b.source} The same series the chart to the left plots.`}
+              ? 'Calculated from the current price and yield.'
+              : b.source}
           when={current.psStr != null || current.yieldStr != null
-            ? 'Whatever moment you typed it.'
-            : 'The most recent fiscal year, so up to a year old.'}
-          how={`⚠ EDITABLE, AND EVERYTHING BELOW MOVES WITH IT — the yield, the target and the `
-            + `Est. CAGR. Typing the yield instead makes THAT the assumption and this box goes `
-            + `back to reporting the figure it implies. ${b.caveat}`} />} />}>
+            ? 'Entered by you.'
+            : 'Latest fiscal year.'}
+          how={`You can edit this value. The yield and target update with it. ${b.caveat}`} />} />}>
         <Input value={show(current.psStr, target.currentPs, 2)} onChange={current.onPs} step={0.5}
           onRevert={current.psStr == null && current.yieldStr == null ? undefined : current.onResetPs}
           revertTitle={current.defaultPs == null
@@ -344,17 +342,10 @@ export default function PriceTargetCalculator({
           the other live — see `cagrStr` in `QuickValuationTab`. */}
       <Row label={t.pt.forecastCagr(bl.perShare)}
         info={<InfoTip content={<AspectCard
-          what={`The annual rate you expect ${b.perShare} to compound at.`}
-          where={`Defaults to the fitted trend's OWN slope — the dotted projection on the chart is `
-            + 'a straight line on a log axis, which IS a constant growth rate, so the default '
-            + 'rate and the default forecast below are the same assumption stated two ways.'}
-          when={`Compounded over ${years} years from the trend's value at the last reported year.`}
-          how={'⚠ TYPE YOUR OWN AND EVERYTHING BELOW MOVES — the forecast figure, the forecast '
-            + 'price and the target on the chart. Editing the figure below instead makes THAT the '
-            + 'assumption and this box goes back to reporting the rate it implies. ⚠ It compounds '
-            + `the FUNDAMENTAL over the fiscal horizon (${years} years past the last reported `
-            + 'year); the CAGR at the foot of this panel is a different number — the PRICE return, '
-            + "annualised from today's close."} />} />}>
+          what={`Expected annual growth of ${b.perShare}.`}
+          where="Based on the dotted trend line."
+          when={`${years} years from the last reported year.`}
+          how="You can edit this rate or the forecast below." />} />}>
         <Input value={cagrStr ?? (shownCagrPct == null ? '' : shownCagrPct.toFixed(1))}
           onChange={onCagr} suffix="%" step={1}
           disabled={cagrDisabled}
@@ -370,10 +361,10 @@ export default function PriceTargetCalculator({
       </Row>
       <Row label={t.pt.forecast(bl.perShare)}
         info={<InfoTip content={<AspectCard
-          what={`What the fitted trend says ${b.perShare} will be.`}
-          where="The dotted projection on the chart to the left, converted from the index back into currency."
-          when={`${years} years past the last reported one.`}
-          how="⚠ An extrapolation, not a forecast anyone made — it continues the exponential through the last decade. Type your own over it, and ↺ puts this one back." />} />}>
+          what={`Projected ${b.perShare}.`}
+          where="The dotted trend line."
+          when={`${years} years after the last reported year.`}
+          how="This is a trend estimate. You can replace it." />} />}>
         {/* ⚠⚠ "RESET TO THE OFFICIAL FORECAST" IS NOT AVAILABLE HERE AND THE BUTTON MUST NOT IMPLY
             IT IS. There is no analyst FCF forecast to return to — `BASIS.fcf.estimateCodes` is
             `null` because no analyst publishes one, which is a fact about the vendor rather than a
@@ -392,17 +383,14 @@ export default function PriceTargetCalculator({
       </Row>
       <Row label={t.pt.currentYield(bl.yieldInline)}
         info={<InfoTip content={<AspectCard
-          what={price.live
-            ? "What the shares yield on this measure at today's price."
-            : 'What the shares yielded on this measure at the last fiscal year-end price.'}
-          where={`Current ${b.perShare} ÷ current share price — the two rows above and below.`}
+          what={`Current ${b.yieldInline}.`}
+          where={`${b.perShare} divided by the current share price.`}
           when={price.live
-            ? `Last filed year's figure over the close of ${fmtDate(price.date)}. ⚠ Two dates, deliberately: that is what a current yield is.`
-            : 'The latest fiscal year — both sides.'}
+            ? `Latest reported figure and the close of ${fmtDate(price.date)}.`
+            : 'Latest fiscal year.'}
           worked={workedRatio(target.currentPs, target.currentPrice,
             target.currentYield == null ? '' : `${n1(target.currentYield)}%`, '', ` ${ccy}`)}
-          how={`The starting point the forecast yield is judged against: the gap between the two IS the rerating this calculator assumes. ⚠ EDITABLE: type one and the ${b.perShare} above re-derives at the current price — the price does NOT move, because it is the market's and every return here is measured from it.${
-            price.live ? ' ⚠ It will not match the “Latest” yield on the chart to the left, which is fiscal on both sides.' : ''}`} />} />}>
+          how="You can edit this value." />} />}>
         <Input value={current.yieldStr ?? (current.shownYieldPct == null ? '' : n1(current.shownYieldPct))}
           onChange={current.onYield} suffix="%" step={0.1}
           onRevert={current.yieldStr == null ? undefined : current.onResetYield}
@@ -411,10 +399,10 @@ export default function PriceTargetCalculator({
       </Row>
       <Row label={t.pt.forecastYield(bl.yieldInline)}
         info={<InfoTip content={<AspectCard
-          what="The yield you expect the market to price the shares at."
-          where={`Defaults to this company's OWN average ${b.yieldInline} over the charted decade — the dashed line on the yield chart.`}
+          what={`Expected ${b.yieldInline}.`}
+          where="Defaults to the average shown by the dashed line."
           when="At the end of the forecast window."
-          how={`⚠ THE ASSUMPTION THAT DRIVES EVERYTHING BELOW. The forecast price is simply the forecast ${b.perShare} divided by this, so a percentage point here moves the target more than any other input.`} />} />}>
+          how="This value sets the target price." />} />}>
         <Input value={show(yieldStr, defaultForecastYield, 1)} onChange={onYield} suffix="%" />
       </Row>
       {/* ⚠ THE ONE ROW THAT IS NOT FISCAL. Everything above it comes from the last filed year;
@@ -423,25 +411,25 @@ export default function PriceTargetCalculator({
           as a fiscal close, or the reverse, is worse than either being wrong. */}
       <Row label={t.pt.currentSharePrice}
         info={<InfoTip content={priceTyped ? <AspectCard
-          what="The price the return is measured from."
-          where="Yours, typed here."
-          when="Whatever moment you typed it."
-          how="⚠ THE FREE ONE OF THE THREE CURRENT ROWS. The yield above re-derives against it and the Est. CAGR below is measured from it; ↺ puts the measured close back." />
+          what="Current share price."
+          where="Entered here."
+          when="Entered by you."
+          how="Used for the yield and estimated CAGR." />
           : price.pending ? <AspectCard
-          what="The price the return is measured from."
-          where="Fetching today's yfinance close…"
-          when="Until it lands, this is the fiscal year-end close."
-          how="If the ISIN has no priced Yahoo listing it will stay that way, and the row will say so." />
+          what="Current share price."
+          where="Fetching the yfinance close."
+          when="Shows the fiscal year-end price until a current close is available."
+          how="A current close may not be available for every ISIN." />
           : price.live ? <AspectCard
-          what="The price the return is measured from — today's."
-          where={`yfinance (\`asset_price\`)${price.symbol ? ` — ${price.symbol}` : ''}, the same price series /portfolios values every model with, converted into ${currency ?? 'the reporting currency'} so it divides into the per-share figure above.`}
-          when={`Its close of ${fmtDate(price.date)}${price.staleDays != null && price.staleDays > STALE_WARN_DAYS ? ` — ⚠ ${price.staleDays} days ago. A listing that has not traded in that long, or one we have stopped fetching.` : '.'}`}
-          how={`⚠ THE ONLY LIVE NUMBER HERE. The ${b.perShare} above it is the last FILED year, so the yield is this year's price against last year's figure — which is what a current yield is, and why the two rows carry different dates.`} />
+          what="Current share price."
+          where={`yfinance asset_price${price.symbol ? ` (${price.symbol})` : ''}.`}
+          when={`Close of ${fmtDate(price.date)}${price.staleDays != null && price.staleDays > STALE_WARN_DAYS ? `, ${price.staleDays} days old.` : '.'}`}
+          how={`Used with the latest reported ${b.perShare} to calculate the current yield.`} />
           : <AspectCard
-            what="The price the return is measured from."
-            where="GuruFocus `Month End Stock Price` — the close at the last fiscal year end."
-            when="⚠ NOT TODAY'S QUOTE. It can be up to a year old, and the CAGR below is measured from it."
-            how="⚠ THE FALLBACK. This ISIN has no priced Yahoo listing (or none we could convert into the reporting currency), so the live close could not be used and the fiscal one stands in." />} />}>
+            what="Latest available share price."
+            where="GuruFocus Month End Stock Price."
+            when="Fiscal year end."
+            how="Used because no current market close is available." />} />}>
         {/* Provenance in the row, not only in the tooltip: a stale price that reads as live is the
             failure this row exists to fix, and nobody opens a tooltip to check a number that
             looks fine.
@@ -469,15 +457,15 @@ export default function PriceTargetCalculator({
       </Row>
       <Row label={t.pt.forecastSharePrice}
         info={<InfoTip content={<AspectCard
-          what={`What the shares are worth if the forecast ${b.perShare} is priced at the forecast ${b.yieldInline}.`}
-          where={`Forecast ${b.perShare} ÷ forecast ${b.yieldInline}.`}
+          what={`Target share price from forecast ${b.perShare} and ${b.yieldInline}.`}
+          where={`${b.perShare} divided by ${b.yieldInline}.`}
           when={`${years} years out.`}
           // ⚠⚠ THE SAME NUMBER IS WORKED ON THE `Price target FY20xx` TILE IN `QuickValuationTab`
           // AND WAS SYMBOLS HERE — one figure explained two ways, one click apart, which reads as
           // two different computations rather than one shown twice.
           worked={workedRatio(target.forecastPs, target.forecastYield,
-            target.forecastPrice == null ? '' : `${ccy}${n2(target.forecastPrice)}`, '', '%')}
-          how="Blank when either input is non-positive: a zero yield divides to infinity, and a forecast that loses money has no price at a positive one." />} />}>
+            target.forecastPrice == null ? '' : n2(target.forecastPrice), '', '%')}
+          how="Not available when either input is zero or negative." />} />}>
         {/* ⚠ THE ONE OUTPUT ON THE CARD, AND THE ONLY ROW WITHOUT A BOX — on request. `Value`
             keeps its digits in the same column as the six editable ones anyway; being read-only is
             said by the absence of a border, not by standing 7px out of line. */}
@@ -491,26 +479,16 @@ export default function PriceTargetCalculator({
               beside it actually plots the target at. */}
           {targetYear != null ? t.pt.estCagrTo(String(targetYear)) : t.pt.estCagr}
           <InfoTip content={<AspectCard
-            what={price.live
-              ? "The annualised return from today's price to the forecast one."
-              : 'The annualised return from the last fiscal year-end price to the forecast one.'}
-            where="(forecast price ÷ current price) ^ (1/years) − 1."
-            when={`${horizonYears.toFixed(1)} years — from the ${price.live ? 'close' : 'fiscal close'} of ${fmtDate(price.date)} to ${
-              targetYear != null ? `the FY${targetYear} year end` : 'the forecast year'}. ${
-              price.live
-                ? '⚠ Less than the ' + years + '-year projection above it: the forecast sits ' + years + ' years past the last REPORTED year, and today is already part of the way there.'
-                : `The full ${years}-year projection, because the price is the fiscal one.`}`}
+            what="Annualised return from the current price to the target price."
+            where="(target price / current price)^(1 / years) - 1."
+            when={`From ${fmtDate(price.date)} to ${targetYear != null ? `FY${targetYear}` : 'the forecast year'} (${horizonYears.toFixed(1)} years).`}
             /* ⚠ ALL FOUR OPERANDS ARE IN SCOPE HERE and always were; the card simply never
                used them. `horizonYears` is the one that matters most — it is a fraction off a
                live price, and the whole reason the tile is named by its endpoint rather than its
                length, so seeing it in the exponent is what makes the number self-explaining. */
-            worked={target.forecastPrice != null && target.currentPrice != null
-              && target.currentPrice > 0 && target.cagr != null
-              ? `(${n2(target.forecastPrice)} ÷ ${n2(target.currentPrice)})`
-                + ` ^ (1 ÷ ${horizonYears.toFixed(1)}) − 1`
-                + ` = ${target.cagr >= 0 ? '+' : ''}${(target.cagr * 100).toFixed(1)}%`
-              : ''}
-            how="⚠ Price only — no dividends, and no return on the cash the business throws off in the meantime. It answers what the multiple and the cash flow do to the share price, not what you would earn holding it." />} />
+            worked={workedPriceCagr(target.forecastPrice, target.currentPrice,
+              horizonYears, target.cagr)}
+            how="Price return only. Dividends are excluded." />} />
         </span>
         <Leader />
         {/* The one figure here that is a conclusion rather than an input, so it carries the sign's

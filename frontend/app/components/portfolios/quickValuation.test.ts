@@ -46,10 +46,10 @@ describe('priceVsMetric', () => {
     const rows = Array.from({ length: 12 }, (_, i) => 2014 + i)
       .flatMap((y) => [m(PRICE, y, y), m(FCF, y, 1)]);
     expect(priceVsMetric(rows).map((p) => p.year))
-      .toEqual([2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]);
+      .toEqual([2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025]);
   });
 
-  it('honours the 2015 house floor even when BOTH series reach the 1990s', () => {
+  it('honours the 2017 house floor even when BOTH series reach the 1990s', () => {
     /**
      * ⚠⚠ THE NVIDIA CASE, AND THE ONE A "start where the fundamentals start" RULE ALONE MISSES.
      * NVIDIA reports per-share figures nearly as far back as its price, so clipping to the first
@@ -60,9 +60,9 @@ describe('priceVsMetric', () => {
     const rows = Array.from({ length: 27 }, (_, i) => 1999 + i)
       .flatMap((y) => [m(PRICE, y, 100 + y), m(FCF, y, 5)]);
     const out = priceVsMetric(rows);
-    expect(out[0].year).toBe(2015);
+    expect(out[0].year).toBe(2017);
     expect(out[out.length - 1].year).toBe(2025);
-    expect(rebase(out).anchor).toBe(2015);
+    expect(rebase(out).anchor).toBe(2017);
   });
 
   it('starts LATER than the floor when the per-share series does', () => {
@@ -81,9 +81,9 @@ describe('priceVsMetric', () => {
   it('keeps a LEADING run with no price — that gap is information, unlike a leading price run', () => {
     // ⚠ THE CLIP IS ASYMMETRIC. A missing price over years we do have figures for is a real gap
     // (an unlisted stretch, a listing we cannot price); a price with no figures is just a lone line.
-    const out = priceVsMetric([m(FCF, 2015, 5), m(FCF, 2016, 6), m(PRICE, 2016, 100)]);
-    expect(out.map((p) => p.year)).toEqual([2015, 2016]);
-    expect(out[0]).toEqual({ year: 2015, price: null, value: 5 });
+    const out = priceVsMetric([m(FCF, 2017, 5), m(FCF, 2018, 6), m(PRICE, 2018, 100)]);
+    expect(out.map((p) => p.year)).toEqual([2017, 2018]);
+    expect(out[0]).toEqual({ year: 2017, price: null, value: 5 });
   });
 
   it('draws nothing at all when the per-share series is empty', () => {
@@ -103,12 +103,12 @@ describe('priceVsMetric', () => {
     const paired = Array.from({ length: 11 }, (_, i) => 2015 + i)
       .flatMap((y) => [m(PRICE, y, 100 + y), m(FCF, y, 5)]);
     const out = priceVsMetric([...paired, m(PRICE, 2026, 999)]);
-    expect(out[0].year).toBe(2015);
+    expect(out[0].year).toBe(2017);
     expect(out[0].value).toBe(5);
     expect(out[out.length - 1]).toEqual({ year: 2026, price: 999, value: null });
     // And the index therefore bases on 2015, not on whatever survived the slice — `rebase`
     // anchors inside what it is GIVEN, so a dropped year re-bases both lines.
-    expect(rebase(out).anchor).toBe(2015);
+    expect(rebase(out).anchor).toBe(2017);
   });
 
   it('keeps the later observation when a year-end change reports twice', () => {

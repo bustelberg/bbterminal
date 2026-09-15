@@ -161,10 +161,10 @@ const EN: QuickValuationCopy = {
     forecastSharePrice: 'Forecast share price',
     estCagr: 'Est. CAGR',
     estCagrTo: (year) => `Est. CAGR to FY${year}`,
-    fiscalBadge: '⚠ fiscal',
-    fiscalBadgeTitle: 'No live close available — this is the fiscal year-end price.',
-    staleBadge: (days) => `⚠ ${days}d old`,
-    staleBadgeTitle: (date, days) => `Last close ${date} — ${days} days ago.`,
+    fiscalBadge: 'fiscal',
+    fiscalBadgeTitle: 'No current close available. This is the fiscal year-end price.',
+    staleBadge: (days) => `${days}d old`,
+    staleBadgeTitle: (date, days) => `Last close ${date}. ${days} days old.`,
   },
 };
 
@@ -247,11 +247,11 @@ const NL: QuickValuationCopy = {
     forecastSharePrice: 'Verwachte koers',
     estCagr: 'Verwachte CAGR',
     estCagrTo: (year) => `Verwachte CAGR t/m FY${year}`,
-    fiscalBadge: '⚠ fiscaal',
-    fiscalBadgeTitle: 'Geen actuele slotkoers beschikbaar — dit is de koers op het einde van het '
+    fiscalBadge: 'fiscaal',
+    fiscalBadgeTitle: 'Geen actuele slotkoers beschikbaar. Dit is de koers op het einde van het '
       + 'boekjaar.',
-    staleBadge: (days) => `⚠ ${days}d oud`,
-    staleBadgeTitle: (date, days) => `Laatste slotkoers ${date} — ${days} dagen geleden.`,
+    staleBadge: (days) => `${days}d oud`,
+    staleBadgeTitle: (date, days) => `Laatste slotkoers ${date}. ${days} dagen geleden.`,
   },
 };
 
