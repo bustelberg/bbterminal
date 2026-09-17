@@ -11160,10 +11160,9 @@ export interface components {
          *     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
          *     is the contribution one.
          *
-         *     ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
-         *     shows a larger percentage on the same euros than one held all year, because it answers "how
-         *     hard did this money work" rather than "what did the instrument do". The Holdings table's own
-         *     Return column is the other question and the two will differ.
+         *     `return_pct` IS CUMULATIVE RESULT OVER CAPITAL COMMITTED, not the instrument's price return.
+         *     It includes the position's actual purchases, realised sales and net income without annualising
+         *     a late purchase. The Holdings table's own Return column is the other question and may differ.
          */
         LedgerPosition: {
             /** Avg Capital Eur */
@@ -12757,6 +12756,11 @@ export interface components {
             comparable?: boolean | null;
             /** Dates Aligned */
             dates_aligned?: boolean | null;
+            /**
+             * Has External Flows
+             * @default false
+             */
+            has_external_flows?: boolean;
             /** Held Eur */
             held_eur?: number | null;
             /** Held Pct */

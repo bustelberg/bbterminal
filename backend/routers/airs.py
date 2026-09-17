@@ -1106,9 +1106,9 @@ class BookHoldingDetail(BaseModel):
     # ── WHAT THE MONEY MADE, as against what the instrument did.
     # ⚠ `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
     # priced in January — which erases your timing ON PURPOSE so the figure describes the stock.
-    # This one divides by the capital actually tied up, weighted by when it went in (Modified
-    # Dietz), with dividends net of withholding and anything realised on a mid-year sale already
-    # in the numerator. Measured: KLA-Tencor +55.62% as an instrument, +30.94% on the money.
+    # This one is the cumulative cash-flow return: Result divided by capital actually committed
+    # (opening value plus purchases). It has no capital-days weighting and is never annualised;
+    # dividends net of withholding and anything realised on a mid-year sale remain in the numerator.
     #
     # ⚠ NULL FOR A LEG INSIDE A CERTIFICATE, and that is not a gap to fill. AIRS trades the
     # WRAPPER, so a stock reached through one has no buys or sells of its own — there is no "money
@@ -1283,10 +1283,9 @@ class LedgerPosition(BaseModel):
     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
     is the contribution one.
 
-    ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
-    shows a larger percentage on the same euros than one held all year, because it answers "how
-    hard did this money work" rather than "what did the instrument do". The Holdings table's own
-    Return column is the other question and the two will differ.
+    `return_pct` IS CUMULATIVE RESULT OVER CAPITAL COMMITTED, not the instrument's price return.
+    It includes the position's actual purchases, realised sales and net income without annualising
+    a late purchase. The Holdings table's own Return column is the other question and may differ.
     """
 
     name: str
@@ -1393,6 +1392,9 @@ class RealisedBlock(BaseModel):
     realised_eur: float | None = None
     sold_income_eur: float | None = None
     book_ytd_pct: float | None = None
+    # True when deposits or withdrawals make opening-capital contributions invalid. In that case
+    # the rows are allocated over AIRS's reconciled flow-aware return instead.
+    has_external_flows: bool = False
     residual_eur: float | None = None
     reconciles: bool | None = None
     holdings_as_of: str | None = None

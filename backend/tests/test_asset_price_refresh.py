@@ -163,11 +163,14 @@ class TestTheStartupCatchUp:
         import scheduler
 
         src = inspect.getsource(scheduler._run_asset_price_refresh)
-        find_at = src.index("find_stale(held_only=True)")
-        fetch_at = src.index("refresh_stale(held_only=True)")
+        find_at = src.index("find_stale(isins=watched)")
+        fetch_at = src.index("refresh_stale(isins=watched)")
         assert find_at < fetch_at
         assert "if not stale:" in src
-        assert "return" in src.split("if not stale:", 1)[1][:400]
+        # Missing series are also backfilled in this branch, but a no-op must
+        # still stop before the ordinary stale-series fetch.
+        branch = src.split("if not stale:", 1)[1].split("_log.warning(", 1)[0]
+        assert "return" in branch
 
     def test_the_startup_path_ALSO_yields_to_the_resolver(self):
         """The queue guard lives in the shared body, so it cannot be bypassed by the startup
@@ -318,7 +321,7 @@ class TestTheBootRace:
         src = inspect.getsource(scheduler._run_asset_price_refresh)
         gate = src.index("_await_db_ready(")
         assert gate < src.index("_q.is_worker_active()")
-        assert gate < src.index("find_stale(held_only=True)")
+        assert gate < src.index("find_stale(isins=watched)")
         # ...and a database that never answers ends the job, rather than falling through into
         # queries that are all guaranteed to fail.
         assert "return" in src.split("_await_db_ready(", 1)[1][:200]
@@ -330,7 +333,7 @@ class TestTheBootRace:
         import scheduler
 
         src = inspect.getsource(scheduler._run_asset_price_refresh)
-        assert src.count("refresh_stale(held_only=True)") == 1
+        assert src.count("refresh_stale(isins=watched)") == 1
         assert "for attempt" not in src
 
 

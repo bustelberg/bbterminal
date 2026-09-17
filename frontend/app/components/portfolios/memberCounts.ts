@@ -86,6 +86,19 @@ const withheld = (c?: MemberCount): c is MemberCount =>
 export type MemberCountLine = { text: string; rule: string };
 
 /**
+ * A Graphs card has one coverage owner. When the tab supplies its shared baseline, the older
+ * metric-specific line must stay hidden even when its count differs; otherwise one heading can
+ * claim two different ACWI populations at once. Outside that provider the metric line remains the
+ * fallback, so callers that do not have a shared baseline still disclose withheld members.
+ */
+export function showMetricCountLine(
+  metricLine: MemberCountLine | null,
+  sharedCoverageText?: string | null,
+): boolean {
+  return !!metricLine && !sharedCoverageText;
+}
+
+/**
  * ⚠⚠ THE LOCALE IS NOT DECORATION HERE. `toLocaleString('en-US')` prints 1,761; Dutch prints
  * 1.761, and a thousands separator that reads as a decimal point in the reader's own language is
  * a wrong number rather than an odd-looking one — on a card whose whole job is to disclose a

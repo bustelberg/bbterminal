@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  countFor, coverageCount, memberCountHow, memberCountLine, type MemberCount,
+  countFor, coverageCount, memberCountHow, memberCountLine, showMetricCountLine, type MemberCount,
 } from './memberCounts';
 
 const CODES = ['annuals__Per Share Data__EPS without NRI',
@@ -86,6 +86,21 @@ describe('coverageCount', () => {
     expect(coverageCount({ holdings: 553, member_count_total: 2270,
       rows: [{ reason: 'covered' }, { reason: 'covered' }, { reason: 'no_metrics' }] }))
       .toEqual({ considered: 2, total: 2270, rule: 'coverage' });
+  });
+});
+
+describe('showMetricCountLine', () => {
+  const metric = { text: 'FamilieTopSelectie: 13 of 28 companies · ACWI: 553 of 2,270',
+    rule: 'positive_only' };
+
+  it('keeps exactly one coverage statement when Graphs supplies its shared baseline', () => {
+    expect(showMetricCountLine(metric,
+      'FamilieTopSelectie: 13 of 28 companies · ACWI: 551 of 2,270')).toBe(false);
+  });
+
+  it('retains the metric-specific fallback outside the shared Graphs context', () => {
+    expect(showMetricCountLine(metric, null)).toBe(true);
+    expect(showMetricCountLine(null, null)).toBe(false);
   });
 });
 

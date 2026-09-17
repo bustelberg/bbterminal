@@ -71,6 +71,8 @@ class Position:
     # appear, and the raw value is kept so it is inspectable.
     avg_capital_eur: float = 0.0
     weight_pct: float | None = None
+    # Dated investor cash flows, used only for the position's true XIRR.
+    cashflows: list[tuple[date, float]] = field(default_factory=list)
 
     # ── What it produced, split by where the figure comes from.
     # Still-held P&L: AIRS's own current − restated Beginwaarde. Restatement is what makes this
@@ -111,6 +113,15 @@ class Position:
     @property
     def result_eur(self) -> float:
         return round(self.held_result_eur + self.realised_result_eur + self.income_eur, 2)
+
+    @property
+    def capital_invested_eur(self) -> float:
+        """Capital actually committed to this position during the reporting year.
+
+        This has no time weighting: it is the opening capital plus purchases during the year.
+        Average capital remains separate and is used only for descriptive allocation weights.
+        """
+        return round(self.opening_eur + self.bought_eur, 2)
 
     @property
     def unsplit_result_eur(self) -> float | None:
@@ -217,7 +228,8 @@ def _flow_weight(datum: str | None, start: date, end: date, days: int) -> float:
 def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, float],
                  beginvermogen: float | None, period_start: date, period_end: date,
                  unknown_names: set[str] | None = None,
-                 splits: dict[str, float] | None = None) -> Ledger:
+                 splits: dict[str, float] | None = None,
+                 income_flows_by_name: dict[str, list[tuple[date, float]]] | None = None) -> Ledger:
     """Every position the book touched, with its average capital and its contribution.
 
     `volk_rows` are `airs_holding` rows (holding_name, quantity, start_value_eur,
@@ -253,6 +265,12 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     def pos(name: str) -> Position:
         return by_name.setdefault(name, Position(name=name))
 
+    def flow_day(raw: str | None) -> date:
+        try:
+            return date.fromisoformat(raw) if raw else period_start
+        except ValueError:
+            return period_start
+
     # ── Pass 1: the trades, so quantities are known before the holdings are de-restated.
     for t in trades:
         p = pos(t.fonds)
@@ -263,6 +281,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
             bought_qty[t.fonds] = bought_qty.get(t.fonds, 0.0) + t.quantity
             p.bought_eur = round(p.bought_eur + t.eur, 2)
             p.avg_capital_eur += t.eur * w
+            p.cashflows.append((flow_day(t.datum), -t.eur))
         else:
             sold_qty[t.fonds] = sold_qty.get(t.fonds, 0.0) + t.quantity
             p.sold_eur = round(p.sold_eur + t.eur, 2)
@@ -274,6 +293,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
             # profitable full sale appear to have negative capital, so its money-weighted return
             # was hidden. `proceeds - Res. YtD` is AIRS's value at the start of this year.
             p.avg_capital_eur -= (t.eur - t.realised_ytd_eur) * w
+            p.cashflows.append((flow_day(t.datum), t.eur))
             if t.datum:
                 p.first_sale = t.datum if p.first_sale is None else min(p.first_sale, t.datum)
                 p.last_sale = t.datum if p.last_sale is None else max(p.last_sale, t.datum)
@@ -338,6 +358,27 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     for name, eur in (income_by_name or {}).items():
         pos(name).income_eur = round(eur, 2)
 
+    # Exact dated dividend/tax cash flows are available in the MUT journal. The aggregate fallback
+    # keeps the pure ledger usable by older callers, but can only place that income at period end.
+    for name, eur in (income_by_name or {}).items():
+        flows = (income_flows_by_name or {}).get(name)
+        if flows:
+            pos(name).cashflows.extend(flows)
+        elif eur:
+            pos(name).cashflows.append((period_end, eur))
+
+    # The valuation closes each position's XIRR. Opening value is an investor outflow on the first
+    # day; current value is an inflow on the report date. A sold-out position already closes through
+    # its sale proceeds and therefore has no terminal valuation.
+    for p in by_name.values():
+        if p.opening_eur:
+            p.cashflows.append((period_start, -p.opening_eur))
+        if p.held:
+            row = next((r for r in volk_rows if r.get("holding_name") == p.name), None) or {}
+            current = _f(row.get("current_value_eur"))
+            if current is not None:
+                p.cashflows.append((period_end, current))
+
     led.positions = sorted(by_name.values(), key=lambda p: -abs(p.result_eur))
     led.total_result_eur = round(sum(p.result_eur for p in led.positions), 2)
     for p in led.positions:
@@ -370,16 +411,42 @@ def contribution_pct(p: Position, basis_eur: float | None) -> float | None:
 
 
 def money_weighted_return_pct(p: Position) -> float | None:
-    """The position's own return on the capital it actually occupied.
+    """True dated XIRR, expressed over this position's actual lifetime in the report window.
 
-    ⚠ NOT COMPARABLE TO THE HOLDINGS TABLE'S `Return`, which is the instrument's price+income
-    return over the window. This one divides by AVERAGE capital, so a name bought late in the year
-    shows a larger percentage on the same euros — it answers "how hard did this money work", not
-    "what did the instrument do". None on a position with no capital to divide by.
+    XIRR itself is conventionally annual; the solved annual rate is de-annualised over the period
+    from first capital to final valuation. That makes a 10-day 11% gain report as 11%, not 4,500%.
     """
-    if p.capital_unknown or p.avg_capital_eur <= 0:
+    if p.capital_unknown or len(p.cashflows) < 2:
         return None
-    return p.result_eur / p.avg_capital_eur * 100
+    flows = sorted((d, amount) for d, amount in p.cashflows if amount)
+    if not flows or not any(v < 0 for _, v in flows) or not any(v > 0 for _, v in flows):
+        return None
+    start, end = flows[0][0], flows[-1][0]
+    span = (end - start).days
+    if span <= 0:
+        return None
+
+    def npv(rate: float) -> float:
+        return sum(amount / (1.0 + rate) ** ((d - start).days / 365.0) for d, amount in flows)
+
+    lo, hi = -0.999999, 1.0
+    flo, fhi = npv(lo), npv(hi)
+    while flo * fhi > 0 and hi < 1_000_000:
+        hi *= 2.0
+        fhi = npv(hi)
+    if flo * fhi > 0:
+        return None
+    for _ in range(100):
+        mid = (lo + hi) / 2.0
+        fmid = npv(mid)
+        if abs(fmid) < 1e-9:
+            break
+        if flo * fmid <= 0:
+            hi, fhi = mid, fmid
+        else:
+            lo, flo = mid, fmid
+    annual = (lo + hi) / 2.0
+    return ((1.0 + annual) ** (span / 365.0) - 1.0) * 100.0
 
 
 def _f(v: object) -> float | None:

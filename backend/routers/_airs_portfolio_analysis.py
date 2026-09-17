@@ -1788,6 +1788,8 @@ def _realised_block(portfolio_id: int) -> dict:
         "realised_eur": rec.get("realised_ytd_eur"),
         "sold_income_eur": rec.get("sold_income_eur"),
         "book_ytd_pct": rec.get("book_return_pct"),
+        "has_external_flows": bool(abs(float(rec.get("deposits_eur") or 0))
+                                   + abs(float(rec.get("withdrawals_eur") or 0))),
         "residual_eur": rec.get("residual_vs_book_eur"),
         # ⚠ None is UNKNOWN, not False — the two sides can be valued a day apart (VOLK snapshot vs
         # ATT report), and that difference is market movement, not a missing position.
@@ -1972,11 +1974,16 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             .eq("as_of_date", _book_snapshot_date(portefeuille) or "").execute().data or [])
 
     muts = ref_mutaties_for(portefeuille)
-    income = {f: d.net_eur for f, d in direct_result([Mutatie(
+    mut_rows = [Mutatie(
         grootboek=m["grootboek"], fonds=m["fonds"], omschrijving="",
         boekdatum=_date.fromisoformat(str(m["boekdatum"])) if m.get("boekdatum") else None,
         amount_eur=float(m["amount_eur"]))
-        for m in muts]).by_fonds.items()}
+        for m in muts]
+    income = {f: d.net_eur for f, d in direct_result(mut_rows).by_fonds.items()}
+    income_flows = defaultdict(list)
+    for m in mut_rows:
+        if m.grootboek in {"Dividend", "Dividendbelasting"} and m.fonds and m.boekdatum:
+            income_flows[m.fonds].append((m.boekdatum, m.amount_eur))
 
     # ⚠ THE NAMES WHOSE QUANTITY ARITHMETIC CANNOT BE TRUSTED — anything carrying a transaction
     # type we do not interpret. `trades()` drops those rows (it emits only buys and sells), so the
@@ -2021,7 +2028,22 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
 
     led = build_ledger(volk, trades(sheet), income, rec.get("book_start_eur"),
                        _date.fromisoformat(van), _date.fromisoformat(tot),
-                       unknown_names=unknown, splits=splits)
+                       unknown_names=unknown, splits=splits, income_flows_by_name=dict(income_flows))
+    # A book with deposits or withdrawals has no common opening-capital denominator. AIRS's own
+    # flow-aware return is still authoritative, so distribute it over EVERY ledger row by its
+    # share of the fully reconciled EUR result. In particular, sold positions must not disappear
+    # from Contribution merely because the book began at zero (MomentumTopSelectie).
+    has_external_flows = bool(abs(float(rec.get("deposits_eur") or 0))
+                              + abs(float(rec.get("withdrawals_eur") or 0)))
+    book_return = rec.get("book_return_pct")
+
+    def position_contribution(p):
+        if has_external_flows:
+            if not led.total_result_eur or book_return is None:
+                return None
+            return p.result_eur / led.total_result_eur * float(book_return)
+        return contribution_pct(p, led.basis_eur)
+
     return {
         "positions": [{
             "name": p.name,
@@ -2033,7 +2055,9 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             # been skipped) — a partial figure in a column headed "Avg capital invested" is worse
             # than none, because it looks whole.
             "opening_eur": None if p.capital_unknown else p.opening_eur,
-            "avg_capital_eur": None if p.capital_unknown else p.avg_capital_eur,
+            # The table's cash-flow return is total result divided by capital actually committed;
+            # average capital remains internal to the allocation-weight calculation.
+            "avg_capital_eur": None if p.capital_unknown else p.capital_invested_eur,
             "capital_unknown": p.capital_unknown,
             # ⚠ Descriptive — a share of the year's CAPITAL, not of the return. The column that
             # adds up is `contribution_pct`.
@@ -2047,7 +2071,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             "fund_result_eur": p.fund_result_eur,
             "fx_result_eur": p.fx_result_eur,
             "unsplit_result_eur": p.unsplit_result_eur,
-            "contribution_pct": contribution_pct(p, led.basis_eur),
+            "contribution_pct": position_contribution(p),
             "return_pct": money_weighted_return_pct(p),
             "sales": p.sales,
             "first_sale": p.first_sale,
@@ -2643,9 +2667,13 @@ def _with_results(holdings: list[dict], realised: dict,
     """
     if not holdings:
         return holdings
-    basis = realised.get("basis_eur") if realised.get("available") else None
-    flow_return = realised.get("book_ytd_pct") if not basis else None
-    ledger_result = realised.get("ledger_result_eur") if not basis else None
+    # Deposits/withdrawals invalidate Result ÷ opening capital even when the opening balance is
+    # non-zero. Use the fully reconciled flow-aware book return for every direct position instead.
+    has_external_flows = bool(realised.get("has_external_flows"))
+    basis = (realised.get("basis_eur") if realised.get("available") and not has_external_flows
+             else None)
+    flow_return = realised.get("book_ytd_pct") if basis is None else None
+    ledger_result = realised.get("ledger_result_eur") if basis is None else None
     by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
     # ⚠ THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
     # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
@@ -2883,7 +2911,7 @@ RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1
 #:
 #: ⚠ BUMP THIS WHENEVER THE ARITHMETIC OF A RISK COLUMN CHANGES — a new cadence, a different
 #: annualisation, a changed floor. It costs one recompute and removes the whole class.
-RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
+RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 
 #: THE SAME TRICK, FOR THE WHOLE PAYLOAD — bump it when the COMPOSITION arithmetic changes.
 #:
@@ -2970,6 +2998,34 @@ def _asset_execution_isins_by_name(names: list[str]) -> dict[str, str]:
     return out
 
 
+def _company_isins_by_name(names: list[str]) -> dict[str, str]:
+    """Resolve old sold AIRS names through the verified company/ISIN universe.
+
+    Historical AIRS snapshots begin after some MomentumTopSelectie sales. Those
+    names may therefore be absent from both `airs_holding` and `asset_execution`,
+    even though the company universe has their canonical ISIN. As above, accept
+    exactly one conservative name match; a short or ambiguous name stays blank.
+    The normal ingest queue then resolves the ISIN and maintains its prices.
+    """
+    out: dict[str, str] = {}
+    for name in names:
+        words = _instrument_name_words(name)
+        if not words:
+            continue
+        pattern = "%".join(words) + "%"
+        rows = (supabase.table("company").select("isin,company_name")
+                .not_.is_("isin", "null").ilike("company_name", pattern)
+                .limit(20).execute().data or [])
+        isins = {r["isin"] for r in rows
+                 if r.get("isin") and _instrument_names_match(name, r.get("company_name") or "")}
+        if len(isins) == 1:
+            out[name] = next(iter(isins))
+        elif len(isins) > 1:
+            _log.info("[analysis] %r matches %d company ISINs; sold row left unlinked",
+                      name, len(isins))
+    return out
+
+
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
     """`{holding name: isin}` for positions the book no longer holds.
 
@@ -3036,6 +3092,8 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
     # the unresolved names. This lets the after-sale result survive a sale.
     unresolved = [name for name in wanted if name not in out]
     out.update(_asset_execution_isins_by_name(unresolved))
+    unresolved = [name for name in wanted if name not in out]
+    out.update(_company_isins_by_name(unresolved))
     return out
 
 
@@ -3058,6 +3116,21 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
     if not sold:
         return
     isin_of = _sold_position_isins([p.get("name") for p in sold])
+    # Persist the small set of known sold ISINs. They no longer appear in AIRS's
+    # current-holdings tables, but their counterfactual post-sale return remains
+    # visible here and therefore needs the same daily price maintenance.
+    watch_rows = [
+        {"isin": isin, "last_sale_date": p.get("last_sale")}
+        for p in sold
+        if (isin := isin_of.get((p.get("name") or "").strip()))
+    ]
+    if watch_rows:
+        try:
+            supabase.table("asset_post_close_watch").upsert(
+                watch_rows, on_conflict="isin"
+            ).execute()
+        except Exception as e:  # noqa: BLE001 -- enrichment must not break Analyse during migration
+            _log.warning("[analysis] could not register sold-price watch: %s", e)
     risk = _holding_risk(sorted(set(isin_of.values())), benchmark_label)
     # A closed row's ordinary Instrument return slot answers a different, useful question: what
     # the security did AFTER the book sold it. The realised amount remains the book's historical
@@ -3152,7 +3225,10 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     if not want:
         return {}
     bench_isin = _BENCHMARK_RISK_ETF.get((benchmark_label or "").upper())
-    floor = _min_bars(years)
+    # A correctly mapped new listing has a measurable risk profile once it has
+    # one full year of history. Longer-lived listings still use the requested
+    # five-year price window loaded by this function.
+    floor = _min_bars(1)
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
@@ -3217,11 +3293,11 @@ def _holding_risk(isins: list[str], benchmark_label: str,
 
     # ⚠ FOUR YEARS OF MONTHS, the same shape as the daily and weekly floors — the three columns
     # must not disagree about which rows have enough history to be quoted under a "5y" heading.
-    floor_m = int(12 * (years - 1))
+    floor_m = 12
     bench_w = _by_week(series.get(bench_isin or "", []))
     # ⚠ FOUR YEARS OF WEEKS, mirroring the daily floor — the two columns must not disagree about
     # which rows have enough history.
-    floor_w = int(52 * (years - 1))
+    floor_w = 52
 
     out: dict[str, dict] = {}
     for isin in todo:

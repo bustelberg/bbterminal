@@ -14,7 +14,10 @@ import HoldingsIngestPanel from './HoldingsIngestPanel';
 import MissingFundamentals from './MissingFundamentals';
 import { LegendItem } from './ChartLegend';
 import { noteFor, reportingLine, whyNoLine, type BlendNote } from './blendNotes';
-import { countFor, MEMBER_COUNT_CARD, memberCountHow, memberCountLine, type MemberCount } from './memberCounts';
+import {
+  countFor, MEMBER_COUNT_CARD, memberCountHow, memberCountLine, showMetricCountLine,
+  type MemberCount,
+} from './memberCounts';
 import { useLang } from '../../../lib/i18n';
 import { paddedLogDomain, periodTick, stepChanges, type Step } from './marginData';
 import { atSharedX, ltmWindowsDiffer, ltmYearX, sharedLtmX, type LtmPoint } from './ltmAxis';
@@ -775,7 +778,7 @@ export default function MetricGrowthCard({
         : <h4 className="text-base font-semibold text-fg-strong">{cfg.title}</h4>}
       {/* ⚠ ONLY WHERE MEMBERS WERE ACTUALLY WITHHELD. On every other card `considered === total`
           and a line saying so is noise on thirteen charts to make one honest. */}
-      {countLine && countLine.text !== sharedCoverage?.text && (
+      {showMetricCountLine(countLine, sharedCoverage?.text) && countLine && (
         <p className="text-[11px] text-fg-faint -mt-2">
           {countLine.text}
           {/* ⚠ THE PROSE FOLLOWS THE SERVER'S `rule`, not this card's identity — a survivorship

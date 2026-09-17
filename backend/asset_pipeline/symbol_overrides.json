@@ -17,6 +17,12 @@
       "symbol": "0316.HK",
       "name": "Orient Overseas (International) Ltd",
       "note": "Was ORI1.MU - Munich, EUR, median EUR 3,056/day. Bermuda-incorporated Hong Kong shipping line; the Munich listing put it in Europe on both the region axis and its own price series."
+    },
+    {
+      "isin": "CNE1000029W3",
+      "symbol": "1658.HK",
+      "name": "Postal Savings Bank of China Co Ltd H",
+      "note": "The held AIRS security is the Hong Kong H share, not the separately listed Shanghai A share (CNE100003PZ4 / 601658.SS). Automatic resolution marked the H-share ISIN not_found; pinning Yahoo 1658.HK restores its own sector and price history without borrowing another share class."
     }
   ]
 }

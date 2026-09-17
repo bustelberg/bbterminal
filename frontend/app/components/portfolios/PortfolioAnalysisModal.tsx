@@ -861,7 +861,7 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
  * wrong — turning on Return's denominator without its numerator, say.
  *
  *     Instrument return  Result ÷ Beginwaarde
- *     Money-weighted     Result ÷ Avg capital invested
+ *     Cash-flow IRR      XIRR of dated position cash flows, shown cumulatively
  *     Contribution       Result ÷ the book's opening capital
  *
  * ⚠ `Instrument return` IS NOT A TIME-WEIGHTED RETURN AND MUST NOT BE RELABELLED AS ONE. A TWR
@@ -870,8 +870,9 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
  * is the same INTENT as a TWR and is why the name is tempting — but it does so with a known bias a
  * real TWR does not have: a mid-year buy is valued at January's price, overstating by
  * `q_bought × (p_buy − p_open)` (measured on KLA: EUR 1,146 — see `backend/airs_timing.py`).
- * `Money-weighted` beside it IS its technical name: Modified Dietz over average invested capital,
- * `money_weighted_return_pct` on the wire.
+ * `Cash-flow IRR` beside it is true dated XIRR over the position's opening value, transactions,
+ * income and final valuation. It is de-annualised over the actual holding period;
+ * `money_weighted_return_pct` remains the wire key for continuity.
  *
  * ⚠ ALL THREE SHARE `Result`, WHICH IS WHY SELECTION IS STORED AS GROUPS AND THE COLUMNS ARE
  * DERIVED AS THEIR UNION. Storing columns instead would mean deciding what happens to `Result`
@@ -2364,11 +2365,23 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       is a claim. */}
                   {show('opening') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.start_value_eur)}</td>}
                   {show('valuenow') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.current_value_eur)}</td>}
-                  {show('avgcapital') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.avg_capital_eur)}</td>}
+                  {show('avgcapital') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>
+                    {eur0n(h.avg_capital_eur)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={copy.info.avgCapitalWhat(h.name ?? copy.row.thisPosition)}
+                      note={copy.info.avgCapitalNote}
+                      how={copy.info.avgCapitalHow(eur0n(h.avg_capital_eur))} />
+                  </td>}
                   {show('unrealised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unrealised_eur)}`}>{eur0n(h.unrealised_eur)}</td>}
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>}
-                  {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>}
+                  {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>
+                    {eur0n(h.result_eur)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={copy.info.resultWhat(h.name ?? copy.row.thisPosition)}
+                      note={copy.info.resultNote}
+                      how={copy.info.resultHow(eur0n(h.unrealised_eur), eur0n(h.realised_result_eur), eur0n(h.income_eur), eur0n(h.result_eur))} />
+                  </td>}
                   {/* ⚠ THE SECOND LINE IS THE SAME LEG AS POINTS OF THIS ROW'S MONEY-WEIGHTED
                       RETURN — same denominator, so the three add up to the figure four columns
                       right. See `ppOf` for why points and not a share of the return. */}
@@ -2613,23 +2626,34 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       them, because nothing else can: the table needs a DOM to render and this repo
                       tests no DOM. Filling these three must not change it — still three cells. */}
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
-                    retTone(p.mom_12_1_pct)}`}
-                    title={p.mom_12_1_pct != null
-                      ? copy.sold.momentumTitle(p.name ?? copy.row.thisPosition)
-                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
+                    retTone(p.mom_12_1_pct)}`}>
                     {p.mom_12_1_pct != null ? fmtRet(p.mom_12_1_pct) : '—'}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={p.mom_12_1_pct != null
+                        ? copy.sold.momentumTitle(p.name ?? copy.row.thisPosition)
+                        : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
+                      note={p.mom_12_1_pct == null ? undefined : copy.row.momentumNote}
+                      how={p.mom_12_1_pct == null
+                        ? copy.row.momentumMissing
+                        : copy.row.momentumHow(momSub(p.mom_12_1_to, p.mom_12_1_from, p.mom_12_1_pct))} />
                   </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
-                    title={p.vol_5y_pct != null
-                      ? copy.sold.volTitle(p.name ?? copy.row.thisPosition)
-                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {p.vol_5y_pct != null ? `${p.vol_5y_pct.toFixed(1)}%` : '—'}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={p.vol_5y_pct != null
+                        ? copy.sold.volTitle(p.name ?? copy.row.thisPosition)
+                        : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
+                      note={p.vol_5y_pct == null ? undefined : copy.row.volNote}
+                      how={p.vol_5y_pct == null ? copy.row.volMissing : copy.row.volHow(`${p.vol_5y_pct.toFixed(1)}%`)} />
                   </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
-                    title={p.beta_5y != null
-                      ? copy.sold.betaTitle(p.name ?? copy.row.thisPosition, benchmark)
-                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {p.beta_5y != null ? p.beta_5y.toFixed(2) : '—'}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={p.beta_5y != null
+                        ? copy.sold.betaTitle(p.name ?? copy.row.thisPosition, benchmark)
+                        : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
+                      note={p.beta_5y == null ? undefined : copy.row.betaNote(benchmark)}
+                      how={p.beta_5y == null ? copy.row.betaMissing : copy.row.betaHow(benchmark, p.beta_5y.toFixed(2))} />
                   </td>
                   {/* Weight (now) — a dash, exactly as the group row above shows it: the position is
                       gone, so there IS no current weight, and a 0% would say the book holds none of

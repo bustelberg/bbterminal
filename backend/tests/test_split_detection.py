@@ -145,7 +145,9 @@ class TestItFlowsThroughTheLedger:
         assert p.capital_unknown is False
         # 14 pre-split shares are 140 in today's basis, so 310 − 140 = 170 were held at the open.
         assert p.opening_eur == pytest.approx(34146.96 * 170 / 310, abs=1.0)
-        assert money_weighted_return_pct(p) == pytest.approx(56.67, abs=0.1)
+        # True XIRR uses the February buy and the report-date valuation as dated flows; this is
+        # intentionally not the simple result/capital ratio beside it.
+        assert money_weighted_return_pct(p) == pytest.approx(53.97, abs=0.01)
 
     def test_the_income_is_inside_the_return_not_beside_it(self):
         """⚠ THE GUARD THAT KEEPS THE FIXTURE HONEST. Without it, someone restoring `{}` here
@@ -161,7 +163,7 @@ class TestItFlowsThroughTheLedger:
         assert p.result_eur - q.result_eur == pytest.approx(95.17, abs=0.01)
         # Same capital either way — a dividend is a RESULT, never a further investment.
         assert p.avg_capital_eur == pytest.approx(q.avg_capital_eur)
-        assert money_weighted_return_pct(q) == pytest.approx(56.38, abs=0.01)
+        assert money_weighted_return_pct(q) == pytest.approx(53.67, abs=0.01)
 
     def test_the_euro_result_is_identical_either_way(self):
         """⚠ ONLY QUANTITIES WERE EVER AMBIGUOUS. A split moves no money, so nothing in the euro

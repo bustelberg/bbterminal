@@ -149,6 +149,16 @@ def apply_symbol_overrides(only_isin: str | None = None) -> int:
         except Exception as e:  # noqa: BLE001 — one bad override must not stop the rest
             _log.warning("[symbol_override] %s -> %s failed: %s: %s",
                          isin, symbol, type(e).__name__, e)
+    if changed:
+        # The Analyse payload contains the grid classification and risk figures.
+        # A mapping repair changes all of those at once; clearing this in-process
+        # cache makes the next modal open show the repaired ISIN immediately
+        # instead of waiting for a TTL or a database-statistics update.
+        try:
+            from routers import _analysis_cache  # noqa: PLC0415
+            _analysis_cache.invalidate()
+        except Exception as e:  # noqa: BLE001 — a completed mapping repair stays completed
+            _log.warning("[symbol_override] could not invalidate Analyse cache: %s", e)
     return changed
 
 

@@ -8490,7 +8490,7 @@
         "type": "object"
       },
       "LedgerPosition": {
-        "description": "One instrument's whole year \u2014 whether the book still holds it or not.\n\n\u26a0 `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own\nYTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).\n`weight_pct` is DESCRIPTIVE \u2014 how much of the year's capital this position occupied \u2014 so\n`contribution \u2248 weight \u00d7 return` holds only approximately, and the identity the table asserts\nis the contribution one.\n\n\u26a0 `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June\nshows a larger percentage on the same euros than one held all year, because it answers \"how\nhard did this money work\" rather than \"what did the instrument do\". The Holdings table's own\nReturn column is the other question and the two will differ.",
+        "description": "One instrument's whole year \u2014 whether the book still holds it or not.\n\n\u26a0 `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own\nYTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).\n`weight_pct` is DESCRIPTIVE \u2014 how much of the year's capital this position occupied \u2014 so\n`contribution \u2248 weight \u00d7 return` holds only approximately, and the identity the table asserts\nis the contribution one.\n\n`return_pct` IS CUMULATIVE RESULT OVER CAPITAL COMMITTED, not the instrument's price return.\nIt includes the position's actual purchases, realised sales and net income without annualising\na late purchase. The Holdings table's own Return column is the other question and may differ.",
         "properties": {
           "avg_capital_eur": {
             "anyOf": [
@@ -12679,6 +12679,11 @@
               }
             ],
             "title": "Dates Aligned"
+          },
+          "has_external_flows": {
+            "default": false,
+            "title": "Has External Flows",
+            "type": "boolean"
           },
           "held_eur": {
             "anyOf": [

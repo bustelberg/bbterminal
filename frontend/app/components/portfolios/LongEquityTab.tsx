@@ -562,10 +562,10 @@ export default function LongEquityTab({
         : 'The selection’s Individual stocks and the selected benchmark’s members.',
       when: lang === 'nl' ? 'De laatst geladen fundamentele data.' : 'The latest loaded fundamentals.',
       how: lang === 'nl'
-        ? 'Dezelfde dekkingsbasis staat op iedere grafiek. Een extra regel kan verschijnen wanneer '
-          + 'een specifieke maatstaf daarna nog ondernemingen uitsluit.'
-        : 'The same coverage baseline appears on every chart. An additional line can appear when '
-          + 'a specific metric subsequently excludes more companies.',
+        ? 'Dezelfde dekkingsbasis staat eenmaal op iedere grafiek, zodat de grafiektitel nooit twee '
+          + 'verschillende dekkingsaantallen tegelijk toont.'
+        : 'The same coverage baseline appears once on every chart, so a chart heading never shows '
+          + 'two different coverage counts at the same time.',
     };
   }, [data?.coverage, data?.member_counts, benchCoverage, benchCounts, benchTarget, isAgg,
       basket?.label, gName, lang, revenue.codes]);
