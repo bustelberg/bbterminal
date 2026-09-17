@@ -19,6 +19,7 @@ the router files are imported by `main`, so the dependency only goes one
 way.
 """
 
+import logging
 import os
 
 from fastapi import FastAPI
@@ -55,6 +56,14 @@ from routers._auth_middleware import enforce_api_auth as _enforce_api_auth
 from routers._error_middleware import cors_safe_errors as _cors_safe_errors
 from routers.momentum._helpers import register_startup_hooks as _register_momentum_hooks
 from scheduler import register_scheduler as _register_scheduler
+
+# Railway may override Docker's uvicorn command, so `--log-level info` in the
+# Dockerfile alone cannot guarantee that normal scheduler state is visible. Set
+# the process root explicitly: INFO is operational telemetry (blue in Railway),
+# while WARNING/ERROR remain real attention signals. An environment override is
+# retained for an intentionally quieter deployment.
+_log_level = getattr(logging, os.environ.get("LOG_LEVEL", "INFO").upper(), logging.INFO)
+logging.getLogger().setLevel(_log_level)
 
 app = FastAPI()
 

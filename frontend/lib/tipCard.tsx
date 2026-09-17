@@ -1,5 +1,16 @@
+import { createContext, useContext } from 'react';
 import Formula from './formula';
 import DynamicText from './dynamicValue';
+import { useLang, type Lang } from './i18n';
+
+/** Lets a translated panel keep all of its tooltip chrome on its own copy snapshot. */
+const TipCardLanguage = createContext<Lang | null>(null);
+
+export function TipCardLanguageProvider({ lang, children }: {
+  lang: Lang; children: React.ReactNode;
+}) {
+  return <TipCardLanguage.Provider value={lang}>{children}</TipCardLanguage.Provider>;
+}
 
 /**
  * Prose on its way into a card field, with any marked live values badged.
@@ -146,16 +157,23 @@ export function AspectCard({ what, where, when, how, worked, legend }: {
   /** What each symbol in `worked` stands for. See {@link Legend}. */
   legend?: readonly FormulaSymbol[];
 }) {
+  // The body comes from the caller's translated copy.  These four structural labels used to be
+  // hard-coded English, producing a Dutch Deep Valuation explanation under English headings.
+  const [globalLang] = useLang();
+  const lang = useContext(TipCardLanguage) ?? globalLang;
+  const label = lang === 'nl'
+    ? { what: 'Wat', where: 'Waar', when: 'Wanneer', how: 'Hoe' }
+    : { what: 'What', where: 'Where', when: 'When', how: 'How' };
   return (
-    <TipCard label="What" title={prose(what)}>
-      {where != null && where !== '' && <Field label="Where">{prose(where)}</Field>}
-      {when != null && when !== '' && <Field label="When">{prose(when)}</Field>}
+    <TipCard label={label.what} title={prose(what)}>
+      {where != null && where !== '' && <Field label={label.where}>{prose(where)}</Field>}
+      {when != null && when !== '' && <Field label={label.when}>{prose(when)}</Field>}
       {/* ⚠ THE THREE ARE ONE GROUP, not three siblings — the prose, the maths it describes and the
           key to that maths are the How section, and spacing them like separate fields would put
           the legend as far from its formula as from the sentence above it. */}
       {(how != null && how !== '') || worked || legend?.length ? (
         <span className="block space-y-1.5">
-          {how != null && how !== '' && <Field label="How">{prose(how)}</Field>}
+          {how != null && how !== '' && <Field label={label.how}>{prose(how)}</Field>}
           {worked ? <Worked text={worked} /> : null}
           {legend?.length ? <Legend items={legend} /> : null}
         </span>

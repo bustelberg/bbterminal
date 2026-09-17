@@ -8,7 +8,7 @@ import {
   PERPETUITY_GROWTH,
 } from './reverseDcf';
 import { SOURCE_CODES, vendorName, type ReverseDcfSource } from './egmInputs';
-import { forwardLegs, normalisedFcf } from './normalisedFcf';
+import { forwardLegs, growthCapex } from './normalisedFcf';
 // ⚠ THE SAME VOCABULARY THE RISK VIEWS USE. Every ⓘ stating a formula owes the reader the same
 // expression with this company's operands in it, typeset by the same engine — see `workedFormula`.
 // ⚠ THE EXPRESSIONS LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is testable and a
@@ -71,7 +71,7 @@ function Field({ label, value, onChange, suffix, info, tone, dim }: {
 }) {
   const total = tone === 'total';
   return (
-    <label className={`flex items-center gap-2 py-1 ${total ? 'border-t border-neutral-800/40' : ''}${
+    <label className={`flex items-center gap-2 py-1 ${total ? 'mt-1 border-t-2 border-neutral-600/70 pt-2' : ''}${
       dim ? ' opacity-45' : ''}`}>
       <span className={`min-w-0 flex-1 truncate text-[12px] ${
         total ? 'text-fg-soft' : 'text-fg-muted'}`}>{label}</span>
@@ -185,11 +185,18 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   growthEst?: GrowthEstimates | null;
 }) {
   const t = useDeepValuationCopy();
+  const lang = t.lang;
   // ⚠ `null` MEANS "NEVER TYPED", which is not the same as `''` (cleared). The defaults are not
   // known when this component first renders — the payload has not loaded — so they cannot be
   // seeded into state; instead the input DISPLAYS the default until an override exists, which also
   // means the box keeps tracking the data if the payload updates underneath it.
   const [fcfStr, setFcfStr] = useState<string | null>(null);
+  // Each adjustment in the visible cash-flow bridge is an input too.  Blank means use the source
+  // row; a typed value replaces only that row, and the total recomputes from the visible bridge.
+  const [sbcStr, setSbcStr] = useState<string | null>(null);
+  const [capexStr, setCapexStr] = useState<string | null>(null);
+  const [depStr, setDepStr] = useState<string | null>(null);
+  const [growthCapexStr, setGrowthCapexStr] = useState<string | null>(null);
   /**
    * The TOTAL, typed directly — the figure the model discounts, bypassing the base and both
    * corrections.
@@ -298,13 +305,21 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   // lines, so this is the same call it always was for those.
   const legCapex = forward ? fwd.capex : src.capex;
   const legDep = forward ? fwd.dep : src.dep;
-  const norm = useMemo(
-    () => normalisedFcf({ fcf: baseFcf, sbc: src.sbc, capex: legCapex, dep: legDep }),
-    [baseFcf, src.sbc, legCapex, legDep]);
+  const sbc = num(sbcStr) ?? src.sbc;
+  // Capex is entered as a positive spend even though GuruFocus files it negative.  `growthCapex`
+  // accepts either convention, but keeping the input positive prevents a reader from having to
+  // learn the vendor's bookkeeping sign just to run a scenario.
+  const capex = num(capexStr) ?? (legCapex == null ? null : Math.abs(legCapex));
+  const dep = num(depStr) ?? legDep;
+  const automaticGrowthCapex = growthCapex(capex, dep);
+  const growthCapexUsed = num(growthCapexStr) ?? automaticGrowthCapex;
+  const hasSbc = sbc != null;
+  const hasGrowthCapex = growthCapexUsed != null;
   /** The total the rows above add up to. ⚠ `?? baseFcf` covers the case where nothing was
    *  correctable; `normalisedFcf` already returns `used === reported` there, so this is a null
    *  guard only. */
-  const computedFcf = normalise ? (norm.used ?? baseFcf) : baseFcf;
+  const computedFcf = !normalise || baseFcf == null ? baseFcf
+    : baseFcf - (sbc ?? 0) + (growthCapexUsed ?? 0);
   /** ⚠ THE TYPED TOTAL WINS OVER EVERYTHING, including the corrections — see `totalStr`. */
   const totalOverride = num(totalStr);
   const overridden = totalOverride != null;
@@ -319,10 +334,12 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const show = (s: string | null, def: number | null, dp = 0) =>
     (s != null ? s : def == null ? '' : def.toFixed(dp));
 
-  const dirty = [fcfStr, totalStr, targetStr, rateStr, perpStr, yearsStr].some((s) => s != null)
+  const dirty = [fcfStr, sbcStr, capexStr, depStr, growthCapexStr, totalStr,
+    targetStr, rateStr, perpStr, yearsStr].some((s) => s != null)
     || !normalise || baseMode != null;
   const reset = () => {
-    setFcfStr(null); setTotalStr(null); setTargetStr(null); setRateStr(null);
+    setFcfStr(null); setSbcStr(null); setCapexStr(null); setDepStr(null); setGrowthCapexStr(null);
+    setTotalStr(null); setTargetStr(null); setRateStr(null);
     setPerpStr(null); setYearsStr(null);
     setNormalise(true); setBaseMode(null);
   };
@@ -496,13 +513,16 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 total falls back to the reported figure. Hiding them would resize the input box,
                 which resizes the OUTPUT box beside it through the grid's stretch, so the whole
                 panel would jump on a checkbox. Same rule as the Reset button above. */}
-            <DerivedRow label={t.dcf.rowSbc} dim={overridden}
-              value={normalise && !overridden && norm.applied.sbc ? mn(norm.sbc) : '—'}
+            <Field label={`${t.dcf.rowSbc}${currency ? ` (${currency}m)` : ' (m)'}`} dim={overridden || !normalise}
+              value={show(sbcStr, src.sbc)} onChange={setSbcStr}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.sbc.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.sbc))}
                 when={flowWhen}
-                how={norm.applied.sbc ? t.dcf.sbcHow + t.dcf.normOff : t.dcf.sbcAbsent} />} />} />
+                how={sbc == null ? t.dcf.sbcAbsent : t.dcf.sbcHow + t.dcf.normOff} />} />} />
+            <div className="mt-1 border-t border-dashed border-neutral-700/60 pt-2 text-[11px] text-fg-faint">
+              {t.dcf.growthCapexCalculation}
+            </div>
             {/* ⚠⚠ THE TWO DIRECT FIGURES, ABOVE THE CORRECTION THEY MAKE. `+ Growth capex` alone is
                 one number a reader cannot check against anything: it is a subtraction of two
                 vendor lines, and the only way to reconcile it with GuruFocus's own page was to
@@ -512,24 +532,22 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 ⚠ NO LEADING SIGN AND INDENTED: these are the INPUTS to the row below, not two more
                 terms of the sum above. A `−` on the depreciation row would read as a deduction
                 from the cash flow, which is exactly what it is not. */}
-            <DerivedRow tone="sub" dim={overridden}
-              label={t.dcf.rowCapex}
-              value={legCapex == null ? '—' : mn(Math.abs(legCapex))}
+            <Field dim={overridden || !normalise} label={`${t.dcf.rowCapex}${currency ? ` (${currency}m)` : ' (m)'}`}
+              value={show(capexStr, capex)} onChange={setCapexStr}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.capex.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.capex))}
                 when={flowWhen}
                 how={t.dcf.capexHow + t.dcf.ttmNote} />} />} />
-            <DerivedRow tone="sub" dim={overridden}
-              label={t.dcf.rowDA}
-              value={legDep == null ? '—' : mn(legDep)}
+            <Field dim={overridden || !normalise} label={`${t.dcf.rowDA}${currency ? ` (${currency}m)` : ' (m)'}`}
+              value={show(depStr, dep)} onChange={setDepStr}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.da.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.dep))}
                 when={flowWhen}
                 how={t.dcf.daHow + t.dcf.ttmNote} />} />} />
-            <DerivedRow label={t.dcf.rowGrowthCapex} dim={overridden}
-              value={normalise && !overridden && norm.applied.growthCapex ? mn(norm.growthCapex) : '—'}
+            <Field label={`${t.dcf.rowGrowthCapex}${currency ? ` (${currency}m)` : ' (m)'}`} dim={overridden || !normalise}
+              value={show(growthCapexStr, automaticGrowthCapex)} onChange={setGrowthCapexStr}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.growthCapex.what}
                 where={t.dcf.cards.growthCapex.where}
@@ -537,16 +555,16 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 // ⚠ GATED ON `normalise` LIKE THE ROW ITSELF. With it off the row reads `—` because
                 // the correction did not run; a tooltip still showing its arithmetic would be a
                 // number the panel is not using, one hover away from a dash.
-                worked={!normalise || overridden ? ''
-                  : workedGrowthCapex(src.capex, src.dep, norm.growthCapex)}
-                legend={!norm.applied.growthCapex ? undefined : [
+                worked={!normalise || overridden || automaticGrowthCapex == null ? ''
+                  : workedGrowthCapex(capex, dep, growthCapexUsed)}
+                legend={automaticGrowthCapex == null ? undefined : [
                   // ⚠ THE BARS ARE IN THE FORMULA BECAUSE THE SIGN IS THE TRAP. The vendor files
                   // capex negative; written `C − D` the expression is always negative, always
                   // clamps to zero, and the add-back silently never happens on any company.
                   { sym: 'C', is: t.dcf.legend.C },
                   { sym: 'D', is: t.dcf.legend.D },
                 ]}
-                how={norm.applied.growthCapex
+                how={growthCapexUsed != null
                   ? `${t.dcf.growthCapexAdded}
 
 ${t.dcf.growthCapexHow}${t.dcf.normOff}`
@@ -571,14 +589,14 @@ ${t.dcf.growthCapexHow}${t.dcf.normOff}`
                 // happen — the same "an absent line is not a zero" rule the rows themselves keep,
                 // one level up in the notation.
                 worked={!normalise || overridden ? '' : workedCashFlowValued(
-                  baseFcf, norm.applied.sbc ? norm.sbc : null,
-                  norm.applied.growthCapex ? norm.growthCapex : null, fcf)}
+                  baseFcf, hasSbc ? sbc : null,
+                  hasGrowthCapex ? growthCapexUsed : null, fcf)}
                 legend={!normalise || overridden || baseFcf == null ? undefined : [
                   { sym: 'F', is: forward ? t.dcf.legend.Fforward(estFy ?? t.dcf.nextFY)
                     : t.dcf.legend.Ffiled },
-                  ...(norm.applied.sbc
+                  ...(hasSbc
                     ? [{ sym: 'S', is: t.dcf.legend.S as React.ReactNode }] : []),
-                  ...(norm.applied.growthCapex
+                  ...(hasGrowthCapex
                     ? [{ sym: 'G', is: t.dcf.legend.G as React.ReactNode }] : []),
                 ]}
                 how={overridden
@@ -589,9 +607,9 @@ ${t.dcf.growthCapexHow}${t.dcf.normOff}`
 
 The workings would have given ${v(computedFcf == null ? 'no figure' : mn(computedFcf))}. Clear the box to go back to them.`
                   : normalise
-                    ? `${!norm.applied.sbc || !norm.applied.growthCapex
-                      ? t.dcf.valuedHowPartial([!norm.applied.sbc ? t.dcf.correctionSbc : null,
-                        !norm.applied.growthCapex ? t.dcf.correctionCapexDep : null]
+                    ? `${!hasSbc || !hasGrowthCapex
+                      ? t.dcf.valuedHowPartial([!hasSbc ? t.dcf.correctionSbc : null,
+                        !hasGrowthCapex ? t.dcf.correctionCapexDep : null]
                         .filter(Boolean).join(' / '))
                       : t.dcf.valuedHowAllRan}
 
@@ -630,8 +648,8 @@ Type a figure here to bypass them and value it directly.`
                 // ⚠ TWO DATES, BECAUSE IT IS A PRODUCT OF TWO OBSERVATIONS and they are rarely
                 // the same day: a close is daily, a diluted share count is a filing. One date over
                 // both would date the market cap to whichever leg the label happened to name.
-                when={[src.priceDate ? t.dcf.closeOn(onDate(src.priceDate)) : null,
-                  src.sharesDate ? t.dcf.sharesOn(onDate(src.sharesDate)) : null,
+                when={[src.priceDate ? t.dcf.closeOn(onDate(src.priceDate, lang)) : null,
+                  src.sharesDate ? t.dcf.sharesOn(onDate(src.sharesDate, lang)) : null,
                 ].filter(Boolean).join(', ') || t.dcf.noDatesStored}
                 worked={workedMarketCap(src.price, src.sharesOutstanding, defTarget)}
                 legend={src.price == null || src.sharesOutstanding == null ? undefined : [
@@ -650,7 +668,7 @@ Type a figure here to bypass them and value it directly.`
                   ? t.common.guruFocus(vendorName(SOURCE_CODES.wacc))
                   : t.dcf.houseDefault}
                 when={src.waccDate == null ? t.dcf.noWaccStored
-                  : v(onDate(src.waccDate))}
+                  : v(onDate(src.waccDate, lang))}
                 how={t.dcf.cards.discountRate.how} />} />} />
             <Field label={t.dcf.rowPerpetuityGrowth} value={show(perpStr, defPerp * 100, 1)} onChange={setPerpStr}
               suffix="%"

@@ -147,7 +147,8 @@ const localCancels = new Map<string, () => void>();
  * `run` returns the card's summary line. Throwing marks the card failed with the message.
  */
 export function startLocalJob(
-  title: string, kind: string, run: (signal: AbortSignal) => Promise<string | void>,
+  title: string, kind: string,
+  run: (signal: AbortSignal, report: (progress: { done: number; total: number; message?: string }) => void) => Promise<string | void>,
 ): string {
   const id = `local:${kind}:${
     typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${performance.now()}`}`;
@@ -161,7 +162,9 @@ export function startLocalJob(
   }));
   void (async () => {
     try {
-      const summary = await run(ctrl.signal);
+      const report = (progress: { done: number; total: number; message?: string }) =>
+        upsert(id, { done: progress.done, total: progress.total, message: progress.message ?? '' });
+      const summary = await run(ctrl.signal, report);
       // ⚠ THE SIGNAL, NOT THE ERROR, DECIDES. A cancelled fetch can resolve rather than throw
       // (a cacheable read is shared, so aborting one caller does not stop the request), and a card
       // that went green on a run the reader stopped is worse than one that never reported.

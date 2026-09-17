@@ -65,6 +65,7 @@ export const EPS_EST_CODES = ['annual_eps_nri_estimate', 'annual_per_share_eps_e
 
 /** ⚠ `value`, NOT `fcf` — it holds EPS half the time. See the module note. */
 export type YearPoint = { year: number; price: number | null; value: number | null };
+export type DailyYieldPoint = { date: string; value: number | null; price: number | null; yld: number | null };
 
 export type Basis = 'fcf' | 'eps';
 
@@ -341,6 +342,29 @@ export function yieldOf(value: number | null, price: number | null): number | nu
   if (value == null || price == null) return null;
   if (!(price > 0)) return null;
   return value / price * 100;
+}
+
+/** Daily close ÷ the most recently reported FCF/share or EPS available on that date. */
+export function dailyYieldHistory(metrics: MetricRow[], codes: string[]): DailyYieldPoint[] {
+  const codeSet = new Set(codes);
+  const fundamentals = metrics
+    .filter((r) => codeSet.has(r.metric_code) && r.numeric_value != null)
+    .sort((a, b) => a.target_date.localeCompare(b.target_date));
+  const closes = metrics
+    .filter((r) => r.metric_code === 'close_price' && r.numeric_value != null
+      && r.target_date >= `${HISTORY_FROM_YEAR}-01-01`)
+    .sort((a, b) => a.target_date.localeCompare(b.target_date));
+
+  let next = 0;
+  let value: number | null = null;
+  return closes.map((close) => {
+    while (next < fundamentals.length && fundamentals[next].target_date <= close.target_date) {
+      value = fundamentals[next].numeric_value;
+      next += 1;
+    }
+    const price = close.numeric_value;
+    return { date: close.target_date, value, price, yld: yieldOf(value, price) };
+  });
 }
 
 /**

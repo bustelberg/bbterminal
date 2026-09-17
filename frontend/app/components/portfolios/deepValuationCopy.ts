@@ -45,6 +45,8 @@ import { v } from '../../../lib/dynamicValue';
 type Card = { what?: string; where?: string; when?: string; how?: string };
 
 export type DeepValuationCopy = {
+  /** The locale this copy tree represents. Consumers use this for date formatting too. */
+  lang: Lang;
   /**
    * Strings BOTH panels use.
    *
@@ -60,6 +62,7 @@ export type DeepValuationCopy = {
   /** The EGM panel — the expected-return model. */
   egm: {
     reset: string;
+    inputs: string; outputs: string; today: string;
     growthRate: string; exitPE: string; sharePriceNow: string; forwardPE: string;
     hurdleRate: string; dividendYield: string;
     showRawData: string;
@@ -132,6 +135,7 @@ export type DeepValuationCopy = {
     forwardPEWhenTyped: string;
     forwardPEHowTyped: (vendor: string, date: string) => string;
     forwardPEDerivedWhere: string;
+    forwardPEAsOf: (date: string) => string;
     /** What the toast reports. ⚠ THE DATE, NOT "done" — see `refreshForwardPE`. */
     forwardPEMoved: (date: string) => string;
     forwardPEUnchanged: (date: string) => string;
@@ -165,6 +169,7 @@ export type DeepValuationCopy = {
     impliedGrowth: string; impliedByDiscountRate: string;
     reset: string; showFigures: string; useThisRate: string;
     rowSbc: string; rowCapex: string; rowDA: string; rowGrowthCapex: string;
+    growthCapexCalculation: string;
     rowDiscountRate: string; rowPerpetuityGrowth: string; rowForecastYears: string;
     cards: {
       sbc: Card; capex: Card; da: Card; growthCapex: Card;
@@ -262,17 +267,21 @@ export type DeepValuationCopy = {
 };
 
 const en: DeepValuationCopy = {
+  lang: 'en',
   common: { guruFocus: (vendor) => `GuruFocus, ${v(vendor)}.` },
   egm: {
     reset: 'Put every assumption back to its default',
-    growthRate: 'Growth rate', exitPE: 'Exit forward P/E', sharePriceNow: 'Share price now',
-    forwardPE: 'Forward P/E', hurdleRate: 'Rendementseis', dividendYield: 'Dividendrendement',
+    inputs: 'Model inputs', outputs: 'Model outputs', today: 'Today.',
+    growthRate: 'Growth rate — next 10 years', exitPE: 'Exit forward P/E — year 10',
+    sharePriceNow: 'Share price — latest close', forwardPE: 'Forward P/E — FY1',
+    hurdleRate: 'Required annual return', dividendYield: 'Dividend yield — next 10 years',
     showRawData: 'Show the raw data behind these defaults',
-    expectedReturn: 'Expected return', priceTarget: 'Price target',
-    totalPriceMove: 'Total price move',
-    atYourHurdle: 'At your hurdle rate',
-    maxPE: 'Max forward P/E', fairValue: 'Fair value', fairValueGap: 'vs. share price',
-    legGrowth: 'Growth', legYield: 'Dividend yield', legMultiple: 'Rerating',
+    expectedReturn: 'Expected annual return — 10 years', priceTarget: 'Price target — year 10',
+    totalPriceMove: 'Total price move — 10 years',
+    atYourHurdle: 'At your required annual return',
+    maxPE: 'Max forward P/E today', fairValue: 'Fair value today', fairValueGap: 'vs. current share price',
+    legGrowth: 'Earnings growth (annual)', legYield: 'Dividend yield (annual)',
+    legMultiple: 'Rerating (annualised)',
     cards: {
       growth: {
         what: 'Assumed growth in earnings per share.',
@@ -341,7 +350,7 @@ const en: DeepValuationCopy = {
     daysOld: (n) => `${n} days old`,
 
     legEarningsGrowth: 'Earnings growth', legMultipleWord: 'Multiple',
-    impliedIn: (years) => `Implied in ${years}y`,
+    impliedIn: (years) => `Implied share price in ${years} years`,
     storedCloseBack: 'The stored close. Click to go back to it.',
     storedCloseInUse: 'The stored close is in use.',
     impliedPEHint: 'Current price divided by next-year consensus EPS. Click to use it.',
@@ -369,6 +378,7 @@ const en: DeepValuationCopy = {
     forwardPEHowTyped: (vendor, date) => `Clear the box to go back to ${vendor}, which last `
       + `published on ${date}.`,
     forwardPEDerivedWhere: 'Derived from the stored close ÷ FY1 consensus EPS.',
+    forwardPEAsOf: (date) => `as of ${date}`,
     forwardPEMoved: (date) => `forward P/E now ${date}`,
     forwardPEUnchanged: (date) => `Still ${date}. GuruFocus has nothing newer.`,
     forwardPENone: 'GuruFocus returned no forward P/E for this company',
@@ -421,7 +431,8 @@ const en: DeepValuationCopy = {
     showFigures: 'Show every company figure this reads, with its source',
     useThisRate: 'Use this rate',
     rowSbc: '− Stock compensation', rowCapex: 'Capital expenditure',
-    rowDA: 'Depreciation & amortisation', rowGrowthCapex: '+ Growth capex',
+    rowDA: 'less: Depreciation & amortisation', rowGrowthCapex: '+ Growth capex',
+    growthCapexCalculation: 'Growth-capex calculation: capital expenditure − depreciation & amortisation',
     rowDiscountRate: 'Discount rate', rowPerpetuityGrowth: 'Perpetuity growth',
     rowForecastYears: 'Forecast years',
     cards: {
@@ -606,17 +617,21 @@ const en: DeepValuationCopy = {
 };
 
 const nl: DeepValuationCopy = {
+  lang: 'nl',
   common: { guruFocus: (vendor) => `GuruFocus, ${v(vendor)}.` },
   egm: {
     reset: 'Zet elke aanname terug op de standaardwaarde',
-    growthRate: 'Groeivoet', exitPE: 'Exit forward P/E', sharePriceNow: 'Koers nu',
-    forwardPE: 'Forward P/E', hurdleRate: 'Hurdle rate', dividendYield: 'Dividend yield',
+    inputs: 'Modelinvoer', outputs: 'Modeluitkomsten', today: 'Vandaag.',
+    growthRate: 'Groeivoet — komende 10 jaar', exitPE: 'Exit forward P/E — jaar 10',
+    sharePriceNow: 'Koers — laatste slotkoers', forwardPE: 'Forward P/E — FY1',
+    hurdleRate: 'Vereist jaarlijks rendement', dividendYield: 'Dividendrendement — komende 10 jaar',
     showRawData: 'Toon de brongegevens achter deze standaardwaarden',
-    expectedReturn: 'Verwacht rendement', priceTarget: 'Koersdoel',
-    totalPriceMove: 'Totale koersbeweging',
-    atYourHurdle: 'Bij uw rendementseis',
-    maxPE: 'Max. forward P/E', fairValue: 'Fair value', fairValueGap: 't.o.v. de koers',
-    legGrowth: 'Groei', legYield: 'Dividendrendement', legMultiple: 'Herwaardering',
+    expectedReturn: 'Verwacht jaarlijks rendement — 10 jaar', priceTarget: 'Koersdoel — jaar 10',
+    totalPriceMove: 'Totale koersbeweging — 10 jaar',
+    atYourHurdle: 'Bij uw vereiste jaarlijkse rendement',
+    maxPE: 'Max. forward P/E vandaag', fairValue: 'Fair value vandaag', fairValueGap: 't.o.v. huidige koers',
+    legGrowth: 'Winstgroei (jaarlijks)', legYield: 'Dividendrendement (jaarlijks)',
+    legMultiple: 'Herwaardering (geannualiseerd)',
     cards: {
       growth: {
         what: 'Aangenomen groei van de winst per aandeel.',
@@ -689,7 +704,7 @@ const nl: DeepValuationCopy = {
     daysOld: (n) => `${n} dagen oud`,
 
     legEarningsGrowth: 'Winstgroei', legMultipleWord: 'Multiple',
-    impliedIn: (years) => `Geïmpliceerd over ${years} jr`,
+    impliedIn: (years) => `Geïmpliceerde koers over ${years} jaar`,
     storedCloseBack: 'De opgeslagen slotkoers. Klik om terug te gaan.',
     storedCloseInUse: 'De opgeslagen slotkoers — in gebruik.',
     impliedPEHint: 'Koers ÷ consensus-EPS van volgend jaar — de multiple die de markt werkelijk '
@@ -720,6 +735,7 @@ const nl: DeepValuationCopy = {
     forwardPEHowTyped: (vendor, date) => `Maak het veld leeg om terug te gaan naar ${vendor}, die `
       + `voor het laatst op ${date} publiceerde.`,
     forwardPEDerivedWhere: 'Afgeleid uit de opgeslagen slotkoers ÷ FY1-consensus-EPS.',
+    forwardPEAsOf: (date) => `per ${date}`,
     forwardPEMoved: (date) => `forward P/E nu ${date}`,
     forwardPEUnchanged: (date) => `nog steeds ${date} — GuruFocus heeft niets nieuwers`,
     forwardPENone: 'GuruFocus gaf geen forward P/E voor deze onderneming',
@@ -770,7 +786,8 @@ const nl: DeepValuationCopy = {
     showFigures: 'Toon elk ondernemingscijfer dat dit leest, met de bron',
     useThisRate: 'Gebruik deze voet',
     rowSbc: '− Stock compensation', rowCapex: 'Investeringen',
-    rowDA: 'Afschrijvingen', rowGrowthCapex: '+ Groei-investeringen',
+    rowDA: 'min: Afschrijvingen', rowGrowthCapex: '+ Groei-investeringen',
+    growthCapexCalculation: 'Berekening groei-investeringen: investeringen − afschrijvingen',
     rowDiscountRate: 'Disconteringsvoet', rowPerpetuityGrowth: 'Eeuwigdurende groei',
     rowForecastYears: 'Prognosejaren',
     cards: {

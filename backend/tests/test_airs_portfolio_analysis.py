@@ -76,6 +76,35 @@ class TestSoldInstrumentNameMatching:
         assert not pa._instrument_names_match(airs_name, asset_name)
 
 
+class TestLookthroughCertificateResults:
+    """A composite must retain gains realised by selling its certificate wrappers."""
+
+    def test_allocates_a_certificates_realised_result_to_its_expanded_rows(self, monkeypatch):
+        monkeypatch.setattr(pa, "_holding_risk", lambda _isins, _benchmark: {})
+        holdings = [
+            {"name": "Apple", "isin": "US0378331005", "bucket": "Equity",
+             "start_value_eur": 50.0, "current_value_eur": 60.0, "income_eur": 0.0,
+             "via_names": ["TestSelectie"], "via_holding_names": ["Test certificate"],
+             "sources": [{"label": "TestSelectie", "value_eur": 60.0}]},
+            {"name": "Nvidia", "isin": "US67066G1040", "bucket": "Equity",
+             "start_value_eur": 30.0, "current_value_eur": 40.0, "income_eur": 0.0,
+             "via_names": ["TestSelectie"], "via_holding_names": ["Test certificate"],
+             "sources": [{"label": "TestSelectie", "value_eur": 40.0}]},
+        ]
+        realised = {
+            "available": True, "basis_eur": 100.0, "has_external_flows": False,
+            "positions": [{"name": "Test certificate", "held": True,
+                           "realised_result_eur": 4.0, "income_eur": 0.0}],
+        }
+
+        rows = pa._with_results(holdings, realised)
+
+        # EUR 20 value movement plus the EUR 4 certificate sale equals the AIRS account result.
+        assert [row["realised_result_eur"] for row in rows] == [2.4, 1.6]
+        assert sum(row["result_eur"] for row in rows) == 24.0
+        assert sum(row["contribution_pct"] for row in rows) == 24.0
+
+
 class TestFundsAreNotLookedThrough:
     """⚠ THE BUCKET THAT KEEPS THE CHART HONEST.
 

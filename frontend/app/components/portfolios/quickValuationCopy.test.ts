@@ -63,8 +63,9 @@ describe('Quick Valuation copy', () => {
     expect(C.nl.basis.fcf.multiple).toBe('P/FCF');
     expect(C.nl.basis.eps.multiple).toBe('P/E');
     expect(C.nl.basis.fcf.perShare).toContain('FCF');
-    expect(C.nl.basis.fcf.yieldInline).toBe('FCF-rendement');
-    expect(C.nl.basis.eps.yieldInline).toBe('winstrendement');
+    expect(C.nl.basis.fcf.yieldTitle).toBe('FCF yield');
+    expect(C.nl.basis.fcf.yieldInline).toBe('FCF yield');
+    expect(C.nl.basis.eps.yieldInline).toBe('earnings yield');
   });
 
   it('⚠ the singular/plural switch works in both languages', () => {

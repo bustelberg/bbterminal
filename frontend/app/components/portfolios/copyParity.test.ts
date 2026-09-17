@@ -132,7 +132,13 @@ const SHARED_PATHS: Record<string, Set<string>> = {
   managementCopy: new Set([
     'page.tabs.bustelberg.label', 'page.tabs.toppenberg.label', 'page.tabs.topselecties.label',
   ]),
-  deepValuationCopy: new Set(['egm.fairValue', 'dcf.rowSbc', 'dcf.correctionSbc']),
+  deepValuationCopy: new Set([
+    'egm.forwardPE', 'egm.fairValue', 'dcf.rowSbc', 'dcf.correctionSbc',
+  ]),
+  quickValuationCopy: new Set([
+    'basis.fcf.yieldTitle', 'basis.fcf.yieldInline',
+    'basis.eps.yieldTitle', 'basis.eps.yieldInline',
+  ]),
 };
 
 /** A string worth comparing at all: prose, not a symbol, a number or a bare code. */
