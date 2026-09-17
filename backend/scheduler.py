@@ -1670,7 +1670,29 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
     # emitted afterwards would arrive with the summary and tell the reader nothing they had not
     # already stopped waiting for.
     step(0, len(currencies), f"asking the ECB for {len(currencies)} currencies since 2000-01-01…")
-    status = sync_fx_rates_to_db(supabase, currencies, _date(2000, 1, 1), _date.today())
+    completed = 0
+
+    def _progress(code: str, result: dict) -> None:
+        """Relay the sync's per-currency completion callback to the job card.
+
+        `sync_fx_rates_to_db` keeps its four-request worker pool; its callback is
+        invoked by the coordinator as each result is collected, so this only
+        improves observability and cannot increase ECB or database concurrency.
+        """
+        nonlocal completed
+        completed += 1
+        outcome = str(result.get("status") or "unknown")
+        rows = int(result.get("rows") or 0)
+        message = f"{code}: {outcome}"
+        if rows:
+            message += f" — {rows:,} rate(s) stored"
+        elif result.get("error"):
+            message += f" — {result['error']}"
+        step(completed, len(currencies), message)
+
+    status = sync_fx_rates_to_db(
+        supabase, currencies, _date(2000, 1, 1), _date.today(), on_progress=_progress,
+    )
     synced = sum(1 for s in status.values() if s.get("status") == "synced")
     errors = sum(1 for s in status.values() if s.get("status") == "error")
     _log.info("[scheduler] fx sync done: %s/%s currencies updated, %s errors",

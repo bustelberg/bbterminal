@@ -937,7 +937,7 @@ def _strip_spreadsheet_preamble(body: bytes) -> bytes:
 def fetch_model_portfolio_names_sync() -> list[str]:
     """Every portfolio's FULL name, in list order — one XLS download instead of 52 page
     fetches. Columns: Portefeuille | Omschrijving | Fixed | FixedDatum."""
-    from io import BytesIO  # noqa: PLC0415
+    from io import BytesIO, StringIO  # noqa: PLC0415
 
     import pandas as pd  # noqa: PLC0415
 
@@ -948,7 +948,12 @@ def fetch_model_portfolio_names_sync() -> list[str]:
         raise RuntimeError(
             "the model-portfolio XLS export returned HTML, not a spreadsheet. "
             + _describe_non_excel(resp))
-    df = pd.read_excel(BytesIO(body))
+    # xlrd writes its harmless empty-short-stream OLE2 observation to stdout.
+    # This is a valid AIRS `.xls`, so retain real parser failures but discard
+    # that library chatter.
+    excel_kwargs = ({"engine": "xlrd", "engine_kwargs": {"logfile": StringIO()}}
+                    if body.startswith(_XLS_MAGIC) else {})
+    df = pd.read_excel(BytesIO(body), **excel_kwargs)
     return [str(v).strip() for v in df["Portefeuille"].tolist()]
 
 
@@ -1194,11 +1199,14 @@ def _parse_positions_xls(body: bytes) -> list[dict]:
     then counts as a holding with the ISIN "nan". `astype(object)` first is what makes the
     None stick.
     """
-    from io import BytesIO  # noqa: PLC0415
+    from io import BytesIO, StringIO  # noqa: PLC0415
 
     import pandas as pd  # noqa: PLC0415
 
-    df = pd.read_excel(BytesIO(_strip_spreadsheet_preamble(body)))
+    body = _strip_spreadsheet_preamble(body)
+    excel_kwargs = ({"engine": "xlrd", "engine_kwargs": {"logfile": StringIO()}}
+                    if body.startswith(_XLS_MAGIC) else {})
+    df = pd.read_excel(BytesIO(body), **excel_kwargs)
     df = df.astype(object).where(pd.notna(df), None)
     return df.to_dict("records")
 

@@ -209,6 +209,7 @@ class TestTheBookSideIsExpandedToo:
         from routers._airs_portfolio_analysis import _expand_book_rows
 
         monkeypatch.setattr(A, "_grid", lambda isins: {})
+        monkeypatch.setattr(A, "_dynamic_account_positions", lambda name: [])
         rows = [
             {"isin": "CH0000000001", "holding_name": "Star Selection Index",
              "current_value_eur": 100.0, "start_value_eur": 80.0,
@@ -253,6 +254,28 @@ class TestTheBookSideIsExpandedToo:
              "start_value_eur": 80.0, "linked_portfolio_id": 7, "bucket": "Equity"},
         ])
         assert out[0]["bucket"] != "Equity", "the child's own class must be re-derived"
+
+    def test_childs_airs_equity_category_survives_an_unresolved_grid(self, monkeypatch):
+        """A look-through leg has AIRS's `AAND` even before asset_grid has it.
+
+        This is the HOYA / Baidu shape: both sit inside AzieTopSelectie and
+        their parent certificate is unclassified, but their own composition
+        explicitly says they are equities.
+        """
+        from routers import _airs_portfolio_analysis as A
+
+        monkeypatch.setattr(A, "_grid", lambda isins: {})
+        monkeypatch.setattr("routers._airs_lookthrough._datum_of", lambda pid: None)
+        monkeypatch.setattr("routers._airs_lookthrough._positions_of",
+                            lambda pid, d: [{"isin": "JP3786800000", "fonds": "HOYA Corporation",
+                                             "percentage": 100.0, "categorie": "AAND"}])
+        out = A._expand_book_rows([
+            {"isin": "CH0000000001", "holding_name": "AzieTopSelectie certificate",
+             "current_value_eur": 100.0, "start_value_eur": 80.0,
+             "linked_portfolio_id": 7, "bucket": "Unclassified"},
+        ])
+
+        assert out[0]["bucket"] == "Equity"
 
 
 class TestEveryPathThatReadsAPortfolioExpandsIt:

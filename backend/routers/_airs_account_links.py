@@ -120,7 +120,7 @@ def guess_model(account: str, models: list[dict]) -> tuple[dict | None, str]:
     return None, f"ambiguous — {len(strategies)} models share the stem '{stem}': {names}"
 
 
-def _models() -> list[dict]:
+def _models(include_empty: bool = False) -> list[dict]:
     """The models a link may point at: the ones with a composition. A model with no positions
     is not a strategy an account can be running — it is a row we scraped and nothing more.
 
@@ -153,7 +153,30 @@ def _models() -> list[dict]:
     counts: dict[int, int] = {}
     for p in ref_positions():
         counts[p["portfolio_id"]] = counts.get(p["portfolio_id"], 0) + 1
-    return [{**m, "positions": counts.get(m["id"], 0)} for m in rows if counts.get(m["id"], 0)]
+    with_counts = [{**m, "positions": counts.get(m["id"], 0)} for m in rows]
+    return with_counts if include_empty else [m for m in with_counts if m["positions"]]
+
+
+def mapped_model(account: str, models: list[dict]) -> dict | None:
+    """The reviewed strategy-map counterpart of an account, including an empty fixed model.
+
+    An empty model cannot support composition analysis, so it must never participate in the
+    general name guess. It can still be the correct account pairing: AziëTopSelectie's fixed row
+    has no stored composition, while its Dynamic account has the valued holdings needed for the
+    Analyse table's Momentum, Volatility, and Beta columns.
+    """
+    from routers._airs_strategy_map import strategies  # noqa: PLC0415
+
+    wanted = _norm(account)
+    by_name = {_norm(m.get("name")): m for m in models if m.get("name")}
+    for strategy in strategies():
+        names = strategy["airs_names"]
+        if wanted not in {_norm(name) for name in names}:
+            continue
+        for name in names:
+            if _norm(name) != wanted and (model := by_name.get(_norm(name))):
+                return model
+    return None
 
 
 def _stored() -> dict[str, dict]:
@@ -208,6 +231,7 @@ def _list_account_links_uncached() -> dict:
 
     perf = _year_perf()
     models = _models()
+    all_models = _models(include_empty=True)
     stored = _stored()
     by_id = {m["id"]: m for m in models}
 
@@ -215,6 +239,11 @@ def _list_account_links_uncached() -> dict:
     for name, p in sorted(perf.items(), key=lambda kv: kv[0].lower()):
         link = stored.get(name.lower())
         g, why = guess_model(name, models)
+        # The map is a reviewed, explicit relationship, not a fuzzy fallback. Use it only after
+        # the conservative composition-bearing guess has refused: that keeps empty wrapper rows
+        # out of ordinary pairing while restoring the legitimate AziëTopSelectie account/fixed pair.
+        if g is None and (mapped := mapped_model(name, all_models)):
+            g, why = mapped, "reviewed strategy-map pairing"
         # A stored row always wins, INCLUDING one that stores NULL — that is a human saying
         # "not a model", and letting the guess speak over it would make the decision
         # un-clearable.

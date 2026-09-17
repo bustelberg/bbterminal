@@ -28,6 +28,14 @@ _log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 
 
+def _progress_name(airs_name: str) -> str:
+    """Friendly strategy name plus the exact AIRS code for progress messages."""
+    from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+
+    nickname = nickname_for(airs_name)
+    return f"{nickname} ({airs_name})" if nickname and nickname != airs_name else airs_name
+
+
 def _acquire_session(wait: float | None = None) -> bool:
     """Take the ONE authenticated AirSPMS session, refusing (`None`) or queueing (`wait` seconds).
 

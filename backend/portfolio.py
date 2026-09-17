@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Optional
 
 import pandas as pd
@@ -153,7 +153,9 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
     Parse AIRS Excel export and compute YTD return in EUR per holding.
     Weight is computed from Huidige waarde EUR as share of total.
     """
-    df = pd.read_excel(BytesIO(file_bytes))
+    excel_kwargs = ({"engine": "xlrd", "engine_kwargs": {"logfile": StringIO()}}
+                    if file_bytes.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") else {})
+    df = pd.read_excel(BytesIO(file_bytes), **excel_kwargs)
     cols = _resolve_columns(df)
 
     col_name = _col(cols, "Fondsomschrijving")

@@ -6,7 +6,7 @@ right, and the wrong risk profile holds nearly the same instruments.
 """
 from __future__ import annotations
 
-from routers._airs_account_links import _stem, guess_model
+from routers._airs_account_links import _stem, guess_model, mapped_model
 
 
 def M(name, positions=20, id=None):
@@ -56,6 +56,12 @@ class TestTheFourNamingConventions:
         """`VTopSelectie OFF DY` — 19 chars, so not AIRS's 24-char truncation. A typo."""
         m, _ = guess_model("VTopSelectie OFF DY", _MODELS)
         assert m["name"] == "VTopSelectie OFF FX"
+
+    def test_reviewed_map_pairs_azie_when_its_fixed_model_has_no_composition(self):
+        """Without this the dashboard opens a basket, which has no valued holding table."""
+        models = [M("AzTopSelectie_DYN", 0), M("AztopSelectie_FX", 0)]
+        assert guess_model("AzTopSelectie_DYN", [m for m in models if m["positions"]])[0] is None
+        assert mapped_model("AzTopSelectie_DYN", models)["name"] == "AztopSelectie_FX"
 
 
 class TestItCannotConfuseTwoRiskProfiles:

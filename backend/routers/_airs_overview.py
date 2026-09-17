@@ -63,6 +63,10 @@ def _management_group(account_name: str | None) -> str:
 
 def _management_name(name: str | None, group: str, account_name: str | None) -> str | None:
     """Remove a redundant risk suffix only from single-variant building blocks."""
+    from routers._management_topselecties import topselectie_for_account  # noqa: PLC0415
+
+    if group == "topselecties" and (entry := topselectie_for_account(account_name)):
+        return entry["display_name"]
     key = re.sub(r"[^a-z0-9]+", "", (account_name or "").casefold())
     if group != "topselecties" or key not in _SINGLE_RISK_PROFILE_ACCOUNTS or not name:
         return name
@@ -127,6 +131,7 @@ def list_overview() -> list[dict]:
     """One row per AIRS Dynamic portfolio, named by the Fixed portfolio it runs."""
     from ._airs_account_links import list_account_links  # noqa: PLC0415  (circular at import)
     from ._airs_accounts import list_accounts  # noqa: PLC0415
+    from ._management_topselecties import topselectie_for_account  # noqa: PLC0415
 
     links = {a["portefeuille"]: a for a in list_account_links()["accounts"]}
     # ⚠ THE ACCOUNT'S OWN NICKNAME BEATS THE MODEL'S. A human typed it for THIS book; the model's
@@ -156,6 +161,11 @@ def list_overview() -> list[dict]:
         display_name, name_is_custom = _overview_name(
             a.get("portefeuille"), nicknames, direct_model_nicknames, m)
         management_group = _management_group(a.get("portefeuille"))
+        # This tab is a reviewed product list, not the catch-all bucket for every Dynamic account
+        # that is neither Bustelberg nor Toppenberg. Keep only its explicit JSON allowlist.
+        if (management_group == "topselecties"
+                and not topselectie_for_account(a.get("portefeuille"))):
+            continue
         display_name = _management_name(display_name, management_group, a.get("portefeuille"))
         out.append({
             # The name a human gave it. Falls back to AIRS's code rather than to a blank: an

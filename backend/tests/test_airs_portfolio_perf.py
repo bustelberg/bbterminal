@@ -29,6 +29,7 @@ from routers._airs_portfolio_perf import (
     ytd_anchor_for,
 )
 from routers.airs import _shape_positions
+from routers._airs_strategy_map import nickname_for
 
 
 class TestHindsight:
@@ -60,6 +61,16 @@ class TestHindsight:
         src = inspect.getsource(_shape_positions)
         assert "ytd_anchor_for(" in src
         assert "compute_holding_marks(" in src
+
+    def test_folded_certificates_use_the_reviewed_strategy_nickname(self):
+        """The default, non-look-through view names the strategy, never its AIRS certificate.
+
+        Toppenberg Offensief holds `EuropaTopSelectie Index`; the certificate is useful provenance
+        but the folded row must carry the same reader-facing name as Management Dashboard.
+        """
+        assert nickname_for("EuropaTopSelect OFF FX") == "EuropaTopSelectie"
+        src = inspect.getsource(_shape_positions)
+        assert 'nickname_for(p.get("name")) or p.get("display_name")' in src
 
     def test_a_model_younger_than_the_year_is_still_flagged(self):
         """The flag survives the fix, with a NEW meaning: not "this is a backtest" (it isn't any

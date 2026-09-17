@@ -16,6 +16,7 @@ import asyncio
 import gzip
 import io
 import re
+from io import StringIO
 from routers import _airs_portfolio_store as store
 from routers._asset_financials import BasketRequest, PerformanceResponse, PriceSeriesResponse
 from routers._sse import sse_event, sse_message
@@ -40,6 +41,8 @@ from deps import IN_CHUNK_SIZE, supabase
 from portfolio import parse_airs_excel
 
 router = APIRouter(tags=["airs"])
+
+_OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
 def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
@@ -97,7 +100,12 @@ def _parse_att_excel(content: bytes) -> list[dict]:
     identity cannot tell `- kosten` from `+ kosten` while the term is zero. Parsed and
     stored; kept out of arithmetic until a book with real costs turns up.
     """
-    df = pd.read_excel(io.BytesIO(content), engine="xlrd")
+    # AIRS's valid legacy exports can contain an unused SSAT after an empty
+    # short-stream container. xlrd reports that benign structural detail to
+    # stdout; keep it out of the service log without swallowing parse errors.
+    excel_kwargs = ({"engine": "xlrd", "engine_kwargs": {"logfile": StringIO()}}
+                    if content.startswith(_OLE2_SIGNATURE) else {})
+    df = pd.read_excel(io.BytesIO(content), **excel_kwargs)
 
     def num(r, col, digits=2):
         """`col` off the row, rounded — or None. Absent column and absent value are the same
@@ -2656,8 +2664,12 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
     _lrows = [{"isin": (str(r["ISINCode"]).strip() if r.get("ISINCode") else None),
                "fonds": (str(r["Fonds"]).strip() if r.get("Fonds") else "")} for r in rows]
     links = resolve_links(supabase, raw["portfolio_id"], _lrows)
-    # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
-    _pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
+    # ⚠ Use the reviewed TopSelectie nickname before a saved model/AIRS name.  These labels feed
+    # the default, folded certificate view, so a book holding `EuropaTopSelectie Index` must say
+    # `EuropaTopSelectie` — the same reader-facing strategy name used on Management Dashboard.
+    # The certificate's own AIRS name remains separately available as `fonds`.
+    from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+    _pf_names = {p["id"]: (nickname_for(p.get("name")) or p.get("display_name") or p["name"]) for p in (
         supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
 
     # Anchored on the composition BEING SHOWN — for the default (newest) snapshot that is the

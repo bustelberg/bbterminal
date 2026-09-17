@@ -107,7 +107,10 @@ def _needs_repoint(isin: str, symbol: str) -> bool:
     cur = (supabase.table("asset_execution").select("isin,yahoo_symbol")
            .eq("isin", isin).limit(1).execute().data or [])
     if not cur:
-        _log.warning("[symbol_override] %s has no execution row to repoint; skipped", isin)
+        # A reviewed override can legitimately precede its first queue resolution.
+        # It will be applied after that resolution; this is an idempotent no-op,
+        # not an operator-warning condition.
+        _log.debug("[symbol_override] %s has no execution row to repoint; skipped", isin)
         return False
     return (cur[0].get("yahoo_symbol") or "") != symbol
 

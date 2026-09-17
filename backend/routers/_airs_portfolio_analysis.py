@@ -874,6 +874,34 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
 
 
 
+def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
+    """Current composition behind a mapped certificate whose fixed model is empty.
+
+    EuropaTopSelectie's fixed AIRS model currently has no dated position rows, while its mapped
+    Dynamic account does have the actual constituents. That account comes from the same reviewed
+    strategy map used for the nickname and certificate link. Express its latest EUR values as
+    percentages so the normal expansion path can consume it without special cases.
+    """
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    from ._airs_strategy_map import dynamic_account_for_holding  # noqa: PLC0415
+
+    account = dynamic_account_for_holding(holding_name)
+    if not account:
+        return []
+    rows = resolve_account_isins(account, freshen=False).get("rows") or []
+    valued = [(row, float(row.get("current_value_eur") or 0)) for row in rows]
+    total = sum(value for _, value in valued if value > 0)
+    if total <= 0:
+        return []
+    return [{
+        "isin": row.get("isin"),
+        "fonds": row.get("holding_name"),
+        "percentage": value / total * 100.0,
+        "categorie": row.get("bucket"),
+    } for row, value in valued if value > 0]
+
+
 def _expand_book_rows(rows: list[dict]) -> list[dict]:
     """Book holdings with each linked certificate replaced by the stocks of the model it IS.
 
@@ -888,27 +916,41 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
     value, and every percentage here is a share of a total that would silently shrink.
     """
     from ._airs_lookthrough import _datum_of, _positions_of  # noqa: PLC0415
+    from ._airs_strategy_map import nickname_for_holding  # noqa: PLC0415
 
     # ⚠ `sources` IS STAMPED HERE, WHERE THE SPLIT HAPPENS, because this is the only place that
     # still knows how much of a leg came from where. One entry per ROUTE IN — `label=None` for the
     # book's own shares — carried through `merge_by_isin`, which concatenates them.
     out: list[dict] = []
+    account_compositions: dict[str, list[dict]] = {}
     for r in rows:
         target = r.get("linked_portfolio_id")
+        # An opaque certificate still uses the reviewed strategy nickname in the default view.
+        # Its direct source and values remain the certificate's own.
+        folded_name = (nickname_for_holding(r.get("holding_name"))
+                       or r.get("linked_portfolio_name") or r.get("holding_name"))
         direct_src = [{"label": None, "model_id": None,
                        "value_eur": float(r.get("current_value_eur") or 0),
                        "start_value_eur": float(r.get("start_value_eur") or 0)}]
-        if not target:
+        child = _positions_of(target, _datum_of(target)) if target else []
+        if not child and nickname_for_holding(r.get("holding_name")):
+            cache_key = str(r.get("holding_name") or "")
+            if cache_key not in account_compositions:
+                account_compositions[cache_key] = _dynamic_account_positions(
+                    r.get("holding_name"))
+            child = account_compositions[cache_key]
+        if not child:
             # held directly — no strategy in between
-            out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
+            out.append({**r, "holding_name": folded_name,
+                        "via_names": [], "via_holding_names": [], "sources": direct_src})
             continue
-        child = _positions_of(target, _datum_of(target))
         inner = sum(float(c.get("percentage") or 0) for c in child)
         if not child or inner <= 0:
             # A certificate with nothing behind it stays whole, so the book holds IT — the route in
             # is direct, and labelling it with the strategy it wraps would claim a look-through
             # that did not happen.
-            out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
+            out.append({**r, "holding_name": folded_name,
+                        "via_names": [], "via_holding_names": [], "sources": direct_src})
             continue
         cur = float(r.get("current_value_eur") or 0)
         start = float(r.get("start_value_eur") or 0)
@@ -916,9 +958,15 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
             share = float(c.get("percentage") or 0) / inner
             if share <= 0:
                 continue
+            # This is the CHILD instrument's AIRS category, not the certificate's.
+            # A certificate is often unclassified in its parent's account; carrying
+            # that marker onto HOYA/Baidu makes a plainly-labelled `AAND` position
+            # disappear from Stocks when the grid has not caught up yet.
+            child_class = _class_from_categorie(c.get("categorie"))
             out.append({
                 **{k: v for k, v in r.items() if k not in
-                   ("isin", "holding_name", "current_value_eur", "start_value_eur", "bucket")},
+                   ("isin", "holding_name", "current_value_eur", "start_value_eur", "bucket",
+                    "categorie", "asset_class")},
                 "isin": c.get("isin"),
                 "holding_name": c.get("fonds"),
                 "current_value_eur": cur * share,
@@ -927,11 +975,16 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # stamp that on a bond the child holds. Cleared so the shared classifier re-derives
                 # it from the child instrument's own grid row.
                 "bucket": None,
+                # `categorie` is the strongest classification signal we have. It
+                # must travel with a look-through leg for the same reason the ISIN
+                # and name do; otherwise an unresolved child becomes Unclassified
+                # despite AIRS already identifying it as an equity or bond.
+                "categorie": c.get("categorie"),
+                "asset_class": child_class,
                 "linked_portfolio_id": None,
                 # WHICH strategy put us in this instrument. The certificate's own name is the only
                 # record of it once its value has been split across the model behind it.
-                "via_names": ([r["linked_portfolio_name"]]
-                              if r.get("linked_portfolio_name") else []),
+                "via_names": [folded_name],
                 # ⚠ THE CERTIFICATE'S OWN AIRS NAME, which `via_names` does NOT carry — that is
                 # the STRATEGY's name ("StarTopSelectie Offensief"), while the ledger is keyed by
                 # the INSTRUMENT the book actually traded ("Star Selection Index"). Without it a
@@ -943,7 +996,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # ⚠ `model_id` RIDES ALONG, because the route's return has to come from the book
                 # behind THIS certificate specifically. Two certificates wrapping two strategies
                 # can both hold NVIDIA, and each book values its own position differently.
-                "sources": [{"label": r.get("linked_portfolio_name") or "via a certificate",
+                "sources": [{"label": folded_name or "via a certificate",
                              "model_id": target,
                              "value_eur": cur * share,
                              "start_value_eur": start * share}],
@@ -995,7 +1048,7 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
             continue
         # An ISIN-less, non-cash row still lands on "Unclassified" — an honest unsure, reached by
         # the classifier rather than by never asking it.
-        r["bucket"] = classify_bucket(None, r["is_fund"], r.get("isin"),
+        r["bucket"] = classify_bucket(r.get("asset_class"), r["is_fund"], r.get("isin"),
                                       r.get("holding_name") or "", g)
     return rows
 

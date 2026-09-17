@@ -38,10 +38,39 @@ def nickname_for(airs_name: str | None) -> str | None:
     return None
 
 
+def nickname_for_holding(holding_name: str | None) -> str | None:
+    """The reader-facing strategy name for one mapped certificate holding.
+
+    AIRS calls a certificate ``EuropaTopSelectie Index`` while the underlying model uses the
+    compact ``EuropaTopSelect …`` code. Both name the same strategy, but only the former exists
+    on a book that cannot be looked through, so it needs the same nickname resolution.
+    """
+    wanted = _key(holding_name)
+    for strategy in strategies():
+        if wanted in {_key(name) for name in (*strategy["airs_names"], *strategy["holding_aliases"])}:
+            return strategy["nickname"]
+    return None
+
+
+def dynamic_account_for_holding(holding_name: str | None) -> str | None:
+    """The valued Dynamic account behind a mapped certificate holding, when configured."""
+    wanted = _key(holding_name)
+    for strategy in strategies():
+        aliases = {_key(name) for name in (*strategy["holding_aliases"], strategy["nickname"])}
+        if wanted not in aliases:
+            continue
+        return next((name for name in strategy["airs_names"]
+                     if _key(name).endswith(("dyn", "dy"))), None)
+    return None
+
+
 def is_strategy_holding(name: str | None) -> bool:
     """Whether a holding name is one of our mapped AIRS strategies/certificates."""
     wanted = _key(name)
-    return any(wanted in {_key(n) for n in (*s["airs_names"], *s["holding_aliases"])}
+    # A folded certificate is deliberately renamed to the reviewed nickname before the shared
+    # bucket classifier runs. Treat that name as the same wrapper too, or EuropaTopSelectie moves
+    # from Stock ETFs to individual Stocks solely because its label became more readable.
+    return any(wanted in {_key(n) for n in (s["nickname"], *s["airs_names"], *s["holding_aliases"])}
                for s in strategies())
 
 

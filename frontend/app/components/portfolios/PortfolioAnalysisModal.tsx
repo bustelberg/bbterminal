@@ -1368,6 +1368,11 @@ function soleVia(h: BookHolding): string | null {
 const SYNTHETIC_ROWS = new WeakSet<object>();
 const isSynthetic = (h: BookHolding) => SYNTHETIC_ROWS.has(h);
 
+/** Known constituent basket for a folded certificate. The row stays a Stock ETF, but its
+ * Fundamental action can use the holdings we already expanded from that certificate. */
+const SYNTHETIC_BASKETS = new WeakMap<object, Basket>();
+export const syntheticBasket = (h: object): Basket | undefined => SYNTHETIC_BASKETS.get(h);
+
 /** `
 
 1.23 ÷ 4.56 − 1 = +7.9%` — the substituted line under a momentum formula, or '' when the
@@ -1407,6 +1412,18 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     // instrument the book holds and its underlying positions, not merely a way to reduce rows.
     const s = sumResults(legs);
     const weight = legs.reduce((a, h) => a + (h.weight_now_pct ?? 0), 0);
+    // Aggregate every known constituent instead of inheriting whichever leg happens to be first.
+    // The first leg is often Liquiditeiten, which is why AziëTopSelectie showed three dashes.
+    const weightedSignal = (pick: (leg: BookHolding) => number | null | undefined) => {
+      const known = legs.flatMap((leg) => {
+        const value = pick(leg);
+        return value == null ? [] : [{ value, weight: leg.weight_now_pct ?? 0 }];
+      });
+      const knownWeight = known.reduce((total, item) => total + item.weight, 0);
+      return knownWeight > 0
+        ? known.reduce((total, item) => total + item.value * item.weight, 0) / knownWeight
+        : null;
+    };
     const row: BookHolding = {
       // Spread a real leg so every field this row type carries exists; everything that describes
       // the POSITION rather than the wrapper is overridden below.
@@ -1434,6 +1451,14 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       avg_capital_eur: s.avgcapital,
       money_weighted_return_pct: s.mwr,
       own_return_pct: (s.result != null && s.opening) ? (s.result / s.opening) * 100 : null,
+      mom_12_1_pct: weightedSignal((leg) => leg.mom_12_1_pct),
+      mom_12_1_from: null,
+      mom_12_1_to: null,
+      mom_state: null,
+      mom_pct_rank: null,
+      mom_rank_n: null,
+      vol_5y_pct: weightedSignal((leg) => leg.vol_5y_pct),
+      beta_5y: weightedSignal((leg) => leg.beta_5y),
       // The row IS the certificate now, so it is no longer reached "through" anything.
       sources: [],
       via_names: [],
@@ -1441,6 +1466,20 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     };
     // ⚠ MARKED AS MADE UP. It is a strategy, not a tradeable position — see `SYNTHETIC_ROWS`.
     SYNTHETIC_ROWS.add(row);
+    // This is the exception to ordinary ETFs: this certificate's underlying companies are known.
+    const weights = new Map<string, { weight: number; name?: string }>();
+    for (const leg of legs) {
+      if (!leg.isin || leg.is_fund) continue;
+      const prior = weights.get(leg.isin);
+      weights.set(leg.isin, {
+        weight: (prior?.weight ?? 0) + (leg.weight_now_pct ?? 0),
+        name: leg.name ?? prior?.name,
+      });
+    }
+    SYNTHETIC_BASKETS.set(row, {
+      label,
+      holdings: [...weights].map(([isin, value]) => ({ isin, ...value })),
+    });
     folded.push(row);
   }
   return [...kept, ...folded];
@@ -2113,7 +2152,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     </td>
                   </tr>
                 )}
-                {part.rows.map((h) => { const i = n++; return (
+                {part.rows.map((h) => { const i = n++; const certificateBasket = syntheticBasket(h); return (
                 <tr key={[h.isin ?? h.name ?? `${g.bucket}-${i}`,
                   (h.via_names ?? []).join(',')].join('|')}
                   onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
@@ -2167,7 +2206,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           so its right edge is two columns further out. Pushing it right would put
                           it on a DIFFERENT vertical line, which is worse than leaving it beside
                           the class label it belongs to. */}
-                      {h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
+                      {certificateBasket?.holdings.length ? (
+                        <FundamentalButton
+                          className="ml-auto shrink-0"
+                          title={copy.classRow.fundamentalTitle(certificateBasket.holdings.length, h.name ?? copy.row.thisPosition)}
+                          onOpen={() => onFundamental({ name: h.name ?? certificateBasket.label,
+                            basket: certificateBasket, weightPct: h.weight_now_pct })} />
+                      ) : h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
                           className="ml-auto shrink-0"
                           title={copy.row.fundamentalTitle(h.name ?? h.isin ?? copy.row.thisPosition)}
