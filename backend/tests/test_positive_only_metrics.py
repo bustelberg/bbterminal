@@ -112,6 +112,42 @@ class TestTheCountIsAlwaysReported:
         rows = [r for r in _rows(EPS) if r["company_id"] == 1]
         assert earnings._blend_rows(rows, COVERED)["member_counts"][EPS]["total"] == 3
 
+    def test_the_complete_selected_basket_can_be_the_denominator(self, earnings):
+        """Coverage filtering happens before blending, but must not make the other selected
+        stocks disappear from the reader-facing `X of Y` disclosure."""
+        built = earnings._blend_rows(_rows(EPS), COVERED)
+        envelope = earnings._blend_envelope(built, COVERED,
+                                             {"holdings": 28, "covered_pct": 50.0})
+        assert envelope["member_counts"][EPS]["total"] == 28
+
+    def test_acwi_uses_the_complete_iShares_membership_for_its_denominator(self, earnings,
+                                                                             monkeypatch):
+        from index_universe.acwi import holdings as acwi_holdings
+
+        monkeypatch.setattr(acwi_holdings, "load_acwi_holdings",
+                            lambda: ([{}] * 2_270, "15-Apr-2026"))
+        body = earnings.FundamentalCoverageRequest(universe="ACWI")
+        assert earnings._member_count_total(body, {"holdings": 553}) == 2_270
+
+    def test_an_explicit_basket_keeps_its_selected_position_count(self, earnings):
+        body = earnings.FundamentalCoverageRequest(
+            holdings=[{"isin": f"US{i:010d}", "weight": 1} for i in range(28)])
+        # Coverage may have canonicalised three positions together, but the label must still name
+        # all 28 positions the reader selected in the TopSelectie.
+        assert earnings._member_count_total(body, {"holdings": 25}) == 28
+
+    def test_a_folded_topselectie_uses_its_individual_stocks_basket(self, earnings):
+        """The shared view must count precisely the rows in its Individual stocks section.
+
+        Its linked model can also contain cash or Stock ETFs, neither of which is part of the
+        Fundamental basket. Looking up that model was what made a TopSelectie show a different
+        denominator through a parent portfolio than directly.
+        """
+        body = earnings.FundamentalCoverageRequest(
+            holdings=[{"isin": f"US{i:010d}", "weight": 1} for i in range(28)],
+            basket_label="FamilieTopSelectie")
+        assert earnings._member_count_total(body, {"holdings": 25}) == 28
+
 
 class TestTheRuleSaysWhyMembersAreMissing:
     """⚠⚠ THE CARD'S ⓘ IS PICKED FROM THIS, so a wrong `rule` is a confident wrong explanation of

@@ -91,7 +91,7 @@
       "look_through_target": "VTopSelectie OFF FX"
     },
     {
-      "nickname": "MerkenTopSelectie Offensief",
+      "nickname": "MerkenTopSelectie",
       "airs_names": [
         "BUS_MTS_OFF_AFS_DYN",
         "BUS_MTS_OFF_AFS"
@@ -129,7 +129,7 @@
       "look_through_target": null
     },
     {
-      "nickname": "FamilieTopSelectie Defensief",
+      "nickname": "FamilieTopSelectie",
       "airs_names": [
         "BUS_FTS_DEF_DYN",
         "BUS_FTS_DEF_AFS"

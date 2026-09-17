@@ -24,7 +24,7 @@ export type BlendHolding = { isin: string; weight: number; name?: string };
 
 /** A portfolio to blend: an explicit basket, or a model portfolio resolved server-side. */
 export type BlendTarget = {
-  basket?: { holdings: BlendHolding[] };
+  basket?: { holdings: BlendHolding[]; label?: string };
   portfolioId?: number;
   /**
    * Limit the blend to the metric keys the caller actually draws.  Leaving this absent retains
@@ -57,6 +57,10 @@ export function blendBody(t: BlendTarget): string {
   const cadence = t.cadence ?? 'annual';
   const base = t.basket
     ? { holdings: t.basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })),
+      basket_label: t.basket.label,
+      // A distinct body also evicts results memoised before folded TopSelecties used their whole
+      // linked-model composition rather than the Individual stocks basket on screen.
+      topselectie_source: t.basket.label ? 'individual-stocks' : undefined,
       cadence }
     : { portfolio_id: t.portfolioId, cadence };
   return JSON.stringify(t.metrics?.length ? { ...base, metrics: t.metrics } : base);

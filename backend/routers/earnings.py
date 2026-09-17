@@ -526,6 +526,13 @@ class FundamentalCoverageRequest(BaseModel):
 
     portfolio_id: int | None = None
     holdings: list[dict] | None = None
+    # A folded TopSelectie's human label. It identifies the selected basket for cache identity;
+    # membership itself always comes from `holdings`, which is the Individual stocks section the
+    # reader opened.
+    basket_label: str | None = None
+    # Request identity for a folded TopSelectie basket. It carries no calculation rule; see
+    # `_member_count_total`.
+    topselectie_source: str | None = None
     # ⚠ ON THE SHARED REQUEST, SO EVERY CARD ON THE TAB MOVES TOGETHER. All eleven `*-inputs`
     # endpoints take this model and read their lines through `_metric_by_year`, so one field here
     # is the whole cadence switch — and it is impossible for one card to be showing fiscal years
@@ -2124,6 +2131,14 @@ def _blend_rows(rows: list[dict], covered: list[dict],
 
 def _blend_envelope(built: dict, covered: list[dict], cov: dict) -> dict:
     """The response both endpoints return — one shape, written once."""
+    # `covered` is necessarily a strict subset whenever an otherwise-selected company has not yet
+    # had fundamentals ingested. A coverage line must disclose the complete selected basket, not
+    # silently redefine it to that filtered subset (FamilieTopSelectie: 13 of 28, not 13 of 14).
+    # Do this at the shared response boundary so the SSE and plain blend paths cannot disagree.
+    member_counts = {code: {**count,
+                            "total": int(cov.get("member_count_total")
+                                         or cov.get("holdings") or count.get("total") or 0)}
+                     for code, count in (built.get("member_counts") or {}).items()}
     return {
         "company_id": None,
         "company_name": f"{len(covered)} holdings · {cov['covered_pct']:.0f}% of weight",
@@ -2138,9 +2153,38 @@ def _blend_envelope(built: dict, covered: list[dict], cov: dict) -> dict:
         # were deliberately withheld, and on the aggregate path because a member with no euros
         # contributes nothing to a sum. `rule` says which, so the card's ⓘ explains the count it is
         # actually showing rather than the one it was written for.
-        "member_counts": built.get("member_counts") or {},
+        "member_counts": member_counts,
         "coverage": cov,
     }
+
+
+def _member_count_total(body: FundamentalCoverageRequest, cov: dict) -> int:
+    """The membership denominator displayed beside a blended line.
+
+    ACWI's weighted line can only use constituents with a stored market cap. That is a necessary
+    input constraint, not the size of ACWI: the committed iShares workbook is the source of the
+    full current membership, so it owns the reader-facing `X of Y` denominator. Other targets use
+    the membership list coverage already measured.
+    """
+    fallback = int(cov.get("holdings") or 0)
+    # An explicit basket is the exact Individual stocks selection the reader opened. This is also
+    # the shared source for a folded TopSelectie: substituting its whole linked model reintroduced
+    # cash and Stock ETFs that are visibly in other sections, so the parent view could not match
+    # the direct one. Expansion may canonicalise duplicate ISINs for arithmetic, but must never
+    # change the reader-facing membership count.
+    if body.holdings is not None:
+        return len(body.holdings) or fallback
+    if body.universe != "ACWI":
+        return fallback
+    try:
+        from index_universe.acwi.holdings import load_acwi_holdings  # noqa: PLC0415
+
+        holdings, _as_of = load_acwi_holdings()
+        return len(holdings) or fallback
+    except Exception:  # noqa: BLE001 - disclosure must not block an otherwise valid chart
+        _log.warning("Could not read the bundled ACWI holdings workbook for the member count",
+                     exc_info=True)
+        return fallback
 
 
 async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], dict]:
@@ -2151,6 +2195,7 @@ async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], d
     if not members:
         raise HTTPException(status_code=404, detail="no holdings to blend")
     cov = await coverage_for_async(members)
+    cov["member_count_total"] = _member_count_total(body, cov)
     covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
     if not covered:
         raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")

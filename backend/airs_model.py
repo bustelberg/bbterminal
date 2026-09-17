@@ -37,7 +37,7 @@ THE SHEET, MEASURED ON BUS_Neutraal_Dyn (42 rows)
 from __future__ import annotations
 
 from dataclasses import dataclass
-from io import BytesIO
+from io import BytesIO, StringIO
 
 import pandas as pd
 
@@ -78,7 +78,9 @@ def _text(v: object) -> str:
 
 def parse_model(file_bytes: bytes) -> list[ModelWeight]:
     """Every line of the MODEL sheet, with `fonds` already aliased to the holdings' spelling."""
-    df = pd.read_excel(BytesIO(file_bytes))
+    excel_kwargs = ({"engine": "xlrd", "engine_kwargs": {"logfile": StringIO()}}
+                    if file_bytes.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1") else {})
+    df = pd.read_excel(BytesIO(file_bytes), **excel_kwargs)
     cols = {str(c).strip().lower(): c for c in df.columns}
 
     def col(name: str):

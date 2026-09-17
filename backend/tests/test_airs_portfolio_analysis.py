@@ -851,6 +851,30 @@ class TestBookWeighting:
         pa._book_port_items(7, {})
         assert self.calls == [{"portefeuille": "X_DYN", "freshen": False}]
 
+    def test_topselectie_route_carries_the_reviewed_direct_model_for_fundamentals(
+            self, monkeypatch):
+        """The model valuing a certificate route need not be the TopSelecties row the reader
+        opens. Graphs must follow the reviewed direct row, or Familie is 25/27 names through a
+        parent while the same TopSelectie is 28 companies directly.
+        """
+        import routers._airs_account_links as links
+
+        self._wire(monkeypatch, rows=[{
+            "isin": "US1", "holding_name": "Company", "current_value_eur": 100,
+            "start_value_eur": 90, "asset_class": "Equity",
+            "via_names": ["FamilieTopSelectie"],
+            "sources": [{"label": "FamilieTopSelectie", "model_id": 1917,
+                         "value_eur": 100, "start_value_eur": 90}],
+        }])
+        monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
+            {"portefeuille": "X_DYN", "model_portfolio_id": 7},
+            {"portefeuille": "BUS_FTS_OFF_DYN", "model_portfolio_id": 1920},
+        ]})
+
+        source = pa._book_port_items(7, {})["holdings_detail"][0]["sources"][0]
+        assert source["model_id"] == 1917
+        assert source["fundamental_model_id"] == 1920
+
 
 class TestTheAllocationBarAlwaysShowsTheFourClasses:
     """⚠⚠ AN OMITTED CLASS CANNOT STATE A ZERO.

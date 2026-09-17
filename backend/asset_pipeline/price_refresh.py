@@ -85,6 +85,21 @@ def held_isins() -> set[str]:
     return _paged_isins("airs_model_portfolio_position") | _paged_isins("airs_holding")
 
 
+def post_close_isins() -> set[str]:
+    """Sold instruments observed by Analyse whose post-sale performance is displayed.
+
+    A sale removes an ISIN from AIRS's current-holdings tables, so it must live in
+    its own watch list; otherwise a perfectly mapped Western Digital can age for
+    ever immediately after sale and its hindsight-return cell becomes blank.
+    """
+    return _paged_isins("asset_post_close_watch")
+
+
+def watched_isins() -> set[str]:
+    """The bounded universe for the daily job: live holdings plus sold watch rows."""
+    return held_isins() | post_close_isins()
+
+
 def _executions(isins: set[str] | None) -> list[dict]:
     cols = "isin,analysis_id,yahoo_symbol,name,status"
     rows: list[dict] = []
@@ -258,7 +273,7 @@ def find_stale(held_only: bool = True,
     `market_latest_close`). Our own maximum alone cannot detect a fleet that stopped updating as a
     block, because every row stays within `stale_days` of every other one.
     """
-    ex = _executions(isins if isins is not None else (held_isins() if held_only else None))
+    ex = _executions(isins if isins is not None else (watched_isins() if held_only else None))
     latest_all = global_latest_close()
     if use_market_anchor:
         market = market_latest_close()
@@ -281,6 +296,30 @@ def find_stale(held_only: bool = True,
             stale.append({**r, "last_close": last})
     stale.sort(key=lambda r: r["last_close"])
     return stale, latest_all, len(ex)
+
+
+def backfill_missing(isins: set[str]) -> dict:
+    """Create a completely absent series for already-resolved instruments.
+
+    This deliberately uses the stored Yahoo symbol, never the resolver: a missing
+    price history is a data-fetch gap, not evidence that an ISIN needs mapping
+    again. The scheduler calls it only while the ingest worker is idle.
+    """
+    from asset_pipeline import store  # noqa: PLC0415
+
+    rows = _executions(isins)
+    latest = latest_close_by_analysis(sorted({r["analysis_id"] for r in rows}))
+    missing = [r for r in rows if r.get("yahoo_symbol") and r["analysis_id"] not in latest]
+    done = failed = 0
+    for r in missing:
+        try:
+            store.store_series(r["analysis_id"], r["yahoo_symbol"], None)
+            done += 1
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            log.warning("[price_refresh] price backfill %s failed: %s", r["isin"], e)
+        time.sleep(DEFAULT_SLEEP_S)
+    return {"missing": len(missing), "backfilled": done, "failed": failed}
 
 
 def refresh_stale(

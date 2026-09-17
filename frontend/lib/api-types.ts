@@ -10510,6 +10510,8 @@ export interface components {
          * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
          */
         FundamentalCoverageRequest: {
+            /** Basket Label */
+            basket_label?: string | null;
             /**
              * Cadence
              * @default annual
@@ -10523,6 +10525,8 @@ export interface components {
             metrics?: string[] | null;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Topselectie Source */
+            topselectie_source?: string | null;
             /** Universe */
             universe?: string | null;
         };
@@ -10822,8 +10826,12 @@ export interface components {
             book_income_eur?: number | null;
             /** Book Start Value Eur */
             book_start_value_eur?: number | null;
+            /** Fundamental Model Id */
+            fundamental_model_id?: number | null;
             /** Label */
             label?: string | null;
+            /** Model Id */
+            model_id?: number | null;
             /** Return Pct */
             return_pct?: number | null;
             /** Start Value Eur */
@@ -11152,10 +11160,9 @@ export interface components {
          *     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
          *     is the contribution one.
          *
-         *     ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
-         *     shows a larger percentage on the same euros than one held all year, because it answers "how
-         *     hard did this money work" rather than "what did the instrument do". The Holdings table's own
-         *     Return column is the other question and the two will differ.
+         *     `return_pct` IS CUMULATIVE RESULT OVER CAPITAL COMMITTED, not the instrument's price return.
+         *     It includes the position's actual purchases, realised sales and net income without annualising
+         *     a late purchase. The Holdings table's own Return column is the other question and may differ.
          */
         LedgerPosition: {
             /** Avg Capital Eur */
@@ -12749,6 +12756,11 @@ export interface components {
             comparable?: boolean | null;
             /** Dates Aligned */
             dates_aligned?: boolean | null;
+            /**
+             * Has External Flows
+             * @default false
+             */
+            has_external_flows?: boolean;
             /** Held Eur */
             held_eur?: number | null;
             /** Held Pct */
@@ -12866,6 +12878,8 @@ export interface components {
          * @description One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.
          */
         RelativeGrowthRequest: {
+            /** Basket Label */
+            basket_label?: string | null;
             /**
              * Cadence
              * @default annual
@@ -12881,6 +12895,8 @@ export interface components {
             period: string;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Topselectie Source */
+            topselectie_source?: string | null;
             /** Universe */
             universe?: string | null;
         };

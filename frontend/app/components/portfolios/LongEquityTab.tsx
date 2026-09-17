@@ -18,8 +18,11 @@ import FcfSbcYieldCard from './FcfSbcYieldCard';
 import DividendYieldCard from './DividendYieldCard';
 import { type BlendNote } from './blendNotes';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
-import { type MemberCount } from './memberCounts';
+import { countFor, coverageCount, memberCountLine, type MemberCount } from './memberCounts';
 import { benchBody, type BenchTarget } from './benchSeries';
+import { type Basket } from './types';
+import { GraphCoverageProvider, type GraphCoverageValue } from './GraphCoverage';
+import { useLang } from '../../../lib/i18n';
 
 /**
  * The "Long Equity" tab: a grid of growth cards (Revenue, FCF/share, …), each a
@@ -40,6 +43,11 @@ type MetricsResponse = {
    *  only metric withholds members deliberately, and a euro-summed one leaves out any member whose
    *  euros could not be built. See `memberCounts`. */
   member_counts?: Record<string, MemberCount>;
+  /** The common fundamentals baseline shown on every Graphs card. */
+  coverage?: {
+    holdings?: number; member_count_total?: number;
+    rows?: { reason?: string | null }[];
+  };
 };
 
 // Each card is one metric. `codes` carries BOTH GuruFocus section spellings (see the backend's
@@ -243,7 +251,7 @@ export default function LongEquityTab({
 }: {
   isin?: string;
   name?: string | null;
-  basket?: { holdings: { isin: string; weight: number; name?: string }[] };
+  basket?: Basket;
   portfolioId?: number;
   /**
    * A SECOND COMPANY to draw beside this one, on every chart, instead of an index.
@@ -269,6 +277,7 @@ export default function LongEquityTab({
   // The period switch's own words. Its KEYS ('annual' | 'quarterly') are state and stay English —
   // they go into `ck`, which re-keys every card's fetch. See `fundamentalChromeCopy`.
   const chrome = useFundamentalChromeCopy();
+  const [lang] = useLang();
   const isAgg = !!basket || portfolioId != null;
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -425,6 +434,7 @@ export default function LongEquityTab({
    *  and the book drop different numbers of members and the card names both. */
   const [benchCounts, setBenchCounts] =
     useState<Record<string, MemberCount> | undefined>();
+  const [benchCoverage, setBenchCoverage] = useState<MetricsResponse['coverage']>();
   const [benchErr, setBenchErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -433,7 +443,7 @@ export default function LongEquityTab({
     const ctrl = new AbortController();
     void (async () => {
       setBenchMetrics(null); setBenchErr(null); setBenchNotes(undefined);
-      setBenchCounts(undefined);
+      setBenchCounts(undefined); setBenchCoverage(undefined);
       if (!benchTarget) return;
       try {
         const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
@@ -469,6 +479,7 @@ export default function LongEquityTab({
         setBenchMetrics((b as MetricsResponse)?.metrics ?? []);
         setBenchNotes((b as MetricsResponse)?.blend_notes);
         setBenchCounts((b as MetricsResponse)?.member_counts);
+        setBenchCoverage((b as MetricsResponse)?.coverage);
       } catch (e) {
         if (!alive) return;                     // aborted by the switch — not a failure to report
         const detail = e instanceof Error ? e.message : String(e);
@@ -513,6 +524,10 @@ export default function LongEquityTab({
     metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
     blendNotes: data?.blend_notes, memberCounts: data?.member_counts,
     holdingsTarget, holdingsName: gName,
+    // A slice is blended from its own holdings, not from every position in the parent portfolio.
+    // The coverage line must therefore name the slice while the rest of the modal retains its
+    // parent-book context.
+    coverageLabel: basket?.label ?? gName,
     ingestIsin, onIngested, onReloadMetrics, cadence,
     benchMetrics, benchLabel: benchTarget?.label ?? null, benchTarget, benchErr, benchNotes,
     benchCounts,
@@ -521,6 +536,39 @@ export default function LongEquityTab({
   // the key a switch would leave twelve charts showing the previous basis until something else
   // re-keyed them — and the toggle would look broken on the cards that matter most.
   const ck = `${reloadKey}-${cadence}`;
+  const sharedCoverage = useMemo<GraphCoverageValue | null>(() => {
+    const line = memberCountLine({
+      // Revenue is the shared usable-fundamentals baseline: unlike EPS/FCF it has no
+      // positive-only survivorship rule, while its aggregate count still excludes a company that
+      // cannot participate because it has no market-cap history. On the current ACWI payload that
+      // is the meaningful 551, rather than the weaker 553 that merely have the sentinel row.
+      own: countFor(revenue.codes, data?.member_counts) ?? coverageCount(data?.coverage),
+      bench: countFor(revenue.codes, benchCounts)
+        ?? coverageCount(benchTarget ? benchCoverage : undefined),
+      isAgg,
+      ownLabel: basket?.label ?? gName ?? 'Portfolio',
+      benchLabel: benchTarget?.label ?? null,
+      lang,
+      always: true,
+    });
+    if (!line) return null;
+    return {
+      text: line.text,
+      what: lang === 'nl'
+        ? 'Hoeveel ondernemingen fundamentele data hebben voor deze grafiek.'
+        : 'How many companies have fundamental data available for this chart.',
+      where: lang === 'nl'
+        ? 'De individuele aandelen van de selectie en de leden van de gekozen benchmark.'
+        : 'The selection’s Individual stocks and the selected benchmark’s members.',
+      when: lang === 'nl' ? 'De laatst geladen fundamentele data.' : 'The latest loaded fundamentals.',
+      how: lang === 'nl'
+        ? 'Dezelfde dekkingsbasis staat eenmaal op iedere grafiek, zodat de grafiektitel nooit twee '
+          + 'verschillende dekkingsaantallen tegelijk toont.'
+        : 'The same coverage baseline appears once on every chart, so a chart heading never shows '
+          + 'two different coverage counts at the same time.',
+    };
+  }, [data?.coverage, data?.member_counts, benchCoverage, benchCounts, benchTarget, isAgg,
+      basket?.label, gName, lang, revenue.codes]);
   return (
     <>
     <div className="flex items-center gap-2 mb-3 text-[11px]">
@@ -572,6 +620,7 @@ export default function LongEquityTab({
     </div>
     {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
     {body ?? (
+    <GraphCoverageProvider value={sharedCoverage}>
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       {/* ⚠ THREE ACROSS, NOT FOUR. Each card carries a 320px chart with up to five series, a legend
           that wraps, and stat tiles above it — at four columns the plot area was narrow enough that
@@ -608,6 +657,7 @@ export default function LongEquityTab({
           leaves after direct cost, then whether the resulting profit turns into money. */}
       <CashConversionCard key={`cashconv-${ck}`} benchTarget={benchTarget} holdingsTarget={holdingsTarget} holdingsName={gName} sbcCorrection={sbcCorrection} />
     </div>
+    </GraphCoverageProvider>
     )}
     </>
   );

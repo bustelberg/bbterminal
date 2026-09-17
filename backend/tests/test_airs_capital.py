@@ -165,16 +165,16 @@ class TestTheLedgerAddsUp:
         assert led.capital_coverage_ratio == pytest.approx(0.9)
 
 
-class TestTheTwoReturnsAreDifferentQuestions:
-    def test_the_money_weighted_return_divides_by_capital_actually_tied_up(self):
-        # ⚠ A name bought late shows a LARGER percentage on the same euros than one held all year.
-        # That is the intended reading — "how hard did this money work" — and it is why this column
-        # will not match the Holdings table's Return.
-        led = build_ledger([_held("A", 100, 0.0, 11000.0)],
+class TestCashFlowReturn:
+    def test_a_late_purchase_reports_its_actual_gain_not_a_capital_days_equivalent(self):
+        # The actual gain is result over EUR 10,000 committed, not result over the calendar-year
+        # average capital. This is the Okta case.
+        led = build_ledger([_held("A", 100, 10000.0, 11000.0)],
                            [_buy("A", 10000.0, 100, "2026-06-01")], {}, 100000.0, Y0, END)
         p = led.positions[0]
         assert p.avg_capital_eur < 10000.0                     # invested for part of the year
-        assert money_weighted_return_pct(p) is not None
+        assert p.capital_invested_eur == 10000.0
+        assert money_weighted_return_pct(p) == pytest.approx(10.0)
 
     def test_a_position_with_no_capital_has_no_return_rather_than_zero(self):
         led = build_ledger([], [_buy("A", 0.0, 0, "2026-03-01")], {}, 10000.0, Y0, END)

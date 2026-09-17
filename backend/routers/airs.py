@@ -16,6 +16,7 @@ import asyncio
 import gzip
 import io
 import re
+from io import StringIO
 from routers import _airs_portfolio_store as store
 from routers._asset_financials import BasketRequest, PerformanceResponse, PriceSeriesResponse
 from routers._sse import sse_event, sse_message
@@ -40,6 +41,8 @@ from deps import IN_CHUNK_SIZE, supabase
 from portfolio import parse_airs_excel
 
 router = APIRouter(tags=["airs"])
+
+_OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
 
 def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
@@ -97,7 +100,12 @@ def _parse_att_excel(content: bytes) -> list[dict]:
     identity cannot tell `- kosten` from `+ kosten` while the term is zero. Parsed and
     stored; kept out of arithmetic until a book with real costs turns up.
     """
-    df = pd.read_excel(io.BytesIO(content), engine="xlrd")
+    # AIRS's valid legacy exports can contain an unused SSAT after an empty
+    # short-stream container. xlrd reports that benign structural detail to
+    # stdout; keep it out of the service log without swallowing parse errors.
+    excel_kwargs = ({"engine": "xlrd", "engine_kwargs": {"logfile": StringIO()}}
+                    if content.startswith(_OLE2_SIGNATURE) else {})
+    df = pd.read_excel(io.BytesIO(content), **excel_kwargs)
 
     def num(r, col, digits=2):
         """`col` off the row, rounded — or None. Absent column and absent value are the same
@@ -965,6 +973,14 @@ class HoldingSource(BaseModel):
     """
 
     label: str | None = None
+    # The fixed model behind a certificate route. The folded TopSelectie Fundamental action uses
+    # this identity to load that TopSelectie's own Individual stocks basket; a label is display
+    # text and cannot safely identify the composition that produced it.
+    model_id: int | None = None
+    # The reviewed TopSelecties-section model whose direct book supplies Fundamental Graphs.
+    # This can differ from `model_id`: FamilieTopSelectie's certificate route in Toppenberg points
+    # at model 1917, while the reviewed direct TopSelectie row opens model 1920 (28 companies).
+    fundamental_model_id: int | None = None
     value_eur: float
     # A share of the WHOLE BOOK, not of the row — so the routes add up to the holding's
     # `weight_now_pct` and can be checked against the column next to them.
@@ -1090,9 +1106,9 @@ class BookHoldingDetail(BaseModel):
     # ── WHAT THE MONEY MADE, as against what the instrument did.
     # ⚠ `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
     # priced in January — which erases your timing ON PURPOSE so the figure describes the stock.
-    # This one divides by the capital actually tied up, weighted by when it went in (Modified
-    # Dietz), with dividends net of withholding and anything realised on a mid-year sale already
-    # in the numerator. Measured: KLA-Tencor +55.62% as an instrument, +30.94% on the money.
+    # This one is the cumulative cash-flow return: Result divided by capital actually committed
+    # (opening value plus purchases). It has no capital-days weighting and is never annualised;
+    # dividends net of withholding and anything realised on a mid-year sale remain in the numerator.
     #
     # ⚠ NULL FOR A LEG INSIDE A CERTIFICATE, and that is not a gap to fill. AIRS trades the
     # WRAPPER, so a stock reached through one has no buys or sells of its own — there is no "money
@@ -1267,10 +1283,9 @@ class LedgerPosition(BaseModel):
     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
     is the contribution one.
 
-    ⚠ `return_pct` IS ON AVERAGE CAPITAL, NOT THE INSTRUMENT'S PRICE RETURN. A name bought in June
-    shows a larger percentage on the same euros than one held all year, because it answers "how
-    hard did this money work" rather than "what did the instrument do". The Holdings table's own
-    Return column is the other question and the two will differ.
+    `return_pct` IS CUMULATIVE RESULT OVER CAPITAL COMMITTED, not the instrument's price return.
+    It includes the position's actual purchases, realised sales and net income without annualising
+    a late purchase. The Holdings table's own Return column is the other question and may differ.
     """
 
     name: str
@@ -1377,6 +1392,9 @@ class RealisedBlock(BaseModel):
     realised_eur: float | None = None
     sold_income_eur: float | None = None
     book_ytd_pct: float | None = None
+    # True when deposits or withdrawals make opening-capital contributions invalid. In that case
+    # the rows are allocated over AIRS's reconciled flow-aware return instead.
+    has_external_flows: bool = False
     residual_eur: float | None = None
     reconciles: bool | None = None
     holdings_as_of: str | None = None
@@ -2656,8 +2674,12 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
     _lrows = [{"isin": (str(r["ISINCode"]).strip() if r.get("ISINCode") else None),
                "fonds": (str(r["Fonds"]).strip() if r.get("Fonds") else "")} for r in rows]
     links = resolve_links(supabase, raw["portfolio_id"], _lrows)
-    # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
-    _pf_names = {p["id"]: (p.get("display_name") or p["name"]) for p in (
+    # ⚠ Use the reviewed TopSelectie nickname before a saved model/AIRS name.  These labels feed
+    # the default, folded certificate view, so a book holding `EuropaTopSelectie Index` must say
+    # `EuropaTopSelectie` — the same reader-facing strategy name used on Management Dashboard.
+    # The certificate's own AIRS name remains separately available as `fonds`.
+    from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+    _pf_names = {p["id"]: (nickname_for(p.get("name")) or p.get("display_name") or p["name"]) for p in (
         supabase.table("airs_model_portfolio").select("id,name,display_name").execute().data or [])}
 
     # Anchored on the composition BEING SHOWN — for the default (newest) snapshot that is the

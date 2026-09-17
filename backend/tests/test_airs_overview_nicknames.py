@@ -101,3 +101,23 @@ class TestManagementGroups:
     def test_only_single_variant_building_blocks_lose_a_risk_suffix(self):
         assert ov._management_name("AITopSelectie Offensief", "topselecties", "AITopSelectie OFF DYN") == "AITopSelectie"
         assert ov._management_name("FamilieTopSelectie Beperkt Offensief", "topselecties", "BUS_FTS_BEPOFF_DYN") == "FamilieTopSelectie Beperkt Offensief"
+
+    def test_the_allowlist_supplies_the_topselecties_display_name(self):
+        assert ov._management_name("FamilieTopSelectie Offensief", "topselecties", "BUS_FTS_OFF_DYN") == "FamilieTopSelectie"
+        assert ov._management_name("MerkenTopSelectie Offensief", "topselecties", "BUS_MTS_OFF_AFS_DYN") == "MerkenTopSelectie"
+        assert ov._management_name("TolpoortenSelectie", "topselecties", "TolpoortenSelect OFF DYN") == "TolpoortenTopSelectie"
+
+    def test_the_topselecties_tab_is_an_explicit_allowlist(self, monkeypatch, stub):
+        stub(rows=[])
+        monkeypatch.setattr("routers._airs_accounts.list_accounts", lambda: [
+            {"portefeuille": "BUS_FTS_OFF_DYN"},
+            {"portefeuille": "BUS_FTS_DEF_DYN"},
+        ])
+        monkeypatch.setattr("routers._airs_account_links.list_account_links",
+                            lambda: {"accounts": []})
+
+        rows = ov.list_overview()
+
+        assert [(r["dynamic_portefeuille"], r["name"]) for r in rows] == [
+            ("BUS_FTS_OFF_DYN", "FamilieTopSelectie"),
+        ]

@@ -111,3 +111,30 @@ def test_benchmark_refresh_ranks_only_after_all_benchmarks_are_refreshed(monkeyp
 
     assert events == ["ACWI", "SP500", "AEX", "ranks"]
     assert detail["relative_momentum"] == {"ranked": 3}
+
+
+def test_fx_sync_relays_each_currency_to_the_job_progress(monkeypatch):
+    """The card must advance during the ECB batch, not jump from 0 to done."""
+    from momentum import data as momentum_data
+
+    def _sync(_supabase, currencies, _start, _end, on_progress=None):
+        assert on_progress is not None
+        for code in currencies:
+            on_progress(code, {"status": "synced", "rows": 2})
+        return {code: {"status": "synced", "rows": 2} for code in currencies}
+
+    class _Ctx:
+        def __init__(self):
+            self.events = []
+
+        def progress(self, done, total, message):
+            self.events.append((done, total, message))
+
+    monkeypatch.setattr(momentum_data, "sync_fx_rates_to_db", _sync)
+    ctx = _Ctx()
+    S._body_fx_sync(ctx)
+
+    # First event announces the batch; later events make the bar advance to its denominator.
+    assert ctx.events[0][0] == 0
+    assert ctx.events[-1][0] == ctx.events[-1][1]
+    assert "rate(s) stored" in ctx.events[-1][2]

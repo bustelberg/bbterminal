@@ -96,6 +96,22 @@ describe('the Analyse modal holdings table', () => {
   });
 });
 
+describe('sold-position risk cells', () => {
+  it('use the same explanatory info affordance as held positions', () => {
+    const s = source();
+    const sold = s.slice(s.indexOf('{sold.map((p, i) => ('));
+    // `Provenance` explains both the formula and why a dash is shown, unlike
+    // the old native title attribute on the cell.
+    expect((sold.match(/<Provenance source="benchmark"/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect(sold).toContain('isMomentumState(p.mom_state)');
+    expect(sold).toContain('stateLabel(p.mom_state)');
+    expect(sold).not.toContain('fmtRet(p.mom_12_1_pct)');
+    expect(sold).toContain('copy.row.momentumHow(');
+    expect(sold).toContain('copy.row.volHow(');
+    expect(sold).toContain('copy.row.betaHow(');
+  });
+});
+
 /**
  * EVERY GATED MONEY COLUMN APPEARS IN EVERY ROW OF THE TABLE — the same invariant one column to
  * the right of the one above, and the one the leading-block check cannot see.

@@ -44,6 +44,25 @@ export type MemberCount = {
   rule?: string;
 };
 
+/** The coverage envelope returned beside a blended metrics response. */
+export type CoverageEnvelope = {
+  holdings?: number;
+  member_count_total?: number;
+  rows?: { reason?: string | null }[];
+};
+
+/** Fundamentals coverage, before any one chart applies its own metric-specific member rule. */
+export function coverageCount(coverage?: CoverageEnvelope | null): MemberCount | undefined {
+  if (!coverage) return undefined;
+  const total = coverage.member_count_total ?? coverage.holdings;
+  if (total == null) return undefined;
+  return {
+    considered: (coverage.rows ?? []).filter((row) => row.reason === 'covered').length,
+    total,
+    rule: 'coverage',
+  };
+}
+
 /**
  * The counts for a card, whichever of its metric-code spellings the blend actually saw.
  *
@@ -65,6 +84,19 @@ const withheld = (c?: MemberCount): c is MemberCount =>
   !!c && c.considered < c.total;
 
 export type MemberCountLine = { text: string; rule: string };
+
+/**
+ * A Graphs card has one coverage owner. When the tab supplies its shared baseline, the older
+ * metric-specific line must stay hidden even when its count differs; otherwise one heading can
+ * claim two different ACWI populations at once. Outside that provider the metric line remains the
+ * fallback, so callers that do not have a shared baseline still disclose withheld members.
+ */
+export function showMetricCountLine(
+  metricLine: MemberCountLine | null,
+  sharedCoverageText?: string | null,
+): boolean {
+  return !!metricLine && !sharedCoverageText;
+}
 
 /**
  * ⚠⚠ THE LOCALE IS NOT DECORATION HERE. `toLocaleString('en-US')` prints 1,761; Dutch prints
@@ -90,19 +122,21 @@ const COUNT_OF: Record<Lang, (label: string, n: string, of: string, companies: b
  *
  * ⚠ THE OWN LINE IS GATED ON `isAgg`. A single company is one member and the count is a tautology.
  */
-export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel, lang }: {
+export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel, lang, always = false }: {
   own?: MemberCount;
   bench?: MemberCount;
   isAgg: boolean;
   ownLabel: string;
   benchLabel?: string | null;
   lang: Lang;
+  /** Graphs' shared coverage baseline is disclosed on every card, even at full coverage. */
+  always?: boolean;
 }): MemberCountLine | null {
   const parts: string[] = [];
-  if (isAgg && withheld(own)) {
+  if (isAgg && own && (always || withheld(own))) {
     parts.push(COUNT_OF[lang](ownLabel, String(own.considered), String(own.total), true));
   }
-  if (benchLabel && withheld(bench)) {
+  if (benchLabel && bench && (always || withheld(bench))) {
     parts.push(COUNT_OF[lang](benchLabel, bench.considered.toLocaleString(LOCALE[lang]),
       bench.total.toLocaleString(LOCALE[lang]), false));
   }
@@ -110,7 +144,8 @@ export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel, lang 
   // ⚠ THE RULE IS PER METRIC, NOT PER LINE — `_blend_rows` is the one place a book and an index
   // build their members, so both sides were filtered by the same rule and either may name it. The
   // shown side is preferred so the sentence explains a number that is actually on screen.
-  const rule = (isAgg && withheld(own) ? own.rule : undefined) ?? bench?.rule ?? 'all';
+  const rule = (isAgg && own && (always || withheld(own)) ? own.rule : undefined)
+    ?? bench?.rule ?? 'all';
   return { text: parts.join(' · '), rule };
 }
 

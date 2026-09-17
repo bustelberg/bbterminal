@@ -874,6 +874,42 @@ def _book_return(portfolio_id: int, ytd_from: str | None, model_ytd: float | Non
 
 
 
+def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
+    """Current composition behind a mapped certificate whose fixed model is empty.
+
+    EuropaTopSelectie's fixed AIRS model currently has no dated position rows, while its mapped
+    Dynamic account does have the actual constituents. That account comes from the same reviewed
+    strategy map used for the nickname and certificate link. Express its latest EUR values as
+    percentages so the normal expansion path can consume it without special cases.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    from ._airs_strategy_map import dynamic_account_for_holding  # noqa: PLC0415
+
+    account = dynamic_account_for_holding(holding_name)
+    if not account:
+        return []
+    link = next((row for row in list_account_links().get("accounts", [])
+                 if row.get("portefeuille") == account), {})
+    model_id = link.get("model_portfolio_id")
+    rows = resolve_account_isins(account, freshen=False).get("rows") or []
+    valued = [(row, float(row.get("current_value_eur") or 0)) for row in rows]
+    total = sum(value for _, value in valued if value > 0)
+    if total <= 0:
+        return []
+    return [{
+        "isin": row.get("isin"),
+        "fonds": row.get("holding_name"),
+        "percentage": value / total * 100.0,
+        "categorie": row.get("bucket"),
+        # The account's reviewed Fixed-model link is needed later to load this child book's own
+        # transaction ledger for Money-weighted return. Europa's certificate link is absent only
+        # because its legacy target model is empty; its Dynamic account still has this real link.
+        "_model_id": model_id,
+    } for row, value in valued if value > 0]
+
+
 def _expand_book_rows(rows: list[dict]) -> list[dict]:
     """Book holdings with each linked certificate replaced by the stocks of the model it IS.
 
@@ -888,27 +924,44 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
     value, and every percentage here is a share of a total that would silently shrink.
     """
     from ._airs_lookthrough import _datum_of, _positions_of  # noqa: PLC0415
+    from ._airs_strategy_map import nickname_for_holding  # noqa: PLC0415
 
     # ⚠ `sources` IS STAMPED HERE, WHERE THE SPLIT HAPPENS, because this is the only place that
     # still knows how much of a leg came from where. One entry per ROUTE IN — `label=None` for the
     # book's own shares — carried through `merge_by_isin`, which concatenates them.
     out: list[dict] = []
+    account_compositions: dict[str, list[dict]] = {}
     for r in rows:
         target = r.get("linked_portfolio_id")
+        # An opaque certificate still uses the reviewed strategy nickname in the default view.
+        # Its direct source and values remain the certificate's own.
+        folded_name = (nickname_for_holding(r.get("holding_name"))
+                       or r.get("linked_portfolio_name") or r.get("holding_name"))
         direct_src = [{"label": None, "model_id": None,
                        "value_eur": float(r.get("current_value_eur") or 0),
                        "start_value_eur": float(r.get("start_value_eur") or 0)}]
-        if not target:
+        child = _positions_of(target, _datum_of(target)) if target else []
+        fallback_model_id = None
+        if not child and nickname_for_holding(r.get("holding_name")):
+            cache_key = str(r.get("holding_name") or "")
+            if cache_key not in account_compositions:
+                account_compositions[cache_key] = _dynamic_account_positions(
+                    r.get("holding_name"))
+            child = account_compositions[cache_key]
+            fallback_model_id = next((c.get("_model_id") for c in child
+                                      if c.get("_model_id") is not None), None)
+        if not child:
             # held directly — no strategy in between
-            out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
+            out.append({**r, "holding_name": folded_name,
+                        "via_names": [], "via_holding_names": [], "sources": direct_src})
             continue
-        child = _positions_of(target, _datum_of(target))
         inner = sum(float(c.get("percentage") or 0) for c in child)
         if not child or inner <= 0:
             # A certificate with nothing behind it stays whole, so the book holds IT — the route in
             # is direct, and labelling it with the strategy it wraps would claim a look-through
             # that did not happen.
-            out.append({**r, "via_names": [], "via_holding_names": [], "sources": direct_src})
+            out.append({**r, "holding_name": folded_name,
+                        "via_names": [], "via_holding_names": [], "sources": direct_src})
             continue
         cur = float(r.get("current_value_eur") or 0)
         start = float(r.get("start_value_eur") or 0)
@@ -916,9 +969,15 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
             share = float(c.get("percentage") or 0) / inner
             if share <= 0:
                 continue
+            # This is the CHILD instrument's AIRS category, not the certificate's.
+            # A certificate is often unclassified in its parent's account; carrying
+            # that marker onto HOYA/Baidu makes a plainly-labelled `AAND` position
+            # disappear from Stocks when the grid has not caught up yet.
+            child_class = _class_from_categorie(c.get("categorie"))
             out.append({
                 **{k: v for k, v in r.items() if k not in
-                   ("isin", "holding_name", "current_value_eur", "start_value_eur", "bucket")},
+                   ("isin", "holding_name", "current_value_eur", "start_value_eur", "bucket",
+                    "categorie", "asset_class")},
                 "isin": c.get("isin"),
                 "holding_name": c.get("fonds"),
                 "current_value_eur": cur * share,
@@ -927,11 +986,16 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # stamp that on a bond the child holds. Cleared so the shared classifier re-derives
                 # it from the child instrument's own grid row.
                 "bucket": None,
+                # `categorie` is the strongest classification signal we have. It
+                # must travel with a look-through leg for the same reason the ISIN
+                # and name do; otherwise an unresolved child becomes Unclassified
+                # despite AIRS already identifying it as an equity or bond.
+                "categorie": c.get("categorie"),
+                "asset_class": child_class,
                 "linked_portfolio_id": None,
                 # WHICH strategy put us in this instrument. The certificate's own name is the only
                 # record of it once its value has been split across the model behind it.
-                "via_names": ([r["linked_portfolio_name"]]
-                              if r.get("linked_portfolio_name") else []),
+                "via_names": [folded_name],
                 # ⚠ THE CERTIFICATE'S OWN AIRS NAME, which `via_names` does NOT carry — that is
                 # the STRATEGY's name ("StarTopSelectie Offensief"), while the ledger is keyed by
                 # the INSTRUMENT the book actually traded ("Star Selection Index"). Without it a
@@ -943,8 +1007,8 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # ⚠ `model_id` RIDES ALONG, because the route's return has to come from the book
                 # behind THIS certificate specifically. Two certificates wrapping two strategies
                 # can both hold NVIDIA, and each book values its own position differently.
-                "sources": [{"label": r.get("linked_portfolio_name") or "via a certificate",
-                             "model_id": target,
+                "sources": [{"label": folded_name or "via a certificate",
+                               "model_id": target or fallback_model_id,
                              "value_eur": cur * share,
                              "start_value_eur": start * share}],
             })
@@ -995,7 +1059,7 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
             continue
         # An ISIN-less, non-cash row still lands on "Unclassified" — an honest unsure, reached by
         # the classifier rather than by never asking it.
-        r["bucket"] = classify_bucket(None, r["is_fund"], r.get("isin"),
+        r["bucket"] = classify_bucket(r.get("asset_class"), r["is_fund"], r.get("isin"),
                                       r.get("holding_name") or "", g)
     return rows
 
@@ -1238,7 +1302,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_holding_isin import (classify_bucket, resolve_account_isins)  # noqa: PLC0415
 
-    link = next((a for a in list_account_links()["accounts"]
+    account_links = list_account_links()["accounts"]
+    link = next((a for a in account_links
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
@@ -1279,6 +1344,13 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # unclassifiable is not a limitation, it is a wrong answer: the stocks are known, one link
     # away, and the model side is already drawing them.
     rows = _expand_book_rows(rows)
+    # A fallback expansion (EuropaTopSelectie) obtains its model ID from the mapped Dynamic
+    # account because the certificate itself has no legacy model link. Collect those IDs after
+    # expansion too, or the route has an identity but never loads that child book's valuations or
+    # transaction ledger.
+    wrapped_ids.update(
+        s["model_id"] for r in rows for s in (r.get("sources") or [])
+        if s.get("label") is not None and s.get("model_id") is not None)
 
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
     items: list[tuple[float, tuple[str, str, str]]] = []
@@ -1470,6 +1542,17 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         net_income = _net_income(r)
         own_book = None
         routes = _weigh_sources(r.get("sources"), total_w)
+        # A certificate's linked model is the right identity for valuing that route, but not always
+        # the reviewed TopSelectie shown as its own row on /management-dashboard. Keep both. The
+        # Fundamental action must open the latter so direct and folded views use one composition.
+        from ._management_topselecties import topselectie_for_display_name  # noqa: PLC0415
+        for rt in routes:
+            reviewed = topselectie_for_display_name(rt.get("label"))
+            reviewed_account = (reviewed or {}).get("dynamic_portefeuille")
+            reviewed_link = next((a for a in account_links
+                                  if a.get("portefeuille") == reviewed_account), None)
+            rt["fundamental_model_id"] = (
+                reviewed_link.get("model_portfolio_id") if reviewed_link else None)
         direct = direct_marks.get(isin or "") if via else None
         for rt in routes:
             if rt["model_id"] is None:
@@ -1705,6 +1788,8 @@ def _realised_block(portfolio_id: int) -> dict:
         "realised_eur": rec.get("realised_ytd_eur"),
         "sold_income_eur": rec.get("sold_income_eur"),
         "book_ytd_pct": rec.get("book_return_pct"),
+        "has_external_flows": bool(abs(float(rec.get("deposits_eur") or 0))
+                                   + abs(float(rec.get("withdrawals_eur") or 0))),
         "residual_eur": rec.get("residual_vs_book_eur"),
         # ⚠ None is UNKNOWN, not False — the two sides can be valued a day apart (VOLK snapshot vs
         # ATT report), and that difference is market movement, not a missing position.
@@ -1889,11 +1974,16 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             .eq("as_of_date", _book_snapshot_date(portefeuille) or "").execute().data or [])
 
     muts = ref_mutaties_for(portefeuille)
-    income = {f: d.net_eur for f, d in direct_result([Mutatie(
+    mut_rows = [Mutatie(
         grootboek=m["grootboek"], fonds=m["fonds"], omschrijving="",
         boekdatum=_date.fromisoformat(str(m["boekdatum"])) if m.get("boekdatum") else None,
         amount_eur=float(m["amount_eur"]))
-        for m in muts]).by_fonds.items()}
+        for m in muts]
+    income = {f: d.net_eur for f, d in direct_result(mut_rows).by_fonds.items()}
+    income_flows = defaultdict(list)
+    for m in mut_rows:
+        if m.grootboek in {"Dividend", "Dividendbelasting"} and m.fonds and m.boekdatum:
+            income_flows[m.fonds].append((m.boekdatum, m.amount_eur))
 
     # ⚠ THE NAMES WHOSE QUANTITY ARITHMETIC CANNOT BE TRUSTED — anything carrying a transaction
     # type we do not interpret. `trades()` drops those rows (it emits only buys and sells), so the
@@ -1938,7 +2028,22 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
 
     led = build_ledger(volk, trades(sheet), income, rec.get("book_start_eur"),
                        _date.fromisoformat(van), _date.fromisoformat(tot),
-                       unknown_names=unknown, splits=splits)
+                       unknown_names=unknown, splits=splits, income_flows_by_name=dict(income_flows))
+    # A book with deposits or withdrawals has no common opening-capital denominator. AIRS's own
+    # flow-aware return is still authoritative, so distribute it over EVERY ledger row by its
+    # share of the fully reconciled EUR result. In particular, sold positions must not disappear
+    # from Contribution merely because the book began at zero (MomentumTopSelectie).
+    has_external_flows = bool(abs(float(rec.get("deposits_eur") or 0))
+                              + abs(float(rec.get("withdrawals_eur") or 0)))
+    book_return = rec.get("book_return_pct")
+
+    def position_contribution(p):
+        if has_external_flows:
+            if not led.total_result_eur or book_return is None:
+                return None
+            return p.result_eur / led.total_result_eur * float(book_return)
+        return contribution_pct(p, led.basis_eur)
+
     return {
         "positions": [{
             "name": p.name,
@@ -1950,7 +2055,9 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             # been skipped) — a partial figure in a column headed "Avg capital invested" is worse
             # than none, because it looks whole.
             "opening_eur": None if p.capital_unknown else p.opening_eur,
-            "avg_capital_eur": None if p.capital_unknown else p.avg_capital_eur,
+            # The table's cash-flow return is total result divided by capital actually committed;
+            # average capital remains internal to the allocation-weight calculation.
+            "avg_capital_eur": None if p.capital_unknown else p.capital_invested_eur,
             "capital_unknown": p.capital_unknown,
             # ⚠ Descriptive — a share of the year's CAPITAL, not of the return. The column that
             # adds up is `contribution_pct`.
@@ -1964,7 +2071,7 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             "fund_result_eur": p.fund_result_eur,
             "fx_result_eur": p.fx_result_eur,
             "unsplit_result_eur": p.unsplit_result_eur,
-            "contribution_pct": contribution_pct(p, led.basis_eur),
+            "contribution_pct": position_contribution(p),
             "return_pct": money_weighted_return_pct(p),
             "sales": p.sales,
             "first_sale": p.first_sale,
@@ -2560,9 +2667,13 @@ def _with_results(holdings: list[dict], realised: dict,
     """
     if not holdings:
         return holdings
-    basis = realised.get("basis_eur") if realised.get("available") else None
-    flow_return = realised.get("book_ytd_pct") if not basis else None
-    ledger_result = realised.get("ledger_result_eur") if not basis else None
+    # Deposits/withdrawals invalidate Result ÷ opening capital even when the opening balance is
+    # non-zero. Use the fully reconciled flow-aware book return for every direct position instead.
+    has_external_flows = bool(realised.get("has_external_flows"))
+    basis = (realised.get("basis_eur") if realised.get("available") and not has_external_flows
+             else None)
+    flow_return = realised.get("book_ytd_pct") if basis is None else None
+    ledger_result = realised.get("ledger_result_eur") if basis is None else None
     by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
     # ⚠ THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
     # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
@@ -2800,7 +2911,7 @@ RISK_KEYS = ("vol_5y_pct", "beta_5y", "mom_12_1_pct", "mom_12_1_from", "mom_12_1
 #:
 #: ⚠ BUMP THIS WHENEVER THE ARITHMETIC OF A RISK COLUMN CHANGES — a new cadence, a different
 #: annualisation, a changed floor. It costs one recompute and removes the whole class.
-RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v1"
+RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 
 #: THE SAME TRICK, FOR THE WHOLE PAYLOAD — bump it when the COMPOSITION arithmetic changes.
 #:
@@ -2887,6 +2998,34 @@ def _asset_execution_isins_by_name(names: list[str]) -> dict[str, str]:
     return out
 
 
+def _company_isins_by_name(names: list[str]) -> dict[str, str]:
+    """Resolve old sold AIRS names through the verified company/ISIN universe.
+
+    Historical AIRS snapshots begin after some MomentumTopSelectie sales. Those
+    names may therefore be absent from both `airs_holding` and `asset_execution`,
+    even though the company universe has their canonical ISIN. As above, accept
+    exactly one conservative name match; a short or ambiguous name stays blank.
+    The normal ingest queue then resolves the ISIN and maintains its prices.
+    """
+    out: dict[str, str] = {}
+    for name in names:
+        words = _instrument_name_words(name)
+        if not words:
+            continue
+        pattern = "%".join(words) + "%"
+        rows = (supabase.table("company").select("isin,company_name")
+                .not_.is_("isin", "null").ilike("company_name", pattern)
+                .limit(20).execute().data or [])
+        isins = {r["isin"] for r in rows
+                 if r.get("isin") and _instrument_names_match(name, r.get("company_name") or "")}
+        if len(isins) == 1:
+            out[name] = next(iter(isins))
+        elif len(isins) > 1:
+            _log.info("[analysis] %r matches %d company ISINs; sold row left unlinked",
+                      name, len(isins))
+    return out
+
+
 def _sold_position_isins(names: list[str]) -> dict[str, str]:
     """`{holding name: isin}` for positions the book no longer holds.
 
@@ -2953,6 +3092,8 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
     # the unresolved names. This lets the after-sale result survive a sale.
     unresolved = [name for name in wanted if name not in out]
     out.update(_asset_execution_isins_by_name(unresolved))
+    unresolved = [name for name in wanted if name not in out]
+    out.update(_company_isins_by_name(unresolved))
     return out
 
 
@@ -2975,6 +3116,21 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
     if not sold:
         return
     isin_of = _sold_position_isins([p.get("name") for p in sold])
+    # Persist the small set of known sold ISINs. They no longer appear in AIRS's
+    # current-holdings tables, but their counterfactual post-sale return remains
+    # visible here and therefore needs the same daily price maintenance.
+    watch_rows = [
+        {"isin": isin, "last_sale_date": p.get("last_sale")}
+        for p in sold
+        if (isin := isin_of.get((p.get("name") or "").strip()))
+    ]
+    if watch_rows:
+        try:
+            supabase.table("asset_post_close_watch").upsert(
+                watch_rows, on_conflict="isin"
+            ).execute()
+        except Exception as e:  # noqa: BLE001 -- enrichment must not break Analyse during migration
+            _log.warning("[analysis] could not register sold-price watch: %s", e)
     risk = _holding_risk(sorted(set(isin_of.values())), benchmark_label)
     # A closed row's ordinary Instrument return slot answers a different, useful question: what
     # the security did AFTER the book sold it. The realised amount remains the book's historical
@@ -3069,7 +3225,10 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     if not want:
         return {}
     bench_isin = _BENCHMARK_RISK_ETF.get((benchmark_label or "").upper())
-    floor = _min_bars(years)
+    # A correctly mapped new listing has a measurable risk profile once it has
+    # one full year of history. Longer-lived listings still use the requested
+    # five-year price window loaded by this function.
+    floor = _min_bars(1)
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
@@ -3134,11 +3293,11 @@ def _holding_risk(isins: list[str], benchmark_label: str,
 
     # ⚠ FOUR YEARS OF MONTHS, the same shape as the daily and weekly floors — the three columns
     # must not disagree about which rows have enough history to be quoted under a "5y" heading.
-    floor_m = int(12 * (years - 1))
+    floor_m = 12
     bench_w = _by_week(series.get(bench_isin or "", []))
     # ⚠ FOUR YEARS OF WEEKS, mirroring the daily floor — the two columns must not disagree about
     # which rows have enough history.
-    floor_w = int(52 * (years - 1))
+    floor_w = 52
 
     out: dict[str, dict] = {}
     for isin in todo:

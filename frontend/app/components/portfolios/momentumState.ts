@@ -21,6 +21,18 @@
 /** -3 (weakest) .. +3 (strongest). */
 export type MomentumState = -3 | -2 | -1 | 0 | 1 | 2 | 3;
 
+/** Server-equivalent upper bounds from `momentum/relative.py::_CUTS`, used only for synthetic
+ * basket percentiles. A direct holding always uses its server-supplied `mom_state`. */
+const PERCENTILE_STATES: readonly [number, MomentumState][] = [
+  [0.10, -3], [0.25, -2], [0.40, -1], [0.60, 0], [0.75, 1], [0.90, 2], [1, 3],
+];
+
+export function stateFromPercentile(pct: number | null | undefined): MomentumState | null {
+  if (pct == null || !Number.isFinite(pct)) return null;
+  const bounded = Math.max(0, Math.min(1, pct));
+  return PERCENTILE_STATES.find(([upper]) => bounded <= upper)?.[1] ?? 3;
+}
+
 export const MOMENTUM_STATE_LABELS: Record<MomentumState, string> = {
   [-3]: '−−−',
   [-2]: '−−',

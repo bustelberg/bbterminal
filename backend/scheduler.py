@@ -1167,14 +1167,24 @@ def _run_asset_price_refresh(trigger: str) -> None:
         # Detect BEFORE fetching. A restart must not cost ~220 Yahoo calls just to discover
         # there was nothing to do — and with `--reload` in dev, restarts are constant. This is
         # a handful of queries (one grouped COPY), so the common case is a near-free no-op.
-        stale, latest, considered = price_refresh.find_stale(held_only=True)
+        watched = price_refresh.watched_isins()
+        stale, latest, considered = price_refresh.find_stale(isins=watched)
+        # A resolved sold name with no rows at all is not "stale" (there is no
+        # last date to compare), so repair that distinct case after the cheap
+        # detection pass. This uses its existing symbol and cannot remap it.
+        backfill = price_refresh.backfill_missing(watched)
         if not stale:
             _log.info(
-                "[scheduler] asset price refresh (%s): all %s held instrument(s) current as of "
+                "[scheduler] asset price refresh (%s): all %s watched instrument(s) current as of "
                 "%s — nothing to do", trigger, considered, latest,
             )
-            rec.skip(f"all {considered} held instrument(s) current as of {latest}")
-            rec.done(considered=considered, latest=str(latest), stale=0)
+            detail = f"all {considered} watched instrument(s) current as of {latest}"
+            if backfill["backfilled"]:
+                detail += f"; {backfill['backfilled']} absent series backfilled"
+            else:
+                rec.skip(detail)
+            rec.done(detail, considered=considered, latest=str(latest), stale=0,
+                     price_backfilled=backfill["backfilled"])
             return
 
         # WARNING, not info: uvicorn leaves the ROOT logger at WARNING, so an `info` here is
@@ -1183,18 +1193,19 @@ def _run_asset_price_refresh(trigger: str) -> None:
         # firing at warning for the same reason. The no-op case above stays at info: a healthy
         # restart should be quiet.
         _log.warning(
-            "[scheduler] asset price refresh (%s): %s of %s held instrument(s) stale vs %s "
+            "[scheduler] asset price refresh (%s): %s of %s watched instrument(s) stale vs %s "
             "(oldest %s) — fetching the gap",
             trigger, len(stale), considered, latest, stale[0]["last_close"],
         )
-        r = price_refresh.refresh_stale(held_only=True)
+        r = price_refresh.refresh_stale(isins=watched)
         _log.warning(
             "[scheduler] asset price refresh (%s) done — %s moved, %s unchanged, %s failed",
             trigger, r["moved"], r["unchanged"], r["failed"],
         )
         rec.done(f"{r['moved']} moved, {r['unchanged']} unchanged, {r['failed']} failed",
                  considered=considered, stale=len(stale), moved=r["moved"],
-                 unchanged=r["unchanged"], failed=r["failed"])
+                 unchanged=r["unchanged"], failed=r["failed"],
+                 price_backfilled=backfill["backfilled"])
       except Exception as e:  # noqa: BLE001
         # ⚠ CAUGHT HERE, SO THE RECORD MUST BE SET BY HAND. `record_run` marks a run failed off the
         # exception PROPAGATING; swallowing it (which this must, to keep the scheduler thread
@@ -1670,7 +1681,29 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
     # emitted afterwards would arrive with the summary and tell the reader nothing they had not
     # already stopped waiting for.
     step(0, len(currencies), f"asking the ECB for {len(currencies)} currencies since 2000-01-01…")
-    status = sync_fx_rates_to_db(supabase, currencies, _date(2000, 1, 1), _date.today())
+    completed = 0
+
+    def _progress(code: str, result: dict) -> None:
+        """Relay the sync's per-currency completion callback to the job card.
+
+        `sync_fx_rates_to_db` keeps its four-request worker pool; its callback is
+        invoked by the coordinator as each result is collected, so this only
+        improves observability and cannot increase ECB or database concurrency.
+        """
+        nonlocal completed
+        completed += 1
+        outcome = str(result.get("status") or "unknown")
+        rows = int(result.get("rows") or 0)
+        message = f"{code}: {outcome}"
+        if rows:
+            message += f" — {rows:,} rate(s) stored"
+        elif result.get("error"):
+            message += f" — {result['error']}"
+        step(completed, len(currencies), message)
+
+    status = sync_fx_rates_to_db(
+        supabase, currencies, _date(2000, 1, 1), _date.today(), on_progress=_progress,
+    )
     synced = sum(1 for s in status.values() if s.get("status") == "synced")
     errors = sum(1 for s in status.values() if s.get("status") == "error")
     _log.info("[scheduler] fx sync done: %s/%s currencies updated, %s errors",

@@ -20,6 +20,7 @@ import {
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import { loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
+import { dialog } from '../../../lib/dialog';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import PanelDialog from './PanelDialog';
@@ -30,7 +31,7 @@ import AnalyseLoading from './AnalyseLoading';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import LoadingDots from './LoadingDots';
 import { type Basket } from './types';
-import { isMomentumState, ordinalPercentile, stateLabel, stateTone } from './momentumState';
+import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
 
 const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
@@ -860,7 +861,7 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
  * wrong — turning on Return's denominator without its numerator, say.
  *
  *     Instrument return  Result ÷ Beginwaarde
- *     Money-weighted     Result ÷ Avg capital invested
+ *     Cash-flow IRR      XIRR of dated position cash flows, shown cumulatively
  *     Contribution       Result ÷ the book's opening capital
  *
  * ⚠ `Instrument return` IS NOT A TIME-WEIGHTED RETURN AND MUST NOT BE RELABELLED AS ONE. A TWR
@@ -869,8 +870,9 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
  * is the same INTENT as a TWR and is why the name is tempting — but it does so with a known bias a
  * real TWR does not have: a mid-year buy is valued at January's price, overstating by
  * `q_bought × (p_buy − p_open)` (measured on KLA: EUR 1,146 — see `backend/airs_timing.py`).
- * `Money-weighted` beside it IS its technical name: Modified Dietz over average invested capital,
- * `money_weighted_return_pct` on the wire.
+ * `Cash-flow IRR` beside it is true dated XIRR over the position's opening value, transactions,
+ * income and final valuation. It is de-annualised over the actual holding period;
+ * `money_weighted_return_pct` remains the wire key for continuity.
  *
  * ⚠ ALL THREE SHARE `Result`, WHICH IS WHY SELECTION IS STORED AS GROUPS AND THE COLUMNS ARE
  * DERIVED AS THEIR UNION. Storing columns instead would mean deciding what happens to `Result`
@@ -1368,6 +1370,32 @@ function soleVia(h: BookHolding): string | null {
 const SYNTHETIC_ROWS = new WeakSet<object>();
 const isSynthetic = (h: BookHolding) => SYNTHETIC_ROWS.has(h);
 
+/** Known constituent basket for a folded certificate. The row stays a Stock ETF, but its
+ * Fundamental action can use the holdings we already expanded from that certificate. */
+const SYNTHETIC_BASKETS = new WeakMap<object, Basket>();
+export const syntheticBasket = (h: object): Basket | undefined => SYNTHETIC_BASKETS.get(h);
+
+/** AIRS's own Dynamic-book code behind a reader-facing folded TopSelectie nickname. */
+const SYNTHETIC_AIRS_NAMES = new WeakMap<object, string>();
+export const syntheticAirsName = (h: object): string | undefined => SYNTHETIC_AIRS_NAMES.get(h);
+
+/** The exact basket behind the direct TopSelectie's Individual stocks section. Exported because
+ * this identity is the invariant that matters: direct and folded entry points must feed Graphs
+ * byte-for-byte equivalent holdings and weights. */
+export function individualStocksBasket(
+  direct: Pick<ModelPortfolioAnalysis, 'book_holdings'>, label: string,
+): Basket {
+  return {
+    label,
+    holdings: (direct.book_holdings ?? []).flatMap((holding) => (
+      holding.isin && holding.bucket === EQUITY_BUCKET && !holding.is_fund
+        ? [{ isin: holding.isin, weight: holding.weight_now_pct ?? 0,
+          name: holding.name ?? undefined }]
+        : []
+    )),
+  };
+}
+
 /** `
 
 1.23 ÷ 4.56 − 1 = +7.9%` — the substituted line under a momentum formula, or '' when the
@@ -1407,6 +1435,19 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     // instrument the book holds and its underlying positions, not merely a way to reduce rows.
     const s = sumResults(legs);
     const weight = legs.reduce((a, h) => a + (h.weight_now_pct ?? 0), 0);
+    // Aggregate every known constituent instead of inheriting whichever leg happens to be first.
+    // The first leg is often Liquiditeiten, which is why AziëTopSelectie showed three dashes.
+    const weightedSignal = (pick: (leg: BookHolding) => number | null | undefined) => {
+      const known = legs.flatMap((leg) => {
+        const value = pick(leg);
+        return value == null ? [] : [{ value, weight: leg.weight_now_pct ?? 0 }];
+      });
+      const knownWeight = known.reduce((total, item) => total + item.weight, 0);
+      return knownWeight > 0
+        ? known.reduce((total, item) => total + item.value * item.weight, 0) / knownWeight
+        : null;
+    };
+    const weightedMomentumRank = weightedSignal((leg) => leg.mom_pct_rank);
     const row: BookHolding = {
       // Spread a real leg so every field this row type carries exists; everything that describes
       // the POSITION rather than the wrapper is overridden below.
@@ -1434,6 +1475,17 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       avg_capital_eur: s.avgcapital,
       money_weighted_return_pct: s.mwr,
       own_return_pct: (s.result != null && s.opening) ? (s.result / s.opening) * 100 : null,
+      mom_12_1_pct: weightedSignal((leg) => leg.mom_12_1_pct),
+      mom_12_1_from: null,
+      mom_12_1_to: null,
+      // Rank first, then bucket it. Averaging pre-bucketed states made a 73rd-percentile basket
+      // look `++` merely because its weighted state happened to round up; the percentile is the
+      // actual relative-momentum measure and keeps the glyph consistent with its tooltip.
+      mom_state: stateFromPercentile(weightedMomentumRank),
+      mom_pct_rank: weightedMomentumRank,
+      mom_rank_n: weightedSignal((leg) => leg.mom_rank_n),
+      vol_5y_pct: weightedSignal((leg) => leg.vol_5y_pct),
+      beta_5y: weightedSignal((leg) => leg.beta_5y),
       // The row IS the certificate now, so it is no longer reached "through" anything.
       sources: [],
       via_names: [],
@@ -1441,6 +1493,37 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     };
     // ⚠ MARKED AS MADE UP. It is a strategy, not a tradeable position — see `SYNTHETIC_ROWS`.
     SYNTHETIC_ROWS.add(row);
+    // This is the exception to ordinary ETFs: this certificate's underlying companies are known.
+    // Keep every selected position. Combining duplicate ISINs is fine for a weighted blend, but
+    // makes the Fundamental coverage label claim fewer TopSelectie stocks than the selection has.
+    const holdings = legs.flatMap((leg) => leg.isin && !leg.is_fund
+      ? [{ isin: leg.isin, weight: leg.weight_now_pct ?? 0, name: leg.name ?? undefined }]
+      : []);
+    // The parent book's look-through rows may already have merged identical ISINs reached through
+    // several routes. Keep the underlying model id so opening Fundamental can replace this
+    // provisional basket with the direct TopSelectie's own Individual stocks rows. That direct
+    // basket is the source of truth for both its charts and its member count.
+    const sourceIds = [...new Set(legs.flatMap((leg) => (leg.sources ?? [])
+      .filter((source) => source.label === label
+        && source.fundamental_model_id != null)
+      .map((source) => source.fundamental_model_id!)))];
+    SYNTHETIC_BASKETS.set(row, {
+      label,
+      holdings,
+      sourcePortfolioId: sourceIds.length === 1 ? sourceIds[0] : undefined,
+    });
+    const airsNames = [...new Set(legs.flatMap((leg) => {
+      const routeNames = (leg.sources ?? [])
+        .filter((source) => source.label === label)
+        .flatMap((source) => source.book ? [source.book] : []);
+      // A route with no resolved child book retains its existing certificate provenance as a
+      // fallback, rather than claiming an AIRS code it cannot identify.
+      return routeNames.length ? routeNames : [
+        ...(leg.via_holding_names ?? []),
+        ...(leg.via_holding_name ? [leg.via_holding_name] : []),
+      ];
+    }).filter(Boolean))];
+    if (airsNames.length) SYNTHETIC_AIRS_NAMES.set(row, airsNames.join(' / '));
     folded.push(row);
   }
   return [...kept, ...folded];
@@ -2113,7 +2196,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     </td>
                   </tr>
                 )}
-                {part.rows.map((h) => { const i = n++; return (
+                {part.rows.map((h) => { const i = n++; const certificateBasket = syntheticBasket(h); return (
                 <tr key={[h.isin ?? h.name ?? `${g.bucket}-${i}`,
                   (h.via_names ?? []).join(',')].join('|')}
                   onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
@@ -2131,7 +2214,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       fourteenth column here shifts every figure one cell right, silently — a
                       weight renders perfectly well under "Ccy". The button rides with the name it
                       belongs to and appears on hover so 52 rows are not 52 buttons at rest. */}
-                  <td className="py-1.5 pr-3 text-fg max-w-0" title={h.name ?? undefined}>
+                  <td className="py-1.5 pr-3 text-fg max-w-0"
+                    title={syntheticAirsName(h) ? `AIRS: ${syntheticAirsName(h)}` : h.name ?? undefined}>
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{h.name ?? '—'}</span>
                       {/* ⚠ SAME GATE AS THE CLASS ROW, and it has to be here too or the rule is
@@ -2167,7 +2251,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           so its right edge is two columns further out. Pushing it right would put
                           it on a DIFFERENT vertical line, which is worse than leaving it beside
                           the class label it belongs to. */}
-                      {h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
+                      {certificateBasket?.holdings.length ? (
+                        <FundamentalButton
+                          className="ml-auto shrink-0"
+                          title={copy.classRow.fundamentalTitle(certificateBasket.holdings.length, h.name ?? copy.row.thisPosition)}
+                          onOpen={() => onFundamental({ name: h.name ?? certificateBasket.label,
+                            basket: certificateBasket, weightPct: h.weight_now_pct })} />
+                      ) : h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
                           className="ml-auto shrink-0"
                           title={copy.row.fundamentalTitle(h.name ?? h.isin ?? copy.row.thisPosition)}
@@ -2215,7 +2305,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         {stateLabel(h.mom_state)}
                       </span>
                     )}
-                    {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct >= 0 ? '+' : ''}${h.mom_12_1_pct.toFixed(1)}%`}
+                    {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       /* ⚠ THE RANK IS SPELLED OUT IN WORDS HERE, because the chip is glyphs. A
                          reader who cannot tell `++` from `+++` at a glance gets "the 82nd
@@ -2275,11 +2365,23 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       is a claim. */}
                   {show('opening') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.start_value_eur)}</td>}
                   {show('valuenow') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.current_value_eur)}</td>}
-                  {show('avgcapital') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(h.avg_capital_eur)}</td>}
+                  {show('avgcapital') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>
+                    {eur0n(h.avg_capital_eur)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={copy.info.avgCapitalWhat(h.name ?? copy.row.thisPosition)}
+                      note={copy.info.avgCapitalNote}
+                      how={copy.info.avgCapitalHow(eur0n(h.avg_capital_eur))} />
+                  </td>}
                   {show('unrealised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unrealised_eur)}`}>{eur0n(h.unrealised_eur)}</td>}
                   {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.realised_result_eur)}`}>{eur0n(h.realised_result_eur)}</td>}
                   {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.income_eur)}`}>{eur0n(h.income_eur)}</td>}
-                  {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>{eur0n(h.result_eur)}</td>}
+                  {show('result') && <td className={`py-1.5 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(h.result_eur)}`}>
+                    {eur0n(h.result_eur)}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={copy.info.resultWhat(h.name ?? copy.row.thisPosition)}
+                      note={copy.info.resultNote}
+                      how={copy.info.resultHow(eur0n(h.unrealised_eur), eur0n(h.realised_result_eur), eur0n(h.income_eur), eur0n(h.result_eur))} />
+                  </td>}
                   {/* ⚠ THE SECOND LINE IS THE SAME LEG AS POINTS OF THIS ROW'S MONEY-WEIGHTED
                       RETURN — same denominator, so the three add up to the figure four columns
                       right. See `ppOf` for why points and not a share of the return. */}
@@ -2524,23 +2626,41 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       them, because nothing else can: the table needs a DOM to render and this repo
                       tests no DOM. Filling these three must not change it — still three cells. */}
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
-                    retTone(p.mom_12_1_pct)}`}
-                    title={p.mom_12_1_pct != null
-                      ? copy.sold.momentumTitle(p.name ?? copy.row.thisPosition)
-                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
-                    {p.mom_12_1_pct != null ? fmtRet(p.mom_12_1_pct) : '—'}
+                    retTone(p.mom_12_1_pct)}`}>
+                    {isMomentumState(p.mom_state) && (
+                      <span className={`mr-1.5 font-semibold ${stateTone(p.mom_state)}`}>
+                        {stateLabel(p.mom_state)}
+                      </span>
+                    )}
+                    {/* Momentum's sign is already conveyed by the +/- rank glyph.
+                        Match held rows: positive returns are plain numbers, never `+114%`. */}
+                    {p.mom_12_1_pct == null ? '—' : `${p.mom_12_1_pct.toFixed(1)}%`}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={p.mom_12_1_pct != null
+                        ? copy.sold.momentumTitle(p.name ?? copy.row.thisPosition)
+                        : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
+                      note={p.mom_12_1_pct == null ? undefined : copy.row.momentumNote}
+                      how={p.mom_12_1_pct == null
+                        ? copy.row.momentumMissing
+                        : copy.row.momentumHow(momSub(p.mom_12_1_to, p.mom_12_1_from, p.mom_12_1_pct))} />
                   </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
-                    title={p.vol_5y_pct != null
-                      ? copy.sold.volTitle(p.name ?? copy.row.thisPosition)
-                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {p.vol_5y_pct != null ? `${p.vol_5y_pct.toFixed(1)}%` : '—'}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={p.vol_5y_pct != null
+                        ? copy.sold.volTitle(p.name ?? copy.row.thisPosition)
+                        : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
+                      note={p.vol_5y_pct == null ? undefined : copy.row.volNote}
+                      how={p.vol_5y_pct == null ? copy.row.volMissing : copy.row.volHow(`${p.vol_5y_pct.toFixed(1)}%`)} />
                   </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft"
-                    title={p.beta_5y != null
-                      ? copy.sold.betaTitle(p.name ?? copy.row.thisPosition, benchmark)
-                      : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}>
+                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {p.beta_5y != null ? p.beta_5y.toFixed(2) : '—'}
+                    <Provenance source="benchmark" asOf={null} kind="formula"
+                      what={p.beta_5y != null
+                        ? copy.sold.betaTitle(p.name ?? copy.row.thisPosition, benchmark)
+                        : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
+                      note={p.beta_5y == null ? undefined : copy.row.betaNote(benchmark)}
+                      how={p.beta_5y == null ? copy.row.betaMissing : copy.row.betaHow(benchmark, p.beta_5y.toFixed(2))} />
                   </td>
                   {/* Weight (now) — a dash, exactly as the group row above shows it: the position is
                       gone, so there IS no current weight, and a 0% would say the book holds none of
@@ -3028,6 +3148,43 @@ export default function PortfolioAnalysisModal({
   /** The instrument or class whose Fundamental is open, over this modal. Null = closed. */
   const [fund, setFund] = useState<
     { name: string; isin?: string; basket?: Basket; weightPct?: number } | null>(null);
+  /** Folded TopSelecties first resolve their direct book. The parent book's expanded legs are only
+   * a preview and can have merged positions; using them would make the same TopSelectie produce a
+   * different graph and denominator depending on where it was opened. */
+  const openFundamental = async (target: {
+    name: string; isin?: string; basket?: Basket; weightPct?: number;
+  }) => {
+    const sourceId = target.basket?.sourcePortfolioId;
+    if (sourceId == null) {
+      setFund(target);
+      return;
+    }
+    const key = `id:${sourceId}|${benchmark}|book||0|0`;
+    try {
+      const direct = await loadPrefetchedAnalysis<ModelPortfolioAnalysis>(key, async () => {
+        const response = await apiFetch(
+          `${API_URL}/api/airs/model-portfolios/${sourceId}/analysis`
+          + `?benchmark=${encodeURIComponent(benchmark)}&weight_by=book&source=book`,
+        );
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+        return body as ModelPortfolioAnalysis;
+      });
+      // This is literally the predicate that renders the direct view's Individual stocks section:
+      // Equity rows which are not fund wrappers. Preserve every row and its direct-book weight.
+      const canonical = individualStocksBasket(direct, target.basket!.label);
+      if (!canonical.holdings.length) {
+        throw new Error('the direct TopSelectie has no Individual stocks');
+      }
+      setFund({ ...target, basket: canonical });
+    } catch (e) {
+      traceError('fundamentals', `could not resolve direct TopSelectie ${target.name}`, e);
+      await dialog.alert(
+        `${target.name}: the direct Individual stocks basket could not be loaded.`,
+        { title: 'Fundamental unavailable' },
+      );
+    }
+  };
   // ⚠ The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
   // Transacties sheet joins on — it carries no ISIN.
   const [timingFor, setTimingFor] = useState<string | null>(null);
@@ -3535,7 +3692,7 @@ export default function PortfolioAnalysisModal({
                  card. `realised` carries them (and the book's own return to check against). */
               <>
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
-                onFundamental={setFund}
+                onFundamental={(target) => { void openFundamental(target); }}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
                 benchmark={data.benchmark ?? benchmark}
                 /* ⚠ Only when this modal is a real portfolio with a paired book. An ad-hoc

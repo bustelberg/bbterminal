@@ -24,24 +24,44 @@ import { useEffect, useState } from 'react';
 /** How long each state of the ellipsis holds. Slow enough to read as breathing, not flicker. */
 const TICK_MS = 400;
 
+const STAGES = [
+  'stored model and linked certificates',
+  'underlying certificate holdings',
+  'portfolio allocation and benchmark',
+  'AIRS book holdings and returns',
+  'sector, region and currency views',
+] as const;
+
 export default function AnalyseLoading({ label }: {
   /** "Loading overview…", translated by the caller. Its trailing ellipsis is dropped. */
   label: string;
 }) {
   const [n, setN] = useState(1);
+  const [ticks, setTicks] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setN((v) => (v % 3) + 1), TICK_MS);
+    const t = setInterval(() => {
+      setN((v) => (v % 3) + 1);
+      setTicks((v) => v + 1);
+    }, TICK_MS);
     return () => clearInterval(t);
   }, []);
 
+  const elapsed = (ticks * TICK_MS / 1000).toFixed(1);
+  const stage = STAGES[Math.min(STAGES.length - 1, Math.floor(ticks / 5))];
+
   return (
-    <p className="py-20 text-center text-2xl font-semibold text-fg-subtle">
+    <div className="py-20 text-center">
+      <p className="text-2xl font-semibold text-fg-subtle">
       {label.replace(/[.…\s]+$/, '')}
       {/* ⚠ THE WIDTH IS RESERVED FOR ALL THREE DOTS. Rendered inline, the text would shift left and
           right three times a second as the ellipsis grew and shrank — a heading that will not hold
           still is harder to sit in front of than one that does nothing at all. `inline-block` with
           a fixed width and left alignment lets the dots change inside a box that does not. */}
       <span className="inline-block w-[1.5em] text-left">{'.'.repeat(n)}</span>
-    </p>
+      </p>
+      <p className="mt-3 text-sm text-fg-faint">
+        Working through {stage} <span className="font-mono">· {elapsed}s</span>
+      </p>
+    </div>
   );
 }
