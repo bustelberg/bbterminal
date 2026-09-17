@@ -6,7 +6,7 @@ import { runSSE } from '../../../lib/stream';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { cancelJob, jobsStore, startLocalJob } from '../../../lib/stores/jobs';
 import { API_URL } from '../../../lib/apiUrl';
-import { AspectCard } from '../../../lib/tipCard';
+import { AspectCard, TipCardLanguageProvider } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { calculateEGM, EGM_DEFAULTS, type EgmAssumptions } from './egm';
 import { egmSource, reverseDcfSource, SOURCE_CODES, vendorName } from './egmInputs';
@@ -92,7 +92,7 @@ function loadSaved(isin: string): Partial<EgmAssumptions> {
  */
 function Field({
   label, value, onChange, suffix, step = '0.1', placeholder, info, hint, hintTitle, onUseHint,
-  action,
+  action, badge,
 }: {
   label: string; value: string; onChange: (v: string) => void;
   suffix?: string; step?: string; placeholder?: string;
@@ -113,6 +113,8 @@ function Field({
    *  never use. */
   hintTitle?: string;
   onUseHint?: () => void;
+  /** A compact provenance stamp for a measured default, such as a vendor observation date. */
+  badge?: React.ReactNode;
   /**
    * A control that goes and gets this field's default again — today only the Forward P/E's.
    *
@@ -138,7 +140,9 @@ function Field({
 }) {
   return (
     <label className="flex items-center gap-2 py-1">
-      <span className="min-w-0 flex-1 truncate text-[12px] text-fg-muted">{label}</span>
+      <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-[12px] text-fg-muted">
+        <span className="truncate">{label}</span>{badge}
+      </span>
       <input type="number" step={step} value={value} placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
         className="w-16 shrink-0 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-[12px] font-mono text-fg-strong text-right focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
@@ -183,6 +187,10 @@ type LatestClose = {
 
 export default function DeepValuationTab({ isin, name }: { isin: string; name?: string | null }) {
   const t = useDeepValuationCopy();
+  // Dates must follow the SAME copy tree as the surrounding prose.  A second language-store read
+  // here could briefly disagree while the reader switches EN/NL, leaving an English panel with a
+  // Dutch observation badge (or the reverse).
+  const lang = t.lang;
   const [metrics, setMetrics] = useState<MetricRow[] | null>(null);
   const [currency, setCurrency] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -441,8 +449,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
         // share price's `close of {date}`: report a fact the reader can check against the panel.
         if (after == null) return t.egm.forwardPENone;
         return after !== before
-          ? t.egm.forwardPEMoved(onDate(after))
-          : t.egm.forwardPEUnchanged(onDate(after));
+          ? t.egm.forwardPEMoved(onDate(after, lang))
+          : t.egm.forwardPEUnchanged(onDate(after, lang));
       }));
   }, [companyId, name, isin, load, t.egm]);
 
@@ -610,6 +618,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   if (metrics == null) return <p className="text-xs text-fg-subtle py-16 text-center">Loading…</p>;
 
   return (
+    <TipCardLanguageProvider lang={t.lang}>
     <div className="space-y-4">
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-4 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
@@ -656,7 +665,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
         {/* ── INPUT ────────────────────────────────────────────────────────────────────────── */}
         <div className="flex flex-col rounded-lg border border-neutral-800/40 bg-inset p-3">
           <div className="flex items-center gap-2">
-            <span className="text-[11px] uppercase tracking-wide text-fg-faint">Input</span>
+            <span className="text-[11px] uppercase tracking-wide text-fg-faint">{t.egm.inputs}</span>
             {/* ⚠ `Reset`, not `Reset to defaults` — it is only ever on screen while something IS
                 off-default, so the qualifier answers a question nobody can be asking.
                 ⚠⚠ RENDERED ALWAYS, HIDDEN WITH `invisible`. Mounting it on the first keystroke
@@ -705,6 +714,13 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 "now they are the panel's first two rows", which stopped being true the moment
                 anything was inserted above them and stayed in the file saying so. */}
             <Field label={`${t.egm.sharePriceNow}${currency ? ` (${currency})` : ''}`}
+              badge={priceDate == null ? null : (
+                <span className="shrink-0 rounded border border-neutral-700 bg-overlay/5 px-1 py-px font-mono text-[9px] text-fg-faint"
+                  title={`${priceFromYahoo ? t.egm.yahooFinance(live?.symbol ?? '')
+                    : t.common.guruFocus(vendorName(SOURCE_CODES.price))} — ${t.egm.forwardPEAsOf(onDate(priceDate, lang))}`}>
+                  {t.egm.forwardPEAsOf(onDate(priceDate, lang))}
+                </span>
+              )}
               value={priceStr} onChange={setPriceStr} step="0.01"
               placeholder={measuredPrice == null ? '' : measuredPrice.toFixed(2)}
               info={<InfoTip content={<AspectCard
@@ -713,7 +729,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                   : priceFromYahoo ? t.egm.yahooFinance(live?.symbol ?? '')
                     : t.common.guruFocus(vendorName(SOURCE_CODES.price))}
                 when={priceOverride != null ? t.egm.whateverMoment
-                  : v(onDate(priceDate)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
+                  : v(onDate(priceDate, lang)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
                 how={t.egm.cards.price.how} />} />}
               hint={measuredPrice == null ? null : measuredPrice.toFixed(2)}
               hintTitle={priceOverride != null
@@ -790,6 +806,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 </button>
               )} />
             <Field label={t.egm.forwardPE} value={fwdPeStr} onChange={setFwdPeStr}
+              badge={src.forwardPEDate == null ? null : (
+                <span className="shrink-0 rounded border border-neutral-700 bg-overlay/5 px-1 py-px font-mono text-[9px] text-fg-faint"
+                  title={`${t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE))} — ${t.egm.forwardPEAsOf(onDate(src.forwardPEDate, lang))}`}>
+                  {t.egm.forwardPEAsOf(onDate(src.forwardPEDate, lang))}
+                </span>
+              )}
               placeholder={src.forwardPE == null ? '' : src.forwardPE.toFixed(1)}
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.forwardPE.what}
@@ -804,13 +826,13 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                    refreshed it but it's still old", which is what that card invites. */
                 when={numOrNull(fwdPeStr) != null ? t.egm.forwardPEWhenTyped
                   : src.forwardPEDate == null ? t.egm.noObservationStored
-                    : v(onDate(src.forwardPEDate))}
+                    : v(onDate(src.forwardPEDate, lang))}
                 how={(numOrNull(fwdPeStr) != null && src.forwardPEDate != null
                   // ⚠ THE WAY BACK, NAMED. With a typed value the useful sentence is not how the
                   // leg is computed — it is that a vendor figure exists behind it and how to get
                   // back to it, which is what the share-price card says in the same state.
                   ? `${t.egm.forwardPEHowTyped(vendorName(SOURCE_CODES.forwardPE),
-                    onDate(src.forwardPEDate))} `
+                    onDate(src.forwardPEDate, lang))} `
                   : '')
                   + t.egm.forwardPEHow(String(assumptions.years))
                   + (impliedPE != null && src.forwardPE != null
@@ -889,6 +911,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 ten years, so it is a claim about the next decade; the measured figure is only its
                 default. Blank = use what GuruFocus reports. */}
             <Field label={t.egm.dividendYield} value={divStr} onChange={setDivStr} suffix="%"
+              badge={divOverride != null || src.dividendYieldDate == null ? null : (
+                <span className="shrink-0 rounded border border-neutral-700 bg-overlay/5 px-1 py-px font-mono text-[9px] text-fg-faint"
+                  title={`${t.common.guruFocus(vendorName(SOURCE_CODES.dividendYield))} — ${t.egm.forwardPEAsOf(onDate(src.dividendYieldDate, lang))}`}>
+                  {t.egm.forwardPEAsOf(onDate(src.dividendYieldDate, lang))}
+                </span>
+              )}
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.dividend.what}
                 where={divOverride != null ? t.egm.yoursTypedHere
@@ -947,7 +975,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
 
         {/* ── OUTPUT ───────────────────────────────────────────────────────────────────────── */}
         <div className="flex flex-col rounded-lg border border-neutral-800/40 bg-inset p-3">
-          <span className="text-[11px] uppercase tracking-wide text-fg-faint">Output</span>
+          <span className="text-[11px] uppercase tracking-wide text-fg-faint">{t.egm.outputs}</span>
 
           <div className="flex flex-1 flex-col justify-center">
             {/**
@@ -1137,7 +1165,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                               : t.common.guruFocus(vendorName(SOURCE_CODES.price))}
                         when={priceOverride != null ? t.egm.whateverMoment
                           : priceDate == null ? t.egm.noneStored
-                            : v(onDate(priceDate)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
+                            : v(onDate(priceDate, lang)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
                         how={priceOverride != null
                           ? t.egm.clearBoxToGoBack(measuredPrice == null ? '' : money(measuredPrice))
                           : priceFromYahoo ? t.egm.rawDataYahoo : t.egm.rawDataNoRefresh} />} />
@@ -1191,7 +1219,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         dividend yield — which reflowed the row that had just been edited. The ⓘ is
                         rendered unconditionally and its CONTENT changes instead, so a payer and a
                         non-payer are the same shape and only the words differ. */}
-                    <td className="truncate pt-1 font-medium text-fg-strong">Return</td>
+                    <td className="truncate pt-1 font-medium text-fg-strong">{t.egm.totalPriceMove}</td>
 
                     <td className={`pt-1 pl-2 text-right font-mono tabular-nums font-semibold ${
                       (r.priceReturn ?? 0) >= 0 ? 'text-pos-500' : 'text-neg-500'}`}>
@@ -1270,7 +1298,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                     <InfoTip content={<AspectCard
                       what={t.egm.cards.maxPE.what}
                       where={t.egm.cards.maxPE.where}
-                      when={t.egm.endOfYear(String(assumptions.years))}
+                      when={t.egm.today}
                       worked={workedMaxPE(assumptions.exitPE, assumptions.growthRate,
                         yieldUsed ?? 0, assumptions.hurdleRate, assumptions.years, r.maxPE)}
                       legend={r.maxPE == null ? undefined : [
@@ -1293,7 +1321,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                     <InfoTip content={<AspectCard
                       what={t.egm.cards.fairValue.what}
                       where={t.egm.cards.fairValue.where}
-                      when={t.egm.endOfYear(String(assumptions.years))}
+                      when={t.egm.today}
                       worked={workedFairValue(src.epsNextFY, r.maxPE, r.fairValue)}
                       legend={r.fairValue == null ? undefined : [
                         { sym: String.raw`EPS_{\text{FY1}}`, is: t.egm.legend.epsFY1 },
@@ -1328,7 +1356,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                     <InfoTip content={<AspectCard
                       what={t.egm.cards.fairValueGap.what}
                       where={t.egm.cards.fairValueGap.where}
-                      when={t.egm.endOfYear(String(assumptions.years))}
+                      when={t.egm.today}
                       worked={workedFairValueGap(r.fairValue, src.price,
                         r.upside == null ? '' : pct1(r.upside))}
                       how={t.egm.cards.fairValueGap.how} />} />
@@ -1353,5 +1381,6 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     <ReverseDcfPanel src={dcfSrc} currency={currency} metrics={metrics} growthEst={growthEst}
       name={name} isin={isin} today={today} />
     </div>
+    </TipCardLanguageProvider>
   );
 }

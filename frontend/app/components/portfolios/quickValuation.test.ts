@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addYears, BASIS, cagrBetween, cagrOf, EPS_EST_CODES, EPS_PS_CODES, FCF_PS_CODES, forwardEstimates,
+  addYears, BASIS, cagrBetween, cagrOf, dailyYieldHistory, EPS_EST_CODES, EPS_PS_CODES, FCF_PS_CODES, forwardEstimates,
   compoundFrom, latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
   rebase, yearsBetween, yieldOf, type MetricRow,
 } from './quickValuation';
@@ -184,6 +184,34 @@ describe('BASIS — the two bases the tab switches between', () => {
     // that is pure bookkeeping.
     expect(EPS_EST_CODES[0]).toBe('annual_eps_nri_estimate');
     expect(BASIS.eps.codes[0]).toContain('EPS without NRI');
+  });
+});
+
+describe('dailyYieldHistory', () => {
+  it('uses every daily close and never applies a later reported per-share figure backwards', () => {
+    const rows: MetricRow[] = [
+      { metric_code: FCF, target_date: '2026-01-02', numeric_value: 5 },
+      { metric_code: 'close_price', target_date: '2026-01-01', numeric_value: 100 },
+      { metric_code: 'close_price', target_date: '2026-01-02', numeric_value: 125 },
+      { metric_code: 'close_price', target_date: '2026-01-03', numeric_value: 100 },
+      { metric_code: FCF, target_date: '2026-01-03', numeric_value: 6 },
+      { metric_code: 'close_price', target_date: '2026-01-04', numeric_value: 100 },
+    ];
+    expect(dailyYieldHistory(rows, FCF_PS_CODES)).toEqual([
+      { date: '2026-01-01', value: null, price: 100, yld: null },
+      { date: '2026-01-02', value: 5, price: 125, yld: 4 },
+      { date: '2026-01-03', value: 6, price: 100, yld: 6 },
+      { date: '2026-01-04', value: 6, price: 100, yld: 6 },
+    ]);
+  });
+
+  it('starts at the shared 2017 Quick Valuation history floor', () => {
+    const rows: MetricRow[] = [
+      { metric_code: FCF, target_date: '2016-12-30', numeric_value: 5 },
+      { metric_code: 'close_price', target_date: '2016-12-30', numeric_value: 100 },
+      { metric_code: 'close_price', target_date: '2017-01-03', numeric_value: 100 },
+    ];
+    expect(dailyYieldHistory(rows, FCF_PS_CODES).map((p) => p.date)).toEqual(['2017-01-03']);
   });
 });
 

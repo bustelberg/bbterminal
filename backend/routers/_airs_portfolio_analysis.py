@@ -2675,6 +2675,42 @@ def _with_results(holdings: list[dict], realised: dict,
     flow_return = realised.get("book_ytd_pct") if basis is None else None
     ledger_result = realised.get("ledger_result_eur") if basis is None else None
     by_name = {p["name"]: p for p in (realised.get("positions") or []) if p.get("held")}
+
+    # A parent account trades the certificate, not each stock revealed by look-through.  Its
+    # realised certificate result therefore cannot join a row by stock name.  Leaving it out made
+    # a composite such as Toppenberg Offensief show only its EUR value movement while AIRS's
+    # headline also included certificate units sold during the year.  Split that *parent* result
+    # over the same current-value routes that split the certificate itself.  This conserves every
+    # certificate's result exactly without pretending a sale belonged to one particular stock.
+    wrapper_values: dict[str, float] = defaultdict(float)
+    for h in holdings:
+        wrapper_for_label = dict(zip(h.get("via_names") or [],
+                                     h.get("via_holding_names") or []))
+        for source in h.get("sources") or []:
+            label = source.get("label")
+            wrapper = wrapper_for_label.get(label) if label is not None else None
+            if wrapper:
+                wrapper_values[wrapper] += float(source.get("value_eur") or 0.0)
+
+    def _lookthrough_realised(h: dict) -> float:
+        """The held certificate result allocated to this expanded row's routes."""
+        wrapper_for_label = dict(zip(h.get("via_names") or [],
+                                     h.get("via_holding_names") or []))
+        total = 0.0
+        for source in h.get("sources") or []:
+            label = source.get("label")
+            wrapper = wrapper_for_label.get(label) if label is not None else None
+            parent = by_name.get(wrapper or "")
+            denominator = wrapper_values.get(wrapper or "", 0.0)
+            if not parent or denominator <= 0:
+                continue
+            # `income_eur` is part of AIRS's account result too.  Certificate distributions are
+            # allocated with sales for the same reason: the underlying rows have no parent ledger
+            # entry of their own.
+            parent_nonheld = (float(parent.get("realised_result_eur") or 0.0)
+                              + float(parent.get("income_eur") or 0.0))
+            total += parent_nonheld * float(source.get("value_eur") or 0.0) / denominator
+        return total
     # ⚠ THE MONEY-WEIGHTED LEG IS ONLY DEFINED WHERE WE KNOW THE FLOWS, and that is the direct
     # holdings. A leg reached through a certificate has no buys or sells of its own — AIRS trades
     # the WRAPPER — so there is no "money you put in" to divide by, and `None` is the honest
@@ -2714,7 +2750,10 @@ def _with_results(holdings: list[dict], realised: dict,
                   else None)
         income = h.get("income_eur") or 0.0
         led = by_name.get(h.get("name") or "") or {}
-        realised_eur = led.get("realised_result_eur") or 0.0
+        # Direct rows join their own ledger by name.  Expanded rows additionally carry their
+        # certificate's realised/distributed result, allocated above by their exact route share.
+        realised_eur = ((led.get("realised_result_eur") or 0.0)
+                        + _lookthrough_realised(h))
         total = (None if unreal is None and not realised_eur and not income
                  else round((unreal or 0.0) + realised_eur + income, 2))
         # ⚠ NOT `led["return_pct"]` BLINDLY — a looked-through leg never matches a ledger position

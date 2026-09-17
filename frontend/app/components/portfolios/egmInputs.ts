@@ -187,6 +187,8 @@ export type EgmSource = {
    *  `priceDate` rides beside `price`. */
   forwardPEDate: string | null;
   dividendYield: number | null;   // decimal
+  /** The GuruFocus observation date for the dividend-yield default. */
+  dividendYieldDate: string | null;
   epsNextFY: number | null;
   epsNextFYDate: string | null;   // which fiscal period the estimate is for
   analystGrowth5Y: number | null; // decimal — reference only, never fed to the math
@@ -590,6 +592,7 @@ export function egmSource(metrics: MetricRow[], today: string): EgmSource {
     // as it does for `ROE %`. The model wants a decimal, and passing the percent through unscaled
     // would apply a 0.3% payer as a 30% one: on a ten-year compounder that is a ~3.4x fair value.
     dividendYield: dy ? dy.value / 100 : null,
+    dividendYieldDate: dy?.date ?? null,
     epsNextFY: eps?.value ?? null,
     epsNextFYDate: eps?.date ?? null,
     analystGrowth5Y: estimateCagr(metrics, today),

@@ -23,7 +23,7 @@ import {
   forwardSeries, since,
 } from './multiplesSeries';
 import {
-  addYears, BASIS, cagrBetween, cagrOf, compoundFrom, latestDateOf, priceTarget, priceVsMetric,
+  addYears, BASIS, cagrBetween, cagrOf, compoundFrom, dailyYieldHistory, latestDateOf, priceTarget, priceVsMetric,
   PRICE_CODES, rebase, yearsBetween, yieldOf, type Basis, type MetricRow,
 } from './quickValuation';
 import { runSSE } from '../../../lib/stream';
@@ -135,6 +135,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const [companyId, setCompanyId] = useState<number | null>(null);
   /** ⚠ ITS OWN HANDLE, so this button's spinner and Cancel cannot be driven by another job. */
   const [peJobId, setPeJobId] = useState<string | null>(null);
+  const [refreshJobId, setRefreshJobId] = useState<string | null>(null);
   /**
    * The newest forward-P/E observation date the last `load` saw — what the toast reports.
    *
@@ -145,7 +146,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const fwdDateRef = useRef<string | null>(null);
   const jobs = jobsStore.use((st) => st.jobs);
   const peJob = peJobId == null ? null : jobs.find((jb) => jb.id === peJobId) ?? null;
+  const refreshJob = refreshJobId == null ? null : jobs.find((jb) => jb.id === refreshJobId) ?? null;
   const peRefreshing = peJob?.status === 'running';
+  const refreshingQuickValuation = refreshJob?.status === 'running';
   const peCancelling = peRefreshing && peJob.cancelRequested;
 
   /**
@@ -225,6 +228,29 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         return after !== before
           ? `forward P/E now ${onDate(after)}`
           : `still ${onDate(after)} — GuruFocus has nothing newer`;
+      }));
+  }, [companyId, name, isin, load]);
+
+  const refreshQuickValuation = useCallback(() => {
+    if (companyId == null) return;
+    setRefreshJobId(startLocalJob(
+      `${name ?? isin} — Quick Valuation`, 'quickval.all',
+      async (signal, report) => {
+        const total = 5;
+        let done = 0;
+        report({ done, total, message: 'starting refresh' });
+        await runSSE(`${API_URL}/api/earnings/${companyId}/refresh-all?force=true`,
+          { method: 'POST' }, (raw) => {
+            const e = raw as { type?: string; message?: string };
+            if (e.type === 'info' && e.message?.startsWith('  Result:')) {
+              done += 1;
+              report({ done, total, message: `${done} of ${total} sources refreshed` });
+            }
+          }, signal);
+        if (signal.aborted) return 'cancelled';
+        invalidateReadCache('refreshed all Quick Valuation inputs');
+        await load(false, signal);
+        return 'Quick Valuation data refreshed';
       }));
   }, [companyId, name, isin, load]);
 
@@ -548,7 +574,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // `Valuation Ratios__FCF Yield %` (or its P/E) — whose denominator convention (year-end price?
   // average market cap?) we do not control. One source, so the two charts cannot disagree.
   const yields = useMemo(
-    () => points.map((p) => ({ year: p.year, yld: yieldOf(p.value, p.price) })), [points]);
+    () => dailyYieldHistory(metrics ?? [], b.codes), [metrics, b.codes]);
   const yieldValues = yields.map((y) => y.yld).filter((v): v is number => v != null);
   const avgYield = meanOf(yieldValues);
   /**
@@ -558,10 +584,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
    * price arrived before its newest filing they are different years, and dividing them would print
    * a plausible expression that does not equal the figure above it.
    */
-  const latestYieldPoint = [...points].reverse()
-    .find((p) => yieldOf(p.value, p.price) != null) ?? null;
+  const latestYieldPoint = [...yields].reverse()
+    .find((p) => p.yld != null) ?? null;
   const latestYield = latestYieldPoint
-    ? yieldOf(latestYieldPoint.value, latestYieldPoint.price) : null;
+    ? latestYieldPoint.yld : null;
 
   /**
    * ⚠ SWITCHING BASIS CLEARS BOTH OVERRIDES, and that is not tidiness. A hand-typed "forecast 12.40"
@@ -1071,36 +1097,60 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">{bl.yieldTitle}</h4>
         <span className="text-xs text-fg-faint">{t.yieldCaption(bl.perShare)}</span>
+        <button type="button"
+          onClick={() => (refreshingQuickValuation
+            ? (refreshJobId ? void cancelJob(refreshJobId) : undefined)
+            : refreshQuickValuation())}
+          disabled={!!refreshJob?.cancelRequested || companyId == null}
+          title={refreshJob?.cancelRequested ? 'Cancelling…'
+            : refreshingQuickValuation ? 'Re-reading — press to cancel'
+              : 'Refresh every Quick Valuation chart'}
+          className={`ml-auto inline-block text-xs leading-none ${
+            refreshJob?.cancelRequested ? 'cursor-wait text-fg-faint'
+              : refreshingQuickValuation ? 'text-warn-400 hover:text-neg-400'
+                : companyId == null ? 'cursor-default text-fg-faint/40'
+                  : 'text-fg-faint hover:text-accent-400'}`}>
+          {refreshJob?.cancelRequested ? 'Cancelling…' : refreshingQuickValuation ? 'Cancel' : 'Refresh'}
+        </button>
       </div>
 
       <div className="flex flex-wrap gap-2">
         <Stat label={t.avg} value={yld(avgYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
             what={`Average ${b.yieldInline}.`}
-            where="Calculated from the charted fiscal years."
+            where="Calculated from the charted daily closes."
             // ⚠ THE SPAN IS NAMED, NOT COUNTED AGAINST A CONSTANT. This read "n of the last 10
             // fiscal years" off the history cap; with the cap gone there is no fixed denominator
             // to be `of`, and quoting one that no longer exists is worse than quoting none.
-            when={points.length
-              ? `${yieldValues.length} of the ${points.length} fiscal years shown `
-                + `(FY${points[0].year}–FY${points[points.length - 1].year}).`
-              : 'No fiscal years to average.'}
+            when={yields.length
+              ? `${yieldValues.length} daily closes shown (${yields[0]?.date} to ${yields[yields.length - 1]?.date}).`
+              : 'No daily closes to average.'}
             // ⚠ `yieldValues` IS WHAT THE MEAN WAS TAKEN OVER — the same array `avgYield` divides,
             // so the addends listed here provably sum to the figure on the tile. It is also the
             // dashed line on the chart below, which is the third place this one number appears.
             worked={workedMean(yieldValues)}
-            how="Simple average of yearly yields." />} />} />
+            how="Simple average of daily yields." />} />} />
         <Stat label={t.latest} value={yld(latestYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
-            what={`Latest fiscal-year ${b.yieldInline}.`}
-            where={`${b.perShare} divided by that year's closing price.`}
-            when="Latest fiscal year with both values."
+            what={`Latest daily ${b.yieldInline}.`}
+            where={`${b.perShare} divided by that day's closing price.`}
+            when={latestYieldPoint?.date ? (
+              <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+                as of {latestYieldPoint.date}
+              </span>
+            ) : 'No daily close with a reported per-share figure.'}
             // ⚠ BOTH OPERANDS OFF THE SAME POINT — see `latestYieldPoint`. The FY label is in the
             // expression because that year is not necessarily the newest one on either line.
             worked={workedRatio(latestYieldPoint?.value, latestYieldPoint?.price,
-              latestYield == null ? '' : `${yld(latestYield)}   (FY${latestYieldPoint?.year})`,
+              latestYield == null ? '' : yld(latestYield),
               '', ` ${ccy}`)}
             how="A higher yield means a lower price relative to this measure." />} />} />
+        <Stat label={t.asOf} value={latestYieldPoint?.date ?? '—'} color={chartTheme.accent}
+          info={<InfoTip content={<AspectCard
+            what={`As-of date for the latest daily ${b.yieldInline}.`}
+            where="The daily close series used as the yield denominator."
+            when={latestYieldPoint?.date ?? 'No daily close with a reported per-share figure.'}
+            how="The Latest yield and this date always come from the same daily observation." />} />} />
       </div>
 
       {/* ⚠ A YIELD, NOT A MULTIPLE — SO NEGATIVES STAY. A cash-burn or loss year is −5% here, which
@@ -1111,7 +1161,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           <ComposedChart data={yields} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
             style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
             <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-            <XAxis dataKey="year" {...tiltedAxis()} />
+            <XAxis dataKey="date" {...tiltedAxis()} tickFormatter={(date: string) => date.slice(0, 7)} />
             <YAxis domain={paddedDomain(yieldValues)} tick={{ fontSize: 12, fill: chartTheme.axisTick }}
               width={52} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
             <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
@@ -1121,7 +1171,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
               <ReferenceLine y={avgYield} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />
             )}
             <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent}
-              strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
+              strokeWidth={2} dot={false} connectNulls />
           </ComposedChart>
         </ResponsiveContainer>
         <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
@@ -1135,9 +1185,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     <MultipleHistoryChart height={CHART_HEIGHT} basis={b} basisKey={basis} currency={currency}
       forward={forwardHistory} fromYear={MULTIPLE_FROM_YEAR}
       name={name} isin={isin}
-      onRefresh={refreshForwardPE} canRefresh={companyId != null}
-      refreshing={peRefreshing} cancelling={peCancelling}
-      onCancel={() => { if (peJobId) void cancelJob(peJobId); }} />
+      onRefresh={refreshQuickValuation} canRefresh={companyId != null}
+      refreshing={refreshingQuickValuation} cancelling={refreshingQuickValuation && !!refreshJob?.cancelRequested}
+      onCancel={() => { if (refreshJobId) void cancelJob(refreshJobId); }} />
 
     {/* Top-right, but LAST IN THE DOM — see the grid note above. The only non-chart card, so it
         fills a cell sized by the chart beside it: a flex column with its CAGR footer pinned to the

@@ -38,9 +38,9 @@
  * ⚠ UTC, LIKE EVERY OTHER DATE IN THIS APP. A bare `new Date('2026-07-31')` is parsed as UTC and
  * then FORMATTED in the viewer's zone, so anyone west of Greenwich reads the previous day.
  */
-export function onDate(iso: string | null | undefined): string {
+export function onDate(iso: string | null | undefined, lang: 'en' | 'nl' = 'en'): string {
   if (!iso) return 'n/a';
-  return new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB',
+  return new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString(lang === 'nl' ? 'nl-NL' : 'en-GB',
     { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
