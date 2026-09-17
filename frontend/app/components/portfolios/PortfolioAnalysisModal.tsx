@@ -2627,7 +2627,14 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       tests no DOM. Filling these three must not change it — still three cells. */}
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
                     retTone(p.mom_12_1_pct)}`}>
-                    {p.mom_12_1_pct != null ? fmtRet(p.mom_12_1_pct) : '—'}
+                    {isMomentumState(p.mom_state) && (
+                      <span className={`mr-1.5 font-semibold ${stateTone(p.mom_state)}`}>
+                        {stateLabel(p.mom_state)}
+                      </span>
+                    )}
+                    {/* Momentum's sign is already conveyed by the +/- rank glyph.
+                        Match held rows: positive returns are plain numbers, never `+114%`. */}
+                    {p.mom_12_1_pct == null ? '—' : `${p.mom_12_1_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={p.mom_12_1_pct != null
                         ? copy.sold.momentumTitle(p.name ?? copy.row.thisPosition)

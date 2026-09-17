@@ -103,6 +103,9 @@ describe('sold-position risk cells', () => {
     // `Provenance` explains both the formula and why a dash is shown, unlike
     // the old native title attribute on the cell.
     expect((sold.match(/<Provenance source="benchmark"/g) ?? []).length).toBeGreaterThanOrEqual(3);
+    expect(sold).toContain('isMomentumState(p.mom_state)');
+    expect(sold).toContain('stateLabel(p.mom_state)');
+    expect(sold).not.toContain('fmtRet(p.mom_12_1_pct)');
     expect(sold).toContain('copy.row.momentumHow(');
     expect(sold).toContain('copy.row.volHow(');
     expect(sold).toContain('copy.row.betaHow(');
