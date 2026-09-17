@@ -731,7 +731,8 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                     + ". Use ‘Force re-rebalance’ to re-decide the current period now."
                 )
             _update_run(run_id, current_message=msg)
-            log_step(run_id, msg, level="warn", phase="plan")
+            # Locked strategies are the normal steady state, not an operator warning.
+            log_step(run_id, msg, level="info", phase="plan")
             _finalize_run(run_id, accumulated_errors, log, tag="rebalance")
             return
         log_step(
