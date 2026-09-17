@@ -1064,7 +1064,7 @@ def maybe_schedule_price_retry(*, reason: str = "") -> None:
             coalesce=True,
             misfire_grace_time=3600,
         )
-        _log.warning(
+        _log.info(
             "[scheduler] held prices stale%s — retry %s/%s scheduled at %s",
             f" ({reason})" if reason else "", attempt, _PRICE_RETRY_MAX_PER_DAY,
             run_at.isoformat(),
