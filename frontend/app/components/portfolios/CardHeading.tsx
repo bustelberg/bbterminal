@@ -25,6 +25,7 @@
 import { AspectCard } from '../../../lib/tipCard';
 import { useLang } from '../../../lib/i18n';
 import InfoTip from '../InfoTip';
+import { GraphCoverageLine } from './GraphCoverage';
 import { chartInfo, chartTitle, type ChartKey } from './longEquityCopy';
 
 export default function CardHeading({ chartKey, sbc = false, className = '' }: {
@@ -39,10 +40,13 @@ export default function CardHeading({ chartKey, sbc = false, className = '' }: {
   const [lang] = useLang();
   const info = chartInfo(lang, chartKey, sbc);
   return (
-    <h4 className={`text-base font-semibold text-fg-strong ${className}`}>
-      {chartTitle(lang, chartKey, sbc)}
-      <InfoTip className="ml-1" content={<AspectCard
-        what={info.what} where={info.where} how={info.how} />} />
-    </h4>
+    <div className="min-w-0">
+      <h4 className={`text-base font-semibold text-fg-strong ${className}`}>
+        {chartTitle(lang, chartKey, sbc)}
+        <InfoTip className="ml-1" content={<AspectCard
+          what={info.what} where={info.where} how={info.how} />} />
+      </h4>
+      <GraphCoverageLine />
+    </div>
   );
 }

@@ -10510,6 +10510,8 @@ export interface components {
          * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
          */
         FundamentalCoverageRequest: {
+            /** Basket Label */
+            basket_label?: string | null;
             /**
              * Cadence
              * @default annual
@@ -10523,6 +10525,8 @@ export interface components {
             metrics?: string[] | null;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Topselectie Source */
+            topselectie_source?: string | null;
             /** Universe */
             universe?: string | null;
         };
@@ -10822,8 +10826,12 @@ export interface components {
             book_income_eur?: number | null;
             /** Book Start Value Eur */
             book_start_value_eur?: number | null;
+            /** Fundamental Model Id */
+            fundamental_model_id?: number | null;
             /** Label */
             label?: string | null;
+            /** Model Id */
+            model_id?: number | null;
             /** Return Pct */
             return_pct?: number | null;
             /** Start Value Eur */
@@ -12866,6 +12874,8 @@ export interface components {
          * @description One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.
          */
         RelativeGrowthRequest: {
+            /** Basket Label */
+            basket_label?: string | null;
             /**
              * Cadence
              * @default annual
@@ -12881,6 +12891,8 @@ export interface components {
             period: string;
             /** Portfolio Id */
             portfolio_id?: number | null;
+            /** Topselectie Source */
+            topselectie_source?: string | null;
             /** Universe */
             universe?: string | null;
         };

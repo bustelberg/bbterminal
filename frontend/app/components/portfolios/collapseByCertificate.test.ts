@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { collapseByCertificate, syntheticAirsName, syntheticBasket } from './PortfolioAnalysisModal';
+import {
+  collapseByCertificate, individualStocksBasket, syntheticAirsName, syntheticBasket,
+} from './PortfolioAnalysisModal';
 
 describe('collapseByCertificate', () => {
   it('keeps a folded TopSelectie in Stock ETFs when its first underlying row is cash', () => {
@@ -47,5 +49,46 @@ describe('collapseByCertificate', () => {
 
     const [folded] = collapseByCertificate(rows as never);
     expect(syntheticBasket(folded)?.holdings).toHaveLength(2);
+  });
+
+  it('uses only the Individual stocks section for a folded TopSelectie basket', () => {
+    const rows = [
+      { name: 'Company A', isin: 'US-A', bucket: 'Equity', is_fund: false, weight_now_pct: 60,
+        current_value_eur: 60, start_value_eur: 60, via_names: ['MerkenTopSelectie'],
+        sources: [{ label: 'MerkenTopSelectie', model_id: 1917, fundamental_model_id: 1920 }] },
+      { name: 'Equity ETF', isin: 'IE-ETF', bucket: 'Equity', is_fund: true, weight_now_pct: 40,
+        current_value_eur: 40, start_value_eur: 40, via_names: ['MerkenTopSelectie'],
+        sources: [{ label: 'MerkenTopSelectie', model_id: 1917, fundamental_model_id: 1920 }] },
+    ];
+
+    const [folded] = collapseByCertificate(rows as never);
+    expect(syntheticBasket(folded)).toEqual({
+      label: 'MerkenTopSelectie', sourcePortfolioId: 1920,
+      holdings: [{ isin: 'US-A', weight: 60, name: 'Company A' }],
+    });
+  });
+});
+
+describe('individualStocksBasket', () => {
+  it('reuses all 28 direct companies and excludes rows outside Individual stocks', () => {
+    const companies = Array.from({ length: 28 }, (_, index) => ({
+      name: `Company ${index + 1}`, isin: `US${String(index + 1).padStart(10, '0')}`,
+      bucket: 'Equity', is_fund: false, weight_now_pct: index + 1,
+    }));
+    const direct = {
+      book_holdings: [
+        ...companies,
+        { name: 'Stock ETF', isin: 'IE-ETF', bucket: 'Equity', is_fund: true,
+          weight_now_pct: 5 },
+        { name: 'Liquiditeiten', isin: null, bucket: 'Cash', is_fund: false,
+          weight_now_pct: 2 },
+      ],
+    };
+
+    const basket = individualStocksBasket(direct as never, 'FamilieTopSelectie');
+    expect(basket.holdings).toHaveLength(28);
+    expect(basket.holdings).toEqual(companies.map((holding) => ({
+      isin: holding.isin, weight: holding.weight_now_pct, name: holding.name,
+    })));
   });
 });

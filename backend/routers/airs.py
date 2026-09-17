@@ -973,6 +973,14 @@ class HoldingSource(BaseModel):
     """
 
     label: str | None = None
+    # The fixed model behind a certificate route. The folded TopSelectie Fundamental action uses
+    # this identity to load that TopSelectie's own Individual stocks basket; a label is display
+    # text and cannot safely identify the composition that produced it.
+    model_id: int | None = None
+    # The reviewed TopSelecties-section model whose direct book supplies Fundamental Graphs.
+    # This can differ from `model_id`: FamilieTopSelectie's certificate route in Toppenberg points
+    # at model 1917, while the reviewed direct TopSelectie row opens model 1920 (28 companies).
+    fundamental_model_id: int | None = None
     value_eur: float
     # A share of the WHOLE BOOK, not of the row — so the routes add up to the holding's
     # `weight_now_pct` and can be checked against the column next to them.

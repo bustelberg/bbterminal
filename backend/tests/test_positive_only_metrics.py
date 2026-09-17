@@ -136,18 +136,15 @@ class TestTheCountIsAlwaysReported:
         # all 28 positions the reader selected in the TopSelectie.
         assert earnings._member_count_total(body, {"holdings": 25}) == 28
 
-    def test_a_folded_topselectie_uses_its_direct_composition_count(self, earnings, monkeypatch):
-        from routers import _airs_account_links, _airs_lookthrough, _airs_strategy_map
+    def test_a_folded_topselectie_uses_its_individual_stocks_basket(self, earnings):
+        """The shared view must count precisely the rows in its Individual stocks section.
 
-        monkeypatch.setattr(_airs_strategy_map, "dynamic_account_for_holding",
-                            lambda label: "BUS_FTS_OFF_DYN" if label == "FamilieTopSelectie" else None)
-        monkeypatch.setattr(_airs_account_links, "list_account_links",
-                            lambda: {"accounts": [{"portefeuille": "BUS_FTS_OFF_DYN",
-                                                     "model_portfolio_id": 1920}]})
-        monkeypatch.setattr(_airs_lookthrough, "_datum_of", lambda _model_id: "2025-04-11")
-        monkeypatch.setattr(_airs_lookthrough, "_positions_of", lambda _model_id, _date: [{}] * 28)
+        Its linked model can also contain cash or Stock ETFs, neither of which is part of the
+        Fundamental basket. Looking up that model was what made a TopSelectie show a different
+        denominator through a parent portfolio than directly.
+        """
         body = earnings.FundamentalCoverageRequest(
-            holdings=[{"isin": "US0000000001", "weight": 100}],
+            holdings=[{"isin": f"US{i:010d}", "weight": 1} for i in range(28)],
             basket_label="FamilieTopSelectie")
         assert earnings._member_count_total(body, {"holdings": 25}) == 28
 

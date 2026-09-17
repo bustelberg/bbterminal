@@ -6881,6 +6881,17 @@
       "FundamentalCoverageRequest": {
         "description": "Either a model portfolio's id, or an explicit basket of (isin, weight).",
         "properties": {
+          "basket_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basket Label"
+          },
           "cadence": {
             "default": "annual",
             "title": "Cadence",
@@ -6925,6 +6936,17 @@
               }
             ],
             "title": "Portfolio Id"
+          },
+          "topselectie_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topselectie Source"
           },
           "universe": {
             "anyOf": [
@@ -7621,6 +7643,17 @@
             ],
             "title": "Book Start Value Eur"
           },
+          "fundamental_model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fundamental Model Id"
+          },
           "label": {
             "anyOf": [
               {
@@ -7631,6 +7664,17 @@
               }
             ],
             "title": "Label"
+          },
+          "model_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Id"
           },
           "return_pct": {
             "anyOf": [
@@ -13034,6 +13078,17 @@
       "RelativeGrowthRequest": {
         "description": "One year of the Share-Price-vs-Owner-Earnings chart, decomposed per holding.",
         "properties": {
+          "basket_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basket Label"
+          },
           "cadence": {
             "default": "annual",
             "title": "Cadence",
@@ -13082,6 +13137,17 @@
               }
             ],
             "title": "Portfolio Id"
+          },
+          "topselectie_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topselectie Source"
           },
           "universe": {
             "anyOf": [

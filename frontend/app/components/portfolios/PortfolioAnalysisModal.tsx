@@ -20,6 +20,7 @@ import {
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import { loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
+import { dialog } from '../../../lib/dialog';
 import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import PanelDialog from './PanelDialog';
@@ -1377,6 +1378,23 @@ export const syntheticBasket = (h: object): Basket | undefined => SYNTHETIC_BASK
 const SYNTHETIC_AIRS_NAMES = new WeakMap<object, string>();
 export const syntheticAirsName = (h: object): string | undefined => SYNTHETIC_AIRS_NAMES.get(h);
 
+/** The exact basket behind the direct TopSelectie's Individual stocks section. Exported because
+ * this identity is the invariant that matters: direct and folded entry points must feed Graphs
+ * byte-for-byte equivalent holdings and weights. */
+export function individualStocksBasket(
+  direct: Pick<ModelPortfolioAnalysis, 'book_holdings'>, label: string,
+): Basket {
+  return {
+    label,
+    holdings: (direct.book_holdings ?? []).flatMap((holding) => (
+      holding.isin && holding.bucket === EQUITY_BUCKET && !holding.is_fund
+        ? [{ isin: holding.isin, weight: holding.weight_now_pct ?? 0,
+          name: holding.name ?? undefined }]
+        : []
+    )),
+  };
+}
+
 /** `
 
 1.23 ÷ 4.56 − 1 = +7.9%` — the substituted line under a momentum formula, or '' when the
@@ -1480,9 +1498,18 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     const holdings = legs.flatMap((leg) => leg.isin && !leg.is_fund
       ? [{ isin: leg.isin, weight: leg.weight_now_pct ?? 0, name: leg.name ?? undefined }]
       : []);
+    // The parent book's look-through rows may already have merged identical ISINs reached through
+    // several routes. Keep the underlying model id so opening Fundamental can replace this
+    // provisional basket with the direct TopSelectie's own Individual stocks rows. That direct
+    // basket is the source of truth for both its charts and its member count.
+    const sourceIds = [...new Set(legs.flatMap((leg) => (leg.sources ?? [])
+      .filter((source) => source.label === label
+        && source.fundamental_model_id != null)
+      .map((source) => source.fundamental_model_id!)))];
     SYNTHETIC_BASKETS.set(row, {
       label,
       holdings,
+      sourcePortfolioId: sourceIds.length === 1 ? sourceIds[0] : undefined,
     });
     const airsNames = [...new Set(legs.flatMap((leg) => {
       const routeNames = (leg.sources ?? [])
@@ -3090,6 +3117,43 @@ export default function PortfolioAnalysisModal({
   /** The instrument or class whose Fundamental is open, over this modal. Null = closed. */
   const [fund, setFund] = useState<
     { name: string; isin?: string; basket?: Basket; weightPct?: number } | null>(null);
+  /** Folded TopSelecties first resolve their direct book. The parent book's expanded legs are only
+   * a preview and can have merged positions; using them would make the same TopSelectie produce a
+   * different graph and denominator depending on where it was opened. */
+  const openFundamental = async (target: {
+    name: string; isin?: string; basket?: Basket; weightPct?: number;
+  }) => {
+    const sourceId = target.basket?.sourcePortfolioId;
+    if (sourceId == null) {
+      setFund(target);
+      return;
+    }
+    const key = `id:${sourceId}|${benchmark}|book||0|0`;
+    try {
+      const direct = await loadPrefetchedAnalysis<ModelPortfolioAnalysis>(key, async () => {
+        const response = await apiFetch(
+          `${API_URL}/api/airs/model-portfolios/${sourceId}/analysis`
+          + `?benchmark=${encodeURIComponent(benchmark)}&weight_by=book&source=book`,
+        );
+        const body = await response.json().catch(() => null);
+        if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+        return body as ModelPortfolioAnalysis;
+      });
+      // This is literally the predicate that renders the direct view's Individual stocks section:
+      // Equity rows which are not fund wrappers. Preserve every row and its direct-book weight.
+      const canonical = individualStocksBasket(direct, target.basket!.label);
+      if (!canonical.holdings.length) {
+        throw new Error('the direct TopSelectie has no Individual stocks');
+      }
+      setFund({ ...target, basket: canonical });
+    } catch (e) {
+      traceError('fundamentals', `could not resolve direct TopSelectie ${target.name}`, e);
+      await dialog.alert(
+        `${target.name}: the direct Individual stocks basket could not be loaded.`,
+        { title: 'Fundamental unavailable' },
+      );
+    }
+  };
   // ⚠ The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
   // Transacties sheet joins on — it carries no ISIN.
   const [timingFor, setTimingFor] = useState<string | null>(null);
@@ -3597,7 +3661,7 @@ export default function PortfolioAnalysisModal({
                  card. `realised` carries them (and the book's own return to check against). */
               <>
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
-                onFundamental={setFund}
+                onFundamental={(target) => { void openFundamental(target); }}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
                 benchmark={data.benchmark ?? benchmark}
                 /* ⚠ Only when this modal is a real portfolio with a paired book. An ad-hoc

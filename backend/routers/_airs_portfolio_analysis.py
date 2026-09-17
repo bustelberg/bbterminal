@@ -1302,7 +1302,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_holding_isin import (classify_bucket, resolve_account_isins)  # noqa: PLC0415
 
-    link = next((a for a in list_account_links()["accounts"]
+    account_links = list_account_links()["accounts"]
+    link = next((a for a in account_links
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
@@ -1541,6 +1542,17 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         net_income = _net_income(r)
         own_book = None
         routes = _weigh_sources(r.get("sources"), total_w)
+        # A certificate's linked model is the right identity for valuing that route, but not always
+        # the reviewed TopSelectie shown as its own row on /management-dashboard. Keep both. The
+        # Fundamental action must open the latter so direct and folded views use one composition.
+        from ._management_topselecties import topselectie_for_display_name  # noqa: PLC0415
+        for rt in routes:
+            reviewed = topselectie_for_display_name(rt.get("label"))
+            reviewed_account = (reviewed or {}).get("dynamic_portefeuille")
+            reviewed_link = next((a for a in account_links
+                                  if a.get("portefeuille") == reviewed_account), None)
+            rt["fundamental_model_id"] = (
+                reviewed_link.get("model_portfolio_id") if reviewed_link else None)
         direct = direct_marks.get(isin or "") if via else None
         for rt in routes:
             if rt["model_id"] is None:

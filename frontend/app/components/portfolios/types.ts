@@ -11,4 +11,8 @@
 export type Basket = {
   holdings: { isin: string; weight: number; name?: string }[];
   label: string;
+  /** The direct TopSelectie model behind a folded certificate. When present, the Fundamental
+   * modal resolves this model's own Individual stocks basket before it opens, so a TopSelectie
+   * cannot acquire a different composition merely because it was reached through another book. */
+  sourcePortfolioId?: number;
 };

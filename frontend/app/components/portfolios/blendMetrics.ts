@@ -58,9 +58,9 @@ export function blendBody(t: BlendTarget): string {
   const base = t.basket
     ? { holdings: t.basket.holdings.map((h) => ({ isin: h.isin, name: h.name, weight: h.weight })),
       basket_label: t.basket.label,
-      // A distinct body also evicts results memoised before folded TopSelecties used their direct
-      // model composition for coverage counts.
-      topselectie_source: t.basket.label ? 'linked-model' : undefined,
+      // A distinct body also evicts results memoised before folded TopSelecties used their whole
+      // linked-model composition rather than the Individual stocks basket on screen.
+      topselectie_source: t.basket.label ? 'individual-stocks' : undefined,
       cadence }
     : { portfolio_id: t.portfolioId, cadence };
   return JSON.stringify(t.metrics?.length ? { ...base, metrics: t.metrics } : base);

@@ -526,11 +526,12 @@ class FundamentalCoverageRequest(BaseModel):
 
     portfolio_id: int | None = None
     holdings: list[dict] | None = None
-    # A folded TopSelectie's human label. Its parent portfolio can expose only the equity legs,
-    # while the direct TopSelectie view knows the full underlying composition.
+    # A folded TopSelectie's human label. It identifies the selected basket for cache identity;
+    # membership itself always comes from `holdings`, which is the Individual stocks section the
+    # reader opened.
     basket_label: str | None = None
-    # Request identity for a basket whose TopSelectie denominator comes from its linked model.
-    # It carries no additional calculation rule; see `_member_count_total`.
+    # Request identity for a folded TopSelectie basket. It carries no calculation rule; see
+    # `_member_count_total`.
     topselectie_source: str | None = None
     # ⚠ ON THE SHARED REQUEST, SO EVERY CARD ON THE TAB MOVES TOGETHER. All eleven `*-inputs`
     # endpoints take this model and read their lines through `_metric_by_year`, so one field here
@@ -2166,31 +2167,11 @@ def _member_count_total(body: FundamentalCoverageRequest, cov: dict) -> int:
     the membership list coverage already measured.
     """
     fallback = int(cov.get("holdings") or 0)
-    if body.basket_label:
-        try:
-            # The direct TopSelectie view uses the model linked to its reviewed Dynamic account.
-            # Do not use the account's live holdings feed here: it may contain a cash line the
-            # linked model does not (MerkenTopSelectie was 23 here and 22 directly).
-            from routers._airs_account_links import list_account_links  # noqa: PLC0415
-            from routers._airs_lookthrough import _datum_of, _positions_of  # noqa: PLC0415
-            from routers._management_topselecties import topselectie_for_display_name  # noqa: PLC0415
-            from routers._airs_strategy_map import dynamic_account_for_holding  # noqa: PLC0415
-
-            reviewed = topselectie_for_display_name(body.basket_label)
-            account = ((reviewed or {}).get("dynamic_portefeuille")
-                       or dynamic_account_for_holding(body.basket_label))
-            link = next((row for row in list_account_links().get("accounts", [])
-                         if row.get("portefeuille") == account), {})
-            model_id = link.get("model_portfolio_id")
-            positions = _positions_of(model_id, _datum_of(model_id)) if model_id else []
-            if positions:
-                return len(positions)
-        except Exception:  # noqa: BLE001 - a label is supplementary disclosure, not chart input
-            _log.warning("Could not load TopSelectie composition for the member count",
-                         exc_info=True)
-    # An explicit basket is the exact selection the reader opened. Expansion canonicalises ISINs
-    # before blending (correct for arithmetic), but can merge two selected positions and turn a
-    # 28-stock TopSelectie into a misleading "of 25" disclosure.
+    # An explicit basket is the exact Individual stocks selection the reader opened. This is also
+    # the shared source for a folded TopSelectie: substituting its whole linked model reintroduced
+    # cash and Stock ETFs that are visibly in other sections, so the parent view could not match
+    # the direct one. Expansion may canonicalise duplicate ISINs for arithmetic, but must never
+    # change the reader-facing membership count.
     if body.holdings is not None:
         return len(body.holdings) or fallback
     if body.universe != "ACWI":

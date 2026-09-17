@@ -25,6 +25,7 @@ import { benchTileLabel, pairedSpan, SpanNote, Stat } from './CardStats';
 import { clipPoints, sharedSpan } from './windowStats';
 import { withWorked, workedCagr, workedMean } from './workedFormula';
 import CardHeading from './CardHeading';
+import { useGraphCoverage } from './GraphCoverage';
 
 /**
  * One "Long Equity" growth card: a metric per fiscal year on a LOG axis with an exponential-trend
@@ -549,6 +550,7 @@ export default function MetricGrowthCard({
     isAgg, ownLabel: coverageLabel ?? ownLabel, benchLabel: omitBenchmarkForRawSeries ? null : benchLabel, lang,
   }), [memberCounts, benchCounts, cfg.codes, isAgg, coverageLabel, ownLabel, benchLabel, lang,
        omitBenchmarkForRawSeries]);
+  const sharedCoverage = useGraphCoverage();
   /**
    * Why the INDEX has no forecast leg, in one short clause.
    *
@@ -773,7 +775,7 @@ export default function MetricGrowthCard({
         : <h4 className="text-base font-semibold text-fg-strong">{cfg.title}</h4>}
       {/* ⚠ ONLY WHERE MEMBERS WERE ACTUALLY WITHHELD. On every other card `considered === total`
           and a line saying so is noise on thirteen charts to make one honest. */}
-      {countLine && (
+      {countLine && countLine.text !== sharedCoverage?.text && (
         <p className="text-[11px] text-fg-faint -mt-2">
           {countLine.text}
           {/* ⚠ THE PROSE FOLLOWS THE SERVER'S `rule`, not this card's identity — a survivorship
