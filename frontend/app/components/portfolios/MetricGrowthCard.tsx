@@ -207,7 +207,7 @@ export { Stat } from './CardStats';
 export default function MetricGrowthCard({
   cfg, metrics, isAgg, currency, holdingsTarget, holdingsName, ingestIsin: _ingestIsin, onIngested,
   blendNotes, onReloadMetrics, cadence = 'annual', benchMetrics, benchLabel, benchTarget, benchErr,
-  benchNotes, memberCounts, benchCounts,
+  benchNotes, memberCounts, benchCounts, coverageLabel,
 }: {
   cfg: MetricCfg;
   /** 'annual' = one point per fiscal year. 'quarterly' = one TRAILING-TWELVE-MONTH point per
@@ -219,6 +219,9 @@ export default function MetricGrowthCard({
   currency?: string | null;
   holdingsTarget: Target;
   holdingsName?: string | null;  // the portfolio/company the drill-down is for
+  /** The precise basket behind a coverage count. It can be narrower than `holdingsName`, which
+   * names the modal's parent portfolio. */
+  coverageLabel?: string | null;
   // Portfolio only: why a metric the holdings DO carry produced no blended line. Absent for a
   // metric nobody reports — that one really is "not ingested". See `blendNotes`.
   blendNotes?: Record<string, BlendNote>;
@@ -543,8 +546,8 @@ export default function MetricGrowthCard({
   const countLine = useMemo(() => memberCountLine({
     own: countFor(cfg.codes, memberCounts),
     bench: omitBenchmarkForRawSeries ? undefined : countFor(cfg.codes, benchCounts),
-    isAgg, ownLabel, benchLabel: omitBenchmarkForRawSeries ? null : benchLabel, lang,
-  }), [memberCounts, benchCounts, cfg.codes, isAgg, ownLabel, benchLabel, lang,
+    isAgg, ownLabel: coverageLabel ?? ownLabel, benchLabel: omitBenchmarkForRawSeries ? null : benchLabel, lang,
+  }), [memberCounts, benchCounts, cfg.codes, isAgg, coverageLabel, ownLabel, benchLabel, lang,
        omitBenchmarkForRawSeries]);
   /**
    * Why the INDEX has no forecast leg, in one short clause.

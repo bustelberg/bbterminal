@@ -882,6 +882,7 @@ def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
     strategy map used for the nickname and certificate link. Express its latest EUR values as
     percentages so the normal expansion path can consume it without special cases.
     """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
 
     from ._airs_strategy_map import dynamic_account_for_holding  # noqa: PLC0415
@@ -889,6 +890,9 @@ def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
     account = dynamic_account_for_holding(holding_name)
     if not account:
         return []
+    link = next((row for row in list_account_links().get("accounts", [])
+                 if row.get("portefeuille") == account), {})
+    model_id = link.get("model_portfolio_id")
     rows = resolve_account_isins(account, freshen=False).get("rows") or []
     valued = [(row, float(row.get("current_value_eur") or 0)) for row in rows]
     total = sum(value for _, value in valued if value > 0)
@@ -899,6 +903,10 @@ def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
         "fonds": row.get("holding_name"),
         "percentage": value / total * 100.0,
         "categorie": row.get("bucket"),
+        # The account's reviewed Fixed-model link is needed later to load this child book's own
+        # transaction ledger for Money-weighted return. Europa's certificate link is absent only
+        # because its legacy target model is empty; its Dynamic account still has this real link.
+        "_model_id": model_id,
     } for row, value in valued if value > 0]
 
 
@@ -933,12 +941,15 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                        "value_eur": float(r.get("current_value_eur") or 0),
                        "start_value_eur": float(r.get("start_value_eur") or 0)}]
         child = _positions_of(target, _datum_of(target)) if target else []
+        fallback_model_id = None
         if not child and nickname_for_holding(r.get("holding_name")):
             cache_key = str(r.get("holding_name") or "")
             if cache_key not in account_compositions:
                 account_compositions[cache_key] = _dynamic_account_positions(
                     r.get("holding_name"))
             child = account_compositions[cache_key]
+            fallback_model_id = next((c.get("_model_id") for c in child
+                                      if c.get("_model_id") is not None), None)
         if not child:
             # held directly — no strategy in between
             out.append({**r, "holding_name": folded_name,
@@ -997,7 +1008,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # behind THIS certificate specifically. Two certificates wrapping two strategies
                 # can both hold NVIDIA, and each book values its own position differently.
                 "sources": [{"label": folded_name or "via a certificate",
-                             "model_id": target,
+                               "model_id": target or fallback_model_id,
                              "value_eur": cur * share,
                              "start_value_eur": start * share}],
             })
@@ -1332,6 +1343,13 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # unclassifiable is not a limitation, it is a wrong answer: the stocks are known, one link
     # away, and the model side is already drawing them.
     rows = _expand_book_rows(rows)
+    # A fallback expansion (EuropaTopSelectie) obtains its model ID from the mapped Dynamic
+    # account because the certificate itself has no legacy model link. Collect those IDs after
+    # expansion too, or the route has an identity but never loads that child book's valuations or
+    # transaction ledger.
+    wrapped_ids.update(
+        s["model_id"] for r in rows for s in (r.get("sources") or [])
+        if s.get("label") is not None and s.get("model_id") is not None)
 
     grid = _grid(sorted({r["isin"] for r in rows if r.get("isin")}))
     items: list[tuple[float, tuple[str, str, str]]] = []

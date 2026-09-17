@@ -30,7 +30,7 @@ import AnalyseLoading from './AnalyseLoading';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import LoadingDots from './LoadingDots';
 import { type Basket } from './types';
-import { isMomentumState, ordinalPercentile, stateLabel, stateTone } from './momentumState';
+import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
 
 const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
@@ -1373,6 +1373,10 @@ const isSynthetic = (h: BookHolding) => SYNTHETIC_ROWS.has(h);
 const SYNTHETIC_BASKETS = new WeakMap<object, Basket>();
 export const syntheticBasket = (h: object): Basket | undefined => SYNTHETIC_BASKETS.get(h);
 
+/** AIRS's own Dynamic-book code behind a reader-facing folded TopSelectie nickname. */
+const SYNTHETIC_AIRS_NAMES = new WeakMap<object, string>();
+export const syntheticAirsName = (h: object): string | undefined => SYNTHETIC_AIRS_NAMES.get(h);
+
 /** `
 
 1.23 ÷ 4.56 − 1 = +7.9%` — the substituted line under a momentum formula, or '' when the
@@ -1424,6 +1428,7 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
         ? known.reduce((total, item) => total + item.value * item.weight, 0) / knownWeight
         : null;
     };
+    const weightedMomentumRank = weightedSignal((leg) => leg.mom_pct_rank);
     const row: BookHolding = {
       // Spread a real leg so every field this row type carries exists; everything that describes
       // the POSITION rather than the wrapper is overridden below.
@@ -1454,9 +1459,12 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       mom_12_1_pct: weightedSignal((leg) => leg.mom_12_1_pct),
       mom_12_1_from: null,
       mom_12_1_to: null,
-      mom_state: null,
-      mom_pct_rank: null,
-      mom_rank_n: null,
+      // Rank first, then bucket it. Averaging pre-bucketed states made a 73rd-percentile basket
+      // look `++` merely because its weighted state happened to round up; the percentile is the
+      // actual relative-momentum measure and keeps the glyph consistent with its tooltip.
+      mom_state: stateFromPercentile(weightedMomentumRank),
+      mom_pct_rank: weightedMomentumRank,
+      mom_rank_n: weightedSignal((leg) => leg.mom_rank_n),
       vol_5y_pct: weightedSignal((leg) => leg.vol_5y_pct),
       beta_5y: weightedSignal((leg) => leg.beta_5y),
       // The row IS the certificate now, so it is no longer reached "through" anything.
@@ -1467,19 +1475,27 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     // ⚠ MARKED AS MADE UP. It is a strategy, not a tradeable position — see `SYNTHETIC_ROWS`.
     SYNTHETIC_ROWS.add(row);
     // This is the exception to ordinary ETFs: this certificate's underlying companies are known.
-    const weights = new Map<string, { weight: number; name?: string }>();
-    for (const leg of legs) {
-      if (!leg.isin || leg.is_fund) continue;
-      const prior = weights.get(leg.isin);
-      weights.set(leg.isin, {
-        weight: (prior?.weight ?? 0) + (leg.weight_now_pct ?? 0),
-        name: leg.name ?? prior?.name,
-      });
-    }
+    // Keep every selected position. Combining duplicate ISINs is fine for a weighted blend, but
+    // makes the Fundamental coverage label claim fewer TopSelectie stocks than the selection has.
+    const holdings = legs.flatMap((leg) => leg.isin && !leg.is_fund
+      ? [{ isin: leg.isin, weight: leg.weight_now_pct ?? 0, name: leg.name ?? undefined }]
+      : []);
     SYNTHETIC_BASKETS.set(row, {
       label,
-      holdings: [...weights].map(([isin, value]) => ({ isin, ...value })),
+      holdings,
     });
+    const airsNames = [...new Set(legs.flatMap((leg) => {
+      const routeNames = (leg.sources ?? [])
+        .filter((source) => source.label === label)
+        .flatMap((source) => source.book ? [source.book] : []);
+      // A route with no resolved child book retains its existing certificate provenance as a
+      // fallback, rather than claiming an AIRS code it cannot identify.
+      return routeNames.length ? routeNames : [
+        ...(leg.via_holding_names ?? []),
+        ...(leg.via_holding_name ? [leg.via_holding_name] : []),
+      ];
+    }).filter(Boolean))];
+    if (airsNames.length) SYNTHETIC_AIRS_NAMES.set(row, airsNames.join(' / '));
     folded.push(row);
   }
   return [...kept, ...folded];
@@ -2170,7 +2186,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       fourteenth column here shifts every figure one cell right, silently — a
                       weight renders perfectly well under "Ccy". The button rides with the name it
                       belongs to and appears on hover so 52 rows are not 52 buttons at rest. */}
-                  <td className="py-1.5 pr-3 text-fg max-w-0" title={h.name ?? undefined}>
+                  <td className="py-1.5 pr-3 text-fg max-w-0"
+                    title={syntheticAirsName(h) ? `AIRS: ${syntheticAirsName(h)}` : h.name ?? undefined}>
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{h.name ?? '—'}</span>
                       {/* ⚠ SAME GATE AS THE CLASS ROW, and it has to be here too or the rule is
@@ -2260,7 +2277,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         {stateLabel(h.mom_state)}
                       </span>
                     )}
-                    {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct >= 0 ? '+' : ''}${h.mom_12_1_pct.toFixed(1)}%`}
+                    {h.mom_12_1_pct == null ? '—' : `${h.mom_12_1_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       /* ⚠ THE RANK IS SPELLED OUT IN WORDS HERE, because the chip is glyphs. A
                          reader who cannot tell `++` from `+++` at a glance gets "the 82nd

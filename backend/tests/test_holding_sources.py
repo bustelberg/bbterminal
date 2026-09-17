@@ -17,12 +17,18 @@ import pytest
 
 from routers import _airs_portfolio_analysis as pa
 from routers._airs_lookthrough import merge_by_isin
-from routers._airs_strategy_map import is_strategy_holding
+from routers._airs_strategy_map import is_strategy_holding, nickname_for_holding
 
 
 class TestWeighSources:
     def test_a_renamed_topselectie_certificate_remains_a_fund_wrapper(self):
         assert is_strategy_holding("EuropaTopSelectie")
+
+    def test_merken_certificate_uses_its_reviewed_nickname(self):
+        assert nickname_for_holding("MerkenTopSelectie Index") == "MerkenTopSelectie"
+
+    def test_familie_defensief_uses_its_reviewed_nickname(self):
+        assert nickname_for_holding("BUS_FTS_DEF_DYN") == "FamilieTopSelectie"
 
     def test_the_routes_sum_to_the_holdings_weight(self):
         # 50,489 direct + 1,991 via, over a 1,245,014 book -> 4.0553% + 0.1599% = 4.2152%.
@@ -210,15 +216,17 @@ class TestTheExpansionStampsTheRoute:
     def test_a_mapped_dynamic_account_fills_an_empty_fixed_model(self, monkeypatch):
         self._wire(monkeypatch, [])
         monkeypatch.setattr(pa, "_dynamic_account_positions", lambda name: [
-            {"isin": "NL1", "fonds": "ASML", "percentage": 60.0, "categorie": "Equity"},
-            {"isin": "NL2", "fonds": "Adyen", "percentage": 40.0, "categorie": "Equity"},
+            {"isin": "NL1", "fonds": "ASML", "percentage": 60.0, "categorie": "Equity",
+             "_model_id": 77},
+            {"isin": "NL2", "fonds": "Adyen", "percentage": 40.0, "categorie": "Equity",
+             "_model_id": 77},
         ])
         out = pa._expand_book_rows(
             [{"isin": "CH1", "holding_name": "EuropaTopSelectie Index",
-              "current_value_eur": 100.0, "start_value_eur": 90.0,
-              "linked_portfolio_id": 99, "linked_portfolio_name": "EuropaTopSelect OFF FX"}])
+              "current_value_eur": 100.0, "start_value_eur": 90.0}])
 
         assert [r["holding_name"] for r in out] == ["ASML", "Adyen"]
         assert all(r["via_names"] == ["EuropaTopSelectie"] for r in out)
         assert all(r["sources"][0]["label"] == "EuropaTopSelectie" for r in out)
+        assert all(r["sources"][0]["model_id"] == 77 for r in out)
         assert sum(r["current_value_eur"] for r in out) == pytest.approx(100.0)

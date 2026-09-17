@@ -20,6 +20,7 @@ import { type BlendNote } from './blendNotes';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 import { type MemberCount } from './memberCounts';
 import { benchBody, type BenchTarget } from './benchSeries';
+import { type Basket } from './types';
 
 /**
  * The "Long Equity" tab: a grid of growth cards (Revenue, FCF/share, …), each a
@@ -243,7 +244,7 @@ export default function LongEquityTab({
 }: {
   isin?: string;
   name?: string | null;
-  basket?: { holdings: { isin: string; weight: number; name?: string }[] };
+  basket?: Basket;
   portfolioId?: number;
   /**
    * A SECOND COMPANY to draw beside this one, on every chart, instead of an index.
@@ -513,6 +514,10 @@ export default function LongEquityTab({
     metrics: data?.metrics ?? null, isAgg, currency: data?.currency,
     blendNotes: data?.blend_notes, memberCounts: data?.member_counts,
     holdingsTarget, holdingsName: gName,
+    // A slice is blended from its own holdings, not from every position in the parent portfolio.
+    // The coverage line must therefore name the slice while the rest of the modal retains its
+    // parent-book context.
+    coverageLabel: basket?.label ?? gName,
     ingestIsin, onIngested, onReloadMetrics, cadence,
     benchMetrics, benchLabel: benchTarget?.label ?? null, benchTarget, benchErr, benchNotes,
     benchCounts,

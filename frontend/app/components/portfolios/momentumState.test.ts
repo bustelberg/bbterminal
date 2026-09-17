@@ -4,6 +4,7 @@ import {
   MOMENTUM_STATE_TONES,
   isMomentumState,
   ordinalPercentile,
+  stateFromPercentile,
   stateLabel,
   stateTone,
   type MomentumState,
@@ -15,6 +16,14 @@ import {
  * presentation rules that make it legible.
  */
 describe('the seven states', () => {
+  it('uses the server percentile boundaries for a folded basket', () => {
+    expect(stateFromPercentile(0.10)).toBe(-3);
+    expect(stateFromPercentile(0.73)).toBe(1);
+    expect(stateFromPercentile(0.75)).toBe(1);
+    expect(stateFromPercentile(0.751)).toBe(2);
+    expect(stateFromPercentile(0.95)).toBe(3);
+  });
+
   it('covers -3..+3 and nothing else', () => {
     const keys = Object.keys(MOMENTUM_STATE_LABELS).map(Number).sort((a, b) => a - b);
     expect(keys).toEqual([-3, -2, -1, 0, 1, 2, 3]);

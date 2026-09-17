@@ -23,3 +23,15 @@ def topselectie_for_account(account_name: str | None) -> dict | None:
     """The reviewed TopSelecties-tab entry for an AIRS Dynamic account, if it is listed."""
     path = Path(__file__).resolve().parent.parent / "config" / "management_topselecties.json"
     return _load(str(path), path.stat().st_mtime_ns).get(_key(account_name))
+
+
+def topselectie_for_display_name(display_name: str | None) -> dict | None:
+    """The reviewed account behind a displayed TopSelectie nickname.
+
+    A nickname can also exist in the broader strategy map for another risk profile. The management
+    allowlist is the unambiguous identity of the TopSelectie row the reader clicked.
+    """
+    path = Path(__file__).resolve().parent.parent / "config" / "management_topselecties.json"
+    wanted = _key(display_name)
+    return next((row for row in _load(str(path), path.stat().st_mtime_ns).values()
+                 if _key(row.get("display_name")) == wanted), None)
