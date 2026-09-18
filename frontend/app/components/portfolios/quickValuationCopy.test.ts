@@ -66,6 +66,8 @@ describe('Quick Valuation copy', () => {
     expect(C.nl.basis.fcf.yieldTitle).toBe('FCF yield');
     expect(C.nl.basis.fcf.yieldInline).toBe('FCF yield');
     expect(C.nl.basis.eps.yieldInline).toBe('earnings yield');
+    expect(C.nl.pt.currentYield(C.nl.basis.fcf.yieldInline)).toBe('Huidige FCF yield');
+    expect(C.nl.pt.forecastYield(C.nl.basis.fcf.yieldInline)).toBe('Verwachte FCF yield');
   });
 
   it('⚠ the singular/plural switch works in both languages', () => {
