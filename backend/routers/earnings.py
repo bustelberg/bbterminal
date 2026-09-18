@@ -225,6 +225,8 @@ _DASHBOARD_METRIC_CODES = [
     # maintenance proxy has to be one too — see `DEP_CODES` in `egmInputs.ts`.
     "annuals__Cashflow Statement__Stock Based Compensation",
     "annuals__Cashflow Statement__Capital Expenditure",
+    "annuals__Cashflow Statement__Purchase Of Property, Plant, Equipment",
+    "annuals__cashflow_statement__Purchase Of Property, Plant, Equipment",
     "annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization",
     "annuals__Income Statement__Revenue",
     "annuals__Income Statement__Operating Income",

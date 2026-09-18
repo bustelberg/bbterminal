@@ -58,9 +58,10 @@ export type GrowthEstimates = {
  * Clearing the box hands control back to the default; `null` (never typed) and `''` (cleared) both
  * fall through to it.
  */
-function Field({ label, value, onChange, suffix, info, tone, dim }: {
+function Field({ label, value, onChange, suffix, info, tone, dim, onRefresh }: {
   label: string; value: string; onChange: (v: string) => void;
   suffix?: string; info?: React.ReactNode;
+  onRefresh?: () => void;
   /** `'total'` gives this row `DerivedRow`'s total weight — the rule and the border, so an
    *  editable total and a computed one are the same object at a glance. */
   tone?: 'total';
@@ -84,6 +85,8 @@ function Field({ label, value, onChange, suffix, info, tone, dim }: {
         className={`w-24 shrink-0 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right font-mono text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30${
           total ? ' font-semibold' : ''}`} />
       <span className="w-2 shrink-0 text-[11px] text-fg-muted">{suffix}</span>
+      {onRefresh && <button type="button" onClick={onRefresh} title="Refresh source data"
+        className="shrink-0 text-[11px] text-fg-faint hover:text-fg-strong">Refresh</button>}
       {/*  THE ⓘ IS A TRAILING SLOT, NOT A SUFFIX ON THE LABEL — the same rule and the same width
           as the EGM panel above. Beside the label its x landed wherever that label happened to end
           (`Discount rate ⓘ` against `Target market cap (USD m) ⓘ` is most of the column apart), so
@@ -173,7 +176,8 @@ function DerivedRow({ label, value, info, tone = 'step', dim }: {
  * shows the trailing one.
  */
 
-export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst, sourceFetchedAt, today }: {
+export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst, sourceFetchedAt, today,
+  onRefresh }: {
   src: ReverseDcfSource; currency?: string | null;
   metrics: MetricRow[]; name?: string | null; isin: string;
   sourceFetchedAt?: { financials?: string | null; estimates?: string | null; indicators?: string | null };
@@ -184,6 +188,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   today: string;
   /** Analysts' 3–5y consensus — context beside the implied rate, never an input to it. */
   growthEst?: GrowthEstimates | null;
+  onRefresh?: () => void;
 }) {
   const t = useDeepValuationCopy();
   const lang = t.lang;
@@ -500,6 +505,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
             <Field dim={overridden}
               label={`${t.dcf.freeCashFlow}${forward && estFy ? ` ${estFy}` : forward ? ` ${t.dcf.nextFY}` : ''}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(fcfStr, defFcf)} onChange={setFcfStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={!forward ? t.dcf.fcfWhatReported
                   : fcfEstDirect ? 'Next fiscal year\'s free cash flow, as forecast.'
@@ -546,6 +552,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 panel would jump on a checkbox. Same rule as the Reset button above. */}
             <Field label={`${t.dcf.rowSbc}${currency ? ` (${currency}m)` : ' (m)'}`} dim={overridden || !normalise}
               value={show(sbcStr, src.sbc)} onChange={setSbcStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.sbc.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.sbc))}
@@ -565,6 +572,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 from the cash flow, which is exactly what it is not. */}
             <Field dim={overridden || !normalise} label={`${t.dcf.rowCapex}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(capexStr, capex)} onChange={setCapexStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.capex.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.capex))}
@@ -572,6 +580,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 how={t.dcf.capexHow + t.dcf.ttmNote} />} />} />
             <Field dim={overridden || !normalise} label={`${t.dcf.rowDA}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(depStr, dep)} onChange={setDepStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.da.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.dep))}
@@ -579,6 +588,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 how={t.dcf.daHow + t.dcf.ttmNote} />} />} />
             <Field label={`${t.dcf.rowGrowthCapex}${currency ? ` (${currency}m)` : ' (m)'}`} dim={overridden || !normalise}
               value={show(growthCapexStr, automaticGrowthCapex)} onChange={setGrowthCapexStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.growthCapex.what}
                 where={t.dcf.cards.growthCapex.where}
@@ -610,6 +620,7 @@ ${t.dcf.growthCapexHow}${t.dcf.normOff}`
             <Field tone="total"
               label={`${t.dcf.cashFlowValued}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(totalStr, computedFcf)} onChange={setTotalStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={overridden ? t.dcf.valuedWhatYours : t.dcf.valuedWhat}
                 where={overridden ? t.dcf.valuedWhereYours : t.dcf.valuedWhere}
@@ -676,6 +687,7 @@ Type a figure here to bypass them and value it directly.`
 
             <Field label={`${t.dcf.targetMarketCap}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(targetStr, defTarget)} onChange={setTargetStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.solvedAgainst.what}
                 where={t.dcf.cards.marketCap.where}
@@ -693,6 +705,7 @@ Type a figure here to bypass them and value it directly.`
                 ]}
                 how={t.dcf.cards.marketCap.how} />} />} />
             <Field label={t.dcf.rowDiscountRate} value={show(rateStr, defRate * 100, 1)} onChange={setRateStr}
+              onRefresh={onRefresh}
               suffix="%"
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.discountRate.what}
@@ -703,6 +716,7 @@ Type a figure here to bypass them and value it directly.`
                   : provenance(sourceFetchedAt?.financials, src.waccDate)}
                 how={t.dcf.cards.discountRate.how} />} />} />
             <Field label={t.dcf.rowPerpetuityGrowth} value={show(perpStr, defPerp * 100, 1)} onChange={setPerpStr}
+              onRefresh={onRefresh}
               suffix="%"
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.perpetuityGrowth.what}
@@ -710,6 +724,7 @@ Type a figure here to bypass them and value it directly.`
                 when={t.dcf.fromYearOnwards(String(defYears + 1))}
                 how={t.dcf.cards.perpetuityGrowth.how} />} />} />
             <Field label={t.dcf.rowForecastYears} value={show(yearsStr, defYears)} onChange={setYearsStr}
+              onRefresh={onRefresh}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.forecastYears.what}
                 where={t.dcf.cards.perpetuityGrowth.where}

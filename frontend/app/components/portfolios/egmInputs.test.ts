@@ -212,6 +212,12 @@ describe('reverseDcfSource', () => {
     expect(reverseDcfSource(wrongDep, TODAY).dep).toBeNull();
   });
 
+  it('accepts the property, plant and equipment capex spelling', () => {
+    const visaCapex = [...rows,
+      m('annuals__Cashflow Statement__Purchase Of Property, Plant, Equipment', '2025-09-30', -820)];
+    expect(reverseDcfSource(visaCapex, TODAY).capex).toBe(-820);
+  });
+
   it(' converts the percent-unit WACC into the decimal the discount rate wants', () => {
     // Filed as 8.2 for 8.2%, like every other `… %` line. Passed through unscaled it is an 820%
     // discount rate, and every company on earth reads as worthless.

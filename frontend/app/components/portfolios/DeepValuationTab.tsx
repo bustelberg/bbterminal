@@ -493,6 +493,22 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
       }));
   }, [companyId, name, isin, load]);
 
+  const refreshReverseDcf = useCallback(() => {
+    if (companyId == null) return;
+    startLocalJob(
+      `${name ?? isin} — Reverse DCF financials`, 'valuation.reverse-dcf',
+      async (signal) => {
+        await runSSE(
+          `${API_URL}/api/earnings/${companyId}/refresh/financials?force=true`,
+          { method: 'POST' }, () => {}, signal);
+        if (signal.aborted) return 'cancelled';
+        invalidateReadCache('refreshed Reverse DCF financials');
+        await load(false, signal);
+        return 'Reverse DCF financials re-read';
+      },
+    );
+  }, [companyId, name, isin, load]);
+
   const refreshExitPE = useCallback((keepDefault: boolean) => {
     if (companyId == null) return;
     refreshExitDefaultRef.current = keepDefault;
@@ -1558,7 +1574,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
         reverse DCF asks what the price already assumes. */}
     <ReverseDcfPanel src={dcfSrc} currency={currency} metrics={metrics} growthEst={growthEst}
       sourceFetchedAt={sourceFetchedAt}
-      name={name} isin={isin} today={today} />
+      name={name} isin={isin} today={today} onRefresh={refreshReverseDcf} />
     </div>
     </TipCardLanguageProvider>
   );

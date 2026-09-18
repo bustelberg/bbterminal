@@ -57,6 +57,8 @@ const SBC_CODES = [
 const CAPEX_CODES = [
   'annuals__Cashflow Statement__Capital Expenditure',
   'annuals__cashflow_statement__Capital Expenditure',
+  'annuals__Cashflow Statement__Purchase Of Property, Plant, Equipment',
+  'annuals__cashflow_statement__Purchase Of Property, Plant, Equipment',
 ];
 /**
  *  THE **CASH FLOW** DEPRECIATION LINE, NOT THE INCOME STATEMENT'S. GuruFocus files both
