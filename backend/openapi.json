@@ -27390,6 +27390,46 @@
         ]
       }
     },
+    "/api/log-dashboard/entries/{entry_id}": {
+      "delete": {
+        "operationId": "delete_entry_api_log_dashboard_entries__entry_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Entry",
+        "tags": [
+          "log dashboard"
+        ]
+      }
+    },
     "/api/log-dashboard/news/{ticker}": {
       "get": {
         "description": "Latest headlines from the legacy GuruFocus API used by this app.",

@@ -52,6 +52,17 @@ async def create_entry(body: LogEntryIn):
     return await asyncio.to_thread(create)
 
 
+@router.delete("/api/log-dashboard/entries/{entry_id}")
+async def delete_entry(entry_id: int):
+    def delete() -> None:
+        result = (supabase.table("bc_log_entry").delete()
+                  .eq("id", entry_id).execute())
+        if not result.data:
+            raise HTTPException(404, "Log entry not found")
+    await asyncio.to_thread(delete)
+    return {"deleted": True}
+
+
 @router.get("/api/log-dashboard/news/{ticker}")
 async def stock_news(ticker: str):
     """Latest headlines from the legacy GuruFocus API used by this app."""
