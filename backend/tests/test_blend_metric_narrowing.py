@@ -69,6 +69,23 @@ def _key(rows: list[dict]) -> set[tuple]:
 
 
 class TestTheNarrowedReadMatchesTheLoop:
+    def test_capex_accepts_the_property_plant_equipment_vendor_spelling(self, earnings):
+        assert "annuals__Cashflow Statement__Purchase Of Property, Plant, Equipment" in \
+            earnings._metric_codes("capex")
+
+    def test_annual_alias_is_normalised_so_ltm_continues_the_same_series(
+            self, earnings, monkeypatch):
+        alias = "annuals__per_share_data_array__EPS without NRI"
+        monkeypatch.setattr(
+            earnings, "_rows_by_company",
+            lambda _cids, _codes: {1: [{"company_id": 1, "metric_code": alias,
+                                        "target_date": "2025-12-31", "numeric_value": 17.01}]})
+        monkeypatch.setattr(earnings, "_ltm_blend_rows", lambda *_args: [])
+
+        rows = earnings._bulk_blend_rows([1], ["eps_nri"], "annual")
+
+        assert [row["metric_code"] for row in rows] == [earnings._metric_codes("eps_nri")[0]]
+
     def test_annual_rows_are_the_same_rows(self, earnings):
         loop = [r for cid in (1, 2) for r in earnings._company_metric_rows(cid)]
         bulk = earnings._bulk_blend_rows([1, 2], ["revenue", "fcf_ps"], "annual")

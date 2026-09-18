@@ -449,7 +449,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
     else { setSortKey(k); setDir('desc'); }
   };
   const caret = (k: string) => (k === sortKey ? (dir === 'desc' ? ' ↓' : ' ↑') : '');
-  const th = 'py-2 font-medium cursor-pointer select-none hover:text-fg';
+  const th = 'py-2 font-medium cursor-pointer hover:text-fg';
 
   /**
    *  No early returns. THE PANE HAS ONE SHAPE, LOADED OR NOT.

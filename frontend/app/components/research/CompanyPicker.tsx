@@ -80,6 +80,27 @@ export default function CompanyPicker({ label, value, onPick }: {
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
+  if (value) {
+    return (
+      <div>
+        <div className="mb-1.5 text-sm font-medium text-fg-soft">{label}</div>
+        <div className="flex min-h-10 items-center gap-3 rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm text-fg-strong">{value.name ?? value.isin}</div>
+            <div className="truncate font-mono text-[11px] text-fg-faint">{value.isin}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => { onPick(null); setQ(''); }}
+            className="shrink-0 text-xs text-fg-subtle transition-colors hover:text-fg"
+          >
+            Change
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={box} className="relative">
       {/*  BIGGER, AND NO LONGER UPPERCASED — the two go together. At 10px small-caps this was
@@ -96,13 +117,6 @@ export default function CompanyPicker({ label, value, onPick }: {
           placeholder="Name, ISIN or ticker…"
           className="flex-1 min-w-0 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors"
         />
-        {value && (
-          <button type="button" onClick={() => { onPick(null); setQ(''); }}
-            title="Clear this side"
-            className="shrink-0 px-3 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-fg text-sm transition-colors">
-
-          </button>
-        )}
       </div>
 
       {open && q.trim().length >= 2 && (
@@ -119,16 +133,7 @@ export default function CompanyPicker({ label, value, onPick }: {
               onClick={() => { onPick(r); setOpen(false); setQ(r.name ?? r.isin); }}
               className="w-full text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
               <div className="text-sm text-fg-strong truncate">{r.name ?? r.isin}</div>
-              <div className="text-[11px] text-fg-faint font-mono truncate">
-                {r.isin}
-                {r.yahoo_symbol && ` · ${r.yahoo_symbol}`}
-                {r.exchange && ` · ${r.exchange}`}
-                {r.currency && ` · ${r.currency}`}
-                {/*  THE BAR COUNT IS SHOWN because it is what the list is ORDERED by, and an
-                    order the reader cannot see reads as arbitrary. It is also the honest way to
-                    tell a company's main listing from a thin foreign one carrying the same name. */}
-                {typeof r.bars === 'number' && ` · ${r.bars.toLocaleString('en-US')} bars`}
-              </div>
+              <div className="text-[11px] text-fg-faint font-mono truncate">{r.isin}</div>
             </button>
           ))}
           {truncated && (

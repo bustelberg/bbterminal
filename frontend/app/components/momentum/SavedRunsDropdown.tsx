@@ -198,7 +198,7 @@ export default function SavedRunsDropdown({
         <div className="absolute right-0 mt-1 w-max min-w-[280px] max-w-[90vw] bg-card border border-neutral-700 rounded-lg shadow-xl z-50 max-h-96 overflow-auto">
           {savedRuns.length > 0 && (
             <div className="sticky top-0 z-10 bg-elevated border-b border-neutral-700 px-3 py-2 flex items-center justify-between gap-2">
-              <label className="inline-flex items-center gap-2 cursor-pointer select-none">
+              <label className="inline-flex items-center gap-2 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={allSelected}

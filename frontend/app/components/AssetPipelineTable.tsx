@@ -431,7 +431,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                 {COLS.map((c) => (
                   <th key={c.key} title={c.title}
                     onClick={() => clickSort(c.key)}
-                    className={`px-3 py-1.5 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft ${c.sep ? 'border-l border-neutral-800/40' : ''}`}>
+                    className={`px-3 py-1.5 font-medium cursor-pointer whitespace-nowrap hover:text-fg-soft ${c.sep ? 'border-l border-neutral-800/40' : ''}`}>
                     <div className={`flex flex-col gap-1 ${c.align === 'right' ? 'items-end' : 'items-start'}`}>
                       <span>{c.label}{sort.key === c.key && <span className="text-accent-400 ml-0.5">{sort.dir === 1 ? '▲' : '▼'}</span>}</span>
                       <SourceBadge source={sourceOf(c.key)} />

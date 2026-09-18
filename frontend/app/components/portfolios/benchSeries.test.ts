@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  benchBody, benchKey, benchNote, isUniverseTarget, mergeSeries, rebaseSeries, seriesCrossesZero,
+  benchBody, benchKey, benchNote, inputsBody, isUniverseTarget, mergeSeries, rebaseSeries, seriesCrossesZero,
   spliceCaps, withBench, type BenchTarget,
 } from './benchSeries';
 import { weightAt } from './marginData';
@@ -251,6 +251,13 @@ describe('the second line can be an index or a company', () => {
     //  And it must not carry `universe`. A company body with a stray universe key is answered by
     // the INDEX branch server-side — a chart that draws ACWI under a company's name.
     expect(JSON.parse(benchBody(co))).not.toHaveProperty('universe');
+  });
+
+  it('uses that same body for input modals', () => {
+    expect(inputsBody(co)).toBe(benchBody(co));
+    expect(inputsBody({ holdings: [{ isin: 'US0378331005', weight: 1 }] })).toBe(
+      JSON.stringify({ holdings: [{ isin: 'US0378331005', weight: 1 }] }),
+    );
   });
 
   it('sends an index as before, with no holdings', () => {

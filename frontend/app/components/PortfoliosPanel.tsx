@@ -467,7 +467,7 @@ export default function PortfoliosPanel() {
             </div>
           )}
           {rows && (
-            <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none whitespace-nowrap"
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer whitespace-nowrap"
               title={`Shows only the portfolios whose counted model holds more than ${MIN_HOLDINGS_SHOWN} instruments. Hides ${smallCount}: the single-instrument portfolios, plus every row with no countable model at all — no fixed model, no snapshot, or a count that failed.`}>
               <input type="checkbox" checked={hideSmall} onChange={(e) => setHideSmall(e.target.checked)}
                 className="accent-accent-600 cursor-pointer" />

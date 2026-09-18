@@ -961,8 +961,9 @@ def _bulk_blend_rows(cids: list[int], metrics: list[str], cadence: str) -> list[
             continue
         raw = _rows_by_company(cids, codes)
         if rule is None:
+            annual_code = _metric_codes(m)[0]
             for rows in raw.values():
-                out += rows
+                out += [{**row, "metric_code": annual_code} for row in rows]
             # `Month End Stock Price` is the one annual chart line for which a daily close is
             # the same economic observation at a finer frequency.  Fill only years the financials
             # blob lacks, so Visa/Oracle's reported FY2017+ fiscal closes stay authoritative while
@@ -2407,7 +2408,8 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     "net_income": ("annuals__Income Statement__Net Income",
                    "annuals__income_statement__Net Income"),
     "fcf_ps": ("annuals__Per Share Data__Free Cash Flow per Share",
-               "annuals__per_share_data__Free Cash Flow per Share"),
+               "annuals__per_share_data__Free Cash Flow per Share",
+               "annuals__per_share_data_array__Free Cash Flow per Share"),
     #  "WITHOUT NRI" IS THE POINT, NOT A DETAIL. GuruFocus publishes three EPS lines and they are
     # near-identical most years, which is exactly what makes picking the wrong one hard to notice:
     # `EPS (Diluted)` and `Earnings per Share (Diluted)` both include non-recurring items, so a
@@ -2499,7 +2501,9 @@ _METRIC_CODES: dict[str, tuple[str, ...]] = {
     # intangibles), reported NEGATIVE (an outflow); the card takes its magnitude. Revenue is the
     # `revenue` key above.
     "capex": ("annuals__Cashflow Statement__Capital Expenditure",
-              "annuals__cashflow_statement__Capital Expenditure"),
+              "annuals__cashflow_statement__Capital Expenditure",
+              "annuals__Cashflow Statement__Purchase Of Property, Plant, Equipment",
+              "annuals__cashflow_statement__Purchase Of Property, Plant, Equipment"),
     # Dividends per share (per-share currency level; CAGR = the dividend-growth rate).  THREE
     # per-share section spellings: capitalized cohort `Per Share Data`, lowercase cohort
     # `per_share_data_array` (NOT `per_share_data` — that's the shares-outstanding trap again).

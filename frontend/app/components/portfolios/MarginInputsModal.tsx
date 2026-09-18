@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { marginOf, type MarginInputs, type MarginRow } from './marginData';
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
-import { type BenchTarget } from './benchSeries';
+import { inputsBody, type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
 import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
 
@@ -53,7 +53,7 @@ export default function MarginInputsModal({ target, portfolioName, benchTarget, 
   const load = async (body: Target | BenchTarget): Promise<MarginInputs> => {
     const r = await apiFetch(`${API_URL}/api/earnings/margin-inputs`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: inputsBody(body),
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);

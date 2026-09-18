@@ -92,6 +92,13 @@ export function benchBody(t: BenchTarget): string {
     : { holdings: [{ isin: t.isin, name: t.label, weight: 1 }], cadence: t.cadence });
 }
 
+/** Serialize either a normal holdings target or a comparison target for a `*-inputs` endpoint. */
+export function inputsBody(t: object): string {
+  return 'isin' in t && !('holdings' in t) && !('portfolio_id' in t)
+    ? benchBody(t as BenchTarget)
+    : JSON.stringify(t);
+}
+
 /** Identity for the fetch effect.  THE ISIN/LABEL AND THE CADENCE, not the label alone — two
  *  companies can share a name (dual listings) and a stale line under a new name is the failure
  *  this key exists to prevent. */

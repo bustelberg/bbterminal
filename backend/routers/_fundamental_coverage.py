@@ -52,9 +52,22 @@ _NON_EQUITY_PRODUCTS = {"BONDS", "BOND", "FUTURE", "FUTURES", "FX", "CRYPTO_CURR
 # asset_grid.asset_class values that mean "a fund wrapper" — it holds companies, it is not one.
 _FUND_CLASSES = {"etf", "fund", "etc", "etp"}
 
-# The one metric probed to answer "does this company have fundamentals?". It is the line the
-# blended charts are built on, so a company that has it can actually be charted.
-_SENTINEL_METRIC = "annuals__Cashflow Statement__Free Cash Flow"
+# A company is usable when it carries at least one core line drawn by the growth charts. Requiring
+# total FCF alone incorrectly excluded issuers such as Mastercard that have revenue, EPS and
+# per-share FCF data; that one missing line then removed every otherwise valid chart from a
+# one-company blend.
+_SENTINEL_METRICS = (
+    "annuals__Cashflow Statement__Free Cash Flow",
+    "annuals__cashflow_statement__Free Cash Flow",
+    "annuals__Per Share Data__Free Cash Flow per Share",
+    "annuals__per_share_data__Free Cash Flow per Share",
+    "annuals__per_share_data_array__Free Cash Flow per Share",
+    "annuals__Per Share Data__EPS without NRI",
+    "annuals__per_share_data__EPS without NRI",
+    "annuals__per_share_data_array__EPS without NRI",
+    "annuals__Income Statement__Revenue",
+    "annuals__income_statement__Revenue",
+)
 
 
 def classify_holding(isin: str | None, grid: dict | None, has_company: bool,
@@ -124,14 +137,15 @@ def coverage_for(members: list[dict]) -> dict:
     # SILENT 1,000-row cap — and every company past the cut-off would come back `no_metrics`,
     # inventing a gap. One code x 20 companies is ~600 rows and cannot truncate.
     #
-    # The sentinel is the Free Cash Flow line: it is what the blend actually charts, so "has
-    # metrics" means "has the metric this view needs" rather than the weaker "has some row".
+    # Probe only the small set of core growth-chart lines. This avoids the wildcard truncation
+    # while allowing a company that lacks one particular statement line to contribute the other
+    # series it does report.
     with_metrics: set[int] = set()
     cids = [c["company_id"] for c in companies.values() if c.get("company_id")]
     for i in range(0, len(cids), 20):
         for m in (supabase.table("metric_data").select("company_id")
                   .in_("company_id", cids[i:i + 20])
-                  .eq("metric_code", _SENTINEL_METRIC).limit(1000).execute().data or []):
+                  .in_("metric_code", _SENTINEL_METRICS).limit(1000).execute().data or []):
             with_metrics.add(m["company_id"])
 
     # An exchange we do not subscribe to. Only meaningful where we HAVE a company row to read an

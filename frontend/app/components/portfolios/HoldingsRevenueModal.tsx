@@ -871,7 +871,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
             that has left the screen makes the period columns unreadable — and the footer IS the
             plotted line, which is the one row you want in view while reading any other. */}
         <thead className="bg-page sticky top-0 z-20">
-          <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft">
+          <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th:hover]:text-fg-soft">
             {/* Company takes the slack so the table fills the width; periods keep natural size.
                  z ABOVE ITS OWN ROW: this cell pins in BOTH directions, so it has to outrank the
                 sticky header beside it and the sticky name cells below it. */}

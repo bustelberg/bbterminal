@@ -1743,7 +1743,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
       {sortKey === k && dir === 'asc' ? '▲' : '▼'}
     </span>
   );
-  const th = 'py-2 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft transition-colors';
+  const th = 'py-2 font-medium cursor-pointer whitespace-nowrap hover:text-fg-soft transition-colors';
 
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl overflow-hidden">
@@ -2926,7 +2926,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
     setDir(k === 'name' ? 'asc' : 'desc');
   };
   const caret = (k: SleeveSortKey) => (sortKey === k ? (dir === 'asc' ? ' ▲' : ' ▼') : '');
-  const th = 'py-1 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft';
+  const th = 'py-1 font-medium cursor-pointer whitespace-nowrap hover:text-fg-soft';
 
   const ccyMap = new Map<string, number>();
   rows.forEach((h) => {

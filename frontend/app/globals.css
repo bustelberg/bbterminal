@@ -283,6 +283,13 @@ body {
   font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
 }
 
+/* Tables are research output: every visible label and figure must be copyable by dragging,
+   including sortable headers and text inside controls. */
+body, body * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 /* Gradient scrollbars (track transparent; thumb carries the brand gradient). */
 ::-webkit-scrollbar {
   width: 7px;

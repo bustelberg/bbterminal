@@ -112,7 +112,7 @@ export default function CorrelationInstruments(
 
   const head = (key: InstrumentSort, label: string, extra = '') => (
     <th
-      className={`px-3 py-2 font-medium cursor-pointer select-none hover:text-fg ${extra}`}
+      className={`px-3 py-2 font-medium cursor-pointer hover:text-fg ${extra}`}
       onClick={() => {
         if (sort === key) setDesc(!desc);
         else { setSort(key); setDesc(true); }

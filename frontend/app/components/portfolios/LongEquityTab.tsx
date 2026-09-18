@@ -62,7 +62,7 @@ const BENCHMARKS = ['SP500', 'ACWI', 'AEX'];
  *  labelled with one, and it would put an identifier in a control whose other values are names. */
 const COMPARE_VALUE = '__compare__';
 
-const CARDS: MetricCfg[] = [
+export const CARDS: MetricCfg[] = [
   {
     /**
      *  First on the tab — the weighted share-price increase of the book and of the index. Every
@@ -201,7 +201,8 @@ const CARDS: MetricCfg[] = [
     title: 'FCF per share', titleKey: 'fcfPs',
     noun: 'FCF per share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
     codes: ['annuals__Per Share Data__Free Cash Flow per Share',
-      'annuals__per_share_data__Free Cash Flow per Share'],
+      'annuals__per_share_data__Free Cash Flow per Share',
+      'annuals__per_share_data_array__Free Cash Flow per Share'],
   },
   {
     // A count, not currency (no ccy prefix). CAGR reads as the buyback (−) / dilution (+) rate.

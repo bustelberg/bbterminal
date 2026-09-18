@@ -1,6 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { apiFetch } from '../../../lib/apiFetch';
+import { API_URL } from '../../../lib/apiUrl';
+import { startJob } from '../../../lib/stores/jobs';
 import CompanyPicker, { type AssetPick } from './CompanyPicker';
 import OwnerEarningsModal from '../portfolios/OwnerEarningsModal';
 
@@ -30,54 +33,134 @@ import OwnerEarningsModal from '../portfolios/OwnerEarningsModal';
 export default function ResearchDashboard() {
   const [a, setA] = useState<AssetPick | null>(null);
   const [b, setB] = useState<AssetPick | null>(null);
+  const [preparing, setPreparing] = useState<string | null>(null);
+  const pending = useRef(new Map<string, Promise<void>>());
+
+  const ensureFundamentals = useCallback((company: AssetPick): Promise<void> => {
+    const alreadyPending = pending.current.get(company.isin);
+    if (alreadyPending) return alreadyPending;
+
+    const run = (async () => {
+      try {
+        const metrics = await apiFetch(
+          `${API_URL}/api/earnings/by-isin/${encodeURIComponent(company.isin)}/metrics`,
+        );
+        let missing = metrics.status === 404;
+        if (metrics.ok) {
+          const payload = await metrics.json().catch(() => null) as {
+            metrics?: { metric_code?: string }[];
+          } | null;
+          missing = !(payload?.metrics ?? []).some((row) => {
+            const code = row.metric_code ?? '';
+            return code === 'annuals__Cashflow Statement__Free Cash Flow'
+              || code === 'annuals__cashflow_statement__Free Cash Flow'
+              || code === 'annuals__Per Share Data__Free Cash Flow per Share'
+              || code === 'annuals__per_share_data__Free Cash Flow per Share'
+              || code === 'annuals__per_share_data_array__Free Cash Flow per Share'
+              || code === 'annuals__Per Share Data__EPS without NRI'
+              || code === 'annuals__per_share_data__EPS without NRI'
+              || code === 'annuals__per_share_data_array__EPS without NRI'
+              || code === 'annuals__Income Statement__Revenue'
+              || code === 'annuals__income_statement__Revenue';
+          });
+        }
+        if (!missing) return;
+
+        const name = company.name ?? company.isin;
+        const { done } = await startJob(
+          `${API_URL}/api/airs/basket/fundamentals/ingest/job`
+            + '?force=true&only_due=true&feeds=all&prices=true',
+          `${name} fundamentals`,
+          {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              holdings: [{ isin: company.isin }],
+              label: name,
+            }),
+          },
+        );
+        await done;
+      } catch {
+        // The selected company remains usable even if its optional fill cannot start or fails.
+      } finally {
+        pending.current.delete(company.isin);
+      }
+    })();
+    pending.current.set(company.isin, run);
+    return run;
+  }, []);
+
+  const selectPrimary = async (company: AssetPick | null) => {
+    if (!company) {
+      setA(null);
+      setB(null);
+      return;
+    }
+    const name = company.name ?? company.isin;
+    setPreparing(name);
+    await ensureFundamentals(company);
+    setA(company);
+    setPreparing(null);
+  };
+
+  const selectCompare = async (company: AssetPick | null) => {
+    if (!company) {
+      setB(null);
+      return;
+    }
+    const name = company.name ?? company.isin;
+    setPreparing(name);
+    await ensureFundamentals(company);
+    setB(company);
+    setPreparing(null);
+  };
+
+  if (!a) {
+    return (
+      <div className="p-6 min-w-0">
+        <div className="mx-auto max-w-md space-y-4 pt-10">
+          <h1 className="text-lg font-semibold text-center text-fg-strong">Research Dashboard</h1>
+          <CompanyPicker label="Company" value={null} onPick={selectPrimary} />
+          {preparing && (
+            <p className="text-center text-xs text-fg-subtle">Preparing {preparing}…</p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-4 min-w-0">
-      <div>
-        <h1 className="text-lg font-semibold text-fg-strong">Research Dashboard</h1>
-        {/*  THE MECHANISM IS NOT THE SUBTITLE. This line used to explain that company B takes the
-            benchmark line and that the charts therefore compare directly rather than side by side
-            — true, load-bearing, and the reason this page is built the way it is, which is why it
-            lives in the docstring above and in CLAUDE.md. A reader arriving here needs to know
-            what they can do, not how it is wired. */}
-        <p className="text-sm text-fg-subtle mt-0.5">
-          Check out a single company or compare two in /research-dashboard
-        </p>
-      </div>
+      <h1 className="text-lg font-semibold text-fg-strong">Research Dashboard</h1>
 
-      {/*  `mx-auto` IS THE CENTRING — `max-w-3xl` alone only caps the width, and a capped block
-          with no auto margin sits hard left under a full-width panel. */}
       <div className="grid gap-4 md:grid-cols-2 max-w-3xl mx-auto">
-        {/*  THE ROLES CAME OFF THE LABELS, NOT OUT OF THE PAGE. "the subject" / "drawn beside it"
-            described what each side becomes; at the label's new size that was a sentence where a
-            field name belongs. Which of the two is optional, and what happens without it, is still
-            said once — in the empty state below, where a reader who has picked neither is looking. */}
-        <CompanyPicker label="Company A" value={a} onPick={setA} />
-        <CompanyPicker label="Company B" value={b} onPick={setB} />
+        <div>
+          <div className="mb-1.5 text-sm font-medium text-fg-soft">Company</div>
+          <div className="flex min-h-10 items-center gap-3 rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm text-fg-strong">{a.name ?? a.isin}</div>
+              <div className="truncate font-mono text-[11px] text-fg-faint">{a.isin}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => { setA(null); setB(null); setPreparing(null); }}
+              className="shrink-0 text-xs text-fg-subtle transition-colors hover:text-fg"
+            >
+              Change
+            </button>
+          </div>
+        </div>
+        <CompanyPicker label="Compare with (optional)" value={b} onPick={selectCompare} />
       </div>
 
-      {a ? (
-        /*  KEYED ON BOTH ISINs so changing either company REMOUNTS the tab. Its cadence, its
-           selected comparison and every card's fetch are per-pair state; carried across a switch
-           they would describe the previous pair under the new names. */
-        <OwnerEarningsModal
-          key={`${a.isin}-${b?.isin ?? 'none'}`}
-          embedded
-          isin={a.isin}
-          name={a.name ?? a.isin}
-          compare={b ? { isin: b.isin, name: b.name ?? b.isin } : null}
-          /* Closing an embedded card means "clear the subject" — there is no dialog to dismiss,
-             and a  that did nothing would be worse than no . */
-          onClose={() => setA(null)}
-        />
-      ) : (
-        <div className="bg-card border border-neutral-800/40 rounded-xl p-4">
-          <p className="py-16 text-center text-xs text-fg-faint">
-            Pick company A to open the Fundamental view. Company B is optional — without it this is
-            the ordinary single-company view, measured against an index.
-          </p>
-        </div>
-      )}
+      <OwnerEarningsModal
+        key={`${a.isin}-${b?.isin ?? 'none'}`}
+        embedded
+        isin={a.isin}
+        name={a.name ?? a.isin}
+        compare={b ? { isin: b.isin, name: b.name ?? b.isin } : null}
+        onClose={() => { setA(null); setB(null); setPreparing(null); }}
+      />
     </div>
   );
 }

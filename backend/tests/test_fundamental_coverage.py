@@ -191,8 +191,9 @@ class TestAnAliasedIsinIsCoveredByItsCanonical:
             def select(self, *_a, **_k): return self
             def eq(self, *_a, **_k): return self
             def limit(self, *_a, **_k): return self
-            def in_(self, _c, vals):
-                self._v = list(vals)
+            def in_(self, column, vals):
+                if column == self._key:
+                    self._v = list(vals)
                 return self
             def execute(self):
                 return type("R", (), {"data": [r for r in self._rows

@@ -57,7 +57,8 @@ export type RefreshScope =
    */
   | { kind: 'universe'; label: string; name: string; feeds?: IndexFeeds };
 
-export default function PortfolioFundamentalsRefresh({ scope, onDone, label, everything }: {
+export default function PortfolioFundamentalsRefresh({ scope, onDone, label, everything, allPeriods = false,
+  broadcast = true }: {
   scope: RefreshScope;
   /**
    * Fetch EVERYTHING the Fundamental modal draws, not just the statements feed.
@@ -83,6 +84,10 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
    * their own, narrower reasons to exist, and a four-figure index spend is not one of them.
    */
   everything?: boolean;
+  /** Re-download the full source history, including older fiscal years that are already past due. */
+  allPeriods?: boolean;
+  /** Notify every mounted fundamentals card. A drill-down that reloads itself keeps this false. */
+  broadcast?: boolean;
   /** Called when the fill ends without failing, so the caller can re-read what it wrote. */
   /**  OPTIONAL, AND THE CACHE DROP IS NOT. `invalidateReadCache` runs beside every call of
    *  this, unconditionally — that is what makes the new data reachable. `onDone` is only for a
@@ -161,7 +166,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
     void watchJob(live.id, `${scope.name} fundamentals`).then((job) => {
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
-        window.dispatchEvent(new Event('bb:fundamentals-finished'));
+        if (broadcast) window.dispatchEvent(new Event('bb:fundamentals-finished'));
         onDone?.();
       }
       setBusy(false);
@@ -178,7 +183,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
     try {
       //  `feeds=all` NARROWS NOTHING and `prices=true` adds the ingest that is not a feed — see
       // the `everything` prop for what the four things are and which chart each one was missing.
-      const q = `?force=true&only_due=true${everything ? '&feeds=all&prices=true' : ''}`;
+      const q = `?force=true&only_due=${allPeriods ? 'false' : 'true'}${everything ? '&feeds=all&prices=true' : ''}`;
       // A company and a basket post the same body — one holding or many. `/api/airs/basket/…` is
       // already the codebase's shape for "an ad-hoc set of holdings"; a single stock is a set of
       // one, which is exactly how `/api/airs/basket/analysis` treats it.
@@ -244,7 +249,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
       // pre-fill book — a refresh button that visibly does nothing.
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
-        window.dispatchEvent(new Event('bb:fundamentals-finished'));
+        if (broadcast) window.dispatchEvent(new Event('bb:fundamentals-finished'));
         onDone?.();
       }
     } catch (e) {
@@ -302,11 +307,13 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
             : 'Stop the fill. Work still queued is dropped at once and the three companies in flight '
               + 'stop at their next feed boundary, seconds away. Everything loaded so far is kept — '
               + 'press again later and it carries on from there.')
-          : ((scope.kind === 'company'
-            ? `Fetch the latest GuruFocus fundamentals for ${scope.name}, if it could plausibly have `
+          : ((allPeriods
+            ? `Re-download the full GuruFocus fundamentals history for ${scope.name}, including older fiscal years.`
+            : (scope.kind === 'company'
+              ? `Fetch the latest GuruFocus fundamentals for ${scope.name}, if it could plausibly have `
               + 'filed since we last looked. One API call, and none at all when its next quarter '
               + 'cannot be out yet.'
-            : scope.kind === 'universe'
+              : scope.kind === 'universe'
               ? `Refresh all reachable ${scope.name} constituents: their financial statements, cash `
                 + 'flow and balance sheet, analyst estimates, indicators and daily share prices. '
                 + 'This updates every Graphs card; exchanges outside the GuruFocus subscription are '
@@ -315,7 +322,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
                 + 'plausibly have filed since we last looked — one API call each, and none for a '
                 + 'company whose next quarter cannot be out yet.')
             + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
-            + 'and carry on if you close this.')}
+            + 'and carry on if you close this.'))}
         className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors
                     disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
           ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'

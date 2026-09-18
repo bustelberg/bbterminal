@@ -31,7 +31,7 @@ export default function JobToaster() {
   return (
     // `pointer-events-none` on the stack, restored per card: the column spans a corner of the
     // viewport and would otherwise swallow clicks on whatever sits underneath it.
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)]
+    <div className="fixed bottom-4 right-4 z-[10000] flex flex-col gap-2 w-80 max-w-[calc(100vw-2rem)]
                     pointer-events-none">
       {/*  KEYED ON `id:status`, SO GOING STALE REMOUNTS THE CARD. That is what lets the countdown
           be a `useState` initialiser instead of an effect — the card that appears when a job
