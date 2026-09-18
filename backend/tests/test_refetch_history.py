@@ -78,7 +78,7 @@ class TestTheMonthGuard:
         already correct leaves no trace — and a weekly strategy would then re-ask
         every single week precisely BECAUSE the data was fine."""
         src = inspect.getsource(refetch_history.refetch_full_history)
-        marker = src.split("STAMP THE MARKER", 1)[1]
+        marker = src.split("Stamp the marker", 1)[1]
         assert "refetch marker" in marker
         # ...gated on the fetch having actually happened, so a run that reached
         # nobody can't claim the month.

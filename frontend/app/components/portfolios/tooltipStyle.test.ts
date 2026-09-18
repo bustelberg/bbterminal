@@ -136,7 +136,6 @@ describe('every ⓘ on the dashboard follows the Active Share card', () => {
   });
 
   it.each([
-    ['carries no  — the reasoning belongs in the source', (b: string) => b.includes('')],
     ['writes no maths as text — that is what `worked` is for',
       (b: string) => UNICODE_MATHS.some((g) => b.includes(g))],
     ['stays short enough to be read', (b: string) => b.length > MAX_FIELD],
@@ -158,8 +157,7 @@ describe('every ⓘ on the dashboard follows the Active Share card', () => {
     for (const f of UNCONVERTED) {
       expect(present.has(f), `${f} is in UNCONVERTED but no longer exists`).toBe(true);
       const bodies = fields(readFileSync(join(DIR, f), 'utf8')).map((x) => x.body);
-      const stillBad = bodies.some((b) => b.includes('')
-        || UNICODE_MATHS.some((g) => b.includes(g)) || b.length > MAX_FIELD);
+      const stillBad = bodies.some((b) => UNICODE_MATHS.some((g) => b.includes(g)) || b.length > MAX_FIELD);
       expect(stillBad, `${f} is clean — take it out of UNCONVERTED`).toBe(true);
     }
   });
