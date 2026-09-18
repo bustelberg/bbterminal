@@ -39,6 +39,7 @@ def main() -> int:
     OUT.write_text(
         json.dumps(spec, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+        newline="\n",
     )
     print(f"Wrote {OUT.relative_to(ROOT)} ({OUT.stat().st_size:,} bytes)")
     return 0
