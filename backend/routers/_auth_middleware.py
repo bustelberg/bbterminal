@@ -95,6 +95,7 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # `POST /api/jobs`) — the owning endpoint starts it — and the one job write, Cancel, is in
 # `_USER_REFRESH_PATTERNS`.
 _USER_READ_PREFIXES: tuple[str, ...] = (
+    "/api/log-dashboard/",
     "/api/companies",
     "/api/earnings",
     "/api/usage",
@@ -156,7 +157,7 @@ def _is_admin_only_pattern(path: str) -> bool:
 
 # Writes any AUTHENTICATED user may make — the mutations those pages need.
 # (Earnings refresh is handled separately by `_is_earnings_refresh`.)
-_USER_WRITE_PREFIXES: tuple[str, ...] = ()
+_USER_WRITE_PREFIXES: tuple[str, ...] = ("/api/log-dashboard/",)
 
 #  Reads that arrive as post. This gate splits on HTTP method, so a compute-and-return endpoint
 # whose input is a LIST OF ISINS — too long for a URL — lands in the write tier and 403s for a user

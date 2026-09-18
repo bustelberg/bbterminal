@@ -21,6 +21,7 @@ export type NavKey =
   | '/'
   | '/management-dashboard'
   | '/research-dashboard'
+  | '/log-dashboard'
   | '/schedule'
   | '/earnings'
   | '/backtest'
@@ -65,6 +66,7 @@ const EN: SidebarCopy = {
     '/': 'Welcome',
     '/management-dashboard': 'Management Dashboard',
     '/research-dashboard': 'Research Dashboard',
+    '/log-dashboard': 'BC Logbook',
     '/schedule': 'Schedule',
     '/earnings': 'Earnings Dashboard',
     '/backtest': 'Backtest',
@@ -109,6 +111,7 @@ const NL: SidebarCopy = {
     '/': 'Welkom',
     '/management-dashboard': 'Managementdashboard',
     '/research-dashboard': 'Researchdashboard',
+    '/log-dashboard': 'BC-logboek',
     '/schedule': 'Planning',
     '/earnings': 'Winstdashboard',
     '/backtest': 'Backtest',

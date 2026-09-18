@@ -8884,6 +8884,85 @@
         "title": "LinkablePortfolio",
         "type": "object"
       },
+      "LogEntryIn": {
+        "properties": {
+          "actions": {
+            "default": "",
+            "maxLength": 4000,
+            "title": "Actions",
+            "type": "string"
+          },
+          "company_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Company Name",
+            "type": "string"
+          },
+          "conviction": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Conviction",
+            "type": "integer"
+          },
+          "decision": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Decision",
+            "type": "string"
+          },
+          "flag": {
+            "default": "none",
+            "pattern": "^(none|yellow|red)$",
+            "title": "Flag",
+            "type": "string"
+          },
+          "isin": {
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Isin",
+            "type": "string"
+          },
+          "notes": {
+            "default": "",
+            "maxLength": 8000,
+            "title": "Notes",
+            "type": "string"
+          },
+          "portfolio_weight": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Weight"
+          },
+          "review_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review On"
+          }
+        },
+        "required": [
+          "company_name",
+          "isin",
+          "decision",
+          "conviction"
+        ],
+        "title": "LogEntryIn",
+        "type": "object"
+      },
       "LongEquitySaveUniverseRequest": {
         "properties": {
           "description": {
@@ -27252,6 +27331,103 @@
         "summary": "Overview",
         "tags": [
           "leonteq"
+        ]
+      }
+    },
+    "/api/log-dashboard/entries": {
+      "get": {
+        "operationId": "get_entries_api_log_dashboard_entries_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Entries",
+        "tags": [
+          "log dashboard"
+        ]
+      },
+      "post": {
+        "operationId": "create_entry_api_log_dashboard_entries_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogEntryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Entry",
+        "tags": [
+          "log dashboard"
+        ]
+      }
+    },
+    "/api/log-dashboard/news/{ticker}": {
+      "get": {
+        "description": "Latest headlines from the legacy GuruFocus API used by this app.",
+        "operationId": "stock_news_api_log_dashboard_news__ticker__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ticker",
+            "required": true,
+            "schema": {
+              "title": "Ticker",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Stock News",
+        "tags": [
+          "log dashboard"
         ]
       }
     },
