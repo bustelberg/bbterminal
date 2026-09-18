@@ -186,13 +186,13 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     JobSpec(
         id="benchmark_fundamentals_fill",
         label="Benchmark fundamentals",
-        fills="metric_data statements for every constituent of ACWI · SP500 · AEX",
+        fills="due metric_data financials, analyst estimates, and indicators for ACWI · SP500 · AEX",
         cadence="Every Monday, 08:00 UTC",
         trigger={"day_of_week": "mon", "hour": 8, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 21600},
         max_age_hours=24 * 10,
-        note="Checks every constituent weekly, but only fetches companies with a newly due filing. "
-             "The regional quota reserve still applies.",
+        note="Checks every constituent weekly. Filings refresh when due; analyst estimates and "
+             "indicators refresh on their own staleness schedule. The regional quota reserve still applies.",
     ),
     JobSpec(
         id="history_drift_check",

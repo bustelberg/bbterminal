@@ -459,7 +459,8 @@ async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual",
 
         resp = (
             supabase.table("company")
-            .select("company_id,company_name,gurufocus_exchange:gurufocus_exchange(currency_code)")
+            .select("company_id,company_name,financials_fetched_at,estimates_fetched_at,indicators_fetched_at,"
+                    "gurufocus_exchange:gurufocus_exchange(currency_code)")
             .eq("isin", canonical(isin))
             .limit(1)
             .execute()
@@ -472,6 +473,11 @@ async def get_earnings_metrics_by_isin(isin: str, cadence: str = "annual",
             "company_id": row["company_id"],
             "company_name": row.get("company_name"),
             "currency": exch.get("currency_code"),
+            "source_fetched_at": {
+                "financials": row.get("financials_fetched_at"),
+                "estimates": row.get("estimates_fetched_at"),
+                "indicators": row.get("indicators_fetched_at"),
+            },
         }
 
     try:

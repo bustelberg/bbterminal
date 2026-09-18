@@ -1575,7 +1575,7 @@ def _fundamental_company_ids(label: str) -> list[tuple[int, str]]:
 
 
 def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
-    """Fill statements for every benchmark constituent, bounded by the monthly GuruFocus quota.
+    """Refresh due fundamentals, estimates, and indicators for benchmark constituents.
 
      THE BUDGET GATE IS THE POINT, and it is the shape `full_price_refresh` already uses: read
     the per-region remaining and DROP the companies whose region is at the floor, rather than
@@ -1630,7 +1630,10 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
             continue
         try:
             step(i - 1, n, f"{label} — filling {len(keep)} constituent(s)…")
-            fill_company_ids(log_ctx, label, keep, feeds="statements", only_due=True)
+            # `smart` makes the weekly job evaluate each feed on its own cadence: filings wait for
+            # a due period, while analyst estimates (which drive EGM growth) refresh when their
+            # source check becomes stale. `only_due` would suppress that second path.
+            fill_company_ids(log_ctx, label, keep, feeds="smart")
             filled += len(keep)
             step(i, n, f"{label} — {len(keep)} filled")
         except Exception as e:  # noqa: BLE001

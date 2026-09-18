@@ -173,9 +173,10 @@ function DerivedRow({ label, value, info, tone = 'step', dim }: {
  * shows the trailing one.
  */
 
-export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst, today }: {
+export default function ReverseDcfPanel({ src, currency, metrics, name, isin, growthEst, sourceFetchedAt, today }: {
   src: ReverseDcfSource; currency?: string | null;
   metrics: MetricRow[]; name?: string | null; isin: string;
+  sourceFetchedAt?: { financials?: string | null; estimates?: string | null; indicators?: string | null };
   /**  PASSED IN, NOT READ FROM THE CLOCK, and it reaches the raw-data modal from here rather than
    *  being re-derived there — "which estimate is next year's" has to be the same question in the
    *  panel and in the table that claims to show what the panel read. Same convention as
@@ -287,6 +288,34 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
   const flowWhen = src.flowBasis.ttm
     ? `Trailing twelve months to ${v(src.flowBasis.date ?? 'the latest quarter')}.`
     : `Most recent fiscal year${src.flowBasis.date ? `, ${v(src.flowBasis.date)}` : ''}.`;
+  const provenance = (
+    retrievedAt: string | null | undefined, appliesTo: string | null | undefined | (string | null | undefined)[],
+  ) => {
+    const appliesDates = [...new Set((Array.isArray(appliesTo) ? appliesTo : [appliesTo])
+      .filter((date): date is string => date != null))];
+    return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+      {retrievedAt != null && (
+        <span className="inline-flex items-center gap-1">
+          <span>{lang === 'nl' ? 'Opgehaald' : 'Retrieved'}</span>
+          <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+            {onDate(retrievedAt, lang)}
+          </span>
+        </span>
+      )}
+      {appliesDates.length > 0 && (
+        <span className="inline-flex items-center gap-1">
+          <span>{lang === 'nl' ? 'Geldt voor' : 'Applies to'}</span>
+          {appliesDates.map((date) => (
+            <span key={date} className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+              {onDate(date, lang)}
+            </span>
+          ))}
+        </span>
+      )}
+    </span>
+    );
+  };
   const defFcf = forward ? fwdFcf : src.fcf;
   const defTarget = marketCapOf(src);
   const defPerp = PERPETUITY_GROWTH;
@@ -478,7 +507,9 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
                 where={!forward ? t.common.guruFocus(vendorName(SOURCE_CODES.fcf))
                   : fcfEstDirect ? `GuruFocus, ${v(vendorName(SOURCE_CODES.fcfEstimate))}.`
                     : `GuruFocus, ${v(vendorName(SOURCE_CODES.ocfEstimate))} less ${v(vendorName(SOURCE_CODES.capex))}.`}
-                when={forward ? v(estFy ?? t.dcf.nextFiscalYear) : flowWhen}
+                when={provenance(
+                  forward ? sourceFetchedAt?.estimates : sourceFetchedAt?.financials,
+                  forward ? src.ocfEstimateDate : src.flowBasis.date)}
                 //  No worked line on the reported base, and that is the rule rather than an
                 // omission: it is a figure the vendor filed, not an arithmetic anybody performed.
                 // A formula over raw data fabricates a derivation — the same reason the four
@@ -518,7 +549,7 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.sbc.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.sbc))}
-                when={flowWhen}
+                when={provenance(sourceFetchedAt?.financials, src.flowBasis.date)}
                 how={sbc == null ? t.dcf.sbcAbsent : t.dcf.sbcHow + t.dcf.normOff} />} />} />
             <div className="mt-1 border-t border-dashed border-neutral-700/60 pt-2 text-[11px] text-fg-faint">
               {t.dcf.growthCapexCalculation}
@@ -537,21 +568,21 @@ export default function ReverseDcfPanel({ src, currency, metrics, name, isin, gr
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.capex.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.capex))}
-                when={flowWhen}
+                when={provenance(sourceFetchedAt?.financials, src.flowBasis.date)}
                 how={t.dcf.capexHow + t.dcf.ttmNote} />} />} />
             <Field dim={overridden || !normalise} label={`${t.dcf.rowDA}${currency ? ` (${currency}m)` : ' (m)'}`}
               value={show(depStr, dep)} onChange={setDepStr}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.da.what}
                 where={t.common.guruFocus(vendorName(SOURCE_CODES.dep))}
-                when={flowWhen}
+                when={provenance(sourceFetchedAt?.financials, src.flowBasis.date)}
                 how={t.dcf.daHow + t.dcf.ttmNote} />} />} />
             <Field label={`${t.dcf.rowGrowthCapex}${currency ? ` (${currency}m)` : ' (m)'}`} dim={overridden || !normalise}
               value={show(growthCapexStr, automaticGrowthCapex)} onChange={setGrowthCapexStr}
               info={<InfoTip content={<AspectCard
                 what={t.dcf.cards.growthCapex.what}
                 where={t.dcf.cards.growthCapex.where}
-                when={flowWhen}
+                when={provenance(sourceFetchedAt?.financials, src.flowBasis.date)}
                 //  Gated on `normalise` LIKE THE ROW ITSELF. With it off the row reads `—` because
                 // the correction did not run; a tooltip still showing its arithmetic would be a
                 // number the panel is not using, one hover away from a dash.
@@ -582,8 +613,9 @@ ${t.dcf.growthCapexHow}${t.dcf.normOff}`
               info={<InfoTip content={<AspectCard
                 what={overridden ? t.dcf.valuedWhatYours : t.dcf.valuedWhat}
                 where={overridden ? t.dcf.valuedWhereYours : t.dcf.valuedWhere}
-                when={overridden ? t.dcf.valuedWhenYours
-                  : forward ? v(estFy ?? t.dcf.nextFiscalYear) : flowWhen}
+                when={overridden ? t.dcf.valuedWhenYours : provenance(
+                  forward ? sourceFetchedAt?.estimates : sourceFetchedAt?.financials,
+                  forward ? src.ocfEstimateDate : src.flowBasis.date)}
                 //  The symbolic half carries only the corrections that ran. A formula printing
                 // `− S` over a company with no stock-comp line states an arithmetic that did not
                 // happen — the same "an absent line is not a zero" rule the rows themselves keep,
@@ -633,7 +665,9 @@ Type a figure here to bypass them and value it directly.`
                 where={forward ? t.common.guruFocus(vendorName(SOURCE_CODES.fcf))
                   : t.dcf.guruFocusLess(vendorName(SOURCE_CODES.ocfEstimate),
                     vendorName(SOURCE_CODES.capex))}
-                when={forward ? flowWhen : v(estFy ?? t.dcf.nextFiscalYear)}
+                when={provenance(
+                  forward ? sourceFetchedAt?.financials : sourceFetchedAt?.estimates,
+                  forward ? src.flowBasis.date : src.ocfEstimateDate)}
                 how={(forward ? src.fcf : fwdFcf) == null
                   ? (forward
                     ? t.dcf.baseNotUsedNoFcf
@@ -648,9 +682,7 @@ Type a figure here to bypass them and value it directly.`
                 //  Two dates, because it is a product of two observations and they are rarely
                 // the same day: a close is daily, a diluted share count is a filing. One date over
                 // both would date the market cap to whichever leg the label happened to name.
-                when={[src.priceDate ? t.dcf.closeOn(onDate(src.priceDate, lang)) : null,
-                  src.sharesDate ? t.dcf.sharesOn(onDate(src.sharesDate, lang)) : null,
-                ].filter(Boolean).join(', ') || t.dcf.noDatesStored}
+                when={provenance(sourceFetchedAt?.financials, [src.priceDate, src.sharesDate])}
                 worked={workedMarketCap(src.price, src.sharesOutstanding, defTarget)}
                 legend={src.price == null || src.sharesOutstanding == null ? undefined : [
                   { sym: 'P_0', is: t.dcf.legend.p0 },
@@ -668,7 +700,7 @@ Type a figure here to bypass them and value it directly.`
                   ? t.common.guruFocus(vendorName(SOURCE_CODES.wacc))
                   : t.dcf.houseDefault}
                 when={src.waccDate == null ? t.dcf.noWaccStored
-                  : v(onDate(src.waccDate, lang))}
+                  : provenance(sourceFetchedAt?.financials, src.waccDate)}
                 how={t.dcf.cards.discountRate.how} />} />} />
             <Field label={t.dcf.rowPerpetuityGrowth} value={show(perpStr, defPerp * 100, 1)} onChange={setPerpStr}
               suffix="%"

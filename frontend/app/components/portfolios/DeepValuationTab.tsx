@@ -170,6 +170,10 @@ type LatestClose = {
   close: number; currency: string; close_in?: number | null; in_currency?: string | null;
 };
 
+type SourceFetchedAt = {
+  financials?: string | null; estimates?: string | null; indicators?: string | null;
+};
+
 export default function DeepValuationTab({ isin, name }: { isin: string; name?: string | null }) {
   const t = useDeepValuationCopy();
   // Dates must follow the SAME copy tree as the surrounding prose.  A second language-store read
@@ -178,6 +182,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const lang = t.lang;
   const [metrics, setMetrics] = useState<MetricRow[] | null>(null);
   const [currency, setCurrency] = useState<string | null>(null);
+  const [sourceFetchedAt, setSourceFetchedAt] = useState<SourceFetchedAt>({});
   const [err, setErr] = useState<string | null>(null);
   const [showWorking, setShowWorking] = useState(false);
   const [growthEst, setGrowthEst] = useState<GrowthEstimates | null>(null);
@@ -224,6 +229,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
    * the PREVIOUS date and the toast would say "unchanged" on the one run that moved it.
    */
   const fwdPeDateRef = useRef<string | null>(null);
+  const refreshGrowthDefaultRef = useRef(false);
+  const refreshDividendDefaultRef = useRef(false);
+  const refreshExitDefaultRef = useRef(false);
   const [jobId, setJobId] = useState<string | null>(null);
   /**
    *  Its own handle, not a shared one. Both buttons are cancellable, and cancelling needs the
@@ -231,6 +239,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
    * and Cancel on either stop whichever ran last.
    */
   const [peJobId, setPeJobId] = useState<string | null>(null);
+  const [growthJobId, setGrowthJobId] = useState<string | null>(null);
+  const [dividendJobId, setDividendJobId] = useState<string | null>(null);
+  const [exitJobId, setExitJobId] = useState<string | null>(null);
   //  The same subscription `JobToaster` USES — `store.use` with a selector, so this re-renders
   // on the job frames and nothing else.
   const jobs = jobsStore.use((st) => st.jobs);
@@ -240,6 +251,15 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const peJob = peJobId == null ? null : jobs.find((j) => j.id === peJobId) ?? null;
   const peRefreshing = peJob?.status === 'running';
   const peCancelling = peRefreshing && peJob.cancelRequested;
+  const growthJob = growthJobId == null ? null : jobs.find((j) => j.id === growthJobId) ?? null;
+  const growthRefreshing = growthJob?.status === 'running';
+  const growthCancelling = growthRefreshing && growthJob.cancelRequested;
+  const dividendJob = dividendJobId == null ? null : jobs.find((j) => j.id === dividendJobId) ?? null;
+  const dividendRefreshing = dividendJob?.status === 'running';
+  const dividendCancelling = dividendRefreshing && dividendJob.cancelRequested;
+  const exitJob = exitJobId == null ? null : jobs.find((j) => j.id === exitJobId) ?? null;
+  const exitRefreshing = exitJob?.status === 'running';
+  const exitCancelling = exitRefreshing && exitJob.cancelRequested;
 
   // Held as strings so a half-typed value stays on screen; parsed on every render for the model.
   //
@@ -292,7 +312,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const today = new Date().toISOString().slice(0, 10);
 
   const load = useCallback(async (blank: boolean, signal?: AbortSignal) => {
-    if (blank) { setMetrics(null); setCurrency(null); }
+    if (blank) { setMetrics(null); setCurrency(null); setSourceFetchedAt({}); }
     setErr(null);
     //  `?cadence=annual` spelt out so this shares the Long Equity tab's cached payload — see the
     // same line in `QuickValuationTab`. It is the server's default, so the wire is unchanged; only
@@ -309,6 +329,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     if (signal?.aborted) return 'cancelled';
     setMetrics((b?.metrics ?? []) as MetricRow[]);
     setCurrency(b?.currency ?? null);
+    setSourceFetchedAt((b?.source_fetched_at ?? {}) as SourceFetchedAt);
     setCompanyId(typeof b?.company_id === 'number' ? b.company_id : null);
     fwdPeDateRef.current = egmSource(
       (b?.metrics ?? []) as MetricRow[], today).forwardPEDate ?? null;
@@ -440,6 +461,54 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
       }));
   }, [companyId, name, isin, load, t.egm]);
 
+  const refreshGrowth = useCallback((keepDefault: boolean) => {
+    if (companyId == null) return;
+    refreshGrowthDefaultRef.current = keepDefault;
+    setGrowthJobId(startLocalJob(
+      `${name ?? isin} — EPS growth estimates`, 'valuation.growth',
+      async (signal) => {
+        await runSSE(
+          `${API_URL}/api/earnings/${companyId}/refresh/analyst_estimates?force=true`,
+          { method: 'POST' }, () => {}, signal);
+        if (signal.aborted) return 'cancelled';
+        invalidateReadCache('refreshed analyst estimates on the Deep Valuation tab');
+        await load(false, signal);
+        return 'analyst estimates re-read';
+      }));
+  }, [companyId, name, isin, load]);
+
+  const refreshDividend = useCallback((keepDefault: boolean) => {
+    if (companyId == null) return;
+    refreshDividendDefaultRef.current = keepDefault;
+    setDividendJobId(startLocalJob(
+      `${name ?? isin} — dividend yield`, 'valuation.dividend',
+      async (signal) => {
+        await runSSE(
+          `${API_URL}/api/earnings/${companyId}/refresh/financials?force=true`,
+          { method: 'POST' }, () => {}, signal);
+        if (signal.aborted) return 'cancelled';
+        invalidateReadCache('refreshed financials on the Deep Valuation tab');
+        await load(false, signal);
+        return 'dividend yield re-read';
+      }));
+  }, [companyId, name, isin, load]);
+
+  const refreshExitPE = useCallback((keepDefault: boolean) => {
+    if (companyId == null) return;
+    refreshExitDefaultRef.current = keepDefault;
+    setExitJobId(startLocalJob(
+      `${name ?? isin} — exit P/E`, 'valuation.exitpe',
+      async (signal) => {
+        await runSSE(
+          `${API_URL}/api/earnings/${companyId}/refresh/financials?force=true`,
+          { method: 'POST' }, () => {}, signal);
+        if (signal.aborted) return 'cancelled';
+        invalidateReadCache('refreshed financials on the Deep Valuation tab');
+        await load(false, signal);
+        return 'five-year P/E median re-read';
+      }));
+  }, [companyId, name, isin, load]);
+
   /**
    *  Not fetched until the reporting currency is known. The close is converted server-side into
    * the currency the EPS and cash-flow series are filed in; asking before we know it would get a
@@ -496,7 +565,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     const v = parseFloat(t);
     return Number.isFinite(v) ? v : null;
   };
-  const divOverride = divStr.trim() === '' ? null : parseFloat(divStr) / 100;
+  const dividendUsesDefault = divStr.trim() === '' || (
+    src.dividendYield != null && divStr === (src.dividendYield * 100).toFixed(2));
+  const divOverride = dividendUsesDefault ? null : parseFloat(divStr) / 100;
   const yieldUsed = divOverride != null && Number.isFinite(divOverride)
     ? divOverride : src.dividendYield;
 
@@ -551,7 +622,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const livePrice = live?.close_in != null && live.close_in > 0 ? live.close_in : null;
   /** What the data says — the model uses `price` below, which a typed override replaces. */
   const measuredPrice = livePrice ?? src.price;
-  const priceOverride = numOrNull(priceStr);
+  const priceUsesDefault = priceStr.trim() === '' || (
+    measuredPrice != null && priceStr === measuredPrice.toFixed(2));
+  const priceOverride = priceUsesDefault ? null : numOrNull(priceStr);
   const price = priceOverride ?? measuredPrice;
   /**  THE DATE AND THE SOURCE BELONG TO THE MEASURED CLOSE, and a typed price has neither — so
    *  they are suppressed rather than left pointing at a figure no longer on screen. A "3 days old"
@@ -585,6 +658,64 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const suggestedPrice = measuredPrice == null ? '' : measuredPrice.toFixed(2);
   const suggestedForwardPE = (price != null && src.epsNextFY != null && src.epsNextFY > 0
     ? price / src.epsNextFY : src.forwardPE)?.toFixed(1) ?? '';
+  const impliedPE = price != null && src.epsNextFY != null && src.epsNextFY > 0
+    ? price / src.epsNextFY : null;
+  const forwardPEUsesDefault = fwdPeStr === suggestedForwardPE;
+  const growthUsesDefault = growthStr === suggestedGrowth;
+  const exitPEUsesDefault = exitStr === suggestedExitPE;
+  const hurdleUsesDefault = hurdleStr === (EGM_DEFAULTS.hurdleRate * 100).toFixed(1);
+  const defaultInfo = (
+    value: string, source: string, retrievedAt: string | null, appliesTo: string | null = retrievedAt,
+  ) => ({
+    where: lang === 'nl' ? `Standaardwaarde ${value}: ${source}.`
+      : `Default ${value}: ${source}.`,
+    when: retrievedAt == null && appliesTo == null
+      ? (lang === 'nl' ? 'Vaste modelaanname; geen peildatum.' : 'Fixed model assumption; no as-of date.')
+      : (
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+          {retrievedAt != null && (
+            <span className="inline-flex items-center gap-1">
+              <span>{lang === 'nl' ? 'Opgehaald' : 'Retrieved'}</span>
+              <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+                {onDate(retrievedAt, lang)}
+              </span>
+            </span>
+          )}
+          {appliesTo != null && (
+            <span className="inline-flex items-center gap-1">
+              <span>{lang === 'nl' ? 'Geldt voor' : 'Applies to'}</span>
+              <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+                {onDate(appliesTo, lang)}
+              </span>
+            </span>
+          )}
+        </span>
+      ),
+  });
+  const priceDefaultInfo = defaultInfo(
+    suggestedPrice || 'n/a',
+    priceFromYahoo ? 'Yahoo Finance close' : t.common.guruFocus(vendorName(SOURCE_CODES.price)),
+    priceDate);
+  const forwardDefaultInfo = defaultInfo(
+    suggestedForwardPE || 'n/a',
+    impliedPE != null ? 'share price divided by next-FY consensus EPS'
+      : t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE)),
+    impliedPE != null ? priceDate : src.forwardPEDate,
+    impliedPE != null ? src.epsNextFYDate : src.forwardPEDate);
+  const growthDefaultInfo = defaultInfo(
+    `${suggestedGrowth}%`, src.analystGrowth5Y != null ? 'consensus EPS estimate CAGR' : 'house assumption',
+    src.analystGrowth5Y != null ? sourceFetchedAt.estimates ?? null : null,
+    src.analystGrowth5Y != null ? src.epsNextFYDate : null);
+  const dividendDefaultInfo = defaultInfo(
+    suggestedDividend ? `${suggestedDividend}%` : '0.00%',
+    t.common.guruFocus(vendorName(SOURCE_CODES.dividendYield)), sourceFetchedAt.financials ?? null,
+    src.dividendYieldDate);
+  const exitDefaultInfo = defaultInfo(
+    `${suggestedExitPE}x`, src.medianPE5Y != null ? 'five-year median P/E' : 'house assumption',
+    src.medianPE5Y != null ? sourceFetchedAt.financials ?? null : null,
+    src.medianPE5Y != null ? src.priceDate : null);
+  const hurdleDefaultInfo = defaultInfo(
+    `${(EGM_DEFAULTS.hurdleRate * 100).toFixed(1)}%`, 'house assumption', null);
   const r = calculateEGM({ ...src, price, forwardPE }, assumptions);
   const isDefault = growthStr === suggestedGrowth
     && exitStr === suggestedExitPE
@@ -596,9 +727,6 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
 
   // The multiple the price implies on the consensus EPS. It is a reference when GuruFocus supplied
   // its own Forward P/E, and the automatic EGM fallback when that dedicated indicator is absent.
-  const impliedPE = price != null && src.epsNextFY != null && src.epsNextFY > 0
-    ? price / src.epsNextFY : null;
-
   // The figures formerly offered in the separate right-hand suggestion column are the model's
   // starting inputs. They remain editable; Reset restores this exact set.
   const defaultsSeeded = useRef(false);
@@ -612,6 +740,27 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     setFwdPeStr(suggestedForwardPE);
   }, [metrics, suggestedGrowth, suggestedExitPE, suggestedDividend, suggestedPrice,
     suggestedForwardPE]);
+
+  // A refresh should update a value that was still following the source, but never overwrite a
+  // deliberate growth override. The ref captures that distinction at click time, before `load`
+  // replaces the metrics and therefore changes the suggested value used for the comparison.
+  useEffect(() => {
+    if (!refreshGrowthDefaultRef.current || metrics == null) return;
+    refreshGrowthDefaultRef.current = false;
+    setGrowthStr(suggestedGrowth);
+  }, [metrics, suggestedGrowth]);
+
+  useEffect(() => {
+    if (!refreshDividendDefaultRef.current || metrics == null) return;
+    refreshDividendDefaultRef.current = false;
+    setDivStr(suggestedDividend);
+  }, [metrics, suggestedDividend]);
+
+  useEffect(() => {
+    if (!refreshExitDefaultRef.current || metrics == null) return;
+    refreshExitDefaultRef.current = false;
+    setExitStr(suggestedExitPE);
+  }, [metrics, suggestedExitPE]);
 
   const reset = useCallback(() => {
     setGrowthStr(suggestedGrowth);
@@ -740,11 +889,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
               placeholder={measuredPrice == null ? '' : measuredPrice.toFixed(2)}
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.price.what}
-                where={priceOverride != null ? t.egm.yoursTypedHere
-                  : priceFromYahoo ? t.egm.yahooFinance(live?.symbol ?? '')
-                    : t.common.guruFocus(vendorName(SOURCE_CODES.price))}
-                when={priceOverride != null ? t.egm.whateverMoment
-                  : v(onDate(priceDate, lang)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
+                where={priceUsesDefault ? priceDefaultInfo.where : t.egm.yoursTypedHere}
+                when={priceUsesDefault ? priceDefaultInfo.when : t.egm.whateverMoment}
                 how={t.egm.cards.price.how} />} />}
               /**
                *  It moved here from the output table, it is not a second one. The share price's
@@ -826,19 +972,15 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
               placeholder={src.forwardPE == null ? '' : src.forwardPE.toFixed(1)}
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.forwardPE.what}
-                where={numOrNull(fwdPeStr) != null ? t.egm.yoursTypedHere
-                  : src.forwardPEOrigin === 'derived' ? t.egm.forwardPEDerivedWhere
-                    : t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE))}
+                where={forwardPEUsesDefault ? forwardDefaultInfo.where : t.egm.yoursTypedHere}
                 /*  AN OVERRIDDEN FORWARD P/E HAS NO VENDOR DATE, and saying otherwise is worse
                    than saying nothing — the exact  the share-price card already carries. `where`
                    branched on the override from the start and `when` did not, so a typed multiple
                    produced a card reading "Yours, typed here" above "24 July 2026": two answers
                    about two different numbers, one of which is not on screen. Reported as "I
                    refreshed it but it's still old", which is what that card invites. */
-                when={numOrNull(fwdPeStr) != null ? t.egm.forwardPEWhenTyped
-                  : src.forwardPEDate == null ? t.egm.noObservationStored
-                    : v(onDate(src.forwardPEDate, lang))}
-                how={(numOrNull(fwdPeStr) != null && src.forwardPEDate != null
+                when={forwardPEUsesDefault ? forwardDefaultInfo.when : t.egm.forwardPEWhenTyped}
+                how={(!forwardPEUsesDefault && src.forwardPEDate != null
                   //  The way back, named. With a typed value the useful sentence is not how the
                   // leg is computed — it is that a vendor figure exists behind it and how to get
                   // back to it, which is what the share-price card says in the same state.
@@ -882,7 +1024,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                   title={peCancelling ? t.egm.cancelling
                     : peRefreshing ? t.egm.reReading
                       : companyId == null ? t.egm.reReadNoCompany
-                        : numOrNull(fwdPeStr) != null ? t.egm.reReadForwardPEOverridden
+                        : !forwardPEUsesDefault ? t.egm.reReadForwardPEOverridden
                           : t.egm.reReadForwardPE}
                   //  Padded like the reference chip beside it (`rounded px-1 py-px`), which is the
                   // other pressable thing on this row. Bare `leading-none` text gave it no
@@ -898,18 +1040,36 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             <Field label={t.egm.hurdleRate} value={hurdleStr} onChange={setHurdleStr} suffix="%"
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.hurdle.what}
-                where={t.egm.yoursOrDefault}
-                when={t.egm.cards.hurdle.when}
+                where={hurdleUsesDefault ? hurdleDefaultInfo.where : t.egm.yoursTypedHere}
+                when={hurdleUsesDefault ? hurdleDefaultInfo.when : t.egm.cards.hurdle.when}
                 how={t.egm.hurdleHow(
                   t.egm.houseDefault(`${(EGM_DEFAULTS.hurdleRate * 100).toFixed(0)}%`))} />} />} />
             <Field label={t.egm.growthRate} value={growthStr} onChange={setGrowthStr} suffix="%"
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.growth.what}
-                where={t.egm.cards.growth.where}
-                when={t.egm.everyYearFor(String(assumptions.years))}
+                where={growthUsesDefault ? growthDefaultInfo.where : t.egm.yoursTypedHere}
+                when={growthUsesDefault ? growthDefaultInfo.when : t.egm.everyYearFor(String(assumptions.years))}
                 how={t.egm.growthHow(t.egm.houseDefault(`${(EGM_DEFAULTS.growthRate * 100).toFixed(0)}%`)
                   + (src.analystGrowth5Y != null
                     ? t.egm.analystsImply(`${(src.analystGrowth5Y * 100).toFixed(1)}%`) : '') + '.')} />} />}
+              action={(
+                <button type="button"
+                  onClick={() => (growthRefreshing && growthJobId
+                    ? void cancelJob(growthJobId) : refreshGrowth(growthUsesDefault))}
+                  disabled={growthCancelling || companyId == null}
+                  aria-label={growthRefreshing ? t.egm.reReadCancel : 'Refresh analyst EPS estimates'}
+                  title={growthCancelling ? t.egm.cancelling
+                    : growthRefreshing ? t.egm.reReading
+                      : companyId == null ? t.egm.reReadNoCompany
+                        : 'Refresh the analyst EPS estimates used for this growth default'}
+                  className={`rounded px-1.5 py-0.5 align-middle text-[11px] leading-none ${
+                    growthCancelling ? 'cursor-wait text-fg-faint'
+                      : growthRefreshing ? 'text-warn-400 hover:bg-overlay/5 hover:text-neg-400'
+                        : companyId == null ? 'cursor-default text-fg-faint/40'
+                          : 'text-fg-faint hover:bg-overlay/5 hover:text-accent-400'}`}>
+                  {growthCancelling ? 'Cancelling…' : growthRefreshing ? 'Cancel' : 'Refresh'}
+                </button>
+              )}
               />
             {/*  AN ASSUMPTION, NOT A READING. The model applies this yield in EVERY one of the
                 ten years, so it is a claim about the next decade; the measured figure is only its
@@ -923,11 +1083,28 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
               )}
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.dividend.what}
-                where={divOverride != null ? t.egm.yoursTypedHere
-                  : t.common.guruFocus(vendorName(SOURCE_CODES.dividendYield))}
-                when={t.egm.everyYearFor(String(assumptions.years))}
+                where={dividendUsesDefault ? dividendDefaultInfo.where : t.egm.yoursTypedHere}
+                when={dividendUsesDefault ? dividendDefaultInfo.when : t.egm.everyYearFor(String(assumptions.years))}
                 how={t.egm.cards.dividend.how} />} />}
               placeholder={src.dividendYield == null ? '0.00' : (src.dividendYield * 100).toFixed(2)}
+              action={(
+                <button type="button"
+                  onClick={() => (dividendRefreshing && dividendJobId
+                    ? void cancelJob(dividendJobId) : refreshDividend(dividendUsesDefault))}
+                  disabled={dividendCancelling || companyId == null}
+                  aria-label={dividendRefreshing ? t.egm.reReadCancel : 'Refresh dividend yield'}
+                  title={dividendCancelling ? t.egm.cancelling
+                    : dividendRefreshing ? t.egm.reReading
+                      : companyId == null ? t.egm.reReadNoCompany
+                        : 'Refresh the financial data used for this dividend-yield default'}
+                  className={`rounded px-1.5 py-0.5 align-middle text-[11px] leading-none ${
+                    dividendCancelling ? 'cursor-wait text-fg-faint'
+                      : dividendRefreshing ? 'text-warn-400 hover:bg-overlay/5 hover:text-neg-400'
+                        : companyId == null ? 'cursor-default text-fg-faint/40'
+                          : 'text-fg-faint hover:bg-overlay/5 hover:text-accent-400'}`}>
+                  {dividendCancelling ? 'Cancelling…' : dividendRefreshing ? 'Cancel' : 'Refresh'}
+                </button>
+              )}
               />
             {/*  THE CHIP IS THE FIGURE, NOT A SENTENCE ABOUT IT. `5y median P/E: 57.3` under a
                 field labelled `Exit P/E` repeated the label an inch above it and named a source
@@ -935,13 +1112,32 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             <Field label={t.egm.exitPE} value={exitStr} onChange={setExitStr} step="0.5"
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.exitPE.what}
-                where={t.egm.cards.exitPE.where}
-                when={t.egm.endOfYear(String(assumptions.years))}
-                how={t.egm.exitPEHow(t.egm.houseDefault(`${EGM_DEFAULTS.exitPE}x`)
-                  + (src.medianPE5Y != null ? t.egm.medianIs(`${src.medianPE5Y.toFixed(1)}x`) : '') + '.')
+                where={exitPEUsesDefault ? exitDefaultInfo.where : t.egm.yoursTypedHere}
+                when={exitPEUsesDefault ? exitDefaultInfo.when : t.egm.endOfYear(String(assumptions.years))}
+                how={t.egm.exitPEHow(exitPEUsesDefault && src.medianPE5Y != null
+                  ? t.egm.medianDefault(`${src.medianPE5Y.toFixed(1)}x`)
+                  : t.egm.houseDefault(`${EGM_DEFAULTS.exitPE}x`))
                   + (forwardPE != null && forwardPE > 0
                     ? t.egm.reratingRuns(`${forwardPE.toFixed(1)}x`,
                       `${assumptions.exitPE.toFixed(1)}x`) : '')} />} />}
+              action={(
+                <button type="button"
+                  onClick={() => (exitRefreshing && exitJobId
+                    ? void cancelJob(exitJobId) : refreshExitPE(exitPEUsesDefault))}
+                  disabled={exitCancelling || companyId == null}
+                  aria-label={exitRefreshing ? t.egm.reReadCancel : 'Refresh five-year P/E median'}
+                  title={exitCancelling ? t.egm.cancelling
+                    : exitRefreshing ? t.egm.reReading
+                      : companyId == null ? t.egm.reReadNoCompany
+                        : 'Refresh the financial data used for this exit P/E default'}
+                  className={`rounded px-1.5 py-0.5 align-middle text-[11px] leading-none ${
+                    exitCancelling ? 'cursor-wait text-fg-faint'
+                      : exitRefreshing ? 'text-warn-400 hover:bg-overlay/5 hover:text-neg-400'
+                        : companyId == null ? 'cursor-default text-fg-faint/40'
+                          : 'text-fg-faint hover:bg-overlay/5 hover:text-accent-400'}`}>
+                  {exitCancelling ? 'Cancelling…' : exitRefreshing ? 'Cancel' : 'Refresh'}
+                </button>
+              )}
               />
           </div>
 
@@ -1361,6 +1557,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     {/* The same question from the other end: the EGM asks what a set of assumptions is worth, the
         reverse DCF asks what the price already assumes. */}
     <ReverseDcfPanel src={dcfSrc} currency={currency} metrics={metrics} growthEst={growthEst}
+      sourceFetchedAt={sourceFetchedAt}
       name={name} isin={isin} today={today} />
     </div>
     </TipCardLanguageProvider>

@@ -101,6 +101,7 @@ export type DeepValuationCopy = {
     houseDefault: (value: string) => string;
     analystsImply: (value: string) => string;
     medianIs: (value: string) => string;
+    medianDefault: (value: string) => string;
     reratingRuns: (from: string, to: string) => string;
     analystHint: string;
     medianPEHint: string;
@@ -341,7 +342,8 @@ const en: DeepValuationCopy = {
     houseDefault: (value) => `Default ${v(value)}, a house figure`,
     analystsImply: (value) => `; analysts imply ${v(value)}`,
     medianIs: (value) => `; its 5-year median is ${v(value)}`,
-    reratingRuns: (from, to) => ` The rerating leg runs ${v(from)} to ${v(to)}.`,
+    medianDefault: (value) => `Default ${v(value)}, based on its 5-year median`,
+    reratingRuns: (from, to) => ` Rerating assumes Forward P/E moves from ${v(from)} today to Exit P/E of ${v(to)} at the end of the horizon.`,
     analystHint: 'Growth implied by consensus EPS estimates. Click to use it.',
     medianPEHint: 'This company’s own median P/E over the last five years. Click to use it.',
     yoursTypedHere: 'Yours, typed here.',
@@ -693,7 +695,8 @@ const nl: DeepValuationCopy = {
     houseDefault: (value) => `Standaard ${v(value)}, een huiswaarde`,
     analystsImply: (value) => `; analisten impliceren ${v(value)}`,
     medianIs: (value) => `; de vijfjaarsmediaan is ${v(value)}`,
-    reratingRuns: (from, to) => ` Het herwaarderingsdeel loopt van ${v(from)} naar ${v(to)}.`,
+    medianDefault: (value) => `Standaard ${v(value)}, gebaseerd op de vijfjaarsmediaan`,
+    reratingRuns: (from, to) => ` Herwaardering veronderstelt dat de Forward P/E van ${v(from)} nu naar een Exit P/E van ${v(to)} aan het einde van de horizon beweegt.`,
     analystHint: 'De door analisten geïmpliceerde groei — de CAGR van de consensus-EPS-ramingen, '
       + 'niet een gepubliceerde langetermijnvoet. Klik om te gebruiken.',
     medianPEHint: 'De eigen mediane P/E van deze onderneming over de afgelopen vijf jaar. Klik om '
