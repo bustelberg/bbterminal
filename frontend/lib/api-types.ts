@@ -6414,6 +6414,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/log-dashboard/entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Entries */
+        get: operations["get_entries_api_log_dashboard_entries_get"];
+        put?: never;
+        /** Create Entry */
+        post: operations["create_entry_api_log_dashboard_entries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/log-dashboard/news/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stock News
+         * @description Latest headlines from the legacy GuruFocus API used by this app.
+         */
+        get: operations["stock_news_api_log_dashboard_news__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/longequity/companies": {
         parameters: {
             query?: never;
@@ -11282,6 +11320,36 @@ export interface components {
             omschrijving?: string | null;
             /** Positions */
             positions: number;
+        };
+        /** LogEntryIn */
+        LogEntryIn: {
+            /**
+             * Actions
+             * @default
+             */
+            actions?: string;
+            /** Company Name */
+            company_name: string;
+            /** Conviction */
+            conviction: number;
+            /** Decision */
+            decision: string;
+            /**
+             * Flag
+             * @default none
+             */
+            flag?: string;
+            /** Isin */
+            isin: string;
+            /**
+             * Notes
+             * @default
+             */
+            notes?: string;
+            /** Portfolio Weight */
+            portfolio_weight?: number | null;
+            /** Review On */
+            review_on?: string | null;
         };
         /** LongEquitySaveUniverseRequest */
         LongEquitySaveUniverseRequest: {
@@ -21441,6 +21509,90 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_entries_api_log_dashboard_entries_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    create_entry_api_log_dashboard_entries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogEntryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stock_news_api_log_dashboard_news__ticker__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
