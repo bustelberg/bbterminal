@@ -113,10 +113,13 @@ type LatestClose = {
   close_in?: number | null; in_currency?: string | null;
 };
 
+type SourceFetchedAt = { financials?: string | null; estimates?: string | null; indicators?: string | null };
+
 export default function QuickValuationTab({ isin, name }: { isin: string; name?: string | null }) {
   const [metrics, setMetrics] = useState<MetricRow[] | null>(null);
   const [basis, setBasis] = useState<Basis>('fcf');
   const [currency, setCurrency] = useState<string | null>(null);
+  const [sourceFetchedAt, setSourceFetchedAt] = useState<SourceFetchedAt>({});
   /**  THE ANSWER CARRIES THE QUESTION IT ANSWERED. "Have we looked yet?" is derived from whether
    *  the stored result belongs to THIS (isin, currency) — a separate `pending` boolean has to be
    *  flipped in four places (mount, company change, success, failure) and the row makes a claim
@@ -151,6 +154,19 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const refreshingQuickValuation = refreshJob?.status === 'running';
   const peCancelling = peRefreshing && peJob.cancelRequested;
 
+  const provenance = (retrievedAt: string | null | undefined, appliesTo: string | null | undefined) => (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+      {retrievedAt != null && <span className="inline-flex items-center gap-1">
+        <span>Retrieved</span>
+        <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">{onDate(retrievedAt)}</span>
+      </span>}
+      {appliesTo != null && <span className="inline-flex items-center gap-1">
+        <span>Applies to</span>
+        <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">{onDate(appliesTo)}</span>
+      </span>}
+    </span>
+  );
+
   /**
    * Read this company's metrics.  EXTRACTED SO THE ↻ CAN RE-RUN IT — the chart's forward series is
    * a `useMemo` over `metrics`, so replacing that array is what redraws the line. Nothing else in
@@ -168,7 +184,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     // truthfully reports "nothing newer" — a write against the wrong company that looks like a
     // vendor with no update. Latent until the ISIN could change inside one mount, which is what
     // the modal's A/B valuation switch now does.
-    if (blank) { setMetrics(null); setCurrency(null); setLiveRes(null); setCompanyId(null); }
+    if (blank) { setMetrics(null); setCurrency(null); setSourceFetchedAt({}); setLiveRes(null); setCompanyId(null); }
     setErr(null);
     const r = await apiFetch(
       `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics?cadence=annual`,
@@ -182,6 +198,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     const rows = (b?.metrics ?? []) as MetricRow[];
     setMetrics(rows);
     setCurrency(b?.currency ?? null);
+    setSourceFetchedAt((b?.source_fetched_at ?? {}) as SourceFetchedAt);
     setCompanyId(typeof b?.company_id === 'number' ? b.company_id : null);
     //  The same builder the chart uses, on the same rows, so the toast's date and the As-of tile
     // can never name different points. Read here rather than off `forwardHistory`, which is a memo
@@ -862,13 +879,13 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           info={<InfoTip content={<AspectCard
             what="Compound annual growth of the fiscal year-end share price."
             where="GuruFocus `Month End Stock Price`, the close at each fiscal year end."
-            when={priceCagr ? `${priceCagr.from} to ${priceCagr.to} (${priceCagr.years} years).` : 'Not available.'}
+            when={priceCagr ? provenance(sourceFetchedAt.financials, null) : 'Not available.'}
             how="First to last positive observation. The year-end price, not today's quote." />} />} />
         <Stat label={t.perShareCagr(bl.perShare)} value={pct(valueCagr?.pct)} color={chartTheme.warn}
           info={<InfoTip content={<AspectCard
             what={`Compound annual growth of ${b.what}.`}
             where={b.source}
-            when={valueCagr ? `${valueCagr.from} to ${valueCagr.to} (${valueCagr.years} years).` : 'Not available.'}
+            when={valueCagr ? provenance(sourceFetchedAt.financials, null) : 'Not available.'}
             how={`Per share, so buybacks and new shares affect it. ${b.caveat}`} />} />} />
         {/*  THE CONCLUSION, ON THE CHART THAT ARGUES FOR IT. The two CAGRs to the left are what
             HAPPENED; these three are what the assumptions in the panel IMPLY, and the reader was
@@ -894,9 +911,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             where={priceLive
               ? `yfinance asset_price${live?.symbol ? ` (${live.symbol})` : ''}.`
               : 'GuruFocus Month End Stock Price.'}
-            when={priceLive
-              ? `Its close of ${priceDate ?? 'an unknown date'}.`
-              : 'Fiscal year end.'}
+            when={provenance(priceLive ? priceDate : sourceFetchedAt.financials, priceDate)}
             how="Used with the latest reported figure to calculate the current yield." />} />} />
         {/*  THE SAME COLOUR AS THE DOT IT DESCRIBES (`chartTheme.accentStrong`, the price line's,
             which is what the `ReferenceDot` below is stroked with) — the tile and the mark on the
@@ -1118,7 +1133,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             // fiscal years" off the history cap; with the cap gone there is no fixed denominator
             // to be `of`, and quoting one that no longer exists is worse than quoting none.
             when={yields.length
-              ? `${yieldValues.length} daily closes shown (${yields[0]?.date} to ${yields[yields.length - 1]?.date}).`
+              ? provenance(sourceFetchedAt.financials, yields[yields.length - 1]?.date)
               : 'No daily closes to average.'}
             //  `yieldValues` IS WHAT THE MEAN WAS TAKEN OVER — the same array `avgYield` divides,
             // so the addends listed here provably sum to the figure on the tile. It is also the
@@ -1129,11 +1144,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           info={<InfoTip content={<AspectCard
             what={`Latest daily ${b.yieldInline}.`}
             where={`${b.perShare} divided by that day's closing price.`}
-            when={latestYieldPoint?.date ? (
-              <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
-                as of {latestYieldPoint.date}
-              </span>
-            ) : 'No daily close with a reported per-share figure.'}
+            when={latestYieldPoint?.date
+              ? provenance(sourceFetchedAt.financials, latestYieldPoint.date)
+              : 'No daily close with a reported per-share figure.'}
             //  Both operands off the same point — see `latestYieldPoint`. The FY label is in the
             // expression because that year is not necessarily the newest one on either line.
             worked={workedRatio(latestYieldPoint?.value, latestYieldPoint?.price,
@@ -1144,7 +1157,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           info={<InfoTip content={<AspectCard
             what={`As-of date for the latest daily ${b.yieldInline}.`}
             where="The daily close series used as the yield denominator."
-            when={latestYieldPoint?.date ?? 'No daily close with a reported per-share figure.'}
+            when={latestYieldPoint?.date
+              ? provenance(sourceFetchedAt.financials, latestYieldPoint.date)
+              : 'No daily close with a reported per-share figure.'}
             how="The Latest yield and this date always come from the same daily observation." />} />} />
       </div>
 
