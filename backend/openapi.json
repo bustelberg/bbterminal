@@ -8886,12 +8886,6 @@
       },
       "LogEntryIn": {
         "properties": {
-          "actions": {
-            "default": "",
-            "maxLength": 4000,
-            "title": "Actions",
-            "type": "string"
-          },
           "company_name": {
             "maxLength": 200,
             "minLength": 1,
@@ -8908,12 +8902,6 @@
             "maxLength": 100,
             "minLength": 1,
             "title": "Decision",
-            "type": "string"
-          },
-          "flag": {
-            "default": "none",
-            "pattern": "^(none|yellow|red)$",
-            "title": "Flag",
             "type": "string"
           },
           "isin": {

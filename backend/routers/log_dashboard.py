@@ -21,10 +21,8 @@ class LogEntryIn(BaseModel):
     isin: str = Field(min_length=1, max_length=20)
     decision: str = Field(min_length=1, max_length=100)
     notes: str = Field(default="", max_length=8000)
-    actions: str = Field(default="", max_length=4000)
     conviction: int = Field(ge=1, le=5)
     portfolio_weight: float | None = Field(default=None, ge=0, le=100)
-    flag: str = Field(default="none", pattern="^(none|yellow|red)$")
     review_on: date | None = None
 
 

@@ -11340,22 +11340,12 @@ export interface components {
         };
         /** LogEntryIn */
         LogEntryIn: {
-            /**
-             * Actions
-             * @default
-             */
-            actions?: string;
             /** Company Name */
             company_name: string;
             /** Conviction */
             conviction: number;
             /** Decision */
             decision: string;
-            /**
-             * Flag
-             * @default none
-             */
-            flag?: string;
             /** Isin */
             isin: string;
             /**
