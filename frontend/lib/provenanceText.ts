@@ -5,7 +5,7 @@
  */
 
 /**
- * ⚠ The card supplies the sentence's final period, so a `how` carrying its own renders "..".
+ *  The card supplies the sentence's final period, so a `how` carrying its own renders "..".
  * Stripped centrally rather than at each of the ~40 call sites, where a stray period is invisible
  * in the source and only shows up on screen.
  */

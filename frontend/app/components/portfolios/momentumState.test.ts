@@ -11,7 +11,7 @@ import {
 } from './momentumState';
 
 /**
- * ⚠ The chip is a RANK. Everything here is about not letting it be read as a return — see the
+ *  The chip is a RANK. Everything here is about not letting it be read as a return — see the
  * module docstring. The arithmetic that produces the state lives on the server; these pin the
  * presentation rules that make it legible.
  */
@@ -36,11 +36,11 @@ describe('the seven states', () => {
     }
   });
 
-  it('⚠ keeps the neutral state colourless — a tone would make no signal look like one', () => {
+  it(' keeps the neutral state colourless — a tone would make no signal look like one', () => {
     expect(MOMENTUM_STATE_TONES[0]).toBe('text-fg-subtle');
   });
 
-  it('⚠⚠ routes every tone through a design token, never a hex or a raw Tailwind colour', () => {
+  it(' routes every tone through a design token, never a hex or a raw Tailwind colour', () => {
     for (const tone of Object.values(MOMENTUM_STATE_TONES)) {
       expect(tone).toMatch(/^text-(neg|pos|fg)-/);
       expect(tone).not.toMatch(/#|\[|red|green|slate|gray|grey/);
@@ -61,7 +61,7 @@ describe('guarding a state that did not arrive', () => {
     expect(stateLabel(v as number)).toBeNull();
   });
 
-  it('⚠ an absent state falls back to a neutral tone, never to a colour', () => {
+  it(' an absent state falls back to a neutral tone, never to a colour', () => {
     expect(stateTone(null)).toBe('text-fg-subtle');
     expect(stateTone(undefined)).toBe('text-fg-subtle');
   });
@@ -80,19 +80,19 @@ describe('the percentile ordinal', () => {
     expect(ordinalPercentile(1)).toBe('100th');
   });
 
-  it('⚠ 11/12/13 take "th", not "st/nd/rd"', () => {
+  it(' 11/12/13 take "th", not "st/nd/rd"', () => {
     expect(ordinalPercentile(0.11)).toBe('11th');
     expect(ordinalPercentile(0.12)).toBe('12th');
     expect(ordinalPercentile(0.13)).toBe('13th');
   });
 
-  it('⚠⚠ Dutch takes a single "e" — "82nd" inside a Dutch sentence reads as a broken number', () => {
+  it(' Dutch takes a single "e" — "82nd" inside a Dutch sentence reads as a broken number', () => {
     expect(ordinalPercentile(0.82, 'nl')).toBe('82e');
     expect(ordinalPercentile(0.01, 'nl')).toBe('1e');
     expect(ordinalPercentile(0.11, 'nl')).toBe('11e');
   });
 
-  it('⚠ never prints a 0th percentile — the weakest member is still 1st of N, not 0th', () => {
+  it(' never prints a 0th percentile — the weakest member is still 1st of N, not 0th', () => {
     expect(ordinalPercentile(0)).toBe('1st');
     expect(ordinalPercentile(0.0001)).toBe('1st');
   });

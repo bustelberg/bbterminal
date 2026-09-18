@@ -1,6 +1,6 @@
 """The due detector reads the fiscal-period axis off ONE exact `metric_code`, never a prefix.
 
-⚠⚠ THIS IS A PERFORMANCE FIX PINNED AS A CORRECTNESS TEST, BECAUSE THE SYMPTOM WAS NEITHER. The
+ THIS IS A PERFORMANCE FIX PINNED AS A CORRECTNESS TEST, BECAUSE THE SYMPTOM WAS NEITHER. The
 query used to be `metric_code LIKE 'quarterly\\_\\_%'`, and the database collates `en_US.UTF-8` — so
 no btree we own gives a range for a prefix. Measured 2026-08-17 over ACWI's 1,949 constituents
 against 69,003,374 rows of `metric_data`:
@@ -14,12 +14,12 @@ nothing was wrong on screen, and no test could fail — which is why the query s
 rather than left to be re-derived by whoever next reads the `LIKE` and thinks it reads more
 naturally.
 
-⚠ IT IS THE SAME ANSWER, MEASURED, NOT A CHEAPER APPROXIMATION. Over all 1,949 constituents the one
+ IT IS THE SAME ANSWER, MEASURED, NOT A CHEAPER APPROXIMATION. Over all 1,949 constituents the one
 code reproduces the prefix scan exactly: 1,712 companies, 127,001 distinct (company, period) pairs,
 an identical `due` set, and the same newest period for every company. The quarterly block is written
 as a unit, so every line in it carries the whole period axis.
 
-⚠ AND IT IS NOT THE QUARTERLY TWIN OF THE `fin` SENTINEL, WHICH IS THE OBVIOUS PICK.
+ AND IT IS NOT THE QUARTERLY TWIN OF THE `fin` SENTINEL, WHICH IS THE OBVIOUS PICK.
 `quarterly__Cashflow Statement__Free Cash Flow` is missing for 11 constituents — a bank's template
 omits it, exactly as it omits gross profit — giving 126,063 pairs and moving a company in and out
 of `due`.
@@ -57,7 +57,7 @@ def _run(monkeypatch, rows, ids, today=date(2026, 8, 17)):
 class TestTheQueryShape:
 
     def test_it_matches_ONE_code_by_equality(self, monkeypatch):
-        """⚠ NO `LIKE`, NO `%`. An equality predicate is what makes the index usable; it is also
+        """ NO `LIKE`, NO `%`. An equality predicate is what makes the index usable; it is also
         what makes the wildcard trap below unexpressible."""
         _out, _note, spy = _run(monkeypatch, [], [1, 2, 3])
         assert "LIKE" not in spy.sql.upper()
@@ -69,19 +69,19 @@ class TestTheQueryShape:
         assert spy.params == ([1, 2, 3], DUE_PERIOD_CODE)
 
     def test_the_code_is_a_quarterly_line(self, monkeypatch):
-        """⚠ THE CADENCE IS IN THE CODE. An `annuals__` line here would infer a 12-month cadence
+        """ THE CADENCE IS IN THE CODE. An `annuals__` line here would infer a 12-month cadence
         for every company and the detector would go quiet for a year at a time."""
         assert DUE_PERIOD_CODE.startswith("quarterly__")
 
     def test_it_is_the_widest_covered_line_not_the_cashflow_one(self):
-        """⚠ MEASURED, NOT PREFERRED. `quarterly__Cashflow Statement__Free Cash Flow` is the
+        """ MEASURED, NOT PREFERRED. `quarterly__Cashflow Statement__Free Cash Flow` is the
         intuitive pick — the quarterly twin of the `fin` sentinel — and 11 ACWI constituents have
         no such row because a bank's template omits the line."""
         assert DUE_PERIOD_CODE == "quarterly__Per Share Data__Revenue per Share"
         assert "Cashflow" not in DUE_PERIOD_CODE
 
     def test_the_analyst_forecast_rows_cannot_be_matched(self, monkeypatch):
-        """⚠ THE TRAP THE OLD PREFIX CARRIED. `_` is a single-character wildcard in SQL LIKE, so an
+        """ THE TRAP THE OLD PREFIX CARRIED. `_` is a single-character wildcard in SQL LIKE, so an
         unescaped `'quarterly__%'` also matched `quarterly_revenue_estimate` — forecast rows whose
         period dates are YEARS in the future (ASML had 2028-03-31). Fed to the detector they make
         every company look comfortably up to date, so the button goes quiet exactly when there is
@@ -106,7 +106,7 @@ class TestWhatItReturns:
         assert out == []
 
     def test_a_company_missing_this_ONE_line_is_due_not_fresh(self, monkeypatch):
-        """⚠ THE SAFETY NET UNDER THE CODE CHOICE, AND THE DIRECTION IS THE WHOLE POINT. A company
+        """ THE SAFETY NET UNDER THE CODE CHOICE, AND THE DIRECTION IS THE WHOLE POINT. A company
         with quarterly data but not this particular row reads as "no periods" and is offered,
         costing one call. The opposite fallback — absent means fresh — would quietly retire it from
         every future press."""
@@ -114,7 +114,7 @@ class TestWhatItReturns:
         assert 99 in out
 
     def test_no_copy_path_returns_EVERYTHING_and_says_so(self, monkeypatch):
-        """⚠ DEGRADING THE OPTIMISATION IS FINE; DEGRADING THE ANSWER IS NOT. Without a direct
+        """ DEGRADING THE OPTIMISATION IS FINE; DEGRADING THE ANSWER IS NOT. Without a direct
         connection the period axis cannot be read cheaply, so the caller gets the full list back
         with a note — never a silently narrowed one."""
         monkeypatch.setattr("common.pg._run_copy", lambda sql, params: None)
@@ -131,7 +131,7 @@ class TestWhatItReturns:
 
 
 class TestTheSetupNarratesItself:
-    """⚠ THE OTHER HALF OF THE SAME BUG REPORT. Even at 1.8s the deciding is silent, and the first
+    """ THE OTHER HALF OF THE SAME BUG REPORT. Even at 1.8s the deciding is silent, and the first
     per-company line only lands once that company's three GuruFocus feeds have been fetched and
     written — so the card sat on "starting…" long after the query was fast. The setup now emits
     before each stretch of database work."""
@@ -182,7 +182,7 @@ class TestTheSetupNarratesItself:
         assert ctx.lines, "the setup emitted nothing at all — the card would read 'starting…'"
         _kind, first_msg, first_data = ctx.lines[0]
         assert "ACWI" in first_msg
-        # ⚠ NO `done`/`total` YET. There is no work list to count against; a percentage here would
+        #  NO `done`/`total` YET. There is no work list to count against; a percentage here would
         # be of a thing not yet decided, and would jump backwards when the real total arrived.
         assert "total" not in first_data and "done" not in first_data
         # The `start` line — the one that DOES carry the bar's total — comes after the narration.

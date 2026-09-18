@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  benchBody, benchKey, benchNote, isUniverseTarget, mergeSeries, rebaseSeries, seriesCrossesZero,
+  benchBody, benchKey, benchNote, inputsBody, isUniverseTarget, mergeSeries, rebaseSeries, seriesCrossesZero,
   spliceCaps, withBench, type BenchTarget,
 } from './benchSeries';
 import { weightAt } from './marginData';
@@ -40,7 +40,7 @@ describe('mergeSeries', () => {
 
 describe('benchNote', () => {
   const aex: BenchTarget = { universe: 'AEX', label: 'AEX', cadence: 'annual' };
-  // ⚠ TWO PERIODS, NOT ONE — A ONE-POINT SERIES IS NO LONGER "DREW". This fixture was
+  //  Two periods, not one — a one-point series is no longer "DREW". This fixture was
   // `m({ 2020: 5 })`, which `benchNote` now reports as "one period only", so the test below broke
   // on a source change that was correct: a single surviving point is not a line you can read a
   // trend off, and saying so is the whole job of this function. The one-period case gets its own
@@ -55,7 +55,7 @@ describe('benchNote', () => {
     expect(benchNote(aex, { rows: [] }, null, drawn)).toBeNull();
   });
 
-  it('⚠ a ONE-period line is an absence too — it draws, and it says nothing readable', () => {
+  it(' a ONE-period line is an absence too — it draws, and it says nothing readable', () => {
     // It renders as a single dot beside a full portfolio curve, which looks like a benchmark that
     // simply tracks nothing rather than one where every other period fell under the coverage floor.
     expect(benchNote(aex, { rows: [] }, null, m({ 2020: 5 })))
@@ -63,7 +63,7 @@ describe('benchNote', () => {
   });
 
   it('keeps the three absences apart — they have different fixes', () => {
-    // ⚠ This is the whole point. On screen all three are "no second line", and a reader who
+    //  This is the whole point. On screen all three are "no second line", and a reader who
     // cannot tell them apart will read a failed request as an index that tracks the book.
     expect(benchNote(aex, null, null, null)).toBe('AEX: loading…');
     expect(benchNote(aex, null, 'no holdings', null)).toBe('AEX: no holdings');
@@ -160,7 +160,7 @@ describe('rebaseSeries', () => {
 
 describe('seriesCrossesZero', () => {
   /**
-   * ⚠⚠ THE BUG THIS CLOSES: "do not index it" and "do not put it on a log axis" were two separate
+   *  The bug this closes: "do not index it" and "do not put it on a log axis" were two separate
    * decisions, and only the first was made. `rebaseSeries` refused a sign-changing series, the card
    * fell back to absolute values and SAID SO in the legend — and then plotted them on a log axis,
    * which nulls everything ≤ 0. The fallback promised the real numbers and hid exactly the ones
@@ -192,7 +192,7 @@ describe('seriesCrossesZero', () => {
     expect(seriesCrossesZero([])).toBe(false);
   });
 
-  it('⚠ agrees with rebaseSeries: anything it flags cannot be indexed against itself', () => {
+  it(' agrees with rebaseSeries: anything it flags cannot be indexed against itself', () => {
     // The two must not disagree — that disagreement IS the bug. A series with no positive year has
     // no anchor at all, so `rebaseSeries` refuses and the axis must go linear.
     const vals = [-2, -1, -0.5];
@@ -219,7 +219,7 @@ describe('spliceCaps', () => {
       { rows: { market_cap_by_period?: Record<string, number> }[] };
     expect(out.rows[0].market_cap_by_period).toEqual({ 2019: 100 });
     expect(out.rows[1].market_cap_by_period).toEqual({});
-    // ⚠ THE POINT OF THE DISTINCTION, asserted through the consumer rather than the shape:
+    //  The point of the distinction, asserted through the consumer rather than the shape:
     // `{}` puts B out of that period's average; `weight_pct` would have kept it in at 6.
     expect(weightAt(out.rows[0] as never, '2019')).toBe(100);
     expect(weightAt(out.rows[1] as never, '2019')).toBe(null);
@@ -242,15 +242,22 @@ describe('the second line can be an index or a company', () => {
   const co: BenchTarget = { isin: 'US67066G1040', label: 'NVIDIA Corporation', cadence: 'annual' };
 
   it('sends a company as a ONE-HOLDING BOOK, which is the shape the endpoints already serve', () => {
-    // ⚠ This is the whole reason company-vs-company needed no backend work. Verified against the
+    //  This is the whole reason company-vs-company needed no backend work. Verified against the
     // real endpoints: `{holdings:[{isin, weight:1}]}` returns one row at weight_pct = 100.
     expect(JSON.parse(benchBody(co))).toEqual({
       holdings: [{ isin: 'US67066G1040', name: 'NVIDIA Corporation', weight: 1 }],
       cadence: 'annual',
     });
-    // ⚠⚠ AND IT MUST NOT CARRY `universe`. A company body with a stray universe key is answered by
+    //  And it must not carry `universe`. A company body with a stray universe key is answered by
     // the INDEX branch server-side — a chart that draws ACWI under a company's name.
     expect(JSON.parse(benchBody(co))).not.toHaveProperty('universe');
+  });
+
+  it('uses that same body for input modals', () => {
+    expect(inputsBody(co)).toBe(benchBody(co));
+    expect(inputsBody({ holdings: [{ isin: 'US0378331005', weight: 1 }] })).toBe(
+      JSON.stringify({ holdings: [{ isin: 'US0378331005', weight: 1 }] }),
+    );
   });
 
   it('sends an index as before, with no holdings', () => {
@@ -259,7 +266,7 @@ describe('the second line can be an index or a company', () => {
   });
 
   it('keys on the identifier, never on the label alone', () => {
-    // ⚠ Two companies can share a name (dual listings, share classes). Keyed on the label, the
+    //  Two companies can share a name (dual listings, share classes). Keyed on the label, the
     // fetch effect would not re-run and the chart would keep the previous company's line under the
     // new name — the failure that looks most like a correct answer.
     const twin: BenchTarget = { isin: 'US67066G1041', label: 'NVIDIA Corporation', cadence: 'annual' };

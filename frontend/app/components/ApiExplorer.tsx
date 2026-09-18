@@ -73,14 +73,14 @@ const MANUAL_OVERRIDES: Record<string, Partial<Endpoint> & { hide?: boolean }> =
 
 /** Display allow-list — scopes this explorer to the `/api/admin/*` MAINTENANCE endpoints.
  *
- * ⚠⚠ IT USED TO BE THE EIGHT ENDPOINTS OF THE EXTERNAL TRADING API, and those were deleted with
+ *  It used to be the eight endpoints of the external trading API, and those were deleted with
  * the IBKR rebalancer (2026-09-08). Emptying the set was NOT the right consequence: an empty set
  * is documented below as "show everything", so removing the entries would silently turn a focused
  * console into a list of all ~137 internal endpoints — every one of which some page already calls
  * for you. Pointed at the survivors instead, the page keeps a job: the admin tools that have no
  * button anywhere else.
  *
- * ⚠ FOUR OF THESE DO HAVE BUTTONS (`company-illiquid` and `company-price-refresh` on /schedule,
+ *  Four of these do have buttons (`company-illiquid` and `company-price-refresh` on /schedule,
  * `scheduled-jobs` on its Automatic-jobs card, `network-diagnostics` on /network). They are listed
  * anyway — seeing the request a page makes is the reason to open an explorer at all.
  *
@@ -330,7 +330,7 @@ function EndpointCard({ ep, token }: { ep: Endpoint; token: string | null }) {
             className="text-xs px-3 py-1 rounded-lg border border-neutral-700 hover:border-neutral-500 text-fg-soft transition-colors"
             title="Copy curl command (uses $TOKEN env var)"
           >
-            {copyOk ? '✓ Copied' : 'Copy as curl'}
+            {copyOk ? ' Copied' : 'Copy as curl'}
           </button>
           <button
             type="button"
@@ -546,7 +546,7 @@ export default function ApiExplorer() {
           <span className="text-xs text-fg-subtle">Auth</span>
           {token ? (
             <>
-              <span className="text-xs text-pos-400">✓ Signed in</span>
+              <span className="text-xs text-pos-400"> Signed in</span>
               <span className="text-xs text-fg-muted font-mono">{email}</span>
               <span className="text-[11px] uppercase tracking-wider text-accent-400">{role ?? 'user'}</span>
               <span className="text-[11px] text-fg-faint font-mono ml-auto">token: {token.slice(0, 12)}…{token.slice(-8)}</span>

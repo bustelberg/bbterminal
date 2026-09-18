@@ -118,7 +118,7 @@ def apply_sleeves(
         stocks  whatever is left: `(1 − Σ etf) × (1 − cash)`, spread over the
                 stock sleeve RENORMALIZED to sum-1.
 
-    ⚠ THE RENORMALIZE IS THE WHOLE POINT, AND IT IS WHAT MAKES THIS IDEMPOTENT.
+     THE RENORMALIZE IS THE WHOLE POINT, AND IT IS WHAT MAKES THIS IDEMPOTENT.
     The stored stock weights are already scaled by whatever cash + ETF sleeves
     were applied last time (0.7 × 0.9 = 0.63 of the book). Scaling THOSE by a new
     sleeve compounds the shrink — set 10% cash three times and the stocks quietly

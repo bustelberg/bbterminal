@@ -4,11 +4,11 @@ import { equityParts, type Splittable } from './equityParts';
 /**
  * Dividing the Stocks class into operating companies and funds.
  *
- * ⚠ WHAT IS WORTH PINNING IS **WHEN A DIVISION APPEARS**, NOT THE MARKUP. A sub-header over a list
+ *  What is worth pinning is **WHEN A DIVISION APPEARS**, NOT THE MARKUP. A sub-header over a list
  * that is all one kind of thing is furniture that has to be read before it can be ignored, and it
  * is the failure this helper is shaped to avoid — so most of these cases are about the absence.
  *
- * ⚠ AND THE DENOMINATOR. `weight_now_pct` is a share of the WHOLE BOOK; the share printed beside a
+ *  And the denominator. `weight_now_pct` is a share of the WHOLE BOOK; the share printed beside a
  * division inside Stocks has to be a share of Stocks, or the two halves do not add to 100 and the
  * reader is quietly given the answer to a different question.
  *
@@ -29,7 +29,7 @@ describe('when the division is real', () => {
     expect(parts.map((p) => p.rows.length)).toEqual([2, 2]);
   });
 
-  it('⚠ shares are OF THE CLASS, so the two halves add to 100', () => {
+  it(' shares are OF THE CLASS, so the two halves add to 100', () => {
     // 50 of 100 either way here — the point is the denominator, not the arithmetic: these rows are
     // 50% of the BOOK each, and "50% of everything" is what a book-share would have printed.
     const parts = equityParts(EQUITY, EQUITY, rows);
@@ -58,7 +58,7 @@ describe('when the division is real', () => {
   });
 });
 
-describe('⚠ when it is not', () => {
+describe(' when it is not', () => {
   it('draws no sub-header for a class with no funds', () => {
     const parts = equityParts(EQUITY, EQUITY, [co(30), co(20)]);
     expect(parts).toHaveLength(1);
@@ -73,7 +73,7 @@ describe('⚠ when it is not', () => {
   });
 
   it('leaves every other class alone, funds or not', () => {
-    // ⚠ Bonds is largely ETFs and Cash has no fund concept at all — the split answers nothing
+    //  Bonds is largely ETFs and Cash has no fund concept at all — the split answers nothing
     // there, and the CALLER names the equity bucket rather than this file guessing which is which.
     for (const bucket of ['Bonds', 'Alternatives', 'Cash', 'Unclassified']) {
       expect(equityParts(bucket, EQUITY, [co(10), etf(10)])).toHaveLength(1);
@@ -86,7 +86,7 @@ describe('⚠ when it is not', () => {
   });
 });
 
-describe('⚠ a weightless class states no share rather than 0%', () => {
+describe(' a weightless class states no share rather than 0%', () => {
   it('reports null when nothing in the class is priced', () => {
     // Every holding unpriced: there is no weight to apportion, and "0% of Stocks" beside a list of
     // real rows claims the book holds none of what it is looking at.

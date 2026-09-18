@@ -1,5 +1,5 @@
 /**
- * THE AUTOMATIC-JOBS OVERVIEW — pure helpers, so the rules are testable without a DOM.
+ * The automatic-jobs overview — pure helpers, so the rules are testable without a DOM.
  *
  * Everything a reader has to be able to tell apart lives here rather than inside JSX, because the
  * whole value of this page is that six states which look alike stay apart:
@@ -7,7 +7,7 @@
  *   missing  — declared and NOT registered. The failure the page exists for.
  *   error    — the last run failed, or started and never finished.
  *   overdue  — it ran, but too long ago for its own cadence.
- *   unknown  — ⚠ WE CANNOT TELL. Never rendered as ok and never as a failure.
+ *   unknown  —  WE CANNOT TELL. Never rendered as ok and never as a failure.
  *   off      — opt-in and correctly not enabled here.
  *   running  — in flight right now.
  *   ok       — ran, recently, and finished.
@@ -47,9 +47,9 @@ export type JobsPayload = {
 };
 
 /**
- * ⚠ THE TONE IS PART OF THE CLAIM, so it is decided once here rather than per cell.
+ *  The tone is part of the claim, so it is decided once here rather than per cell.
  *
- * ⚠⚠ `unknown` IS NEUTRAL INK, NOT AMBER AND NOT GREEN. Amber reads as "something is wrong" and
+ *  `unknown` IS NEUTRAL INK, NOT AMBER AND NOT GREEN. Amber reads as "something is wrong" and
  * green as "checked and fine"; the honest rendering of "we have no evidence either way" is the
  * absence of a verdict. This is the same rule the rest of the app follows for an unpriceable
  * holding — `n/a`, never `0%`.
@@ -58,13 +58,13 @@ export const JOB_TONE: Record<string, { dot: string; text: string; label: string
   missing: { dot: 'bg-neg-500', text: 'text-neg-400', label: 'not registered' },
   error: { dot: 'bg-neg-500', text: 'text-neg-400', label: 'failed' },
   overdue: { dot: 'bg-warn-500', text: 'text-warn-400', label: 'overdue' },
-  // ⚠ AMBER, NOT RED. The process was restarted mid-run (a deploy, an OOM, or `uvicorn --reload`)
+  //  Amber, not red. The process was restarted mid-run (a deploy, an OOM, or `uvicorn --reload`)
   // — the work did not finish, but nothing is broken and the fix is to run it again. Red here
   // means every local restart paints a fault, and a reader who learns to discount red rows will
   // discount the real one too.
   interrupted: { dot: 'bg-warn-500', text: 'text-warn-400', label: 'interrupted' },
-  // ⚠⚠ AMBER AND ITS OWN WORD, NOT `overdue`. Both mean the work has not happened, but this one
-  // KNOWS WHY — the row was written by an observer (the misfire listener, or the boot-time gap
+  //  Amber and its own word, not `overdue`. Both mean the work has not happened, but this one
+  // Knows why — the row was written by an observer (the misfire listener, or the boot-time gap
   // scan) and carries the fire time it belongs to and whether the process was busy or absent.
   // Folded into `overdue` the reader loses the one distinction that decides where to look: overdue
   // is inferred from silence, missed is recorded evidence. The reason is in the expanded row.
@@ -78,7 +78,7 @@ export const JOB_TONE: Record<string, { dot: string; text: string; label: string
 /**
  * "3 days ago" / "just now" — the age a reader actually reasons in.
  *
- * ⚠ AN ABSENT AGE IS `—`, NEVER "0h ago". A job that has never been recorded has no age, and a
+ *  An absent age is `—`, NEVER "0h ago". A job that has never been recorded has no age, and a
  * zero there reads as "ran this second" — the exact inversion of what it means.
  */
 export function ago(hours: number | null | undefined): string {
@@ -103,7 +103,7 @@ export function stamp(iso: string | null | undefined): string {
 /**
  * The one line under the page title.
  *
- * ⚠⚠ THE SCHEDULER BEING DOWN IS NOT ONE ROW'S PROBLEM, IT IS EVERY ROW'S, and saying it once at
+ *  The scheduler being down is not one row's problem, it is every row's, and saying it once at
  * the top is the difference between a reader diagnosing it in a second and reading eight identical
  * red rows looking for a pattern. `DISABLE_SCHEDULER` is named explicitly because on a replica this
  * is the CORRECT state and the page must not be read as an outage.
@@ -121,7 +121,7 @@ export function headline(p: JobsPayload): { text: string; tone: string } {
   const c = p.summary.counts;
   const bad = (c.missing ?? 0) + (c.error ?? 0);
   if (bad) return { text: `${bad} job(s) need attention.`, tone: 'text-neg-300' };
-  // ⚠ INTERRUPTED SITS WITH OVERDUE, NOT WITH "need attention". Both mean the same thing to the
+  //  Interrupted sits with overdue, not with "need attention". Both mean the same thing to the
   // reader — work that has not happened — and neither is a fault to debug. Naming them separately
   // in the headline would imply two different problems.
   const late = (c.overdue ?? 0) + (c.interrupted ?? 0);

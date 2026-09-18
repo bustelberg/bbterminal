@@ -3,26 +3,26 @@ import type { Lang } from '../../../lib/i18n';
 /**
  * The Long Equity cards' HEADINGS, in both languages.
  *
- * ⚠⚠ THE HEADING ONLY — not the stat tiles, legends, tooltips or footnotes on these cards. That is
+ *  The heading only — not the stat tiles, legends, tooltips or footnotes on these cards. That is
  * the scope that was asked for, and it is a coherent one: a reader scanning fourteen cards in a
  * grid is reading the titles, and the titles are what say which metric they are looking at.
  *
- * ⚠⚠ AND IT IS A SEPARATE LOOKUP FROM `MetricCfg.title`, DELIBERATELY. The four growth cards carry
+ *  And it is a separate lookup from `MetricCfg.title`, DELIBERATELY. The four growth cards carry
  * their title inside a config object that is ALSO used as a React `key` in `LongEquityTab`
  * (`key={revenue.title}`), as a series label, and as the fallback display name when a book has
  * none. Translating the config field itself would change the key with the language — remounting
  * every card and refetching its data on a switch that should only repaint text. So the config keeps
  * its English identity and gains a stable `titleKey`; only the rendered `<h4>` is translated.
  *
- * ⚠ EVERY ENTRY IS A FUNCTION OF `sbc`, INCLUDING THE ONES THAT IGNORE IT. Three headings genuinely
+ *  Every entry is a function of `sbc`, INCLUDING THE ONES THAT IGNORE IT. Three headings genuinely
  * change with the SBC-correction checkbox (`FCF margin` → `FCF-SBC margin`), and a record mixing
  * bare strings with functions means every call site has to know which kind it is holding. One shape
  * costs a `()` and removes that question.
  *
- * ⚠ THE DUTCH IS LONGER THAN THE ENGLISH, sometimes by a lot — "SBC / OCF" against
+ *  The dutch is longer than the english, sometimes by a lot — "SBC / OCF" against
  * "Aandelenbeloning / operationele kasstroom". These headings sit in a grid where the cards' stat
  * tiles are read as a row, so a heading that wraps to two lines pushes one card's tiles out of line
- * with its neighbours' (see the ⚠ on `CashReturnCard`'s `<h4>`). That is a real cost of spelling
+ * with its neighbours' (see the  on `CashReturnCard`'s `<h4>`). That is a real cost of spelling
  * the terms out, accepted because a reader who cannot tell which metric a card shows has a worse
  * problem than a ragged grid.
  */
@@ -34,7 +34,7 @@ export const CHART_KEYS = [
 ] as const;
 export type ChartKey = (typeof CHART_KEYS)[number];
 
-/** `(sbcCorrection) => heading`. Most entries ignore the argument — see the ⚠ above. */
+/** `(sbcCorrection) => heading`. Most entries ignore the argument — see the  above. */
 export type ChartTitles = Record<ChartKey, (sbc: boolean) => string>;
 
 const en: ChartTitles = {
@@ -58,7 +58,7 @@ const en: ChartTitles = {
 };
 
 /**
- * ⚠⚠ THE SAME DUTCH TERM FOR THE SAME THING AS THE `Tables` TAB USES, AND IT IS ENFORCED. Both
+ *  The same dutch term for the same thing as the `Tables` TAB USES, AND IT IS ENFORCED. Both
  * surfaces live in the same modal, one summarising the other, so "vrije kasstroom per aandeel" and
  * "rendement op geïnvesteerd vermogen" have to be the identical phrase in both — a summary that
  * renames the rows it summarises is a summary of something else. `longEquityCopy.test` asserts the
@@ -66,7 +66,7 @@ const en: ChartTitles = {
  * the headings here do not carry: `nl.chip.fcfCagr` must equal this heading exactly, so the CHIP is
  * the short name and the row LABEL is the one that says CAGR. See `tablesCopy`.
  *
- * ⚠ `SBC` SURVIVES AS A SHORT MARKER where spelling it out would double a heading's length
+ *  `SBC` SURVIVES AS A SHORT MARKER where spelling it out would double a heading's length
  * ("na aandelenbeloning"). It is the one abbreviation kept, and it is kept because the checkbox
  * that drives these three headings is itself labelled `SBC correction` in the tab's control row —
  * so the heading names the control the reader just clicked.
@@ -101,33 +101,33 @@ export function chartTitle(lang: Lang, key: ChartKey, sbc = false): string {
 }
 
 /**
- * WHAT EACH CHART ON THE `Graphs` TAB IS, AND THE CAVEAT THAT COMES WITH IT.
+ * What each chart on the `Graphs` TAB IS, AND THE CAVEAT THAT COMES WITH IT.
  *
- * ⚠⚠ ASKED FOR ON THE HEADING, WHICH IS WHERE THE READER IS (2026-09-03: "each graph should have
+ *  Asked for on the heading, which is where the reader is (2026-09-03: "each graph should have
  * an info icon explaining what it is that we are viewing, and caveats to keep in mind"). Every one
  * of these cards ALREADY had an `AspectCard` — on its stat tile, explaining the AVERAGE. So a
  * reader who wanted to know what the LINE was had to hover a number to find out, and the caveat
  * that decides whether the line means anything at all (a bank has no gross profit; a loss-making
  * year has no cash conversion) sat under a figure rather than under the chart it disqualifies.
  *
- * ⚠⚠ IT COVERS ALL SEVENTEEN, AND THE FIRST CUT COVERED TWELVE. The five growth cards were left
+ *  It covers all seventeen, and the first cut covered twelve. The five growth cards were left
  * out on the belief that `MetricGrowthCard` rendered its own heading tip — it does not. The tip in
  * that file hangs off the MEMBER-COUNT line, which renders only where members were actually
  * withheld, so Share price, Revenue and Shares outstanding had no ⓘ at all and EPS and FCF/share
  * had one only on the books where the positives-only filter had dropped somebody. Reported as
  * exactly that: "Share price doesn't have it, EPS doesn't have it."
  *
- * ⚠ THE CAVEAT IS THE POINT, NOT THE DEFINITION. `what` says what is plotted in one line; `how` is
+ *  The caveat is the point, not the definition. `what` says what is plotted in one line; `how` is
  * the thing that would otherwise be learned by misreading the chart once — which years are missing
  * and why, what a blank means, which businesses the ratio simply does not describe.
  *
- * ⚠ NO WARNING GLYPHS AND NO UNICODE MATHS IN THESE STRINGS. They render in an `AspectCard`, and
+ *  No warning glyphs and no unicode maths in these strings. They render in an `AspectCard`, and
  * every card on this tab is a file `tooltipStyle.test.ts` already holds to the Active Share shape.
  * The copy living in this module rather than in the JSX does not exempt it — it only puts it out
  * of that scanner's reach, which is a reason to be careful rather than a licence.
  */
 export type ChartInfo = { what: string; where: string; how: string };
-/** ⚠ EVERY `ChartKey`, so a card cannot be added to the tab without an explanation: the Record is
+/**  EVERY `ChartKey`, so a card cannot be added to the tab without an explanation: the Record is
  *  exhaustive, and a new key fails `tsc` here rather than shipping a heading with no ⓘ. */
 export type ChartInfos = Record<ChartKey, (sbc: boolean) => ChartInfo>;
 
@@ -138,7 +138,7 @@ const BLEND_NL = 'GuruFocus-jaarrekeningen, per boekjaar. Voor een portefeuille 
   + 'naar waarde gewogen mix van de posities die de regel rapporteren.';
 
 /**
- * ⚠⚠ WHAT A LEVEL CARD ACTUALLY PLOTS, AND IT IS NOT THE LEVEL. Both lines are INDEXED TO 100 at
+ *  What a level card actually plots, and it is not the level. Both lines are INDEXED TO 100 at
  * the first year they share, on a log axis — so what is being compared is growth, and the two
  * curves are directly comparable however far apart the underlying figures are. The hover is the
  * ACTUAL value. Said once here because it is true of all four level cards, and because it is the
@@ -256,7 +256,7 @@ const infoNl: ChartInfos = {
   sharePrice: () => ({
     what: 'De aandelenkoers tegenover de benchmark, beide op 100 gestart — wie harder groeit, niet wie duurder is.',
     where: 'Slotkoersen per boekjaareinde van GuruFocus, in de rapportagevaluta van de onderneming.',
-    // ⚠ NOT A WORD-FOR-WORD PORT. This read "een hoge uitkeerder groeit hier trager dan wie hem
+    //  Not a word-for-word port. This read "een hoge uitkeerder groeit hier trager dan wie hem
     // hield verdiende" — the English clause order carried straight over, which in Dutch leaves the
     // comparison dangling and `hem` pointing at nothing a reader can find. The Dutch says what the
     // line does, not what the English sentence does.

@@ -8,11 +8,11 @@ import { CAGR_DECIMALS, cagrExcess, cagrPct, commonEndPeriod, lineCagr } from '.
 /**
  * The `Table` view: what the book and the index compounded at, over five and ten years.
  *
- * ⚠ IT REPLACES THE TWO MATRICES RATHER THAN SITTING ABOVE THEM. Those are what this is derived
+ *  It replaces the two matrices rather than sitting above them. Those are what this is derived
  * from, and the modal is already 84vh; a summary you have to scroll past its own inputs to reach is
  * a summary nobody reads. The other three views are still one click away.
  *
- * ⚠⚠ IT READS THE SAME LINE THE CHART DRAWS. `buildBlend(...).level` is the weighted, chained,
+ *  It reads the same line the chart draws. `buildBlend(...).level` is the weighted, chained,
  * coverage-floored series the `Rebased` footer prints — so a CAGR here can be checked against the
  * row beneath it. Deriving it "the same way" from the raw cells is how a summary comes to disagree
  * with the table it summarises; see `lineCagr` for why doing it on the LINE is also the only way it
@@ -26,13 +26,13 @@ export type CagrBenchmark = typeof CAGR_BENCHMARKS[number];
 
 const WINDOWS = [5, 10] as const;
 
-/** ⚠ THE SHARED SPELLING (`cagrPct`, two decimals). Only `CAGR_BENCHMARKS` above is imported
+/**  THE SHARED SPELLING (`cagrPct`, two decimals). Only `CAGR_BENCHMARKS` above is imported
  *  anywhere today — the table itself renders nowhere — so this is kept in step rather than left as
  *  a one-decimal copy for whoever mounts it next. See `CAGR_DECIMALS`. */
 const pct = cagrPct;
 
 /**
- * ⚠⚠ THE `Dots` THAT LIVED HERE IS NOW `LoadingDots`, AND MOVING IT IS THE POINT (2026-09-03).
+ *  THE `Dots` THAT LIVED HERE IS NOW `LoadingDots`, AND MOVING IT IS THE POINT (2026-09-03).
  * It was written here, for this request, on the same day — and this component renders NOWHERE (only
  * its `CAGR_BENCHMARKS` constant is imported), so the fix shipped to a dead file while `TablesTab`,
  * the table people actually read, kept its motionless ellipsis. The shared one is also CSS rather
@@ -48,7 +48,7 @@ function Cell({ blend, years, endPeriod }: {
   if (got.pct == null) {
     return (
       <td className="px-3 py-2 text-right">
-        {/* ⚠ `InfoTip`, NOT `title=` — the native tooltip sits for a second or two before appearing,
+        {/*  `InfoTip`, NOT `title=` — the native tooltip sits for a second or two before appearing,
             which is long enough for a reader to conclude the dash means "zero" and move on. */}
         <InfoTip text={got.reason} className="cursor-default text-fg-faint">—</InfoTip>
       </td>
@@ -57,7 +57,7 @@ function Cell({ blend, years, endPeriod }: {
   return (
     <td className={`px-3 py-2 text-right font-mono tabular-nums
                     ${got.pct >= 0 ? 'text-fg-soft' : 'text-neg-300'}`}>
-      {/* ⚠ THE WINDOW IS ON THE NUMBER, because "5y" is a claim the data has to support and does
+      {/*  THE WINDOW IS ON THE NUMBER, because "5y" is a claim the data has to support and does
           not always support identically on both rows — a book whose history starts in 2019 and an
           index reaching back to 2004 can both answer "5y" and only one of them can answer "10y". */}
       <InfoTip text={`${got.from} → ${got.to}, ${got.years} years, compounded annually. `
@@ -87,7 +87,7 @@ export default function CagrTable({
 }) {
   const th = 'px-3 py-1.5 font-medium text-right whitespace-nowrap';
   /**
-   * ⚠⚠ ONE WINDOW FOR BOTH ROWS — see `lineCagr`'s `endPeriod`. Each line ends at its own latest
+   *  One window for both rows — see `lineCagr`'s `endPeriod`. Each line ends at its own latest
    * DRAWN period, and a twenty-holding book crosses the coverage floor for a new fiscal year weeks
    * before a 1,900-name index does. Left alone, the book would be measured 2020→2025 and the index
    * 2019→2024, printed side by side under one "5y" heading, and the Excess would be a subtraction
@@ -102,7 +102,7 @@ export default function CagrTable({
         <h3 className="text-sm font-medium text-fg-strong">
           {metricLabel} — compound annual growth
         </h3>
-        {/* ⚠ THE PICKER IS THE TABLE'S OWN, NOT THE CHART'S. The drill-down inherits whatever
+        {/*  THE PICKER IS THE TABLE'S OWN, NOT THE CHART'S. The drill-down inherits whatever
             benchmark the card behind it was drawn against, which is fine for the matrices; here the
             question is "against what", and having to close the modal and reopen it from a different
             chart to ask it of ACWI would make the comparison not worth having. */}
@@ -138,12 +138,12 @@ export default function CagrTable({
               <td className="px-3 py-2 text-fg-soft">
                 {benchLabel}
                 {benchErr && (
-                  <InfoTip text={benchErr} className="ml-1.5 cursor-default text-warn-300">⚠</InfoTip>
+                  <InfoTip text={benchErr} className="ml-1.5 cursor-default text-warn-300"></InfoTip>
                 )}
               </td>
               {WINDOWS.map((y) => <Cell key={y} blend={benchmark} years={y} endPeriod={endPeriod} />)}
             </tr>
-            {/* ⚠ pp, NOT `%` — the difference between two rates is not itself a rate. Writing
+            {/*  pp, NOT `%` — the difference between two rates is not itself a rate. Writing
                 "3.2%" for a gap between 8.4% and 5.2% invites reading it as a relative one, which
                 would be 62%. */}
             <tr className="bg-page font-semibold text-fg-strong">
@@ -171,9 +171,9 @@ export default function CagrTable({
 
       {benchLoading && <p className="text-[11px] text-fg-subtle">Loading {benchChoice} constituents…</p>}
 
-      {/* ⚠⚠ THE CAVEATS THAT DECIDE WHETHER THE NUMBER MEANS ANYTHING, STATED RATHER THAN IMPLIED.
+      {/*  THE CAVEATS THAT DECIDE WHETHER THE NUMBER MEANS ANYTHING, STATED RATHER THAN IMPLIED.
           Each is a thing a reader would otherwise assume and each is false. */}
-      {/* ⚠ A `<div>`, NOT A `<p>` — see the identical note on the `Tables` footnote. This prose
+      {/*  A `<div>`, NOT A `<p>` — see the identical note on the `Tables` footnote. This prose
           embeds an `InfoTip`, whose card is built from `<div>`s, and the HTML parser closes a
           paragraph at an opening div: the server's markup then disagrees with React's tree and
           hydration fails. Purely a correctness fix; the text renders the same. */}

@@ -8,13 +8,13 @@ import { describe, expect, it } from 'vitest';
  * black, and the text on top of it does not change colour, so a hover turns dark ink on a dark
  * fill: invisible.
  *
- * ⚠⚠ THIS IS NOT HYPOTHETICAL. The /research-dashboard company picker shipped with
+ *  This is not hypothetical. The /research-dashboard company picker shipped with
  * `hover:bg-overlay` on its suggestion rows and the highlighted row was unreadable. 198 uses across
  * the app carried an alpha; that one did not, and nothing failed — not tsc, not eslint, not a
  * single test. A design token whose entire meaning lives in a modifier needs a check that the
  * modifier is there.
  *
- * ⚠ IT READS THE SOURCE, WHICH IS WHY IT CAN CATCH THIS AT ALL. There is no rendered pixel to
+ *  It reads the source, which is why it can catch this at all. There is no rendered pixel to
  * assert on in a unit test, and the repo bans anything that boots a browser. Reading files is
  * milliseconds and needs no DB, no network and no build.
  */
@@ -34,7 +34,7 @@ function walk(dir: string, out: string[] = []): string[] {
 /**
  * A `bg-overlay` / `text-overlay` / `border-overlay` NOT followed by `/<alpha>`.
  *
- * ⚠ The `(?![\w-])` is what makes this precise rather than noisy: without it the pattern also
+ *  The `(?![\w-])` is what makes this precise rather than noisy: without it the pattern also
  * matches `bg-overlay-something` and every longer token that merely starts the same way.
  */
 const BARE = /\b(?:bg|text|border|from|to|via)-overlay(?![\w-])(?!\/)/;
@@ -42,13 +42,13 @@ const BARE = /\b(?:bg|text|border|from|to|via)-overlay(?![\w-])(?!\/)/;
 /**
  * The source with every COMMENT blanked out, newlines and line lengths preserved.
  *
- * ⚠⚠ IT MUST RUN OVER THE WHOLE FILE, NOT PER LINE. The mention that made this necessary sits in
+ *  It must run over the whole file, not per line. The mention that made this necessary sits in
  * the MIDDLE of a multi-line `{/* … *\/}` block, on a line carrying no comment marker of its own —
  * a per-line stripper sees ordinary text there and the guard fires on prose again.
  *
- * ⚠ BLANKED, NOT DELETED, so the reported line numbers still point at the real line.
+ *  Blanked, not deleted, so the reported line numbers still point at the real line.
  *
- * ⚠ `(?<!:)` KEEPS `https://…` OUT OF IT. Without it a URL anywhere on a line blanks the rest of
+ *  `(?<!:)` KEEPS `https://…` OUT OF IT. Without it a URL anywhere on a line blanks the rest of
  * that line, and a real bare overlay after one would go unreported — a false negative in the
  * direction this suite exists to prevent.
  */
@@ -61,7 +61,7 @@ describe('the overlay token is never used at full opacity', () => {
   const files = ROOTS.flatMap((r) => walk(r));
 
   it('finds source to check at all', () => {
-    // ⚠ A guard on the guard. If the walk breaks, every assertion below passes vacuously and the
+    //  A guard on the guard. If the walk breaks, every assertion below passes vacuously and the
     // rule silently stops being enforced — which is worse than not having it.
     expect(files.length).toBeGreaterThan(100);
   });
@@ -71,18 +71,18 @@ describe('the overlay token is never used at full opacity', () => {
     for (const f of files) {
       // globals.css DEFINES the token and is allowed to name it; components CONSUME it.
       if (f.endsWith('globals.css')) continue;
-      // ⚠ AND THIS FILE, which has to quote the broken form both in its prose and in the negative
+      //  And this file, which has to quote the broken form both in its prose and in the negative
       // test below. Excluding it by NAME rather than excluding every `*.test.*`: a component's own
       // test has no more business writing a bare overlay than the component does, and a blanket
       // exemption is how the rule quietly stops covering half the tree.
       if (f.endsWith('overlayToken.test.ts')) continue;
-      // ⚠⚠ COMMENTS ARE BLANKED FIRST, BECAUSE THE RULE IS ABOUT WHAT RENDERS AND A COMMENT
-      // RENDERS NOTHING. Without this the guard cannot tell a USE from a MENTION, and it fired on
+      //  Comments are blanked first, because the rule is about what renders and a comment
+      // Renders nothing. Without this the guard cannot tell a USE from a MENTION, and it fired on
       // `PortfolioAnalysisModal`'s own note explaining why a bare overlay would be wrong there —
       // a file was red for documenting the very rule this suite enforces. Blanking rather than
       // dropping the lines keeps the reported line NUMBERS true.
       //
-      // ⚠ THE COST, STATED: a bare overlay inside commented-out JSX is no longer caught. That is
+      //  The cost, stated: a bare overlay inside commented-out JSX is no longer caught. That is
       // the right trade — it is not on screen — and the alternative (matching only inside
       // `className`) would miss the real thing being guarded against, a class assembled in a
       // template literal or a variable.
@@ -98,7 +98,7 @@ describe('the overlay token is never used at full opacity', () => {
   });
 
   it('the pattern actually fires — otherwise this suite proves nothing', () => {
-    // ⚠ A NEGATIVE TEST FOR A NEGATIVE ASSERTION. "No offenders" is also what a broken regex
+    //  A negative test for a negative assertion. "No offenders" is also what a broken regex
     // returns, and that is exactly how a rule like this rots into decoration.
     expect(BARE.test('className="hover:bg-overlay transition-colors"')).toBe(true);
     expect(BARE.test('className="bg-overlay"')).toBe(true);
@@ -108,18 +108,18 @@ describe('the overlay token is never used at full opacity', () => {
   });
 
   it('a MENTION in a comment is not a USE — and a use beside one still is', () => {
-    // ⚠ THE FALSE POSITIVE THIS FIXED: a component documenting why a bare overlay would be wrong
+    //  The false positive this fixed: a component documenting why a bare overlay would be wrong
     // there made its own file red. The rule is about what renders, and a comment renders nothing.
-    expect(BARE.test(stripComments('  // ⚠ `bg-overlay` would need an alpha here'))).toBe(false);
-    // ⚠ THE WHOLE BLOCK, NOT A LINE OUT OF IT — which is the point of stripping file-wide. The
+    expect(BARE.test(stripComments('  //  `bg-overlay` would need an alpha here'))).toBe(false);
+    //  The whole block, not a line out of it — which is the point of stripping file-wide. The
     // line that actually made this necessary sits mid-block and carries no marker of its own, so
     // asserting on it alone would be asserting that a stripper cannot see what it cannot see.
     expect(BARE.test(stripComments([
       '{/* a note about the divider.',
-      '    ⚠ `bg-overlay` WOULD NEED AN ALPHA — see the token note in CLAUDE.md.',
+      '     `bg-overlay` WOULD NEED AN ALPHA — see the token note in CLAUDE.md.',
       '    a hairline is enough. */}',
     ].join('\n')))).toBe(false);
-    // ⚠ AND THE GUARD IS STILL A GUARD. A real class on a line that also carries a comment, and a
+    //  And the guard is still a guard. A real class on a line that also carries a comment, and a
     // real class on a line carrying a URL, both still fire.
     expect(BARE.test(stripComments('<div className="bg-overlay" /> // note'))).toBe(true);
     expect(BARE.test(stripComments('// see https://x.dev\n<div className="bg-overlay" />')))

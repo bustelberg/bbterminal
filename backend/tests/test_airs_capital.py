@@ -1,6 +1,6 @@
 """Average invested capital + the one-list position ledger. Pure: dicts in, dataclasses out.
 
-⚠ THE TWO BOOKS BEHIND THESE NUMBERS ARE REAL, and they disagree in the way that decided the
+ THE TWO BOOKS BEHIND THESE NUMBERS ARE REAL, and they disagree in the way that decided the
 design. BUS_Offensief_Dyn was fully invested all year; AITopSelectie OFF DYN opened the year in
 CASH and deployed EUR 1m on 5 January. A 1-January weight describes the first and lies about the
 second (it would call it 96% cash), which is why the weight here is average invested capital.
@@ -41,7 +41,7 @@ class TestAverageInvestedCapital:
         assert p.avg_capital_eur == pytest.approx(10000.0)
 
     def test_a_buy_early_in_the_year_counts_for_almost_all_of_it(self):
-        # ⚠ THE AITopSelectie CASE. Bought 5 January, so the money was invested for ~97% of the
+        #  THE AITopSelectie CASE. Bought 5 January, so the money was invested for ~97% of the
         # period — a 1-January weight would say this position was 0% of the book.
         w = (END - date(2026, 1, 5)).days / DAYS
         led = build_ledger([_held("A", 100, 0.0, 12000.0)],
@@ -70,14 +70,14 @@ class TestAverageInvestedCapital:
         assert money_weighted_return_pct(p) is not None
 
     def test_a_flow_dated_outside_the_window_is_clamped(self):
-        # ⚠ AIRS occasionally books to a settlement date past the report's end. Unclamped, the
+        #  AIRS occasionally books to a settlement date past the report's end. Unclamped, the
         # weight goes negative and the position reports LESS capital than it ever held.
         led = build_ledger([], [_buy("A", 1000.0, 10, "2026-12-31")], {}, 10000.0, Y0, END)
         assert led.positions[0].avg_capital_eur == pytest.approx(0.0)
 
 
 class TestDeRestatement:
-    """⚠ `Beginwaarde` is qty_now × the 1-Jan price, NOT the 1-Jan value."""
+    """ `Beginwaarde` is qty_now × the 1-Jan price, NOT the 1-Jan value."""
 
     def test_a_position_bought_into_has_its_opening_value_scaled_back(self):
         # Owned 100 on 1 Jan, bought 50 in March -> AIRS reports Beginwaarde for 150 shares.
@@ -100,14 +100,14 @@ class TestDeRestatement:
 
 class TestASoldOutPositionsOpeningValue:
     def test_it_is_proceeds_minus_res_ytd_when_nothing_was_bought_this_year(self):
-        # ⚠ proceeds − Res. YtD == Kostprijs + Res. voorg. jr. == last year's closing value.
+        #  proceeds − Res. YtD == Kostprijs + Res. voorg. jr. == last year's closing value.
         led = build_ledger([], [_sell("A", 12000.0, 100, "2026-04-01", ytd=2000.0, prior=3000.0)],
                            {}, 50000.0, Y0, END)
         assert led.positions[0].opening_eur == pytest.approx(10000.0)
         assert led.positions[0].closed_out is True
 
     def test_a_name_bought_AND_sold_within_the_year_contributes_no_opening_capital(self):
-        # ⚠ THE BUG THIS RULE EXISTS FOR. Counting `proceeds − Res. YtD` here would invent opening
+        #  The bug this rule exists for. Counting `proceeds − Res. YtD` here would invent opening
         # capital that did not exist on 1 January — done naively across a real book it moved the
         # gap from EUR 55,427 to EUR 377,776.
         led = build_ledger([], [_buy("A", 9000.0, 100, "2026-02-01"),
@@ -117,7 +117,7 @@ class TestASoldOutPositionsOpeningValue:
 
     def test_a_partly_pre_owned_name_is_split_proportionally(self):
         # Held 50 at the open, bought 50 in February, sold all 100 in May. Half the opening claim
-        # is real. ⚠ Proportional because AIRS does not publish its parcel matching — an
+        # is real.  Proportional because AIRS does not publish its parcel matching — an
         # approximation, and `capital_coverage_ratio` is where it shows.
         led = build_ledger([], [_buy("A", 5000.0, 50, "2026-02-01"),
                                 _sell("A", 12000.0, 100, "2026-05-01", ytd=2000.0)],
@@ -127,7 +127,7 @@ class TestASoldOutPositionsOpeningValue:
 
 class TestTheLedgerAddsUp:
     def test_contributions_sum_to_the_books_own_return(self):
-        # ⚠ THE IDENTITY THE WHOLE TABLE ASSERTS. Held P&L + realised + income, over the book's
+        #  The identity the whole table asserts. Held P&L + realised + income, over the book's
         # opening capital.
         led = build_ledger(
             [_held("A", 100, 10000.0, 11000.0), _held("B", 50, 5000.0, 5500.0)],
@@ -139,7 +139,7 @@ class TestTheLedgerAddsUp:
         assert led.total_result_eur == pytest.approx(2700.0)
 
     def test_income_attaches_to_a_name_the_book_no_longer_holds(self):
-        # ⚠ A sold position's dividend is real and belongs on its own row, not in a leftover
+        #  A sold position's dividend is real and belongs on its own row, not in a leftover
         # bucket — which is why the journal is read per name rather than via the rolled-up orphans.
         led = build_ledger([], [_sell("Gone", 5000.0, 50, "2026-03-01", ytd=500.0)],
                            {"Gone": 120.0}, 10000.0, Y0, END)

@@ -8,7 +8,7 @@
  * 6,933 closes, 513 forward-P/E points and 113 quarterly FCF rows for ASML) — no second request,
  * so this chart cannot disagree with the ones beside it.
  *
- * TWO LINES, AND THEY COME FROM DIFFERENT PLACES:
+ * Two lines, and they come from different places:
  *
  *   Forward P/E   GuruFocus PUBLISHES this (`indicator_q_forward_pe_ratio`), weekly, back to 2015.
  *                 It is not computed here. Measured against argenx: dividing the close by it
@@ -18,7 +18,7 @@
  *
  *   Trailing      Computed: price ÷ the per-share figure last REPORTED at that date.
  *
- * ⚠ THERE IS NO FORWARD P/FCF LINE AND THERE CANNOT BE. Nobody forecasts capex, so no vendor
+ *  There is no forward p/FCF line and there cannot be. Nobody forecasts capex, so no vendor
  * publishes a free-cash-flow consensus — current or historic. The FCF basis gets the trailing line
  * only, and the chart says so. (This is the same wall that removed the trend extrapolation from
  * the fiscal-year version.)
@@ -29,7 +29,7 @@ import { type MetricRow } from './quickValuation';
 export const CLOSE_CODE = 'close_price';
 export const FORWARD_PE_CODE = 'indicator_q_forward_pe_ratio';
 
-/** ⚠ PER-QUARTER, NOT CUMULATIVE — verified before this file was written, because the whole TTM
+/**  PER-QUARTER, NOT CUMULATIVE — verified before this file was written, because the whole TTM
  *  idea is invalid otherwise. ASML: sum of the four quarters equals the annual row exactly
  *  (2023 8.24, 2024 23.08), so a rolling 4-quarter SUM is the trailing-twelve-month figure. Had
  *  they been year-to-date cumulatives, summing would have counted Q1 four times. */
@@ -47,7 +47,7 @@ export const QUARTERLY_EPS_CODES = [
 /**
  * How long after a fiscal period ends before its figures are public.
  *
- * ⚠ WITHOUT THIS, EVERY MULTIPLE IS COMPUTED ON A NUMBER THE MARKET DID NOT HAVE. GuruFocus
+ *  Without this, every multiple is computed on a number the market did not have. GuruFocus
  * stamps a fiscal row with the period END (`2015-12-31`), but ASML did not publish FY2015 until
  * late January 2016. Using it on 2016-01-05 is look-ahead: the series comes out cleaner and
  * cheaper-looking than anything anyone could have traded, and nothing about the chart reveals it.
@@ -60,7 +60,7 @@ export type Point = { t: number; value: number };   // t = epoch ms
 /**
  * A trailing point WITH the two numbers it was divided from.
  *
- * ⚠ THE INPUTS RIDE ALONG RATHER THAN BEING RE-DERIVED. The drill-down has to show what the
+ *  The inputs ride along rather than being re-derived. The drill-down has to show what the
  * multiple was computed from, and the tempting alternative — hand it the closes and the reported
  * series and let it re-run `reportedAt` — is a second computation of the lag rule that can
  * disagree with the line it claims to explain. Whatever `trailingMultiples` actually divided is
@@ -92,7 +92,7 @@ export function pick(metrics: MetricRow[], codes: string[]): { date: string; val
 /**
  * Rolling four-quarter sums — the trailing-twelve-month figure, stamped at the quarter it closes.
  *
- * ⚠ A GAP BREAKS THE WINDOW RATHER THAN SPANNING IT. Four consecutive ROWS are not four
+ *  A gap breaks the window rather than spanning it. Four consecutive ROWS are not four
  * consecutive QUARTERS if one is missing, and summing across the hole would silently report nine
  * months as a year — low, and indistinguishable from a bad year. Quarters more than ~400 days
  * apart end the window instead.
@@ -124,7 +124,7 @@ export function reportedAt(
 /**
  * price ÷ the figure reported at that date, one point per sampled close.
  *
- * ⚠ A NON-POSITIVE DENOMINATOR YIELDS NO POINT, NOT A NEGATIVE ONE — the same refusal as
+ *  A non-positive denominator yields no point, not a negative one — the same refusal as
  * `multipleOf`. A loss year as a multiple is −20×, which sorts below every cheap year on any axis
  * and reads as the bargain of the decade.
  */
@@ -154,7 +154,7 @@ export function forwardSeries(metrics: MetricRow[]): Point[] {
  * Thin a daily series to roughly one point per `everyDays`.
  *
  * 6,933 daily closes over a decade is more marks than a 320px-tall chart has pixels, and recharts
- * pays for every one. Weekly is past the point where the line changes shape. ⚠ It KEEPS the last
+ * pays for every one. Weekly is past the point where the line changes shape.  It KEEPS the last
  * point unconditionally — dropping it would end the chart days short of today, which on a
  * valuation chart reads as the multiple having stopped moving.
  *
@@ -189,7 +189,7 @@ export function medianSpacing(points: Point[]): number | null {
 /**
  * Both series on ONE timeline, so they can be drawn as lines rather than confetti.
  *
- * ⚠ THE PROBLEM THIS SOLVES IS AN ARTEFACT OF MERGING, NOT A GAP IN THE DATA. The vendor's forward
+ *  The problem this solves is an artefact of merging, not a gap in the data. The vendor's forward
  * indicator and our trailing series are sampled independently, so their timestamps essentially
  * never coincide. Merging them by timestamp therefore produces rows that hold ONE value and a null
  * for the other, alternating — and `connectNulls={false}`, which is right for real holes, then
@@ -200,7 +200,7 @@ export function medianSpacing(points: Point[]): number | null {
  * (× `gapFactor`) rather than hardcoded, because the same vendor feed is weekly for one company
  * and quarterly for another, and a fixed threshold would turn the sparse one back into dots.
  *
- * ⚠ A REAL GAP STILL BREAKS THE LINE. Beyond `maxGap` the carry stops and the row is null, so a
+ *  A real gap still breaks the line. Beyond `maxGap` the carry stops and the row is null, so a
  * stretch with no observation is a visible break — a company that stopped being covered, or a run
  * of loss years with no multiple, must not be spanned by a confident straight line.
  */

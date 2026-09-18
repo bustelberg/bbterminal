@@ -26,12 +26,12 @@ describe('Analyse primary-view copy', () => {
       'chrome.benchmark', 'axes.sector', 'holdings.via', 'holdings.sector', 'holdings.momentum',
       'holdings.result', 'holdings.price', 'holdings.currency', 'holdings.rest',
       'holdings.direct', 'row.momentumNote',
-      // ⚠ A UNIT, NOT A WORD. `YTD (€)` is the same caption in both languages — "YTD" is what a
+      //  A UNIT, NOT A WORD. `YTD (€)` is the same caption in both languages — "YTD" is what a
       // Dutch wealth manager says out loud, and `(€)` is a symbol. Translating it would invent a
       // label nobody uses; the SENTENCES that explain the tile (`sleeve.ytdWhat/Note/How`) are
       // translated and are not on this list.
       'sleeve.ytdUnit',
-      // ⚠⚠ `Beta`, NOT `Bèta` (2026-09-07, on request). The accented form is the correct Dutch
+      //  `Beta`, NOT `Bèta` (2026-09-07, on request). The accented form is the correct Dutch
       // spelling of the Greek letter's NAME, and it is not what this column is: `Beta` is the
       // finance term, spelled the same way in both languages and in every screener a reader will
       // compare this against. `copyParity`'s `FINANCE_EN` already lists it beside `Sharpe` and

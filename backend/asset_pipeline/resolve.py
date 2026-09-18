@@ -571,7 +571,7 @@ def resolve(identifier: str, id_type: str | None = None, with_candles: bool = Tr
 def sector_for(symbol: str, asset_class: str, current: str | None = None) -> str:
     """The sector to store for `symbol` — Yahoo's, else what the row already had, else the class.
 
-    ⚠ THE ASSET CLASS IS THE LAST RESORT, NOT THE ANSWER. A repoint used to write it
+     THE ASSET CLASS IS THE LAST RESORT, NOT THE ANSWER. A repoint used to write it
     unconditionally, which turned 3i Group from "Financials" into "equity" and Samsung from
     "Technology" into "equity". `asset_grid.sector` is what the portfolio sector breakdown and the
     Brinson attribution bucket a holding by, so that is not a label change — it moves the holding
@@ -590,7 +590,7 @@ def sector_for(symbol: str, asset_class: str, current: str | None = None) -> str
         found = None
     if found:
         return found
-    # ⚠ Do not carry a previously-clobbered value forward: "equity"/"etf" IS the class, so treating
+    #  Do not carry a previously-clobbered value forward: "equity"/"etf" IS the class, so treating
     # it as a sector would make the old bug self-perpetuating through every future repoint.
     if current and current.lower() not in {asset_class.lower(), "equity", "etf", "fund"}:
         return current

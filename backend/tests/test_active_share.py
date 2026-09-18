@@ -1,12 +1,12 @@
 """Active share = ½ Σ|wᵖ − wᵇ|, and every test here is an IDENTITY rather than a fixture.
 
-⚠⚠ THE FIGURE IS UNCHECKABLE BY EYE. "Active share 71%" against a 1,700-name index is not something
+ THE FIGURE IS UNCHECKABLE BY EYE. "Active share 71%" against a 1,700-name index is not something
 a reader can sanity-test, and neither is it something a screenshot review catches — so the things
 worth pinning are the properties that make it the quantity it claims to be: it is 0 against itself,
 100 against a disjoint book, it equals 100 − overlap exactly, and it is invariant to which SHARE
 CLASS you happen to hold.
 
-⚠ THE SHARE-CLASS CASE IS THE ONE THAT BITES. `_asset_benchmark.members` keeps ONE row per company
+ THE SHARE-CLASS CASE IS THE ONE THAT BITES. `_asset_benchmark.members` keeps ONE row per company
 (Yahoo reports the full company cap on every class), so a book holding GOOG against an index row
 carrying GOOGL matches on nothing at all if the join is the ISIN — reporting a full overweight AND
 a full underweight in Alphabet, roughly a 4% swing on a US book, invented by the identifier.
@@ -53,7 +53,7 @@ class TestTheIdentities:
         assert abs(got["off_benchmark_pct"] - 100.0) < 1e-9
 
     def test_active_share_and_overlap_always_sum_to_100(self, monkeypatch):
-        """⚠ THE DEFINING IDENTITY, and the reason the ½ is there. Both vectors sum to 1, so every
+        """ THE DEFINING IDENTITY, and the reason the ½ is there. Both vectors sum to 1, so every
         overweight has a matching underweight; without the half everything is counted twice and
         this sum comes out at 200 for a book with no overlap at all."""
         _bench(monkeypatch, [("Apple Inc", 50.0), ("Microsoft Corp", 30.0), ("Nvidia Corp", 20.0)])
@@ -72,7 +72,7 @@ class TestTheIdentities:
 
 class TestTheIssuerNotTheLine:
     def test_a_different_share_class_still_matches(self, monkeypatch):
-        """⚠⚠ THE REGRESSION THE WHOLE MODULE EXISTS FOR. The index row is Alphabet class A; the
+        """ THE REGRESSION THE WHOLE MODULE EXISTS FOR. The index row is Alphabet class A; the
         book holds class C. On an ISIN join these are two different companies and active share
         reads 100."""
         _bench(monkeypatch, [("Alphabet Inc", 100.0)])
@@ -81,7 +81,7 @@ class TestTheIssuerNotTheLine:
         assert got["active_share_pct"] < 1e-9, got["rows"]
 
     def test_two_classes_of_one_issuer_are_summed_not_replaced(self, monkeypatch):
-        """⚠ A book holding BOTH classes holds ONE position in Alphabet. Taking either line alone
+        """ A book holding BOTH classes holds ONE position in Alphabet. Taking either line alone
         would report half the position as an underweight that does not exist."""
         _bench(monkeypatch, [("Alphabet Inc", 100.0)])
         _grid(monkeypatch, {"US02079K1079": "Alphabet Inc Class C",
@@ -97,7 +97,7 @@ class TestTheIssuerNotTheLine:
         assert A.compute_active_share([_h("ASML", "NL1", 100)], "AEX")["active_share_pct"] < 1e-9
 
     def test_two_genuinely_different_companies_are_not_fused(self, monkeypatch):
-        """⚠ THE OTHER DIRECTION, and the reason this is not a fuzzy match. A false positive here
+        """ THE OTHER DIRECTION, and the reason this is not a fuzzy match. A false positive here
         does not mis-price a listing — it merges two companies into one row of a risk report, and
         the report then understates the bet. `Siemens Ltd` is not `Siemens AG`."""
         assert A._issuer_key("Siemens Ltd") != A._issuer_key("Siemens Energy AG")
@@ -106,7 +106,7 @@ class TestTheIssuerNotTheLine:
 
 class TestTheDenominator:
     def test_funds_cash_and_unpriceable_lines_are_dropped_and_the_rest_renormalised(self, monkeypatch):
-        """⚠ THE STATED ASSUMPTION: the individual stocks ARE 100% of the compared portfolio. A
+        """ THE STATED ASSUMPTION: the individual stocks ARE 100% of the compared portfolio. A
         fund left in at its real weight would count as a bet against every index name at once."""
         _bench(monkeypatch, [("Apple Inc", 100.0)])
         _grid(monkeypatch, {"US1": "Apple Inc"})
@@ -116,7 +116,7 @@ class TestTheDenominator:
             _h("Liquiditeiten", "", 25),
         ], "ACWI")
         assert got["active_share_pct"] < 1e-9, "the one stock IS the index once renormalised"
-        # ⚠ AND THE RENORMALISATION IS REPORTED, never silent — 25 of 100 is the sleeve compared.
+        #  And the renormalisation is reported, never silent — 25 of 100 is the sleeve compared.
         assert abs(got["stocks_pct"] - 25.0) < 1e-9
 
     def test_a_book_with_no_individual_stocks_refuses(self, monkeypatch):
@@ -127,7 +127,7 @@ class TestTheDenominator:
         assert "no individual stocks" in got["reason"]
 
     def test_an_unmatchable_line_stays_active_rather_than_being_dropped(self, monkeypatch):
-        """⚠ DROPPING IT WOULD RENORMALISE THE REST UPWARD AND LOWER ACTIVE SHARE — the flattering
+        """ DROPPING IT WOULD RENORMALISE THE REST UPWARD AND LOWER ACTIVE SHARE — the flattering
         direction. It is a real position the index has no row for, so it counts, and it is listed."""
         _bench(monkeypatch, [("Apple Inc", 100.0)])
         _grid(monkeypatch, {"US1": "Apple Inc"})    # 'XX9' bridges to nothing
@@ -139,7 +139,7 @@ class TestTheDenominator:
 
 class TestWhatItRefusesToHide:
     def test_it_reports_how_much_of_the_index_it_could_price(self, monkeypatch):
-        """⚠ A MISSING CONSTITUENT INFLATES THE WEIGHT OF THE REST (renormalisation), so an
+        """ A MISSING CONSTITUENT INFLATES THE WEIGHT OF THE REST (renormalisation), so an
         unpriceable name we do not hold makes active share read slightly LOW. Never exact."""
         _bench(monkeypatch, [("Apple Inc", 100.0)], covered=78.5)
         _grid(monkeypatch, {"US1": "Apple Inc"})

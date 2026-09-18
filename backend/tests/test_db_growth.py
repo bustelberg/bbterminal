@@ -1,6 +1,6 @@
 """Database growth, measured in BYTES ON DISK rather than rows written.
 
-⚠⚠ THE MEASUREMENT THIS REPLACES WOULD HAVE INVERTED THE RANKING. The intuitive instrumentation is
+ THE MEASUREMENT THIS REPLACES WOULD HAVE INVERTED THE RANKING. The intuitive instrumentation is
 "have each job count what it inserts" — and the AIRS model scan delete-then-inserts every
 portfolio's positions (thousands of rows written, zero growth) while several others are
 delete-then-insert snapshots or upserts. A row count is also blind to indexes and bloat, which on this database's 18 GB
@@ -57,7 +57,7 @@ def rpc(monkeypatch):
 
 class TestNoBaselineIsNotZeroGrowth:
     def test_a_table_with_no_earlier_sample_reports_None(self, rpc):
-        """⚠ A FRESH INSTALL HAS SIZES AND NO GROWTH. Rendering that as "0 MB added" presents a
+        """ A FRESH INSTALL HAS SIZES AND NO GROWTH. Rendering that as "0 MB added" presents a
         database nobody has measured yet as one that is not growing — the reader's next move is to
         stop worrying about a number that was never taken."""
         rpc["rows"] = [_row("metric_data", 18_746, None)]
@@ -80,7 +80,7 @@ class TestNoBaselineIsNotZeroGrowth:
 
 class TestPerDayIsDividedByTheWindowACTUALLYMEASURED:
     def test_not_by_the_window_requested(self):
-        """⚠ THE BASELINE IS THE NEWEST SAMPLE AT-OR-BEFORE THE CUTOFF, which on a sparse history
+        """ THE BASELINE IS THE NEWEST SAMPLE AT-OR-BEFORE THE CUTOFF, which on a sparse history
         can be much older than asked for. Dividing 14 days of growth by the requested 7 would
         report double the real rate — measured: 4.77 MB over 14 days is 0.349/day, not 0.681."""
         a = (NOW - timedelta(days=14)).isoformat()
@@ -125,7 +125,7 @@ class TestOrdering:
 
 class TestTheWindowIsCarriedOnEveryRow:
     def test_each_row_states_the_span_it_was_measured_over(self, rpc):
-        """⚠ WITHOUT IT THE DELTA IS UNREADABLE. Rows can have different baselines — a table
+        """ WITHOUT IT THE DELTA IS UNREADABLE. Rows can have different baselines — a table
         created last week has a shorter history than one from 2024 — so a single window in the
         header would describe some rows and misdescribe others."""
         rpc["rows"] = [_row("a", 10, 5, days_back=3), _row("b", 10, 5, days_back=20)]

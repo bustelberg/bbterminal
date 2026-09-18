@@ -1,18 +1,18 @@
 """Admin-only maintenance + diagnostics API.
 
-⚠⚠ THE EXTERNAL TRADING SURFACE IS GONE (2026-09-08, on request). This router existed to let a
+ THE EXTERNAL TRADING SURFACE IS GONE (2026-09-08, on request). This router existed to let a
 local IBKR re-balancer pull order-ready holdings — `GET /api/admin/schedules` and its three
 siblings, `/universes` (×2), `/etfs` and `/health` — and that script is no longer needed. With it
 went `common/admin_key` and the `X-Admin-Key` credential built for it two hours earlier: a
 standing secret with no caller is a liability, not an asset.
 
-⚠ WHAT IS LEFT IS NOT A PUBLIC API. Every remaining endpoint is a maintenance or diagnostic tool
+ WHAT IS LEFT IS NOT A PUBLIC API. Every remaining endpoint is a maintenance or diagnostic tool
 reached from inside the app: four back live pages (`company-illiquid` and `company-price-refresh`
 on /schedule, `scheduled-jobs` on its Automatic-jobs card, `network-diagnostics` on /network), and
 the rest are one-off tools an admin drives through the /api explorer. All of them authenticate
 with the caller's own Supabase session, which now means a second factor too.
 
-⚠ `_load_strategy_row` and `_strategy_snapshots` SURVIVED THE DELETION and are the reason this
+ `_load_strategy_row` and `_strategy_snapshots` SURVIVED THE DELETION and are the reason this
 module still knows anything about strategies: `routers/diversifier.py` imports both. They are no
 longer used by anything in this file.
 
@@ -632,7 +632,7 @@ def _strategy_snapshots(strategy_id: int) -> list[dict]:
 async def admin_scheduled_jobs(authorization: str = Header(None)):
     """EVERY JOB THAT IS SUPPOSED TO RUN BY ITSELF — declared, registered, and last actually run.
 
-    ⚠⚠ IT ANSWERS "IS ANYTHING MISSING", WHICH NOTHING ELSE COULD. `/schedule` shows the ingest
+     IT ANSWERS "IS ANYTHING MISSING", WHICH NOTHING ELSE COULD. `/schedule` shows the ingest
     pipeline's own history and `scheduler.list_scheduled_jobs()` shows what APScheduler is holding
     right now — and BOTH look healthy in the one case that matters, a job that is not registered at
     all. `list_scheduled_jobs()` is empty under `DISABLE_SCHEDULER`, empty before startup finishes,
@@ -640,7 +640,7 @@ async def admin_scheduled_jobs(authorization: str = Header(None)):
     scheduler by looking at the list. The declaration in `scheduled_jobs.py` is what makes an
     absence visible, and this endpoint is the join.
 
-    ⚠ THE READ IS PER-PROCESS AND SAYS SO. The scheduler is in-process by design (one instance,
+     THE READ IS PER-PROCESS AND SAYS SO. The scheduler is in-process by design (one instance,
     `DISABLE_SCHEDULER=1` on any replica), so `registered`/`next_run_at` describe *the container
     that served this request* — which is the honest scope, and the reason `scheduler_running` is
     reported rather than inferred from an empty list.
@@ -650,7 +650,7 @@ async def admin_scheduled_jobs(authorization: str = Header(None)):
     """
     _require_admin(authorization)
 
-    # ⚠⚠ THE ASSEMBLY MOVED TO `scheduler.job_health` SO THE WATCHDOG SHARES IT. It was a closure
+    #  The assembly moved to `scheduler.job_health` SO THE WATCHDOG SHARES IT. It was a closure
     # here; the self-healing tick needs the same verdict, and a second copy of "is this job
     # overdue" is the one thing that must not exist — the page would say `ok` while the watchdog
     # re-fired, or the reverse, and the surface built to report what is wrong would be wrong about
@@ -663,7 +663,7 @@ async def admin_scheduled_jobs(authorization: str = Header(None)):
     health = await asyncio.to_thread(job_health)
     rows, running, now = health["rows"], health["running"], health["now"]
     if health["history_error"]:
-        # ⚠ THE PAGE STILL RENDERS. Losing the history costs the "did it run" column; it must not
+        #  The page still renders. Losing the history costs the "did it run" column; it must not
         # cost the "is it registered" one, which needs no database at all.
         return {"jobs": rows, "summary": summarize(rows), "scheduler_running": running,
                 "checked_at": now.isoformat(), "history_error": health["history_error"]}
@@ -681,18 +681,18 @@ async def admin_scheduled_jobs(authorization: str = Header(None)):
 async def admin_run_scheduled_job(job_id: str, authorization: str = Header(None)):
     """Kick one declared job off NOW, as a cancellable registry job with a progress toast.
 
-    ⚠ THE SAME BODY THE SCHEDULER TICK RUNS (`scheduler.JOB_BODIES`), never a second copy — a
+     THE SAME BODY THE SCHEDULER TICK RUNS (`scheduler.JOB_BODIES`), never a second copy — a
     button that ran its own implementation would drift from the thing the schedule does, and the
     drift would only ever surface as the button disagreeing with the nightly result.
 
-    ⚠⚠ CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between
+     CANCELLATION IS COOPERATIVE, AND ITS LATENCY DIFFERS PER JOB. The AIRS scan stops between
     ACCOUNTS (an account's four reports are stored as a unit); the drift probe stops between
     COMPANIES; the FX and size jobs are seconds long and have no useful boundary at all.
     "Stops immediately" is not on offer for a scraper mid-download, and a Cancel that claimed it
     would be the decorative control this codebase has already removed once. The UI says which is
     which rather than implying they are the same.
 
-    ⚠ A JOB WITH NO BODY IS 404, WHICH IS AN ANSWER. The 20-second queue worker has nothing worth
+     A JOB WITH NO BODY IS 404, WHICH IS AN ANSWER. The 20-second queue worker has nothing worth
     triggering, and the two pipeline jobs already own a richer Run-now with a live console tail —
     `runnable` on `/api/admin/scheduled-jobs` says so per row, so the button is simply absent
     rather than present-and-failing.
@@ -715,28 +715,28 @@ async def admin_run_scheduled_job(job_id: str, authorization: str = Header(None)
 async def admin_db_growth(days: int = 7, authorization: str = Header(None)):
     """HOW FAST THE DATABASE IS GROWING, PER TABLE — bytes on disk, over a window.
 
-    ⚠⚠ BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count
+     BYTES, NOT ROWS WRITTEN, AND THE DIFFERENCE INVERTS THE RANKING. Asking each job to count
     its own inserts would put the AIRS model scan — which delete-then-inserts every portfolio's
     positions, thousands of rows written and zero growth — above the month-end price refresh. Several jobs here are
     delete-then-insert snapshots or upserts. A row count is also blind to INDEXES and BLOAT, which
     on an 18 GB table are most of the disk.
 
-    ⚠ IT ANSWERS "WHAT GREW", NEVER "WHO GREW IT". The measurement is taken from outside every job,
+     IT ANSWERS "WHAT GREW", NEVER "WHO GREW IT". The measurement is taken from outside every job,
     which is what makes it impossible for a job to forget to report or to drift — and is exactly
     why it cannot attribute. Per-job attribution is a separate, lossier measurement.
 
-    ⚠ `delta` IS NULL, NOT 0, UNTIL THE HISTORY REACHES BACK `days`. A fresh install has sizes and
+     `delta` IS NULL, NOT 0, UNTIL THE HISTORY REACHES BACK `days`. A fresh install has sizes and
     no growth; rendering that as "0 MB added" would present an unmeasured database as a static one.
     `has_baseline` says which of the two you are looking at.
 
-    ⚠ SUPABASE STORAGE IS NOT COUNTED — the `gurufocus-raw` bucket of cached vendor JSON is not in
+     SUPABASE STORAGE IS NOT COUNTED — the `gurufocus-raw` bucket of cached vendor JSON is not in
     Postgres. Reconciling this against the hosting's disk figure will show a gap; that is the gap.
     """
     _require_admin(authorization)
 
     from db_growth import growth  # noqa: PLC0415
 
-    # ⚠ CLAMPED. `days` reaches a SQL `make_interval`, and a silly value is a silly window rather
+    #  CLAMPED. `days` reaches a SQL `make_interval`, and a silly value is a silly window rather
     # than an error — but an unbounded one invites a negative, which would make `earlier` newer
     # than `latest` and report shrinkage.
     window = max(1, min(int(days), 365))

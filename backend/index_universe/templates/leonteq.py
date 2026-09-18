@@ -307,7 +307,7 @@ class LeonteqTemplate(UniverseTemplate):
         )
         if name_mismatches > 0:
             emit(
-                f"⚠ {name_mismatches} match(es) where the scraped name doesn't overlap the "
+                f" {name_mismatches} match(es) where the scraped name doesn't overlap the "
                 f"matched company name — likely ticker-collision mismaps, review each:",
                 None,
             )

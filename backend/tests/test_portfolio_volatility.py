@@ -1,11 +1,11 @@
 """σ_p = √(Σ(Rₜ−R̄)²/(T−1))·√f, and the two things that make it trustworthy rather than merely present.
 
-⚠⚠ FIRST: IT IS THE SAME σₚ THE CORRELATION VIEW USES. That view prints `σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ`
+ FIRST: IT IS THE SAME σₚ THE CORRELATION VIEW USES. That view prints `σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ`
 and invites the reader to check it; if the Volatility view one click away showed a different σₚ, the
 reader would have learned that one of them is wrong and nothing about which. Both come from
 `build_paired_series`, and this asserts they still do.
 
-⚠⚠ SECOND: NO CASH-FLOW CONTAMINATION. Computing risk off an ACCOUNT VALUE makes a deposit look like
+ SECOND: NO CASH-FLOW CONTAMINATION. Computing risk off an ACCOUNT VALUE makes a deposit look like
 a huge gain and a withdrawal like a crash, so a book that merely received money reads as turbulent —
 which is what time-weighted returns exist to fix. This series never has flows in it: it is a
 weighted basket of instrument price returns, so scaling every holding's VALUE changes nothing. That
@@ -67,7 +67,7 @@ class TestTheFormula:
         p = np.asarray(build_paired_series(book, "ACWI", "weekly", 5)["portfolio"])
         want = float(np.std(p, ddof=1) * np.sqrt(got["periods_per_year"]) * 100)
         assert got["volatility_pct"] == pytest.approx(want, abs=1e-9)
-        # ⚠ ddof=1 — asserted against the population sd it must NOT equal.
+        #  ddof=1 — asserted against the population sd it must NOT equal.
         population = float(np.std(p, ddof=0) * np.sqrt(got["periods_per_year"]) * 100)
         assert abs(got["volatility_pct"] - want) < abs(got["volatility_pct"] - population)
 
@@ -80,7 +80,7 @@ class TestTheFormula:
             corr["benchmark_vol_pct"], abs=1e-9)
 
     def test_downside_deviation_is_sortinos_convention(self, book):
-        """⚠ DIVIDED BY ALL n, AGAINST A TARGET OF 0 — not the semi-deviation (below-MEAN only,
+        """ DIVIDED BY ALL n, AGAINST A TARGET OF 0 — not the semi-deviation (below-MEAN only,
         divided by how many there are), which is also called downside deviation and reads higher.
         This is the one `sortino` is built on, so the ratio equals its own parts."""
         from routers._tracking_error import build_paired_series
@@ -100,7 +100,7 @@ class TestTheFormula:
             got["return_ann_pct"] / got["downside_dev_pct"], abs=1e-9)
 
     def test_a_series_that_never_falls_has_zero_downside_and_no_sortino(self, monkeypatch):
-        """⚠ 0.0 AND None MEAN DIFFERENT THINGS. Zero downside deviation is a measurement — nothing
+        """ 0.0 AND None MEAN DIFFERENT THINGS. Zero downside deviation is a measurement — nothing
         ever fell short. A null Sortino is "a ratio over zero has no value"."""
         dates = _weekdays(401)
         up = [0.001] * 400
@@ -117,7 +117,7 @@ class TestTheFormula:
 
 class TestFlowsCannotReachIt:
     def test_scaling_every_holding_changes_nothing(self, monkeypatch):
-        """⚠⚠ THE PROPERTY TWR EXISTS TO PRODUCE, HERE BY CONSTRUCTION. A deposit that doubles the
+        """ THE PROPERTY TWR EXISTS TO PRODUCE, HERE BY CONSTRUCTION. A deposit that doubles the
         book is, in a value series, a +100% period; in a series of weighted instrument RETURNS it
         does not appear at all. Doubling every price level leaves the returns identical, so the
         volatility must be bit-identical too."""

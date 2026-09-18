@@ -1,5 +1,5 @@
 /**
- * ⚠⚠ AN LTM POINT MUST NEVER RENDER AS A FISCAL QUARTER.
+ *  An ltm point must never render as a fiscal quarter.
  *
  * MEASURED 2026-08-14 on the ACWI overlay of `EPS (excl. non-recurring)`, Long Equity tab, annual
  * basis. A trailing-twelve-month point is dated to a QUARTER-END, so it lands on a fractional x
@@ -30,7 +30,7 @@ describe('periodTick', () => {
   });
 
   it('names BOTH windows when the two lines end on different quarters', () => {
-    // ⚠ Two "LTM" ticks are the honest answer: each blend is stamped with the newest filing behind
+    //  Two "LTM" ticks are the honest answer: each blend is stamped with the newest filing behind
     // it, so these really are two trailing years. Naming one of them "2026 Q1" would say the book
     // filed a quarter, which it did not.
     const xs = new Set([2026.0, 2026.25]);
@@ -49,18 +49,18 @@ describe('periodTick', () => {
 /**
  * The per-period step the level cards show on hover.
  *
- * ⚠ WHY THE STEP AND NOT THE GROWTH SINCE THE ANCHOR: both lines are rebased to 100 at the anchor,
+ *  Why the step and not the growth since the anchor: both lines are rebased to 100 at the anchor,
  * so how far apart they have drawn on screen IS the since-anchor comparison — a hover repeating it
  * adds nothing. Which line grew faster in the period under the cursor cannot be read off a log
  * axis where both are climbing, and that is the question the hover exists to answer.
  *
- * ⚠ AND WHY IT IS THE ONE HONEST FIGURE A BLENDED LEVEL CAN PUT IN A HOVER: it is a ratio of two of
+ *  And why it is the one honest figure a blended level can put in a hover: it is a ratio of two of
  * the line's own points, so the units divide out and it is as real for a portfolio — which has no
  * currency and no actual value — as it is for a single company.
  */
 describe('stepChanges', () => {
   it('measures against the previous point and reports which one', () => {
-    // ⚠ `toBeCloseTo`, NEVER `toEqual`, ON THE PERCENTAGE. `100 * (110/100 - 1)` is
+    //  `toBeCloseTo`, NEVER `toEqual`, ON THE PERCENTAGE. `100 * (110/100 - 1)` is
     // 10.000000000000009 in binary floating point, so an exact match fails on a step that is
     // arithmetically exactly 10% — the assertion would be testing IEEE-754, not the rule.
     const s = stepChanges(new Map([[2023, 100], [2024, 110], [2025, 121]]));
@@ -77,7 +77,7 @@ describe('stepChanges', () => {
   });
 
   it('refuses a percentage from a NEGATIVE base, and says so with null not 0', () => {
-    // ⚠ THE CASE EPS ACTUALLY HITS. −2 → −1 is not "+50% growth" for a company still making a
+    //  The case EPS actually hits. −2 → −1 is not "+50% growth" for a company still making a
     // loss, and −1 → +2 is not "+300%" in any sense that compounds. Same refusal as the CAGR tile.
     const s = stepChanges(new Map([[2023, -2], [2024, -1], [2025, 3]]));
     expect(s.get(2024)).toEqual({ pct: null, from: 2023 });
@@ -90,7 +90,7 @@ describe('stepChanges', () => {
   });
 
   it('measures across a HOLE, and names the period it really came from', () => {
-    // ⚠ A period the coverage floor withheld is not drawn, so this step spans two years. `from` is
+    //  A period the coverage floor withheld is not drawn, so this step spans two years. `from` is
     // what stops it being labelled "YoY" — the caller renders "+21.0% vs 2023", which is true.
     const s = stepChanges(new Map([[2023, 100], [2024, null], [2025, 121]]));
     expect(s.get(2025)).toEqual({ pct: expect.closeTo(21, 10), from: 2023 });
@@ -104,7 +104,7 @@ describe('stepChanges', () => {
   });
 
   it('is unchanged by a rebase — the multiplier divides out', () => {
-    // ⚠ WHY IT IS SAFE TO COMPUTE ON THE RAW SERIES AND SHOW IT BESIDE AN INDEXED AXIS. A rebase is
+    //  Why it is safe to compute on the raw series and show it beside an indexed axis. A rebase is
     // one constant per series, so the step cannot disagree with the line it annotates.
     const raw = new Map([[2023, 4.0], [2024, 5.0]]);
     const indexedSeries = new Map([[2023, 100], [2024, 125]]);

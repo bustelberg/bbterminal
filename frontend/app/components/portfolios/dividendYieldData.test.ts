@@ -17,7 +17,7 @@ describe('dividendYieldOf', () => {
     expect(dividendYieldOf(0, 100)).toBe(0);
   });
 
-  it('⚠ an ABSENT dividend line is not a zero', () => {
+  it(' an ABSENT dividend line is not a zero', () => {
     // Reading it as 0 would let un-ingested holdings deflate the book's yield with a number
     // nobody reported. Unknown stays unknown, and the average renormalises over the rest.
     expect(dividendYieldOf(null, 100)).toBeNull();

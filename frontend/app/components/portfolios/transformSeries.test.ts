@@ -4,7 +4,7 @@ import { transformSeries } from './marginData';
 /**
  * The three views behind the drill-down switch (Reported / Rebased / YoY %).
  *
- * ⚠ THE INTERESTING CASES ARE ALL REFUSALS. Every one of these transforms has an arithmetic
+ *  The interesting cases are all refusals. Every one of these transforms has an arithmetic
  * expression that produces a perfectly ordinary-looking number from an input it has no business
  * accepting — a zero base, a negative base, a gap in the middle of a series. Each of those renders
  * in the same font as a real figure, so the assertions below are mostly that we produce NOTHING.
@@ -38,13 +38,13 @@ describe('transformSeries', () => {
 
   describe('yoy', () => {
     /**
-     * ⚠ A GROWTH RATE IS A RATIO, SO IT IS COMPARED APPROXIMATELY. `110/100 − 1` is
+     *  A growth rate is a ratio, so it is compared approximately. `110/100 − 1` is
      * `0.10000000000000009` in binary floating point, and `toEqual` against a literal `10` fails
      * on the last bit — which is a fact about IEEE-754, not about the function. These three
      * assertions were red for exactly that reason; matching on the value to a sane precision keeps
      * them checking the arithmetic instead of the representation.
      *
-     * ⚠ THE NULLS STAY EXACT. Every interesting case in this file is a REFUSAL, and "no value" is
+     *  The nulls stay exact. Every interesting case in this file is a REFUSAL, and "no value" is
      * the thing actually being asserted — it must never be swallowed by a tolerance.
      */
     const closeTo = (got: (number | null)[], want: (number | null)[]) => {
@@ -60,7 +60,7 @@ describe('transformSeries', () => {
     });
 
     it('measures against the previous period THIS ROW REPORTED, not the previous column', () => {
-      // ⚠ The whole point. A skipped period must not silently show two periods of growth in the
+      //  The whole point. A skipped period must not silently show two periods of growth in the
       // same ink as everyone else's one: 121 is compared with 100, and the answer is 21%.
       closeTo(transformSeries([100, null, 121], 'yoy'), [null, null, 21]);
     });

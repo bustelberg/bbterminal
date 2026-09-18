@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// ⚠ The suite runs on `node` (see `vitest.config.ts`); this module's whole subject is what leaves
+//  The suite runs on `node` (see `vitest.config.ts`); this module's whole subject is what leaves
 // `localStorage`, so it takes the per-file escape hatch that config documents.
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -10,7 +10,7 @@ describe('purgeLegacySessions', () => {
   beforeEach(() => localStorage.clear())
 
   it('removes the retired switcher\'s refresh tokens', () => {
-    // ⚠ THE POINT OF THE WHOLE MODULE. Deleting the account switcher removed the code that READ
+    //  The point of the whole module. Deleting the account switcher removed the code that READ
     // these; the tokens themselves stayed valid in every browser that had used it.
     localStorage.setItem('bbterminal_sessions', JSON.stringify([
       { email: 'admin@bustelberg.nl', refresh_token: 'still-valid' },
@@ -36,7 +36,7 @@ describe('purgeLegacySessions', () => {
   })
 
   it('touches nothing else in storage', () => {
-    // ⚠ The app keeps real preferences alongside these (`bb:lang`, and whatever a panel has
+    //  The app keeps real preferences alongside these (`bb:lang`, and whatever a panel has
     // remembered). A purge that reached wider would log people out of their own settings.
     localStorage.setItem('bb:lang', 'nl')
     localStorage.setItem('bb:lang:owner', 'reader@bustelberg.nl')

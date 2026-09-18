@@ -28,22 +28,22 @@ import {
  * The panel says "sector", "region" or "currency" depending on the axis chosen — never the
  * jargon "bucket", and never "sector" while showing regions.
  *
- * ⚠ The three effects SUM to the excess. That identity is the whole point, and it is checked,
+ *  The three effects SUM to the excess. That identity is the whole point, and it is checked,
  * not assumed — if it ever fails, the table is three columns of numbers sitting next to each
  * other, and the banner says so instead of letting them be read as a decomposition.
  */
 type Axis = 'sector' | 'region' | 'currency';
 
 /**
- * DECIMALS ON EVERY FIGURE IN THIS PANEL — one constant, because "all of it" is the requirement.
+ * Decimals on every figure in this panel — one constant, because "all of it" is the requirement.
  *
- * ⚠ IT WAS THREE PRECISIONS, AND THAT IS WHY THIS EXISTS (2026-08-13, on request). `pct`/`pp`
+ *  It was three precisions, and that is why this exists (2026-08-13, on request). `pct`/`pp`
  * defaulted to 2 but were CALLED with an explicit `1` in six places, and the weights were bare
  * `.toFixed(1)` literals in nine more — so one row showed `34.4` against a tooltip quoting
  * `34.38%`, and the arithmetic printed in the ⓘ ("wt × return = contribution") could not be
  * reproduced from the digits beside it. A default that every call site overrides is not a default.
  *
- * ⚠ THE ⓘ CARDS QUOTE THE SAME FORMATTERS, not their own `toFixed`. The whole point of printing
+ *  THE ⓘ CARDS QUOTE THE SAME FORMATTERS, not their own `toFixed`. The whole point of printing
  * `(4.30% − 6.10%) × (…)` is that a reader can check it against the row; a card rounded differently
  * from the cells it explains is worse than no card.
  */
@@ -64,7 +64,7 @@ const pp = (v: number | null | undefined, dp = DP) =>
 /**
  * A WEIGHT — bare digits, no unit and no sign.
  *
- * ⚠ NO LEADING `+`, unlike `pct`/`pp`. A weight is a share of a base and cannot be negative, so a
+ *  No leading `+`, unlike `pct`/`pp`. A weight is a share of a base and cannot be negative, so a
  * sign on it would imply a direction it does not have; a return and an effect both can go either
  * way, which is why those two carry one. The `%` stays at the call site because the main table puts
  * it in the column header and the tooltips put it inline.
@@ -74,7 +74,7 @@ const wt = (v: number | null | undefined, dp = DP) => n(v).toFixed(dp);
 /**
  * A number with its OWN ⓘ.
  *
- * ⚠ THE ⓘ IS THE ONLY HOVER TARGET IN THIS PANEL, AND EVERY ONE OF THEM OPENS THE SAME CARD —
+ *  THE ⓘ IS THE ONLY HOVER TARGET IN THIS PANEL, AND EVERY ONE OF THEM OPENS THE SAME CARD —
  * What · Source · When · How. Nothing else reacts to a pointer: not the value, not the column
  * label. That single rule is what makes the gesture worth learning, and it was arrived at by
  * removing two earlier answers. Free prose under each chip made the affordance unpredictable
@@ -82,7 +82,7 @@ const wt = (v: number | null | undefined, dp = DP) => n(v).toFixed(dp);
  * was worse: two targets in one header, no way to tell which held the answer, so a reader found
  * one, read it, and concluded that was all there was.
  *
- * ⚠ THE ICON, NOT THE NUMBER, IS THE TRIGGER. Hovering a bare value is invisible — a tooltip
+ *  The icon, not the number, is the trigger. Hovering a bare value is invisible — a tooltip
  * nobody knows is there is a tooltip that does not exist.
  */
 function Num({ children, prov }: { children: React.ReactNode; prov: React.ReactNode }) {
@@ -100,7 +100,7 @@ function Num({ children, prov }: { children: React.ReactNode; prov: React.ReactN
  *  weight × return decomposition of the excess, all of them in `pp`. */
 function Eff({ v, prov }: { v?: number | null; prov?: React.ReactNode }) {
   if (v == null) return <span className="text-fg-faint">—</span>;
-  // ⚠ THE THRESHOLD IS DERIVED FROM `DP`, NOT A LITERAL 0.005 THAT HAPPENS TO MATCH IT. It means
+  //  The threshold is derived from `DP`, NOT A LITERAL 0.005 THAT HAPPENS TO MATCH IT. It means
   // "this would print as zero", so it has to move with the precision — a hardcoded one drifts the
   // moment DP changes and leaves some "0.00pp" cells shown and others dashed, with no rule a
   // reader can infer. Same lesson as `composition.DISPLAY_EPSILON`.
@@ -111,14 +111,14 @@ function Eff({ v, prov }: { v?: number | null; prov?: React.ReactNode }) {
 }
 
 /**
- * ⚠ THE WORD FOLLOWS THE AXIS. It is "sector" only when the axis IS sector — switch to Region and
+ *  The word follows the axis. It is "sector" only when the axis IS sector — switch to Region and
  * every "sector" in this panel becomes a lie. "Bucket" was correct but it is jargon; naming the
  * thing the reader actually chose is both correct AND plain.
  */
 /**
  * A column header. The LABEL is inert; the ⓘ beside it is the only thing to hover.
  *
- * ⚠ ONE TARGET PER HEADER. The label used to carry its own dotted-underline tooltip explaining
+ *  One target per header. The label used to carry its own dotted-underline tooltip explaining
  * what the column means, beside an ⓘ carrying What/Source/When/How — two hover targets, two
  * different cards, one header. A reader cannot see which of them holds the answer they want, so
  * they find one, read it, and stop; whichever they land on, they conclude that is all there is.
@@ -147,7 +147,7 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
   hint: string;
   src: SourceKey;
   asOf?: string | null;
-  /** ⚠ The numerator of the weight, named exactly — the AIRS book weights by `Beginwaarde`, the
+  /**  The numerator of the weight, named exactly — the AIRS book weights by `Beginwaarde`, the
    *  model by its own stated percentage, and the index by start-of-window cap. Passed in rather
    *  than guessed here: all three land in the same three columns. */
   weightHow: string;
@@ -168,10 +168,10 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
           column take the rest and TRUNCATE — without it the table sizes to its content and, in the
           narrower dock, spills past its grid cell and overlaps the neighbouring list. */}
       <table className="w-full text-[12px] table-fixed">
-        {/* ⚠ Widened for the per-cell ⓘ. Every numeric column now carries a 14px chip plus its
+        {/*  Widened for the per-cell ⓘ. Every numeric column now carries a 14px chip plus its
             gap OUTSIDE the digits, and at the old `w-9` the weight column could not fit "4.7%"
             and an icon — under `table-fixed` that does not wrap, it spills over the neighbour.
-            ⚠ AND WIDENED AGAIN, x1.2 (2026-08-13, on request), because the digits grew: every
+             AND WIDENED AGAIN, x1.2 (2026-08-13, on request), because the digits grew: every
             figure in this panel moved to two decimals (see `DP`), so "4.7%" became "4.70%" and
             "+59.2%" became "+59.24%" — two more glyphs in a column that was already sized to the
             character. `table-fixed` does not resize to fit, it OVERLAPS, so a precision change is
@@ -255,18 +255,18 @@ function Names({ title, rows, hint, src, asOf, weightHow, returnHow,
  * The names behind ONE row of the attribution table: what you hold in that bucket beside what the
  * index holds, with each side's weights and returns.
  *
- * ⚠ THE SAME TABLE THE SECTOR-BAR DRILL-DOWN USES, imported rather than rebuilt — same columns,
+ *  The same table the sector-bar drill-down uses, imported rather than rebuilt — same columns,
  * same rank, same sort, same overlap treatment (a shared name tinted and dotted, the rest faded),
  * off the same payload. Two tables for one question is two things to learn.
  *
- * ⚠ BOTH LISTS ARE ON THE SAME BASE AS THE ROW ABOVE THEM. The backend renormalises each side's
+ *  Both lists are on the same base as the row above them. The backend renormalises each side's
  * per-holding weights over what that side can attribute, so the weights in each list ADD UP to the
  * "Your weight" / "Index weight" figures in the row that opened it — the check a reader will
  * actually try.
  * They were raw shares of the whole portfolio once: Technology read 34.38% while its own holdings
  * summed to 9.11%, out by exactly 100/attributable_pct, and neither number was wrong on its own.
  *
- * ⚠ AN EMPTY SIDE IS A FINDING, NOT A BLANK. A bucket the index holds and you do not is an
+ *  An empty side is a finding, not a blank. A bucket the index holds and you do not is an
  * allocation bet with no picks to judge — exactly what the row's Selection column says by being
  * 0.00pp. Saying so beats an empty box.
  */
@@ -274,7 +274,7 @@ function BucketNames({ row, bucket, benchmark, startLabel }: {
   row: NonNullable<ModelPortfolioAttribution['rows']>[number];
   bucket: string;
   benchmark: string;
-  /** ⚠ WHEN the weights were measured — passed down because THIS panel has a window toggle and the
+  /**  WHEN the weights were measured — passed down because THIS panel has a window toggle and the
    *  `/bucket` drill-down does not. A YTD window opens on 1 January; a since-inception one opens on
    *  the model's own effective date. See `Holdings`'s `startLabel`. */
   startLabel: string;
@@ -346,7 +346,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   /**
    * The bucket whose names are open, or null.
    *
-   * ⚠ ONE AT A TIME, AND CLEARED WHEN THE AXIS CHANGES. Bucket names are not unique across axes
+   *  One at a time, and cleared when the axis changes. Bucket names are not unique across axes
    * — "Technology" is a sector and "United States" a region — so a key left over from the previous
    * axis would either open nothing or, worse, open a same-named bucket on a table it does not
    * belong to.
@@ -394,13 +394,13 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   /**
    * The window, spelt out — this is the panel's heading and nothing else reads it.
    *
-   * ⚠ WRITTEN OUT, NOT "YTD" (2026-08-13, on request). The heading was `Why — YTD vs SP500`, which
+   *  Written out, not "YTD" (2026-08-13, on request). The heading was `Why — YTD vs SP500`, which
    * is three abbreviations and a dash standing in for a sentence: "Why" names no quantity, "vs"
    * does not say what is being compared, and the panel underneath is a Brinson decomposition rather
    * than a difference of two numbers. `Year-to-date performance attribution compared to SP500` says
    * what the table is.
    *
-   * ⚠ THE SECOND WINDOW IS HYPHENATED TO MATCH, because both are compound adjectives in front of
+   *  The second window is hyphenated to match, because both are compound adjectives in front of
    * "performance attribution" — `Since-inception performance attribution compared to SP500`. Left
    * as "Since inception" it reads as a sentence fragment where its twin reads as a title.
    */
@@ -408,7 +408,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   /**
    * WHEN the drill-down's weights were measured — the header under "Weight" in each names table.
    *
-   * ⚠ DERIVED FROM THE SAME `window` AS THE HEADING, so the two cannot disagree. A YTD window opens
+   *  Derived from the same `window` AS THE HEADING, so the two cannot disagree. A YTD window opens
    * on 1 January; a since-inception one opens on the model's own effective date, which for 27 of
    * the 56 models is somewhere inside this year. "Start of year" on that second case would be a
    * confident wrong date on a column a reader uses to check the arithmetic.
@@ -423,14 +423,14 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   // Where the PORTFOLIO side of every number came from — the AIRS book's VOLK values, or our
   // yfinance reconstruction. The benchmark side is always yfinance; the effect columns are derived.
   const pSrc: SourceKey = (data?.source ?? source) === 'book' ? 'airs_volk' : 'yfinance';
-  // ⚠ THE PORTFOLIO WEIGHT IS A DIFFERENT QUANTITY IN THE TWO SOURCES, so a How that names one
+  //  The portfolio weight is a different quantity in the two sources, so a How that names one
   // is wrong for the other. The BOOK weights by `Beginwaarde` — the position's value when the
   // window opened, which is why a holding bought mid-window has weight 0 and drops out. The
   // MODEL weights by the composition's own stated percentage. Both then renormalise over the
   // attributable sleeve; only the numerator differs.
   const isBook = (data?.source ?? source) === 'book';
   const pWeightSrc = isBook ? 'Beginwaarde' : 'the model’s stated weight';
-  // ⚠ PLAIN WORDS, NOT AN EXPRESSION. This reaches a card's `how`, where the maths is now
+  //  Plain words, not an expression. This reaches a card's `how`, where the maths is now
   // typeset through `worked` — so a second, prose copy of the same division would be the two
   // ways of setting one formula the house style exists to prevent.
   const pReturnHow = isBook
@@ -441,7 +441,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   return (
     <section className="h-full min-h-0 flex flex-col bg-card border border-accent-500/30
       rounded-xl p-4">
-      {/* ⚠⚠ `shrink-0`, AND IT CARRIES THE AXIS PICKER. Sized to its content, this dialog
+      {/*  `shrink-0`, AND IT CARRIES THE AXIS PICKER. Sized to its content, this dialog
           resized every time the axis changed — moving the select the reader had just used
           out from under the pointer. See `PanelDialog` for the fixed box. */}
       <div className="shrink-0 flex items-start justify-between gap-3 mb-2">
@@ -465,7 +465,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
         </div>
       </div>
 
-      {/* ⚠ `min-h-0` OR THE FIXED HEIGHT GIVES WAY. A flex item defaults to `min-height:auto`,
+      {/*  `min-h-0` OR THE FIXED HEIGHT GIVES WAY. A flex item defaults to `min-height:auto`,
           which refuses to shrink below its content, so `overflow-auto` here would be ignored and
           the section would grow instead — silently, and only for the longest tables. */}
       <div className="flex-1 min-h-0 overflow-auto">
@@ -494,10 +494,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               )}
             </div>
           )}
-          {/* ⚠ The identity IS the decomposition. If it fails, these are just three columns. */}
+          {/*  The identity IS the decomposition. If it fails, these are just three columns. */}
           {hasRows && !data.reconciles && (
             <p className="text-[12px] text-neg-300 mb-2">
-              {/* ⚠ THE ONE FIGURE IN THIS PANEL THAT IS NOT AT `DP`, AND DELIBERATELY SO. Every
+              {/*  THE ONE FIGURE IN THIS PANEL THAT IS NOT AT `DP`, AND DELIBERATELY SO. Every
                   other number here is a quantity a reader compares; this one is the PROOF that the
                   three columns are a decomposition, and it only ever appears when that proof has
                   failed. At two decimals a real 0.004pp break prints "+0.00%" — a banner announcing
@@ -507,7 +507,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </p>
           )}
 
-          {/* ⚠ NO COVERAGE NOTES HERE — ALL FOUR REMOVED ON REQUEST 2026-08-05, not overlooked.
+          {/*  NO COVERAGE NOTES HERE — ALL FOUR REMOVED ON REQUEST 2026-08-05, not overlooked.
               What they said is still true and the fields are still in the payload:
                 • `unattributed_excess_pct` — this table decomposes the ATTRIBUTABLE SLEEVE, not
                   the account: cash, income on positions closed during the year and the account’s
@@ -521,7 +521,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               screen. Read a row here as a statement about the sleeve that COULD be attributed,
               never about the account. */}
 
-          {/* ⚠ NO FORMULA STRIP HERE. Each effect's arithmetic lives in its OWN column header's
+          {/*  NO FORMULA STRIP HERE. Each effect's arithmetic lives in its OWN column header's
               info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
@@ -534,7 +534,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     prov={<Provenance source="derived" column kind="formula" note={`the ${w}s`}
                       what={`The ${w}s the excess is split across — including the ones ${benchmark} holds and you do NOT, because choosing not to own something is a decision the numbers can price.`}
                       how={copy.prov.bucketsHow(w)} />} />
-                  {/* ⚠ WORDS, NOT `w_P` / `R_B`. The subscripted notation was readable only while
+                  {/*  WORDS, NOT `w_P` / `R_B`. The subscripted notation was readable only while
                       the formula strip below carried its key (w = weight, R = return, P = you,
                       B = index); with that strip gone the symbols arrive undecoded, and the
                       `uppercase` on this row was flattening the lowercase `w` that carries half
@@ -606,7 +606,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   const open = openBucket === r.bucket;
                   return (
                     <Fragment key={r.bucket}>
-                    {/* ⚠ THE WHOLE ROW IS THE HIT TARGET, not a chevron in the first cell. Every
+                    {/*  THE WHOLE ROW IS THE HIT TARGET, not a chevron in the first cell. Every
                         figure on it belongs to the bucket the drill-down explains, so any of them
                         is a reasonable place to click and ask "which names is this?". */}
                     <tr onClick={() => setOpenBucket(open ? null : r.bucket)}
@@ -740,7 +740,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               hint={copy.names.detractorsHint} src={pSrc} asOf={portfolioAsOf}
               weightHow={pWeightSrc} returnHow={pReturnHow} />
             {/* The other half of "why" — and the half a holdings-only view can never show.
-                ⚠ `held={false}`: these three columns are the INDEX's weight, the index's return
+                 `held={false}`: these three columns are the INDEX's weight, the index's return
                 and what the name was worth TO THE INDEX. Same columns as the two lists beside it,
                 different subject — the per-cell text has to say so or a benchmark's gain reads as
                 something that happened in your book. */}

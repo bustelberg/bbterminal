@@ -25,7 +25,7 @@ REAL = [
     _row("ASML Holding", 3.250, 5.275297, -2.025297, -23800.950875, 0, 15, 38193.449125, 1589.60, 23844.0),
     _row("MasterCard", 1.300, 2.539570, -1.239570, -14567.220350, 0, 31, 15277.379650, 531.98, 14455.978259),
     _row("Effectenrekening Liquiditeiten", 1.358, 2.501220, -1.143220, -13434.924181, 0, 0, 15958.985819, 0.0, 0.0),
-    # ⚠ In the model and NOT held — the strategy says buy it and the book has not.
+    #  In the model and NOT held — the strategy says buy it and the book has not.
     _row("iShares Global Select Dividend 100", 2.000, 0.0, 2.000, 23000.0, 12, 0, 23000.0, 25.5, 23000.0),
 ]
 
@@ -49,14 +49,14 @@ class TestTheWeightsAreReadAsReported:
         assert m["iShares Global Select Dividend 100"].buy == 12
 
     def test_the_model_sums_to_100(self):
-        """⚠ Measured at EXACTLY 100.000 on every book. Far from it means a PARTIAL download, and
+        """ Measured at EXACTLY 100.000 on every book. Far from it means a PARTIAL download, and
         a partial model understates every weight without looking wrong."""
         full = [*REAL, _row("Filler", 92.092, 0, 0, 0, 0, 0, 0, 0, 0)]
         assert model_total_pct(parse_model(_xls(full))) == pytest.approx(100.0, abs=1e-3)
 
 
 class TestTheCashLineIsAliasedNotFuzzyMatched:
-    """⚠ THE ONE SYSTEMATIC RENAME. This sheet says `Effectenrekening Liquiditeiten`; the
+    """ THE ONE SYSTEMATIC RENAME. This sheet says `Effectenrekening Liquiditeiten`; the
     Vermogensoverzicht says `Effectenrekening`. One row, both books, every time — so it is an
     explicit alias. Fuzzy matching the whole join to absorb it would re-import the failure mode
     that put a cash line on Hermes' ISIN this morning."""
@@ -80,7 +80,7 @@ class TestAttachingToTheBook:
         assert by_name["Effectenrekening"].model_pct == pytest.approx(1.358)
 
     def test_a_model_line_the_book_does_not_hold_is_reported_as_drift(self):
-        """⚠ Measured: `iShares Global Select Dividend 100` is in BUS_Neutraal_Dyn's model and not
+        """ Measured: `iShares Global Select Dividend 100` is in BUS_Neutraal_Dyn's model and not
         held. Dropping it would hide the one thing a model-vs-book view is for."""
         _, unheld = attach_model(parse_model(_xls(REAL)), self.HOLD)
         assert [r.fonds for r in unheld] == ["iShares Global Select Dividend 100"]
@@ -97,7 +97,7 @@ class TestAttachingToTheBook:
 
 class TestTheSheetShapeIsChecked:
     def test_a_missing_required_column_raises(self):
-        """⚠ A silently empty model reads as "this book has no strategy", which is never true."""
+        """ A silently empty model reads as "this book has no strategy", which is never true."""
         rows = [{k: v for k, v in r.items() if k != "Model percentage"} for r in REAL]
         buf = BytesIO()
         pd.DataFrame(rows).to_excel(buf, index=False)

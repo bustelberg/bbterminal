@@ -4,7 +4,7 @@ import type { Lang } from '../../../lib/i18n';
 /**
  * What the headline benchmark figure actually is, as the ⓘ card's four fields.
  *
- * ⚠⚠ IT EXISTS BECAUSE THERE ARE NOW TWO BENCHMARK NUMBERS ONE CLICK APART. Since 2026-08-19 the
+ *  It exists because there are now two benchmark numbers one click apart. Since 2026-08-19 the
  * Scorecard's benchmark comes from the index ETF's own price series (`_benchmark_etf`), while the
  * Attribution panel still decomposes the constituent RECONSTRUCTION — because an ETF price has no
  * constituents in it to attribute. Measured on ACWI YTD, those disagree by ~2.8pp (+14.67% against
@@ -15,12 +15,12 @@ import type { Lang } from '../../../lib/i18n';
  * why from the screen. So the tile SAYS which one it is showing rather than leaving the difference
  * to be discovered.
  *
- * ⚠ THE SOURCE KEY IS PART OF THE ANSWER, NOT DECORATION. `benchmark` renders as "yfinance close
+ *  The source key is part of the answer, not decoration. `benchmark` renders as "yfinance close
  * (benchmark constituents)" and `benchmark_etf` as "GuruFocus daily close (index ETF)". Getting
  * that wrong prints one vendor's name over the other's number, which is the single failure the
  * provenance badge exists to make impossible.
  *
- * ⚠ AND `how` NAMES THE CONVERSION, not just the currency. "In EUR" is ambiguous between
+ *  AND `how` NAMES THE CONVERSION, not just the currency. "In EUR" is ambiguous between
  * "converted at today's rate" (which strips the currency leg out of the return entirely) and
  * "each mark at its own date's rate" (what EUR-basis means everywhere in this app, and what the
  * server does). On ACWI YTD those differ by 1.5pp — the whole of the dollar's move.
@@ -36,7 +36,7 @@ export type BenchmarkProvenance = {
   asOf?: string | null;
   /** The index label the tile is measured against, e.g. 'ACWI'. */
   label: string;
-  /** The four numbers the return is made of. ⚠ `fx*` is the ETF currency PER EUR (1.1750 USD/EUR),
+  /** The four numbers the return is made of.  `fx*` is the ETF currency PER EUR (1.1750 USD/EUR),
    *  the direction the formula divides by. All absent on the rebuild path. */
   openPrice?: number | null;
   closePrice?: number | null;
@@ -62,12 +62,12 @@ const pc = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 /**
  * The rule, then the same rule with this window's own numbers under it.
  *
- * ⚠ THE BLANK LINE IS THE POINT, and it survives only because the card renders `how` with
+ *  The blank line is the point, and it survives only because the card renders `how` with
  * `whitespace-pre-wrap`. In a plain span every run of whitespace collapses to one character and
  * the two lines would run together into one long sentence — which is exactly the thing a worked
  * example is supposed to break up.
  *
- * ⚠ IT DEGRADES TO THE RULE ALONE when any mark is missing, rather than printing `undefined ÷
+ *  It degrades to the rule alone when any mark is missing, rather than printing `undefined ÷
  * undefined`. An older payload (before the marks were carried) and the rebuild path both land
  * here, and a formula card that renders "NaN" is worse than one that only states the method.
  */
@@ -85,7 +85,7 @@ function etfFormula(
     + `÷ (${px(openPrice as number)} ÷ ${fx(openFx as number)}) − 1`
     + (typeof eurPct === 'number' ? ` = ${pc(eurPct)}` : '');
   const dated = from && asOf ? `${from} → ${asOf}` : null;
-  // ⚠ A BLANK LINE BETWEEN THEM, not a bullet or a dash: the second line IS the first line, said
+  //  A blank line between them, not a bullet or a dash: the second line IS the first line, said
   // again with numbers. Anything that reads as a new item invites it to be read as a new fact.
   return `${rule}\n\n${dated ? `${dated}\n` : ''}${worked}`;
 }
@@ -101,7 +101,7 @@ export function benchmarkProvenance(p: BenchmarkProvenance, lang: Lang = 'en'): 
       how: etfFormula(p, lang),
     };
   }
-  // ⚠ THE FALLBACK IS NAMED, NOT LEFT BLANK. The AEX has no reachable ETF and a window opening
+  //  The fallback is named, not left blank. The AEX has no reachable ETF and a window opening
   // before the fund existed cannot use one, so this path is reached on purpose — and its number
   // carries known biases the ETF's does not. Saying "rebuilt from constituents" is what lets a
   // reader ask why it differs from the figure they can look up. There is no worked line here

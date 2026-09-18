@@ -26,7 +26,7 @@ describe('usableStep — the skip rule', () => {
     expect(s.span).toBe(1);
     expect(s.skipped).toBe(0);
     expect(s.growth).toBeCloseTo(0.10, 10);
-    // ⚠ over one period the total IS the annual figure — no root taken.
+    //  over one period the total IS the annual figure — no root taken.
     expect(s.annualised).toBe(s.growth);
   });
 
@@ -41,7 +41,7 @@ describe('usableStep — the skip rule', () => {
     expect(s.annualised).toBeCloseTo(2 ** (1 / 3) - 1, 10);   // +25.99%/yr
   });
 
-  it('⚠ walks past a POSITIVE base that is immaterial — the case a sign test misses', () => {
+  it(' walks past a POSITIVE base that is immaterial — the case a sign test misses', () => {
     // Eli Lilly ran 5.085 → −3.489 → 0.458 → 6.632. `0.458` is positive, and dividing by it prints
     // +1,348% for a company whose three-year growth was +30.4%. Scale is Lilly's own median |FCF/sh|
     // over its full history (~5.085), so the floor is 0.509 and 0.458 sits under it.
@@ -59,7 +59,7 @@ describe('usableStep — the skip rule', () => {
   });
 
   it('refuses a base orders of magnitude below the series, and says so with null', () => {
-    // The Japan Post Bank shape. ⚠ THIS TEST IS ABOUT THE DIVISOR ONLY: the base of 4.998 is a
+    // The Japan Post Bank shape.  THIS TEST IS ABOUT THE DIVISOR ONLY: the base of 4.998 is a
     // rounding error against a series in the thousands and is refused. The FY2025 figure being
     // 1,000x too large (its `shares` cell is 1,000x too small) is a vendor defect in the VALUE,
     // which no growth rule can mend — see `yoyStep`.
@@ -88,7 +88,7 @@ describe('usableStep — the skip rule', () => {
     expect(s.annualised).toBe(s.growth);
   });
 
-  it('⚠ refuses a rate for a MULTI-period step ending below zero, because none exists', () => {
+  it(' refuses a rate for a MULTI-period step ending below zero, because none exists', () => {
     // The company that turned negative and never came back — the one case the skip rule cannot
     // reach: it bridges a dip BETWEEN two positive years, and there is no far side here.
     // `1 + growth ≤ 0` over 2 periods has no real square root.
@@ -99,7 +99,7 @@ describe('usableStep — the skip rule', () => {
     expect(s.annualised).toBeNull();                          // …but there is no rate. Not NaN.
   });
 
-  it('⚠ telescopes across the USABLE periods — and the whole column does NOT', () => {
+  it(' telescopes across the USABLE periods — and the whole column does NOT', () => {
     // I asserted the stronger property first and this caught it. `4 → −2 → 0.05 → 6 → 9` at scale 4
     // (floor 0.4) has usable indices 0, 3, 4.
     const vals = [4, -2, 0.05, 6, 9];
@@ -113,7 +113,7 @@ describe('usableStep — the skip rule', () => {
     expect(step(vals, 3, scale)!.from).toBe('0');              // …skipping −2 and 0.05
     expect(step(vals, 4, scale)!.from).toBe('3');              // …then continuing from 6
 
-    // ⚠ AND THE FULL COLUMN OVERLAPS. The cells at 1 and 2 are ALSO measured from index 0, so they
+    //  And the full column overlaps. The cells at 1 and 2 are ALSO measured from index 0, so they
     // are not links in that chain — they answer "where is this against the last solid base".
     let all = 1;
     for (let i = 1; i < vals.length; i += 1) {
@@ -148,7 +148,7 @@ describe('negativeRunStart', () => {
     expect(runFrom([5, 0, -1], 2)).toBe('1');
   });
 
-  it('⚠ stops at a GAP. An unreported period is not a negative one, and walking through it would '
+  it(' stops at a GAP. An unreported period is not a negative one, and walking through it would '
     + 'date the turn to before a year we have no figure for', () => {
     expect(runFrom([5, -1, null, -3], 3)).toBe('3');
   });

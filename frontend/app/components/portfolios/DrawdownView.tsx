@@ -1,21 +1,21 @@
 'use client';
 
 /**
- * MAX DRAWDOWN — the Risk panel's fifth view.
+ * Max drawdown — the Risk panel's fifth view.
  *
  *     Wₜ = ∏(1 + Rₛ)    Mₜ = max_{s≤t} Wₛ    DDₜ = Wₜ/Mₜ − 1    MDD = min DDₜ
  *
- * ⚠⚠ THIS IS THE RECONSTRUCTION, NOT THE CLIENT'S DRAWDOWN, and the panel says so where it cannot
+ *  This is the reconstruction, not the client's drawdown, and the panel says so where it cannot
  * be missed. It rebuilds a series from the holdings as they stand TODAY, so it carries look-ahead
  * bias (those weights were chosen with hindsight) and survivorship bias (names since sold are
  * absent — and the sold ones skew towards the fallers). The number for a client report is the one
  * from the AIRS returns, with real trades, real costs and real timing. Two different figures, not
  * interchangeable.
  *
- * ⚠⚠ DAILY ONLY. A drawdown compares a series with itself, so there is no cross-market close-time
+ *  Daily only. A drawdown compares a series with itself, so there is no cross-market close-time
  * bias to trade off. Coarsening instead hides a fall that recovers inside a week or month.
  *
- * ⚠ AND THE PERCENTAGE IS THE LEAST USEFUL PART. "−31.4%" is one number; "peaked 19 Feb, bottomed
+ *  And the percentage is the least useful part. "−31.4%" is one number; "peaked 19 Feb, bottomed
  * 7 Apr after 33 days, back to level 12 Aug after another 91" is a conversation.
  */
 import { useEffect, useState } from 'react';
@@ -39,9 +39,9 @@ const day = (d: string | null | undefined) =>
     { day: 'numeric', month: 'short', year: 'numeric' }));
 
 /**
- * EVERY SYMBOL THIS VIEW USES, DEFINED ONCE — same rule as the other three risk views.
+ * Every symbol this view uses, defined once — same rule as the other three risk views.
  *
- * ⚠ A DRAWDOWN IS THREE QUANTITIES, NOT ONE, and the reader has to hold all three at once: the
+ *  A drawdown is three quantities, not one, and the reader has to hold all three at once: the
  * wealth curve, its running maximum, and the gap between them. Defining them per card would be
  * three chances to describe the high-water mark differently.
  */
@@ -111,9 +111,9 @@ export default function DrawdownView({
   const worst = data?.worst;
 
   /**
-   * WHAT EVERY CARD HERE IS MEASURED FROM, AND OVER WHAT WINDOW — built once.
+   * What every card here is measured from, and over what window — built once.
    *
-   * ⚠ THE SAME TWO STRINGS THE OTHER THREE RISK VIEWS BUILD, from one `build_paired_series`.
+   *  The same two strings the other three risk views build, from one `build_paired_series`.
    */
   const where = data?.available
     ? `${v(data.observations)} ${v(data.frequency)} returns, prices from ${v(sourceField('yfinance'))} `
@@ -121,7 +121,7 @@ export default function DrawdownView({
       + `against ${v(data.benchmark)}'s tracker.`
     : '';
 
-  /** ⚠ TWO CLOCKS — a price window and a weights date. See the ⚠⚠ in `TrackingErrorView`. */
+  /**  TWO CLOCKS — a price window and a weights date. See the  in `TrackingErrorView`. */
   const when = data?.available
     ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
       + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
@@ -142,7 +142,7 @@ export default function DrawdownView({
 
       {data?.available && (
         <>
-          {/* ⚠⚠ THE PROVENANCE WARNING LEADS, above the numbers rather than in a footnote. It is
+          {/*  THE PROVENANCE WARNING LEADS, above the numbers rather than in a footnote. It is
               not a caveat about precision — it says this is a DIFFERENT QUANTITY from the one a
               client report carries, and a reader who takes it for the client's own drawdown has
               been misled by the panel rather than by the data. */}
@@ -158,7 +158,7 @@ export default function DrawdownView({
                 where={where}
                 when={when}
                 worked={data.max_drawdown_pct == null ? '' : withWorked(
-                  // ⚠ ONE STATEMENT PER LINE, BROKEN HERE RATHER THAN BY THE BOX. The formula
+                  //  One statement per line, broken here rather than by the box. The formula
                   // block honours `\n`; left as one line it wraps at whatever operator lands on
                   // the 22rem edge, which is harder to read than no formula at all.
                   String.raw`W_t = \prod_s (1 + R_s)\qquad M_t = \max_{s \le t} W_s\qquad MDD = \min_t \left( \dfrac{W_t}{M_t} - 1 \right)`,
@@ -181,9 +181,9 @@ export default function DrawdownView({
                   + 'comparable.'}
                 where={where}
                 when={when}
-                how={'For scale. ⚠ It carries none of this book\'s survivorship bias — the index '
+                how={'For scale.  It carries none of this book\'s survivorship bias — the index '
                   + 'kept its fallers — so the gap between the two flatters the book.'} />} />} />
-            {/* ⚠⚠ THE VALUE IS THE FILTERED COUNT, and it did not used to be. The label has
+            {/*  THE VALUE IS THE FILTERED COUNT, and it did not used to be. The label has
                 always promised "over 5%" while the tile showed `episodes_total`, which counts
                 every peak-to-recovery cycle including a bad afternoon that came back the next
                 session — 68 of them here against 6 real falls. A heading that names a
@@ -199,8 +199,8 @@ export default function DrawdownView({
                   + 'shallower dip is counted too.'}
                 where={where}
                 when={when}
-                how={'⚠ ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four '
-                  + '−25%s share a maximum and are not the same risk. ⚠ A 40% fall that bounces 5% '
+                how={' ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four '
+                  + '−25%s share a maximum and are not the same risk.  A 40% fall that bounces 5% '
                   + 'and falls further is ONE drawdown, not two — splitting on direction would '
                   + 'report shallow dips and no crash.'} />} />} />
           </div>
@@ -224,7 +224,7 @@ export default function DrawdownView({
                         <span className="text-fg-faint"> ({worst.recovery_periods} {unit})</span>
                       </>
                     )
-                    /* ⚠ NOT A DASH. "Still underwater" is a fact about the book; a dash reads as
+                    /*  NOT A DASH. "Still underwater" is a fact about the book; a dash reads as
                        a missing figure. */
                     : <span className="text-warn-300">{t.dd.stillUnderwater}</span>}
                 </div>
@@ -275,7 +275,7 @@ export default function DrawdownView({
           )}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {/* ⚠ THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as the tracking-error and
+            {/*  THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as the tracking-error and
                 volatility footnotes. "Today's weights over 5 years" asserted a start date
                 instead of reporting one, and the paired grid rarely reaches the full five. */}
             {`${portfolioName}'s stock sleeve at its current weights, priced from `}

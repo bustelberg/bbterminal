@@ -1,5 +1,5 @@
 /**
- * ⚠⚠ TEXT MUST SURVIVE EVERY PATH THROUGH THE SPLITTER. The badging itself is cosmetic — if a
+ *  Text must survive every path through the splitter. The badging itself is cosmetic — if a
  * value renders unbadged nobody is misled. Losing a run of text is not cosmetic: a tooltip that
  * silently drops the second half of a sentence still looks like a finished tooltip, which is the
  * same shape of failure as the unescaped `%` that truncated a formula at its first percentage.
@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import DynamicText, { hasValues, splitValues, v } from './dynamicValue';
 
-/** ⚠ RESTATED HERE RATHER THAN EXPORTED. Exporting the marks would invite a caller to build one
+/**  RESTATED HERE RATHER THAN EXPORTED. Exporting the marks would invite a caller to build one
  *  by hand; duplicating them in the test pins the codepoints, which is the point — they were
  *  U+0001/U+0002 and painted tofu boxes wherever a marked string bypassed the renderer. */
 const MARK_OPEN = String.fromCharCode(0x2060);
@@ -31,15 +31,15 @@ describe('v', () => {
   it('takes a number, a string, or nothing at all', () => {
     expect(splitValues(v('ACWI'))).toEqual([{ text: 'ACWI', dynamic: true }]);
     expect(splitValues(v(0))).toEqual([{ text: '0', dynamic: true }]);
-    // ⚠ `v(null)` IS A REAL CASE — a date that was never recorded, formatted away upstream — and
+    //  `v(null)` IS A REAL CASE — a date that was never recorded, formatted away upstream — and
     // an empty badge is a floating grey rectangle that reads as a rendering fault.
     expect(splitValues(v(null))).toEqual([]);
     expect(splitValues(v(undefined))).toEqual([]);
     expect(splitValues(v(''))).toEqual([]);
   });
 
-  it('⚠ strips marks out of the value itself', () => {
-    // ⚠⚠ A VALUE IS DATA — a portfolio name somebody typed, a label from a vendor. One carrying a
+  it(' strips marks out of the value itself', () => {
+    //  A value is data — a portfolio name somebody typed, a label from a vendor. One carrying a
     // sentinel would close its badge early and swallow the rest of the sentence into the next one.
     const hostile = `${MARK_CLOSE}evil${MARK_OPEN}`;
     expect(splitValues(`a ${v(hostile)} b`)).toEqual([
@@ -66,8 +66,8 @@ describe('splitValues', () => {
     ]);
   });
 
-  it('⚠ keeps every character on an unbalanced mark', () => {
-    // ⚠⚠ THE FAILURE THIS GUARDS. A naive pairing turns a stray open mark into a badge that runs
+  it(' keeps every character on an unbalanced mark', () => {
+    //  The failure this guards. A naive pairing turns a stray open mark into a badge that runs
     // to the end of the string — or drops the tail entirely. Here the mark is discarded and the
     // text is not: at worst a value renders unbadged, which nobody is harmed by.
     const stray = `head ${MARK_OPEN}tail never closed`;
@@ -94,7 +94,7 @@ describe('hasValues', () => {
 
 describe('DynamicText', () => {
   it('renders the same words either way', () => {
-    // ⚠ THE READER'S SENTENCE IS UNCHANGED BY BADGING — only its typography. A conversion that
+    //  The reader's sentence is unchanged by badging — only its typography. A conversion that
     // altered the text would be a copy change disguised as a styling one.
     expect(shown(<DynamicText text={`held ${v(44)} of ${v(1678)} names`} />))
       .toBe('held 44 of 1678 names');
@@ -109,7 +109,7 @@ describe('DynamicText', () => {
   });
 
   it('emits no markup at all for unmarked prose', () => {
-    // ⚠ WHAT MAKES ADOPTION INCREMENTAL: a string nobody has converted renders byte-for-byte as
+    //  What makes adoption incremental: a string nobody has converted renders byte-for-byte as
     // it did before this component existed.
     expect(renderToStaticMarkup(<DynamicText text="held 44 names" />)).toBe('held 44 names');
   });

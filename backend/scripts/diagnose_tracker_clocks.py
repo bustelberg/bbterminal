@@ -1,17 +1,17 @@
 """Which trading session each risk tracker closes in, and how much of the index closes with it.
 
-⚠⚠ THE TRACKING-ERROR PANEL WARNS THAT DAILY CLOSES ARE NOT SYNCHRONOUS, and the warning names one
+ THE TRACKING-ERROR PANEL WARNS THAT DAILY CLOSES ARE NOT SYNCHRONOUS, and the warning names one
 cause — "the tracker closes at 16:30 London, a US holding at 21:00". That claim is about the VENUE
 we price the tracker on, not about the fund: an ISIN names a fund, and `asset_execution` picks which
 listing of it we actually read. So the warning could be right, stale, or wrong, and nothing on
 screen says which. This prints the venue behind each tracker and the session split of the index it
 is supposed to stand for, which is what decides whether repointing a tracker would help.
 
-⚠ SESSIONS, NOT CLOCK TIMES, ARE THE UNIT THAT MATTERS. Two series are synchronous when their bars
+ SESSIONS, NOT CLOCK TIMES, ARE THE UNIT THAT MATTERS. Two series are synchronous when their bars
 close in the same session; the exact minute is a DST detail that changes twice a year and would give
 this report a false precision. Approximate UTC closes are printed as orientation only.
 
-⚠ READ-ONLY. It writes nothing and touches no vendor.
+ READ-ONLY. It writes nothing and touches no vendor.
 
     cd backend && uv run python scripts/diagnose_tracker_clocks.py
     cd backend && uv run python scripts/diagnose_tracker_clocks.py --isins IE00B6R52259,US4642882579
@@ -29,10 +29,10 @@ import deps  # noqa: E402,F401  (loads .env / .env.local first)
 from deps import IN_CHUNK_SIZE, supabase  # noqa: E402
 from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: E402
 
-# ⚠ BY LISTING COUNTRY, WHICH IS THE VENUE'S — never the issuer's domicile. A US company on a German
+#  By listing country, which is the venue's — never the issuer's domicile. A US company on a German
 # line closes at the German bell, and that is the only fact synchrony cares about. `asset_grid`
 # carries both; picking the wrong one is the trap `CLAUDE.md` records for `msci_region`.
-# ⚠ `listing_country` HOLDS FULL NAMES ("United States"), NOT ISO-2 CODES — checked against the
+#  `listing_country` HOLDS FULL NAMES ("United States"), NOT ISO-2 CODES — checked against the
 # live grid, where a code-keyed table silently bucketed every row as UNMAPPED and the report still
 # printed a confident-looking breakdown. Codes stay in as a second key so an ISO-2 column elsewhere
 # does not have to be special-cased.
@@ -64,7 +64,7 @@ def _session(country: str | None) -> str:
     for name, (members, _) in _SESSION.items():
         if c in members:
             return name
-    # ⚠ NOT SILENTLY BUCKETED. An unmapped country is a hole in the table above, and folding it into
+    #  Not silently bucketed. An unmapped country is a hole in the table above, and folding it into
     # the biggest session would make this report agree with itself while being wrong.
     return f"UNMAPPED({c or '—'})"
 
@@ -97,7 +97,7 @@ def _report_trackers(isins: dict[str, str]) -> dict[str, str]:
         found = by_isin.get(isin.upper(), [])
         print(f"\n{label}  ({isin})")
         if not found:
-            # ⚠ LOUD. A tracker with no row is a benchmark leg that cannot be priced at all, which
+            #  LOUD. A tracker with no row is a benchmark leg that cannot be priced at all, which
             # is a bigger problem than the clock question this script was written for.
             print("  !! NO asset_grid ROW — this benchmark has no priced listing.")
             continue
@@ -142,7 +142,7 @@ def _report_index(label: str, tracker_session: str | None) -> None:
         print("  !! no priced constituents")
         return
 
-    aids = [m["company_id"] for m in mem]           # ⚠ the analysis_id, see `members`' docstring
+    aids = [m["company_id"] for m in mem]           #  the analysis_id, see `members`' docstring
     country: dict[int, str] = {}
     for i in range(0, len(aids), IN_CHUNK_SIZE):
         res = (supabase.table("asset_grid").select("analysis_id,listing_country")
@@ -168,7 +168,7 @@ def _report_index(label: str, tracker_session: str | None) -> None:
         aligned = (by_sess.get(tracker_session, 0.0) / total * 100.0) if total > 0 else 0.0
         print(f"\n  => {aligned:.2f}% of the index closes WITH the tracker; "
               f"{100 - aligned:.2f}% does not.")
-        # ⚠ THE ACTIONABLE COMPARISON. If the largest session is not the tracker's, repointing the
+        #  The actionable comparison. If the largest session is not the tracker's, repointing the
         # tracker to a listing in that session strictly reduces the misaligned weight.
         biggest = max(by_sess, key=lambda k: by_sess[k])
         if biggest != tracker_session:

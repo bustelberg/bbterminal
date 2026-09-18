@@ -3,7 +3,7 @@
 import { useLang, type Lang } from '../../../lib/i18n';
 import { type HomeTileKey } from './homeTileKeys';
 
-// ⚠⚠ NO RE-EXPORT OF `HOME_TILE_ORDER` FROM HERE, DELIBERATELY. Re-exporting it would restore the
+//  No re-export of `HOME_TILE_ORDER` FROM HERE, DELIBERATELY. Re-exporting it would restore the
 // exact bug the split fixes: a server component could import the array through this `'use client'`
 // module and get a client-reference proxy again, with nothing in the import path hinting why. Data
 // comes from `homeTileKeys.ts` directly, for every caller.
@@ -11,18 +11,18 @@ import { type HomeTileKey } from './homeTileKeys';
 /**
  * The home page's copy, in both languages.
  *
- * ⚠⚠ THE TILE REGISTRY IS KEYED BY HREF, AND THAT IS WHAT STOPS IT DRIFTING. The list used to be an
+ *  The tile registry is keyed by href, and that is what stops it drifting. The list used to be an
  * array of {href, label, description} objects inside 'app/page.tsx', which meant adding a page put
  * its English copy in one file and its Dutch copy nowhere. Record<HomeTileKey, …> makes a missing
  * Dutch entry a COMPILE ERROR rather than an empty tile — the same rule 'i18n.ts' states for every
  * translated surface: English is the source, the Dutch follows, and a forgotten string must fail
  * the build instead of silently falling back and looking like a rendering fault.
  *
- * ⚠⚠ THE KEY AND THE ORDER LIVE IN 'homeTileKeys.ts', WHICH HAS NO 'use client'. They were here, and
+ *  The key and the order live in 'homeTileKeys.ts', WHICH HAS NO 'use client'. They were here, and
  * the server component that filters them by role got a client-reference PROXY instead of an array —
  * a runtime TypeError on the home page, invisible to tsc and to vitest. See that file.
  *
- * ⚠ THE HREF IS THE KEY, NOT AN INDEX. A tile's copy cannot end up on the wrong tile, and the route
+ *  The href is the key, not an index. A tile's copy cannot end up on the wrong tile, and the route
  * gate's 'isUserAllowedPath' filters the SAME values the page renders.
  */
 type Tile = { label: string; description: string };
@@ -104,7 +104,7 @@ const EN: HomeCopy = {
   },
 };
 
-/** ⚠ TRANSLATED FROM THE ENGLISH ABOVE, never authored here — see the note on `Lang`. Product names
+/**  TRANSLATED FROM THE ENGLISH ABOVE, never authored here — see the note on `Lang`. Product names
  *  (BBTerminal, LongEquity, ACWI, Leonteq, GuruFocus, MomentumTopSelectie) stay untranslated: they
  *  are what the things are called, in either language. */
 const NL: HomeCopy = {
@@ -178,7 +178,7 @@ const NL: HomeCopy = {
   },
 };
 
-/** ⚠ EXPORTED FOR THE DRIFT TEST, NOT FOR CALL SITES — components use `useHomeCopy()`, which
+/**  EXPORTED FOR THE DRIFT TEST, NOT FOR CALL SITES — components use `useHomeCopy()`, which
  *  picks the reader's language. The compiler guarantees each language COVERS `HomeTileKey`; what it
  *  cannot see is the two maps disagreeing with `HOME_TILE_ORDER`, or a Dutch string left as its
  *  English source. `homeCopy.test.ts` reads this to check both. */

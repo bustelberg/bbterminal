@@ -5,7 +5,7 @@ import { LANGS, LANG_LABEL, type Lang } from '../../lib/i18n';
 /**
  * EN | NL, as a joined segmented bar.
  *
- * ⚠ SEGMENTED, NOT TWO PILLS — the shape carries the meaning. A joined bar says "exactly one of
+ *  SEGMENTED, NOT TWO PILLS — the shape carries the meaning. A joined bar says "exactly one of
  * these", which is what a language is; separate pills say "any of these", the shape the `Tables`
  * tab's row and window filters use because those genuinely combine. Borrowing the wrong one would
  * promise that EN and NL can both be on.

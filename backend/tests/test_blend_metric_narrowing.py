@@ -5,13 +5,13 @@ That is right for a 40-name book and impossible for an index: the S&P 500 is ~1,
 for a checkbox. So a request may NAME its metrics, and the read becomes one chunked, paged query
 per metric across every constituent.
 
-⚠ THE DANGER IS NOT SPEED, IT IS DIVERGENCE. Two loaders feeding one blend is two places for the
+ THE DANGER IS NOT SPEED, IT IS DIVERGENCE. Two loaders feeding one blend is two places for the
 rules to live — which cadence spelling a metric uses, which code the result is emitted under, what
 happens to a company with no rows. If they drift, a chart shows a portfolio line and a benchmark
 line built by different rules and calls the gap a finding. So the narrowed reader is asserted to
 produce the SAME rows as the loop it replaces, on both cadences.
 
-⚠ AND THE TTM ROWS MUST CARRY `company_id`. They are synthesised, not read, so the field is easy
+ AND THE TTM ROWS MUST CARRY `company_id`. They are synthesised, not read, so the field is easy
 to leave off — and `_blend_rows` keys every point by the company that reported it. Without it a
 PORTFOLIO's growth cards raised KeyError the moment the tab switched to quarterly (a 500), while
 the single-company path, which never blends, stayed green. Measured and fixed 2026-08-04.
@@ -69,6 +69,23 @@ def _key(rows: list[dict]) -> set[tuple]:
 
 
 class TestTheNarrowedReadMatchesTheLoop:
+    def test_capex_accepts_the_property_plant_equipment_vendor_spelling(self, earnings):
+        assert "annuals__Cashflow Statement__Purchase Of Property, Plant, Equipment" in \
+            earnings._metric_codes("capex")
+
+    def test_annual_alias_is_normalised_so_ltm_continues_the_same_series(
+            self, earnings, monkeypatch):
+        alias = "annuals__per_share_data_array__EPS without NRI"
+        monkeypatch.setattr(
+            earnings, "_rows_by_company",
+            lambda _cids, _codes: {1: [{"company_id": 1, "metric_code": alias,
+                                        "target_date": "2025-12-31", "numeric_value": 17.01}]})
+        monkeypatch.setattr(earnings, "_ltm_blend_rows", lambda *_args: [])
+
+        rows = earnings._bulk_blend_rows([1], ["eps_nri"], "annual")
+
+        assert [row["metric_code"] for row in rows] == [earnings._metric_codes("eps_nri")[0]]
+
     def test_annual_rows_are_the_same_rows(self, earnings):
         loop = [r for cid in (1, 2) for r in earnings._company_metric_rows(cid)]
         bulk = earnings._bulk_blend_rows([1, 2], ["revenue", "fcf_ps"], "annual")

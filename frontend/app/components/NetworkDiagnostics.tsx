@@ -350,7 +350,7 @@ export default function NetworkDiagnostics() {
                     <div>
                       Impersonating <span className="font-mono">{circuit.preferred_target ?? '—'}</span>
                       {circuit.proxy_configured ? ' through a proxy.' : ' directly (no proxy).'}
-                      {!circuit.curl_cffi_available && ' ⚠ curl_cffi missing — prod calls will be blocked.'}
+                      {!circuit.curl_cffi_available && '  curl_cffi missing — prod calls will be blocked.'}
                     </div>
                     <div>
                       {circuit.circuit_open

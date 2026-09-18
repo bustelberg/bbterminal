@@ -6,7 +6,7 @@ SAME company OpenFIGI identified for the ISIN (rapidfuzz name match — the same
 
     uv run python scripts/asset_audit_mappings.py
 
-⚠⚠ IT NO LONGER ACTS, AND THE COUNT IS WHY. `--fix` re-queued every mismatch for re-resolution;
+ IT NO LONGER ACTS, AND THE COUNT IS WHY. `--fix` re-queued every mismatch for re-resolution;
 measured 2026-09-04 on the live grid, 110 rows fail this test and only ~15 are genuinely the wrong
 company. The rest are OpenFIGI's own spelling — `MUENCHENER RUECKVER AG-REG` for Münchener
 Rückversicherungs-Gesellschaft, `IND & COMM BK OF CHINA-H` for ICBC, `SAMSUNG ELECTRO-REGS GDR
@@ -16,7 +16,7 @@ an overloaded caller with an EMPTY list rather than a 429, so the ranker picks f
 missing the real listing (Alphabet -> GOOA.VI, 75,000x thinner). The action lives in
 `scripts/asset_fix_mismaps.py`, which takes the ISINs a human has checked.
 
-⚠ THE TEST IS RE-RUN RATHER THAN READ off `identity_status`, deliberately: this is the checker, and
+ THE TEST IS RE-RUN RATHER THAN READ off `identity_status`, deliberately: this is the checker, and
 a row stamped before a change to `same_company` carries a verdict nobody has re-asked. The two
 agreed exactly when last compared (110 = 110).
 
@@ -78,8 +78,8 @@ def main() -> None:
           f"{no_figi} no-OpenFIGI-name · {unmapped} unmapped", flush=True)
 
     if bad and APPLY:
-        # ⚠⚠ `--fix` IS REFUSED, AND IT IS REFUSED HERE BECAUSE THIS WAS THE SECOND DOOR TO THE
-        # SAME BLANKET RE-RESOLVE. `asset_fix_mismaps.py` was made review-first on 2026-09-04 —
+        #  `--fix` IS REFUSED, AND IT IS REFUSED HERE BECAUSE THIS WAS THE SECOND DOOR TO THE
+        # Same blanket re-resolve. `asset_fix_mismaps.py` was made review-first on 2026-09-04 —
         # measured, only ~15 of these 110 are genuinely the wrong company, the rest are OpenFIGI's
         # own spelling (`MUENCHENER RUECKVER AG-REG`, `IND & COMM BK OF CHINA-H`, `DHL GROUP`) —
         # and this line went straight to `queue.enqueue` on ALL of them, bypassing that entirely.

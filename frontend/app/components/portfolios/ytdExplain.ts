@@ -94,15 +94,15 @@ export function explainWarnings(t: ExplainTrace): string[] {
   const p = t.portfolio;
   if (!p) return out;
   if (!p.reconciles) {
-    out.push(`⚠ contributions do NOT sum to the YTD: Σ ${pct(p.sum_of_contributions_pp, 6)} `
+    out.push(` contributions do NOT sum to the YTD: Σ ${pct(p.sum_of_contributions_pp, 6)} `
       + `vs ${pct(p.ytd_pct, 6)}. The legs below do not explain this number — treat the whole `
       + `dump as suspect and report it.`);
   }
   if (p.low_coverage) {
-    out.push(`⚠ coverage ${p.covered_pct.toFixed(1)}% is under the floor — no YTD is returned. `
+    out.push(` coverage ${p.covered_pct.toFixed(1)}% is under the floor — no YTD is returned. `
       + `The unpriced legs below are the reason.`);
   } else if (p.covered_pct < 99.9) {
-    out.push(`⚠ only ${p.covered_pct.toFixed(1)}% of the model's weight could be priced, so the `
+    out.push(` only ${p.covered_pct.toFixed(1)}% of the model's weight could be priced, so the `
       + `return is renormalised over ${p.resolved_holdings} of `
       + `${p.resolved_holdings + p.unresolved_holdings} instruments. Two deployments that resolve `
       + `a DIFFERENT number of holdings will disagree on the YTD even with identical prices — `

@@ -1,7 +1,7 @@
 /** Shared types + helpers for the FCF margin card and its drill-down. The margin is derived on
  *  the client from three raw lines so the numbers and the drill-down can't disagree.
  *
- *  ⚠ The SBC subtraction is no longer unconditional — it follows the tab-level correction toggle
+ *   The SBC subtraction is no longer unconditional — it follows the tab-level correction toggle
  *  (`correctedFcf`). It used to be hardcoded here while two sibling cards never applied it, so one
  *  screen could describe the same book as both SBC-corrected and not. */
 
@@ -32,7 +32,7 @@ export const fmtRevM = (v: number | null | undefined) => {
 export const fmtRatioPct = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(1)}%`);
 
 /**
- * ⚠ THE COVERAGE FLOOR, SHARED BY EVERY CARD ON THE TAB. A year's aggregate is only drawn when
+ *  The coverage floor, shared by every card on the tab. A year's aggregate is only drawn when
  * this share of the charted holdings actually reported it.
  *
  * Without it the newest fiscal year is the dangerous one: books close on different dates, so early
@@ -42,12 +42,12 @@ export const fmtRatioPct = (v: number | null | undefined) => (v == null ? '—' 
  * and it is a move in the sample. The same applies at the left edge, where holdings had not listed
  * yet.
  *
- * ⚠ 60 → 80 (2026-07-28) → 50 (2026-08-12, on request: half the constituents in a period should
+ *  60 → 80 (2026-07-28) → 50 (2026-08-12, on request: half the constituents in a period should
  * draw that period). `<` is the comparison, so exactly 50% clears. The newest-year artifact above
- * is now an ACCEPTED cost rather than a prevented one — see the backend constant's ⚠⚠, and note
+ * is now an ACCEPTED cost rather than a prevented one — see the backend constant's , and note
  * that the targeted fix, if it ever bites, is a stricter bar on the LATEST period alone.
  *
- * ⚠ ONE NUMBER, AND EVERY MENTION OF IT READS IT. The two `benchNote` sentences used to spell "80%"
+ *  One number, and every mention of it reads it. The two `benchNote` sentences used to spell "80%"
  * into their text, so lowering the floor would have left the legend confidently quoting a floor
  * that no longer existed.
  *
@@ -60,14 +60,14 @@ export const MIN_YEAR_COVERAGE_PCT = 50;
 /**
  * A period LABEL from the server → the numeric x every card plots on.
  *
- * ⚠ THIS EXISTS BECAUSE `Number("2025-Q3")` IS **NaN**, AND NaN IS A VALID Map KEY. Every card on
+ *  This exists because `Number("2025-Q3")` IS **NaN**, AND NaN IS A VALID Map KEY. Every card on
  * this tab keyed its series with `Number(year)`, which was correct while the server only ever sent
  * "2025" — and the day it started sending trailing-twelve-month labels, all 42 quarterly periods
  * collapsed onto ONE NaN key and nine charts went blank. Not one of them errored: the drill-down
  * modals read the same payload as strings and rendered perfectly, so the data was visibly there
  * while the chart above it was empty.
  *
- * ⚠ FRACTIONAL YEARS, NOT AN INDEX. A quarter is a quarter OF A YEAR, so four points span exactly
+ *  Fractional years, not an index. A quarter is a quarter OF A YEAR, so four points span exactly
  * 1.0 on the axis — which keeps the spacing honest when a series has gaps and keeps any per-year
  * arithmetic (the growth cards' CAGR) per year. `2025-Q3` → 2025.5.
  */
@@ -92,7 +92,7 @@ export const periodToX = (period: string): number => {
 /** The inverse, for an axis tick or a tooltip: 2025 → "2025", 2025.5 → "2025 Q3". Without it an
  *  axis tick reads "2025.5", which is a year that does not exist.
  *
- *  ⚠ KNOWN AMBIGUITY, AND IT IS THE LEAST-BAD ONE: a Q1 point sits on an integer x (the quarter is
+ *   Known ambiguity, and it is the least-bad one: a Q1 point sits on an integer x (the quarter is
  *  offset by (q−1)/4 so that four quarters span exactly 1.0 — see `periodToX`), so it renders as
  *  the bare "2025" rather than "2025 Q1". The alternatives are worse: offsetting by q/4 puts Q4 on
  *  the NEXT year's integer, and taking a cadence argument means threading one through twelve chart
@@ -110,7 +110,7 @@ export const xToMonth = (x: number): string => {
 /**
  * Can this period label be placed on the axis at all?
  *
- * ⚠⚠ A PERIOD `periodToX` CANNOT PLACE MUST BE DROPPED, NOT PLOTTED AT NaN. `Number("LTM")` is NaN,
+ *  A PERIOD `periodToX` CANNOT PLACE MUST BE DROPPED, NOT PLOTTED AT NaN. `Number("LTM")` is NaN,
  * NaN is a valid `Map` key, and every such period therefore lands on ONE key — the exact failure
  * `periodToX` documents, where nine charts went blank while their drill-downs rendered perfectly.
  * The server now sends an `LTM` period to the six flow-ratio endpoints, so this is a live label and
@@ -129,7 +129,7 @@ export const xToPeriod = (x: number): string => {
 /**
  * The axis tick (and tooltip header) for a chart that also carries TRAILING-TWELVE-MONTH points.
  *
- * ⚠⚠ AN LTM POINT SITS ON A QUARTER-END x, SO `xToPeriod` NAMES IT A FISCAL QUARTER. On an annual
+ *  An ltm point sits on a quarter-end x, SO `xToPeriod` NAMES IT A FISCAL QUARTER. On an annual
  * chart every reported point is on a whole year and the LTM extension is the only fractional x
  * there is — 2026-06-30 → 2026.25 → **"2026 Q2"**, a quarter nobody filed, in the one place a
  * reader looks for the newest figure. Measured 2026-08-14 on the ACWI overlay of `EPS (excl.
@@ -137,7 +137,7 @@ export const xToPeriod = (x: number): string => {
  * own to match against, and the INDEX's LTM was labelled "2026 Q2" while its line ran a quarter
  * past the book's. It reads as "the index has reported and we have not", which it was not.
  *
- * ⚠⚠ `ltmXs` IS A SET FOR ROBUSTNESS, BUT A CHART MUST PUT ITS LTM STUB ON **ONE** x (2026-08-18).
+ *  `ltmXs` IS A SET FOR ROBUSTNESS, BUT A CHART MUST PUT ITS LTM STUB ON **ONE** x (2026-08-18).
  * It briefly held two: each blend stamps its trailing year with the newest filing behind it and
  * `ltmYearX` measures the stub from that entity's OWN last fiscal year end, so a book and an index
  * on different fiscal calendars produced two positions — a second "LTM" tick on the axis, and two
@@ -158,23 +158,23 @@ export type Step = { pct: number | null; from: number };
 /**
  * Each point's change from the period before it, keyed by x.
  *
- * ⚠⚠ THIS IS WHAT A LEVEL CHART CANNOT BE READ FOR. The number on the axis is an INDEX, i.e.
+ *  This is what a level chart cannot be read for. The number on the axis is an INDEX, i.e.
  * cumulative growth since the anchor — so "are we ahead of the benchmark since 2015" is already the
  * SHAPE of the two lines and needs no figure, while "did we out-grow it THIS year" is invisible on
  * a log axis where both lines are rising, and it is the question a reader hovers a point to ask.
  *
- * ⚠ IT IS NOT "YoY", AND CALLING IT THAT WOULD BE WRONG THREE WAYS ON THIS TAB: the LTM point sits
+ *  It is not "YoY", AND CALLING IT THAT WOULD BE WRONG THREE WAYS ON THIS TAB: the LTM point sits
  * a quarter or two past the last fiscal year (which is why it is out of the CAGR fit), the
  * quarterly basis steps one QUARTER at a time on a trailing-twelve-month series, and a period the
  * coverage floor withheld leaves a two-year gap drawn as one segment. So `from` comes back and the
  * caller NAMES the interval — "+11.4% vs 2024" — instead of asserting one.
  *
- * ⚠ A NON-POSITIVE BASE GETS `null`, NEVER A PERCENTAGE. Same rule as `transformSeries`' YoY view
+ *  A non-positive base gets `null`, NEVER A PERCENTAGE. Same rule as `transformSeries`' YoY view
  * and the server's `step_growth`, and the same reason this card withholds its CAGR across a sign
  * change: −2 → −1 reads as "+50% growth" for a company still making a loss, and −1 → +2 is not
  * "+300%" in any sense that compounds.
  *
- * ⚠ SAFE ON EITHER BASIS. A rebase is one constant multiplier per series, so it divides out of
+ *  Safe on either basis. A rebase is one constant multiplier per series, so it divides out of
  * `v / prev` — the step is identical whether computed on the indexed values or the raw ones. Feed
  * it the RAW series so the answer cannot change when the axis flips to absolute on a sign change.
  */
@@ -184,7 +184,7 @@ export function stepChanges(series: ReadonlyMap<number, number | null>): Map<num
   for (const x of [...series.keys()].sort((a, b) => a - b)) {
     const v = series.get(x);
     if (v == null) continue;
-    // ⚠ AGAINST THE PREVIOUS POINT THIS SERIES HAS, not the previous column — a line with a hole
+    //  Against the previous point this series has, not the previous column — a line with a hole
     // would otherwise show two periods of growth in the same ink as everyone else's one.
     if (prev) out.set(x, { pct: prev.v > 0 ? 100 * (v / prev.v - 1) : null, from: prev.x });
     prev = { x, v };
@@ -198,7 +198,7 @@ export function stepChanges(series: ReadonlyMap<number, number | null>): Map<num
  * could have a value for and a per-holding value; this applies the weights, the renormalisation
  * and the floor in ONE place.
  *
- * ⚠ THE DENOMINATOR IS THE CHARTED SET, NOT THE BOOK. `weight_pct` is the share of the WHOLE book
+ *  The denominator is the charted set, not the book. `weight_pct` is the share of the WHOLE book
  * (cash and bonds sit in its denominator), so measuring coverage against 100 would mean a
  * portfolio holding 20% cash could never clear the floor and every chart would go blank.
  * Coverage here answers "of the companies this chart aggregates, how many reported this year".
@@ -215,7 +215,7 @@ export type Weighted = {
  * The weight in force for one row in one period — the frontend twin of the backend's
  * `_fundamental_blend._weight_at`, and the reason every card on this tab weights the same way.
  *
- * ⚠ AN INDEX IS WEIGHTED BY THE CAP IT HAD IN THAT PERIOD. Weighting 2018's margin by today's cap
+ *  An index is weighted by the cap it had in that period. Weighting 2018's margin by today's cap
  * is look-ahead bias — measured on the S&P, NVIDIA is carried at 7.46% of a year it was 0.63% of.
  * Null (never 0) when a constituent has no cap that period: it is out of that period's average
  * entirely rather than weighted on a different basis from its neighbours.
@@ -225,7 +225,7 @@ export function weightAt(r: Weighted, year: string): number | null {
   if (per) {
     const v = per[year];
     if (v && v > 0) return v;
-    // ⚠ AS-OF, MIRRORING THE BACKEND'S `_weight_at`. A market cap is a stock: the last one filed
+    //  As-of, mirroring the backend's `_weight_at`. A market cap is a stock: the last one filed
     // stands until a newer one exists. The server already carries the newest year forward once in
     // the payload, so this only bites on an older gap — but the two sides must resolve a missing
     // cap the same way or a card and the chart behind it weight the same period differently.
@@ -240,12 +240,12 @@ export function weightAt(r: Weighted, year: string): number | null {
  * Each period's value for one row: its own, or the latest one before it — with `reported` saying
  * which. The client twin of `_fundamental_blend.carry_forward`; see that docstring for why.
  *
- * ⚠ A CARRIED VALUE NEVER COUNTS AS COVERAGE. It keeps the contributor set stable (without it the
+ *  A carried value never counts as coverage. It keeps the contributor set stable (without it the
  * line alternates between the companies that file quarterly and the ones that file at Jun/Dec — a
  * ±20% sawtooth of composition), while the floor still sees only who actually reported, so the
  * newest period cannot slip through on carried figures.
  *
- * ⚠ BOUNDED to one year, so a holding that stops reporting falls out instead of being held at a
+ *  BOUNDED to one year, so a holding that stops reporting falls out instead of being held at a
  * frozen value for the rest of the axis. Periods are compared on their own calendar ends —
  * `periodToX` puts a year and its quarters on one numeric axis, and a year is 1.0 of it.
  */
@@ -275,17 +275,17 @@ export type SeriesView = 'reported' | 'rebased' | 'yoy';
 /**
  * One line of one company, ordered along the axis, under one of the three views.
  *
- * ⚠ AN ARRAY IN, AN ARRAY OUT — the transforms are relative to the row's OWN reported history, so
+ *  An array in, an array out — the transforms are relative to the row's OWN reported history, so
  * they cannot be computed a cell at a time without re-deriving that history per cell. `null` means
  * "not reported" on the way in and "cannot be stated" on the way out, and the two are deliberately
  * the same hole: a period a company did not report has no index level and no growth rate either.
  *
- * ⚠ NULL, NOT A NUMBER, ON A NON-POSITIVE BASE. `100 × v/0` is undefined and a negative base
+ *  Null, not a number, on a non-positive base. `100 × v/0` is undefined and a negative base
  * inverts the curve — the same refusal `_fundamental_blend._prepare` makes server-side, which is
  * why a company whose equity opens negative is out of the blended line entirely rather than in it
  * upside-down. The same test guards YoY's denominator.
  *
- * ⚠ YoY IS AGAINST THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company
+ *  YoY IS AGAINST THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company
  * that skipped a period would otherwise show two periods of growth in the same ink as everyone
  * else's one.
  */
@@ -325,8 +325,8 @@ export function weightedByYear<T extends Weighted>(
 
   const num = new Map<number, number>();
   const den = new Map<number, number>();
-  // ⚠⚠ COVERAGE IS ACCUMULATED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP, AND CONFUSING
-  // THE TWO DISABLES THE FLOOR COMPLETELY. The per-period cap comes out of the same GuruFocus
+  //  Coverage is accumulated on the **STABLE** WEIGHT, NOT THE PER-PERIOD CAP, AND CONFUSING
+  // The two disables the floor completely. The per-period cap comes out of the same GuruFocus
   // blob as the figure, so a company that has not filed FY2026 has no FY2026 cap either —
   // measure coverage with it and you divide the filers by the filers, which reads ~100% in
   // exactly the period where almost nobody has reported. Measured on the S&P revenue blend:
@@ -351,7 +351,7 @@ export function weightedByYear<T extends Weighted>(
       }
     }
   }
-  // ⚠ BOTH FLOORS, AND ONLY ON WHAT WAS REPORTED. Weight alone lets one giant draw a period (AEX
+  //  Both floors, and only on what was reported. Weight alone lets one giant draw a period (AEX
   // 2026-Q2: two constituents, 53.8% of cap); names alone would let ten tiny ones outvote a
   // missing giant. A carried value counts toward neither — that is what stops the carry defeating
   // the floor in the newest period.
@@ -371,8 +371,8 @@ export function weightedByYear<T extends Weighted>(
 /**
  * The denominator each period's weighted average ACTUALLY divided by — `{period: Σ weight}`.
  *
- * ⚠ IT MUST APPLY THE SAME TWO TESTS AS `weightedByYear`, AND THAT IS THE ONLY REASON IT EARNS ITS
- * PLACE HERE RATHER THAN IN THE MODAL. A drill-down exists to show the arithmetic behind a line; a
+ *  It must apply the same two tests as `weightedByYear`, AND THAT IS THE ONLY REASON IT EARNS ITS
+ * Place here rather than in the modal. A drill-down exists to show the arithmetic behind a line; a
  * denominator derived "the same way" somewhere else is how a table comes to show weights that do
  * not sum to the line above them. Value present AND a usable weight — a company with a figure but
  * no cap that period is out of the average, so it is out of this sum too.
@@ -385,14 +385,14 @@ export function periodDenoms<T extends Weighted>(
   rawYearsOf: (r: T) => string[],
   valueOf: (r: T, year: string) => number | null,
 ): Record<string, number> {
-  // ⚠ THE SAME FILTER AS `weightedByYear`, FOR THE SAME REASON — and because these two must agree.
+  //  The same filter as `weightedByYear`, FOR THE SAME REASON — and because these two must agree.
   // This function exists to prove the line's weights sum to 100%; a period one of them can see and
   // the other cannot would make that proof fail on a period nobody plotted. See `plottable`.
   const yearsOf = (r: T) => rawYearsOf(r).filter(plottable);
   const out: Record<string, number> = {};
   const years = new Set<string>();
   for (const r of rows) for (const y of yearsOf(r)) years.add(y);
-  // ⚠ THE CARRIED ROWS ARE IN THE DENOMINATOR, BECAUSE THEY ARE IN THE AVERAGE. `weightedByYear`
+  //  The carried rows are in the denominator, because they are in the average. `weightedByYear`
   // divides by every row that contributed a figure — its own or its latest — so a denominator
   // computed over the reporters alone would be smaller than the one the line used, and the
   // drill-down's weights would not sum to 100%. The point of this function is that they do.
@@ -431,7 +431,7 @@ export function coverageByYear<T extends Weighted>(
   for (const r of rows) for (const y of yearsOf(r)) years.add(y);
   for (const y of years) {
     let den = 0;
-    // ⚠ THE SAME TWO TESTS `weightedByYear` APPLIES — a value AND a usable weight. A constituent
+    //  The same two tests `weightedByYear` APPLIES — a value AND a usable weight. A constituent
     // with a figure but no cap that period is out of the average, so counting it as covered would
     // let a period clear the floor on the strength of rows that contributed nothing to it. And the
     // same STABLE weight, for the reason spelled out there.

@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { dividendYieldOf, type DividendYieldInputs, type DividendYieldRow } from './dividendYieldData';
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
-import { type BenchTarget } from './benchSeries';
+import { inputsBody, type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
 import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
 
@@ -15,26 +15,26 @@ import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
  * followed by the DERIVED yield the card plots. Same columns / Unsubscribed / Fetch behaviour as
  * the other drill-downs. Mirrors {@link ./FcfSbcYieldInputsModal}.
  *
- * ⚠ A BLANK DIVIDEND CELL IS NOT A ZERO — it means no dividend line was ingested for that year,
+ *  A blank dividend cell is not a zero — it means no dividend line was ingested for that year,
  * and the yield row is blank with it. A company that genuinely pays nothing shows `0` and a
  * `0.00%` yield, which counts in the book's average. */
 
 /**
- * ⚠ THE TABLE IS `RatioInputsTable`, SHARED BY EVERY RATIO CARD. What is left in this file is the
+ *  The table is `RatioInputsTable`, SHARED BY EVERY RATIO CARD. What is left in this file is the
  * fetch, the prose, and the card's own two constants — the lines it lists and the figure it
  * derives. Eleven near-identical copies of that table used to exist, which is why the benchmark
  * only ever got built into one of them, and why adding the cap/weight lines was a ten-file edit.
  *
- * ⚠ THE BENCHMARK IS THE SAME ENDPOINT AND THE SAME TABLE — `{holdings|portfolio_id}` swapped for
+ *  The benchmark is the same endpoint and the same table — `{holdings|portfolio_id}` swapped for
  * `{universe}`. One component renders both, so the book's rows and the index's cannot come to
  * format a figure or hide a status differently on the one screen built for comparing them.
  *
- * ⚠ THE DERIVED LINE CALLS THE CARD'S OWN FUNCTION, and `RatioInputsTable` feeds that same function
+ *  The derived line calls the card's own function, and `RatioInputsTable` feeds that same function
  * to `periodDenoms` — which is what makes the `weight` line under each company sum to exactly 100%
  * of the line the chart drew.
  */
 
-/** ⚠ PER-SHARE AMOUNTS, NOT MILLIONS. These are the only raw inputs on the tab that are not a
+/**  PER-SHARE AMOUNTS, NOT MILLIONS. These are the only raw inputs on the tab that are not a
  *  currency total, so they print plainly instead of compacted to B/M — "2.14", not "2B". */
 const fmtPs = (v: number | null | undefined) => (v == null ? '—' : v.toFixed(2));
 
@@ -56,7 +56,7 @@ export default function DividendYieldInputsModal({ target, portfolioName, benchT
   const load = async (body: Target | BenchTarget): Promise<DividendYieldInputs> => {
     const r = await apiFetch(`${API_URL}/api/earnings/dividend-yield-inputs`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: inputsBody(body),
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
@@ -75,7 +75,7 @@ export default function DividendYieldInputsModal({ target, portfolioName, benchT
       }
     })();
     return () => { alive = false; };
-     
+
   }, [target, reloadKey]);
 
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
@@ -126,7 +126,7 @@ export default function DividendYieldInputsModal({ target, portfolioName, benchT
           {portfolioName && <span className="text-sm text-fg-soft truncate max-w-[24ch]" title={portfolioName}>{portfolioName}</span>}
           {data && <span className="text-[12px] text-fg-faint">{data.rows.length} companies</span>}
           {benchLabel && <span className="text-[12px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
-          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
@@ -153,7 +153,7 @@ export default function DividendYieldInputsModal({ target, portfolioName, benchT
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}
               {bench && (
                 <>
-                  {/* ⚠ THE COVERAGE GAP IS STATED. Only constituents with these lines ingested feed
+                  {/*  THE COVERAGE GAP IS STATED. Only constituents with these lines ingested feed
                       the benchmark line, so a table longer than the contributing set is not a
                       mismatch — it IS the gap, and the `weight` line renormalises over what is
                       left, period by period. */}

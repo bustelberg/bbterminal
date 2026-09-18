@@ -1,16 +1,16 @@
 """`common/pg.copy_connection_scope` — reuse a direct-Postgres connection per REQUEST, per THREAD.
 
-⚠ WHY THIS EXISTS: `_run_copy_uncached` opened a fresh `psycopg.connect()` for every COPY.
+ WHY THIS EXISTS: `_run_copy_uncached` opened a fresh `psycopg.connect()` for every COPY.
 Measured 2026-08-11 — connect + `SET statement_timeout` + `SELECT 1`:
 
         local (127.0.0.1)          24.0 ms
         production (eu-west-3)    220.7 ms
 
 The Analyse modal issues 17 COPYs, so it spent **~3.75 s in production purely opening
-connections** while a laptop profile reported 0.41 s. ⚠ **This is the class of cost a local
+connections** while a laptop profile reported 0.41 s.  **This is the class of cost a local
 profile structurally cannot show**, which is why it survived several rounds of profiling.
 
-⚠ THE SCOPE IS KEYED PER THREAD, AND THAT IS A CORRECTNESS REQUIREMENT, NOT A REFINEMENT. A
+ THE SCOPE IS KEYED PER THREAD, AND THAT IS A CORRECTNESS REQUIREMENT, NOT A REFINEMENT. A
 ContextVar is COPIED into a worker by `asyncio.to_thread`, so several workers share one context —
 and a psycopg connection is NOT thread-safe. Two COPY streams interleaved on one socket do not
 raise; they return the wrong bytes.
@@ -128,17 +128,17 @@ class TestFailureIsolation:
 
 class TestThreadsDoNotShareAConnection:
     def test_each_thread_gets_its_own(self, monkeypatch):
-        """⚠ THE ONE THAT MATTERS. `to_thread` copies the context, so workers share the scope
+        """ THE ONE THAT MATTERS. `to_thread` copies the context, so workers share the scope
         dict — but a psycopg connection is not thread-safe, and interleaved COPY streams return
         wrong bytes rather than raising.
 
-        ⚠⚠ IT MUST BE `copy_context().run`, NOT A BARE `threading.Thread`. A plain thread does NOT
+         IT MUST BE `copy_context().run`, NOT A BARE `threading.Thread`. A plain thread does NOT
         inherit ContextVars — it sees the default `None`, `_scoped_connection` returns None, and
         the test passes or fails for a reason that has nothing to do with the property. My first
         version did exactly that and asserted `4 == 1` against `{ident: None}`. `asyncio.to_thread`
         propagates the context via `contextvars.copy_context()`, so that is what this reproduces.
 
-        ⚠ AND THE BARRIER IS LOAD-BEARING: thread IDENTS ARE REUSED after a thread exits, so
+         AND THE BARRIER IS LOAD-BEARING: thread IDENTS ARE REUSED after a thread exits, so
         short sequential threads can share one and the dict silently collapses to fewer entries
         (the same first version recorded ONE). Holding all four alive at once keeps them distinct.
         """
@@ -153,7 +153,7 @@ class TestThreadsDoNotShareAConnection:
                 seen[threading.get_ident()] = conn
                 barrier.wait(timeout=10)          # all four alive together — no ident reuse
 
-            # ⚠ ONE Context PER THREAD. A `contextvars.Context` cannot be entered twice
+            #  ONE Context PER THREAD. A `contextvars.Context` cannot be entered twice
             # concurrently — sharing one across four threads raises "cannot enter context:
             # already entered" inside the workers, which pytest reports only as an unhandled
             # THREAD exception while the assertion fails for an unrelated-looking reason.

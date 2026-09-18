@@ -24,7 +24,7 @@ describe('memberCountLine', () => {
     lang: 'en' as const };
 
   it('says nothing when both lines used every holding they had', () => {
-    // ⚠ THE DEFAULT, on twelve of thirteen cards. A line reading "42 of 42" is noise everywhere it
+    //  The default, on twelve of thirteen cards. A line reading "42 of 42" is noise everywhere it
     // is true, which is what would make the one card that matters unreadable.
     expect(memberCountLine({ ...base, own: c(42, 42), bench: c(22, 22) })).toBeNull();
   });
@@ -36,7 +36,7 @@ describe('memberCountLine', () => {
   });
 
   it('names only the side that withheld', () => {
-    // ⚠ TWO BLENDS OVER TWO SETS OF COMPANIES. One count standing for both would be wrong on
+    //  Two blends over two sets of companies. One count standing for both would be wrong on
     // whichever it was not.
     expect(memberCountLine({ ...base, own: c(42, 42), bench: c(12, 22, 'aggregate') })?.text)
       .toBe('AEX: 12 of 22');
@@ -69,7 +69,7 @@ describe('memberCountLine', () => {
   });
 
   it('falls back to `all` when the payload carries no rule', () => {
-    // ⚠ AN OLDER PAYLOAD. The count is still true; only the explanation is unknown, and
+    //  An older payload. The count is still true; only the explanation is unknown, and
     // `memberCountHow` answers that with the generic sentence rather than inventing a cause.
     expect(memberCountLine({ ...base, own: c(36, 42) })?.rule).toBe('all');
   });
@@ -112,7 +112,7 @@ describe('memberCountHow', () => {
   });
 
   it('explains the euro sum as a missing input, and does NOT call it survivorship', () => {
-    // ⚠⚠ THE WHOLE POINT OF `rule`. The two constructions withhold members for reasons that have
+    //  The whole point of `rule`. The two constructions withhold members for reasons that have
     // nothing to do with each other, and the FCF sentence on an EPS card would tell the reader
     // their earnings line excludes loss-makers — a confident wrong explanation of a right number.
     const how = memberCountHow('aggregate', 'en');
@@ -121,7 +121,7 @@ describe('memberCountHow', () => {
     expect(how).not.toMatch(/positive in every period/);
   });
 
-  it('⚠ names the MARKET CAP, not a share count — the only aggregated metric is a total', () => {
+  it(' names the MARKET CAP, not a share count — the only aggregated metric is a total', () => {
     /**
      * Measured on ACWI revenue 2026-08-31 (`scripts/diagnose_blend_members.py`): all 1,511
      * constituents carry euros and the line is still drawn from 1,509. The two missing — CSG NV

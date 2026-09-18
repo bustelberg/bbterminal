@@ -18,7 +18,7 @@ describe('the security page copy', () => {
     }
   })
 
-  it('⚠ actually translates — it is not the English block copied across', () => {
+  it(' actually translates — it is not the English block copied across', () => {
     // A copy module that compiles with the source language duplicated is the silent half of a
     // half-translated screen. These four are ordinary words, so they must differ.
     for (const key of ['title', 'remove', 'cancel', 'loading'] as const) {
@@ -33,7 +33,7 @@ describe('the security page copy', () => {
     }
   })
 
-  it('⚠⚠ the clock warning blames THIS COMPUTER, never the phone', () => {
+  it(' the clock warning blames THIS COMPUTER, never the phone', () => {
     // The measurement that settles it is browser-vs-SERVER, and in practice a phone on automatic
     // time is right while a laptop drifts. The first version of the failure copy assumed the
     // opposite and sent somebody to change a setting that was already correct.
@@ -46,7 +46,7 @@ describe('the security page copy', () => {
     }
   });
 
-  it('⚠ names the direction, since "out by 59s" does not say which way', () => {
+  it(' names the direction, since "out by 59s" does not say which way', () => {
     expect(SECURITY_COPY.en.clockWarning(59, true)).toMatch(/ahead/i);
     expect(SECURITY_COPY.en.clockWarning(59, false)).toMatch(/behind/i);
     expect(SECURITY_COPY.nl.clockWarning(59, true)).toMatch(/voor op/i);

@@ -1,7 +1,7 @@
 /**
  * The sidebar's copy, and its agreement with the home page's.
  *
- * ⚠ THE COMPILER COVERS COMPLETENESS — `Record<NavKey, string>` will not build with a label missing
+ *  The compiler covers completeness — `Record<NavKey, string>` will not build with a label missing
  * in either language, and `NavItem = { href: NavKey }` will not build for a nav entry whose href has
  * no label. What it cannot see is the two SURFACES disagreeing: the same page named one thing in the
  * nav and another on its home tile, which is two names for one destination in a single screenshot.
@@ -23,7 +23,7 @@ describe('the nav labels', () => {
     }
   });
 
-  it('⚠⚠ agree with the home tile for every page that has both', () => {
+  it(' agree with the home tile for every page that has both', () => {
     // A page named `Planning` in the nav and `Schedule` on its tile is two names for one
     // destination, on one screen. The home tiles are a subset of the nav, so every tile key must
     // resolve here and to the SAME words.
@@ -35,7 +35,7 @@ describe('the nav labels', () => {
     }
   });
 
-  it('⚠ keeps product and tool names identical in both languages', () => {
+  it(' keeps product and tool names identical in both languages', () => {
     // These are what the things are CALLED — translating them would name something that does not
     // exist in the app. Unlike the home DESCRIPTIONS, a label matching across languages is correct
     // here, so no blanket "must differ" check applies to this map.
@@ -45,7 +45,7 @@ describe('the nav labels', () => {
     }
   });
 
-  it('⚠ but DOES translate the ordinary words', () => {
+  it(' but DOES translate the ordinary words', () => {
     // The counterweight to the case above: if this list ever matched too, the "translation" would
     // be a copy of the English map and every one of these tests would still pass.
     for (const href of ['/', '/schedule', '/fx-rates', '/fees', '/network',
@@ -57,7 +57,7 @@ describe('the nav labels', () => {
 });
 
 describe('the account block', () => {
-  it('⚠ translates the destructive confirmation — the worst place for an English string', () => {
+  it(' translates the destructive confirmation — the worst place for an English string', () => {
     // It asks for a decision that cannot be undone; a reader who does not read the sentence is
     // being asked to confirm something they have not been told.
     expect(SIDEBAR_COPY.nl.deleteSure).not.toBe(SIDEBAR_COPY.en.deleteSure);

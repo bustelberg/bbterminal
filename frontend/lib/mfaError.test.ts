@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { describeMfaError } from './mfaError'
 
 describe('describeMfaError', () => {
-  it('⚠⚠ names the environment as the cause when MFA is not switched on', () => {
+  it(' names the environment as the cause when MFA is not switched on', () => {
     // The expected production failure: TOTP enabled in `config.toml` but not in the hosted
     // dashboard, so enrolment works locally and 422s for everybody in prod. The message must send
     // the reader to an admin, not to their own phone.
@@ -12,7 +12,7 @@ describe('describeMfaError', () => {
     expect(s).toMatch(/admin/i)
   })
 
-  it('⚠ wins over the generic invalid-input case', () => {
+  it(' wins over the generic invalid-input case', () => {
     // GoTrue reports this as an unprocessable entity; a looser rule would call it a bad code and
     // send someone to check a clock that is fine.
     const s = describeMfaError({ code: 'mfa_enroll_disabled', message: 'invalid request' })
@@ -29,7 +29,7 @@ describe('describeMfaError', () => {
       .toMatch(/remove one/i)
   })
 
-  it('⚠ separates an expired challenge from a wrong code', () => {
+  it(' separates an expired challenge from a wrong code', () => {
     // Both are verification failures; only one is fixed by looking at the phone again.
     const expired = describeMfaError({ code: 'mfa_challenge_expired' })
     expect(expired).toMatch(/took too long|start again/i)

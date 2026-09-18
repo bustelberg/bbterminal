@@ -37,7 +37,7 @@ class EarningsResult:
     source: str = ""  # "financials", "analyst_estimates", "indicators"
     rows_loaded: int = 0
     #: Rows the vendor gave us that were ALREADY in the database, byte for byte, and so were not
-    #: written. ⚠ `rows_loaded == 0 and rows_unchanged > 0` IS THE HEALTHY, COMMON OUTCOME of a
+    #: written.  `rows_loaded == 0 and rows_unchanged > 0` IS THE HEALTHY, COMMON OUTCOME of a
     #: refresh — see `_upsert_metric_rows`. Only `rows_loaded == 0 and rows_unchanged == 0` means
     #: the fetch itself came back with nothing.
     rows_unchanged: int = 0
@@ -64,7 +64,7 @@ def _build_symbol(ticker: str, exchange: str) -> str:
 def refuse_unsubscribed(exchange: str, source: str) -> EarningsResult | None:
     """The refusal for an exchange our GuruFocus subscription does not cover, or None to proceed.
 
-    ⚠⚠ IT LIVES IN THE FETCHERS BECAUSE THE VENDOR DOES NOT RELIABLY REFUSE. The 403 path below
+     IT LIVES IN THE FETCHERS BECAUSE THE VENDOR DOES NOT RELIABLY REFUSE. The 403 path below
     each caller (`api.is_forbidden`) assumes an unsubscribed region answers with an error. Diploma
     plc, `LSE:DPLM`, proves it does not: GuruFocus returned a full statements payload — 53 quarterly
     periods across hundreds of section keys — whose price column is **0 for 1998-2013** and then
@@ -72,7 +72,7 @@ def refuse_unsubscribed(exchange: str, source: str) -> EarningsResult | None:
     £28.10, before stepping 3.81x in a single period. `Market Cap` carries the identical step. All
     of it plausible, none of it true, and nothing downstream could tell.
 
-    ⚠⚠ SO THE GATE IS THE EXCHANGE, NOT THE VALUES — and that is a measured conclusion, not a
+     SO THE GATE IS THE EXCHANGE, NOT THE VALUES — and that is a measured conclusion, not a
     preference. A payload-shape heuristic was tried first and rejected: over the 1,782 companies
     holding a price series, "mostly zeros" fires on Alphabet (46%), CRH (52%) and NetEase (77%),
     because GuruFocus zero-fills quarters it does not publish; and "frozen for many periods" cannot
@@ -81,17 +81,17 @@ def refuse_unsubscribed(exchange: str, source: str) -> EarningsResult | None:
     is untrustworthy is the subscription, and that is a fact about the request rather than a guess
     about the answer.
 
-    ⚠ IT IS HERE AND NOT AT THE CALLERS. `routers/_fundamental_backfill.eligible` already applies
+     IT IS HERE AND NOT AT THE CALLERS. `routers/_fundamental_backfill.eligible` already applies
     this rule, so the /benchmarks and Long-Equity fills were never the leak; the per-company SSE
     refresh (`/api/earnings/{id}/refresh/{source}`) and the universe bulk fetch both called the
     fetchers directly and were not covered. Two known callers meant two places to forget, and the
     next caller would have been a third.
 
-    ⚠ NO CALL IS SPENT. The refusal is pre-flight, so an unsubscribed name costs nothing rather
+     NO CALL IS SPENT. The refusal is pre-flight, so an unsubscribed name costs nothing rather
     than costing a request that returns junk — which also means a region's monthly quota is no
     longer drained by names we cannot use.
 
-    ⚠ OTC PINK IS SUBSCRIBED, so a foreign company with a US OTC line still resolves through it —
+     OTC PINK IS SUBSCRIBED, so a foreign company with a US OTC line still resolves through it —
     the usual fix for exactly these names. See `FEASIBLE_GF_EXCHANGES`.
     """
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
@@ -99,7 +99,7 @@ def refuse_unsubscribed(exchange: str, source: str) -> EarningsResult | None:
     if is_gf_subscribed_exchange(exchange):
         return None
     r = EarningsResult(source=source)
-    # ⚠ `is_forbidden`, THE SAME FLAG THE REAL 403 SETS. Callers already count and report that
+    #  `is_forbidden`, THE SAME FLAG THE REAL 403 SETS. Callers already count and report that
     # ("skipped_region"); a new status word would need every one of them to learn it, and this is
     # the same fact arrived at one step earlier.
     r.is_forbidden = True
@@ -123,12 +123,12 @@ _bucket_ready = False
 def _ensure_bucket(supabase: Client) -> None:
     """Make sure the raw-response bucket exists.
 
-    ⚠ ONCE PER PROCESS. Every one of the three feed fetchers called this at the top, so a bulk fill
+     ONCE PER PROCESS. Every one of the three feed fetchers called this at the top, so a bulk fill
     spent THREE Storage round trips per company creating a bucket that has existed since the first
     ingest — 5,136 of them on a 1,712-constituent press. It is 7ms locally and a cloud round trip in
     production, which is minutes of the run buying literally nothing.
 
-    ⚠ A RACE HERE IS HARMLESS AND UNGUARDED ON PURPOSE. Two workers arriving together make one extra
+     A RACE HERE IS HARMLESS AND UNGUARDED ON PURPOSE. Two workers arriving together make one extra
     call that the `except` already swallows; a lock would serialise every fetcher in the fill on a
     no-op.
     """
@@ -139,7 +139,7 @@ def _ensure_bucket(supabase: Client) -> None:
         supabase.storage.create_bucket(_BUCKET, options={"public": False})
     except Exception:
         pass
-    # ⚠ SET EVEN WHEN IT RAISED — "already exists" is the overwhelmingly common failure and is the
+    #  Set even when it raised — "already exists" is the overwhelmingly common failure and is the
     # answer we wanted. A real outage would fail the upload a moment later with a message that says
     # so, which is more use than retrying the create 5,000 times.
     _bucket_ready = True
@@ -231,13 +231,13 @@ FETCHED_AT_COLUMN = {
 def _stamp_fetched(supabase: Client, company_id: int, source: str, _log: callable) -> None:
     """Record that we ASKED for `source` — see the migration `20260817000000`.
 
-    ⚠⚠ STAMPED WHENEVER WE GOT AN ANSWER, INCLUDING AN EMPTY ONE, and that is the entire point.
+     STAMPED WHENEVER WE GOT AN ANSWER, INCLUDING AN EMPTY ONE, and that is the entire point.
     The smart refresh's other signal is `max(recorded_at)` on the feed's sentinel row, which only
     moves when a ROW APPEARS — so a company GuruFocus publishes no consensus for never advances it
     and is re-asked on every press, for ever. Measured on ACWI: 2,392 of 4,326 calls in one press.
     Gating this on rows-loaded would leave it NULL for exactly those companies.
 
-    ⚠ AND IT NEVER FAILS THE INGEST. The data is already written by the time this runs; a stamp we
+     AND IT NEVER FAILS THE INGEST. The data is already written by the time this runs; a stamp we
     could not save is a worse decision next time, not a failed fetch.
     """
     from datetime import datetime, timezone  # noqa: PLC0415
@@ -259,11 +259,11 @@ def _upsert_metric_rows(supabase: Client, rows: list[dict]) -> tuple[int, int]:
     Thin wrapper over the shared `ingest.metric_upsert` pair so the submodule call sites
     (`from ._common import _upsert_metric_rows`) stay put.
 
-    ⚠⚠ THE DIFF IS ON THE EARNINGS PATH ONLY, AND IT IS THE DIFFERENCE BETWEEN A BULK FILL BEING
+     THE DIFF IS ON THE EARNINGS PATH ONLY, AND IT IS THE DIFFERENCE BETWEEN A BULK FILL BEING
     AFFORDABLE AND NOT — see `changed_rows`, which carries the measurement. A refresh re-parses the
     whole GuruFocus blob (up to 36,494 rows for one company) and, measured, changes none of it.
 
-    ⚠ IT RETURNS TWO NUMBERS BECAUSE THEY ANSWER TWO QUESTIONS, and collapsing them is a real bug.
+     IT RETURNS TWO NUMBERS BECAUSE THEY ANSWER TWO QUESTIONS, and collapsing them is a real bug.
     "0 written" now means "nothing moved", which for a company that is up to date is the CORRECT and
     expected outcome — while it used to be reachable only when the vendor returned nothing. Anything
     that reads a zero as "the fetch came back empty" (the bulk fill's retry-once did exactly that)

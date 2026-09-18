@@ -14,17 +14,17 @@ describe('cashConversionOf', () => {
     expect(cashConversionOf(98767, 112010)).toBeCloseTo(88.18, 2);      // Apple 2025
   });
 
-  it('⚠ does NOT clamp above 100% — that is the healthy case, not an error', () => {
+  it(' does NOT clamp above 100% — that is the healthy case, not an error', () => {
     // Depreciation running ahead of capex converts more cash than the accounts book as profit.
     expect(cashConversionOf(150, 100)).toBeCloseTo(150);
   });
 
-  it('⚠ KEEPS a negative FCF against positive earnings', () => {
+  it(' KEEPS a negative FCF against positive earnings', () => {
     // Profit with no cash behind it is the entire reason this ratio exists; it belongs below zero.
     expect(cashConversionOf(-40, 100)).toBeCloseTo(-40);
   });
 
-  it('⚠ refuses a non-positive denominator', () => {
+  it(' refuses a non-positive denominator', () => {
     // A loss-maker with POSITIVE cash flow would print a negative conversion, reading as "burning
     // cash" when the opposite is happening — and two companies could show −80% for opposite
     // reasons. The ratio does not apply to a loss.
@@ -56,10 +56,10 @@ describe('cashConversionByYear', () => {
     expect(cashConversionByYear(rows).get(2025)).toBeCloseTo(110, 6);
   });
 
-  it('⚠ drops the year once too much of the book has no ratio', () => {
+  it(' drops the year once too much of the book has no ratio', () => {
     // The shared `MIN_YEAR_COVERAGE_PCT` floor — a book mostly in losses must not publish a "cash
     // conversion" that silently describes only the profitable part.
-    // ⚠ 40/60, NOT 50/50: the floor moved to 50 (2026-08-12) and `<` is the comparison, so an even
+    //  40/60, NOT 50/50: the floor moved to 50 (2026-08-12) and `<` is the comparison, so an even
     // split now clears it BY DESIGN. The case being pinned is "the computable part is under the
     // floor", which needs it under half.
     const rows = [

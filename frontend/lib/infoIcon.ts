@@ -1,17 +1,17 @@
 /** THE info icon. One definition, imported everywhere — there is no second correct one.
  *
- * ⚠ THIS EXISTS BECAUSE THERE WERE FOUR. `InfoTip`, a second `InfoTip` under `universe/`,
+ *  This exists because there were four. `InfoTip`, a second `InfoTip` under `universe/`,
  * `ApiUsageBadge` and `Provenance` each carried their own copy of the class string, and they had
  * drifted into two visibly different icons: a grey OUTLINED circle at `w-4`/`text-[10px]` and a
  * filled ACCENT circle at `w-3.5`/`text-[9px]`. Both appeared on the same screen, so the same
  * affordance read as two different controls.
  *
- * ⚠ APPEARANCE ONLY — NO MARGIN. Spacing belongs to the call site (`ml-1` beside a number,
+ *  Appearance only — no margin. Spacing belongs to the call site (`ml-1` beside a number,
  * nothing inside a flex row with its own gap). Folding a margin in here would make every future
  * caller either accept the wrong spacing or override it, and an overridden shared class is how
  * the next fork starts.
  *
- * ⚠ AND IT MUST PIN EVERY INHERITED TEXT PROPERTY, OR THE CELL AROUND IT RESTYLES THE GLYPH.
+ *  And it must pin every inherited text property, or the cell around it restyles the glyph.
  * The icon's content is the LITERAL CHARACTER `i`, so it is text, and text inherits. Everything
  * here was specified except the properties that shape a character — and each omission produced
  * the same bug in a different place, twice, on the same page:
@@ -39,7 +39,7 @@ export const INFO_ICON =
   + 'cursor-help transition-colors '
   + 'bg-accent-500/10 text-accent-500 hover:bg-accent-500/20';
 
-/** The same icon carrying a warning — a `!` on stale data. ⚠ Same geometry, same font AND same
+/** The same icon carrying a warning — a `!` on stale data.  Same geometry, same font AND same
  *  text properties as `INFO_ICON` on purpose: it must read as the SAME control in a different
  *  state, not as another control. Only the hue changes. */
 export const INFO_ICON_WARN =

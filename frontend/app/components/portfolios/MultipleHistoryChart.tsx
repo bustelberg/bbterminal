@@ -16,27 +16,27 @@ import MultipleHistoryModal from './MultipleHistoryModal';
 import { useQuickValuationCopy } from './quickValuationCopy';
 
 /**
- * THE MULTIPLE THROUGH TIME — a decade of it, at the resolution the price moves.
+ * The multiple through time — a decade of it, at the resolution the price moves.
  *
  * The fiscal-year chart answers "what did it trade at each year end"; twelve dots cannot show a
  * de-rating that happened over four months. This is the same question at weekly resolution, and
  * it is the only place the FORWARD multiple has real history.
  *
- * ⚠⚠ FORWARD ONLY SINCE 2026-08-21, ON REQUEST. The trailing line — price ÷ the figure last
+ *  Forward only since 2026-08-21, ON REQUEST. The trailing line — price ÷ the figure last
  * REPORTED at that date, on both bases — was removed. What is left is one line: GuruFocus's own
  * published forward-P/E indicator, back to 2015, weekly, read straight through and computed from
  * nothing here.
  *
- * ⚠ SO THE FCF BASIS DRAWS NOTHING, AND SAYS SO RATHER THAN LOOKING BROKEN. Nobody forecasts
+ *  So the FCF basis draws nothing, and says so rather than looking broken. Nobody forecasts
  * capex, so no vendor publishes a free-cash-flow consensus and there is no forward P/FCF to read —
  * anywhere, at any date. A forward FCF line is planned; until it exists this panel is honest about
  * being empty instead of falling back to the measure that was just removed.
  *
- * ⚠ THE MEDIAN MOVED WITH THE LINE. It used to be the median of the TRAILING series, and the tile
+ *  The median moved with the line. It used to be the median of the TRAILING series, and the tile
  * said so explicitly ("a median of two different measures would be neither"). With one series left
  * it is that series' median — the same reasoning, applied to what is now on screen.
  *
- * ⚠ WHAT THE REMOVED LINE WAS FOR, RECORDED so the decision can be revisited rather than
+ *  What the removed line was for, recorded so the decision can be revisited rather than
  * rediscovered: it was the only measure available on the FCF basis, and it carried its own inputs
  * (close, per-share) into the drill-down, which the vendor indicator cannot — a published number
  * has nothing to decompose. It was also genuinely jagged on FCF (ASML 21.8x -> 116.4x -> 28.9x in
@@ -48,7 +48,7 @@ import { useQuickValuationCopy } from './quickValuationCopy';
 const OUTLIER_MULT = 5;
 
 /**
- * ⚠ THE TWO SERIES ARE BLUE AND AMBER, AND THAT PAIR WAS MEASURED, NOT CHOSEN.
+ *  The two series are blue and amber, and that pair was measured, not chosen.
  *
  * They shipped as `accent` and `accentStrong` — two steps of the SAME blue — which the palette
  * validator fails outright:
@@ -62,11 +62,11 @@ const OUTLIER_MULT = 5;
  * records for the app's default A/B pair. Re-run before changing these:
  *   node scripts/validate_palette.js "#3b82c9,#c0891a" --mode light
  *
- * ⚠ TRAILING KEEPS THE PRIMARY BLUE WHETHER OR NOT A FORWARD LINE EXISTS. Colour follows the
+ *  Trailing keeps the primary blue whether or not a forward line exists. Colour follows the
  * entity, never its rank — the FCF basis has no forward line at all, and a lone amber line there
  * would mean the same series changed colour because a different one disappeared.
  */
-/** ⚠ THE FORWARD LINE KEEPS AMBER, NOT THE PRIMARY BLUE IT COULD NOW CLAIM. Colour follows the
+/**  THE FORWARD LINE KEEPS AMBER, NOT THE PRIMARY BLUE IT COULD NOW CLAIM. Colour follows the
  *  ENTITY, never its rank — the same rule the two-line version stated in the other direction. A
  *  reader who knows this chart knows the forward line as amber; promoting it to blue because the
  *  blue series left would mean the same series changed colour because a different one disappeared. */
@@ -93,13 +93,13 @@ export default function MultipleHistoryChart({
   /**
    * Go and get the vendor's series again.
    *
-   * ⚠⚠ THIS SERIES IS THE ONE THING ON THE TAB THAT GOES STALE WITHOUT SAYING SO. It is read from
+   *  This series is the one thing on the tab that goes stale without saying so. It is read from
    * GuruFocus, not computed here, and the vendor publishes it with a multi-week lag — measured on
    * argenx, the newest observation was 24 July while the file was read on 17 August. Everything
    * else on this card is derived from it, so a stale line silently ages the median, the tile and
    * the drill-down together and nothing looks wrong.
    *
-   * ⚠ THE CARD DOES NOT FETCH — the tab owns the metrics and the chart is a function of them, so a
+   *  The card does not fetch — the tab owns the metrics and the chart is a function of them, so a
    * fetch here would be a second loader for one payload. It gets a callback and three flags.
    */
   onRefresh?: () => void;
@@ -109,9 +109,9 @@ export default function MultipleHistoryChart({
   refreshing?: boolean;
   cancelling?: boolean;
 }) {
-  // ⚠⚠ TRANSLATED LABELS FOR WHAT IS DRAWN, English `b` for the ⓘ prose — the same split as the
+  //  Translated labels for what is drawn, English `b` for the ⓘ prose — the same split as the
   // tab that owns this card. See `quickValuationCopy`.
-  // ⚠ THE KEY COMES IN AS A PROP, NOT FROM `b.tab`. Deriving it as `b.tab === 'EPS' ? …` would key
+  //  The key comes in as a prop, not from `b.tab`. Deriving it as `b.tab === 'EPS' ? …` would key
   // a lookup off a LABEL, which is the pattern this folder keeps paying for — and it would be
   // silently wrong the day that label is translated or renamed.
   const t = useQuickValuationCopy();
@@ -125,11 +125,11 @@ export default function MultipleHistoryChart({
   /**
    * The date of the newest observation, for the As-of tile.
    *
-   * ⚠ THE VENDOR'S DATE, NOT OURS. It is when GuruFocus last published a point, which is the only
+   *  The vendor's date, not ours. It is when GuruFocus last published a point, which is the only
    * date that answers "is this current" — the moment we happened to read it says nothing about
    * whether there was anything newer to read.
    *
-   * ⚠ ISO HERE AND `onDate` IN THE TOAST, DELIBERATELY. A `Stat` value is 18px mono inside 8rem, so
+   *  Iso here and `onDate` IN THE TOAST, DELIBERATELY. A `Stat` value is 18px mono inside 8rem, so
    * `2026-07-24` fits at ten characters and `24 July 2026` truncates to a date that reads as a
    * different one. The refresh's toast is a sentence with room, and gets the human form.
    */
@@ -137,7 +137,7 @@ export default function MultipleHistoryChart({
     ? new Date(forward.at(-1)!.t).toISOString().slice(0, 10) : null;
 
   /**
-   * ⚠ NO `align` ANY MORE, AND THAT IS THE ONE SIMPLIFICATION THE REMOVAL ACTUALLY BUYS. It
+   *  NO `align` ANY MORE, AND THAT IS THE ONE SIMPLIFICATION THE REMOVAL ACTUALLY BUYS. It
    * existed because the vendor's forward indicator and our trailing series were sampled
    * independently and shared almost no dates — a naive merge gave rows holding one value and a
    * null for the other, alternating, which `connectNulls={false}` then drew as isolated dots. One
@@ -163,7 +163,7 @@ export default function MultipleHistoryChart({
       <div className="flex items-baseline gap-2 flex-wrap">
         <h4 className="text-base font-semibold text-fg-strong">{t.multipleForward(bl.multiple)}</h4>
         <span className="text-xs text-fg-faint">{t.sinceMedian(String(fromYear))}</span>
-        {/* ⚠ ONLY ON THE BASIS THAT HAS A VENDOR LINE. The FCF basis used to print its own chip
+        {/*  ONLY ON THE BASIS THAT HAS A VENDOR LINE. The FCF basis used to print its own chip
             here explaining why there is no forward series; the empty state below already says it,
             and saying it twice in one card — once in the header, once across the middle of it —
             was the redundancy, not the sentence. Removed on request. */}
@@ -173,15 +173,15 @@ export default function MultipleHistoryChart({
             {t.vendorIndicator}
           </span>
         )}
-        {/* ⚠⚠ ONE CONTROL, THREE STATES, AND IT TURNS INTO THE CANCEL — the same shape and the same
+        {/*  ONE CONTROL, THREE STATES, AND IT TURNS INTO THE CANCEL — the same shape and the same
             three WORDS as the share-price Refresh on the Deep Valuation tab. The reader pressed it HERE,
             so this is where stopping it belongs; sending them to the toast in the corner to undo
             something they started on this card is a Cancel that does nothing.
               Refresh  idle     Cancel  running, press to abort     Cancelling…  unwinding
-            ⚠ RENDERED ONLY ON A BASIS THAT HAS A VENDOR LINE. On the FCF basis there is no forward
+             RENDERED ONLY ON A BASIS THAT HAS A VENDOR LINE. On the FCF basis there is no forward
             series anywhere, at any date, so a refresh button would promise a fetch that cannot
             exist — see the note beside `hasForward`.
-            ⚠ DISABLED, NOT ABSENT, WITH NO COMPANY: a control that vanishes takes its space with
+             DISABLED, NOT ABSENT, WITH NO COMPANY: a control that vanishes takes its space with
             it, and the header reflows on a state the reader cannot see the cause of. */}
         {hasForward && onRefresh && (
           <button type="button"
@@ -211,7 +211,7 @@ export default function MultipleHistoryChart({
               when={`Weekly since ${fromYear}.`}
               how="Uses consensus EPS for the current fiscal year." />} />} />
         )}
-        {/* ⚠⚠ THE VENDOR'S OWN PUBLICATION DATE, WHICH NOTHING ON THIS CARD USED TO SHOW. Every
+        {/*  THE VENDOR'S OWN PUBLICATION DATE, WHICH NOTHING ON THIS CARD USED TO SHOW. Every
             figure here descends from a series read from GuruFocus with a multi-week lag, and the
             card said only "since 2015" — the window, never the edge. A reader could not tell a
             line current to yesterday from one that stopped five weeks ago, and the Refresh beside it had
@@ -235,7 +235,7 @@ export default function MultipleHistoryChart({
       <div>
         {data.length < 2 ? (
           <p className="text-xs text-fg-faint py-16 text-center px-6">
-            {/* ⚠ THE TWO EMPTINESSES ARE DIFFERENT AND ONLY ONE IS EVER FIXABLE. On the FCF basis
+            {/*  THE TWO EMPTINESSES ARE DIFFERENT AND ONLY ONE IS EVER FIXABLE. On the FCF basis
                 there is no vendor forward series to read at all — a fact about the market, not
                 about this company. On EPS it means GuruFocus publishes no forward P/E for this
                 listing, which a re-ingest might. */}
@@ -267,7 +267,7 @@ export default function MultipleHistoryChart({
                   <ReferenceLine y={median} stroke={MEDIAN_COLOR} strokeDasharray="5 3"
                     strokeOpacity={0.55} />
                 )}
-                {/* ⚠ `connectNulls={false}` STILL. A stretch the vendor published nothing for is a
+                {/*  `connectNulls={false}` STILL. A stretch the vendor published nothing for is a
                     HOLE — joining across it draws a smooth valuation through a period that had
                     none, which is as wrong with one line as it was with two. */}
                 <Line dataKey="fwd" name="fwd" type="monotone" stroke={FORWARD_COLOR}
@@ -282,10 +282,10 @@ export default function MultipleHistoryChart({
               {clipped > 0 && (
                 <span className="text-warn-300"
                   title={`Above ${OUTLIER_MULT}x the median. Still drawn, only excluded from the axis range — one collapsed-FCF year would otherwise flatten the whole decade.`}>
-                  ⚠ {clipped} point{clipped > 1 ? 's' : ''} off the top of the axis
+                   {clipped} point{clipped > 1 ? 's' : ''} off the top of the axis
                 </span>
               )}
-              {/* ⚠ THE "reporting lag applied" NOTE WENT WITH THE TRAILING LINE, deliberately. It
+              {/*  THE "reporting lag applied" NOTE WENT WITH THE TRAILING LINE, deliberately. It
                   was about holding a fiscal figure back until it was plausibly public — a property
                   of a multiple WE computed from reported accounts. This line is read from the
                   vendor, so the note would be reassurance about arithmetic that no longer happens
@@ -296,9 +296,9 @@ export default function MultipleHistoryChart({
       </div>
 
       {showData && (
-        // ⚠ HANDED `data` — the exact rows plotted above. Nothing is recomputed, so the table
+        //  HANDED `data` — the exact rows plotted above. Nothing is recomputed, so the table
         // cannot disagree with the line that opened it. Same rule as `QuickValuationInputsModal`.
-        // ⚠ NO INPUTS COLUMNS ANY MORE, and that is a property of the data rather than lost detail:
+        //  No inputs columns any more, and that is a property of the data rather than lost detail:
         // the trailing multiple was OUR division and carried its two operands; a vendor's published
         // indicator has nothing to decompose.
         <MultipleHistoryModal rows={data} basis={b} median={median}

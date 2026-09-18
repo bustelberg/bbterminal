@@ -7,16 +7,16 @@ import { useLang, type Lang } from '../../../lib/i18n';
  * period switch. Not the tabs' contents: each of those has its own copy module
  * (`longEquityCopy`, `tablesCopy`, `deepValuationCopy`) or is still untranslated.
  *
- * ⚠⚠ THE TAB LABELS ARE NOT THE TAB KEYS. `Tab` is `'longequity' | 'tables' | 'quickval' |
+ *  The tab labels are not the tab keys. `Tab` is `'longequity' | 'tables' | 'quickval' |
  * 'deepval'` and stays English for ever: it is this modal's state, `openTab` and every caller pass
  * it, and `LongEquityTab` keys its per-cadence fetches off it. Translating the KEY would remount
  * every card and refetch on a switch that should only repaint text — the same argument
  * `longEquityCopy` makes about `MetricCfg.title`. Only the rendered word changes here.
  *
- * ⚠ `Graphs` IS THE LABEL FOR THE `longequity` KEY (renamed 2026-09-03, on request). The Dutch
+ *  `Graphs` IS THE LABEL FOR THE `longequity` KEY (renamed 2026-09-03, on request). The Dutch
  * follows the label, not the key.
  *
- * ⚠ `EN` / `NL` ARE NOT HERE AND MUST NOT BE. They are the language switch's own options and are
+ *  `EN` / `NL` ARE NOT HERE AND MUST NOT BE. They are the language switch's own options and are
  * endonyms — a Dutch reader looks for "NL", not "Nederlands" — so they are the same in every
  * language by design. See `LANG_LABEL` in `lib/i18n`.
  */
@@ -54,7 +54,7 @@ const EN: FundamentalChromeCopy = {
   sbc: 'SBC correction',
   valuing: 'Which company to value',
   sbcTitle: 'Subtract stock-based compensation from free cash flow before computing FCF margin, '
-    + 'FCF yield, cash return on capital and FCF / Net Income. ⚠ No effect on ROIC, which is '
+    + 'FCF yield, cash return on capital and FCF / Net Income.  No effect on ROIC, which is '
     + 'GuruFocus’s own published ratio — there is no numerator of ours to adjust.',
   periods: 'Periods',
   annual: 'Annual',
@@ -67,9 +67,9 @@ const EN: FundamentalChromeCopy = {
 };
 
 /**
- * ⚠ TRANSLATED FROM THE ENGLISH ABOVE, never authored here — see the note on `Lang`.
+ *  Translated from the english above, never authored here — see the note on `Lang`.
  *
- * ⚠ `Quick Valuation` / `Deep Valuation` KEEP THEIR ENGLISH NAMES. They are what these two screens
+ *  `Quick Valuation` / `Deep Valuation` KEEP THEIR ENGLISH NAMES. They are what these two screens
  * are called — the terms a wealth manager uses out loud, like `Sharpe` and `drawdown` elsewhere in
  * this app — and a reader who has learned "Deep Valuation" should find it under that name in either
  * language. `Graphs` and `Tables` are ordinary words and do translate.
@@ -89,7 +89,7 @@ const NL: FundamentalChromeCopy = {
   sbc: 'SBC-correctie',
   valuing: 'Welke onderneming waarderen',
   sbcTitle: 'Trek aandelenbeloning (SBC) van de vrije kasstroom af vóór het berekenen van '
-    + 'FCF-marge, FCF-rendement, cash return op kapitaal en FCF / nettowinst. ⚠ Geen effect op '
+    + 'FCF-marge, FCF-rendement, cash return op kapitaal en FCF / nettowinst.  Geen effect op '
     + 'ROIC: dat is GuruFocus’ eigen gepubliceerde ratio — er is geen teller van ons om aan te '
     + 'passen.',
   periods: 'Perioden',

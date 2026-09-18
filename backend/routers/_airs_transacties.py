@@ -1,21 +1,21 @@
 """One account's AIRS Transacties, cached — the read behind the /portfolios "Transactions" panel.
 
-⚠ CACHED BY DEFAULT, LIVE ONLY WHEN ASKED. A live fetch is one download behind a headless AirSPMS
+ CACHED BY DEFAULT, LIVE ONLY WHEN ASKED. A live fetch is one download behind a headless AirSPMS
 session and takes seconds; the panel is opened by a click, and a click that costs seconds every
 time is a panel nobody opens twice. Same shape as the model portfolios' position cache: read the
 stored snapshot, hit AIRS only on `refresh=true`, on a window that differs from the stored one, or
 when nothing is stored at all.
 
-⚠ AND THE ANSWER SAYS WHICH IT WAS. `cached_at` is returned and the UI prints it. A cached answer
+ AND THE ANSWER SAYS WHICH IT WAS. `cached_at` is returned and the UI prints it. A cached answer
 shown as fresh is how a stale figure gets trusted — the rule this repo already applies to the
 model-portfolio positions and to every price mark.
 
-⚠ ZERO ROWS IS AN ANSWER AND IT IS CACHED LIKE ANY OTHER. A book that has not traded has an empty
+ ZERO ROWS IS AN ANSWER AND IT IS CACHED LIKE ANY OTHER. A book that has not traded has an empty
 Transacties report. Storing the empty snapshot is what stops every expand re-asking AIRS for a
 report we already know is empty — and it is why "no snapshot stored" and "stored, and empty" are
 kept apart in the table rather than both reading as absent.
 
-⚠ THE AIRS SESSION IS SINGLE-THREADED, so a live fetch takes `airs_vermogen._LOCK` — the same lock
+ THE AIRS SESSION IS SINGLE-THREADED, so a live fetch takes `airs_vermogen._LOCK` — the same lock
 the fleet scan and the per-row refresh hold. Two threads driving one headless browser is how a
 download arrives as somebody else's report. A contended fetch does NOT queue: it falls back to
 whatever is cached and says so, because a request that blocks for the length of a fleet scan is
@@ -30,11 +30,11 @@ from deps import supabase
 
 _log = logging.getLogger(__name__)
 
-# ⚠ THE SAME WINDOW THE REST OF THE PANEL IS MEASURED OVER — 1 January to today, exactly what
+#  The same window the rest of the panel is measured over — 1 January to today, exactly what
 # `refresh_one_portfolio` and the fleet scan pass for every report. A transactions list on a
 # different window from the returns beside it invites a reader to explain one with the other, and
 # the arithmetic would not work.
-# ⚠ AND `scan_one` CALLS THIS RATHER THAN REUSING ITS OWN `van`/`tot`: a snapshot stored under any
+#  AND `scan_one` CALLS THIS RATHER THAN REUSING ITS OWN `van`/`tot`: a snapshot stored under any
 # other window is one `account_transactions` treats as not-this-answer, so it would re-download on
 # every open and the scan's work would be invisible. They are equal today — relying on that is how
 # they come apart the first time a caller passes a custom range.
@@ -46,13 +46,13 @@ def ytd_window() -> tuple[str, str]:
 def _stored(portefeuille: str) -> tuple[dict | None, str | None]:
     """The cached snapshot, and WHY there isn't one when there isn't.
 
-    ⚠ A BROKEN CACHE IS NOT A BROKEN PANEL. This 500'd on the very first click, because the table
+     A BROKEN CACHE IS NOT A BROKEN PANEL. This 500'd on the very first click, because the table
     did not exist yet (the migration had not been applied) and an unhandled `APIError` came out as
     `{"detail":"Internal Server Error"}` — 34 bytes that name neither the table nor the cause. The
     cache is an OPTIMISATION: it makes the second open instant. Its absence means one more download,
     not no answer, so a read fault degrades to a live fetch.
 
-    ⚠ AND IT IS LOUD, because the failure that put this comment here is a SETUP one that never
+     AND IT IS LOUD, because the failure that put this comment here is a SETUP one that never
     heals on its own. Swallowed silently, a missing table would look exactly like a cold cache: the
     panel would work, every open would re-download from AIRS, and nobody would ever find out. The
     reason is logged at WARNING (uvicorn's root logger sits there, so `info` is invisible in
@@ -73,11 +73,11 @@ def _stored(portefeuille: str) -> tuple[dict | None, str | None]:
 def _store(portefeuille: str, van: str, tot: str, sheet) -> str | None:
     """Delete-then-insert, so a transaction that vanished upstream actually disappears.
 
-    ⚠ ONE SNAPSHOT PER ACCOUNT, THE NEWEST. Keeping a history here would mean serving one of
+     ONE SNAPSHOT PER ACCOUNT, THE NEWEST. Keeping a history here would mean serving one of
     several windows as though it were current — the same rot-backwards failure the model-portfolio
     position cache refuses by never writing back a historical `datum`.
 
-    ⚠ A FAILED WRITE MUST NOT LOSE THE ROWS WE ALREADY HAVE. The download has happened and the
+     A FAILED WRITE MUST NOT LOSE THE ROWS WE ALREADY HAVE. The download has happened and the
     answer is in hand; throwing here would spend an AIRS fetch and then return nothing, which is
     the worst of both. Returns the reason instead, for the caller to surface.
     """
@@ -117,7 +117,7 @@ def account_transactions(portefeuille: str, refresh: bool = False) -> dict:
 
     Returns `{portefeuille, datum_van, datum_tot, columns, kinds, rows, cached_at, source, note}`.
 
-    ⚠ `source` IS PART OF THE ANSWER, not diagnostics. `cache` | `live` | `unavailable` — and the
+     `source` IS PART OF THE ANSWER, not diagnostics. `cache` | `live` | `unavailable` — and the
     third is NOT an error state to hide: an account whose report AIRS does not produce, or one we
     could not reach while a scan holds the session, has a real reason and the reader gets it.
     """
@@ -126,7 +126,7 @@ def account_transactions(portefeuille: str, refresh: bool = False) -> dict:
 
     van, tot = ytd_window()
     cached, cache_note = _stored(portefeuille)
-    # ⚠ A CACHED SNAPSHOT OF A DIFFERENT WINDOW IS NOT THIS ANSWER. The window rolls forward every
+    #  A cached snapshot of a different window is not this answer. The window rolls forward every
     # day, so yesterday's cache is missing today's trades — served silently, that is a transaction
     # list that is quietly one day short. Same window, or re-fetch.
     fresh_enough = bool(cached) and cached["datum_van"] == van and cached["datum_tot"] == tot
@@ -134,7 +134,7 @@ def account_transactions(portefeuille: str, refresh: bool = False) -> dict:
         return {**_shape(cached), "source": "cache", "note": None}
 
     if not _LOCK.acquire(blocking=False):
-        # ⚠ FALL BACK, NEVER BLOCK. A fleet scan runs for minutes; waiting on it would make this
+        #  Fall back, never block. A fleet scan runs for minutes; waiting on it would make this
         # request indistinguishable from a hang. Whatever is cached is served, with the reason.
         note = ("An AIRS refresh is running, so this could not be re-fetched"
                 + (" — showing the last stored snapshot." if cached else "."))
@@ -143,7 +143,7 @@ def account_transactions(portefeuille: str, refresh: bool = False) -> dict:
     try:
         sheet = _fetch_live(portefeuille, van, tot)
     except AirsNoData as e:
-        # ⚠ AIRS ANSWERED: THIS BOOK HAS NO SUCH REPORT. Stored as an empty snapshot so the next
+        #  AIRS Answered: this book has no such report. Stored as an empty snapshot so the next
         # open is instant — the same reasoning that makes `scan_one` count `no_data` as ok rather
         # than re-scanning the account for ever.
         from airs_transacties import ParsedSheet  # noqa: PLC0415
@@ -152,7 +152,7 @@ def account_transactions(portefeuille: str, refresh: bool = False) -> dict:
         return _empty(portefeuille, van, tot, "live", _join(
             "AIRS has no Transacties report for this book in this period.", write_note))
     except Exception as e:  # noqa: BLE001 — a download fault must not 500 a panel
-        # ⚠ NOT STORED. A failure is not an empty report, and caching it as one would turn a
+        #  Not stored. A failure is not an empty report, and caching it as one would turn a
         # transient session problem into a permanent "this book never traded".
         note = f"Could not fetch transactions from AIRS ({type(e).__name__}: {e})"
         _log.warning("[airs_transacties] %s failed: %s: %s", portefeuille, type(e).__name__, e)
@@ -168,7 +168,7 @@ def account_transactions(portefeuille: str, refresh: bool = False) -> dict:
 
 
 def _join(*notes: str | None) -> str | None:
-    """One line out of the reasons there are. ⚠ Two independent things can go wrong at once — the
+    """One line out of the reasons there are.  Two independent things can go wrong at once — the
     cache can be unreachable AND the report absent — and dropping either leaves the reader with
     half an explanation for what they are looking at."""
     parts = [n for n in notes if n]
@@ -185,7 +185,7 @@ def _shape(row: dict) -> dict:
 
 
 def _empty(portefeuille: str, van: str, tot: str, source: str, note: str) -> dict:
-    """No rows, and the REASON. ⚠ An empty table with no explanation reads as "this book never
+    """No rows, and the REASON.  An empty table with no explanation reads as "this book never
     traded", which is a claim — and for an unreachable report it is a false one."""
     return {"portefeuille": portefeuille, "datum_van": van, "datum_tot": tot,
             "columns": [], "kinds": {}, "rows": [], "cached_at": None,

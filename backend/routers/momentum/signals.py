@@ -59,7 +59,7 @@ class SignalBreakdownRequest(BaseModel):
     index_universe: str | None = None
     signal_weights: dict[str, float] | None = None
     category_weights: dict[str, float] | None = None
-    # ⚠⚠ MUST MATCH THE RUN BEING EXPLAINED. This endpoint exists to show WHY a company scored what
+    #  Must match the run being explained. This endpoint exists to show WHY a company scored what
     # it scored in a given backtest month; scoring it under a different normalization than the run
     # used would produce a breakdown that explains a ranking which never happened. The caller sends
     # the run's own value; the default is the legacy one, matching a request that omits it.
@@ -368,7 +368,7 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
             yield _emit({"type": "progress", "pct": 75, "message": f"DB cache hit — universe panel ({len(panel_df)} companies) loaded from durable store"})
 
     if panel_df is None:
-        # SLOW PATH (panel cache miss): full universe load + panel
+        # Slow path (panel cache miss): full universe load + panel
         # computation. Before paying the 10s Supabase round-trip, check
         # the persistent price/volume cache — if the user just ran a
         # backtest on this universe, the indices + universe_df +
@@ -440,8 +440,8 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
         if monthly_eligible is not None:
             eligible = monthly_eligible.get(target_month_key) or {}
             if not eligible:
-                # ⚠ A FROZEN UNIVERSE HAS EXACTLY ONE MONTH, AND IT IS ALMOST NEVER
-                # THE MONTH YOU ARE ASKING ABOUT. `LEONTEQ (as of 2026-06-17)` is
+                #  A frozen universe has exactly one month, and it is almost never
+                # The month you are asking about. `LEONTEQ (as of 2026-06-17)` is
                 # stamped 2026-06 and is what the August book selected from — the
                 # engine broadcasts that single snapshot across history
                 # (`broadcast_constant`) and `run_current_portfolio` falls back to
@@ -479,10 +479,10 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
         universe_company_ids = sorted({int(c) for c in universe_df["company_id"]})
 
         # 2. Resolve price + volume indices for the universe.
-        # FAST PATH: the price/volume cache supplied indices already
+        # Fast path: the price/volume cache supplied indices already
         # covering [price_start, cutoff]. Skip the ~500K-row Supabase
         # load entirely and jump straight to panel compute.
-        # SLOW PATH: load prices + volumes from Supabase in chunks,
+        # Slow path: load prices + volumes from Supabase in chunks,
         # build the indices, then compute the panel. `price_start` was
         # computed at the top of this branch for the cache lookup.
         if cached_pv is not None:
@@ -598,7 +598,7 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
 
     # 5. Per-signal universe min/max (what 0-100 normalization saw).
     #
-    # ⚠ AND WHICH COMPANY SITS AT EACH END. The normalization is
+    #  And which company sits at each end. The normalization is
     # `(raw − min) / (max − min)`, so those two names set the scale for all ~1,500
     # others — one corrupt series at an extreme silently compresses everyone
     # else's score toward the middle. An unnamed range is unfalsifiable: "max

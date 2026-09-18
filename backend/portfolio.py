@@ -9,7 +9,7 @@ WHAT AIRS GIVES US PER HOLDING, AND WHAT WE MAKE OF IT
         Beginwaarde lopend jaar EUR · Huidige koers · Huidige waarde · Huidige waarde EUR ·
         Weging · Fondsresultaat · Valutaresultaat · Resultaat in % · Valuta · ISIN-code
 
-⚠ `ISIN-code` IS OPTIONAL AND IS THE MOST VALUABLE COLUMN ON THE SHEET.
+ `ISIN-code` IS OPTIONAL AND IS THE MOST VALUABLE COLUMN ON THE SHEET.
     It was switched on in AirSPMS on 2026-07-23; every snapshot taken before that has only
     `Fondsomschrijving`, a NAME. That is why `_airs_holding_isin` exists at all — it recovers
     the identity by fuzzy-matching the name against the Fixed portfolio's positions and then
@@ -25,7 +25,7 @@ WHAT AIRS GIVES US PER HOLDING, AND WHAT WE MAKE OF IT
     statements of the same quantity are a cross-check, and collapsing them into one would
     throw away the only evidence that either is right.
 
-⚠ OURS AND AIRS'S ARE 100× APART, AND BOTH ARE NAMED `pct`.
+ OURS AND AIRS'S ARE 100× APART, AND BOTH ARE NAMED `pct`.
     `ytd_return_pct` is a FRACTION we compute; `airs_result_pct` is AIRS's `Resultaat in %`
     as reported, a PERCENT — and they are the same quantity (the EUR return). Measured on a
     real download (BUS_MTS_OFF_AFS_DYN, row `Visa`): AIRS 11.41 against our
@@ -33,7 +33,7 @@ WHAT AIRS GIVES US PER HOLDING, AND WHAT WE MAKE OF IT
     same trap. NOTHING here rescales either into the other: they are carried side by side
     precisely so the two can be compared, and a reader who sees only one is told which.
 
-⚠ `fund_result_eur` / `fx_result_eur` ARE IN EUR — MEASURED, NOT ASSUMED.
+ `fund_result_eur` / `fx_result_eur` ARE IN EUR — MEASURED, NOT ASSUMED.
     `Fondsresultaat` + `Valutaresultaat` = the EUR value delta: Visa 3099 + 813.18 =
     3912.18 against 38211.21 - 34298.74 = 3912.47 (to rounding). They are NOT local — the
     local delta is 3553.96, which matches neither leg, so a holding's `Fondsresultaat` is
@@ -43,7 +43,7 @@ WHAT AIRS GIVES US PER HOLDING, AND WHAT WE MAKE OF IT
     compute can produce it — our `ytd_return_pct` and `ytd_return_local_pct` bracket the FX
     leg but never isolate it.
 
-⚠ A HOLDING'S FIGURE IS NOT THE PORTFOLIO'S. Do not aggregate anything here into a
+ A HOLDING'S FIGURE IS NOT THE PORTFOLIO'S. Do not aggregate anything here into a
     portfolio return: these are price returns over a book with deposits and withdrawals,
     and `AITopSelectie OFF DYN` measures -5.85% that way against AIRS's own +46.12%. The
     portfolio return is `airs_performance.cumulatief_rendement`; see `_airs_accounts.py`.
@@ -102,7 +102,7 @@ def _resolve_columns(df: pd.DataFrame) -> dict[str, str]:
 def _col(cols: dict[str, str], header: str) -> Optional[str]:
     """The real column for `header`, or None.
 
-    ⚠ EXACT match on the normalised name — never a prefix. `Huidige waarde` and
+     EXACT match on the normalised name — never a prefix. `Huidige waarde` and
     `Huidige waarde  EUR` are DIFFERENT columns (local vs EUR), and a `startswith` would
     hand back the EUR one for the local lookup: a silent 1.16× on every USD holding.
     """
@@ -121,7 +121,7 @@ _ISIN_RE = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
 def _isin(row: pd.Series, col: Optional[str]) -> Optional[str]:
     """AIRS's ISIN for this row, or None.
 
-    ⚠ THE CASH LINE'S EMPTY CELL ARRIVES AS THE STRING `"nan"`, WHICH IS TRUTHY. pandas reads a
+     THE CASH LINE'S EMPTY CELL ARRIVES AS THE STRING `"nan"`, WHICH IS TRUTHY. pandas reads a
     blank as float NaN, `str()` renders it `"nan"`, and every downstream test of "does this row
     have an ISIN" then says yes — the same trap that once counted a cash line as a holding.
 

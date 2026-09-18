@@ -18,7 +18,7 @@ WHY AIRS AND NOT YFINANCE, HERE
     has no listing for — the zero-bar guard refuses them, correctly — and AIRS values 7 of 7 where
     the yfinance path prices 0 of 9. AIRS is the custodian's system; it does not need a listing.
 
-⚠⚠ THE PORTFOLIO RETURN IS `cumulatief_rendement`, AND NEVER `eindvermogen / beginvermogen`.
+ THE PORTFOLIO RETURN IS `cumulatief_rendement`, AND NEVER `eindvermogen / beginvermogen`.
 
         `rendement`  == eindvermogen/beginvermogen - 1   -- exact, in 38 of 38 accounts
         `cumulatief_rendement`                            -- AIRS's own, flow-aware
@@ -31,7 +31,7 @@ WHY AIRS AND NOT YFINANCE, HERE
     (`sum(current)/sum(start)`) is the SAME wrong number wearing different arithmetic — it was the
     obvious way to build this view, and it would have reported -5.85% on a book that made +46%.
 
-    ⚠ THE ORIGINAL DIAGNOSIS ABOVE WAS WRONG, THOUGH THE RULE IT PRODUCED IS RIGHT (2026-07-17).
+     THE ORIGINAL DIAGNOSIS ABOVE WAS WRONG, THOUGH THE RULE IT PRODUCED IS RIGHT (2026-07-17).
     The gap was read here as flows — "the value ratio is a return only when nothing was
     deposited or withdrawn". Measured against a real download: AITopSelectie OFF DYN has
     `stortingen` = 0 and `onttrekkingen` = 0 for every month of 2026, and its two figures still
@@ -42,7 +42,7 @@ WHY AIRS AND NOT YFINANCE, HERE
     both are correct — of different periods. See `_year_perf`, which is where the year is now
     assembled, and which the whole of this module's money now flows through.
 
-⚠ THE HOLDINGS DO NOT SUM TO THE PORTFOLIO RETURN, AND THAT IS CORRECT.
+ THE HOLDINGS DO NOT SUM TO THE PORTFOLIO RETURN, AND THAT IS CORRECT.
     They are different quantities, not a reconciliation that failed:
       - each holding's figure is a PRICE return (AIRS restates `Beginwaarde lopend jaar` to the
         current quantity — measured on 32 of 36 quantity changes; the 4 that do not are KLA's
@@ -57,7 +57,7 @@ from __future__ import annotations
 import asyncio
 from datetime import date
 
-# ⚠ IMPORTED, NOT RE-LISTED. The set of reports an account needs is the set the refresh fetches;
+#  Imported, not re-listed. The set of reports an account needs is the set the refresh fetches;
 # two copies would drift the moment a fifth report is added, and the drift would show up as
 # accounts silently missing from the page.
 from airs_vermogen import REPORTS
@@ -86,7 +86,7 @@ _PER_PERIOD_SUMS = ("stortingen", "onttrekkingen", "koersresultaat", "opbrengste
 def _paged(build, *, page: int = 1000) -> list[dict]:
     """Every row the query matches — not the first serverful.
 
-    ⚠⚠ `.limit(20000)` IS NOT PROTECTION, AND READING IT AS PROTECTION IS HOW THIS BIT US. The
+     `.limit(20000)` IS NOT PROTECTION, AND READING IT AS PROTECTION IS HOW THIS BIT US. The
     bound that applies is the SERVER'S `db-max-rows`: **1,000 on Supabase cloud, 10,000 locally**.
     PostgREST truncates to it and says nothing — no error, no header, no short-read signal.
 
@@ -98,7 +98,7 @@ def _paged(build, *, page: int = 1000) -> list[dict]:
     while July's −11.96% sat in the table unread. Local: +36.64%. Same code, same query, two
     answers, and nothing anywhere said the read was short.
 
-    ⚠ AND REFRESHING MADE IT WORSE. `airs_performance` is append-only — every daily run writes
+     AND REFRESHING MADE IT WORSE. `airs_performance` is append-only — every daily run writes
     another row for each month in progress — so each refresh pushed the newest rows further past
     the cap. The one action that looks like a fix was feeding the bug.
 
@@ -123,7 +123,7 @@ def _paged(build, *, page: int = 1000) -> list[dict]:
 def _year_perf() -> dict[str, dict]:
     """Each account's YEAR, aggregated from AIRS's own monthly rows.
 
-    ⚠⚠ ONE ATT ROW IS ONE MONTH, NOT ONE PORTFOLIO — and reading the freshest row as
+     ONE ATT ROW IS ONE MONTH, NOT ONE PORTFOLIO — and reading the freshest row as
     "the year" is the bug this function exists to prevent. Measured on AITopSelectie
     OFF DYN, whose sheet has seven rows:
 
@@ -140,7 +140,7 @@ def _year_perf() -> dict[str, dict]:
     three times too small, on a screen claiming to describe the same period. The year's
     price result is **+420,225**.
 
-    ⚠ THE ROWS ARE NOT ALL DISTINCT PERIODS, SO THEY CANNOT SIMPLY BE SUMMED. The daily
+     THE ROWS ARE NOT ALL DISTINCT PERIODS, SO THEY CANNOT SIMPLY BE SUMMED. The daily
     refresh re-downloads Jan-1..today, and the sheet's final row is a PARTIAL month, so
     every run writes another row for the month in progress. BUS_Offensief_Dyn holds 20
     rows for 7 months: seven of them are June (all with `beginvermogen` 1,211,625.02 —
@@ -152,7 +152,7 @@ def _year_perf() -> dict[str, dict]:
     year's opening from the FIRST, and `cumulatief_rendement` from the LAST (never
     recomputed — it is AIRS's own and it is flow-aware).
     """
-    # ⚠ PAGED, NOT `.limit(20000)` — see `_paged`. This exact read served June's YTD in
+    #  Paged, not `.limit(20000)` — see `_paged`. This exact read served June's YTD in
     # production while July sat unread, because the cap that binds is the server's (1,000) and
     # ascending order puts the newest rows last. The sort key is `(periode, portefeuille,
     # fetched_at)`: `periode` alone ties across all ~44 accounts, and a page boundary inside a
@@ -210,7 +210,7 @@ def _direct_result(portefeuille: str, holding_names: set[str]):
     Returns `(attached_by_holding_name, sold_totals)` — the second being income from positions no
     longer held, already rolled up.
 
-    ⚠ THE ROLL-UP HAPPENS HERE, NOT IN `account_holdings`, AND THAT IS DELIBERATE. That function
+     THE ROLL-UP HAPPENS HERE, NOT IN `account_holdings`, AND THAT IS DELIBERATE. That function
     is guarded by a test forbidding the token `sum(` in its source, because summing the holdings
     into a portfolio RETURN is the headline bug this module exists to prevent (see the module
     docstring: it would have reported -5.85% on a book that made +46%). Adding euros of income is
@@ -218,12 +218,12 @@ def _direct_result(portefeuille: str, holding_names: set[str]):
     crude guard on a real trap is worth more than a precise one nobody trusts, so the arithmetic
     moves rather than the rule.
 
-    ⚠ AGGREGATED ON READ, NEVER STORED AS A TOTAL. The journal lines are the source; a stored
+     AGGREGATED ON READ, NEVER STORED AS A TOTAL. The journal lines are the source; a stored
     per-holding sum is a second source of truth that drifts from the rows it counts, and it could
     not answer "which payments, on what dates" — the first thing anyone asks when a dividend figure
     looks wrong.
 
-    ⚠ JOINED BY NAME, EXACTLY. This sheet carries no ISIN. Both `fonds` and `holding_name` are AIRS
+     JOINED BY NAME, EXACTLY. This sheet carries no ISIN. Both `fonds` and `holding_name` are AIRS
     strings truncated at the same 50 characters, so an exact match is sound — and nothing fuzzy
     belongs here (see `_airs_holding_isin` for the price of fuzzy matching this join).
     """
@@ -253,7 +253,7 @@ def _direct_result(portefeuille: str, holding_names: set[str]):
 def _model_weights(portefeuille: str) -> dict[str, dict]:
     """This book's OWN model weights, keyed by holding name (`airs_model_weight`).
 
-    ⚠ NO PAIRING. These come from the dynamic portfolio's own MODEL report, so there is no
+     NO PAIRING. These come from the dynamic portfolio's own MODEL report, so there is no
     fixed portfolio to match it to and no guess to get wrong — which was the failure mode with the
     worst blast radius here, since the risk variants of a strategy hold the same instruments and a
     mis-pairing therefore looks entirely normal on every other column.
@@ -268,7 +268,7 @@ def parse_holding_counts_csv(raw: str) -> tuple[dict[str, int], dict[str, str]]:
     """`portefeuille,as_of_date,count` CSV -> (counts, newest dates). Pure, so the parsing is
     testable without a database.
 
-    ⚠ PARSED AS CSV, NEVER `line.split(",")`. AIRS portfolio names are free text with spaces
+     PARSED AS CSV, NEVER `line.split(",")`. AIRS portfolio names are free text with spaces
     ("WTS test 1 FX", "VTopSelectie OFF DY") and nothing stops one containing a comma — at which
     point a naive split shifts every field on that row and the account silently gets the wrong
     count. Postgres quotes such a field; `csv.reader` unquotes it.
@@ -292,7 +292,7 @@ def parse_holding_counts_csv(raw: str) -> tuple[dict[str, int], dict[str, str]]:
 def _holding_counts() -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
     """(holdings per account, that account's snapshot date) — off the freshest snapshot only.
 
-    ⚠ AGGREGATED IN POSTGRES, BECAUSE READING THE TABLE DOES NOT SCALE AND FAILS SILENTLY. This
+     AGGREGATED IN POSTGRES, BECAUSE READING THE TABLE DOES NOT SCALE AND FAILS SILENTLY. This
     used to `select(...).limit(20000)` over ALL of `airs_holding` and reduce it in Python.
     `airs_holding` keeps one snapshot per account PER DATE and grows on every scan — measured
     2026-07-30 it was already at 9,817 rows across 18 snapshot dates for 39 accounts. The moment it
@@ -323,7 +323,7 @@ def _holding_counts() -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
 def _holding_counts_paged() -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
     """The COPY-less fallback: the same reduction, but PAGED rather than capped.
 
-    ⚠ `.range()` IN A LOOP, NOT A BIGGER `.limit()`. Raising the cap only moves the cliff; paging
+     `.range()` IN A LOOP, NOT A BIGGER `.limit()`. Raising the cap only moves the cliff; paging
     until a short page arrives has no cliff at all. Slower and correct beats fast and quietly wrong
     — this runs wherever `SUPABASE_DB_URL` is unset.
     """
@@ -357,7 +357,7 @@ def _holding_counts_paged() -> tuple[dict[str, int], dict[str, str], dict[str, i
 def _hidden_accounts() -> set[str]:
     """Accounts a human has removed from the list (`airs_account_hidden`), lower-cased.
 
-    ⚠ AN EMPTY SET ON FAILURE, NEVER AN EXCEPTION. This gates a read of the whole portfolios
+     AN EMPTY SET ON FAILURE, NEVER AN EXCEPTION. This gates a read of the whole portfolios
     page; a missing table or a transient error must show one row too many, not zero rows.
     """
     try:
@@ -372,7 +372,7 @@ def _hidden_accounts() -> set[str]:
 def _live_accounts() -> set[str] | None:
     """The accounts AIRS listed on the most recent discovery, lower-cased — or None.
 
-    ⚠ `None` MEANS "DO NOT FILTER", AND IS NOT THE SAME AS AN EMPTY SET. Before the first
+     `None` MEANS "DO NOT FILTER", AND IS NOT THE SAME AS AN EMPTY SET. Before the first
     discovery has run (a fresh database, or right after this table was added) the roster is empty.
     Treating that as "no account exists" would blank the entire portfolios page; treating it as
     "we do not know yet" shows what we have, which is the honest state. An empty set would mean
@@ -393,7 +393,7 @@ def _live_accounts() -> set[str] | None:
 def _fetched_at() -> dict[str, str]:
     """Per account (lower-cased), when WE last successfully scanned it — `reports_at`.
 
-    ⚠⚠ IT IS A DIFFERENT FACT FROM `as_of`, AND THE ROW WAS SHOWING ONLY ONE OF THEM. `as_of` is
+     IT IS A DIFFERENT FACT FROM `as_of`, AND THE ROW WAS SHOWING ONLY ONE OF THEM. `as_of` is
     the date AIRS VALUED the book; this is the moment we last READ it. The freshness badge was
     computed from `as_of` alone and told the reader to press Refresh — which cannot help when the
     gap is AIRS's rather than ours.
@@ -419,7 +419,7 @@ def _fetched_at() -> dict[str, str]:
 def _missing_reports() -> dict[str, list[str]]:
     """Per account (lower-cased), which of the four reports the last refresh did NOT retrieve.
 
-    ⚠ THIS USED TO BE A FILTER AND IT WAS THE WRONG SHAPE. Accounts missing a report were withheld
+     THIS USED TO BE A FILTER AND IT WAS THE WRONG SHAPE. Accounts missing a report were withheld
     from the list entirely, so a scan that reached all 44 portfolios displayed 22 — the work was
     done and invisible, and the operator had no way to see WHICH report was short or for whom.
     Marking a row costs nothing and keeps the finding; hiding it threw the finding away along with
@@ -436,7 +436,7 @@ def _missing_reports() -> dict[str, list[str]]:
     dated = [r for r in rows if r.get("reports_at")]
     if not dated:
         return {}
-    # ⚠⚠ EACH ACCOUNT'S OWN LAST SCAN — NOT THE NEWEST TIMESTAMP IN THE TABLE. This used to take
+    #  Each account's own last scan — not the newest timestamp in the table. This used to take
     # `dated[0]["reports_at"]` as "the last refresh" and skip every row that did not match it
     # EXACTLY, which is wrong twice over:
     #
@@ -451,11 +451,11 @@ def _missing_reports() -> dict[str, list[str]]:
     # The question is per account — "did THIS account's last refresh retrieve everything?" — so it
     # is answered from that account's own row. A global maximum cannot answer a per-row question.
     #
-    # ⚠ FIRST ROW WINS, and the query is ordered `reports_at desc`. The table holds one row per
+    #  First row wins, and the query is ordered `reports_at desc`. The table holds one row per
     # account today; keeping the newest explicitly means a second row per account (a history) would
     # not silently start reporting an old scan's gaps.
     out: dict[str, list[str]] = {}
-    # ⚠ A SEPARATE `seen`, NOT `key in out`. A COMPLETE account never enters `out` — it has no gap
+    #  A SEPARATE `seen`, NOT `key in out`. A COMPLETE account never enters `out` — it has no gap
     # to record — so using `out` as the dedupe let its OLDER row through and resurface last week's
     # gaps on a row that is currently fine. Caught by
     # `test_the_newest_row_wins_if_an_account_ever_has_two`.
@@ -467,7 +467,7 @@ def _missing_reports() -> dict[str, list[str]]:
         seen.add(key)
         got = set(r.get("reports_ok") or [])
         gap = [code for code in REPORTS if code not in got]
-        # ⚠ An account with nothing missing gets NO ENTRY, not an empty list — `missing_reports`
+        #  An account with nothing missing gets NO ENTRY, not an empty list — `missing_reports`
         # is rendered on truthiness at the other end, and `[]` there would badge a whole row with
         # an empty gap list.
         if gap:
@@ -478,21 +478,21 @@ def _missing_reports() -> dict[str, list[str]]:
 def _complete_accounts() -> set[str] | None:
     """Accounts whose last refresh retrieved ALL FOUR reports, lower-cased — or None.
 
-    ⚠ NO LONGER USED AS A LIST FILTER — see `_missing_reports`. Kept because it is the honest
+     NO LONGER USED AS A LIST FILTER — see `_missing_reports`. Kept because it is the honest
     expression of "is this account whole", which the tests pin and which any future caller
     (an alert, a health check) should reuse rather than re-derive.
 
-    ⚠ AN ACCOUNT MISSING ONE REPORT IS NOT A SLIGHTLY-WORSE ROW, IT IS A MIXTURE OF DATES.
+     AN ACCOUNT MISSING ONE REPORT IS NOT A SLIGHTLY-WORSE ROW, IT IS A MIXTURE OF DATES.
     Measured 2026-07-29: Rendement 44/44 but Vermogensoverzicht 31/44, so thirteen accounts
     rendered this week's return beside last week's holdings, with nothing on screen saying so.
     Every figure was real; only their combination was fiction.
 
-    ⚠ `None` MEANS "DO NOT FILTER" — same contract as `_live_accounts`, same reason. Before any
+     `None` MEANS "DO NOT FILTER" — same contract as `_live_accounts`, same reason. Before any
     refresh has recorded an outcome (a fresh database, or the deploy that added the columns) every
     account looks incomplete, and asserting that would blank the page over a measurement never
     taken. An empty SET is different: it means a refresh ran and nothing came back whole.
 
-    ⚠ AND ONLY THE NEWEST VERDICT COUNTS. Rows carry the batch stamp their refresh wrote, so an
+     AND ONLY THE NEWEST VERDICT COUNTS. Rows carry the batch stamp their refresh wrote, so an
     account skipped by a later run keeps an older `reports_at` and is correctly not counted as
     complete-as-of-now — rather than coasting on a verdict from a week ago.
     """
@@ -526,13 +526,13 @@ def list_accounts() -> list[dict]:
     fetched = _fetched_at()
     out: list[dict] = []
     for name, r in perf.items():
-        # ⚠ Filtered HERE, at the one place the list is built, so every surface that reads it
+        #  Filtered HERE, at the one place the list is built, so every surface that reads it
         # agrees. Hiding in the UI instead would leave the account in the API, in the
         # account-model link picker and in anything else that enumerates accounts.
         key = (name or "").strip().lower()
         if key in hidden:
             continue
-        # ⚠ AND THE SCRAPE DECIDES WHAT EXISTS. `perf` comes from `airs_performance`, which is
+        #  And the scrape decides what exists. `perf` comes from `airs_performance`, which is
         # append-only, so an account AIRS deactivated stays here for ever with a frozen snapshot
         # (measured: 44 live, 50 listed — TOPS_AZTS_L, TOPS_MOTS_L and WTS test 1-4). The
         # performance table answers "what did it make", which stays true after the book is gone;
@@ -542,7 +542,7 @@ def list_accounts() -> list[dict]:
         begin, end = r.get("beginvermogen"), r.get("eindvermogen")
         out.append({
             "portefeuille": name,
-            # ⚠ MARKED, NOT HIDDEN. A row assembled from a fresh Rendement and a week-old
+            #  Marked, not hidden. A row assembled from a fresh Rendement and a week-old
             # Vermogensoverzicht mixes dates, and the reader has to be told — but withholding the
             # row told them nothing at all and threw away the scan's work. Empty list = whole;
             # absent from `missing` also = whole (or never measured), which is the same display.
@@ -554,10 +554,10 @@ def list_accounts() -> list[dict]:
             "as_of": newest.get(name),
             "begin_value_eur": begin,
             "end_value_eur": end,
-            # ⚠ AIRS'S OWN YEAR RETURN — the compounding of every month's `rendement`, and
+            #  AIRS'S own year return — the compounding of every month's `rendement`, and
             # flow-aware. Never `end/begin - 1`.
             "ytd_pct": r.get("cumulatief_rendement"),
-            # ⚠ THE FRESHEST ROW'S `rendement` IS THE LATEST MONTH'S RETURN — NOT a rival YTD.
+            #  The freshest row's `rendement` IS THE LATEST MONTH'S RETURN — NOT a rival YTD.
             # It was served as `value_ratio_pct` ("the naive value ratio... the wrong one"),
             # which mis-stated what it is: -8.37% is not a wrong answer for the year, it is the
             # right answer for July. Named for the window it actually measures.
@@ -579,12 +579,12 @@ def list_accounts() -> list[dict]:
             "investment_result_eur": r.get("beleggingsresultaat"),
             "costs_eur": r.get("kosten"),
             "accrued_interest_change_eur": r.get("mutatie_opgelopen_rente"),
-            # ⚠ THE FLOWS. This is why `ytd_pct` and `value_ratio_pct` differ; a reader who
+            #  The flows. This is why `ytd_pct` and `value_ratio_pct` differ; a reader who
             # sees a 52pp gap between two returns on one row deserves the cause on it too.
             "deposits_eur": r.get("stortingen"),
             "withdrawals_eur": r.get("onttrekkingen"),
             "holdings": counts.get(name),          # None = we hold no snapshot for it
-            # ⚠ THE BOOK'S OWN ISINs, NOT THE PAIRED MODEL'S POSITION COUNT. The column used to
+            #  The book's own ISINs, NOT THE PAIRED MODEL'S POSITION COUNT. The column used to
             # read the model — so a book with no model showed "—" beside 22 holdings you could see
             # the moment you expanded it, and the number it DID show for a paired book described a
             # different object. The Vermogensoverzicht has carried `ISIN-code` since 2026-07-23;
@@ -603,7 +603,7 @@ def account_holdings(portefeuille: str) -> dict:
     quantity, so it is not contaminated by a purchase. It will NOT sum to the account's return:
     that one is flow-aware and includes income. See the module docstring.
     """
-    # ⚠ THE NEWEST SNAPSHOT IS ASKED FOR, NOT FILTERED OUT OF EVERY SNAPSHOT. This read all of an
+    #  The newest snapshot is asked for, not filtered out of every snapshot. This read all of an
     # account's history under `.limit(2000)` and took `max(as_of_date)` from whatever came back —
     # but `airs_holding` keeps one snapshot per account PER DATE and grows on every scan (10,084
     # rows across all accounts, 704 for the busiest, and only climbing). The server caps a
@@ -620,12 +620,12 @@ def account_holdings(portefeuille: str) -> dict:
     if not newest:
         return {"portefeuille": portefeuille, "as_of": None, "rows": []}
     as_of = str(newest[0]["as_of_date"])
-    # ⚠ COPY REMOVES THE PAGING *AND* ITS EMPTY PROBE PAGE. The pager below is correct and must
+    #  Copy removes the paging *AND* ITS EMPTY PROBE PAGE. The pager below is correct and must
     # stay as the fallback, but it costs `ceil(rows/1000) + 1` round trips — the +1 being the
     # empty page that proves the previous one was the last (measured: a 24-row snapshot issued a
     # second request at `offset=24` purely to come back empty). A COPY has no row cap, so one
     # query returns the snapshot and there is nothing to prove.
-    # ⚠ `as_of_date` STAYS A SERVER-SIDE FILTER. `airs_holding` keeps 28 historical snapshots per
+    #  `as_of_date` STAYS A SERVER-SIDE FILTER. `airs_holding` keeps 28 historical snapshots per
     # book, so fetching the book and picking the date in Python reads **788 rows instead of 42**.
     snap = load_rows_via_copy("airs_holding", _SNAP_COLS, "portefeuille", [portefeuille],
                               where={"as_of_date": as_of})
@@ -645,7 +645,7 @@ def account_holdings(portefeuille: str) -> dict:
     return {
         "portefeuille": portefeuille,
         "as_of": as_of,
-        # ⚠ THE PAIR, HERE TOO — see `_fetched_at`. The list row carries both dates and its badge can
+        #  The pair, here too — see `_fetched_at`. The list row carries both dates and its badge can
         # therefore say whether an old valuation is AIRS's lag or ours; the expanded panel showed the
         # same account through the same component with only `as_of`, so every ⓘ inside it went amber
         # on a book we had read that afternoon. One fact, two surfaces, and the surface with MORE
@@ -656,7 +656,7 @@ def account_holdings(portefeuille: str) -> dict:
         "ytd_pct": perf.get("cumulatief_rendement"),
         "price_result_eur": perf.get("koersresultaat"),
         "income_eur": perf.get("opbrengsten"),
-        # ⚠ Income the holdings table CANNOT show. A position sold during the year paid real
+        #  Income the holdings table CANNOT show. A position sold during the year paid real
         # dividends and has no row left to carry them — measured, 3 of 27 funds and EUR 1,010 of
         # BUS_Neutraal_Dyn's EUR 12,031. Summing the Direct result column and calling it the
         # book's income would understate it with nothing on screen to say why.
@@ -671,7 +671,7 @@ def account_holdings(portefeuille: str) -> dict:
             "start_value_eur": r.get("start_value_eur"),
             "current_value_eur": r.get("current_value_eur"),
             "ytd_return_eur": r.get("ytd_return_eur"),
-            # ⚠ None where `Beginwaarde` is 0 — a position not held at the year's open (or a cash
+            #  None where `Beginwaarde` is 0 — a position not held at the year's open (or a cash
             # line). Its YTD is UNDEFINED, not 0%: dividing by zero would be infinite and calling
             # it flat would be a claim. `parse_airs_excel` already refuses it; this preserves the
             # refusal rather than coalescing it to a number.
@@ -689,10 +689,10 @@ def account_holdings(portefeuille: str) -> dict:
             "fx_result_eur": r.get("fx_result_eur"),
             "airs_result_pct": r.get("airs_result_pct"),
             # The DIRECT result: what this instrument actually paid the book, from the Mutaties
-            # journal. ⚠ `dividend_eur` is GROSS and `dividend_tax_eur` is NEGATIVE (as AIRS books
+            # journal.  `dividend_eur` is GROSS and `dividend_tax_eur` is NEGATIVE (as AIRS books
             # it), so net is their sum — they are two columns because a US name losing 15% and a
             # Dutch one losing nothing is a fact about the holding, not rounding.
-            # ⚠ None, never 0.0, when the journal has no line for it: "paid nothing" and "we have
+            #  None, never 0.0, when the journal has no line for it: "paid nothing" and "we have
             # not scanned this book's journal" are different claims and only one is safe to make.
             "dividend_eur": (d.gross_eur if (d := income.get(r["holding_name"])) else None),
             "dividend_tax_eur": (d.tax_eur if (d := income.get(r["holding_name"])) else None),

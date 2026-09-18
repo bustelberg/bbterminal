@@ -12,7 +12,7 @@ WHY THIS EXISTS
     Python. That is a pure transport change, so everything here is about it staying pure: the same
     rows, under the same metric, in the same ORDER.
 
-⚠ ORDER IS NOT COSMETIC HERE. `_latest_per_year_dated` keeps the LAST row it sees for a period, so
+ ORDER IS NOT COSMETIC HERE. `_latest_per_year_dated` keeps the LAST row it sees for a period, so
     two rows landing in one fiscal year resolve differently depending on which arrives second. A
     filter preserves relative order; these tests pin that it is actually a filter.
 """
@@ -59,7 +59,7 @@ class TestItIsOneReadForEveryLine:
         assert len(calls) == 1, f"expected ONE read for {len(metrics)} lines, got {len(calls)}"
 
     def test_the_read_asks_for_every_metrics_codes(self, _capture):
-        # ⚠ EVERY SPELLING, NOT JUST THE FIRST. `_METRIC_CODES` carries two or three per line (the
+        #  Every spelling, not just the first. `_METRIC_CODES` carries two or three per line (the
         # capitalized and lowercase GuruFocus section cohorts) and dropping the alternates would
         # blank whichever cohort a company happens to be in — silently, for half the index.
         calls, install = _capture
@@ -82,7 +82,7 @@ class TestTheSplitIsExact:
         assert [r["numeric_value"] for r in out["net_income"][1]] == [10.0]
 
     def test_a_company_with_nothing_is_absent_from_that_metric(self, _capture):
-        # ⚠ ABSENT, NEVER AN EMPTY LIST THAT READS AS A ZERO. The grid renders "no observation" as
+        #  Absent, never an empty list that reads as a zero. The grid renders "no observation" as
         # a dash and a reported 0 as "0" — they are different facts about a company.
         _calls, install = _capture
         rev = e._METRIC_CODES["revenue"][0]
@@ -101,7 +101,7 @@ class TestTheSplitIsExact:
         assert not out["revenue"] and not out["goodwill"]
 
     def test_order_within_a_metric_survives_the_split(self, _capture):
-        # ⚠ THE FAILURE THIS GUARDS IS SILENT AND PICKS A DIFFERENT NUMBER, NOT AN ERROR:
+        #  The failure this guards is silent and picks a different number, not an error:
         # `_latest_per_year_dated` keeps the LAST row it sees for a fiscal year.
         _calls, install = _capture
         rev = e._METRIC_CODES["revenue"][0]
@@ -119,7 +119,7 @@ class TestTheSplitIsExact:
 
 class TestARefusedMetricIsAbsentNotEmpty:
     def test_quarterly_omits_a_line_with_no_ttm_rule(self, _capture, monkeypatch):
-        # ⚠ "WE REFUSE TO ROLL THIS UP" AND "WE HOLD NOTHING" ARE DIFFERENT ANSWERS, and the
+        #  "WE REFUSE TO ROLL THIS UP" AND "WE HOLD NOTHING" ARE DIFFERENT ANSWERS, and the
         # caller has to be able to tell them apart — `_codes_and_rule` returns (None, None) rather
         # than guessing a roll-up, because the wrong rule produces a plausible number (summing four
         # quarter-end balance sheets reports a company with 4x its assets).

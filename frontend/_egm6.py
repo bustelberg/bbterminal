@@ -14,7 +14,7 @@ END = """            ) : (
 end = s.index(END) + len(END)
 
 NEW = '''            {/**
-              * ⚠⚠ THE TABLE IS ALWAYS THE SAME FOUR ROWS. It used to swap for a paragraph whenever
+              *  The table is always the same four rows. It used to swap for a paragraph whenever
               * `calculateEGM` refused — and refusing is something the READER can cause: type `0`
               * into Exit P/E and the model has no multiple to rerate to, so the entire output box
               * changed shape mid-keystroke. Worse, the paragraph blamed a missing forward P/E,
@@ -40,7 +40,7 @@ NEW = '''            {/**
                         <td className="truncate py-0.5 text-fg-muted">
                           {leg.key === 'growth' ? 'Earnings growth'
                             : leg.key === 'yield' ? 'Dividend yield'
-                              // ⚠ THE ENDPOINTS COME OFF THE LEG WHERE THERE IS ONE — they travel
+                              //  The endpoints come off the leg where there is one — they travel
                               // with the arithmetic (see `EgmLeg`), so a label can never name a
                               // different pair than the figure beside it was computed from. With no
                               // bridge nothing was computed, so the fields themselves are the only
@@ -48,7 +48,7 @@ NEW = '''            {/**
                               : <>Multiple <span className="font-mono text-fg-soft">
                                 {mult('from' in leg ? leg.from ?? null : src.forwardPE)} → {mult('to' in leg ? leg.to ?? null : assumptions.exitPE)}</span></>}
                         </td>
-                        {/* ⚠ NO `/yr` ON THE LEGS. Every row here is annualised, so repeating the
+                        {/*  NO `/yr` ON THE LEGS. Every row here is annualised, so repeating the
                             unit four times states one fact four times; it is said ONCE, on the
                             answer, where a reader taking only that number away still gets it. */}
                         <td className={`py-0.5 pl-2 text-right font-mono tabular-nums ${
@@ -64,7 +64,7 @@ NEW = '''            {/**
                 <tr className="border-t border-neutral-700/60">
                   <td className="pt-1 font-medium text-fg-strong">
                     Expected return
-                    {/* ⚠⚠ THE COMPOUNDING NOTE IS IN THE HOVER, IT DID NOT GO AWAY. It was two
+                    {/*  THE COMPOUNDING NOTE IS IN THE HOVER, IT DID NOT GO AWAY. It was two
                         lines of prose under the rule. True and load-bearing — but on a panel whose
                         job is "as little as possible", a permanent paragraph about an arithmetic
                         subtlety is the first thing a reader skips, and the `×` column beside it
@@ -82,8 +82,8 @@ NEW = '''            {/**
                       how={r.bridge
                         ? 'Returns compound, so the rates cannot be added — the × column is the arithmetic the model actually performs, and it ties exactly.'
                         : src.forwardPE == null || !(src.forwardPE > 0)
-                          ? '⚠ No usable forward P/E for this company — a loss-maker has no multiple to rerate from, and none was ingested. Nothing here depends on your assumptions.'
-                          : '⚠ These assumptions produce no valuation — an exit P/E of zero or less, or a growth or hurdle rate at or below −100%, has no compounding path. Adjust the inputs on the left.'} />} />
+                          ? ' No usable forward P/E for this company — a loss-maker has no multiple to rerate from, and none was ingested. Nothing here depends on your assumptions.'
+                          : ' These assumptions produce no valuation — an exit P/E of zero or less, or a growth or hurdle rate at or below −100%, has no compounding path. Adjust the inputs on the left.'} />} />
                   </td>
                   <td className={`pt-1 pl-2 text-right font-mono tabular-nums font-semibold ${
                     (r.bridge?.rate ?? 0) >= 0 ? 'text-pos-500' : 'text-neg-500'}`}>
@@ -101,7 +101,7 @@ s = s[:start] + NEW + s[end:]
 # the conclusion table renders unconditionally too — same reason.
 OLD_GATE = """            {(r.impliedPrice != null || src.price != null) && (
               <table"""
-NEW_GATE = """            {/* ⚠ UNCONDITIONAL, like the table above — `n/a` is a value, an absent table is a
+NEW_GATE = """            {/*  UNCONDITIONAL, like the table above — `n/a` is a value, an absent table is a
                 different panel. */}
             {(
               <table"""

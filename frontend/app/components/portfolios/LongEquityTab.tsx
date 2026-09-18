@@ -39,7 +39,7 @@ type MetricsResponse = {
   blend_notes?: Record<string, BlendNote>;
   /** Per metric code, how many members the line was drawn from, how many were on offer, and the
    *  `rule` that explains the gap.
-   *  ⚠ DIFFERENT FROM `coverage`, which answers "how many hold this metric at all" — a positives-
+   *   Different from `coverage`, which answers "how many hold this metric at all" — a positives-
    *  only metric withholds members deliberately, and a euro-summed one leaves out any member whose
    *  euros could not be built. See `memberCounts`. */
   member_counts?: Record<string, MemberCount>;
@@ -53,23 +53,23 @@ type MetricsResponse = {
 // Each card is one metric. `codes` carries BOTH GuruFocus section spellings (see the backend's
 // `_METRIC_CODES`); `benchmarkMetric` is the `metric` param for the benchmark + holdings endpoints.
 /** The indices a chart can be measured against — the same three the /benchmarks panel rebuilds.
- *  ⚠ Their coverage differs a lot (SP500 is the best-ingested), and a thinly-covered index makes a
+ *   Their coverage differs a lot (SP500 is the best-ingested), and a thinly-covered index makes a
  *  confident-looking line over a fraction of itself; each card states the coverage it drew. */
 const BENCHMARKS = ['SP500', 'ACWI', 'AEX'];
 
 /** The select value that means "the company the caller handed me", not an index.
- *  ⚠ A SENTINEL, NOT AN ISIN. An ISIN in the option value would collide the day an index is ever
+ *   A sentinel, not an ISIN. An ISIN in the option value would collide the day an index is ever
  *  labelled with one, and it would put an identifier in a control whose other values are names. */
 const COMPARE_VALUE = '__compare__';
 
-const CARDS: MetricCfg[] = [
+export const CARDS: MetricCfg[] = [
   {
     /**
-     * ⚠ FIRST ON THE TAB — THE WEIGHTED SHARE-PRICE INCREASE OF THE BOOK AND OF THE INDEX. Every
+     *  First on the tab — the weighted share-price increase of the book and of the index. Every
      * other card on this grid explains a return; this one IS it, so it leads and the explanation
      * follows.
      *
-     * ⚠⚠ IT NEEDED NO NEW ENDPOINT, NO NEW BLEND RULE AND NO NEW CHART, AND THAT IS NOT A
+     *  It needed no new endpoint, no new blend rule and no new chart, and that is not a
      * COINCIDENCE — it is the tab's design paying out. A price is a LEVEL in each company's own
      * units, exactly like Revenue or FCF/share, so `_fundamental_blend` already aggregates it by
      * the rule this card wants: the line is CHAINED from weighted growth,
@@ -80,8 +80,8 @@ const CARDS: MetricCfg[] = [
      * is the identical computation over the index's cap-weighted constituents (`benchBody` swaps
      * `holdings` for `universe`), so the two lines on this chart cannot mean different things.
      *
-     * ⚠⚠ IT IS A PRICE RETURN IN EACH COMPANY'S REPORTING CURRENCY — NOT A EUR TOTAL RETURN, AND
-     * IT WILL NOT RECONCILE WITH THE ANALYSE MODAL. Three deliberate differences, every one of
+     *  It is a price return in each company's reporting currency — not a EUR total return, and
+     * It will not reconcile with the analyse modal. Three deliberate differences, every one of
      * which moves the number: dividends are excluded (a price index, not total return); the FX leg
      * is excluded (each g_i divides out its own currency, so a US holding's euro move is not in
      * it — see the EUR-basis rule in CLAUDE.md, which governs the RETURN surfaces, not this tab);
@@ -90,7 +90,7 @@ const CARDS: MetricCfg[] = [
      * their revenue and earnings — it is deliberately NOT the portfolio's performance, which
      * `period_return_pct` owns and nothing here may restate.
      *
-     * ⚠⚠ THE BENCHMARK LINE HERE IS THE CONSTITUENT REBUILD, AND IT STILL READS HIGH. Measured
+     *  The benchmark line here is the constituent rebuild, and it still reads high. Measured
      * 2026-08-21 after the anchor-weighting fix (`blend_series`, which took a decade of ACWI from a
      * fabricated +20.21%/yr to +11.14%/yr): ACWI +11.14, SP500 +14.09, AEX +10.29 per year over
      * 2015→2025, each roughly 1–2pp above what the index itself did. That residual is NOT a further
@@ -99,48 +99,48 @@ const CARDS: MetricCfg[] = [
      * names that fell out are not in it), weights are FULL market cap where MSCI float-adjusts, and
      * the basis is each company's own reporting currency rather than one index currency. It is
      * exactly why the Analyse modal's benchmark tile reads the index ETF's own price series instead
-     * (`routers/_benchmark_etf.py`, and the ⚠⚠ on it in CLAUDE.md). There is no ETF series on this
+     * (`routers/_benchmark_etf.py`, and the  on it in CLAUDE.md). There is no ETF series on this
      * tab, because every other card here is a FUNDAMENTAL the ETF cannot supply — so this line is
      * the same constituents as the fourteen charts around it, which is the property that makes the
      * comparison internally coherent, at the cost of a point or two against the published index.
      *
-     * ⚠ THE SAME `price_ps` LINE THE DIVIDEND-YIELD CARD DIVIDES BY. There is one "share price" on
+     *  The same `price_ps` LINE THE DIVIDEND-YIELD CARD DIVIDES BY. There is one "share price" on
      * this tab: GuruFocus's `Month End Stock Price` at each fiscal period end, in the reporting
      * currency, which is also `_RG_PRICE_CODE` — the price leg of /earnings'
      * Share-Price-vs-Owner-Earnings chart. Measured on ASML it IS a sample of the daily close
      * (681.7 / 678.7 / 921.4 at the last three year-ends, ratio 1.0000), so this changes the
      * frequency of that series and nothing else.
      *
-     * ⚠ AND IT IS THE ONE PRICE SERIES HERE THAT SELF-HEALS THROUGH A SPLIT. CLAUDE.md records
+     *  And it is the one price series here that self-heals through a split. CLAUDE.md records
      * that our stored `close_price` cannot: ingest only fetches dates NEWER than the stored max,
      * so a vendor's retroactive split rewrite is never re-read (KLA 1929→211). This line arrives
      * in the financials blob, which `ingest/earnings/financials.py` re-parses IN FULL on every
      * fetch and upserts by diff — a rewritten history therefore lands. That is a reason to prefer
      * the fiscal-period price here over the daily close, not a claim that the daily one is fixed.
      *
-     * ⚠ THE `LTM` POINT ON THIS CARD IS THE LATEST QUARTER-END PRICE, not a trailing twelve months
+     *  THE `LTM` POINT ON THIS CARD IS THE LATEST QUARTER-END PRICE, not a trailing twelve months
      * of anything: `price_ps`'s `_TTM_RULE` is `last`, because a price is a level at an instant
      * (summing four of them would report a share at 4x its price). Same reading `market_cap` and
      * every balance-sheet line already carry under that label.
      *
-     * ⚠ NO FORECAST LEG. `forecastCodes` is for a published analyst consensus of THIS line, and
+     *  No forecast leg. `forecastCodes` is for a published analyst consensus of THIS line, and
      * nobody publishes one for a share price that we ingest — a dotted continuation here would be
      * an extrapolation wearing a forecast's clothes. See the EPS card's note.
      *
-     * ⚠⚠ THE `Tables` TAB'S `priceCagr` ROW IS THIS SAME LINE, ONE TAB AWAY IN THE SAME MODAL, AND
-     * THEY MUST NOT DRIFT. That row runs `buildBlend` over `portfolio-revenue-matrix?metric=
+     *  THE `Tables` TAB'S `priceCagr` ROW IS THIS SAME LINE, ONE TAB AWAY IN THE SAME MODAL, AND
+     * They must not drift. That row runs `buildBlend` over `portfolio-revenue-matrix?metric=
      * price_ps` — the client twin of `_fundamental_blend.blend_series`, same chained weighted
      * growth, same coverage floor, same carry-forward — so the two are one series computed on two
      * sides of the wire, not two definitions of "the basket's price". They differ only as every
      * card/row pair on this tab does: the card's CAGR is a log-linear FIT (hence the R² beside it)
-     * and the row's is point-to-point. ⚠ At a high R² that gap is worth ~0.5pp; a large one means
+     * and the row's is point-to-point.  At a high R² that gap is worth ~0.5pp; a large one means
      * the two sides are reading DIFFERENT SERIES, not that the fit disagrees — the trap that hid
      * the `fcf_per_share`/`fcf_ps` key bug for weeks. See `TablesTab`'s header.
      */
     title: 'Share price', titleKey: 'sharePrice',
     noun: 'share price', unit: 'per_share', kind: 'growth',
     benchmarkMetric: 'price_ps',
-    // ⚠ THREE PER-SHARE SECTION SPELLINGS, same as `div_ps` — the capitalized cohort's
+    //  Three per-share section spellings, same as `div_ps` — the capitalized cohort's
     // `Per Share Data`, and the lowercase cohort's `per_share_data` AND `per_share_data_array`.
     // These must stay identical to the backend's `_METRIC_CODES['price_ps']`, or a whole cohort's
     // holdings read as "no share price ingested" while carrying the line.
@@ -150,14 +150,14 @@ const CARDS: MetricCfg[] = [
   },
   {
     /**
-     * ⚠ FIRST OF THE FUNDAMENTAL CARDS, DELIBERATELY — it is the line the rest of the page is
+     *  First of the fundamental cards, deliberately — it is the line the rest of the page is
      * about, and it sits directly under the share price because it is the half of that move
      * anybody can underwrite. Revenue says how much a business sold; this says what reached a
      * share. The card indexes it to 100 at the first year it shares with the benchmark, so what
      * is compared is the GROWTH — the same idea as /earnings' Share-Price-vs-Owner-Earnings
      * chart, whose price leg is now the card above this one.
      *
-     * ⚠⚠ "EXCLUDING NON-RECURRING ITEMS" IS THE WHOLE POINT AND IT IS ONE OF THREE NEAR-IDENTICAL
+     *  "EXCLUDING NON-RECURRING ITEMS" IS THE WHOLE POINT AND IT IS ONE OF THREE NEAR-IDENTICAL
      * LINES. GuruFocus also publishes `EPS (Diluted)` and `Earnings per Share (Diluted)`, both of
      * which INCLUDE one-offs — an impairment, a disposal, a tax settlement. They agree with this
      * one in most years, which is exactly what makes the wrong choice hard to catch: the series
@@ -165,7 +165,7 @@ const CARDS: MetricCfg[] = [
      * the chart IS that trend's slope. Same line `_RG_OE_CODE` uses on /earnings, so the two
      * surfaces cannot come to mean different things by "earnings".
      *
-     * ⚠ EPS GOES NEGATIVE, AND THE CARD ALREADY KNOWS. A loss year cannot be plotted on a log axis
+     *  EPS Goes negative, and the card already knows. A loss year cannot be plotted on a log axis
      * and cannot be a rebase base (100 × v/−2 inverts the curve), so `rebaseSeries` refuses when
      * there is no shared positive year and the card falls back to ABSOLUTE values, saying so in
      * the legend. That is the same treatment FCF/share gets and it is why neither is silently
@@ -178,13 +178,13 @@ const CARDS: MetricCfg[] = [
       'annuals__per_share_data__EPS without NRI',
       'annuals__per_share_data_array__EPS without NRI'],
     /**
-     * ⚠ THE FORECAST OF **THIS** LINE, not of EPS generally. GuruFocus publishes
+     *  The forecast of **THIS** LINE, not of EPS generally. GuruFocus publishes
      * `annual_per_share_eps_estimate` beside it and the two agree to a cent on almost every company
      * (Apple 8.76 vs 8.77), which is exactly why the choice cannot be made by eye: this card's
      * actual is `EPS without NRI`, so continuing it with an including-NRI consensus would put a
      * one-off impairment on the wrong side of the join with nothing on screen to say so.
      *
-     * ⚠ THE ONLY CARD WITH ONE, DELIBERATELY. Analysts forecast earnings; they do not publish a
+     *  The only card with one, deliberately. Analysts forecast earnings; they do not publish a
      * consensus for FCF/share or a diluted share count, and `_FORECAST_BASE` knows of exactly two
      * forecast lines (this and dividends per share). A dotted leg on a card with no consensus
      * behind it would be an extrapolation wearing a forecast's clothes.
@@ -201,7 +201,8 @@ const CARDS: MetricCfg[] = [
     title: 'FCF per share', titleKey: 'fcfPs',
     noun: 'FCF per share', unit: 'per_share', kind: 'growth', benchmarkMetric: 'fcf_ps',
     codes: ['annuals__Per Share Data__Free Cash Flow per Share',
-      'annuals__per_share_data__Free Cash Flow per Share'],
+      'annuals__per_share_data__Free Cash Flow per Share',
+      'annuals__per_share_data_array__Free Cash Flow per Share'],
   },
   {
     // A count, not currency (no ccy prefix). CAGR reads as the buyback (−) / dilution (+) rate.
@@ -211,7 +212,7 @@ const CARDS: MetricCfg[] = [
     codes: ['annuals__Income Statement__Shares Outstanding (Diluted Average)',
       'annuals__income_statement__Shares Outstanding (Diluted Average)'],
   },
-  // ⚠ NO "DIVIDEND / SHARE" CARD — the dividend is reported as a YIELD, for a company and for a
+  //  NO "DIVIDEND / SHARE" CARD — the dividend is reported as a YIELD, for a company and for a
   // portfolio alike (`DividendYieldCard`). A per-share amount has no portfolio-level meaning: there
   // is no portfolio share, the amounts sit in different currencies, and the level rule rebases each
   // holding to 100 at its first year, which a dividend series starting at 0.00 cannot survive — so
@@ -219,9 +220,9 @@ const CARDS: MetricCfg[] = [
 ];
 
 /**
- * THE METRIC LIST THE BLEND IS NARROWED TO — one declaration, because two tabs now send it.
+ * The metric list the blend is narrowed to — one declaration, because two tabs now send it.
  *
- * ⚠⚠ `TablesTab` SENDS THE IDENTICAL ARRAY SO THE TWO SHARE ONE CACHE ENTRY. Both the server's
+ *  `TablesTab` SENDS THE IDENTICAL ARRAY SO THE TWO SHARE ONE CACHE ENTRY. Both the server's
  * `cached_blend` and the browser's `readCache` key on the request BODY, so a different metric list
  * is a different entry — and an index blend is the most expensive read on this modal (~1,500
  * constituents on ACWI). Spelling the list twice would not be a wrong answer, it would be the
@@ -233,12 +234,12 @@ export const BLEND_METRICS: string[] = [...new Set(CARDS.flatMap(
 /**
  * metric KEY -> the GuruFocus codes its line is drawn from, for reading a blended payload back.
  *
- * ⚠⚠ DERIVED FROM `CARDS`, NEVER LISTED SEPARATELY. These are the same code lists the charts
+ *  Derived from `CARDS`, NEVER LISTED SEPARATELY. These are the same code lists the charts
  * extract with, and this file has already paid for one key/code mismatch — `fcf_per_share` against
  * the real `fcf_ps`, which drew REVENUE under an FCF heading at +19.0% against +28.0%. A second
  * hand-written copy is that bug with a longer fuse.
  *
- * ⚠ GROWTH CARDS ONLY. A ratio card's line is an average of a point-in-time ratio, not a level
+ *  Growth cards only. A ratio card's line is an average of a point-in-time ratio, not a level
  * chain, so it has no blended level to read and is not comparable to these.
  */
 export const BLEND_CODES: Record<string, { codes: string[]; forecast: string[] }> =
@@ -254,9 +255,9 @@ export default function LongEquityTab({
   basket?: Basket;
   portfolioId?: number;
   /**
-   * A SECOND COMPANY to draw beside this one, on every chart, instead of an index.
+   * A second company to draw beside this one, on every chart, instead of an index.
    *
-   * ⚠⚠ IT REUSES THE BENCHMARK SLOT RATHER THAN ADDING A THIRD SERIES, AND THAT IS THE WHOLE
+   *  It reuses the benchmark slot rather than adding a third series, and that is the whole
    * TRICK. Every card here already draws a second line on a shared y-domain, with a legend, a
    * hover order and a coverage floor — all of it computed by running the card's OWN helper
    * (`marginByYear`, `debtRatioByYear`, …) over a second row set. A company is a one-holding book
@@ -264,13 +265,13 @@ export default function LongEquityTab({
    * no new endpoint: fourteen charts become comparisons at once, and they cannot disagree with the
    * single-company view because they ARE it.
    *
-   * ⚠ THE COST IS THAT YOU GET ONE OR THE OTHER. A chart carries the book and one comparison line;
+   *  The cost is that you get one or the other. A chart carries the book and one comparison line;
    * choosing a company means not showing the index on that chart. Making it three lines would be a
    * third colour on fourteen charts, two of which already carry an amber trend line — see the
    * palette note in `benchSeries`.
    */
   compare?: { isin: string; name: string } | null;
-  /** ⚠ OWNED BY THE MODAL, NOT HERE — its checkbox lives in the tab row, which is in the fixed
+  /**  OWNED BY THE MODAL, NOT HERE — its checkbox lives in the tab row, which is in the fixed
    *  head and therefore always visible. Governs the four charts whose numerator is FCF. */
   sbcCorrection?: boolean;
 }) {
@@ -289,7 +290,7 @@ export default function LongEquityTab({
     window.addEventListener('bb:fundamentals-finished', reload);
     return () => window.removeEventListener('bb:fundamentals-finished', reload);
   }, []);
-  // ⚠ A SECOND, NARROWER KEY. The growth cards all read ONE metrics fetch, while each derived card
+  //  A second, narrower key. The growth cards all read ONE metrics fetch, while each derived card
   // owns its own endpoint and refetches on a re-key — so bumping `reloadKey` to refresh one chart
   // reloads twelve. This one refetches the metrics only; nothing else moves.
   const [metricsKey, setMetricsKey] = useState(0);
@@ -298,7 +299,7 @@ export default function LongEquityTab({
   /**
    * The cadence every chart on this tab is on.
    *
-   * ⚠ "Quarterly" IS TRAILING TWELVE MONTHS, NOT RAW QUARTERS — quarterly frequency with annual
+   *  "Quarterly" IS TRAILING TWELVE MONTHS, NOT RAW QUARTERS — quarterly frequency with annual
    * scope. Raw quarters would put a seasonal sawtooth through revenue, margins and cash
    * conversion, and the growth cards' trend line would fit the season rather than the business.
    * The roll-up is per metric and lives on the SERVER (`_TTM_RULE`): flows sum over four quarters,
@@ -310,33 +311,33 @@ export default function LongEquityTab({
   /**
    * The benchmark drawn beside every chart, or null for none.
    *
-   * ⚠ IT IS THE SAME REQUEST AS THE PORTFOLIO'S, WITH `universe` INSTEAD OF `holdings` — so each
+   *  It is the same request as the portfolio's, with `universe` INSTEAD OF `holdings` — so each
    * card computes the benchmark line with the identical helper it runs over the book. There is no
    * second implementation of "FCF-SBC margin" anywhere, which is the only way the two lines on one
    * chart can be guaranteed to mean the same thing. The index arrives cap-weighted; the card's
    * existing weighted average does the rest.
    */
-  // ⚠⚠ ACWI, AND SPELT OUT RATHER THAN `BENCHMARKS[0]` (2026-09-03, on request; it was 'AEX').
+  //  Acwi, and spelt out rather than `BENCHMARKS[0]` (2026-09-03, on request; it was 'AEX').
   // The default is a choice about what a book is measured against, so it is written where the
   // choice is made: pinning it to the array's order would let a reorder of the list silently
   // re-benchmark every chart on the tab.
-  // ⚠ WHY ACWI RATHER THAN THE DUTCH INDEX IT WAS. These books are global — the Analyse modal's
+  //  Why acwi rather than the dutch index it was. These books are global — the Analyse modal's
   // own scorecard already defaults to ACWI, and the relative-momentum precompute ranks against it
   // — so AEX put the tab's fourteen charts on a 22-name national index while the tile two clicks
   // away used a 2,000-name global one. Two defaults for the same question, on one screen.
-  // ⚠ THE OTHER TWO ARE STILL OFFERED and the coverage note above still applies: SP500 is the
+  //  The other two are still offered and the coverage note above still applies: SP500 is the
   // best-ingested, so a card drawn against ACWI states the coverage it actually reached.
   const [benchmark, setBenchmark] = useState<string | null>(compare ? COMPARE_VALUE : 'ACWI');
 
   /**
-   * ⚠ A COMPANY PICKED ELSEWHERE WINS, AND THE SELECT FOLLOWS IT. On /research-dashboard the second
+   *  A company picked elsewhere wins, and the select follows it. On /research-dashboard the second
    * company is chosen by the PAGE, not by this control; leaving the select on the default index
    * would draw an index while the page above it named a company. Derived at render from `compare` — an effect
    * that assigned it would render once with the wrong line and again with the right one.
    */
   const selected = compare && benchmark === COMPARE_VALUE ? COMPARE_VALUE : benchmark;
 
-  /** ⚠ Memoised for the same reason `holdingsTarget` is — it is an effect dep in twelve cards. */
+  /**  Memoised for the same reason `holdingsTarget` is — it is an effect dep in twelve cards. */
   const benchTarget = useMemo<BenchTarget | null>(() => {
     if (compare && selected === COMPARE_VALUE) {
       return { isin: compare.isin, label: compare.name, cadence };
@@ -346,8 +347,8 @@ export default function LongEquityTab({
       : null;
   }, [compare, selected, cadence]);
 
-  // ⚠ Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
-  // ⚠ `cadence` RIDES IN THE BODY, which is what makes one toggle move nine cards: every derived
+  //  Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
+  //  `cadence` RIDES IN THE BODY, which is what makes one toggle move nine cards: every derived
   // card POSTs this object verbatim to its own `*-inputs` endpoint, and they all read their lines
   // through one cadence-aware loader on the server. Nothing per-card to keep in step.
   const holdingsTarget = useMemo(() => (isAgg
@@ -359,12 +360,12 @@ export default function LongEquityTab({
   useEffect(() => {
     let alive = true;
     /**
-     * ⚠ ABORTED ON THE WAY OUT, NOT MERELY IGNORED. A book's blend is a read per holding and runs
+     *  Aborted on the way out, not merely ignored. A book's blend is a read per holding and runs
      * for a minute; the `alive` flag alone dropped the RESULT but left the work running, so
      * flipping the cadence twice had two blends of forty companies in flight, competing for the
      * same connections while the reader waited on the second. Switching now cancels the first.
      *
-     * ⚠ THE STREAM HONOURS IT PROPERLY — `runSSE` wires abort to `reader.cancel()`, so the server
+     *  The stream honours it properly — `runSSE` wires abort to `reader.cancel()`, so the server
      * stops mid-book rather than finishing into a dropped connection.
      */
     const ctrl = new AbortController();
@@ -397,7 +398,7 @@ export default function LongEquityTab({
         if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
         setData(b as MetricsResponse);
       } catch (e) {
-        // ⚠ AN ABORT IS NOT AN ERROR. It is this component cancelling its own request, and
+        //  An abort is not an error. It is this component cancelling its own request, and
         // rendering "AbortError" where a chart was would turn a deliberate switch into a failure.
         // `alive` is already false by then — this only guards a future caller that forgets.
         if (alive) setErr(e instanceof Error ? e.message : String(e));
@@ -410,7 +411,7 @@ export default function LongEquityTab({
    * The benchmark's metrics for the three GROWTH cards — ONE blend for all three, exactly as the
    * book's own metrics are fetched once above.
    *
-   * ⚠ The nine derived cards do NOT come through here: each owns its `*-inputs` endpoint and
+   *  The nine derived cards do NOT come through here: each owns its `*-inputs` endpoint and
    * fetches the index from it directly (`useBenchInputs`), because that is the only way each
    * benchmark line is computed by the same helper as the portfolio line beside it. This fetch is
    * the growth cards' equivalent, not a second source for anyone else.
@@ -421,7 +422,7 @@ export default function LongEquityTab({
   /**
    * The index's own `blend_notes` — why a code its constituents DO carry drew nothing.
    *
-   * ⚠⚠ IT WAS THROWN AWAY, AND THAT MADE A CORRECT REFUSAL LOOK LIKE A BUG. Switching the
+   *  It was thrown away, and that made a correct refusal look like a bug. Switching the
    * benchmark from AEX to ACWI drops the analyst-expectation line, because 22 of 22 AEX names
    * carry a consensus and only 351 of 1,715 ACWI names do — 20%, far under the blend's floor,
    * so every forecast period is refused. That is the right answer and it vanished in silence:
@@ -429,7 +430,7 @@ export default function LongEquityTab({
    * "the index has no expectations" and "too few of its members are covered" was true.
    */
   const [benchNotes, setBenchNotes] = useState<Record<string, BlendNote> | undefined>();
-  /** The index's own member counts — see `MetricsResponse.member_counts`. ⚠ ITS OWN STATE, beside
+  /** The index's own member counts — see `MetricsResponse.member_counts`.  ITS OWN STATE, beside
    *  `benchNotes`, because the benchmark is a SEPARATE blend: on a positives-only metric the index
    *  and the book drop different numbers of members and the card names both. */
   const [benchCounts, setBenchCounts] =
@@ -449,19 +450,19 @@ export default function LongEquityTab({
         const r = await apiFetch(`${API_URL}/api/earnings/fundamental-blend-metrics`, {
           signal: ctrl.signal,
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          // ⚠ NAME THE THREE METRICS. Unnamed, the blend reads every charted code per constituent —
+          //  Name the three metrics. Unnamed, the blend reads every charted code per constituent —
           // three paged requests each, i.e. ~1,500 round trips for the S&P. Named, it is one
           // chunked query per metric. See the request model's `metrics` field.
-          // ⚠⚠ THE FORECAST METRICS MUST BE NAMED HERE OR THE INDEX SILENTLY HAS NO FORECAST. The
+          //  The forecast metrics must be named here or the index silently has no forecast. The
           // book's own line comes from the UNNARROWED read, which already pages `annual_%estimate`;
           // a benchmark is a narrowed read and gets exactly what this list asks for. Omitting them
           // draws a dotted consensus on the book and none on the index — which reads as "the index
           // has no expectations" rather than "we did not ask for them".
-          // ⚠ THE SAME BODY BUILDER THE CARDS USE (`benchBody`), then the metric list merged in.
+          //  The same body builder the cards use (`benchBody`), then the metric list merged in.
           // Hand-writing `{universe: …}` here is what made this the ONE fetch that could not
           // compare against a company: the ten cards went through `useBenchInputs` and switched,
           // and the three growth cards silently kept drawing the index. One builder, one shape.
-          // ⚠ `BLEND_METRICS`, NOT AN INLINE LIST — `TablesTab` sends the same array so the two
+          //  `BLEND_METRICS`, NOT AN INLINE LIST — `TablesTab` sends the same array so the two
           //   tabs share one cache entry. See its declaration.
           body: JSON.stringify({
             ...JSON.parse(benchBody(benchTarget)),
@@ -491,17 +492,17 @@ export default function LongEquityTab({
   }, [benchTarget, cadence]);
 
   /**
-   * ⚠⚠ NEITHER AN ERROR NOR A LOAD MAY TAKE THE CONTROL ROW WITH IT — these used to be early
+   *  Neither an error nor a load may take the control row with it — these used to be early
    * `return`s, and the toggle that STARTED the load was the first thing to leave the screen.
    *
    * A book's blend runs for a minute, so pressing Quarterly replaced the whole tab — cadence
    * toggle, benchmark picker and all — with one "Loading… (3 of 41 companies)" line, and the
    * reader who wanted to go straight back to Annual had nothing to click until it finished. A
    * control that disappears exactly while its own work is in flight is the one moment it is most
-   * needed: switching back now cancels that fetch (see the ⚠ on the effect above) and the cached
+   * needed: switching back now cancels that fetch (see the  on the effect above) and the cached
    * answer for the cadence you came from returns instantly.
    *
-   * ⚠ ONE COUNT FOR THE WHOLE GRID, NOT TWELVE. Every card below reads this one metrics fetch (or
+   *  One count for the whole grid, not twelve. Every card below reads this one metrics fetch (or
    * fires its own once it lands), so twelve boxes each saying "Loading…" showed a wait twelve
    * times over and none of them could say how far along it was.
    */
@@ -532,7 +533,7 @@ export default function LongEquityTab({
     benchMetrics, benchLabel: benchTarget?.label ?? null, benchTarget, benchErr, benchNotes,
     benchCounts,
   };
-  // ⚠ ONE KEY SUFFIX FOR EVERY DERIVED CARD. They each own their fetch, so without the cadence in
+  //  One key suffix for every derived card. They each own their fetch, so without the cadence in
   // the key a switch would leave twelve charts showing the previous basis until something else
   // re-keyed them — and the toggle would look broken on the cards that matter most.
   const ck = `${reloadKey}-${cadence}`;
@@ -592,10 +593,10 @@ export default function LongEquityTab({
           trailing 12 months — a Q4 point equals that fiscal year
         </span>
       )}
-      {/* ⚠ ONE CONTROL FOR TWELVE CHARTS. Per-card benchmark pickers would let two charts on one
+      {/*  ONE CONTROL FOR TWELVE CHARTS. Per-card benchmark pickers would let two charts on one
           screen be measured against different indices — a comparison a reader cannot arbitrate,
           and the same failure the tab-wide cadence toggle avoids. */}
-      {/* ⚠ ONE CONTROL, NOT A CHECKBOX PLUS A PICKER. The pair had the benchmark OFF by default and
+      {/*  ONE CONTROL, NOT A CHECKBOX PLUS A PICKER. The pair had the benchmark OFF by default and
           hid which index it would draw until you ticked it, so the common case — measure the book
           against something — cost two interactions and a guess. A single select shows the answer
           while it states the question, and `None` is an option rather than a second widget. */}
@@ -610,7 +611,7 @@ export default function LongEquityTab({
             + 'applies to the index exactly as it does to the book.'}
           className="cursor-pointer bg-page border border-neutral-700 rounded-lg px-2 py-0.5 text-[11px] font-mono text-fg focus:border-accent-500">
           <option value="">None</option>
-          {/* ⚠ FIRST, AND ONLY WHEN THERE IS ONE. The comparison company is what the reader came
+          {/*  FIRST, AND ONLY WHEN THERE IS ONE. The comparison company is what the reader came
               for on /research-dashboard; the indices stay available underneath so a company can
               still be measured against its market without leaving the page. */}
           {compare && <option value={COMPARE_VALUE}>{compare.name}</option>}
@@ -622,16 +623,16 @@ export default function LongEquityTab({
     {body ?? (
     <GraphCoverageProvider value={sharedCoverage}>
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      {/* ⚠ THREE ACROSS, NOT FOUR. Each card carries a 320px chart with up to five series, a legend
+      {/*  THREE ACROSS, NOT FOUR. Each card carries a 320px chart with up to five series, a legend
           that wraps, and stat tiles above it — at four columns the plot area was narrow enough that
           a twelve-year axis crowded its ticks and the legend took three lines. Only the grid
           changes; the card order below is fixed and reflows unaltered. */}
-      {/* ⚠ FIRST IN THE GRID — the weighted share-price increase of the book and of the index, i.e.
+      {/*  FIRST IN THE GRID — the weighted share-price increase of the book and of the index, i.e.
           the move every card after it exists to explain. See its entry in `CARDS`, and in
           particular why it is NOT the portfolio's return. */}
       <MetricGrowthCard key={sharePrice.title} cfg={sharePrice}
         {...growth} />
-      {/* ⚠ SECOND — the line the tab is about. See its entry in `CARDS`. */}
+      {/*  SECOND — the line the tab is about. See its entry in `CARDS`. */}
       <MetricGrowthCard key={epsNri.title} cfg={epsNri}
         {...growth} />
       <MetricGrowthCard key={revenue.title} cfg={revenue}

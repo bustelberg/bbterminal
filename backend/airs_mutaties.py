@@ -14,29 +14,29 @@ THE SHEET, MEASURED ON BUS_Neutraal_Dyn (2026-01-01..2026-07-23, 91 rows)
     Grootboek · Boekdatum · Omschrijving · Fonds · Rekening · Debet · Credit · Valuta ·
     Rekvaluta · Valutakoers · Bedrag eur · Bedrag vv · Bedrag
 
-⚠ `Bedrag eur` IS ALREADY SIGNED AND ALREADY IN EUR. Do not re-derive it from Debet/Credit and do
+ `Bedrag eur` IS ALREADY SIGNED AND ALREADY IN EUR. Do not re-derive it from Debet/Credit and do
     not apply `Valutakoers` yourself — both are how you double-count or flip a sign. Measured:
         Dividend          ASML 2026-02-18   Credit 62.40   Bedrag eur  +62.400000
         Dividendbelasting ASML 2026-02-18   Debet   9.36   Bedrag eur   -9.360000
         Dividend          MSFT 2026-03-12   Credit 49.14 USD @ 0.866026 -> +42.556508
     The tax rows are NEGATIVE, so the net a holding earned is a plain SUM over both ledgers.
 
-⚠ WITHHOLDING TAX IS ITS OWN ROW, SO GROSS AND NET ARE DIFFERENT NUMBERS. 54 `Dividend` rows
+ WITHHOLDING TAX IS ITS OWN ROW, SO GROSS AND NET ARE DIFFERENT NUMBERS. 54 `Dividend` rows
     against 37 `Dividendbelasting` on one book. `net` is what reached the account and is what a
     return should use; `gross` and `tax` ride along because the difference is a real fact about a
     holding (a US name loses 15%, a Dutch one nothing).
 
-⚠ ONLY THE DIVIDEND LEDGERS COUNT, AND THE FILTER IS EXPLICIT. Measured, this report returned
+ ONLY THE DIVIDEND LEDGERS COUNT, AND THE FILTER IS EXPLICIT. Measured, this report returned
     exactly `Dividend` and `Dividendbelasting` on every book tried — but a journal is a journal,
     and the day AIRS adds `Aankoop` or `Storting` rows an unfiltered sum turns a deposit into
     investment income. Unknown ledgers are counted in `ignored` rather than silently dropped.
 
-⚠ THE JOIN IS BY `Fonds`, A NAME — THERE IS NO ISIN ON THIS SHEET. Measured: 24 of 27 match a
+ THE JOIN IS BY `Fonds`, A NAME — THERE IS NO ISIN ON THIS SHEET. Measured: 24 of 27 match a
     holding_name EXACTLY, and both fields are truncated by AIRS at the same 50 characters, so an
     exact match is safe and no fuzzy matching is wanted here (see `_airs_holding_isin` for what
     fuzzy matching costs). The other 3 are not truncations — no holding starts with them:
 
-⚠ A SOLD POSITION EARNED INCOME AND HAS NO ROW TO PUT IT ON. `Automatic Data Proc.`,
+ A SOLD POSITION EARNED INCOME AND HAS NO ROW TO PUT IT ON. `Automatic Data Proc.`,
     `Marsh&Mclennan` and `iShares Markit iBoxx High Yld Cpd Bd` paid dividends into this book and
     were then sold, so they are absent from the holdings snapshot. Their income is REAL and
     attaching it to nothing would understate the book. `unattached` keeps it, named, rather than
@@ -107,7 +107,7 @@ def _num(v: object) -> float | None:
 
 
 def _text(v: object) -> str:
-    """⚠ A blank cell arrives as float NaN and `str()` renders it `"nan"`, which is TRUTHY — the
+    """ A blank cell arrives as float NaN and `str()` renders it `"nan"`, which is TRUTHY — the
     same trap that once counted a cash line as a holding."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return ""
@@ -162,7 +162,7 @@ def parse_mutaties(file_bytes: bytes) -> list[Mutatie]:
 def direct_result(rows: list[Mutatie]) -> MutatiesSummary:
     """The income each instrument paid, keyed by AIRS's own `Fonds` string.
 
-    ⚠ Keyed on the RAW `Fonds`, matched to `airs_holding.holding_name` EXACTLY by the caller.
+     Keyed on the RAW `Fonds`, matched to `airs_holding.holding_name` EXACTLY by the caller.
     Both are AIRS strings truncated at the same 50 characters; anything looser re-imports the
     fuzzy-matching failure mode this codebase spent a long time removing.
     """
@@ -192,7 +192,7 @@ def attach(summary: MutatiesSummary, holding_names: set[str]) -> tuple[dict[str,
                                                                       list[DirectResult]]:
     """Split the income into what a current holding can carry and what it cannot.
 
-    ⚠ THE SECOND HALF IS NOT LEFTOVER, IT IS THE BOOK'S MONEY. A position sold during the year
+     THE SECOND HALF IS NOT LEFTOVER, IT IS THE BOOK'S MONEY. A position sold during the year
     paid real dividends and is absent from the holdings snapshot, so it has no row. Measured on
     BUS_Neutraal_Dyn: 3 of 27 (`Automatic Data Proc.`, `Marsh&Mclennan`, an iShares HY fund).
     A portfolio income figure that silently drops them is understated with nothing on screen to

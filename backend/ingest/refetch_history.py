@@ -1,6 +1,6 @@
 """Force a COMPLETE re-read of price + volume history from GuruFocus.
 
-⚠ THE ONLY WAY OUR HISTORY EVER GETS CORRECTED.
+ THE ONLY WAY OUR HISTORY EVER GETS CORRECTED.
 
 `ingest/prices.py::_upsert_metric_rows` writes only rows with `d > existing_max`,
 so once a bar is stored it is never revisited — and `force_refresh=True` does NOT
@@ -12,7 +12,7 @@ Measured on the 1,479-name Leonteq universe, 2026-08-02:
     173 companies had wrong CLOSE history   (46,969 bars)
     887 companies had wrong VOLUME history  (68,311 bars)
 
-⚠ AND THE BIG ONES ARE NOT THE DANGEROUS ONES. A seam detector finds Worldline's
+ AND THE BIG ONES ARE NOT THE DANGEROUS ONES. A seam detector finds Worldline's
 1-for-40 (0.2886 → 11.16 overnight, a +1142% momentum on a stock that fell 69%).
 It cannot find Air Liquide's 1-for-10 free share attribution, which re-scales the
 whole history by 10/11 and shows up as a −9.1% step — an ordinary day's move, with
@@ -59,7 +59,7 @@ WORKERS = 8
 CHANGE_TOLERANCE = 1e-6
 METRICS = (("close_price", "price"), ("volume", "volume"))
 # ── Phantom bars ───────────────────────────────────────────────────
-# ⚠ A ROW ON A DAY THE MARKET WAS SHUT. Older GuruFocus responses carried
+#  A row on a day the market was shut. Older GuruFocus responses carried
 # exchange holidays with a volume of 0; the vendor now omits those dates
 # entirely, but we stored them and an upsert-only refetch can never remove them.
 # Measured on VERBUND (WBO): 8 zero-volume bars — 24/25/26 December, 31 December,
@@ -134,9 +134,9 @@ def find_phantoms(
     Returns `(phantoms, refusal_reason)`. Pure — no DB, no network — so the three
     fences are unit-testable without a vendor:
 
-      * INSIDE THE SPAN. Never a date before the vendor's first bar or after its
+      * Inside the span. Never a date before the vendor's first bar or after its
         last: a vendor that truncated its history must not delete ours.
-      * DENSE NEIGHBOURHOOD. The vendor must have a bar within `neighbour_days`
+      * Dense neighbourhood. The vendor must have a bar within `neighbour_days`
         on BOTH sides. A genuine vendor gap (a missing month) then reads as a gap
         rather than as "none of these days ever traded".
       * BOUNDED. Beyond `max_share` of our rows, refuse the whole company and say
@@ -255,7 +255,7 @@ def refetch_full_history(
                 continue
             series = _parse_price_series(data or [])
             if not series:
-                # ⚠ NEVER a delete — see the module header.
+                #  NEVER a delete — see the module header.
                 with lock:
                     counters["empty_vendor"] += 1
                 _say(f"  {label} {metric}: vendor returned nothing (HTTP {status}) — kept ours",
@@ -276,7 +276,7 @@ def refetch_full_history(
                     changed.append({
                         "company_id": cid, "metric_code": metric, "source_code": "gurufocus",
                         "target_date": key, "numeric_value": v,
-                        # ⚠ STAMPED EXPLICITLY, AND THE MONTH GUARD DEPENDS ON IT.
+                        #  Stamped explicitly, and the month guard depends on it.
                         # `recorded_at` defaults on INSERT only; an upsert that
                         # resolves to an UPDATE leaves the original timestamp, so a
                         # corrected 2015 bar would still read "first seen 2026-06"
@@ -329,7 +329,7 @@ def refetch_full_history(
     with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="refetch") as ex:
         list(ex.map(_one, cids))
 
-    # ⚠ STAMP THE MARKER EVEN WHEN NOTHING MOVED — the clean run is the common
+    #  Stamp the marker even when nothing moved — the clean run is the common
     # case and it must still count as "we asked this month". Only changed bars are
     # written, so a universe that is already correct would otherwise leave no
     # trace, `last_full_refetch` would never advance, and a weekly strategy would
@@ -356,7 +356,7 @@ def refetch_full_history(
             _say(f"could not stamp the refetch marker: {type(e).__name__}: {e} — "
                  "the next rebalance may re-ask", "warn")
 
-    # ⚠ The headline is what MOVED, not what ran. "1,479 companies refetched" is
+    #  The headline is what MOVED, not what ran. "1,479 companies refetched" is
     # a receipt; "173 had wrong close history" is the finding.
     _say(
         f"{'Rewrote' if apply else 'Would rewrite'} history: "

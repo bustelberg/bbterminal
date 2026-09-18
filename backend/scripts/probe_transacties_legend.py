@@ -17,7 +17,7 @@ Three cheap places the answer may already be sitting, in order of cost:
   3. A PREAMBLE OR FOOTER IN SHEET 0. The parser takes row 0 as the header; anything above it is
      consumed and anything far below the data is dropped.
 
-⚠ READ-ONLY, AND ONE LOGIN. It downloads two reports for one account and writes nothing — no DB,
+ READ-ONLY, AND ONE LOGIN. It downloads two reports for one account and writes nothing — no DB,
 no cache, no state. Safe to run against production, which is the whole point of it being the
 cheapest option.
 """
@@ -45,7 +45,7 @@ KNOWN = {"A": "Aankoop (buy)", "V": "Verkoop (sell)"}
 
 
 def _say(step: str, detail: str = "") -> None:
-    """⚠ Every step announced. A probe that prints nothing for thirty seconds behind a headless
+    """ Every step announced. A probe that prints nothing for thirty seconds behind a headless
     browser is indistinguishable from one that has hung."""
     print(f"[probe] {step}{': ' + detail if detail else ''}", flush=True)
 
@@ -67,10 +67,10 @@ def fetch(account: str, van: str, tot: str, as_xls: bool) -> bytes:
 def scan_html(body: bytes) -> None:
     """Look for anything that explains the codes.
 
-    ⚠ DECODED VIA THE SCANNER'S OWN HELPER. AirSPMS serves ISO-8859-1 and decoding it as utf-8
+     DECODED VIA THE SCANNER'S OWN HELPER. AirSPMS serves ISO-8859-1 and decoding it as utf-8
     silently turns `Azië` into `Azi?` — measured, 3 of 95 rows on the model-portfolio list.
     """
-    # ⚠ `_decode_html` takes a RESPONSE (it reads the declared charset off the header), not bytes.
+    #  `_decode_html` takes a RESPONSE (it reads the declared charset off the header), not bytes.
     # AirSPMS serves ISO-8859-1, and decoding as utf-8 turns `Azië` into `Azi?` — so the charset
     # still has to be honoured here; it is just wrapped by hand because this probe holds raw bytes.
     from airs_scanner import AirsHttpResponse, _decode_html  # noqa: PLC0415
@@ -104,7 +104,7 @@ def scan_xls(body: bytes) -> None:
 
     body = _strip_spreadsheet_preamble(body)
     xl = pd.ExcelFile(BytesIO(body))
-    # ⚠ THE PARSER READS SHEET 0 ONLY. A legend tab would be invisible to it and to every consumer
+    #  The parser reads sheet 0 ONLY. A legend tab would be invisible to it and to every consumer
     # downstream — which is exactly the kind of thing this probe exists to find.
     _say("xls sheets", ", ".join(map(repr, xl.sheet_names)))
     for name in xl.sheet_names:

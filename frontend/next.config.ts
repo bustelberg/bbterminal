@@ -2,7 +2,7 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 /**
- * ⚠ A PRODUCTION BUILD WITHOUT `NEXT_PUBLIC_API_URL` MUST NOT SHIP. The value is INLINED AT BUILD
+ *  A PRODUCTION BUILD WITHOUT `NEXT_PUBLIC_API_URL` MUST NOT SHIP. The value is INLINED AT BUILD
  * TIME, so an unset variable cannot be corrected afterwards by editing the Vercel env — it needs a
  * REBUILD, and nothing about the resulting site says so. Before `lib/apiUrl.ts` was hardened, that
  * build baked in `http://localhost:8000` and every visitor's browser was asked to reach their OWN

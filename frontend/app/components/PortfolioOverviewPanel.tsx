@@ -53,7 +53,7 @@ function prefetchModelAnalysis(id: number) {
  * system of record for what a book made and we are not. Expanding a row shows the holdings —
  * ISIN and fund name from the Fixed side, everything else AIRS's own.
  *
- * ⚠ 27 OF 28 PAIRINGS ARE AN UNCONFIRMED GUESS, AND THE ROW MUST SAY SO. This is not a small
+ *  27 OF 28 PAIRINGS ARE AN UNCONFIRMED GUESS, AND THE ROW MUST SAY SO. This is not a small
  *   doubt: the risk variants of a strategy hold the SAME instruments (BUS_FTS_Bepoff/DEF/NEU_AFS
  *   share 27 of 27 ISINs), so a mis-pairing files a real book's money under another strategy's
  *   name and NOTHING else on the row looks wrong. Confirm them in Dynamic → Fixed.
@@ -74,13 +74,13 @@ type FailureGroup = {
 };
 
 /**
- * ⚠ THE DETAIL GOES TO THE CONSOLE, NOT ONTO THE PAGE. The panel gets ONE short line saying what
+ *  The detail goes to the console, not onto the page. The panel gets ONE short line saying what
  * happened; everything needed to diagnose it — the HTTP status, the backend's own error list, the
  * per-cause failure groups and which accounts hit them — is logged.
  *
  * This is not only a tidiness rule. The prose block that used to sit under the message explained
  * the SCAN's failure modes ("every account it reached is listed; the ones short a report carry a
- * ⚠…") and was gated on the amber colour alone — so a plain successful DELETE, which is amber
+ * …") and was gated on the amber colour alone — so a plain successful DELETE, which is amber
  * because it leaves a gap, printed a paragraph about reports that were never fetched. An
  * explanation attached to a colour rather than to an outcome will eventually explain the wrong one.
  */
@@ -95,14 +95,14 @@ type ScanStep = {
   got?: string[]; failed?: string[]; complete?: boolean; count?: number;
 };
 
-/** ✓ / — / ✗ per report outcome. `no_data` is AIRS ANSWERING (this book has no such report), so it
+/**  / — /  per report outcome. `no_data` is AIRS ANSWERING (this book has no such report), so it
  *  must not wear the failure mark: 14 of 44 books have no fixed model and never will. */
-const STEP_MARK: Record<string, string> = { ok: '✓', no_data: '—', failed: '✗' };
+const STEP_MARK: Record<string, string> = { ok: '', no_data: '—', failed: '' };
 
 /**
  * Print every scan step the console has not seen yet; returns the new high-water mark.
  *
- * ⚠ THE ROSTER IS PRINTED IN FULL, NOT COUNTED. "44 found" is a number nobody can check; the 44
+ *  The roster is printed in full, not counted. "44 found" is a number nobody can check; the 44
  * NAMES are what you compare against AIRS's own "44 Items in selectie" to confirm the scan is
  * looking at the Interne/actief population and not some other one.
  */
@@ -132,10 +132,10 @@ function logSteps(log: ScanStep[], from: number): number {
 /**
  * Can this row be ANALYSED — i.e. is there a composition for the modals to open?
  *
- * ⚠ THIS IS THE PREDICATE THE ANALYSE AND FUNDAMENTAL BUTTONS RENDER ON, defined once so the list
+ *  This is the predicate the analyse and fundamental buttons render on, defined once so the list
  * and the buttons cannot disagree.
  *
- * ⚠ AND IT ASKS FOR HOLDINGS, NOT FOR A MODEL PORTFOLIO. It used to require `fixed_portfolio_id`,
+ *  And it asks for holdings, not for a model portfolio. It used to require `fixed_portfolio_id`,
  * which made both buttons depend on the Stamgegevens model scan — a SECOND workflow the account
  * scan never touches. Measured in production 2026-07-30: 46 books, every report fetched, and not
  * one button anywhere, because that scan had never run. Neither modal ever needed it; both take a
@@ -143,7 +143,7 @@ function logSteps(log: ScanStep[], from: number): number {
  * that. The pairing is preferred where it exists (attribution and the bucket drill-downs are
  * id-only) but it is an upgrade, not a prerequisite — see `openModal`.
  *
- * ⚠ AND UNDER `MIN_REAL_HOLDINGS` IS NOT A PORTFOLIO. The AIRS benchmarks carry exactly 1 holding
+ *  And under `MIN_REAL_HOLDINGS` IS NOT A PORTFOLIO. The AIRS benchmarks carry exactly 1 holding
  * and the `_MV` / `WTS test` shells carry none, against 10-29 for every real book — so the same
  * threshold the backend now uses to skip them in the SCAN (`airs_vermogen.MIN_REAL_HOLDINGS`)
  * decides whether they are worth a row here. One rule, both ends: a book the scan stops fetching
@@ -154,7 +154,7 @@ const MIN_REAL_HOLDINGS = 5;
 const canAnalyse = (r: AirsPortfolioOverview) =>
   r.fixed_portfolio_id != null || (r.holdings ?? 0) >= MIN_REAL_HOLDINGS;
 
-// ⚠ KEEP IN STEP WITH `airs_vermogen.REPORTS` — a code with no label here renders as a bare
+//  Keep in step with `airs_vermogen.REPORTS` — a code with no label here renders as a bare
 // mnemonic in the "missing reports" gap list, which reads as a bug rather than as a named report.
 const REPORT_LABELS: Record<string, string> = {
   att: 'Rendement',
@@ -180,11 +180,11 @@ const collectionNameOrder: Record<PortfolioCollection, string[]> = {
 };
 
 export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
-  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so every
+  //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
   // component in one render gets the same value — passing copy down would add a prop to each
   // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
   const t = useMgmtCopy();
-  // ⚠ READING AND REFRESHING ARE FOR EVERYONE; CHANGING WHAT THE TABLE SAYS IS NOT. The line moved
+  //  Reading and refreshing are for everyone; changing what the table says is not. The line moved
   // (2026-08-19): re-scanning AIRS — the fleet button, a row's, and the Analyse modal's — is now
   // open to every authenticated user, because a reader who can see a stale figure and cannot act
   // on it is worse off than one who can. Deleting an account, renaming a book and pinning a Class
@@ -222,7 +222,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
-   * ⚠ `warn` IS NOT `error`, AND CONFLATING THEM COST A DAY. The fleet refresh fetches FOUR
+   *  `warn` IS NOT `error`, AND CONFLATING THEM COST A DAY. The fleet refresh fetches FOUR
    * reports for each of ~44 accounts, so 27 individual failures out of ~176 attempts is a job that
    * WORKED and is incomplete for some accounts — the backend says `status: "ok"` and stored a
    * snapshot. Painting that red says "the scan failed", which sends you looking for a broken
@@ -230,7 +230,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * yet". A partial result and a dead job need different colours because they need different
    * reactions: one is "look at which accounts", the other is "the scraper is down".
    *
-   * ⚠ THE KIND IS A COLOUR, NOT A STORY. It was called `partial` and a block of scan-specific
+   *  The kind is a colour, not a story. It was called `partial` and a block of scan-specific
    * prose hung off that name, so every other amber outcome — a delete, most obviously — got the
    * scan's explanation printed underneath it. The kinds now say only how loud the line is; what
    * happened is in `text`, and the detail is in the console.
@@ -241,37 +241,37 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * The job id behind each in-flight action, so its button can become a CANCEL.
    *
-   * ⚠ THE ID, NOT A BOOLEAN. `refreshingAll` / `refreshingRows` already say "this is busy" and
+   *  The id, not a boolean. `refreshingAll` / `refreshingRows` already say "this is busy" and
    * that is all a spinner needs — but Cancel needs something to cancel, and it must be the job
    * THIS button started. A shared "is anything running" flag would offer a Cancel on every row
    * while only one of them could act, which is worse than not offering it at all.
    *
-   * ⚠ THE TOAST'S OWN CANCEL IS THE SAME SCOPE HERE, deliberately: one press, one job. (In the
+   *  The toast's own cancel is the same scope here, deliberately: one press, one job. (In the
    * Benchmarks panel the two differ — there a run is a SEQUENCE of jobs, so the toast cancels a
    * leg and the panel's button cancels the run. Nothing on this panel is a sequence.)
    */
   const [fleetJob, setFleetJob] = useState<string | null>(null);
   const [rowJobs, setRowJobs] = useState<Record<string, string>>({});
   /**
-   * WHICH ROWS THE READER HAS ASKED TO STOP — the PRESS, not the job's state.
+   * Which rows the reader has asked to stop — the PRESS, not the job's state.
    *
-   * ⚠⚠ THE BUTTON MUST FLIP ON THE PRESS, NOT ON THE JOB ID ARRIVING, and that is what this is for.
+   *  The button must flip on the press, not on the job id arriving, and that is what this is for.
    * Keyed on `rowJobs` the flip waited a round-trip: for that window the control read "Refresh",
    * enabled, over work that had already started — so a second press started a SECOND job (the
    * backend `_LOCK` then answered "busy") and a second toast appeared beside the first. The reader
    * sees their own click, so the state that follows it has to be one we set ourselves, synchronously.
    *
-   * ⚠ AND A CANCEL PRESSED IN THAT SAME WINDOW MUST NOT BE LOST. There is nothing to cancel until
+   *  And a cancel pressed in that same window must not be lost. There is nothing to cancel until
    * `startJob` returns an id, so the intent is recorded here and `refreshOne` fires it the instant
    * the id lands. Dropping it would be the same broken control seen from the other side.
    *
-   * ⚠ A REF BESIDE THE STATE, KEPT IN STEP BY THE TWO HELPERS BELOW AND NOTHING ELSE. The state is
+   *  A ref beside the state, kept in step by the two helpers below and nothing else. The state is
    * what renders; the ref is what `refreshOne` reads AFTER its `await`, where the closure's copy is
    * a snapshot from before the press. Neither is optional and neither is written directly.
    */
   const [cancelWanted, setCancelWanted] = useState<Set<string>>(new Set());
   const cancelWantedRef = useRef<Set<string>>(new Set());
-  /** ⚠ THE SYNCHRONOUS "is this row already running", which `refreshingRows` cannot be: React
+  /**  THE SYNCHRONOUS "is this row already running", which `refreshingRows` cannot be: React
    *  batches, so two clicks in one tick both read the pre-click Set and both start a job. */
   const refreshingRef = useRef<Set<string>>(new Set());
   const setCancelWantedFor = (pf: string, wanted: boolean) => {
@@ -288,18 +288,18 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    *  whichever half of "Refresh all" is currently running. */
   const [modelsJob, setModelsJob] = useState<string | null>(null);
   /** Whichever half of "Refresh all" is in flight. They run in sequence, never together, so one
-   *  id is the whole truth — and the ✕ has to mean the same thing in both. */
+   *  id is the whole truth — and the  has to mean the same thing in both. */
   const allJob = fleetJob ?? modelsJob;
   const [opening, setOpening] = useState<string | null>(null);
 
   /**
    * Name one book, or clear the name.
    *
-   * ⚠ THE NAME IS THE ACCOUNT'S, NOT THE MODEL'S. `display_name` on a model names a STRATEGY, and
+   *  The name is the account's, not the model's. `display_name` on a model names a STRATEGY, and
    * an account only borrowed it through its pairing — so a book paired with no model could not be
    * named at all, which is backwards: those are precisely the rows still wearing AIRS's own code.
    *
-   * ⚠ EMPTY CLEARS, AND CANCEL DOES NOT. `dialog.prompt` returns null on cancel and "" when the
+   *  Empty clears, and cancel does not. `dialog.prompt` returns null on cancel and "" when the
    * field is emptied deliberately; collapsing the two would make "clear this name" unreachable and
    * every accidental Escape a silent rename.
    */
@@ -334,7 +334,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * holdings. (Fundamental buttons used to share this — one per row, one per holding and one per
    * segment. All were removed 2026-08-04; this panel opens Analyse only.)
    *
-   * ⚠ IT NEVER NEEDED A MODEL PORTFOLIO, AND WIRING IT TO ONE COST DAYS. It accepts a
+   *  It never needed a model portfolio, and wiring it to one cost days. It accepts a
    * plain basket of `{isin, weight}` — `PortfolioAnalysisModal`'s own comment says "a basket is
    * treated as a portfolio-of-N: same view" — and every account already carries exactly that, from
    * the Vermogensoverzicht's `ISIN-code` column. Gating the buttons on `fixed_portfolio_id` instead
@@ -349,7 +349,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    */
   const openModal = async (r: AirsPortfolioOverview) => {
     const set = setAnalyse;
-    // ⚠ THE PORTEFEUILLE CODE TRAVELS WITH THE MODAL. `refreshOne` is keyed on it, not on the
+    //  The portefeuille code travels with the modal. `refreshOne` is keyed on it, not on the
     // fixed portfolio id, so without it the modal's Refresh has nothing to call — the row and the
     // modal must fire the identical scan.
     if (r.fixed_portfolio_id != null) {
@@ -366,7 +366,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         resolved = (await i.json()) as AirsAccountIsins;
         setIsins((m) => ({ ...m, [p]: resolved }));
       }
-      // ⚠ ISIN-BEARING ROWS ONLY, AND WEIGHTS AS AIRS STATES THEM. A cash line has no ISIN and no
+      //  ISIN-Bearing rows only, and weights as AIRS states them. A cash line has no ISIN and no
       // instrument to analyse; including it as a zero would put a phantom holding in every bucket.
       const holdings = (resolved.rows ?? [])
         .filter((h) => h.isin && (h.weight ?? 0) > 0)
@@ -387,13 +387,13 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * Run the MODEL-PORTFOLIO scan — the prerequisite this page has no other way to satisfy.
    *
-   * ⚠ IT IS A SEPARATE SCAN FROM "Refresh all", AND THAT IS THE WHOLE TRAP. Refresh all scans the
+   *  It is a separate scan from "Refresh all", AND THAT IS THE WHOLE TRAP. Refresh all scans the
    * ACCOUNTS (returns, holdings, mutations); this one scans the MODEL portfolios that give an
    * account its name, its ISINs and — the part you notice — its Analyse button.
    * Until 2026-07-30 it had no button anywhere in the app, so a fresh deployment could never get
    * past "0 analysable" from inside the UI.
    *
-   * ⚠⚠ A JOB, NOT AN SSE STREAM INTO THE CONSOLE (2026-08-17). It is minutes long — the list lands
+   *  A job, not an SSE stream into the console (2026-08-17). It is minutes long — the list lands
    * in ~6s, then an edit-page GET and an XLS download for each of ~58 fixed portfolios — and it
    * used to report ONLY via `console.warn`. So for the whole slow half of "Refresh all" the single
    * thing on screen saying anything was happening was this button's own label: no `i/n`, no name of
@@ -405,12 +405,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * reload via `attachRunningJobs`, and its Cancel reaches the scan (which stops between
    * portfolios, keeping everything already counted).
    *
-   * ⚠ THE CONSOLE NARRATION IS KEPT, DELIBERATELY REDUCED TO THE OUTCOME. The toast answers "is it
+   *  The console narration is kept, deliberately reduced to the outcome. The toast answers "is it
    * moving"; the console answers "what did it do". What is gone is the per-event `console.warn`
    * relay, which was only ever a stand-in for the progress line this now has.
    */
   const scanModels = async (force: boolean) => {
-    // ⚠ SKIPPED ONLY WHEN EVERY REAL BOOK HAS A MODEL. One existing pairing says nothing about
+    //  Skipped only when every real book has a model. One existing pairing says nothing about
     // another account whose model's composition was never stored: TOPS_DEF_BEH_DYN was exactly
     // that case — several other rows were paired, so this used to skip the scan forever and
     // Analyse fell back to an empty basket. An unpaired account with real holdings is therefore
@@ -432,12 +432,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         'Scan model portfolios');
       setModelsJob(id);
       const job = await done;
-      // ⚠ `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
+      //  `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
       // outcome; this is the copy you can scroll back to after the card has dismissed itself.
       if (job.status === 'failed') logDetail('model scan failed', job.summary);
       else console.warn(`[AIRS models] ${job.status} — ${job.summary ?? ''}`);
     } catch (e) {
-      // ⚠ REPORTED, NEVER RAISED INTO THE ACCOUNT SCAN'S RESULT. A failure in a scan of DIFFERENT
+      //  Reported, never raised into the account scan's result. A failure in a scan of DIFFERENT
       // objects must not appear in the account refresh's error summary, or a portfolio refresh
       // reports a fault in something it was never asked to fetch. One button, two subjects, two
       // verdicts. (The case that taught this was the CRM export, folded into the account scrape
@@ -452,7 +452,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * Delete one account's scraped rows — the way to prove Refresh all actually refills a gap.
    *
-   * ⚠ IT ASKS FIRST, AND THE QUESTION NAMES WHAT DOES NOT COME BACK. A scan fetches `1 Jan →
+   *  It asks first, and the question names what does not come back. A scan fetches `1 Jan →
    * today`, so any performance month before January is gone permanently; "the refresh will
    * restore it" is true only for this year. `dialog.confirm`, never the native one.
    */
@@ -499,7 +499,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // re-fetching left the open row on "Loading holdings…" for ever, since nothing re-requests until
   // the next click — the row had to be collapsed and re-expanded by hand to recover.
   const loadDetail = useCallback(async (p: string) => {
-    // ⚠ TIMED, BECAUSE "IT TAKES A WHILE" IS NOT A BUG REPORT. Expanding a row fires three
+    //  Timed, because "IT TAKES A WHILE" IS NOT A BUG REPORT. Expanding a row fires three
     // requests and the slow one is not the obvious one: measured 2026-07-30, `/isins` spent
     // 11,537 ms of 11,793 ms inside a single step (refreshing stale prices from Yahoo) while
     // every DB read was under 60 ms. The backend returns its own per-phase breakdown; this
@@ -533,7 +533,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         const r = await apiFetch(`${API_URL}/api/airs/portfolios/overview`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const body = (await r.json()) as AirsPortfolioOverview[];
-        // ⚠ AN EMPTY TABLE IS THE STATE A FRESH PRODUCTION DATABASE IS IN, and it renders exactly
+        //  An empty table is the state a fresh production database is in, and it renders exactly
         // like a broken page. It is not an error — nothing has been scanned yet — so it is a
         // WARN with the remedy in it, not a red banner and not silence.
         traceRows('overview', 'portfolios', body,
@@ -568,7 +568,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * Re-scan ONE portfolio's AIRS reports (Rendement + Vermogensoverzicht) and reload its figures.
    *
-   * ⚠ IT RUNS AS A JOB, AND THE PROGRESS GOES TO THE SHARED TOAST STACK (`lib/stores/jobs.ts`,
+   *  It runs as a job, and the progress goes to the shared toast stack (`lib/stores/jobs.ts`,
    * rendered from the root layout) — the same one the fundamentals ingests report into. Three
    * things that a plain POST could not give it, and this refresh needs all three:
    *   * a line that MOVES. With the cascade this is five downloads per account over a chain that
@@ -577,12 +577,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    *     nothing on screen to say so;
    *   * re-attachment on reload (`attachRunningJobs`), so a refresh is never invisible.
    *
-   * ⚠ THE INLINE `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately. Two places reporting one
+   *  The inline `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately. Two places reporting one
    * job is two places to keep in step, and the toast already carries the outcome, the failure and
    * the countdown. `refreshMsg` stays for everything else on this panel that is NOT a job.
    */
   const refreshOne = async (portefeuille: string) => {
-    // ⚠ ONE JOB PER ROW, ENFORCED HERE AND NOT BY THE BUTTON'S `disabled`. A second job on the same
+    //  One job per row, enforced here and not by the button's `disabled`. A second job on the same
     // account cannot do any work — the backend `_LOCK` answers "busy" — but it DOES get a job id
     // and therefore a second toast, which is the duplicate card this guard exists to prevent. The
     // ref, not `refreshingRows`: React batches, so two clicks in one tick see the same stale Set.
@@ -594,19 +594,19 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job`,
         portefeuille);
       setRowJobs((m) => ({ ...m, [portefeuille]: id }));
-      // ⚠ THE CANCEL THAT ARRIVED BEFORE THE ID. The button flips on the press, so Cancel is
+      //  The cancel that arrived before the id. The button flips on the press, so Cancel is
       // pressable during the round-trip above — and a press that reached a control offering it must
       // act, not evaporate because the handle it needed was still in flight.
       if (cancelWantedRef.current.has(portefeuille)) void cancelJob(id);
       const job = await done;
-      // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER, not only on `done`. A failed cascade still
+      //  Reload on anything that reached the server, not only on `done`. A failed cascade still
       // wrote every account it got through, so leaving the pre-refresh figures on screen would
       // hide real work that was really done — the same rule the bulk fundamentals fill follows.
       if (job.status === 'failed') logDetail(`refresh ${portefeuille} failed`, job.summary);
       setDetail((d) => { const n = { ...d }; delete n[portefeuille]; return n; });
       setIsins((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       await loadOverview();
-      // ⚠ Dropping the cache is only half of it. An OPEN row re-renders straight into
+      //  Dropping the cache is only half of it. An OPEN row re-renders straight into
       // "Loading holdings…" and stays there, because only a click re-requests — so re-fetch here.
       if (open === portefeuille) await loadDetail(portefeuille);
     } catch (e) {
@@ -620,7 +620,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       setRowJobs((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       // The press is spent with the job it was aimed at — the row goes back to offering Refresh.
       setCancelWantedFor(portefeuille, false);
-      // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN ON THIS PORTFOLIO. It is drawn from the composition
+      //  And the analyse modal, if it is open on this portfolio. It is drawn from the composition
       // and holdings this scan just re-read, and it has already loaded — so without a nudge it
       // would sit showing pre-scan figures while the row behind it updated, which reads as the
       // button having done nothing. A counter, not a boolean: two scans in a row must both land.
@@ -631,12 +631,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * Scan every live portfolio that NEEDS scanning — as a CANCELLABLE JOB.
    *
-   * ⚠ INCREMENTAL, AND THE BACKEND DECIDES. Discovery always runs against AIRS, so an account that
+   *  Incremental, and the backend decides. Discovery always runs against AIRS, so an account that
    * is new or was deleted is always fetched; one whose last pass got all four reports recently is
    * skipped. A full pass is minutes, a no-op pass is seconds — hence `force` for when you actually
    * want the four downloads again.
    *
-   * ⚠⚠ THIS WAS A POLL LOOP AND THAT IS WHY THE BUTTON KEPT READING AS BROKEN (2026-08-11). It
+   *  This was a poll loop and that is why the button kept reading as broken (2026-08-11). It
    * POSTed `/vermogen/refresh`, then re-read `/vermogen/status` every 2.5s and painted its own
    * banner. Three consequences, all of them the reader's problem rather than the code's:
    *   * the work was INVISIBLE the moment you navigated away or reloaded — it carried on, with
@@ -647,16 +647,16 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * As a job it reports into the shared toast stack, survives the route change, re-attaches on
    * reload (`attachRunningJobs`), and Cancel reaches the scan.
    *
-   * ⚠ THE INLINE `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately — the same rule
+   *  The inline `refreshMsg` LINE IS GONE FOR THIS ACTION, deliberately — the same rule
    * `refreshOne` follows. Two places reporting one job is two places to keep in step, and the
    * toast already carries the outcome, the failure and the countdown. `refreshMsg` stays for
    * everything on this panel that is NOT a job.
    *
-   * ⚠ THE STEP-BY-STEP CONSOLE NARRATION IS KEPT, BUT PRINTED ONCE AT THE END. It used to come
+   *  The step-by-step console narration is kept, but printed once at the end. It used to come
    * from the polled `log` array via a high-water mark on `seq`; there is no poll any more, so it
    * is read from `/vermogen/status` in a single request after the job resolves. That log is the
    * only place the ROSTER appears in full (44 names to compare against AIRS's own "44 Items in
-   * selectie") and the only per-report ✓/—/✗ breakdown — the comments on `logSteps` record that
+   * selectie") and the only per-report /—/ breakdown — the comments on `logSteps` record that
    * this is where the bugs kept being found, so dropping it to save one request would have been a
    * real loss of diagnosability disguised as cleanup. The toast carries `i/n: name` live, which is
    * what answers "is it moving"; this answers "what did it actually do".
@@ -664,29 +664,29 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * Reload the table WHILE a fleet scan is running, so rows land as they are written.
    *
-   * ⚠⚠ THE SCAN STORES EACH ACCOUNT AS IT GOES, and the panel used to repaint only when the whole
+   *  The scan stores each account as it goes, and the panel used to repaint only when the whole
    * job resolved — several minutes of watching figures that had already been replaced in the
    * database. This is driven by the job's own progress lines (`startJob`'s `onProgress`), so there
    * is no second source of truth about how far along it is.
    *
-   * ⚠ THROTTLED, AND SINGLE-FLIGHTED. `loadOverview` reads every account; firing it on all 44
+   *  Throttled, and single-flighted. `loadOverview` reads every account; firing it on all 44
    * progress lines would be 44 whole-table reads racing each other, and the LAST one to return
    * would win regardless of which was newest — a scan could visibly go backwards. One in flight at
    * a time, at most one every `RELOAD_EVERY_MS`, and a request that arrives while one is running
    * sets a flag instead of queueing a second.
    *
-   * ⚠ IT DOES NOT TOUCH `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
+   *  It does not touch `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
    * mid-scan would collapse or blank an open book under the reader every few seconds. The end of
    * the run still clears them once, which is where a full re-read belongs.
    */
   /**
-   * ⚠ THE THROTTLE AND THE SINGLE-FLIGHT LIVE IN `lib/liveReload.ts`, WHICH IS TESTED. Two bugs
+   *  The throttle and the single-flight live in `lib/liveReload.ts`, WHICH IS TESTED. Two bugs
    * were found there by its own tests and neither would have been visible here: the FIRST advance
    * was swallowed by the throttle window, and a throttled advance set a flag that only a RUNNING
    * reload ever consumed — so a scan reporting its remaining progress inside one window never
    * repainted again. Concurrency written inline in a component is concurrency nobody can test.
    *
-   * ⚠ IT DOES NOT TOUCH `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
+   *  It does not touch `detail` / `isins`. Those are the EXPANDED row's contents; clearing them
    * mid-scan would collapse or blank an open book under the reader every few seconds. The end of
    * the run still clears them once, which is where a full re-read belongs.
    */
@@ -696,7 +696,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     if (refreshingAll) return;
     setRefreshingAll(true);
     try {
-      // ⚠ A FRESH ONE PER RUN. Its `seen` high-water mark is per-scan; reusing it would make the
+      //  A fresh one per run. Its `seen` high-water mark is per-scan; reusing it would make the
       // second "Refresh all" of a session ignore every progress line below the first run's count.
       live.current = createLiveReload(() => loadOverview(), 4000);
       const { id, done } = await startJob(
@@ -706,16 +706,16 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         (e) => live.current?.onProgress(e.done));
       setFleetJob(id);
       const job = await done;
-      // ⚠ CLEARED THE MOMENT PHASE ONE RESOLVES, not in the `finally`. Phase two is a job of its
+      //  Cleared the moment phase one resolves, not in the `finally`. Phase two is a job of its
       // own now, and `allJob = fleetJob ?? modelsJob` is only the LIVE one if the finished half
-      // stops claiming to be running — otherwise the ✕ would spend the whole model scan wired to a
+      // stops claiming to be running — otherwise the  would spend the whole model scan wired to a
       // job that had already ended. The `finally` still clears it; setting null twice is free.
       setFleetJob(null);
-      // ⚠ RELOAD ON ANYTHING THAT REACHED THE SERVER — done, failed OR cancelled. The scan stores
+      //  Reload on anything that reached the server — done, failed OR cancelled. The scan stores
       // each account as it goes, so a run stopped after 30 of 44 wrote 30 books; leaving the
       // pre-refresh figures on screen would hide real work that was really done.
       if (job.status === 'failed') logDetail('fleet refresh failed', job.summary);
-      // ⚠ BEST-EFFORT, AND NEVER A REASON TO FAIL THE REFRESH. The scan is already finished and
+      //  Best-effort, and never a reason to fail the refresh. The scan is already finished and
       // its rows are already stored; a console diagnostic that could not be fetched must not turn
       // a completed run into an error on screen.
       try {
@@ -735,7 +735,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       setDetail({});
       setIsins({});
       await loadOverview();
-      // ⚠ PHASE TWO OF THE SAME BUTTON, AND IT IS SKIPPED ON CANCEL. Front-Office → the four
+      //  Phase two of the same button, and it is skipped on cancel. Front-Office → the four
       // reports per book is the whole workflow; this adds the model portfolios, which supply the
       // readable nickname and the id-only views. Running it after the reader pressed Cancel would
       // be minutes more of exactly what they asked to stop.
@@ -758,7 +758,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * Stop the fleet scan the reader started.
    *
-   * ⚠ IT STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the button says so. An account's four reports
+   *  It stops between accounts, not inside one, and the button says so. An account's four reports
    * are downloaded and stored as a unit — stopping midway would leave a book holding two fresh
    * reports and two stale ones with nothing on the row to say which. So Cancel waits out the
    * account in flight (seconds), and everything already stored is kept.
@@ -766,29 +766,29 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   /**
    * Stop ONE row's re-scan.
    *
-   * ⚠ THE CASCADE IS WHY THIS IS WORTH HAVING. A single row is not one download: with the
+   *  The cascade is why this is worth having. A single row is not one download: with the
    * look-through chain it is five per account over a chain reaching NINE books, so a press on the
    * wrong row is minutes, not seconds.
    *
-   * ⚠ IT REPORTS RATHER THAN STOPS MID-CHAIN, and that is the backend's rule, not an oversight:
+   *  It reports rather than stops mid-chain, and that is the backend's rule, not an oversight:
    * `/refresh/job` deliberately has no `ctx.check()` inside the scan, because a half-finished
    * cascade leaves a parent fresh against stale children — the exact state that endpoint exists to
    * avoid. So Cancel is honoured at the job boundary; the button says the chain finishes first.
    */
   /**
-   * ⚠ NO INLINE `refreshMsg` LINE ON EITHER CANCEL — the same rule the two refresh actions above
+   *  No inline `refreshMsg` LINE ON EITHER CANCEL — the same rule the two refresh actions above
    * already follow, which these two had quietly broken. `cancelJob` puts "cancelling…" on the job's
    * own card the instant the button is pressed (`cancelRequested`), and that card then carries the
    * outcome, how far it got and the countdown. A banner saying the same thing is a second place to
    * keep in step, in a different corner of the screen, that nothing ever clears.
    *
-   * ⚠ AND IT WAS NOT CARRYING THE NUANCE EITHER — both buttons' own tooltips say the in-flight
+   *  And it was not carrying the nuance either — both buttons' own tooltips say the in-flight
    * account (or chain) finishes first and everything already downloaded is kept, which is the one
    * moment it is worth reading: BEFORE the press.
    */
   const cancelRefreshRow = async (portefeuille: string) => {
     if (cancelWantedRef.current.has(portefeuille)) return;   // already asked; asking twice is a no-op
-    // ⚠ RECORDED BEFORE THE REQUEST, so the button changes on the press rather than on the reply.
+    //  Recorded before the request, so the button changes on the press rather than on the reply.
     // If the job id is not back yet this is ALL that happens here and `refreshOne` fires the cancel
     // the moment it has one — the press is never dropped, only deferred.
     setCancelWantedFor(portefeuille, true);
@@ -798,7 +798,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   };
 
   /**
-   * ⚠ WHICHEVER HALF IS RUNNING. "Refresh all" is two jobs in sequence and only one of them can be
+   *  Whichever half is running. "Refresh all" is two jobs in sequence and only one of them can be
    * in flight, so ONE id is enough — but it must be the live one. Keying this on `fleetJob` alone
    * left the button reading "Cancel scan" through phase two and cancelling nothing, which is the
    * decorative-Cancel failure the job registry exists to prevent.
@@ -810,11 +810,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   };
 
   /**
-   * ⚠ ADMIN ONLY (2026-08-06). The expanded row is the ACCOUNT's own book — its positions and
+   *  Admin only (2026-08-06). The expanded row is the ACCOUNT's own book — its positions and
    * their EUR values, its mutations for the year, and the reconciliation against AIRS. The table
    * above it is a summary; this is the money.
    *
-   * ⚠ THE GUARD IS HERE AS WELL AS ON THE ROW, and neither is the access rule. Making the `<tr>`
+   *  The guard is here as well as on the row, and neither is the access rule. Making the `<tr>`
    * inert covers the click, but `expand` is a plain function on a component a non-admin renders —
    * anything that reaches it later (a keyboard handler, a deep link, an "expand all") would walk
    * straight past a `cursor-default`. The rule that actually holds is on the server: the four
@@ -839,7 +839,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   }, []);
 
   /**
-   * ⚠ THE FILTER KEEPS WHAT THE PAGE CAN ACTUALLY DO SOMETHING WITH — `canAnalyse`, the same
+   *  The filter keeps what the page can actually do something with — `canAnalyse`, the same
    * predicate the Analyse button renders on.
    *
    * It went through a wrong turn worth recording. It was "Linked only", which hid two books that
@@ -852,7 +852,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * Defining it as the buttons' own condition is the point: a row can no longer appear in the list
    * and then refuse to do the thing the list is for.
    *
-   * ⚠ AND IT CAN NEVER EMPTY A FULL TABLE. On a fresh deployment the accounts scan runs before any
+   *  And it can never empty a full table. On a fresh deployment the accounts scan runs before any
    * model scan, so nothing is paired; that filter hid all 44 and the page read as a failed scan.
    * Whatever the rule, if it would leave nothing it does not apply.
    */
@@ -877,7 +877,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           return (aRank < 0 ? order.length : aRank) - (bRank < 0 ? order.length : bRank);
         }
       }
-      // ⚠ ABSENT SORTS TO THE BOTTOM IN BOTH DIRECTIONS. A portfolio with no return has no
+      //  Absent sorts to the bottom in both directions. A portfolio with no return has no
       // value here — it is not a very small one. Letting null fall through to a numeric
       // compare would park every unlinked book at the top of an ascending sort and read as "these
       // are the worst performers", which is a claim the data never made.
@@ -892,18 +892,18 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   })();
 
   return (
-    /* ⚠⚠ EVERY EXPLICIT FONT SIZE IN THIS FILE WENT UP ONE STEP (2026-09-03, on request: "make
+    /*  EVERY EXPLICIT FONT SIZE IN THIS FILE WENT UP ONE STEP (2026-09-03, on request: "make
        the font of everything a bit bigger"). It is written out per class rather than set once on
        this section, and that is not a missed opportunity: `rem` is ROOT-relative, so a
        `font-size` here would move nothing — and almost every size on this page is an arbitrary
        px value, which no container can scale either. The single knob that does exist
        (`html{font-size}`, see the design-system doc) is global and would take the whole app with
        it.
-       ⚠ THE MAP WAS 9→10, 10→11, 11→12, 12→13, and `text-xs` (12px) → `text-[13px]` so it stays
+        THE MAP WAS 9→10, 10→11, 11→12, 12→13, and `text-xs` (12px) → `text-[13px]` so it stays
        equal to what it was equal to, `text-sm` (14px) → `text-[15px]`. Applied in ONE pass: run
        in sequence, 9→10 would be re-matched by 10→11 and every size would collapse upward into
        the largest.
-       ⚠ SHARED COMPONENTS KEPT THEIR SIZES ON PURPOSE — the provenance ⓘ cards, the state badges,
+        SHARED COMPONENTS KEPT THEIR SIZES ON PURPOSE — the provenance ⓘ cards, the state badges,
        `LinkCell` and the Analyse modal all render on other screens too, so bumping them here
        would silently resize those. What grew is what this file owns. */
     <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
@@ -937,7 +937,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               allJob
                 ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
                 : 'border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-            {/* ⚠ BOTH PHASES NOW OFFER CANCEL. Phase two used to run after the fleet job had
+            {/*  BOTH PHASES NOW OFFER CANCEL. Phase two used to run after the fleet job had
                 resolved, so `fleetJob` was already null and the label was the only thing left
                 saying the button was busy — a control that reads "Scanning models…" for minutes
                 with no way to stop it. It is a job of its own now, so `allJob` is whichever half
@@ -956,7 +956,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
             className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
             {t.overview.allocationBands}
           </button>
-          {/* ⚠ ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
+          {/*  ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
               control — which put an implementation rule (keep the two scans' error verdicts apart)
               in front of the operator as a chore. They are phases of one action now; only the
               reporting stays separate. */}
@@ -968,7 +968,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 : 'Keeps only the books that can actually be opened: Analyse describes the paired model portfolio, so a book with no model has no button and nothing this page can do with it. Hides the AIRS benchmarks and the test shells for the same reason.'}>
               <input type="checkbox" checked={hideSmall} disabled={substantial === 0}
                 onChange={(e) => setHideSmall(e.target.checked)} />
-              {/* ⚠ Disabled at zero — see `effectiveHideSmall`. A checkbox that silently does
+              {/*  Disabled at zero — see `effectiveHideSmall`. A checkbox that silently does
                   nothing is worse than one that says it cannot. */}
               Analysable only ({substantial} of {rows.length})
             </label>
@@ -981,7 +981,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           three: green = every account came back whole; RED = nothing was stored, the scan is
           broken; AMBER = a snapshot was written but some reports did not arrive, which is a thing
           to read rather than a thing to fix. */}
-      {/* ⚠ NO "MISSING PREREQUISITE" BANNER, BECAUSE THERE IS NO PREREQUISITE. One lived here
+      {/*  NO "MISSING PREREQUISITE" BANNER, BECAUSE THERE IS NO PREREQUISITE. One lived here
           briefly, announcing that the model scan had to run before anything could be analysed —
           which was the bug, not the diagnosis: both modals take a basket, and Front-Office → the
           four reports per book already supplies one. The model scan is now what it always was, an
@@ -993,14 +993,14 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
             : refreshMsg.kind === 'warn' ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
               : refreshMsg.kind === 'ok' ? 'text-pos-300 bg-pos-500/10 border-pos-500/20'
                 : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
-          {/* ⚠ ONE LINE, AND NOTHING UNDER IT. What failed and why is `logDetail`'d — see the note
+          {/*  ONE LINE, AND NOTHING UNDER IT. What failed and why is `logDetail`'d — see the note
               on it. The per-account detail is not lost from the PAGE either: a row short a report
-              still carries its own ⚠ badge naming which, right where you would act on it. */}
+              still carries its own  badge naming which, right where you would act on it. */}
           {refreshMsg.text}
         </div>
       )}
 
-      {/* ⚠ NO "N PAIRINGS UNCONFIRMED" BANNER. A name match IS how a pairing is normally made —
+      {/*  NO "N PAIRINGS UNCONFIRMED" BANNER. A name match IS how a pairing is normally made —
           it was firing on 27 of 28 rows, every session, with no action attached to it, which is a
           warning about the software's ordinary behaviour rather than about this data. The guess is
           still recomputed on every read (never frozen into the table), so it self-corrects when a
@@ -1013,14 +1013,14 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
 
       {rows && (
         <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
-          {/* ⚠ `overflow-x-auto`, NOT `overflow-auto`, and no max-height: the table grows to its
+          {/*  `overflow-x-auto`, NOT `overflow-auto`, and no max-height: the table grows to its
               content and the PAGE scrolls it. The horizontal container has to stay — 17 columns
               are wider than a phone, and the repo rule is that a dense table scrolls inside its
               own box so the page never scrolls sideways. */}
           <table className="w-full text-[13px] whitespace-nowrap">
             <thead className="bg-card z-10 [&_th]:bg-card">
               <tr className="text-fg-faint text-[12px] uppercase tracking-wide border-b border-neutral-800/40">
-                {/* ⚠ A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
+                {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
                     or re-sorted, which is the point — it is there to say "the 14th row", so two
                     people can talk about the same line. `text-right` so the digits align. */}
                 <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
@@ -1042,7 +1042,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 const isOpen = open === r.dynamic_portefeuille;
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
-                    {/* ⚠ THE ROW IS ONLY A CONTROL FOR AN ADMIN. For everyone else it carries no
+                    {/*  THE ROW IS ONLY A CONTROL FOR AN ADMIN. For everyone else it carries no
                         handler and no pointer — the accent hover is what says "this opens", so
                         leaving it on a row that cannot open reads as a broken table rather than a
                         restricted one. `group` stays either way: the action cells inside still
@@ -1058,17 +1058,17 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           attribution), which is why it needs `fixed_portfolio_id` and an unlinked
                           row cannot offer it. stopPropagation so it does not also toggle the row. */}
                       <td className="px-3 py-1.5 whitespace-nowrap">
-                        {/* ⚠⚠ BOTH CONTROLS ARE SIZED HERE AND NOWHERE ELSE (2026-09-03, on
+                        {/*  BOTH CONTROLS ARE SIZED HERE AND NOWHERE ELSE (2026-09-03, on
                             request: "make the Analyse and Refresh button bigger"). They sit side
                             by side under `items-stretch`, so the two MUST carry the same text size
                             and padding — stretch equalises their HEIGHT, which means a size change
                             to one silently pads the other to match instead of failing visibly.
                             `text-[11px] px-1.5 py-0.5` → `px-2.5 py-1`, and `rounded` →
                             `rounded-md` so they match the chip chrome the Analyse modal uses.
-                            ⚠ THE SIZE ITSELF IS NO LONGER SET HERE ALONE — every explicit font
+                             THE SIZE ITSELF IS NO LONGER SET HERE ALONE — every explicit font
                             size on this page went up a step the same day (see the note on the
                             section below), so these carry `text-[13px]` with the rest of it.
-                            ⚠ THE ROW GETS TALLER, and that is the accepted cost: the cell's own
+                             THE ROW GETS TALLER, and that is the accepted cost: the cell's own
                             `py-1.5` no longer sets the row height, these do. */}
                         <div className="flex items-stretch gap-1.5">
                           {canAnalyse(r) && (
@@ -1105,7 +1105,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             const pf = r.dynamic_portefeuille;
                             const busy = refreshingRows.has(pf);
                             const stopping = cancelWanted.has(pf);
-                            // ⚠ THE FLIP KEYS ON `busy` — THE PRESS — NOT ON `rowJobs`. See
+                            //  The flip keys on `busy` — THE PRESS — NOT ON `rowJobs`. See
                             // `cancelWanted`: keyed on the id it waited a round-trip, during which
                             // the control read "Refresh" over work already running and a second
                             // press started a second job and a second toast.
@@ -1118,7 +1118,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                                   if (busy) void cancelRefreshRow(pf);
                                   else void refreshOne(pf);
                                 }}
-                                // ⚠ INERT ONLY ONCE THE CANCEL IS IN. A disabled spinner is the
+                                //  Inert only once the cancel is in. A disabled spinner is the
                                 // state this panel kept being reported as "stuck": nothing to
                                 // press, nothing moving, no way out — so while it runs there is
                                 // always something to press, and afterwards there is nothing left
@@ -1136,7 +1136,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                                     ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
                                     : 'border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300'}`}
                               >
-                                {/* ⚠ THE WORD, NOT A GLYPH (2026-09-03, on request: every Refresh
+                                {/*  THE WORD, NOT A GLYPH (2026-09-03, on request: every Refresh
                                     says "Refresh" and every Cancel says "Cancel", site-wide). This
                                     one carried no label at all, so it GAINS the word rather than
                                     losing an icon — and the cell is sized for it. The `title` and
@@ -1147,25 +1147,25 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           })()}
                         </div>
                       </td>
-                      {/* ⚠⚠ THE THREE COLUMNS THAT ARE THE ANSWER ARE A SIZE UP FROM THE REST
+                      {/*  THE THREE COLUMNS THAT ARE THE ANSWER ARE A SIZE UP FROM THE REST
                           (2026-09-03, on request). Name · YTD · Current month are what this page
                           is for; the row number, the two action buttons and the delete are chrome
                           around them. At one uniform `text-[13px]` the row read as six equal
                           things and the eye had to pick the important ones out every time.
-                          ⚠ ON THE CELL, so anything nested that sets its OWN size keeps it — the
+                           ON THE CELL, so anything nested that sets its OWN size keeps it — the
                           expand caret, the AIRS-code hover, the freshness badge. A larger figure
                           beside its own small badge is the hierarchy; scaling the badge with it
                           would be the same flat row one step louder. */}
                       <td className="px-3 py-1.5 text-[15px] text-fg whitespace-nowrap">
                         <span className="text-fg-faint mr-1.5">{isOpen ? '▾' : '▸'}</span>
-                        {/* ⚠ AIRS NAMES ONE PORTFOLIO THREE WAYS — our readable name, the Fixed
+                        {/*  AIRS NAMES ONE PORTFOLIO THREE WAYS — our readable name, the Fixed
                             code and the Dynamic code — and printing all three ran them together
                             ("ToppenbergBeheer DefensiefTOPS_DEF_BEH_DYN · TOPS_DEF_BEH"), so the
                             one name a reader wants was the hardest thing on the line to find.
                             The codes are what you search AirSPMS for, which is a deliberate act
                             and can afford a hover — but it has to hang off something hoverable,
                             so it hangs off the name rather than an empty span nobody can reach. */}
-                        {/* ⚠ CLICK TO NAME IT — and admin-only, because a nickname is shared. The
+                        {/*  CLICK TO NAME IT — and admin-only, because a nickname is shared. The
                             books still wearing AIRS's own code (`BUS_Ris_bepOff_Kl_AFS_Dy`) are
                             exactly the ones paired with no model, i.e. the ones nothing else can
                             name; before this the only way to give a book a readable name was to
@@ -1178,7 +1178,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             className="text-left hover:text-accent-300 hover:underline decoration-dotted underline-offset-2">
                             {r.name}
                             {r.name_is_custom && (
-                              <span className="text-accent-400 text-[11px] leading-none ml-1 align-middle">✎</span>
+                              <span className="text-accent-400 text-[11px] leading-none ml-1 align-middle"></span>
                             )}
                           </button>
                         ) : (
@@ -1187,7 +1187,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             {r.name}
                           </span>
                         )}
-                        {/* ⚠ MARKED, NOT WITHHELD. These rows used to be hidden from the list
+                        {/*  MARKED, NOT WITHHELD. These rows used to be hidden from the list
                             entirely, so a scan that reached all 44 portfolios displayed 22 and the
                             operator could not see which report was short, or for whom. The row's
                             figures are still real — they just do not all describe the same date,
@@ -1196,15 +1196,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           <span className="ml-1.5 text-[12px] text-warn-300"
                             title={`This account's last scan did not retrieve: ${r.missing_reports!
                               .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — retry with the Refresh button on the left, or leave it to the daily scan.`}>
-                            ⚠ {r.missing_reports!.map((c) => REPORT_LABELS[c] ?? c).join(', ')}
+                             {r.missing_reports!.map((c) => REPORT_LABELS[c] ?? c).join(', ')}
                           </span>
                         )}
-                        {/* ⚠ NO BADGE FOR A GUESSED PAIRING. A name match is how nearly every row
-                            is paired, so an amber ⚠ on 27 of 28 of them marked the NORMAL case as
+                        {/*  NO BADGE FOR A GUESSED PAIRING. A name match is how nearly every row
+                            is paired, so an amber  on 27 of 28 of them marked the NORMAL case as
                             exceptional — which is how a badge stops being read, and takes the ones
                             that matter with it. The `Where` line below still says the pairing was
                             matched by name; it is reachable, just not shouted. */}
-                        {/* ⚠⚠ `copied`, NOT `formula`, AND NO `how` (2026-09-03, on request: "this
+                        {/*  `copied`, NOT `formula`, AND NO `how` (2026-09-03, on request: "this
                             is simply read in from AIRS, so the info icon should be that simple
                             too"). A name is a STRING WE FETCHED. `formula` printed "A formula on
                             the data:" over it and the `how` then spent four lines deriving a value
@@ -1212,11 +1212,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             looks wrong — which is a paragraph about the LINK, not about the name
                             in the cell. The Link control is the place to act on that, and it is
                             two columns away in the expanded row.
-                            ⚠ THE GUESS IS STILL DISCLOSED, in the one clause it needs: `Where`
+                             THE GUESS IS STILL DISCLOSED, in the one clause it needs: `Where`
                             says "matched to this book by name" when the pairing was inferred, and
                             names the deliberate link when it was not. Dropping the `how` must not
                             drop the fact that most of these pairings are inferred.
-                            ⚠⚠ AND IT NOW CARRIES A DATE. With neither `asOf` nor `fetchedAt` the
+                             AND IT NOW CARRIES A DATE. With neither `asOf` nor `fetchedAt` the
                             card read "no dated source (a structural / computed value)" — which was
                             wrong twice over: it IS dated, by the scan that read it, and calling a
                             fetched string computed is the same mistake `formula` was making. The
@@ -1245,7 +1245,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           note="rendement — AIRS's return for the most recent month" />
                       </td>
                       <td className="px-3 py-1.5 text-right">
-                        {/* ⚠ stopPropagation — the row is the expand toggle, and a delete that also
+                        {/*  stopPropagation — the row is the expand toggle, and a delete that also
                             opened the detail would leave a confirm sitting over a panel loading
                             data for a row about to disappear. */}
                         {isAdmin && (
@@ -1270,15 +1270,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           <Holdings d={detail[r.dynamic_portefeuille]} i={isins[r.dynamic_portefeuille]}
                             portefeuille={r.dynamic_portefeuille} onOverride={refreshIsins}
                             canEdit={isAdmin} />
-                          {/* ⚠ WHAT THE BOOK DID, beneath what it holds. The positions answer
+                          {/*  WHAT THE BOOK DID, beneath what it holds. The positions answer
                               "where is the money now"; only this answers "how did it get there" —
                               a name that appeared mid-year, one sold out entirely, and a weight
                               that drifted purely on price look identical without it.
-                              ⚠ ITS OWN COLLAPSED SECTION, AND ITS OWN LAZY FETCH: the first open
+                               ITS OWN COLLAPSED SECTION, AND ITS OWN LAZY FETCH: the first open
                               of an account goes out to AIRS behind the shared headless session
                               and takes seconds, so it must not ride on expanding the row. */}
                           <AccountTransactions portefeuille={r.dynamic_portefeuille} />
-                          {/* ⚠ THE TWO PANELS ABOVE ARE HALVES OF ONE YEAR, AND THEY DISAGREE
+                          {/*  THE TWO PANELS ABOVE ARE HALVES OF ONE YEAR, AND THEY DISAGREE
                               WITH THE ROW'S OWN YTD UNTIL BOTH ARE COUNTED. Measured across 39
                               accounts, the held positions alone miss the book's own figure by
                               more than 1pp on 23 of them; adding what was SOLD closes
@@ -1296,12 +1296,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         </div>
       )}
       {analyse && (
-        // ⚠ KEYED BY PORTFOLIO. The modal deliberately does NOT clear `data` when its request key
+        //  Keyed by portfolio. The modal deliberately does NOT clear `data` when its request key
         // changes (clearing inside the effect cascades a render), so a surviving instance would
         // paint the PREVIOUS portfolio's composition for the ~4s the next one takes to load —
         // a complete, plausible, wrong answer with no loading state to warn the reader. The key
         // forces a fresh mount, so an unloaded modal can only ever show "Loading overview…".
-        // ⚠ THE ROW'S OWN `refreshOne`, PASSED THROUGH — not a second implementation. Offered on
+        //  The row's own `refreshOne`, PASSED THROUGH — not a second implementation. Offered on
         // exactly the same terms as the row's button (open to every user since 2026-08-19; absent
         // only when there is no AIRS book behind the modal to re-scan), and `refreshSeq` bumps
         // when it finishes so the modal re-reads what the scan rebuilt.
@@ -1310,7 +1310,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!) : undefined}
           refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
           refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
-          // ⚠ THE ROW'S OWN CANCEL, NOT A SECOND ONE — and passed unconditionally while the modal
+          //  The row's own cancel, not a second one — and passed unconditionally while the modal
           // has a portfolio behind it, so the button flips on the PRESS exactly as the row's does.
           // Gating it on `rowJobs` would reintroduce the round-trip window where the modal offered
           // "Refresh" over work already running (see `cancelWanted`).
@@ -1331,7 +1331,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
 }
 
 /**
- * ⚠ `unpriced` IS NOT A PASS — the name matched and NOTHING checked it, which for a fund is
+ *  `unpriced` IS NOT A PASS — the name matched and NOTHING checked it, which for a fund is
  * exactly where the share-class trap lives (IE00BNDS1P30 vs IE00BNDS1Q47: both "Vanguard ESG
  * Global Corporate Bond UCITS ETF EUR Hedged", Acc and Inc, €4.79 vs €3.99, compounding
  * differently). It must not look like `ok`.
@@ -1371,7 +1371,7 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
   bucket?: string | null; isin?: string | null; overridden?: boolean | null;
   onOverride?: (isin: string, bucket: string | null) => void | Promise<void>;
 }) {
-  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so every
+  //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
   // component in one render gets the same value — passing copy down would add a prop to each
   // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
   const t = useMgmtCopy();
@@ -1395,7 +1395,7 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
       title={overridden ? 'Class manually set — pick “Auto” to revert to the calculated class.' : 'Auto-classified — click to override the Class.'}>
       {dot}
       <span className="text-fg-soft">{bucketLabel(bucket)}</span>
-      {overridden && <span className="text-accent-400 text-[11px] leading-none">✎</span>}
+      {overridden && <span className="text-accent-400 text-[11px] leading-none"></span>}
       {/* The picker overlays the whole cell, invisible, so the badge stays the visible affordance. */}
       <select
         aria-label="Set Class"
@@ -1422,7 +1422,7 @@ function BucketBadge({ bucket, isin, overridden, onOverride }: {
 /** HOW an ISIN came to be on this row. Two sources only since the fixed↔dynamic pairing was
  *  deleted (2026-07-23): AIRS states it, or a human supplied it for a row AIRS gives none for. */
 function isinHow(r: NonNullable<AirsAccountIsins['rows']>[number]): string {
-  // ⚠ The price check no longer tests a name match — there is none. It tests OUR price series for
+  //  The price check no longer tests a name match — there is none. It tests OUR price series for
   // the instrument AIRS names, so a mismatch points at our listing, not at the identity.
   if (r.verdict === 'cross_listed') {
     return `read straight off the holding — AIRS's own ISIN-code column. It is priced from ${r.served_by}, which its execution row is linked to on purpose, so the two prices are NOT the same number: €${r.implied_price_eur}/unit implied here against €${r.our_price_eur} (ratio ${r.price_ratio}). For an ADR that gap is the share ratio and the premium, and it confirms nothing either way about the identity.`;
@@ -1430,8 +1430,8 @@ function isinHow(r: NonNullable<AirsAccountIsins['rows']>[number]): string {
   const checked = r.verdict === 'ok'
     ? `Our own price series agrees: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} (ratio ${r.price_ratio}).`
     : r.verdict === 'price_mismatch'
-      ? `⚠ Our own price series DISAGREES: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'our instrument'} (ratio ${r.price_ratio}). The identity is AIRS's, so this points at OUR listing for it.`
-      // ⚠ NOT A SOFTER MISMATCH — a different question, unanswered. Our newest close for this line
+      ? ` Our own price series DISAGREES: €${r.implied_price_eur}/unit implied here vs €${r.our_price_eur} for ${r.our_instrument ?? 'our instrument'} (ratio ${r.price_ratio}). The identity is AIRS's, so this points at OUR listing for it.`
+      //  Not a softer mismatch — a different question, unanswered. Our newest close for this line
       // is from another day, and the refresh already tried to fetch a newer one, so the gap is time
       // rather than identity.
       : r.verdict === 'stale_price'
@@ -1448,7 +1448,7 @@ function IsinCell({ r, onPin }: {
   /** Supply/clear this holding's ISIN by hand. Absent = read-only. */
   onPin?: (holdingName: string, current?: string | null) => void | Promise<void>;
 }) {
-  // ⚠ NOT a dead dash. AIRS gives no ISIN for its cash line, and none for a snapshot taken before
+  //  NOT a dead dash. AIRS gives no ISIN for its cash line, and none for a snapshot taken before
   // `ISIN-code` existed — so a blank is the entry point for supplying one, not a full stop.
   if (!r?.isin) {
     if (!r || !onPin) return <span className="text-fg-faint">—</span>;
@@ -1463,13 +1463,13 @@ function IsinCell({ r, onPin }: {
   }
   const mismatch = r.verdict === 'price_mismatch';
   const unpriced = r.verdict === 'unpriced';
-  // ⚠ NOT RED. The ratio is out of tolerance, but the two prices are from different days and the
+  //  Not red. The ratio is out of tolerance, but the two prices are from different days and the
   // refresh has already tried to close that gap — so this is "we cannot check it", not "the
   // listing is wrong". Painting it like a mismatch is exactly the false alarm it exists to stop.
   const stale = r.verdict === 'stale_price';
-  // ⚠ NOT A WARNING. This ISIN's execution row is deliberately served by another instrument, so
+  //  Not a warning. This ISIN's execution row is deliberately served by another instrument, so
   // the prices differ BY DESIGN (an ADR against the main company's listing — TSMC is 1 ADR = 5
-  // ordinary shares). A red ⚠ here trains a reader to ignore the ones that mean something.
+  // ordinary shares). A red  here trains a reader to ignore the ones that mean something.
   const crossListed = r.verdict === 'cross_listed';
   return (
     <span className="font-mono whitespace-nowrap">
@@ -1483,14 +1483,14 @@ function IsinCell({ r, onPin }: {
           onClick={(e) => { e.stopPropagation(); void onPin?.(r.holding_name, r.isin); }}
           title="ISIN set by hand — AIRS gives this holding none. Click to change or clear it."
           className="text-accent-400 text-[11px] leading-none ml-1 align-middle hover:text-accent-300">
-          ✎
+
         </button>
       )}
       {crossListed && (
         <span className="text-fg-muted ml-1" title={`Priced from ${r.served_by} — this execution row is linked to another instrument on purpose, so the two prices are not the same number. This holding implies €${r.implied_price_eur}/unit against €${r.our_price_eur} for ${r.our_instrument ?? 'the linked instrument'} (ratio ${r.price_ratio}); for an ADR that difference is the share ratio and the ADR premium, not an error.`}>↗</span>
       )}
       {mismatch && (
-        <span className="text-neg-400 ml-1" title={`⚠ OUR price series disagrees with this instrument. This holding implies €${r.implied_price_eur}/unit; ${r.isin} last closed at €${r.our_price_eur} (${r.our_instrument ?? 'our instrument'}) — a ratio of ${r.price_ratio}. The ISIN is AIRS's own, so this points at OUR listing for it, not at the identity.`}>⚠</span>
+        <span className="text-neg-400 ml-1" title={` OUR price series disagrees with this instrument. This holding implies €${r.implied_price_eur}/unit; ${r.isin} last closed at €${r.our_price_eur} (${r.our_instrument ?? 'our instrument'}) — a ratio of ${r.price_ratio}. The ISIN is AIRS's own, so this points at OUR listing for it, not at the identity.`}></span>
       )}
       {stale && (
         <span className="text-fg-faint ml-1" title={`Not checked — our newest close for this instrument is from ${r.our_price_date}, ${r.price_lag_days} days before this valuation, and Yahoo has nothing newer. Two prices from different days cannot confirm or deny a listing.`}>⏱</span>
@@ -1505,30 +1505,30 @@ function IsinCell({ r, onPin }: {
 /**
  * An asset class, and what it returned. AIRS's own `Beleggingscategorie` — not our inference.
  *
- * ⚠ THE RETURN AND THE WEIGHT DO NOT COVER THE SAME HOLDINGS. A holding with no opening value
+ *  The return and the weight do not cover the same holdings. A holding with no opening value
  *   has an undefined return but real exposure, so it counts in the weight and not in the return.
  *   Cash is exactly this, and so is a short (Nestle India, -3,504 shares). Where they differ the
  *   header says how much the return spans, rather than quietly averaging over a smaller basket.
  *
- * ⚠ ETFs ARE COUNTED, NEVER BUCKETED. An equity ETF is Equity and a bond ETF is Bonds — that is
+ *  ETFs ARE COUNTED, NEVER BUCKETED. An equity ETF is Equity and a bond ETF is Bonds — that is
  *   AIRS's classification and it is the right one: 10 of the 11 bond ISINs are ETFs, so an "ETF"
  *   bucket would empty Bonds and make a defensive book read as holding almost none.
  */
 function SegmentHeader({ s, asOf, stats, altReturnPct, basisKey }: {
   s: AirsHoldingSegment; asOf?: string | null;
-  /** ⚠ EVERY FIGURE ON THIS ROW COMES FROM THE HOLDINGS UNDER IT (`groupStats`), not from the
+  /**  EVERY FIGURE ON THIS ROW COMES FROM THE HOLDINGS UNDER IT (`groupStats`), not from the
    *  backend's own per-segment numbers — it computes those over a different row set, and a header
    *  that disagrees with the lines beneath it is a second source of truth with no way to tell
    *  which is right. `s` is used only for the label. */
   stats: GroupStats;
   /** Return on the chosen weight basis, when that is not the start basis. Null = show the real one. */
   altReturnPct?: number | null;
-  /** ⚠ THE SAME BASIS THE <thead> AND THE ROWS BELOW USE. Only one weight column is rendered —
+  /**  THE SAME BASIS THE <thead> AND THE ROWS BELOW USE. Only one weight column is rendered —
    *  the one the Return is computed on — so a header that gated on a different value than its
    *  rows would put this segment's figure under someone else's column heading. */
   basisKey: WeightBasis;
 }) {
-  // ⚠ NO `useMgmtCopy` HERE, DELIBERATELY. Every string this row renders is ⓘ Provenance
+  //  NO `useMgmtCopy` HERE, DELIBERATELY. Every string this row renders is ⓘ Provenance
   // prose, which is outside the translated scope (see `managementCopy`'s header). Holding an
   // unused copy handle 'just in case' is how a component comes to look translated and is not.
   const { etfPct, partial } = stats;
@@ -1555,13 +1555,13 @@ function SegmentHeader({ s, asOf, stats, altReturnPct, basisKey }: {
           )}
         </span>
       </td>
-      {/* ⚠ ONE CELL PER COLUMN. The table is Fund · ISIN · Class · Link · Sector · Region · Ccy
+      {/*  ONE CELL PER COLUMN. The table is Fund · ISIN · Class · Link · Sector · Region · Ccy
           · Beginwaarde · Huidige waarde · Direct result · Div tax · <one weight> · Return —
           THIRTEEN. (It was fourteen: a leading Fundamental column was removed 2026-08-04, one
           cell from each of the four row shapes — thead, this header, the holdings and Total. Drop
           one and not the others and every figure below shifts a column, silently: a weight
           renders perfectly well under "Ccy".)
-          ⚠ EXACTLY ONE WEIGHT COLUMN, and WHICH one is `basisKey`. All four rows — this header,
+           EXACTLY ONE WEIGHT COLUMN, and WHICH one is `basisKey`. All four rows — this header,
           the <thead>, the Total row and the holdings — gate on the same value, so a gate added to
           one and forgotten in another does not shift a column here; it puts this segment's figure
           under a heading that belongs to a different weight. */}
@@ -1652,10 +1652,10 @@ function SegmentHeader({ s, asOf, stats, altReturnPct, basisKey }: {
           note="segment return"
           how={stats.returnPct == null || stats.contributionPct == null || !stats.startWeightPct
             ? 'no holding here has an opening value, so this segment has no return to state'
-            // ⚠ pp, not %. The contribution is a share OF THE BOOK's return; printing it "+5.46%"
+            //  pp, not %. The contribution is a share OF THE BOOK's return; printing it "+5.46%"
             // beside the segment's own "+6.60%" reads as two rival returns.
             : altReturnPct != null
-              ? `Σ (the chosen weight × Return) ÷ Σ those weights, over this segment's rows that carry both. ⚠ A hypothetical: the segment's real return is ${pct(stats.returnPct)}`
+              ? `Σ (the chosen weight × Return) ÷ Σ those weights, over this segment's rows that carry both.  A hypothetical: the segment's real return is ${pct(stats.returnPct)}`
               : `Σ (Start wt × Return) of the rows below = ${stats.contributionPct >= 0 ? '+' : ''}${stats.contributionPct.toFixed(2)}pp, ÷ this segment's ${stats.startWeightPct.toFixed(2)}% Start wt${partial ? ', priced rows only' : ''}`} />
       </td>
     </tr>
@@ -1931,22 +1931,22 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
    *  non-admin sees each one's ANSWER as plain text and no control to change it. */
   canEdit?: boolean;
 }) {
-  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so every
+  //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
   // component in one render gets the same value — passing copy down would add a prop to each
   // nested piece for a value none of them can disagree about. Missing Dutch is a build error.
   const t = useMgmtCopy();
-  // ⚠ THE 21-ROW TABLE IS BEHIND A SECOND CLICK (2026-08-05, on request). Expanding an account
+  //  THE 21-ROW TABLE IS BEHIND A SECOND CLICK (2026-08-05, on request). Expanding an account
   // used to land the reader straight in the full position list, which is the DETAIL — the thing
   // you go looking for once you already know which book you are in. Collapsed by default, the
   // expanded row opens on the book's own summary and the rows are one more click away.
   //
-  // ⚠ COLLAPSED IS NOT EMPTY. The bar carries the Total row's own three figures (holdings, value
+  //  Collapsed is not empty. The bar carries the Total row's own three figures (holdings, value
   // now, return), from the identical variables that row renders — not a second aggregation of the
   // same data, which is exactly the drift this file warns about two comments below. A disclosure
   // that says only "Current portfolio" gives the reader nothing to decide on and makes the click
   // mandatory rather than optional.
   //
-  // ⚠ RESET ON EVERY EXPAND, and that is free: the parent renders this component inside
+  //  Reset on every expand, and that is free: the parent renders this component inside
   // `{isOpen && …}`, so collapsing the account unmounts it. There is no stale "still open from
   // last time" state to reason about.
   const [showRows, setShowRows] = useState(false);
@@ -1957,7 +1957,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   // request per holding. Null until it lands, which the cell renders as "…" rather than an empty
   // select that looks like "no options".
   const [linkCtx, setLinkCtx] = useState<LinkCtx | null>(null);
-  // ⚠ FETCHED WHEN THE TABLE IS OPENED, NOT WHEN THE ACCOUNT IS. It feeds the Link dropdowns and
+  //  Fetched when the table is opened, not when the account is. It feeds the Link dropdowns and
   // nothing else, so behind a collapsed table it buys a request whose result no one can see —
   // and expanding an account already costs two (holdings + isins). A reader scanning down the
   // list now pays for the rows they actually ask for.
@@ -2019,7 +2019,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   // (Cash and Unclassified last — they are what is left). A holding whose class we do not know
   // still renders: it falls in the trailing ungrouped block rather than vanishing from a table
   // that is supposed to account for the whole book.
-  // ⚠ AIRS bills one instrument on SEVERAL lines — BUS_Neutraal lists "6,5% Rabobank Certificaten
+  //  AIRS bills one instrument on SEVERAL lines — BUS_Neutraal lists "6,5% Rabobank Certificaten
   // 14-perp." at 1.64% AND 0.01%. The ISIN/segment side already dedupes (resolve_account_isins), so
   // merge by name here too, summing weight + values, or the same holding shows as two rows. The
   // return % is identical for two lines of one instrument (same price move), so keep the first's.
@@ -2051,11 +2051,11 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   // ONE aggregation rule, applied twice. A segment row sums the columns of the holdings under it
   // (start-weighted for the return); the TOTAL row does exactly the same over the segment rows.
   //
-  // ⚠ THE TOTAL USED TO RE-DERIVE ITSELF FROM THE HOLDINGS. That is a second code path that only
+  //  The total used to re-derive itself from the holdings. That is a second code path that only
   // HAPPENED to agree with the headers above it — and a figure that agrees by coincidence starts
   // disagreeing the day either side changes. Now it can only be the sum of what is on screen.
   //
-  // ⚠ NOT Σ(displayed-weight × return) at either level: the Weight column is today's value share,
+  //  NOT Σ(displayed-weight × return) at either level: the Weight column is today's value share,
   // and weighting by it lets a big winner (up +148%, now 3× its share) dominate — that read
   // +56.11% on a book whose true return was +41.98%. Start-weighting is the honest number and the
   // one that lines up with `cumulatief_rendement`.
@@ -2069,7 +2069,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
     modelOf: (r) => r.model_pct,
     actualOf: (r) => r.model_actual_pct,
   });
-  // ⚠ EVERY group, including the trailing ungrouped block (which draws no header). Aggregating
+  //  EVERY group, including the trailing ungrouped block (which draws no header). Aggregating
   // only the groups that rendered a header would drop those holdings from the book's totals.
   const groupStatsOf = new Map(ordered.map(([seg, g]) => [seg?.asset_class ?? 'rest', statsFor(g)]));
   const total = aggregateGroups([...groupStatsOf.values()]);
@@ -2088,7 +2088,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   const isHypothetical = basisKey !== 'start';
   const totalReturn = total.returnPct == null ? null : total.returnPct / 100;
   return (
-    /* ⚠⚠ ONE ACCOUNT, ONE FETCH TIME, FORTY ⓘ ICONS. Every provenance card below describes this
+    /*  ONE ACCOUNT, ONE FETCH TIME, FORTY ⓘ ICONS. Every provenance card below describes this
        book, so they all share the moment we last read it — and without that fact each one turns
        amber on AIRS's own valuation lag, which no button on this page can clear. Supplied once for
        the subtree rather than as a prop on forty call sites, where the one that got forgotten would
@@ -2096,7 +2096,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
        stale". See `ProvenanceFetchedAt`. */
     <ProvenanceFetchedAt at={d?.fetched_at}>
     <div className="space-y-2">
-      {/* ⚠ THE WHOLE BAR IS THE TOGGLE, not a caret you have to hit. The figures on it are the
+      {/*  THE WHOLE BAR IS THE TOGGLE, not a caret you have to hit. The figures on it are the
           Total row's, so a reader who only wanted the summary has already been answered and the
           click is genuinely optional. */}
       <button type="button" onClick={() => setShowRows((v) => !v)}
@@ -2107,12 +2107,12 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
         <span className="text-fg-faint">
           {all.length} holding{all.length === 1 ? '' : 's'}
         </span>
-        {/* ⚠ THE SAME VARIABLES THE TOTAL ROW PRINTS, through the same formatters — never a
+        {/*  THE SAME VARIABLES THE TOTAL ROW PRINTS, through the same formatters — never a
             second aggregation of `all`. One that merely HAPPENS to agree starts disagreeing the
             day either side changes, which is the trap the comment above `basis` records. */}
         <span className="ml-auto flex items-center gap-3 font-mono">
           <span className="text-fg-soft">{eur(total.valueEur)}</span>
-          {/* ⚠ THE BOOK'S REAL RETURN, EVEN WHEN A HYPOTHETICAL BASIS IS ARMED INSIDE. The
+          {/*  THE BOOK'S REAL RETURN, EVEN WHEN A HYPOTHETICAL BASIS IS ARMED INSIDE. The
               control that marks a basis as hypothetical is itself hidden while this is collapsed,
               so showing the hypothetical here would be the one number on screen with nothing left
               to qualify it. The chip says a different basis is waiting rather than quietly
@@ -2120,7 +2120,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
           {isHypothetical && (
             <span className="text-warn-500 font-sans text-[12px]"
               title={`Inside, the returns are weighted by ${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} — a hypothetical. The figure here is the book's own start-weighted return.`}>
-              ⚠ {WEIGHT_BASES.find((x) => x.key === basisKey)!.label} inside
+               {WEIGHT_BASES.find((x) => x.key === basisKey)!.label} inside
             </span>
           )}
           <span className={totalReturn == null ? 'text-fg-faint' : tone(totalReturn)}
@@ -2133,7 +2133,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
       {/* Which weights the segment + Total returns use. Four discrete, named options, so this is
           a segmented control rather than a literal slider — a slider would put "Model wt" at an
           unlabelled 3/4 position and make the default indistinguishable from a nudge.
-          ⚠ ONLY "Start wt" is the book's own return; the rest are clearly-marked hypotheticals. */}
+           ONLY "Start wt" is the book's own return; the rest are clearly-marked hypotheticals. */}
       <div className="flex items-center gap-2 flex-wrap text-[12px]">
         <span className="text-fg-faint">{t.overview.weightReturnsBy}</span>
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
@@ -2150,18 +2150,18 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
         {isHypothetical && (
           <span className="text-warn-500"
             title="Weighted by a column that is not the year's opening share, so this is what the book WOULD have returned held that way — not what it did. Only Start wt reproduces the real return.">
-            ⚠ hypothetical — the real return is on Start wt
+             hypothetical — the real return is on Start wt
           </span>
         )}
       </div>
       <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
-        {/* ⚠ `overflow-x-auto`, NOT `overflow-auto`, and no max-height: the holdings grow to their
+        {/*  `overflow-x-auto`, NOT `overflow-auto`, and no max-height: the holdings grow to their
             content and the PAGE scrolls them. The horizontal container stays — on a narrow
             viewport these columns are still wider than the screen, and a dense table must scroll
             inside its own box so the page never scrolls sideways. The header loses `sticky top-0`
             with the scrollport it was sticking to; leaving the class would read as if it still did
             something.
-            ⚠ `w-full`, NOT `w-auto`. `w-auto` sizes to content, which was invisible while four
+             `w-full`, NOT `w-auto`. `w-auto` sizes to content, which was invisible while four
             weight columns made the table wider than any container — it only ever grew. Showing
             one weight column instead of four can leave it NARROWER, and `w-auto` then parks the
             whole table against the left edge with dead space beside it, which reads as a broken
@@ -2172,14 +2172,14 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
             <tr className="text-fg-faint text-[12px] uppercase tracking-wide border-b border-neutral-800/40">
               <th className="px-3 py-1.5 font-medium text-left">{t.overview.colFund}</th>
               <th className="px-3 py-1.5 font-medium text-left"
-                title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close. ⚠ = the price disagrees; ? = no series, so nothing cross-checks it.">
+                title="AIRS's own ISIN-code where the book carries one (exact), else matched by name to a Fixed portfolio position, else pinned by hand. Always price-checked against that instrument's own close.  = the price disagrees; ? = no series, so nothing cross-checks it.">
                 {t.overview.colIsin}
               </th>
               <th className="px-3 py-1.5 font-medium text-left"
                 title="Smart asset-class label — Stocks · Bonds · Alternatives · Cash · Unclassified (genuinely unsure). Every class names what the holding INVESTS IN, so an equity ETF is Stocks and a bond ETF is Bonds. AIRS's own class first, then the instrument's grid data and name.">
                 {t.overview.colClass}
               </th>
-              {/* ⚠ Some holdings are not instruments — they are other model portfolios, wrapped as
+              {/*  Some holdings are not instruments — they are other model portfolios, wrapped as
                   a Leonteq certificate so they can be held like a security. Those are CH ISINs
                   Yahoo can never price, so they sit here as dead rows (`?`) whose weight leaves
                   the coverage denominator. The link is what lets a reader see through the wrapper
@@ -2191,7 +2191,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 Link
               </th>
               <th className="px-3 py-1.5 font-medium text-left" title="The instrument's own yfinance sector. A fund is opaque, so it reads “—”.">{t.overview.colSector}</th>
-              <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo. ⚠ For an ETF this describes its listing, not what it holds.">{t.overview.colRegion}</th>
+              <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo.  For an ETF this describes its listing, not what it holds.">{t.overview.colRegion}</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-right"
                 title="Beginwaarde lopend jaar EUR — what this holding was worth when the year opened, restated by AIRS to the CURRENT quantity so a purchase does not read as a gain. EUR 0 means it was not held then.">
@@ -2209,7 +2209,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 title="Withholding tax on that dividend, as AIRS books it (NEGATIVE). Kept in its own column because a US name losing 15% and a Dutch one losing nothing is a fact about the holding. Net income is the two added.">
                 {t.overview.colDivTax}
               </th>
-              {/* ⚠ ONE WEIGHT COLUMN, THE SELECTED ONE. The other three are not hidden to save
+              {/*  ONE WEIGHT COLUMN, THE SELECTED ONE. The other three are not hidden to save
                   space — they are hidden because only this one produced the Return beside them,
                   and four identical-looking columns gave the reader no way to tell which. */}
               {basisKey === 'start' && (
@@ -2232,7 +2232,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
               )}
               {basisKey === 'actual' && (
               <th className="px-3 py-1.5 font-medium text-right"
-                title="Werkelijk percentage — what the Model report says the book actually holds. ⚠ A different report from the Weight column beside it (Vermogensoverzicht), computed on its own date, so the two can legitimately differ.">
+                title="Werkelijk percentage — what the Model report says the book actually holds.  A different report from the Weight column beside it (Vermogensoverzicht), computed on its own date, so the two can legitimately differ.">
                 Werkelijk
               </th>
               )}
@@ -2248,7 +2248,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                   note="holdings in the book"
                   how="a count of the AIRS positions, merged where one instrument is billed on several lines" />
               </td>
-              {/* ⚠ Over ALL rows, not just the priced ones — the column is what a reader adds up,
+              {/*  Over ALL rows, not just the priced ones — the column is what a reader adds up,
                   and the Return's denominator (`startSum`) deliberately spans fewer rows. */}
               <td className="px-3 py-1.5 text-right font-mono text-fg-muted">
                 {eur(total.startEurAll)}
@@ -2264,7 +2264,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                   note="the book's value now"
                   how="a sum of the Huidige waarde column of the segment rows" />
               </td>
-              {/* ⚠ The book's income is NOT this column's sum. A position sold during the year
+              {/*  The book's income is NOT this column's sum. A position sold during the year
                   paid real dividends and has no row left to carry them, so the total states the
                   held part and its card names the difference. */}
               <td className="px-3 py-1.5 text-right font-mono text-fg-strong">
@@ -2274,7 +2274,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                     what="The dividends and coupons received this year by the positions still held."
                     note="Direct result of the holdings still held"
                     how={d.dividend_sold_eur
-                      ? `a sum of the Direct result column of the segment rows. ⚠ It is NOT the book's income: ${eur(d.dividend_sold_eur)} more was paid by ${d.dividend_sold_funds?.join(', ')}, sold during the year and no longer in the table`
+                      ? `a sum of the Direct result column of the segment rows.  It is NOT the book's income: ${eur(d.dividend_sold_eur)} more was paid by ${d.dividend_sold_funds?.join(', ')}, sold during the year and no longer in the table`
                       : "a sum of the Direct result column of the segment rows. Every fund that paid this year is still held, so it is also the book's dividend income"} />
                 )}
               </td>
@@ -2309,7 +2309,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 {total.modelPct != null && (
                   <Provenance source="airs_model" asOf={d.as_of} kind="formula" note="the model's total"
                     what="The model portfolio's weights added up across every segment."
-                    how="a sum of the Model wt column of the segment rows. ⚠ Short of 100% by whatever the model names and this account does not hold" />
+                    how="a sum of the Model wt column of the segment rows.  Short of 100% by whatever the model names and this account does not hold" />
                 )}
               </td>
               )}
@@ -2334,7 +2334,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                   how={totalReturn == null
                     ? 'no holding has an opening value, so the book has no price return to compute'
                     : isHypothetical
-                      ? `Σ (${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} × Return) ÷ Σ those weights, over the rows carrying both. ⚠ NOT the book's return — that is on Start wt (${pct(totalReturn! * 100)}). Renormalised, because these weights sum to ${wrTotal.weightSum < 2 ? (100 * wrTotal.weightSum).toFixed(2) : wrTotal.weightSum.toFixed(2)}%, not 100`
+                      ? `Σ (${WEIGHT_BASES.find((x) => x.key === basisKey)!.label} × Return) ÷ Σ those weights, over the rows carrying both.  NOT the book's return — that is on Start wt (${pct(totalReturn! * 100)}). Renormalised, because these weights sum to ${wrTotal.weightSum < 2 ? (100 * wrTotal.weightSum).toFixed(2) : wrTotal.weightSum.toFixed(2)}%, not 100`
                       : `Σ (Start wt × Return) of the segment rows above = ${total.contributionPct! >= 0 ? '+' : ''}${total.contributionPct!.toFixed(2)}pp, ÷ their ${total.startWeightPct!.toFixed(2)}% Start wt. Price + income, not flow-aware`} />
               </td>
             </tr>
@@ -2358,7 +2358,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 </td>
                 <td className="px-3 py-1.5">
                   <IsinCell r={g} onPin={canEdit ? pinIsin : undefined} />
-                  {/* ⚠ The ISIN is the one column NOT read off a source — it is INFERRED (a name
+                  {/*  The ISIN is the one column NOT read off a source — it is INFERRED (a name
                       match, then a price check), so its card carries both steps. */}
                   {g?.isin && (
                     <Provenance
@@ -2414,7 +2414,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                   {g?.region && (
                     <Provenance source="yfinance" kind="formula" what="Which part of the world the issuer belongs to."
                       note="region — the MSCI ACWI region"
-                      how="derived from the resolved country above. ⚠ For an ETF it describes the fund's own listing, not what the fund holds" />
+                      how="derived from the resolved country above.  For an ETF it describes the fund's own listing, not what the fund holds" />
                   )}
                 </td>
                 <td className="px-3 py-1.5 font-mono text-fg-muted">
@@ -2425,7 +2425,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                       note="Valuta — the currency AIRS books this position in" />
                   )}
                 </td>
-                {/* ⚠ €0 here IS a value, not a gap: AIRS reports Beginwaarde 0 for a holding that
+                {/*  €0 here IS a value, not a gap: AIRS reports Beginwaarde 0 for a holding that
                     was not there when the year opened, which is why its Return is blank. */}
                 <td className="px-3 py-1.5 text-right font-mono text-fg-muted">
                   {eur(r.start_value_eur)}
@@ -2443,7 +2443,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                       note="Huidige waarde EUR — the position's value at the snapshot date" />
                   )}
                 </td>
-                {/* ⚠ Blank, never €0. "Paid nothing" and "this book's journal has no line for it"
+                {/*  Blank, never €0. "Paid nothing" and "this book's journal has no line for it"
                     are different claims, and a 0.00 in a money column reads as the first. */}
                 <td className="px-3 py-1.5 text-right font-mono text-fg-soft">
                   {r.dividend_eur == null ? '—' : eur(r.dividend_eur)}
@@ -2463,7 +2463,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                       how="a sum of this holding's Dividendbelasting lines in the AIRS Mutaties journal; negative, so net income is this plus the Direct result" />
                   )}
                 </td>
-                {/* ⚠ A dash, never 0.00%. No opening value means the holding was NOT THERE when
+                {/*  A dash, never 0.00%. No opening value means the holding was NOT THERE when
                     the year began, which is why it has no return either — not that it held none
                     of the book. */}
                 {basisKey === 'start' && (
@@ -2487,7 +2487,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                   )}
                 </td>
                 )}
-                {/* ⚠ Blank, never 0%. A model that does not name this holding is DRIFT — the book
+                {/*  Blank, never 0%. A model that does not name this holding is DRIFT — the book
                     bought something the strategy never asked for — and a 0% would read as the
                     strategy deliberately wanting none of it. */}
                 {basisKey === 'model' && (
@@ -2510,7 +2510,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                   )}
                 </td>
                 )}
-                {/* ⚠ A dash, never 0%. No opening value = the return is UNDEFINED, not flat.
+                {/*  A dash, never 0%. No opening value = the return is UNDEFINED, not flat.
                     This is now a TOTAL return: the income sits in the numerator, so a high-yield
                     holding stops reading as a laggard beside one that pays nothing. */}
                 {(() => { const tr = holdingTotalReturn(r); return (
@@ -2519,7 +2519,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                     ? 'No opening value — not held when the year opened (or a cash line). Its return is undefined, not zero.'
                     : undefined}>
                   {tr == null ? '—' : pct(tr * 100)}
-                  {/* ⚠ EVERY TERM IS A COLUMN ON SCREEN, INCLUDING THE TAX. Printing the netted
+                  {/*  EVERY TERM IS A COLUMN ON SCREEN, INCLUDING THE TAX. Printing the netted
                       dividend as one number hides the tax term entirely, and a reader checking the
                       row against the Div tax column cannot find it. Both are rendered with their
                       own signs, so the tax reads negative here exactly as it does there. */}

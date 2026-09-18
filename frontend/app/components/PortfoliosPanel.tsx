@@ -67,7 +67,7 @@ type Perf = ModelPortfolioPerformance;
  *  window is SHORT: the model is younger than the year, so its "YTD" covers days rather than
  *  months. MoTopSelectie_FX has held its weights for eight days — +0.51%. Priced back to 1 Jan
  *  it would read +75.85%, on a basket it never held, and top the table. Both facts are why the
- *  ⚠ stays: a partial year is honest, but it is not comparable to a full one. */
+ *   stays: a partial year is honest, but it is not comparable to a full one. */
 const isPartialYear = (p: Perf) => p.model_changed_in_period;
 
 type PosState = { loading: boolean; data?: ModelPortfolioPositions; error?: string;
@@ -261,7 +261,7 @@ export default function PortfoliosPanel() {
 
   /** Re-acquire EVERY input behind one model's YTD, streamed, then rebuild the number.
    *
-   * ⚠ "REFRESH FROM AIRS" ON ITS OWN CANNOT FIX A WRONG RETURN, WHICH IS WHY THIS EXISTS. A YTD
+   *  "REFRESH FROM AIRS" ON ITS OWN CANNOT FIX A WRONG RETURN, WHICH IS WHY THIS EXISTS. A YTD
    * has five inputs and only the first comes from AIRS: the composition (AirSPMS), the
    * instrument mapping (Yahoo/OpenFIGI), the FX history (ECB), the price series (Yahoo), and our
    * own certificate links. The old button re-scraped the composition and nothing else, so a
@@ -309,7 +309,7 @@ export default function PortfoliosPanel() {
         setRows((prev) => prev?.map((p) => ({ ...p, perf: byId.get(p.id) ?? p.perf })) ?? prev);
       }
     } catch { /* the row keeps its previous figure; the console has the new one */ }
-    // ⚠ AND THE ANALYSE MODAL, IF IT IS OPEN. It is drawn from the composition, the prices and the
+    //  And the analyse modal, if it is open. It is drawn from the composition, the prices and the
     // FX this run just rebuilt, and it has already loaded — so without a nudge it would sit there
     // showing pre-refresh figures while the row behind it updated, which reads as the button
     // having done nothing. A counter rather than a boolean: two refreshes in a row must both land.
@@ -467,7 +467,7 @@ export default function PortfoliosPanel() {
             </div>
           )}
           {rows && (
-            <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer select-none whitespace-nowrap"
+            <label className="flex items-center gap-1.5 text-xs text-fg-muted cursor-pointer whitespace-nowrap"
               title={`Shows only the portfolios whose counted model holds more than ${MIN_HOLDINGS_SHOWN} instruments. Hides ${smallCount}: the single-instrument portfolios, plus every row with no countable model at all — no fixed model, no snapshot, or a count that failed.`}>
               <input type="checkbox" checked={hideSmall} onChange={(e) => setHideSmall(e.target.checked)}
                 className="accent-accent-600 cursor-pointer" />
@@ -635,9 +635,9 @@ export default function PortfoliosPanel() {
       )}
 
       {analyse && (
-        // ⚠ Keyed by portfolio — see the twin in `PortfolioOverviewPanel`. Without it a surviving
+        //  Keyed by portfolio — see the twin in `PortfolioOverviewPanel`. Without it a surviving
         // instance paints the previous portfolio's composition while the next one loads.
-        // ⚠ THE ROW'S OWN REFRESH HANDLER, PASSED THROUGH — not a second implementation. Pressing
+        //  The row's own refresh handler, passed through — not a second implementation. Pressing
         // it here runs the identical job the expanded row runs, streams to the same console, and
         // bumps `refreshSeq` so this modal re-reads the composition it just rebuilt.
         <PortfolioAnalysisModal key={analyse.id} id={analyse.id} name={analyse.name}
@@ -658,7 +658,7 @@ export default function PortfoliosPanel() {
  *                 funds). We return NOTHING rather than renormalise 1% of a portfolio up to
  *                 100% and print it to two decimals. That actually happened: TOPS_OFF_BEH
  *                 read "+0.00%", which was its cash line, alone.
- *   ⚠ (amber)   — a PARTIAL year. The model is younger than the year, so the window opens at
+ *    (amber)   — a PARTIAL year. The model is younger than the year, so the window opens at
  *                 its inception rather than 1 Jan (it never held these weights in January, and
  *                 pricing them back there would be a backtest). The figure is real — it is just
  *                 not a year, and it is sitting in a column of them. Hover for the window.
@@ -679,7 +679,7 @@ function YtdCell({ p }: { p: Portfolio }) {
   const v = f.ytd_pct;
   const colour = v >= 0 ? 'text-pos-400' : 'text-neg-400';
   const hint = isPartialYear(f)
-    ? `⚠ PARTIAL YEAR — measured from ${f.ytd_from}, not 1 January. This model took effect on ${f.model_effective}, DURING the year: it never held these weights in January, and pricing them back there would backtest a basket chosen with hindsight (that would read very differently). So this is ${statDays(f)} trading day(s) of realized return, sitting in a column of full years — do not rank it against one.`
+    ? ` PARTIAL YEAR — measured from ${f.ytd_from}, not 1 January. This model took effect on ${f.model_effective}, DURING the year: it never held these weights in January, and pricing them back there would backtest a basket chosen with hindsight (that would read very differently). So this is ${statDays(f)} trading day(s) of realized return, sitting in a column of full years — do not rank it against one.`
     : `Full year — measured from ${f.ytd_from}. This model has held these weights since ${f.model_effective}, before the year began, so this IS what it earned.`;
   // ONE approximation marker, not two. Renormalised coverage and an interpolated opening mark
   // are different CAUSES, but to a reader they are the same fact — this number is an estimate —
@@ -697,7 +697,7 @@ function YtdCell({ p }: { p: Portfolio }) {
 
   return (
     <span title={hint + cov + estWhy} className="inline-flex items-center gap-1">
-      {isPartialYear(f) && <span className="text-warn-400" aria-label={t.partialYear}>⚠</span>}
+      {isPartialYear(f) && <span className="text-warn-400" aria-label={t.partialYear}></span>}
       {approx && <span className="text-warn-400" aria-label="approximate">≈</span>}
       <span className={colour}>{v >= 0 ? '+' : ''}{v.toFixed(2)}%</span>
       <Provenance source="yfinance" asOf={f.sources?.yf_close}
@@ -808,7 +808,7 @@ function absentSince(f: Perf): string | null {
 /** The since-inception cell — the model's return since ITS OWN effective date.
  *
  * This is the honest number for every portfolio, hindsight-flagged or not, which is exactly why
- * it sits next to the YTD: where the ⚠ says the YTD is a backtest, this column says what the
+ * it sits next to the YTD: where the  says the YTD is a backtest, this column says what the
  * portfolio actually did. MoTopSelectie_FX: +75.85% YTD, +0.51% since the model took effect.
  *
  * NOTE the window is the COMPOSITION's effective date, which is not always AIRS's "Fixed date"
@@ -886,7 +886,7 @@ function RatioCell({ p, kind }: { p: Portfolio; kind: 'sharpe' | 'sortino' }) {
 
 /** The geometric annualized return since the fixed date.
  *
- *  ⚠ ABSENT under a year of trading, and that is the whole design of the cell. A CAGR compounds
+ *   ABSENT under a year of trading, and that is the whole design of the cell. A CAGR compounds
  *  a window's return out to a year, so a short window is not merely noisy — it is systematically
  *  amplified: AITopSelectie OFF FX made +50.61% in 135 trading days, which annualizes to
  *  +114.8%. That number would sit in this column, same font, beside one earned over two years.
@@ -1010,7 +1010,7 @@ type Position = ModelPortfolioPositions['rows'][number];
  *  Weight these returns by the model's percentages and you get that number back exactly (checked:
  *  AITopSelectie OFF FX, 51.4812% both ways).
  *
- *  ⚠ The prices are in EUR, deliberately, because the return is an EUR return and carries the FX
+ *   The prices are in EUR, deliberately, because the return is an EUR return and carries the FX
  *  leg. Showing the LOCAL closes here would print two numbers whose ratio is not the third — a
  *  USD holding can rise in dollars and fall in euros on the same days. The local close and its
  *  currency are in the tooltip, where they inform without pretending to be the sum.
@@ -1048,7 +1048,7 @@ function MarkCells({ p, ytdFrom, source }: {
   const returnHow = 'End ÷ Start − 1. An EUR return, so it carries the FX leg — a USD holding can rise in dollars yet fall here.';
 
   if (p.start_price_eur == null || p.end_price_eur == null) {
-    // ⚠ A STALE SERIES IS NOT A BROKEN MAPPING, and the blank looks identical. Meta Platforms is
+    //  A stale series is not a broken mapping, and the blank looks identical. Meta Platforms is
     // correctly mapped to META with years of data — but its last close is 2026-07-02 while
     // BUS_2.0_NEU_FX's window opens 2026-07-09, so there is NO PRICE INSIDE THE WINDOW and no
     // return over it can exist. Telling the reader "it listed later" (the old text) sends them
@@ -1059,13 +1059,13 @@ function MarkCells({ p, ytdFrom, source }: {
       : !p.known_instrument
         ? 'This ISIN is not an instrument in our grid, so we have no price series for it — typically an in-house fund, or an ETF still queued for resolution.'
         : stale
-          ? `⚠ STALE PRICES, not a bad mapping. This holding's latest close is ${p.last_close} — BEFORE this window opened on ${ytdFrom} — so there is no price inside the window and no return over it can exist. The instrument and its listing are fine; the price series just hasn't been refreshed. Refresh it from the instrument grid.`
+          ? ` STALE PRICES, not a bad mapping. This holding's latest close is ${p.last_close} — BEFORE this window opened on ${ytdFrom} — so there is no price inside the window and no return over it can exist. The instrument and its listing are fine; the price series just hasn't been refreshed. Refresh it from the instrument grid.`
           : `No close on or before ${ytdFrom ?? 'the window'}, so the holding cannot be marked from there — it listed later, or its series has no data that far back.${p.last_close ? ` Its latest close is ${p.last_close}.` : ''}`;
     return (
       <>
         {[0, 1, 2, 3, 4].map((i) => (
           <td key={i} className={`px-3 py-1.5 font-mono text-right ${stale ? 'text-warn-300' : 'text-fg-faint'}`}>
-            <span title={why}>{stale && i === 0 ? '⚠ ' : ''}—</span>
+            <span title={why}>{stale && i === 0 ? ' ' : ''}—</span>
           </td>
         ))}
       </>
@@ -1077,14 +1077,14 @@ function MarkCells({ p, ytdFrom, source }: {
       ? `${p.currency} ${v.toLocaleString('en-GB', { maximumFractionDigits: 2 })} on ${d} — converted at that date's own FX rate.`
       : undefined;
 
-  // ⚠ The opening price is an ESTIMATE, not a close. This holding has no price near the date the
+  //  The opening price is an ESTIMATE, not a close. This holding has no price near the date the
   // window opened — it trades rarely, or is pointed at a listing that does — so the value was
   // straight-lined between the two real closes either side of it. It renders in the same column,
   // same font, as an observed price, so it must SAY it is not one.
   const est = p.start_interpolated;
-  const estWhy = `⚠ ESTIMATE, not a traded price. This holding has no close near ${p.start_date} — the two real closes bracketing that date are ${p.start_gap_days} days apart — so its opening value was linearly INTERPOLATED between them. Everything downstream of it (this row's return, and its share of the portfolio's) is therefore partly modelled. Usually the real cause is a bad listing: check the instrument's Yahoo symbol.`;
+  const estWhy = ` ESTIMATE, not a traded price. This holding has no close near ${p.start_date} — the two real closes bracketing that date are ${p.start_gap_days} days apart — so its opening value was linearly INTERPOLATED between them. Everything downstream of it (this row's return, and its share of the portfolio's) is therefore partly modelled. Usually the real cause is a bad listing: check the instrument's Yahoo symbol.`;
 
-  // ⚠ These marks are a LOOK-THROUGH, not a traded price: this holding is a certificate wrapping
+  //  These marks are a LOOK-THROUGH, not a traded price: this holding is a certificate wrapping
   // another model, which Yahoo cannot price. Start/End are that model's BASKET indexed to 100 at
   // the window open — only the Return between them is a real number (and it weights into the
   // portfolio total exactly like a priced holding). The index must never read as a share price,
@@ -1099,7 +1099,7 @@ function MarkCells({ p, ytdFrom, source }: {
     <>
       <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
         <span className={startClass} title={startTitle}>
-          {est && <span aria-label="interpolated" className="text-warn-400 mr-1">⚠</span>}
+          {est && <span aria-label="interpolated" className="text-warn-400 mr-1"></span>}
           {lt && <span aria-label={t.viaLinkedModel} className="text-accent-400 mr-1">↳</span>}
           {eur(p.start_price_eur)}
         </span>
@@ -1134,7 +1134,7 @@ function MarkCells({ p, ytdFrom, source }: {
 
 /** The chosen name — click to edit, blank to clear back to AIRS's code.
  *
- * ⚠ THE FALLBACK IS SHOWN, NOT SUBSTITUTED. A row with no chosen name renders a muted "—", not a
+ *  The fallback is shown, not substituted. A row with no chosen name renders a muted "—", not a
  * greyed-out copy of the AIRS code: a cell that quietly repeats the column to its left makes the
  * table look fully populated and gives you no way to see which models still need naming — which
  * is the only thing this column is for while it is being filled in.
@@ -1202,7 +1202,7 @@ function DisplayNameCell({ p, onSaved }: { p: Portfolio; onSaved: (v: string) =>
 
 /** The "is this sound?" launcher.
  *
- * ⚠ IT ONLY OFFERS ITSELF WHERE IT CAN WORK, and the reasons it cannot are DIFFERENT reasons, not
+ *  It only offers itself where it can work, and the reasons it cannot are DIFFERENT reasons, not
  * one blank. A dead button that opens a modal saying "no data" is worse than no button: it invites
  * a click on every row and answers nothing, and after the third one nobody trusts the column.
  *
@@ -1240,7 +1240,7 @@ function SoundnessCell({ p, onOpen }: {
   );
 }
 
-/** ⚠ `name` IS THE PRETTY NAME, `code` IS AIRS'S. The backend already resolves
+/**  `name` IS THE PRETTY NAME, `code` IS AIRS'S. The backend already resolves
  *  `display_name || Portefeuille`, so the dropdown shows the strategy a reader recognises while
  *  the code stays available for looking the row up in AirSPMS. */
 type LinkOption = { id: number; name: string; code?: string | null;
@@ -1259,7 +1259,7 @@ export type LinkCtx = { options: LinkOption[]; excluded_by_isin: Record<string, 
  * GUESS only: once a human picks, it is a decision, not an estimate, and showing a number next
  * to it would imply we were still unsure.
  *
- * ⚠ The edit applies to the HOLDING, not to this row: the same certificate in the other ten
+ *  The edit applies to the HOLDING, not to this row: the same certificate in the other ten
  * portfolios that hold it gets the same link. One fact, stored once. */
 /** Just the fields the link cell reads. Deliberately NOT `Position`: the ACCOUNT holdings table
  *  carries the same five facts under one different name (`holding_name` rather than `fonds`), and
@@ -1279,14 +1279,14 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
   /** Excluded from the dropdown — a portfolio is not its own holding. For an ACCOUNT this is the
    *  model it runs (0 when unpaired, which excludes nothing). */
   ownerId: number;
-  /** ⚠ WHICH TABLE IS ASKING, not which row is written. The two screens post to different URLs
+  /**  WHICH TABLE IS ASKING, not which row is written. The two screens post to different URLs
    *  — `/model-portfolios/{id}` and `/accounts/{portefeuille}` — but both land on the SAME
    *  `airs_model_portfolio_link` row, because the link is keyed on the holding and not on
    *  (parent, holding). One certificate is the same portfolio wherever it is held, so this is a
    *  routing detail, never a second copy of the fact. */
   linkBase: string;
   onSaved: () => void;
-  /** ⚠ SHOW THE LINK, OFFER NO WAY TO CHANGE IT. Setting a link is admin-only at the API gate, so
+  /**  SHOW THE LINK, OFFER NO WAY TO CHANGE IT. Setting a link is admin-only at the API gate, so
    *  a non-admin gets the ANSWER — which portfolio this certificate really is, the whole reason the
    *  column exists — as text, rather than a dropdown that 403s on change. */
   readOnly?: boolean;
@@ -1449,7 +1449,7 @@ export function LinkCell({ p, ctx, ownerId, linkBase, onSaved, readOnly }: {
           <button type="button" disabled={busy} onClick={() => void nameLinkedPortfolio()}
             title={`Set the readable name for ${linkedOpt.code ?? linkedOpt.name}.`}
             className="text-[12px] text-fg-faint hover:text-accent-400 disabled:opacity-50">
-            ✎
+
           </button>
         )}
 
@@ -1516,7 +1516,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
   useEffect(() => {
     if (pid == null) return;
     let alive = true;
-    // ⚠ `API_URL`. A bare `/api/...` goes to the Next.js origin, not the backend — it 404s,
+    //  `API_URL`. A bare `/api/...` goes to the Next.js origin, not the backend — it 404s,
     // `.json()` throws, and the cell renders a permanent "…" with nothing in the console to
     // say why. Every apiFetch in this file is absolute for that reason.
     apiFetch(`${API_URL}/api/airs/model-portfolios/${pid}/linkable`)
@@ -1629,7 +1629,7 @@ function Positions({ state, source, onSource, onPickDate, onRefresh, refreshing,
             ) : (
               <span className="text-pos-400" title={t.fetchedLive}>live</span>
             )}
-            {/* ⚠ NOT "Refresh from AIRS" ANY MORE, AND THE LABEL MATTERS. That button re-read
+            {/*  NOT "Refresh from AIRS" ANY MORE, AND THE LABEL MATTERS. That button re-read
                 the composition and nothing else, so a return that was wrong because of a stale
                 price series or a short FX history survived every press — which is exactly how
                 production and local disagreed on AITopSelectie by 18 points. This re-acquires

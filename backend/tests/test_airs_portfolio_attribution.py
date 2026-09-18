@@ -14,7 +14,7 @@ from routers import _airs_portfolio_attribution as at
 
 
 class TestTheIdentityIsTheWholePoint:
-    """⚠ allocation + selection + interaction == excess.
+    """ allocation + selection + interaction == excess.
 
     Three columns of numbers that do NOT sum to the excess are not a decomposition of it — they
     are three columns of numbers sitting next to each other. The residual is RETURNED, not
@@ -64,7 +64,7 @@ class TestFundsAndCashAreNotASectorBet:
 
 
 class TestAnUnpricedHoldingIsADIFFERENTExclusion:
-    """⚠ THE ONE THAT PRODUCES A FALSE FINDING, NOT A MISSING ONE.
+    """ THE ONE THAT PRODUCES A FALSE FINDING, NOT A MISSING ONE.
 
     A fund is excluded because it is not a sector bet — harmless. An UNPRICED EQUITY is excluded
     because we failed to price it, and its sector then reads as UNOWNED: measured, a model holding
@@ -81,7 +81,7 @@ class TestAnUnpricedHoldingIsADIFFERENTExclusion:
 
 
 class TestMissedWinnersAreMatchedByCOMPANY:
-    """⚠ 'DID NOT OWN' IS A STATEMENT ABOUT THE COMPANY, NOT ABOUT THE ISIN.
+    """ 'DID NOT OWN' IS A STATEMENT ABOUT THE COMPANY, NOT ABOUT THE ISIN.
 
     Alphabet is GOOGL (class A) in the index and "Alphabet - C" (class C) in the model — two
     ISINs, one business. Matched on the ISIN, the panel reported GOOGL as a winner they MISSED, at
@@ -104,7 +104,7 @@ class TestMissedWinnersAreMatchedByCOMPANY:
 
 
 class TestTheOverlapMatcherNeedsBOTHKeys:
-    """⚠ ONE ISIN UNDER TWO NAMES, AND TWO ISINS UNDER ONE BUSINESS — both are real, and NEITHER
+    """ ONE ISIN UNDER TWO NAMES, AND TWO ISINS UNDER ONE BUSINESS — both are real, and NEITHER
     matcher alone catches both.
 
     The model's "AMD" is the index's "Advanced Micro Devices Inc". `same_company` scores that pair
@@ -142,7 +142,7 @@ class TestTheOverlapMatcherNeedsBOTHKeys:
 
 
 class TestTheNameLegIsExactNotFuzzy:
-    """⚠ A SHARED WORD IS NOT A SHARED COMPANY.
+    """ A SHARED WORD IS NOT A SHARED COMPANY.
 
     `same_company` is right for a listing↔issuer match ("NVIDIA CORP" ↔ "NVIDIA Corporation") but
     catastrophic here: `_company_root('S&P Global Inc')` reduces to the SINGLE generic token
@@ -179,7 +179,7 @@ class TestOneNameVocabularyAcrossBothSides:
     set side by side in a single comparison table, reads as a data bug — and it is the first thing
     a reader asks about. Both sides already join `asset_grid` by ISIN, so both can say one thing.
 
-    ⚠ DISPLAY ONLY — if this ever becomes what makes the overlap match succeed, a rename silently
+     DISPLAY ONLY — if this ever becomes what makes the overlap match succeed, a rename silently
     breaks correctness. See TestTheOverlapMatcherNeedsBOTHKeys.
     """
 

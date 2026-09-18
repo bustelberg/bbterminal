@@ -1,6 +1,6 @@
 """A dropdown's option list is an AGGREGATE, and building it from `.limit()`-ed rows truncates.
 
-⚠⚠ THE FAILURE THIS CLOSES SHIPPED, IN PRODUCTION ONLY, AND SHOWED NOTHING. `/api/companies/
+ THE FAILURE THIS CLOSES SHIPPED, IN PRODUCTION ONLY, AND SHOWED NOTHING. `/api/companies/
 field-options` built its sector list as `universe_membership.select("sector").limit(10000)` and
 reduced it to a set in Python. `.limit()` does not decide how many rows come back — PostgREST's
 `db-max-rows` does, and it is **1,000 on the cloud project** against 10,000 locally. The table
@@ -9,11 +9,11 @@ holds 8,444 rows carrying 43 distinct sectors, so production derived that list f
 empty cell and no error anywhere. WHICH three depended on physical row order, so a VACUUM could
 change the answer — and the local dataset returned all 43 and could never reproduce any of it.
 
-⚠ SO THE TEST IS ABOUT `max_rows`, NOT ABOUT SPEED. `FakeSupabase(max_rows=…)` is the harness that
+ SO THE TEST IS ABOUT `max_rows`, NOT ABOUT SPEED. `FakeSupabase(max_rows=…)` is the harness that
 makes the cloud's cap reproducible on a laptop (`project_postgrest_max_rows_trap`); a stable local
 server hides this bug completely, which is exactly how it shipped.
 
-⚠ The fix is `SELECT DISTINCT` server-side (`common.pg.load_distinct_via_copy`), where the
+ The fix is `SELECT DISTINCT` server-side (`common.pg.load_distinct_via_copy`), where the
 aggregate runs BEFORE the row limit rather than after it. These tests pin the PostgREST FALLBACK,
 because that is the path that runs when the COPY transport is unavailable — i.e. precisely when
 nobody is looking — and a fallback that is quietly wrong is worse than no fallback.
@@ -63,7 +63,7 @@ def test_the_unpaged_read_this_replaced_would_have_lost_three(monkeypatch):
 
 
 def test_a_local_sized_cap_hides_it(monkeypatch):
-    """⚠ Why a laptop could never catch this: at `db-max-rows = 10000` the broken read is CORRECT."""
+    """ Why a laptop could never catch this: at `db-max-rows = 10000` the broken read is CORRECT."""
     fake = FakeSupabase({"universe_membership": list(_ROWS)}, max_rows=10_000)
     rows = fake.table("universe_membership").select("sector").limit(10_000).execute().data
     assert len({r["sector"] for r in rows}) == 43
@@ -77,7 +77,7 @@ def test_the_pager_is_complete_at_every_cap(monkeypatch, cap):
 
 
 def test_blanks_and_nulls_are_dropped_once_centrally(monkeypatch):
-    """⚠ Filtered in the loader, not per caller — so every option list gets the same answer."""
+    """ Filtered in the loader, not per caller — so every option list gets the same answer."""
     rows = [{"sector": "Energy"}, {"sector": None}, {"sector": "   "}, {"sector": "Energy"}]
     fake = FakeSupabase({"universe_membership": rows}, max_rows=1000)
     assert _options(fake, monkeypatch) == ["Energy"]

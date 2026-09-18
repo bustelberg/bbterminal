@@ -1,6 +1,6 @@
 """Prove the Analyse modal's cross-portfolio cache changes NOTHING about the answer.
 
-⚠ A CACHE THAT CHANGES A FIGURE IS NOT A SPEED-UP, IT IS A BUG WITH A STOPWATCH ATTACHED. This
+ A CACHE THAT CHANGES A FIGURE IS NOT A SPEED-UP, IT IS A BUG WITH A STOPWATCH ATTACHED. This
 page's whole discipline is that a number is current or absent, so the only acceptable evidence for
 `_analysis_cache.leg` is that the payload is IDENTICAL with the memo on and with it off — field for
 field, over the real database, on portfolios that exercise every branch (a book with wrapped
@@ -9,7 +9,7 @@ certificates, a book without, an unpaired basket).
 The memo is disabled by making every lookup miss, which is exactly the state the code was in before
 it existed. Everything else — the same process, the same database, the same request — is held equal.
 
-⚠ `timings_ms` IS EXCLUDED, AND IT IS THE ONLY EXCLUSION. It is a stopwatch; being faster is the
+ `timings_ms` IS EXCLUDED, AND IT IS THE ONLY EXCLUSION. It is a stopwatch; being faster is the
 point. Every other key, including the deep structures (`axes`, `book_holdings`, `realised`), is
 compared in full.
 
@@ -70,7 +70,7 @@ def run(pid: int, bench: str, memo: bool) -> dict:
     ac.invalidate()
     orig_leg, orig_many, orig_put = ac.leg, ac.leg_get_many, ac.leg_put_many
     if not memo:
-        # ⚠ EVERY LOOKUP MISSES AND NOTHING IS FILED — the pre-2026-08-19 behaviour exactly. Not
+        #  Every lookup misses and nothing is filed — the pre-2026-08-19 behaviour exactly. Not
         # "a smaller cache": a partially-filled one would still be the new code path.
         ac.leg = lambda key, compute: compute()
         ac.leg_get_many = lambda keys: ({}, list(keys))
@@ -107,7 +107,7 @@ def main() -> None:
     for pid in ids:
         off = run(pid, bench, memo=False)
         on = run(pid, bench, memo=True)
-        # ⚠ AND A SECOND RUN WITH THE MEMO ALREADY WARM, because that is the state a real second
+        #  And a second run with the memo already warm, because that is the state a real second
         # reader hits — the first `on` run FILLED the cache, it did not read it.
         warm = run_warm(pid, bench, off)
         same = canon(off) == canon(on) == canon(warm)

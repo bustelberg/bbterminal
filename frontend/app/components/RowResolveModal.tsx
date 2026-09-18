@@ -107,7 +107,7 @@ function SourceLine({ label, ok, detail }: { label: string; ok: boolean; detail:
     <div className="flex items-center gap-2 text-xs">
       <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${
         ok ? 'bg-pos-500/10 text-pos-400 border-pos-500/20' : 'bg-neg-500/10 text-neg-400 border-neg-500/20'}`}>
-        {ok ? '✓ found' : '✗ missing'}
+        {ok ? ' found' : ' missing'}
       </span>
       <span className="text-fg-soft font-medium w-16">{label}</span>
       <span className="text-fg-muted truncate">{detail}</span>

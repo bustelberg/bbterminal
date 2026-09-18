@@ -1,7 +1,7 @@
 /**
  * A CLASS's return in the Analyse modal's Holdings table — the rows under it, aggregated.
  *
- * ⚠⚠ IT IS THE `Result` COLUMN OVER THE CLASS'S OPENING VALUE, AND NOTHING ELSE. It used to be
+ *  It is the `Result` COLUMN OVER THE CLASS'S OPENING VALUE, AND NOTHING ELSE. It used to be
  * Σ(start weight × the instrument's own return), which was wrong in TWO independent ways at once
  * and produced a figure a reader could not reconcile with anything on screen. Measured on
  * AITopSelectie 2026-08-05, where the class is 99.91% of the book and the gap was 0.93pp:
@@ -17,7 +17,7 @@
  *   * AND IT WAS A WEIGHTED AVERAGE OF PER-ROW RATES, which is not the class's return unless every
  *     row shares one denominator. They do not: `own_return_pct` is each instrument's own rate.
  *
- * ⚠ THE DENOMINATOR IS THE CLASS'S OWN `Beginwaarde`, NOT THE BOOK'S OPENING CAPITAL. That is
+ *  The denominator is the class's own `Beginwaarde`, NOT THE BOOK'S OPENING CAPITAL. That is
  * deliberate and it is why this still will not equal the book's return on the total row:
  *   * `Beginwaarde` is RESTATED to today's quantity, so buying more during the year inflates it
  *     (AITopSelectie's rows claim EUR 1,006,881 against a book that opened at EUR 1,000,000);
@@ -28,7 +28,7 @@
  * book's own capital; this one answers "what did this class do", which is a different question and
  * is why both are shown.
  *
- * ⚠ A ROW WITHOUT AN OPENING VALUE IS OUT OF BOTH SIDES. It was not held when the year opened (or
+ *  A row without an opening value is out of both sides. It was not held when the year opened (or
  * is a cash line), so it has no share of the class's starting money and its result cannot be
  * expressed as a rate on it. `coveredPct` says how much of the class's RESULT the figure speaks
  * for, so weight silently leaving the ratio is visible rather than absorbed.
@@ -62,7 +62,7 @@ const EMPTY: ClassReturn = { pct: null, legs: 0, rows: 0, coveredPct: 0,
 /**
  * `Σ result ÷ Σ opening value` over the rows that have an opening value.
  *
- * ⚠ THE NUMERATOR IS RESTRICTED TO THE SAME ROWS AS THE DENOMINATOR. Summing every row's result
+ *  The numerator is restricted to the same rows as the denominator. Summing every row's result
  * over only the rows that have an opening value would divide one population by another — the
  * figure would exceed the truth by whatever the excluded rows made, and it would still look like
  * a return.
@@ -70,12 +70,12 @@ const EMPTY: ClassReturn = { pct: null, legs: 0, rows: 0, coveredPct: 0,
 export function classWeightedReturn(
   rows: readonly ClassReturnRow[],
   /**
-   * ⚠⚠ CASH RETURNS 0%, AND THAT IS AN ANSWER, NOT A MISSING ONE. AIRS books no `Beginwaarde` for
+   *  Cash returns 0%, AND THAT IS AN ANSWER, NOT A MISSING ONE. AIRS books no `Beginwaarde` for
    * a cash line, so the rule below finds nothing to divide by and would print a dash — which says
    * "we could not work this out" about the one asset whose return is certain. It earned nothing;
    * a euro is always worth a euro.
    *
-   * ⚠ AND ITS DRAG IS A FACT. This repo prices cash at 0% rather than skipping it everywhere else
+   *  And its drag is a fact. This repo prices cash at 0% rather than skipping it everywhere else
    * (`portfolio_math.make_cash_holding`) for the reason recorded there: dropping it scales a
    * 20%-cash portfolio's return up by 25%. A dash invites exactly that — treating cash as an
    * unknown to be ignored — where a 0% states the drag.
@@ -86,7 +86,7 @@ export function classWeightedReturn(
   const startEur = priced.reduce((s, r) => s + r.start_value_eur!, 0);
   const allResult = rows.reduce((s, r) => s + (r.result_eur ?? 0), 0);
   if (!priced.length || startEur <= 0) {
-    // ⚠ The income leg still counts. A cash account that was credited interest made real money,
+    //  The income leg still counts. A cash account that was credited interest made real money,
     // and only its PRICE leg is asserted to be zero — so an all-cash class with income is not
     // flatly 0%, it is whatever that income was over... nothing to divide by. Still 0: the rate is
     // undefined and 0 is the honest floor, while the euros stay visible in the Result column.
@@ -101,7 +101,7 @@ export function classWeightedReturn(
     pct: (resultEur / startEur) * 100,
     legs: priced.length,
     rows: rows.length,
-    // ⚠ Of the RESULT, not of the weight. The question a reader has is "does this rate describe
+    //  Of the RESULT, not of the weight. The question a reader has is "does this rate describe
     // all the money this class made", and an unpriced row that made nothing costs nothing.
     coveredPct: allResult === 0 ? 100 : Math.abs(resultEur) / Math.abs(allResult) * 100,
     resultEur,

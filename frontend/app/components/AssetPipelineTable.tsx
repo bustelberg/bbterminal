@@ -78,7 +78,7 @@ const COLS: Col[] = [
   { key: 'volume_from', label: 'Vol from', align: 'right', title: 'First date with traded volume' },
   { key: 'volume_to', label: 'Vol to', align: 'right', title: 'Last date with traded volume' },
   { key: 'zero_vol_frac', label: 'Zero-vol %', align: 'right', title: 'Share of stored bars with zero volume — illiquidity / data-gap flag (a liquid equity ≈ 0%; FX/index ≈ 100%)' },
-  // ⚠ APPENDED AT THE END OF `COLS`, DELIBERATELY. The body cells are hardcoded positionally and
+  //  Appended at the end of `COLS`, DELIBERATELY. The body cells are hardcoded positionally and
   // matched to this list by ORDER, so inserting mid-list shifts every cell after it one column
   // right — silently, since the values would still render, just under the wrong headings.
   // Appending is the one position where that cannot happen.
@@ -109,7 +109,7 @@ const _LEONTEQ_KEYS = new Set<SortKey>(['isin', 'leonteq_verified', 'leonteq_nam
 const sourceOf = (key: SortKey): keyof typeof SOURCE_TONE =>
   _LEONTEQ_KEYS.has(key) ? 'Leonteq' : _OPENFIGI_KEYS.has(key) ? 'OpenFIGI' : 'yfinance';
 
-// Match badge: verified = green ✓, mismatch = amber ⚠, else neutral —.
+// Match badge: verified = green , mismatch = amber , else neutral —.
 const MATCH_TONE: Record<string, string> = {
   verified: 'bg-pos-500/10 text-pos-400 border-pos-500/20',
   mismatch: 'bg-warn-500/10 text-warn-400 border-warn-500/20',
@@ -126,9 +126,9 @@ function MissingBadge() {
 
 function MatchBadge({ status }: { status?: string | null }) {
   if (status === 'verified')
-    return <span title="OpenFIGI confirms the resolved instrument" className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.verified}`}>✓ Match</span>;
+    return <span title="OpenFIGI confirms the resolved instrument" className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.verified}`}> Match</span>;
   if (status === 'mismatch')
-    return <span title="OpenFIGI names a different company — likely wrong resolution" className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.mismatch}`}>⚠ Mismatch</span>;
+    return <span title="OpenFIGI names a different company — likely wrong resolution" className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border ${MATCH_TONE.mismatch}`}> Mismatch</span>;
   return <span className="text-fg-faint" title="No OpenFIGI name to compare">—</span>;
 }
 
@@ -145,7 +145,7 @@ function SourceBadge({ source }: { source: keyof typeof SOURCE_TONE }) {
  * sortable; expand a mapped row for its chart; download the full-OHLCV parquet. */
 export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: number }) {
   const [rows, setRows] = useState<AssetGridRow[] | null>(null);
-  // ⚠ COMPUTED OVER EVERY LABEL IN THE GRID, NOT PER ROW. `buildUniverseStyles` spreads the hues
+  //  Computed over every label in the grid, not per row. `buildUniverseStyles` spreads the hues
   // evenly across the set it is given, so feeding it one row's labels would give each row its own
   // palette and a universe would change colour as you scrolled.
   const universeStyles = useMemo(
@@ -293,7 +293,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
   const view = useMemo(() => {
     const { key, dir } = sort;
     return (rows ?? []).filter((r) => matches(r)).sort((a, b) => {
-      // ⚠ AN EMPTY ARRAY IS AN ABSENCE, NOT A SMALL VALUE. `universes` is `text[]` and comes back
+      //  An empty array is an absence, not a small value. `universes` is `text[]` and comes back
       // `[]` rather than null for an asset in no benchmark; left as-is it stringifies to "" and
       // heads an ascending sort, putting every unclassified row above every classified one. Folded
       // to null here so it obeys the same nulls-last rule as every other column.
@@ -330,7 +330,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
         <h3 className="text-sm font-semibold text-fg-strong">
           Execution instruments{rows ? ` · ${view.length}/${rows.length}` : ''}
         </h3>
-        {/* ⚠ EVERY CONTROL IN HERE HAS A FIXED WIDTH, ON PURPOSE.
+        {/*  EVERY CONTROL IN HERE HAS A FIXED WIDTH, ON PURPOSE.
             A <select> sizes itself to its widest <option>, and these options are FACETED — their
             labels carry live counts ("All sectors (16,150)" -> "All sectors (3)") and options
             drop out entirely as a search narrows. So without a fixed width, every keystroke
@@ -431,7 +431,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                 {COLS.map((c) => (
                   <th key={c.key} title={c.title}
                     onClick={() => clickSort(c.key)}
-                    className={`px-3 py-1.5 font-medium cursor-pointer select-none whitespace-nowrap hover:text-fg-soft ${c.sep ? 'border-l border-neutral-800/40' : ''}`}>
+                    className={`px-3 py-1.5 font-medium cursor-pointer whitespace-nowrap hover:text-fg-soft ${c.sep ? 'border-l border-neutral-800/40' : ''}`}>
                     <div className={`flex flex-col gap-1 ${c.align === 'right' ? 'items-end' : 'items-start'}`}>
                       <span>{c.label}{sort.key === c.key && <span className="text-accent-400 ml-0.5">{sort.dir === 1 ? '▲' : '▼'}</span>}</span>
                       <SourceBadge source={sourceOf(c.key)} />
@@ -443,7 +443,7 @@ export default function AssetPipelineTable({ reloadSignal }: { reloadSignal?: nu
                     dividends. The separator sits on the group's FIRST column so the whole
                     section reads as one. */}
                 <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap border-l border-neutral-800/40"
-                  title="How many daily closes we hold in GuruFocus's own series (metric_data). ⚠ THIS IS A DIFFERENT VENDOR FROM THE 'Price from/to' COLUMNS, WHICH ARE YAHOO'S. /backtest and /schedule price off GuruFocus, so this — not the Yahoo bar count — is what says whether the momentum engine can price this company. A dash means no company row behind this ISIN (bonds, futures and most ETFs never have one) or no series yet.">
+                  title="How many daily closes we hold in GuruFocus's own series (metric_data).  THIS IS A DIFFERENT VENDOR FROM THE 'Price from/to' COLUMNS, WHICH ARE YAHOO'S. /backtest and /schedule price off GuruFocus, so this — not the Yahoo bar count — is what says whether the momentum engine can price this company. A dash means no company row behind this ISIN (bonds, futures and most ETFs never have one) or no series yet.">
                   <div className="flex flex-col gap-1 items-end">
                     <span>GF bars</span>
                     <SourceBadge source="GuruFocus" />
@@ -712,7 +712,7 @@ function revenueReason(r: AssetGridRow): keyof typeof DIV_REASON | null {
 
 function ReasonBadge({ reason }: { reason: keyof typeof DIV_REASON }) {
   const r = DIV_REASON[reason];
-  // ⚠ THE MARKUP MOVED TO `StateBadge` so the fundamentals drill-downs wear the identical badge
+  //  The markup moved to `StateBadge` so the fundamentals drill-downs wear the identical badge
   // for the identical word. The REASONS stay here — they are this grid's vocabulary; only the way
   // a badge looks is shared.
   return <StateBadge label={r.label} tone={r.tone} title={r.title} />;
@@ -833,7 +833,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
             ? (
               <span title="In the uploaded Leonteq (lynqs) list"
                 className="align-middle text-[9px] uppercase tracking-wider font-semibold px-1 py-0.5 rounded border bg-accent-600/15 text-accent-400 border-accent-600/30">
-                Leonteq ✓
+                Leonteq
               </span>
             )
             : <span className="text-fg-faint" title="Not in the uploaded Leonteq (lynqs) list.">—</span>}
@@ -919,7 +919,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
               ? <span className="text-fg-faint">—</span>
               : <span className={r.zero_vol_frac >= 0.05 ? 'text-warn-300' : 'text-fg-subtle'}>{(r.zero_vol_frac * 100).toFixed(1)}%</span>}
         </td>
-        {/* Benchmarks — one chip per universe. ⚠ NOT a `MissingBadge` when empty: an asset in no
+        {/* Benchmarks — one chip per universe.  NOT a `MissingBadge` when empty: an asset in no
             benchmark is the normal case here (most of 16,613 rows are not index constituents), so
             a "missing" marker would flag two thirds of the grid as a data problem. A dash says
             "none", which is the answer. */}
@@ -956,7 +956,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
             query and its dividends. An em-dash means this ISIN hasn't been resolved (hit Fetch)
             or couldn't be, exactly as in the Div/share cell beside it.
 
-            ⚠ THE TWO COVERAGE CELLS ARE A DIFFERENT VENDOR FROM `price_from`/`price_to` ABOVE.
+             THE TWO COVERAGE CELLS ARE A DIFFERENT VENDOR FROM `price_from`/`price_to` ABOVE.
             Those are Yahoo (`asset_price`); these are GuruFocus (`metric_data`). A row can hold
             thousands of bars on one side and none on the other — SMIC had a full GuruFocus
             series the whole time its Yahoo row sat unresolved — so they must never be read as
@@ -989,7 +989,7 @@ function GridRow({ r, onChart, onResolve, dividend, onDividends, onFinancial, me
                   ? `Not this row's own listing — GuruFocus has no ${r.currency ?? 'local'} line for this ISIN, so we use ${dividend.exchange}:${dividend.gurufocus_ticker}. The amounts are right (GuruFocus reports the declaration currency on every listing), but the payment history may be incomplete.`
                   : undefined}>
                 {dividend.gurufocus_ticker}
-                {dividend.is_home === false && <span className="ml-1 text-[10px]" aria-hidden>⚠</span>}
+                {dividend.is_home === false && <span className="ml-1 text-[10px]" aria-hidden></span>}
               </span>
             )
             : <span className="text-fg-faint">—</span>}

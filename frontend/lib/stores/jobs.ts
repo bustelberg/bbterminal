@@ -5,9 +5,9 @@ import { createStore } from '../store';
 import { runSSE } from '../stream';
 
 /**
- * BACKGROUND JOBS, AND THE TOASTS THAT REPORT THEM.
+ * Background jobs, and the toasts that report them.
  *
- * ⚠ MODULE-SCOPED ON PURPOSE — see `lib/store.ts`'s own note. The state lives outside React's
+ *  Module-scoped on purpose — see `lib/store.ts`'s own note. The state lives outside React's
  * tree, so a job keeps reporting when the panel that started it unmounts and when the reader
  * navigates to another page. A toast owned by the component that launched it would vanish with
  * the route change while the work carried on invisibly, which is the failure this whole layer
@@ -26,7 +26,7 @@ export type JobToast = {
   /**
    * The server's identity for this piece of work — `fundamentals.index` + `ACWI`.
    *
-   * ⚠ IT IS HERE SO A CONTROL CAN FIND ITS OWN RUN AGAIN. A button knows it has a job in flight
+   *  It is here so a control can find its own run again. A button knows it has a job in flight
    * only from its own React state, so reopening a modal or reloading the page brings it back
    * offering to START one while the work is still going. `(kind, label)` is what the server
    * de-duplicates on (`jobs.start`), so it is also the only key a component can match on to adopt
@@ -42,11 +42,11 @@ export type JobToast = {
   /** The latest progress line. One line: anything with detail goes to the console. */
   message: string;
   summary: string | null;
-  /** Metered external calls spent (GuruFocus quota today). ⚠ 0 RENDERS NOTHING rather than "0
+  /** Metered external calls spent (GuruFocus quota today).  0 RENDERS NOTHING rather than "0
    *  calls" — a refusal and a cache hit both legitimately cost nothing, and a zero on every such
    *  card trains the eye to skip the number on the cards where it matters. */
   apiCalls: number;
-  /** ⚠ NOT `status === 'cancelled'`. Cancellation is cooperative, so this is true from the moment
+  /**  NOT `status === 'cancelled'`. Cancellation is cooperative, so this is true from the moment
    *  the button is pressed while the job is still finishing its current feed. The card reads
    *  "cancelling…" in that window; without it the button would look inert for several seconds. */
   cancelRequested: boolean;
@@ -60,13 +60,13 @@ export const jobsStore = createStore<JobsState>({ jobs: [] });
 /**
  * How long a finished card lingers before it fades, in seconds — the countdown the card shows.
  *
- * ⚠ THE THREE ARE NOT THE SAME NUMBER, because they are not equally worth reading. A success is
+ *  The three are not the same number, because they are not equally worth reading. A success is
  * confirmation of something you asked for and already expected; a cancellation is worth a glance
  * to see how far it got; a failure is the only one carrying information you did not have, and it
  * points at the console for the rest. Giving them one duration would either rush the failure off
  * screen or leave successes piling up in the corner.
  *
- * ⚠ THE COUNTDOWN IS VISIBLE AND PAUSES ON HOVER (see `JobCard`). A toast that vanishes while
+ *  The countdown is visible and pauses on hover (see `JobCard`). A toast that vanishes while
  * being read is worse than one that never appeared — you know you missed something and cannot get
  * it back.
  */
@@ -91,11 +91,11 @@ export const dismissJob = (id: string) =>
   jobsStore.set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }));
 
 /**
- * Ask the server to stop. ⚠ It halts at its next safe point, not immediately — the card shows
+ * Ask the server to stop.  It halts at its next safe point, not immediately — the card shows
  * `cancelRequested` straight away so the press is acknowledged, and `status` follows when the
  * worker actually stops.
  *
- * ⚠ RETURNS WHETHER THE REQUEST LANDED, because a caller that puts its own button into a
+ *  Returns whether the request landed, because a caller that puts its own button into a
  * "Cancelling…" state has to be able to take it back out again. Swallowing the failure here left
  * such a button disabled and lying for the rest of the run — the request never arrived, the job
  * carried on, and the only control that could stop it had turned itself off. Additive: every
@@ -103,7 +103,7 @@ export const dismissJob = (id: string) =>
  */
 export async function cancelJob(id: string): Promise<boolean> {
   upsert(id, { cancelRequested: true, message: 'cancelling…' });
-  // ⚠⚠ LOCAL JOBS FIRST, AND THIS IS WHY THERE IS STILL ONE CANCEL PATH. `JobToaster`'s Cancel
+  //  Local jobs first, and this is why there is still one cancel path. `JobToaster`'s Cancel
   // button calls this function and nothing else; a second kind of job with a second kind of cancel
   // would mean teaching that button which sort it is looking at, at which point every future
   // control has to know too. A job that runs in this tab has no `/api/jobs/{id}` to POST to — the
@@ -130,16 +130,16 @@ const localCancels = new Map<string, () => void>();
 /**
  * Report a piece of work THIS TAB is doing on the shared toast stack.
  *
- * ⚠⚠ NOT EVERY CANCELLABLE THING IS A SERVER JOB. `startJob` needs an endpoint that owns the work
+ *  Not every cancellable thing is a server job. `startJob` needs an endpoint that owns the work
  * and hands back a `job_id`; re-reading a cached GET has no such endpoint and does not deserve
  * one. Without this, a control like the Deep Valuation tab's share-price refresh had two bad
  * options: paint its own private spinner — a second progress vocabulary the reader has to learn,
  * and the exact thing the job layer was built to delete — or invent a backend job for a fetch.
  *
- * ⚠ CANCELLATION IS AN `AbortController`, AND IT IS REAL. `cancelJob` finds this handle before it
+ *  Cancellation is an `AbortController`, AND IT IS REAL. `cancelJob` finds this handle before it
  * reaches for the network, so the toaster's own Cancel button works on these with no change to it.
  *
- * ⚠ IT DIES WITH THE TAB, AND THAT IS THE ONE THING A SERVER JOB DOES BETTER. A route change or a
+ *  It dies with the tab, and that is the one thing a server job does better. A route change or a
  * reload takes the work with it — there is nothing to re-attach to (`attachRunningJobs` lists the
  * server's jobs, and this is not one). Use it only for work short enough that losing it costs
  * nothing; anything that outlives a page view belongs on the server.
@@ -165,7 +165,7 @@ export function startLocalJob(
       const report = (progress: { done: number; total: number; message?: string }) =>
         upsert(id, { done: progress.done, total: progress.total, message: progress.message ?? '' });
       const summary = await run(ctrl.signal, report);
-      // ⚠ THE SIGNAL, NOT THE ERROR, DECIDES. A cancelled fetch can resolve rather than throw
+      //  The signal, not the error, decides. A cancelled fetch can resolve rather than throw
       // (a cacheable read is shared, so aborting one caller does not stop the request), and a card
       // that went green on a run the reader stopped is worse than one that never reported.
       upsert(id, ctrl.signal.aborted
@@ -197,12 +197,12 @@ export function startLocalJob(
  * `onProgress` — called for every progress line, so a caller can refresh what it shows AS the job
  * runs rather than only when it ends.
  *
- * ⚠ IT IS NOT THE TOAST'S JOB. The toast already narrates; this exists for callers whose SCREEN is
+ *  It is not the toast's job. The toast already narrates; this exists for callers whose SCREEN is
  * the thing the job changes — "Refresh all" rewrites 44 account rows over several minutes, and
  * repainting them only at the end means staring at figures you have already replaced. Optional, so
  * every existing caller is untouched.
  *
- * ⚠ IT MUST NOT THROW. It runs inside the stream handler; an exception here would kill the
+ *  It must not throw. It runs inside the stream handler; an exception here would kill the
  * progress stream and the toast with it, turning a cosmetic nicety into a lost job. Wrapped below.
  */
 export function watchJob(id: string, title: string, after = 0,
@@ -218,7 +218,7 @@ export function watchJob(id: string, title: string, after = 0,
   }));
 
   return new Promise<JobToast>((resolve) => {
-    // ⚠ NO AUTO-DISMISS TIMER HERE. The card owns the countdown, because only the card knows
+    //  No auto-dismiss timer here. The card owns the countdown, because only the card knows
     // whether the reader is hovering it — a timer started from this side would fire regardless and
     // yank the toast out from under the cursor. This just reports the outcome.
     const finish = () => {
@@ -247,7 +247,7 @@ export function watchJob(id: string, title: string, after = 0,
             summary: e.summary ?? null,
             apiCalls: e.api_calls ?? 0,
             cancelRequested: !!e.cancel_requested,
-            // ⚠ ONLY FROM THE `job` FRAME. A progress EVENT also carries a `kind` and it means
+            //  Only from the `job` FRAME. A progress EVENT also carries a `kind` and it means
             // something entirely different there (`progress` / `skip` / `error`) — writing that
             // into the identity would make every control lose track of its own run one line in.
             ...(e.kind ? { kind: e.kind } : {}),
@@ -262,7 +262,7 @@ export function watchJob(id: string, title: string, after = 0,
           ...(typeof e.done === 'number' ? { done: e.done } : {}),
           ...(typeof e.total === 'number' ? { total: e.total } : {}),
         });
-        // ⚠ AFTER the toast, and swallowed. The toast is the job's own record and must land even
+        //  AFTER the toast, and swallowed. The toast is the job's own record and must land even
         // if a listener misbehaves; see the note on `onProgress`.
         if (onProgress) {
           try {
@@ -294,12 +294,12 @@ export async function startJob(
   /** Per-progress-line callback — see `watchJob`. For callers whose screen the job rewrites. */
   onProgress?: (e: { done?: number; total?: number; message?: string }) => void,
 ): Promise<{ id: string; done: Promise<JobToast>; body: Record<string, unknown> }> {
-  // ⚠ `init` IS OPTIONAL AND MERGED AFTER `method`, so a caller can add a JSON body (the basket
+  //  `init` IS OPTIONAL AND MERGED AFTER `method`, so a caller can add a JSON body (the basket
   // fill posts its holdings) without being able to turn this into a GET by accident.
   const r = await apiFetch(startUrl, { ...init, method: 'POST' });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const b = (await r.json()) as { job_id: string };
-  // ⚠ THE START RESPONSE IS HANDED BACK, NOT JUST THE HANDLE. An endpoint often knows something
+  //  The start response is handed back, not just the handle. An endpoint often knows something
   // at start-up that the job itself never reports — the portfolio fill returns how many holdings
   // it could reach and why the rest it could not, which the caller has to render BEFORE the first
   // progress line arrives. Discarding it forced a second request for data we already had.
@@ -309,7 +309,7 @@ export async function startJob(
 }
 
 /**
- * ⚠ THE ONE CALL THAT MAKES RUNNING WORK VISIBLE MUST NOT BE A SINGLE SHOT.
+ *  The one call that makes running work visible must not be a single shot.
  *
  * `attachRunningJobs` fires once, from a `useEffect` in the root layout, the moment the role
  * resolves — so a backend that is unreachable for that one second costs the reader every toast
@@ -325,7 +325,7 @@ const ATTACH_RETRY_MS = [1_000, 3_000, 9_000];
 
 const _sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** ⚠ THE RETRY MADE `attachRunningJobs` RE-ENTRANT. It used to be over in one round trip, so a
+/**  THE RETRY MADE `attachRunningJobs` RE-ENTRANT. It used to be over in one round trip, so a
  *  second call could not overlap the first; now one can still be sleeping when the effect refires
  *  (the admin flag resolving, a "view as user" toggle), and two loops would each adopt the same
  *  jobs in the window before `watchJob` puts them in the store. */
@@ -334,7 +334,7 @@ let _attaching = false;
 /**
  * Re-attach to whatever is already running on the server.
  *
- * ⚠ THIS IS THE PAYOFF OF PUTTING A JOB IN THE MIDDLE. Without it a reload leaves the work running
+ *  This is the payoff of putting a job in the middle. Without it a reload leaves the work running
  * with nothing on screen to say so — the exact state the old thread-and-queue endpoints left you
  * in, except now it is recoverable.
  */
@@ -346,7 +346,7 @@ export async function attachRunningJobs() {
       try {
         const r = await apiFetch(`${API_URL}/api/jobs`);
         if (!r.ok) {
-          // ⚠ 403 FOR A NON-ADMIN IS AN ANSWER, NOT AN ERROR — and so is a 404. A 5xx is not: it
+          //  403 FOR A NON-ADMIN IS AN ANSWER, NOT AN ERROR — and so is a 404. A 5xx is not: it
           // is the server still coming up, which is the one non-answer worth asking again for.
           if (r.status >= 500 && attempt < ATTACH_RETRY_MS.length) {
             await _sleep(ATTACH_RETRY_MS[attempt]);

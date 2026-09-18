@@ -436,7 +436,7 @@ function XlsAgeBadge() {
   if (age == null || age < 14) return null;
   return (
     <p className="text-xs text-warn-300 mt-2 max-w-3xl">
-      ⚠ Bundled iShares XLS is <span className="font-mono">{age}</span> day{age === 1 ? '' : 's'} old.
+       Bundled iShares XLS is <span className="font-mono">{age}</span> day{age === 1 ? '' : 's'} old.
       iShares blocks automated downloads, so the reconstruction runs against this stale file until
       someone manually commits a fresh <span className="font-mono">iShares-MSCI-ACWI-ETF_fund.xls</span>.
     </p>

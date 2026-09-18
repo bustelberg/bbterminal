@@ -7,7 +7,7 @@
     3. FLOOR  — a period draws only when at least half the WEIGHT and half the NAMES reported it,
        and a CARRIED value counts toward neither.
 
-⚠⚠ RULE 3'S "CARRIED COUNTS FOR NOTHING" IS WHAT MAKES RULE 2 SAFE. Carry the values and count
+ RULE 3'S "CARRIED COUNTS FOR NOTHING" IS WHAT MAKES RULE 2 SAFE. Carry the values and count
 them as coverage and the newest fiscal year — a handful of filers, everyone else held at last
 year's figure — reads 100% covered, sails past the floor, and draws a flat line of stale numbers.
 Kept apart, the line is smooth AND the newest year is still refused.
@@ -52,7 +52,7 @@ class TestTheCarryKeepsTheBasketStable:
         out = blend_series([member(1.0, QUARTERLY_FILER, CAPS_2024_25),
                             member(1.0, SEMI_FILER, CAPS_2024_25)], ROE, quarter_bucket)
         got = {p["period"]: p["value"] for p in out["points"]}
-        # ⚠ Q3 is the case: only the quarterly filer reported (10), the semi-annual one is carried
+        #  Q3 is the case: only the quarterly filer reported (10), the semi-annual one is carried
         # at its June figure (30) — so the average stays over BOTH, at 20. Without the carry it
         # would drop to 10 and jump back to 20 in Q4: the sawtooth.
         assert got["2024-Q2"] == pytest.approx(20.0)
@@ -68,7 +68,7 @@ class TestTheCarryKeepsTheBasketStable:
         assert by["2024-Q3"]["covered_names_pct"] == pytest.approx(50.0)
 
     def test_nothing_is_carried_before_a_members_first_report(self):
-        # ⚠ Backwards is invention, not estimation. A constituent that had not listed yet must not
+        #  Backwards is invention, not estimation. A constituent that had not listed yet must not
         # appear in the periods before its first figure.
         out = carry_forward({"2024-Q3": ("2024-09-30", 5.0)},
                             ["2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4"])
@@ -93,7 +93,7 @@ class TestBothFloors:
         assert MIN_BLEND_COVERAGE_NAMES_PCT == 50.0
 
     def test_one_giant_cannot_draw_a_period_on_its_own(self):
-        """⚠ THE WEIGHT FLOOR ALONE PASSED THIS. Measured on the AEX: 2026-Q2 had 2 of 22
+        """ THE WEIGHT FLOOR ALONE PASSED THIS. Measured on the AEX: 2026-Q2 had 2 of 22
         constituents reporting and cleared at 53.8% of cap, because ASML is enormous."""
         big = member(60.0, {"2024-12-31": 10.0, "2025-12-31": 12.0})
         small = [member(10.0, {"2024-12-31": 10.0}) for _ in range(4)]
@@ -112,7 +112,7 @@ class TestBothFloors:
         assert [p["period"] for p in out["points"]] == ["2024"]
 
     def test_the_newest_year_is_still_refused_when_carried(self):
-        """⚠⚠ THE PROPERTY THAT MAKES THE CARRY SAFE. Everyone is carried into 2025, so the value
+        """ THE PROPERTY THAT MAKES THE CARRY SAFE. Everyone is carried into 2025, so the value
         exists for all five — but only one REPORTED, so neither floor is met and nothing is
         drawn. Count the carried members as covered and this reads 100% and draws a flat line."""
         filed = member(10.0, {"2024-12-31": 10.0, "2025-12-31": 12.0})

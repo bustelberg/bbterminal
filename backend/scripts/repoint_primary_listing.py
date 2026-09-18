@@ -61,7 +61,7 @@ from asset_pipeline.resolve import resolve  # noqa: E402
 
 _FIGI_COLS = ("openfigi_figi", "openfigi_name", "openfigi_ticker", "openfigi_exch", "openfigi_type")
 
-# ⚠ THIS SCRIPT RESOLVES BY NAME, SO IT MAY ONLY TOUCH AN OPERATING COMPANY.
+#  THIS SCRIPT RESOLVES BY NAME, SO IT MAY ONLY TOUCH AN OPERATING COMPANY.
 #
 # `resolve()` searches Yahoo by NAME and gates identity with `same_company()`. That is right for
 # a company and DANGEROUS for a fund, whose siblings share almost every word of their names.
@@ -98,7 +98,7 @@ def _candidates(sb, max_ratio: float, isin: str | None,
     `wrapper` rows are excluded: a Bitcoin ETF legitimately analyses as `BTC-USD`,
     and its ADV/market-cap ratio means nothing.
 
-    ⚠ A MISSING MARKET CAP IS A SIGNAL, NOT A REASON TO SKIP (`no_cap_max_adv`).
+     A MISSING MARKET CAP IS A SIGNAL, NOT A REASON TO SKIP (`no_cap_max_adv`).
         The ratio needs a cap, so a row without one cannot be scored — and for years that meant
         it was passed over. But a DEAD listing is exactly what fails to report a cap: Brown &
         Brown sat on BTW.DE (Xetra, €7,836/day, no cap, NO PRICE BARS AT ALL) while its real

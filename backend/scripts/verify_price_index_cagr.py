@@ -1,6 +1,6 @@
 """What the PRODUCTION blend now reports for a benchmark's share-price line.
 
-⚠ THE ENDPOINT'S OWN CALL PATH, not a reimplementation — `_load_and_expand_members` ->
+ THE ENDPOINT'S OWN CALL PATH, not a reimplementation — `_load_and_expand_members` ->
 `_bulk_blend_rows` -> `_blend_rows` -> `blend_series`, exactly as
 `POST /api/earnings/fundamental-blend-metrics` runs it with `{universe, metrics:["price_ps"]}`.
 `profile_price_index_weighting.py` measured the BIAS by running the level chain twice; this proves

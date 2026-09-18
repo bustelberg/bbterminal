@@ -1,6 +1,6 @@
 """Sanity-check computed beta against real data. A market-wide index against ITSELF must be 1.0.
 
-⚠ A SCRIPT, NOT A MODULE — every line below runs AT IMPORT and hits the database. It lives in the
+ A SCRIPT, NOT A MODULE — every line below runs AT IMPORT and hits the database. It lives in the
 `backend` package root, so `import _beta` from anywhere would execute a full S&P index load as a
 side effect. Nothing imports it today; if this is meant to be kept, `scripts/` is where the other
 one-off probes live.
@@ -22,7 +22,7 @@ t = time.perf_counter()
 bench = benchmark_returns("SP500", ANCHOR, END, rows)
 print(f"benchmark_returns: {len(bench)} daily returns, {(time.perf_counter()-t)*1000:.0f} ms")
 
-# ⚠ THE CONTROL: the biggest constituents, whose beta must be near 1 by construction if the
+#  The control: the biggest constituents, whose beta must be near 1 by construction if the
 # maths is right — and a low-beta name must come out low.
 aids = [r["analysis_id"] for r in rows if r.get("analysis_id")]
 closes = _closes(aids, ANCHOR, END)

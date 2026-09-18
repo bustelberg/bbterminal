@@ -37,13 +37,13 @@ export function interestBurdenByYear(rows: InterestBurdenRow[]): Map<number, num
 /**
  * Interest COVERAGE from an interest BURDEN — `100 ÷ burden%`, or null when there is none to state.
  *
- * ⚠⚠ COVERAGE IS A VIEW OF THE BURDEN, NOT A SERIES OF ITS OWN, AND THAT IS THE WHOLE POINT. The
+ *  Coverage is a view of the burden, not a series of its own, and that is the whole point. The
  * burden (interest as a share of operating profit) is the ADDITIVE quantity here — exactly as an
  * earnings yield is where a P/E is not — so every average, across holdings OR across years, has to
  * be taken on the burden and only then inverted. Averaging coverages instead is the same mistake
  * `_fundamental_blend` refuses when it combines a multiple harmonically.
  *
- * ⚠⚠ AND DOING IT IN ONE DIMENSION BUT NOT THE OTHER IS WHAT SHIPPED FIRST (2026-08-21). The
+ *  And doing it in one dimension but not the other is what shipped first (2026-08-21). The
  * cross-section averaged burdens correctly and the WINDOW then averaged the resulting coverages,
  * which broke twice over on ASML:
  *

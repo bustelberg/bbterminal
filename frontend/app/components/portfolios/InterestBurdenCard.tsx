@@ -27,23 +27,23 @@ import CardHeading from './CardHeading';
  * / exponential trend). Lower = less of profit lost to servicing debt. Click through to the two
  * base lines per company.
  *
- * ⚠ THE RATIO IS DERIVED HERE from the raw lines (`interestBurdenByYear`), so the line, the tiles
+ *  The ratio is derived here from the raw lines (`interestBurdenByYear`), so the line, the tiles
  * and the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
  *
- * ⚠ THIS IS THE ONE CARD WHOSE BENCHMARK LINE IS USUALLY ABSENT, AND IT IS NOT A DATA GAP. The
+ *  This is the one card whose benchmark line is usually absent, and it is not a data gap. The
  * ratio needs a POSITIVE operating income, and a BANK reports no operating income line at all
  * (GuruFocus template 'B') — measured 2026-08-04, ING, ABN AMRO, JPMorgan, Bank of America, Morgan
  * Stanley and Goldman all carry interest expense with none, and insurers (NN, ASR, Aegon) carry
  * neither. Their index weight stays in the coverage denominator, so AEX lands at 72–80% — which
  * cleared the OLD 80% floor in exactly ONE year of twelve, and clears the 50% floor throughout.
- * ⚠ That measurement is one of the reasons the floor was lowered (2026-08-12): this card's index
+ *  That measurement is one of the reasons the floor was lowered (2026-08-12): this card's index
  * line was being withheld over a fifth of a book it genuinely spans. Lowering it for the benchmark
  * ALONE would still be wrong — the two lines on this chart would then be computed under different
  * rules, the one thing this whole overlay refuses to do; see `benchSeries`.
  */
 
-/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+/**  `String.raw`, or every backslash in the expressions below is eaten before KaTeX
  *  sees it. */
 const R = String.raw;
 
@@ -90,7 +90,7 @@ export default function InterestBurdenCard({ holdingsTarget, holdingsName, bench
   const own = holdingsName ?? 'Interest / op. profit';
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(ratioByYr, benchByYr), [ratioByYr, benchByYr]);

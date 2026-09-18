@@ -56,7 +56,7 @@ def _summary(rows: list[dict]):
 
 
 class TestTheAmountIsAirssOwnSignedEuroFigure:
-    """⚠ `Bedrag eur` is ALREADY signed and ALREADY converted. Re-deriving it from Debet/Credit
+    """ `Bedrag eur` is ALREADY signed and ALREADY converted. Re-deriving it from Debet/Credit
     or re-applying `Valutakoers` is how you double-count or flip a sign."""
 
     def test_the_tax_row_is_negative_so_net_is_a_plain_sum(self):
@@ -88,7 +88,7 @@ class TestTheAmountIsAirssOwnSignedEuroFigure:
 
 
 class TestOnlyTheDividendLedgersAreIncome:
-    """⚠ A journal is a journal. The day AIRS adds a movement row, an unfiltered sum turns a
+    """ A journal is a journal. The day AIRS adds a movement row, an unfiltered sum turns a
     deposit into investment income."""
 
     def test_an_unknown_ledger_is_excluded_and_counted_never_summed(self):
@@ -112,7 +112,7 @@ class TestOnlyTheDividendLedgersAreIncome:
 
 
 class TestAttachingToHoldings:
-    """⚠ The join is by NAME — the sheet has no ISIN. Both sides are AIRS strings truncated at the
+    """ The join is by NAME — the sheet has no ISIN. Both sides are AIRS strings truncated at the
     same 50 chars, so the match is EXACT; nothing fuzzy belongs here."""
 
     def test_a_name_that_matches_a_holding_is_attached(self):
@@ -122,7 +122,7 @@ class TestAttachingToHoldings:
         assert un == []
 
     def test_a_sold_position_keeps_its_income_instead_of_losing_it(self):
-        """⚠ Measured: `Automatic Data Proc.`, `Marsh&Mclennan` and an iShares HY fund paid into
+        """ Measured: `Automatic Data Proc.`, `Marsh&Mclennan` and an iShares HY fund paid into
         BUS_Neutraal_Dyn and were then sold, so no holding row can carry them. Dropping them
         understates the book with nothing on screen to say so."""
         sold = _row(LEDGER_DIVIDEND, "2026-01-15", "Marsh&Mclennan", 0, 88.0, "USD", 0.9, 79.2, 88.0)
@@ -143,7 +143,7 @@ class TestAttachingToHoldings:
 
 class TestTheSheetShapeIsChecked:
     def test_a_missing_required_column_raises_rather_than_summing_nothing(self):
-        """⚠ Zero income and no income look identical downstream. A shape change must be loud."""
+        """ Zero income and no income look identical downstream. A shape change must be loud."""
         rows = [{k: v for k, v in r.items() if k != "Bedrag eur"} for r in ASML]
         buf = BytesIO()
         pd.DataFrame(rows).to_excel(buf, index=False)   # NOT _xls: it would re-add the column

@@ -59,16 +59,16 @@ from typing import NamedTuple
 # Nasdaq, while symbols are built as bare tickers for NASDAQ and the exchange row
 # is keyed NASDAQ. NYSE / AMEX / OTCPK / XTER / MIL / TSE / XSWX already agree.
 #
-# ⚠⚠ RE-EXPORTED, NOT DEFINED (2026-09-01). It now lives beside `FEASIBLE_GF_EXCHANGES`, which is
+#  Re-exported, not defined (2026-09-01). It now lives beside `FEASIBLE_GF_EXCHANGES`, which is
 # the set it exists to reconcile with — `is_gf_subscribed_exchange` needs the same aliasing and did
 # not have it, so `NAS` read as out-of-coverage there while reading fine here. Two copies of a
 # bridge is how the two sides of it drift.
 from index_universe.acwi.exchange_map import GF_EXCHANGE_ALIASES  # noqa: E402
 
 # GuruFocus's USA region, straight from its own `exchange_list`:
-#     NAS  NYSE  OTCPK  OTCBB  AMEX  ARCA  IEXG  BATS  GREY
+#     Nas  nyse  otcpk  otcbb  amex  arca  iexg  bats  grey
 #
-# ARCA (NYSE Arca) matters far more than it looks: it is where most US ETFs list.
+# Arca (nyse Arca) matters far more than it looks: it is where most US ETFs list.
 # Of SPY / IWM / VOO / XLU / EDV / GLD / QQQ, SIX resolve to ARCA and only QQQ to NAS.
 #
 # These venues have no `gurufocus_exchange` row (that table only holds the exchanges
@@ -82,12 +82,12 @@ _US_CURRENCY = "USD"
 
 #: Venues that are reachable but are not where a security really trades — they lose any tie.
 #:
-#: ⚠ `FRA` IS THE FRANKFURT FLOOR, NOT XETRA. Both are German, both quote EUR, and a company often
+#:  `FRA` IS THE FRANKFURT FLOOR, NOT XETRA. Both are German, both quote EUR, and a company often
 #: carries the same ticker on each, so they score identically and only the tie-break separates
 #: them. Xetra (`XTER`) is the electronic venue where the volume and the history are; the floor is
 #: the thin one. Without this set the tie went alphabetically, and `FRA` sorts first.
 #:
-#: ⚠ IT IS ABOUT PICKING BETWEEN LISTINGS, NOT ABOUT COVERAGE. `FRA` stays in
+#:  IT IS ABOUT PICKING BETWEEN LISTINGS, NOT ABOUT COVERAGE. `FRA` stays in
 #: `FEASIBLE_GF_EXCHANGES` — GuruFocus answers for it, and a company we hold ONLY on the floor
 #: (Verisure) must still resolve. This only says: given a choice, prefer the primary venue.
 _SECONDARY_VENUES = frozenset({"FRA"})
@@ -188,7 +188,7 @@ def pick_listing(
         # so they can't win a tie or mask a real candidate.
         if not is_gf_subscribed_exchange(exch):
             continue
-        # US ETF venues (ARCA/BATS/IEXG) have no `gurufocus_exchange` row, so fall
+        # Us ETF venues (ARCA/BATS/IEXG) have no `gurufocus_exchange` row, so fall
         # back to USD rather than scoring them as currency-unknown.
         ccy = (exchange_currency.get(exch)
                or (_US_CURRENCY if exch in _US_EXCHANGES else "")).upper()
@@ -205,13 +205,13 @@ def pick_listing(
     # Highest score wins; US listing breaks a tie; then exchange/ticker so the
     # result is deterministic across re-resolves.
     #
-    # ⚠⚠ `_SECONDARY_VENUES` LOSES A TIE, AND IT EXISTS BECAUSE THE ALPHABET NEARLY DECIDED THIS.
+    #  `_SECONDARY_VENUES` LOSES A TIE, AND IT EXISTS BECAUSE THE ALPHABET NEARLY DECIDED THIS.
     # The final tie-break is the exchange code ascending, which is arbitrary but deterministic —
     # fine while every candidate was a primary venue. Adding `FRA` to `FEASIBLE_GF_EXCHANGES`
     # (2026-09-01) broke that assumption: a German company can list on both Xetra and the Frankfurt
     # floor with the same ticker and the same currency, so the two score identically, and `"FRA" <
     # "XTER"` would have handed every such tie to the thinner floor. That is the Stuttgart failure
-    # this codebase already carries a ⚠⚠ about (NVDA on `LLY.SG`-class venues, EUR 1.6M/day against
+    # this codebase already carries a  about (NVDA on `LLY.SG`-class venues, EUR 1.6M/day against
     # Nasdaq's 28,076M), arrived at through a sort key rather than a bad match.
     best_score, best = max(
         scored,

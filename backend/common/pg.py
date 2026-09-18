@@ -38,8 +38,8 @@ _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # ---------------------------------------------------------------------------
 # Per-request connection reuse
 #
-# ⚠⚠ A FRESH CONNECTION PER COPY COSTS 220ms IN PRODUCTION AND 24ms LOCALLY — SO A LOCAL PROFILE
-# CANNOT SEE THIS AT ALL. `_run_copy_uncached` used to `psycopg.connect()` every time. Measured
+#  A fresh connection per copy costs 220ms IN PRODUCTION AND 24ms LOCALLY — SO A LOCAL PROFILE
+# Cannot see this at all. `_run_copy_uncached` used to `psycopg.connect()` every time. Measured
 # 2026-08-11 from this machine:
 #
 #     connect + SET statement_timeout + SELECT 1     local 24.0ms     production 220.7ms
@@ -52,13 +52,13 @@ _SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # So a connection is opened once per REQUEST and reused. Scope comes from `read_cache`, which is
 # already exactly "one request" and is already entered by every endpoint that does bulk reads.
 #
-# ⚠ KEYED PER THREAD, NOT PER CONTEXT. A ContextVar is COPIED into a worker thread by
+#  Keyed per thread, not per context. A ContextVar is COPIED into a worker thread by
 # `asyncio.to_thread`, so several workers can share one context — and a psycopg connection is NOT
 # thread-safe. Sharing one across threads would interleave two COPY streams on a single socket,
 # which does not raise, it returns the wrong bytes. The scope holds a dict keyed by thread id, so
 # concurrent workers get their own connection and still avoid reconnecting per COPY.
 #
-# ⚠ A BROKEN CONNECTION MUST NOT POISON THE REST OF THE REQUEST. Anything that fails on a reused
+#  A broken connection must not poison the rest of the request. Anything that fails on a reused
 # connection drops it from the scope so the next COPY opens a fresh one; the caller still gets the
 # normal PostgREST fallback for that one query.
 _CONN_SCOPE: ContextVar[dict | None] = ContextVar("pg_conn_scope", default=None)
@@ -118,12 +118,12 @@ def load_rows_via_copy(table: str, columns: str, key_col: str, values: list,
     Returns `None` to mean "fall back to PostgREST" — unconfigured, psycopg missing, or any
     error. Never raises, never returns a partial list.
 
-    ⚠ WHY THIS EXISTS: PostgREST encodes an IN-clause into the URL, so a long id list must be
+     WHY THIS EXISTS: PostgREST encodes an IN-clause into the URL, so a long id list must be
     chunked (`IN_CHUNK_SIZE` = 200) and each chunk is a round trip. `asset_grid` alone costs 11 of
     them on one Analyse open — 502 analysis ids in three chunks plus eight ISIN batches — and in
     production a round trip is ~50ms. A COPY has no URL, so the whole list goes in one.
 
-    ⚠⚠ THE ROWS ARE SHIPPED AS JSON, NOT AS CSV COLUMNS, AND THAT IS NOT A STYLE CHOICE. The other
+     THE ROWS ARE SHIPPED AS JSON, NOT AS CSV COLUMNS, AND THAT IS NOT A STYLE CHOICE. The other
     COPY loaders in this codebase parse with `line.split(",")`, which is safe only because they
     select numbers and dates. These selects include `name`, `gf_company_name`, `openfigi_name`,
     `leonteq_name` — and **1,948 rows in `asset_grid` have a comma in `name`** ("Alphabet, Inc.").
@@ -132,7 +132,7 @@ def load_rows_via_copy(table: str, columns: str, key_col: str, values: list,
     number, NULL stays None) and distinguishes NULL from the empty string, which bare CSV cannot —
     so the dicts match what PostgREST returns field for field, rather than approximately.
 
-    ⚠ `table`, `columns` and `key_col` are INTERPOLATED and must never come from a request. Every
+     `table`, `columns` and `key_col` are INTERPOLATED and must never come from a request. Every
     caller passes a module-level literal; `values` is the only parameterised part.
     """
     if not _db_url() or not values:
@@ -141,8 +141,8 @@ def load_rows_via_copy(table: str, columns: str, key_col: str, values: list,
         log.warning("[common.pg] refusing a COPY with a non-identifier table/key: %r/%r",
                     table, key_col)
         return None
-    # ⚠ `where` EXISTS BECAUSE DROPPING A SERVER-SIDE FILTER AND RE-APPLYING IT IN PYTHON IS A
-    # SILENT DATA REGRESSION — right answer, far more bytes. Measured on `airs_holding`: filtering
+    #  `where` EXISTS BECAUSE DROPPING A SERVER-SIDE FILTER AND RE-APPLYING IT IN PYTHON IS A
+    # Silent data regression — right answer, far more bytes. Measured on `airs_holding`: filtering
     # on `portefeuille` alone and picking the snapshot afterwards fetched **788 rows instead of
     # 42**, an 18.8x over-fetch, because the table keeps 28 historical snapshots per book. Extra
     # equality predicates belong in the query.
@@ -162,7 +162,7 @@ def load_rows_via_copy(table: str, columns: str, key_col: str, values: list,
 
 
 def _rows_from_copy(buf: io.BytesIO) -> list[dict]:
-    """One `row_to_json`-per-line COPY buffer -> dicts. ⚠ ONE PARSER, shared by every JSON COPY
+    """One `row_to_json`-per-line COPY buffer -> dicts.  ONE PARSER, shared by every JSON COPY
     loader here, because the reason it is `csv.reader` and not `line.split(',')` is a measured bug
     (1,948 `asset_grid` names contain a comma) and a second copy of the loop is where that lesson
     gets quietly re-broken."""
@@ -182,7 +182,7 @@ def load_table_via_copy(table: str, columns: str = "*",
     Never raises, never returns a partial list. Same JSON transport, and the same interpolation
     rule, as `load_rows_via_copy`: `table`, `columns` and `order_by` must never come from a request.
 
-    ⚠⚠ WHY THIS EXISTS, AND IT IS NOT ONLY SPEED. Offset-paging a wide view through PostgREST costs
+     WHY THIS EXISTS, AND IT IS NOT ONLY SPEED. Offset-paging a wide view through PostgREST costs
     one statement PER PAGE and each one re-materializes the whole view before discarding the rows
     ahead of the offset — against the 8s `statement_timeout` on the `authenticator` role, which
     `service_role` inherits. That is what took `/asset-pipeline` down: `asset_grid` slowed to 10.3s
@@ -216,12 +216,12 @@ def load_distinct_via_copy(table: str, column: str) -> list | None:
     Returns `None` to mean "fall back to PostgREST" — unconfigured, psycopg missing, or any error.
     Same interpolation rule as its siblings: `table` and `column` must never come from a request.
 
-    ⚠⚠ WHY THIS EXISTS: A DROPDOWN'S OPTION LIST IS AN AGGREGATE, AND PULLING THE ROWS TO BUILD IT
+     WHY THIS EXISTS: A DROPDOWN'S OPTION LIST IS AN AGGREGATE, AND PULLING THE ROWS TO BUILD IT
     IN PYTHON IS BOTH SLOWER AND WRONG. `/api/companies/field-options` built its sector list as
     `universe_membership.select("sector").limit(10000)` and then `{r["sector"] for r in rows}` —
     8,444 rows over the wire to produce 43 strings.
 
-    ⚠⚠ AND `.limit()` IS NOT WHAT DECIDES HOW MANY ROWS COME BACK — PostgREST's `db-max-rows` is,
+     AND `.limit()` IS NOT WHAT DECIDES HOW MANY ROWS COME BACK — PostgREST's `db-max-rows` is,
     and it is **1,000 on the cloud project** against 10,000 locally (`project_postgrest_max_rows_trap`).
     So production was deriving that list from the first 1,000 rows and shipping **40 of the 43
     sectors**, with no empty cell and no error anywhere: three filter options simply did not exist,
@@ -231,10 +231,10 @@ def load_distinct_via_copy(table: str, column: str) -> list | None:
     A `SELECT DISTINCT` cannot truncate, because the aggregate happens before the row limit rather
     than after it: 43 rows leave the server, and they are all of them.
 
-    ⚠ NULLs and blanks are dropped HERE rather than by the caller, so every caller gets the same
+     NULLs and blanks are dropped HERE rather than by the caller, so every caller gets the same
     answer and none of them has to remember to.
 
-    ⚠⚠ SORTED IN PYTHON, NOT BY `ORDER BY` — the two do not agree, and the DATABASE's answer is the
+     SORTED IN PYTHON, NOT BY `ORDER BY` — the two do not agree, and the DATABASE's answer is the
     one that can move. Postgres sorts under the database COLLATION, which is locale-aware and need
     not match between the local container and the cloud project; Python sorts by codepoint. On the
     live sector list they already differ:
@@ -298,7 +298,7 @@ def _run_copy(sql: str, params: tuple) -> io.BytesIO | None:
     return the raw CSV bytes (or `None` to signal fall-back: unconfigured,
     psycopg missing, or any connection/query error).
 
-    ⚠ INSIDE A `read_cache()` BLOCK AN IDENTICAL COPY IS SERVED FROM THE FIRST ONE. Measured on
+     INSIDE A `read_cache()` BLOCK AN IDENTICAL COPY IS SERVED FROM THE FIRST ONE. Measured on
     the Analyse modal: the benchmark's price panel — the single most expensive read on that screen
     — was loaded THREE times with a byte-identical id list and window, because three collaborating
     modules each correctly asked for it. Outside such a block this is unchanged: no memo, no TTL,
@@ -368,7 +368,7 @@ def _run_copy_uncached(sql: str, params: tuple) -> io.BytesIO | None:
         buf.seek(0)
         return buf
     except Exception as e:  # noqa: BLE001 — any failure → fall back, never raise
-        # ⚠ DROP THE REUSED CONNECTION ON ANY FAILURE. A COPY that errors can leave the session in
+        #  Drop the reused connection on any failure. A COPY that errors can leave the session in
         # a state the next one cannot use, and a broken socket would otherwise fail every
         # remaining COPY in the request instead of just this one. Reconnecting costs 220ms once;
         # poisoning the request costs all of them.

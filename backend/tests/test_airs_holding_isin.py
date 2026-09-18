@@ -1,6 +1,6 @@
 """One AIRS account's holdings: identity, Class, and the price check.
 
-⚠ THIS FILE USED TO PIN A FUZZY NAME MATCHER — ~200 lines of scoring, 1:1 assignment and refusal
+ THIS FILE USED TO PIN A FUZZY NAME MATCHER — ~200 lines of scoring, 1:1 assignment and refusal
 logic that recovered each holding's ISIN from a PAIRED model portfolio. All of it was deleted
 2026-07-23, when the Vermogensoverzicht started carrying `ISIN-code`, and its tests went with it.
 The four mechanisms and their measured failures are recorded in the module docstring rather than
@@ -29,7 +29,7 @@ from routers._airs_holding_isin import (
 
 
 class TestAStalePriceIsNotAWrongListing:
-    """⚠ THE CHECK IS ONLY AS GOOD AS THE PRICE UNDER IT. AIRS's implied price is compared with our
+    """ THE CHECK IS ONLY AS GOOD AS THE PRICE UNDER IT. AIRS's implied price is compared with our
     own close at a 15% tolerance — a band meant to catch share-class errors of 19x and 20x. A series
     that merely STOPPED UPDATING drifts past 15% on any ordinary mover, and the row then reads
     `price_mismatch`: "our listing is wrong" about a listing that is perfect. Measured 2026-07-29:
@@ -57,7 +57,7 @@ class TestAStalePriceIsNotAWrongListing:
         assert _close_lag_days({"date": "2026-07-21"}, "2026-07-29") > _MAX_CLOSE_LAG_DAYS
 
     def test_the_measured_amat_gap_is_inside_it_which_is_why_the_refresh_must_lead(self):
-        """⚠ THE LAG GUARD ALONE CANNOT SAVE THIS — AND THAT IS THE POINT OF `_CHECK_STALE_DAYS`.
+        """ THE LAG GUARD ALONE CANNOT SAVE THIS — AND THAT IS THE POINT OF `_CHECK_STALE_DAYS`.
 
         Applied Materials, 2026-07-30: a flawless mapping (AMAT, NasdaqGS, USD) whose stored close
         was 07-27 against a 07-30 valuation — THREE days, inside the guard, so the row was judged.
@@ -80,7 +80,7 @@ class TestAStalePriceIsNotAWrongListing:
 
 
 class TestTheAccountBillsOneInstrumentOnSeveralLines:
-    """⚠ AIRS lists one instrument on several rows — `6,5% Rabobank Certificaten 14-perp.` at
+    """ AIRS lists one instrument on several rows — `6,5% Rabobank Certificaten 14-perp.` at
     2.60% AND 0.01%. Two rows for one instrument is two a reader has to reconcile, and every
     per-holding figure (weight, value, income) would be split across them."""
 
@@ -107,7 +107,7 @@ class TestTheAccountBillsOneInstrumentOnSeveralLines:
 
 
 class TestTheClassComesFromTheGridAndTheName:
-    """⚠ AIRS's `categorie` WAS DROPPED with the pairing (2026-07-23), so the asset grid and the
+    """ AIRS's `categorie` WAS DROPPED with the pairing (2026-07-23), so the asset grid and the
     holding's name are all that is left. Measured across all 668 holdings, removing it moved 58
     rows; two whole groups were real regressions and are recovered here from yfinance — the same
     source the Sector column already shows.
@@ -124,20 +124,20 @@ class TestTheClassComesFromTheGridAndTheName:
         assert classify_bucket(None, False, "US8288061091", "Simon Property Group", g) == BUCKET_ALTS
 
     def test_the_real_estate_test_runs_BEFORE_the_equity_test(self):
-        """⚠ Order decides it: a REIT's grid asset_class IS `equity`, so an equity-first branch
+        """ Order decides it: a REIT's grid asset_class IS `equity`, so an equity-first branch
         returns Equity and the sector is never consulted."""
         g = self._grid(asset_class="equity", sector="Real Estate", name="Prologis")
         assert classify_bucket(None, False, "US74340W1036", "Prologis", g) != BUCKET_EQUITY
 
     def test_a_bond_etf_missing_from_the_grid_is_still_bonds(self):
-        """⚠ `iShares iBonds 2032 Term Corp UCITS ETF USD` is not in asset_grid at all, and
+        """ `iShares iBonds 2032 Term Corp UCITS ETF USD` is not in asset_grid at all, and
         `\\bbond` does NOT match "iBonds" — there is no word boundary before the b. It classified
         as an equity ETF until `ibond` was added."""
         assert classify_bucket(None, True, "IE000XYZ12345",
                                "iShares iBonds 2032 Term Corp UCITS ETF USD", {}) == BUCKET_BONDS
 
     def test_a_bond_etf_the_grid_calls_equity_is_still_bonds(self):
-        """⚠ `iShares Euro HY Corp Bd ETF EUR` sits in the grid as asset_class 'equity',
+        """ `iShares Euro HY Corp Bd ETF EUR` sits in the grid as asset_class 'equity',
         sector 'equity' — simply wrong for a bond fund. "Bd" is the only bond tell on the row."""
         g = self._grid(asset_class="equity", sector="equity", name="iShares Euro HY Corp Bd ETF")
         assert classify_bucket(None, True, "IE00B66F4759",
@@ -156,7 +156,7 @@ class TestTheClassComesFromTheGridAndTheName:
         assert classify_bucket(None, False, "NL0010273215", "ASML Holding", g) == BUCKET_EQUITY
 
     def test_a_fund_with_no_bond_tell_is_equity_because_that_is_what_it_holds(self):
-        """⚠ NOT ITS OWN BUCKET. `Equity ETF` was retired 2026-08-18: every bucket names what a
+        """ NOT ITS OWN BUCKET. `Equity ETF` was retired 2026-08-18: every bucket names what a
         holding INVESTS IN, and an equity fund invests in equity — a bond ETF has always been
         `Bonds` rather than "ETF Bonds", which is what made the equity split the inconsistent one.
         """
@@ -170,7 +170,7 @@ class TestTheClassComesFromTheGridAndTheName:
         assert classify_bucket(None, True, "XX0000000000", "High Income Quality fund", g) == BUCKET_ALTS
 
     def test_the_etf_wrapper_never_changes_the_bucket(self):
-        """⚠⚠ THE INVARIANT THE MERGE CREATED, AND THE ONE A REVERT WOULD BREAK FIRST. `is_etf` may
+        """ THE INVARIANT THE MERGE CREATED, AND THE ONE A REVERT WOULD BREAK FIRST. `is_etf` may
         still decide Equity-vs-Unclassified in the fallback, but it may never move a holding
         between two REAL classes — that is what "the wrapper is not the asset class" means.
         """
@@ -197,6 +197,6 @@ class TestTheClassComesFromTheGridAndTheName:
         assert classify_bucket(None, False, None, "Liquiditeiten", {}) == BUCKET_CASH
 
     def test_nothing_decides_means_unclassified_not_a_guess(self):
-        """⚠ An honest "unsure". Folding it into Equity — the bucket a reader would least
+        """ An honest "unsure". Folding it into Equity — the bucket a reader would least
         question — is how an unknown instrument becomes a confident wrong answer."""
         assert classify_bucket(None, False, "XX0000000000", "House Product", {}) == "Unclassified"

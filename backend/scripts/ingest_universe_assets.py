@@ -9,13 +9,13 @@ WHY
     (Contrast GuruFocus, whose gaps are structural — it does not sell us the UK or India at any
     price. That is the whole reason the benchmark is moving to the asset world.)
 
-⚠ THIS ONLY REACHES MEMBERS THAT HAVE AN ISIN.
+ THIS ONLY REACHES MEMBERS THAT HAVE AN ISIN.
     189 ACWI members have none — 156 of them Indian (NSE), 28 British. The ISIN is the bridge, so
     those cannot be reached from here at all, and GuruFocus cannot supply the ISIN either (it is
     blind to exactly those markets). They need a different identifier route and are reported, not
     silently skipped: a coverage number that quietly excludes India is worse than no number.
 
-⚠ ONE YAHOO CONSUMER AT A TIME.
+ ONE YAHOO CONSUMER AT A TIME.
     Yahoo answers an overloaded caller with an EMPTY result rather than a 429, and an empty
     candidate set is how a resolution lands on a thin foreign listing (NVDA-on-Stuttgart). This
     pauses between ISINs and refuses to run while the ingest-queue worker is live.
@@ -133,7 +133,7 @@ def main() -> int:
         time.sleep(a.sleep)
 
     print(f"\n   ingested={ok}  failed={failed}  (still unreachable, no ISIN: {len(no_isin)})")
-    # ⚠ A PRICE SERIES IS NOT ENOUGH — A CAP-WEIGHTED INDEX NEEDS A CAP. A freshly ingested row
+    #  A PRICE SERIES IS NOT ENOUGH — A CAP-WEIGHTED INDEX NEEDS A CAP. A freshly ingested row
     # has bars but `market_cap_eur = NULL`, so it would be silently DROPPED from the index it was
     # just ingested for. Say so; the backfill is a separate, batched Yahoo pass.
     print("\n   NOTE: newly ingested rows have NO market cap yet and cannot be weighted. Run:")

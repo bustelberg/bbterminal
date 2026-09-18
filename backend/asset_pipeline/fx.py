@@ -13,7 +13,7 @@ from datetime import date as _date
 # Minor-unit quotes → (major currency, divisor). Normalise the minor unit into
 # its major unit before FX.
 #
-# ⚠ `GBp` IS NOT A CURRENCY CODE — it is PENCE, and `fx_rate` has no row for it.
+#  `GBp` IS NOT A CURRENCY CODE — it is PENCE, and `fx_rate` has no row for it.
 #     Yahoo quotes every London listing in pence, so `asset_execution.currency`
 #     says "GBp" for 343 of our rows. Any FX lookup that passes that string
 #     straight to `fx_rate` gets NOTHING back, and a caller that then treats a
@@ -26,7 +26,7 @@ from datetime import date as _date
 #     holding vanishes; forget to divide by the DIVISOR and a £46.75 share
 #     prices at £4,675 — a hundredfold error that still looks like a number.
 #
-# ⚠⚠ AND THE DIVISOR IS NOT ALWAYS 100. `KWF` is Kuwaiti FILS, of which there are **1,000** to the
+#  And the divisor is not always 100. `KWF` is Kuwaiti FILS, of which there are **1,000** to the
 #     dinar — the one entry here that would be wrong if it were copied from the line above it.
 #     Measured on the live quote before it was added: NBK.KW closed at **861.0 KWF** against a
 #     share that trades at ~0.861 KWD. At a divisor of 100 that share would price at 8.61 KWD,
@@ -36,7 +36,7 @@ SUBUNIT: dict[str, tuple[str, float]] = {
     "GBX": ("GBP", 100.0),
     "ZAc": ("ZAR", 100.0),   # SA cents
     "ILA": ("ILS", 100.0),   # Tel-Aviv agorot
-    "KWF": ("KWD", 1000.0),  # Kuwaiti fils — ⚠ 1,000, not 100
+    "KWF": ("KWD", 1000.0),  # Kuwaiti fils —  1,000, not 100
 }
 
 _SUBUNIT = SUBUNIT          # legacy private alias — this module's own callers

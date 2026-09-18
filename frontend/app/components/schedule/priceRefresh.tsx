@@ -73,7 +73,7 @@ export function PriceRefreshPanel({ result, onClose }: { result: PriceRefreshRes
     return (
       <div className="flex items-center justify-between gap-2 text-[12px] font-mono text-neg-300">
         <span className="truncate">Refresh failed: {result.error}</span>
-        <button type="button" onClick={onClose} className="text-fg-faint hover:text-fg-soft shrink-0">✕</button>
+        <button type="button" onClick={onClose} className="text-fg-faint hover:text-fg-soft shrink-0"></button>
       </div>
     );
   }
@@ -92,7 +92,7 @@ export function PriceRefreshPanel({ result, onClose }: { result: PriceRefreshRes
       <span className="text-fg-muted truncate min-w-0" title={url}>{url}</span>
       <span className="text-fg-faint shrink-0">·</span>
       <span className={`shrink-0 ${response.error ? 'text-neg-400' : 'text-fg-soft'}`}>{datesLabel}</span>
-      <button type="button" onClick={onClose} className="text-fg-faint hover:text-fg-soft shrink-0 ml-auto">✕</button>
+      <button type="button" onClick={onClose} className="text-fg-faint hover:text-fg-soft shrink-0 ml-auto"></button>
     </div>
   );
 }

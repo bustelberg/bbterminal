@@ -2,7 +2,7 @@
  * Wording for `blend_notes` — the backend's answer to "the holdings have this metric, so why is
  * the portfolio chart empty?" (`_fundamental_blend.explain_empty`).
  *
- * ⚠ AN EMPTY CHART HAS TWO OPPOSITE CAUSES AND LOOKS IDENTICAL. Measured on a real book's
+ *  AN EMPTY CHART HAS TWO OPPOSITE CAUSES AND LOOKS IDENTICAL. Measured on a real book's
  * Dividends per Share: every holding carried the line and the card still read "No dividend/share
  * ingested for this portfolio" — a level series is rebased to 100 at its first year, and a
  * dividend series that starts at 0.00 cannot be, so member after member was dropped until no year

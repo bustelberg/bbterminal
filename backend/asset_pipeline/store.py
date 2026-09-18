@@ -124,7 +124,7 @@ def upsert_asset(res: dict, figi: dict | None = None) -> dict:
 
 #: A row a PERSON unmapped, written into `reason` — see `scripts/unmap_asset_row.py`.
 #:
-#: ⚠⚠ IT IS WHAT STOPS THE FIX BEING UNDONE BY THE NEXT SWEEP. `queue.requeue_unmapped()` re-queues
+#:  IT IS WHAT STOPS THE FIX BEING UNDONE BY THE NEXT SWEEP. `queue.requeue_unmapped()` re-queues
 #: every `not_found` row OpenFIGI identified, on the reasonable theory that it only failed because
 #: Yahoo was throttled. That theory is wrong for a row somebody unmapped ON PURPOSE because the
 #: resolver had it on a DIFFERENT instrument: re-resolving it runs the same resolver over the same
@@ -132,7 +132,7 @@ def upsert_asset(res: dict, figi: dict | None = None) -> dict:
 #: (`AEN000101016`) is the measured case — OpenFIGI offers only Bloomberg composite codes, Yahoo has
 #: no Abu Dhabi coverage at all, and the ticker `FAB` bare is a US First Trust ETF with 4,822 bars.
 #:
-#: ⚠ A PREFIX, NOT AN EXACT STRING, so the rest of `reason` stays free for the human explanation.
+#:  A PREFIX, NOT AN EXACT STRING, so the rest of `reason` stays free for the human explanation.
 MANUAL_UNMAP_PREFIX = "unmapped by hand"
 
 
@@ -141,20 +141,20 @@ def unmap_execution(isin: str, reason: str) -> dict | None:
 
     Returns the row as it was BEFORE the change, or None when there is no row / nothing to do.
 
-    ⚠⚠ THE WHOLE RESOLVED IDENTITY GOES, NOT JUST THE STATUS. `asset_grid` is a VIEW that reads
+     THE WHOLE RESOLVED IDENTITY GOES, NOT JUST THE STATUS. `asset_grid` is a VIEW that reads
     `asset_class` / `name` / `sector` off this row, so clearing the status alone leaves every screen
     still calling an Abu Dhabi bank a First Trust ETF — and `_fundamental_coverage.classify_holding`
     still reads `asset_class='etf'` and still answers `fund`. The field list was checked against
     what a genuine `not_found` row looks like rather than guessed.
 
-    ⚠ `name` BECOMES THE OPENFIGI NAME — the instrument this ISIN actually is. Leaving the wrong
+     `name` BECOMES THE OPENFIGI NAME — the instrument this ISIN actually is. Leaving the wrong
     instrument's name keeps the wrong answer on screen with nothing pointing at it.
 
-    ⚠ THE REASON IS PREFIXED WITH `MANUAL_UNMAP_PREFIX`, and that is not cosmetic: it is the only
+     THE REASON IS PREFIXED WITH `MANUAL_UNMAP_PREFIX`, and that is not cosmetic: it is the only
     thing stopping `queue.requeue_unmapped()` handing this ISIN straight back to the resolver,
     which would run the same candidates and can restore the same wrong ticker.
 
-    ⚠ THE PRICE ROWS ARE LEFT. They are real bars for a real instrument, merely filed under the
+     THE PRICE ROWS ARE LEFT. They are real bars for a real instrument, merely filed under the
     wrong ISIN, and nothing reads them once `analysis_id` is null. Deleting is a separate,
     irreversible decision.
     """
@@ -172,7 +172,7 @@ def unmap_execution(isin: str, reason: str) -> dict | None:
         "med_adv_eur": None, "first_date": None, "years": None,
         "name": r.get("openfigi_name") or r.get("name"),
     }
-    # ⚠ ONLY COLUMNS THAT EXIST. `sector` looks like one of these because `asset_grid` has it — the
+    #  Only columns that exist. `sector` looks like one of these because `asset_grid` has it — the
     # view reads it off the ANALYSIS — and PostgREST answers an update naming a missing column with
     # a 42703, at the one moment this is halfway through a write.
     patch = {k: v for k, v in patch.items() if k in r}
@@ -290,7 +290,7 @@ def extend_series(analysis_id: int, symbol: str, since: str) -> int | None:
     """Fetch ONLY the bars after `since` and append them. Returns rows stored, or None when the
     caller must fall back to a full `store_series` (see below).
 
-    ⚠ WHY THIS IS NOT JUST `store_series` WITH A LATER `first_ts`.
+     WHY THIS IS NOT JUST `store_series` WITH A LATER `first_ts`.
         `store_series` derives the grid's denormalized coverage stats — `price_from`, `bars`,
         `zero_vol_frac` — FROM THE ROWS IT JUST FETCHED, and rewrites the parquet archive from
         the same window. Hand it a two-week window and it will faithfully record that Meta
@@ -403,7 +403,7 @@ def store_one(identifier: str) -> dict:
     ids = upsert_asset(res, figi=fig)
     rows = store_series(ids["analysis_id"], an["symbol"], an.get("first_ts"))
 
-    # A RESOLUTION WITH NO PRICE SERIES IS NOT A RESOLUTION.
+    # A resolution with no price series is not a resolution.
     #
     # Measured 2026-07-13: ten distinct Leonteq structured products (CH ISINs, Guernsey
     # branch) each resolved to the SAME symbol GODE.DE -- a German certificate with zero

@@ -18,7 +18,7 @@ from ingest import prices
 
 
 class TestOnlyOneSpellingFilters:
-    """⚠ `?from=&to=`, `?start=&end=`, `?date=`, `?limit=`, `?period=`, `?days=`
+    """ `?from=&to=`, `?start=&end=`, `?date=`, `?limit=`, `?period=`, `?days=`
     are ALL accepted with HTTP 200 and return the FULL series. Send one and you
     get an 11,501-bar answer to a one-day question — it parses fine and is wrong
     about what you asked, with nothing anywhere to tell you."""
@@ -34,7 +34,7 @@ class TestOnlyOneSpellingFilters:
 
 
 class TestEndDateTodayInventsABar:
-    """⚠ THE TRAP THAT CREATED A PHANTOM DURING DEVELOPMENT OF THIS VERY FEATURE.
+    """ THE TRAP THAT CREATED A PHANTOM DURING DEVELOPMENT OF THIS VERY FEATURE.
 
         ?start_date=2026-07-29&end_date=2026-07-31  -> 3 real bars
         ?start_date=2026-07-29&end_date=2026-08-02  -> the same 3, PLUS
@@ -84,7 +84,7 @@ class TestTheGapPathIsUsedButNotAlways:
         assert "not force_refresh" in src.split("GAP FETCH", 1)[1][:400] or "force_refresh" in gap
 
     def test_it_bypasses_storage(self):
-        """⚠ The cached blob is the FULL series. Overwriting it with a window —
+        """ The cached blob is the FULL series. Overwriting it with a window —
         or merging into it — would truncate the only copy of the history we keep
         outside the DB."""
         src = inspect.getsource(prices.ensure_prices_for_company)

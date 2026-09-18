@@ -1,11 +1,11 @@
 """Effective positions — `Eᵢ = qᵢ·Pᵢ·Xᵢ`, the euros behind the weights, and the currencies.
 
-⚠⚠ THE POINT OF THIS MODULE IS THAT IT SHARES ITS WEIGHTS. Active share, Concentration and this all
+ THE POINT OF THIS MODULE IS THAT IT SHARES ITS WEIGHTS. Active share, Concentration and this all
 read `build_issuer_weights`; three panels showing three sets of weights for one portfolio would make
 every number on all three unfalsifiable. The test that matters is therefore the cross-check against
 Concentration, not any figure in isolation.
 
-⚠ AND `Eᵢ` IS AIRS'S OWN VALUATION, not a product we compute. `airs_holding` carries a quantity, but
+ AND `Eᵢ` IS AIRS'S OWN VALUATION, not a product we compute. `airs_holding` carries a quantity, but
 it also carries `current_value_eur` — the figure on the client's statement. A second derivation from
 our close and our FX would disagree with it on most rows, with nothing able to say which was right.
 """
@@ -27,7 +27,7 @@ def wire(monkeypatch):
         monkeypatch.setattr(B, "members",
                             lambda _l: (mem, {"covered_pct": 100.0,
                                               "universe_members": len(mem)}))
-        # ⚠ PATCHED ON `_active_share`, WHICH IS WHY `_portfolio_exposure` REACHES IT THROUGH THE
+        #  Patched on `_active_share`, WHICH IS WHY `_portfolio_exposure` REACHES IT THROUGH THE
         # MODULE rather than by a from-import. A name bound at import time would silently miss this
         # and go to the real database — returning nothing, so the issuer key would fall back to the
         # HOLDING's name and a dual listing would read as two issuers. Caught exactly that way.
@@ -62,7 +62,7 @@ class TestTheEurosFoldPerIssuer:
         assert got["sleeve_eur"] == pytest.approx(1_000_000.0, abs=1e-6)
 
     def test_the_weights_are_the_ones_concentration_uses(self, wire):
-        """⚠⚠ THE ARCHITECTURAL TEST. Both read `build_issuer_weights`; if either grew its own
+        """ THE ARCHITECTURAL TEST. Both read `build_issuer_weights`; if either grew its own
         folding, the two panels would count and rank the same book differently."""
         wire([(f"Co{i}", 100.0) for i in range(5)],
              {f"I{i}": {"name": f"Co{i}", "ccy": "EUR"} for i in range(5)})
@@ -72,7 +72,7 @@ class TestTheEurosFoldPerIssuer:
         assert exp["positions"][0]["weight_pct"] == pytest.approx(conc["top1_pct"], abs=1e-9)
 
     def test_a_basket_has_weights_and_no_euros(self, wire):
-        """⚠ ABSENT, NOT ZERO. Zero would claim the position is worthless."""
+        """ ABSENT, NOT ZERO. Zero would claim the position is worthless."""
         wire([(f"Co{i}", 100.0) for i in range(5)],
              {f"I{i}": {"name": f"Co{i}", "ccy": "EUR"} for i in range(5)})
         got = E.compute_exposure(
@@ -96,7 +96,7 @@ class TestCurrencyIsTrackedSeparately:
         assert by["USD"]["value_eur"] == pytest.approx(500.0, abs=1e-6)
 
     def test_one_issuer_across_two_currencies_is_named(self, wire):
-        """⚠⚠ THE FOLD HIDES THIS BY DESIGN, so it is surfaced. A dual-listed company is ONE
+        """ THE FOLD HIDES THIS BY DESIGN, so it is surfaced. A dual-listed company is ONE
         position and TWO FX exposures, and a reader looking at a single row would not know."""
         wire([("Shell PLC", 100.0)],
              {"GB1": {"name": "Shell PLC", "ccy": "GBP"},
@@ -107,7 +107,7 @@ class TestCurrencyIsTrackedSeparately:
         assert got["positions"][0]["currencies"] == ["EUR", "GBP"]
 
     def test_an_unassignable_currency_is_not_folded_into_eur(self, wire):
-        """⚠ THE FLATTERING DEFAULT would make the book look more domestic than it is."""
+        """ THE FLATTERING DEFAULT would make the book look more domestic than it is."""
         wire([("Co0", 100.0)], {"I0": {"name": "Co0", "ccy": "EUR"}})
         got = E.compute_exposure([_h("Co0", "I0", 50.0, 50.0, "EUR"),
                                   _h("Mystery", "I9", 50.0, 50.0, None)], "ACWI")
@@ -125,6 +125,6 @@ class TestBothDenominators:
             _h("Cash", "", 25.0, 250.0, None)], "ACWI")
         assert got["sleeve_eur"] == pytest.approx(250.0, abs=1e-9)
         assert got["book_eur"] == pytest.approx(1000.0, abs=1e-9)
-        # ⚠ EVERY OTHER VIEW EXCLUDES THIS AND RENORMALISES; the figure exists so that is visible.
+        #  Every other view excludes this and renormalises; the figure exists so that is visible.
         assert got["other_eur"] == pytest.approx(750.0, abs=1e-9)
         assert got["stocks_pct"] == pytest.approx(25.0, abs=1e-9)

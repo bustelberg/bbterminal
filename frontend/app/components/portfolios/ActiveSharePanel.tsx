@@ -1,26 +1,26 @@
 'use client';
 
 /**
- * ACTIVE SHARE — how much of the book's stock sleeve is not the benchmark.
+ * Active share — how much of the book's stock sleeve is not the benchmark.
  *
  *     AS = ½ · Σ |wᵢᵖ − wᵢᵇ|          Overlap = Σ min(wᵢᵖ, wᵢᵇ) = 1 − AS
  *
- * ⚠⚠ IT IS A STRUCTURAL MEASURE, NOT A RETURN ONE, AND THE PANEL HAS TO SAY SO. Every other number
+ *  It is a structural measure, not a return one, and the panel has to say so. Every other number
  * in this modal is about what happened; this one is about what the book IS, today, regardless of
  * how it has performed. A high active share is not good news and a low one is not bad — it is the
  * size of the bet, and the only thing it predicts is how far the return CAN diverge. Rendering it
  * beside the excess-return tiles without that framing invites reading it as a score.
  *
- * ⚠ THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO — funds, cash and bonds dropped and
+ *  The individual stocks are treated as 100% OF THE PORTFOLIO — funds, cash and bonds dropped and
  * the rest renormalised, which is what the user asked for and the standard convention. `stocks_pct`
  * is printed rather than assumed: a book that is 40% ETFs has an active share describing 60% of
  * itself, and a figure whose denominator is invisible is a figure nobody can compare.
  *
- * ⚠ THE ROWS ARE COMPANIES, NOT HOLDINGS. Two share classes fold into one line with their weights
+ *  The rows are companies, not holdings. Two share classes fold into one line with their weights
  * summed — see `_active_share._issuer_key` — so the count here will not always match the Holdings
  * table's, and that is correct rather than a discrepancy.
  *
- * ⚠ AND THE WORD ON SCREEN IS "COMPANY", not "issuer" (2026-08-25). The code still says issuer,
+ *  And the word on screen is "COMPANY", not "issuer" (2026-08-25). The code still says issuer,
  * which is right there: `_issuer_key` folds share classes and ADRs onto one entity, and "issuer"
  * is the term for that entity in general. But every row this panel can produce IS a company —
  * funds, cash and bonds are dropped before the fold — so on screen "issuer" was jargon buying no
@@ -47,9 +47,9 @@ import DrawdownView from './DrawdownView';
 import ConcentrationView from './ConcentrationView';
 
 /**
- * ONE BODY FOR ALL SEVEN RISK VIEWS.
+ * One body for all seven risk views.
  *
- * ⚠⚠ SIX OF THEM ARE SCALE-FREE and read only `weight_pct`; `value_eur` and `currency` exist for
+ *  Six of them are scale-free and read only `weight_pct`; `value_eur` and `currency` exist for
  * the Effective-positions view alone. They ride on the SAME object anyway, deliberately: seven
  * views assembled from seven slightly different holdings lists is exactly the failure the shared
  * `build_issuer_weights` / `build_paired_series` exist to prevent, one level up.
@@ -59,20 +59,20 @@ export type ActiveShareHolding = {
   name?: string | null;
   weight_pct: number;
   is_fund?: boolean;
-  /** AIRS's own `current_value_eur`. ⚠ Absent on an ad-hoc basket — weights without euros. */
+  /** AIRS's own `current_value_eur`.  Absent on an ad-hoc basket — weights without euros. */
   value_eur?: number | null;
-  /** ⚠ The LISTING's currency — the FX exposure actually borne, not the company's reporting one. */
+  /**  The LISTING's currency — the FX exposure actually borne, not the company's reporting one. */
   currency?: string | null;
 };
 
-/** ⚠ TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
+/**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
  *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
  *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
  *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const signed = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}`;
 
-/** ⚠ ONE ROW'S BAR IS SCALED TO THE LARGEST BET ON SCREEN, not to 100%. The biggest active weight
+/**  ONE ROW'S BAR IS SCALED TO THE LARGEST BET ON SCREEN, not to 100%. The biggest active weight
  *  in a diversified book is a couple of points, so a 0-100 scale renders every row as an invisible
  *  sliver — a chart that cannot be read is worse than the number alone. */
 function Bar({ v, max }: { v: number; max: number }) {
@@ -112,25 +112,25 @@ export default function ActiveSharePanel({
   holdings: ActiveShareHolding[];
   benchmark: string;
   /** The book's own name, so its date line names the thing it dates rather than saying "the book".
-   *  ⚠ It is on screen anyway (the modal's heading), which is what makes it the shortest possible
+   *   It is on screen anyway (the modal's heading), which is what makes it the shortest possible
    *  label here — the reader does not have to work out which of the two lines is theirs. */
   portfolioName: string;
   /**
-   * ⚠⚠ THE BOOK'S OWN VALUATION DATE, PASSED IN RATHER THAN ASSUMED. AIRS values end-of-day on
+   *  The book's own valuation date, passed in rather than assumed. AIRS values end-of-day on
    * its own cadence, so "the weights" are as of whenever it last valued this book — Friday on a
    * Monday morning, older after a failed scrape. The card used to say "Today's weights", which
    * was an assumption printed as a fact; the reader can only judge whether it is current if they
-   * are told the date. ⚠ It cannot be derived here: a holdings array carries no date, which is
+   * are told the date.  It cannot be derived here: a holdings array carries no date, which is
    * exactly why the claim went unchecked for as long as it did.
    */
   portfolioAsOf?: string | null;
   /** When WE last read that valuation — a different fact from when AIRS produced it. */
   portfolioFetchedAt?: string | null;
   /**
-   * WHICH AIRS scan these weights came from — a model portfolio's composition or an account's own
+   * Which AIRS scan these weights came from — a model portfolio's composition or an account's own
    * Vermogensoverzicht.
    *
-   * ⚠ IT IS THE CALLER'S FACT, NOT A DEFAULT. The modal already knows (`isBasket`), and the two
+   *  It is the caller's fact, not a default. The modal already knows (`isBasket`), and the two
    * scans are different objects read by different jobs; picking one here would print a source that
    * happens to be right for whichever kind of book was opened first.
    */
@@ -140,28 +140,28 @@ export default function ActiveSharePanel({
   const t = useRiskCopy();
   const [data, setData] = useState<ActiveShare | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** ⚠ ALL ROWS, OR ONLY WHAT WE HOLD. The underweights are the other half of the measure — a book
+  /**  ALL ROWS, OR ONLY WHAT WE HOLD. The underweights are the other half of the measure — a book
    *  can be 70% active almost entirely by NOT owning things — but there are ~1,700 of them on ACWI,
    *  so the default is the book and the index's biggest gaps are one click away. */
   const [showAll, setShowAll] = useState(false);
   /**
    * Which of the two risk views is on screen.
    *
-   * ⚠⚠ ONE PANEL WITH A SWITCH, NOT TWO BUTTONS IN THE TOOLBAR, and that is the point of it.
+   *  One panel with a switch, not two buttons in the toolbar, and that is the point of it.
    * Active share is what the book LOOKS like against the index; tracking error is what that
    * difference has actually DONE. They are the same question from opposite ends — a book can be
    * 80% active and track closely (different names, same sectors) or 30% active and wander (few
    * bets, enormous ones) — so reading either as a proxy for the other is the standard mistake,
    * and putting them one click apart under one heading is what makes the pair legible.
    *
-   * ⚠ THE TRACKING-ERROR SIDE IS MOUNTED LAZILY. It costs a five-year daily price load for every
+   *  The tracking-error side is mounted lazily. It costs a five-year daily price load for every
    * holding plus the tracker; most opens of this panel never switch to it, and paying for it on
    * every open would make the cheap view as slow as the expensive one.
    */
   const [view, setView] =
     useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active');
 
-  // ⚠ THE BODY IS THE DEPENDENCY, NOT AN OBJECT IDENTITY. `holdings` is rebuilt on every render of
+  //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
   const key = `${benchmark}|${holdings.length}|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
 
@@ -186,7 +186,7 @@ export default function ActiveSharePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  // ⚠ `?? []` ON BOTH — every list on this payload is optional in the generated types (the
+  //  `?? []` ON BOTH — every list on this payload is optional in the generated types (the
   // Pydantic default makes it so), and `.filter` on undefined is a blank panel with no error.
   const all: ActiveShareRow[] = data?.rows ?? [];
   const rows = all.filter((r) => (showAll ? true : r.held));
@@ -194,23 +194,23 @@ export default function ActiveSharePanel({
   /**
    * The footer row's sums — over the ROWS ON SCREEN, not over `all`.
    *
-   * ⚠⚠ WHAT THEY MEAN CHANGES WITH THE FILTER, AND THE ROW HAS TO SAY WHICH. Over EVERY name both
+   *  What they mean changes with the filter, and the row has to say which. Over EVERY name both
    * weight columns sum to 100% and Active sums to exactly zero — that zero is the reason active
    * share is halved, since every overweight has a matching underweight by construction. Over the
    * HELD names only, Active sums to the book's whole overweight, which is carried by the index
    * constituents not on screen. Both are useful; a footer that printed either without naming the
    * set would be read as the other.
    *
-   * ⚠ AND ½ Σ|Active| RECONCILES TO THE TILE ABOVE **ONLY OVER EVERY NAME**. On the held subset
+   *  AND ½ Σ|Active| RECONCILES TO THE TILE ABOVE **ONLY OVER EVERY NAME**. On the held subset
    * half the sum is missing, so it is not shown there rather than shown and quietly wrong.
    */
   /**
    * The two-sided date line, built once and shared by every tile that compares the book WITH the
    * index — active share, overlap, off-benchmark.
    *
-   * ⚠ ONE STRING FOR THE THREE, because they are three readings of ONE pair of inputs. Three
+   *  One string for the three, because they are three readings of ONE pair of inputs. Three
    * separate calls would be three places for the operands to drift apart, and a panel where two
-   * tiles date the same weights differently is a panel nobody can reconcile. ⚠ The Stocks tile is
+   * tiles date the same weights differently is a panel nobody can reconcile.  The Stocks tile is
    * deliberately NOT here — no index appears in it, so it takes `whenBook`.
    */
   const whenBoth = t.active.whenWeights(
@@ -229,7 +229,7 @@ export default function ActiveSharePanel({
   return (
     <div className="h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
       bg-card p-4">
-      {/* ⚠⚠ THE HEADER IS `shrink-0` AND OUTSIDE THE VIEW BRANCH — which is the whole point
+      {/*  THE HEADER IS `shrink-0` AND OUTSIDE THE VIEW BRANCH — which is the whole point
           of the switch living here. It used to sit above content whose height changed with
           the selected view, so choosing "Tracking error" moved the very control that had
           just been clicked. A toggle that jumps out from under the pointer reads as a
@@ -242,23 +242,23 @@ export default function ActiveSharePanel({
           <p className="text-[11px] text-fg-faint mt-0.5">
             {t.subtitle}
           </p>
-          {/* ⚠ A TWO-POSITION SEGMENTED CONTROL, JOINED — which is the shape that means "exactly
+          {/*  A TWO-POSITION SEGMENTED CONTROL, JOINED — which is the shape that means "exactly
               one of these". The filter chips elsewhere in this modal are separate pills because
               they mean "any of these"; borrowing that look here would promise both views at once.
-              See the ⚠ on `Chip` in `TablesTab` for the same distinction. */}
-          {/* ⚠ `flex-wrap`, NOT `inline-flex` — at six positions the row was wider than a
+              See the  on `Chip` in `TablesTab` for the same distinction. */}
+          {/*  `flex-wrap`, NOT `inline-flex` — at six positions the row was wider than a
               narrow dialog, and an overflowing segmented control silently hides its last option.
               Wrapping keeps every view reachable; the joined look survives via the shared border. */}
           <div className="flex flex-wrap mt-2 rounded-lg border border-neutral-800/40
             overflow-hidden max-w-full">
-            {/* ⚠⚠ FIVE RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SIXTH. Every one
+            {/*  FIVE RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SIXTH. Every one
                 of these describes the SHAPE of the book — how far it sits from the index, how far
                 that gap has moved, how much of the movement is shared, how much it varies, how
                 deep it has fallen, and how few names it is. Attribution DECOMPOSES the active
                 return into allocation + selection + interaction, terms that sum to it exactly;
                 none of these appears in that decomposition and none of them sums to anything.
                 Putting it on this switch would imply they reconcile. It keeps its own dialog. */}
-            {/* ⚠ THE KEYS DRIVE THE ORDER, THE COPY TABLE DRIVES THE WORDS — a label typed
+            {/*  THE KEYS DRIVE THE ORDER, THE COPY TABLE DRIVES THE WORDS — a label typed
                 here in one language is exactly the drift `riskCopy`'s compile-time guarantee
                 exists to prevent. */}
             {(['active', 'te', 'corr', 'vol', 'dd', 'conc'] as const).map((k) => (
@@ -277,17 +277,17 @@ export default function ActiveSharePanel({
           aria-label={t.close}>×</button>
       </div>
 
-      {/* ⚠ EVERYTHING BELOW THE HEADER SCROLLS AS ONE. `min-h-0` is what lets it: without it the
+      {/*  EVERYTHING BELOW THE HEADER SCROLLS AS ONE. `min-h-0` is what lets it: without it the
           flex child refuses to shrink under its content and the dialog's fixed height gives way
           — see `PanelDialog`. */}
       <div className="flex-1 min-h-0 overflow-auto pt-3 space-y-3">
 
-      {/* ⚠ MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
+      {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
           lazy load real rather than merely hidden. It takes the SAME holdings, so both views
           describe one portfolio; see `compute_tracking_error`. */}
       {view === 'te' && (
         <TrackingErrorView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
-          // ⚠ THE SAME BOOK IDENTITY THE ACTIVE-SHARE CARDS CARRY. This view measures the same
+          //  The same book identity the active-share cards carry. This view measures the same
           // sleeve, so its cards owe the reader the same answer to "whose weights, read when, from
           // where" — and a second copy of those facts would be a second thing to keep true.
           portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
@@ -314,7 +314,7 @@ export default function ActiveSharePanel({
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
 
-      {/* ⚠ CENTRED, BECAUSE THE BOX NO LONGER SHRINKS TO THEM. One line of text in the top
+      {/*  CENTRED, BECAUSE THE BOX NO LONGER SHRINKS TO THEM. One line of text in the top
           corner of a fixed 76vh panel reads as a render that failed halfway. */}
       {view === 'active' && (error || !data || !data.available) && (
         <div className="h-full grid place-items-center text-center px-6">
@@ -327,7 +327,7 @@ export default function ActiveSharePanel({
       {view === 'active' && data?.available && (
         <>
           <div className="flex flex-wrap gap-2">
-            {/* ⚠ `where` STAYS AT THE CALL SITE where it interpolates live counts — the copy
+            {/*  `where` STAYS AT THE CALL SITE where it interpolates live counts — the copy
                 table carries the sentences, not the arithmetic. A `where` with two numbers in it
                 would need a formatter per language for no gain; these are counts and a benchmark
                 name, which read the same in both. */}
@@ -385,7 +385,7 @@ export default function ActiveSharePanel({
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.stocks.what}
                 where={t.active.cards.stocks.where}
-                // ⚠ THE BOOK'S DATE ALONE. No index appears in this figure, so dating the caps
+                //  The book's date alone. No index appears in this figure, so dating the caps
                 // beside it would date a side the number does not contain.
                 when={t.active.whenBook(
                   portfolioName, dayOf(portfolioAsOf), dayOf(portfolioFetchedAt))}
@@ -400,7 +400,7 @@ export default function ActiveSharePanel({
                 how={t.active.cards.stocks.how} />} />} />
           </div>
 
-          {/* ⚠ THE INDEX'S OWN COVERAGE, STATED WHENEVER ITS WEIGHTS ARE ON SCREEN — the same rule
+          {/*  THE INDEX'S OWN COVERAGE, STATED WHENEVER ITS WEIGHTS ARE ON SCREEN — the same rule
               the composition charts follow. A constituent we cannot price does not lose its weight,
               it redistributes it across the rest, which makes active share read slightly LOW. */}
           {data.benchmark_covered_pct != null && data.benchmark_covered_pct < 99.5 && (
@@ -436,7 +436,7 @@ export default function ActiveSharePanel({
             </button>
           </div>
 
-          {/* ⚠⚠ THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED
+          {/*  THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED
               TO SIT HERE. That note said a cap would "nest one scrollbar inside another — and the
               outer one would have nothing to scroll". The first half is true and the second is
               not: the outer box still scrolls the tiles, the coverage note and the filter chips.
@@ -447,10 +447,10 @@ export default function ActiveSharePanel({
               fixing the paint order. Sticking a cell to the top of the box it actually lives in is
               the most-tested table pattern there is, and it is what the mobile rule in the project
               docs already asks for ("keep dense tables inside their own overflow-auto container").
-              ⚠ `max-h`, NOT `h` — a short book must not get a half-empty box with a scrollbar. */}
+               `max-h`, NOT `h` — a short book must not get a half-empty box with a scrollbar. */}
           <div className="rounded-lg border border-neutral-800/40 max-h-[55vh] overflow-auto">
             <table className="w-full text-xs">
-              {/* ⚠⚠ STICKY AND THE BACKGROUND BOTH SIT ON THE `<th>` CELLS, NOT ON `<thead>`, AND
+              {/*  STICKY AND THE BACKGROUND BOTH SIT ON THE `<th>` CELLS, NOT ON `<thead>`, AND
                   THAT IS THE WHOLE FIX. Two separate reasons, either of which alone produces the
                   reported symptom — rows travelling over a header that should absorb them:
 
@@ -463,7 +463,7 @@ export default function ActiveSharePanel({
                      problem and darkening the token would not have fixed it — a `<th>` background
                      paints in the cell's own layer and covers what goes underneath.
 
-                  ⚠ `z-10` BECAUSE STICKY ALONE ONLY WINS AGAINST NON-POSITIONED CONTENT, and the
+                   `z-10` BECAUSE STICKY ALONE ONLY WINS AGAINST NON-POSITIONED CONTENT, and the
                   rows are not that: `Bar` uses `relative`/`absolute` for its bars, so its spans
                   paint in the positioned phase and would sit over a z-auto header. */}
               <thead>
@@ -494,7 +494,7 @@ export default function ActiveSharePanel({
                     <td className="text-right font-mono tabular-nums text-fg-muted">
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%` : '—'}
                     </td>
-                    {/* ⚠ NO TONE ON THE NUMBER ITSELF beyond direction. An overweight is not a
+                    {/*  NO TONE ON THE NUMBER ITSELF beyond direction. An overweight is not a
                         good thing and an underweight is not a bad one; the colour says which way
                         the bet goes, never whether it was right. */}
                     <td className={`text-right font-mono tabular-nums ${
@@ -505,12 +505,12 @@ export default function ActiveSharePanel({
                   </tr>
                 ))}
               </tbody>
-              {/* ⚠ STICKY TO THE BOTTOM OF THE SCROLL BOX, like the header is to the top. With
+              {/*  STICKY TO THE BOTTOM OF THE SCROLL BOX, like the header is to the top. With
                   1,678 rows a plain `<tfoot>` is a footer nobody reaches, and the total is the
                   one row that reconciles this table to the tiles above it.
-                  ⚠ A SOLID BACKGROUND IS LOAD-BEARING: the rows scroll UNDER it, and at any
+                   A SOLID BACKGROUND IS LOAD-BEARING: the rows scroll UNDER it, and at any
                   alpha the digits of two rows overlap. */}
-              {/* ⚠ SAME TREATMENT AS THE HEADER AND FOR BOTH THE SAME REASONS — see above. Rows
+              {/*  SAME TREATMENT AS THE HEADER AND FOR BOTH THE SAME REASONS — see above. Rows
                   pass under this end too, so it carried the identical bug. */}
               <tfoot>
                 <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
@@ -521,7 +521,7 @@ export default function ActiveSharePanel({
                     <InfoTip className="ml-1" content={<AspectCard
                       {...(showAll ? t.active.totalCard : t.active.totalCardHeld)}
                       when={whenBoth}
-                      // ⚠ THE SYMBOLIC HALF ONLY OVER EVERY NAME. On the held subset half the sum
+                      //  The symbolic half only over every name. On the held subset half the sum
                       // is missing, so ½ Σ|Active| is NOT the active share — printing the formula
                       // there would invite exactly the reconciliation the copy warns against.
                       worked={showAll
@@ -541,7 +541,7 @@ export default function ActiveSharePanel({
                   <td className="text-right font-mono tabular-nums text-fg">
                     {`${totals.bench.toFixed(2)}%`}
                   </td>
-                  {/* ⚠ NO TONE ON THE TOTAL. Over every name it is zero and a colour would imply a
+                  {/*  NO TONE ON THE TOTAL. Over every name it is zero and a colour would imply a
                       direction; over the held subset it is always positive and a green would read
                       as a verdict on a number that is positive by construction. */}
                   <td className="text-right font-mono tabular-nums text-fg">

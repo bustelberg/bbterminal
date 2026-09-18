@@ -342,7 +342,7 @@ def _run_momentum_phase(
                         elif t == "warning":
                             wm = evt.get("message")
                             if wm:
-                                log_step(run_id, f"    ⚠ {wm}", level="warn", phase="momentum")
+                                log_step(run_id, f"     {wm}", level="warn", phase="momentum")
                         elif t == "current_portfolio":
                             payload = evt.get("data") or {}
                             snapshot_id = payload.get("snapshot_id")
@@ -458,7 +458,7 @@ def _run_momentum_phase(
                 "[pipeline.momentum] run_id=%s strategy=%s snapshot=%s holdings=%s",
                 run_id, strategy_name, snapshot_id, holdings_count,
             )
-            # THE ANSWER THE RUN EXISTS TO PRODUCE — itemised, after the ETF
+            # The answer the run exists to produce — itemised, after the ETF
             # overlay and the cash sleeve, i.e. the book as it will actually be
             # held. A count ("24 holdings") is a receipt, not a result.
             _log_holdings(run_id, strategy_name, snapshot_id)

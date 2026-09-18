@@ -1,6 +1,6 @@
 """A HUNG JOB MUST BE ABLE TO DIE.
 
-⚠⚠ THE PRODUCTION FAILURE, 2026-08-31. `Refresh all portfolios` blocked inside a Playwright call,
+ THE PRODUCTION FAILURE, 2026-08-31. `Refresh all portfolios` blocked inside a Playwright call,
 so its worker never reached a `ctx.check()`. Cancellation here is cooperative by design, so Cancel
 could only set the flag — the card read "cancelling…" with "starting…" as its last line, and three
 separate mechanisms then kept it alive forever:
@@ -56,14 +56,14 @@ class TestSilenceIsWrittenOff:
         assert "No progress" in (row["summary"] or "")
 
     def test_failed_not_cancelled(self, fast):
-        """⚠ NOBODY ASKED FOR THIS TO STOP; it stopped answering. Filing it as a cancellation would
+        """ NOBODY ASKED FOR THIS TO STOP; it stopped answering. Filing it as a cancellation would
         put a worker's crash in the same column as a reader's decision."""
         J.start("k", "hangs", _hang)
         time.sleep(1.1)
         assert J.listing()[0]["status"] == "failed"
 
     def test_the_summary_does_not_pretend_the_thread_was_killed(self, fast):
-        """⚠ IT IS A STATUS CHANGE, NOT A KILL — a thread blocked in a vendor call cannot be
+        """ IT IS A STATUS CHANGE, NOT A KILL — a thread blocked in a vendor call cannot be
         interrupted from outside, and a summary claiming otherwise is the kind of thing a reader
         acts on."""
         J.start("k", "hangs", _hang)
@@ -77,7 +77,7 @@ class TestSilenceIsWrittenOff:
         assert job.cancel_requested
 
     def test_a_watcher_gets_a_line_saying_why(self, fast):
-        """⚠ A CARD THAT FLIPS TO `failed` WITH NOTHING TO READ is the same dead end from the other
+        """ A CARD THAT FLIPS TO `failed` WITH NOTHING TO READ is the same dead end from the other
         side. The reaper emits, so an open stream ends with an explanation."""
         job, _ = J.start("k", "hangs", _hang)
         time.sleep(1.1)
@@ -87,7 +87,7 @@ class TestSilenceIsWrittenOff:
 
 class TestTheNextPressStartsARealRun:
     def test_a_reaped_job_no_longer_blocks_its_own_label(self, fast):
-        """⚠⚠ THE HALF THAT MATTERS MOST. `start` attaches to `find_running` instead of launching —
+        """ THE HALF THAT MATTERS MOST. `start` attaches to `find_running` instead of launching —
         right for a run in flight, fatal for a hung one. Before the reaper, every press adopted the
         corpse and nothing new ever started."""
         J.start("k", "same label", _hang)
@@ -101,7 +101,7 @@ class TestTheNextPressStartsARealRun:
         assert ran.wait(2)
 
     def test_a_LIVE_job_is_still_reused(self, fast):
-        """⚠ THE REAPER MUST NOT BREAK IDEMPOTENCE. A job that is narrating is doing its work, and
+        """ THE REAPER MUST NOT BREAK IDEMPOTENCE. A job that is narrating is doing its work, and
         a second press has to attach to it — that is what stops two fills over one index."""
         def _chatty(ctx):
             for _ in range(40):
@@ -128,7 +128,7 @@ class TestTheClockIsSilenceNotAge:
         assert J.listing()[0]["status"] == "running"
 
     def test_the_heartbeat_starts_at_creation(self, fast):
-        """⚠ A JOB THAT DIES BEFORE ITS FIRST `emit` still has to age out. `last_event_at` starts at
+        """ A JOB THAT DIES BEFORE ITS FIRST `emit` still has to age out. `last_event_at` starts at
         creation rather than at 0, or such a job is instantly stale — and starts at creation rather
         than never, or it lives forever."""
         job, _ = J.start("k", "silent", lambda _c: time.sleep(5) or "done")

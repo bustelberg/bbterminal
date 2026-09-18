@@ -12,7 +12,7 @@ const ROWS: (ValuedRow & { weight: number })[] = [
   { holding_name: 'iShares MSCI Wld Mom Fact ETF EUR', start_value_eur: 59554.30, current_value_eur: 62622.60, weight: 0.05 },
   { holding_name: 'Alphabet - C', start_value_eur: 56285.38, current_value_eur: 62339.83, weight: 0.05 },
   { holding_name: 'Berkshire Hathaway - B', start_value_eur: 60317.50, current_value_eur: 61345.35, weight: 0.05 },
-  // ⚠ No opening value: real exposure today, undefined return. Cash is always this.
+  //  No opening value: real exposure today, undefined return. Cash is always this.
   { holding_name: 'Effectenrekening', start_value_eur: 0, current_value_eur: 32936.16, weight: 0.03 },
 ];
 
@@ -38,7 +38,7 @@ describe('startBasis', () => {
   });
 
   it("weighting by today's share does not, and overstates", () => {
-    // ⚠ THE BUG A READER HITS WITH ONLY ONE WEIGHT COLUMN ON SCREEN. A holding that rose carries
+    //  The bug a reader hits with only one weight column on screen. A holding that rose carries
     // a bigger share of the book TODAY than it held while it was rising, so today's weights tilt
     // toward the winners — here ASML, up +72.5%, at 17.0% of the book at the open and 23.7% now.
     //
@@ -58,7 +58,7 @@ describe('startBasis', () => {
   });
 
   it('a holding with no opening value gets null, never 0', () => {
-    // ⚠ A 0.00% would read as "held none of the book"; the truth is "was not held yet".
+    //  A 0.00% would read as "held none of the book"; the truth is "was not held yet".
     const b = startBasis(ROWS);
     expect(b.weightOf({ holding_name: 'Effectenrekening', start_value_eur: 0, current_value_eur: 32936.16 }))
       .toBeNull();
@@ -107,7 +107,7 @@ describe('groupStats', () => {
   });
 
   it('THE SEGMENTS WEIGHT TO THE BOOK — the identity holds one level up too', () => {
-    // ⚠ Only true because both come from the same `startBasis` over the same priced rows. This is
+    //  Only true because both come from the same `startBasis` over the same priced rows. This is
     // what makes the group rows a decomposition of the Total rather than figures beside it.
     const weighted = [eq, etf].reduce(
       (s, g) => s + (g.startWeightPct! / 100) * (g.returnPct! / 100), 0);
@@ -115,7 +115,7 @@ describe('groupStats', () => {
   });
 
   it('a row with no opening value counts in the weight but not in the return', () => {
-    // ⚠ Cash is exactly this. Putting it in Σcurrent/Σstart would report its whole balance as gain.
+    //  Cash is exactly this. Putting it in Σcurrent/Σstart would report its whole balance as gain.
     expect(etf.pricedValueEur).toBeCloseTo(62622.60, 2);        // the ETF only
     expect(etf.valueEur).toBeCloseTo(62622.60 + 32936.16, 2);   // + the cash
     expect(etf.partial).toBe(true);
@@ -149,7 +149,7 @@ describe('groupStats: the segment return explains itself without using itself', 
   });
 
   it('the segment return is that contribution ÷ the segment start weight', () => {
-    // ⚠ This is what "renormalised within the segment" means, and it is the whole formula.
+    //  This is what "renormalised within the segment" means, and it is the whole formula.
     const s = groupStats(EQ, basis, opts);
     expect(s.contributionPct! / s.startWeightPct!).toBeCloseTo(s.returnPct! / 100, 12);
   });
@@ -160,7 +160,7 @@ describe('groupStats: the segment return explains itself without using itself', 
   });
 
   it('startValueEur is summed from the rows, NOT reconstructed from the return', () => {
-    // ⚠ `pricedValueEur / (1 + returnPct)` derives the input from the output, so it agrees with
+    //  `pricedValueEur / (1 + returnPct)` derives the input from the output, so it agrees with
     // the answer BY CONSTRUCTION and could never contradict a wrong one. On the real Stocks row
     // it happened to land on the true €945,712 — which is the danger, not the reassurance: a
     // figure that is right by luck and cannot be wrong is not a check.
@@ -185,7 +185,7 @@ describe('groupStats: dividend columns', () => {
   });
 
   it('is NULL when no row below has a figure, never 0', () => {
-    // ⚠ A money column reads 0 as "this group paid nothing". For a book whose Mutaties journal
+    //  A money column reads 0 as "this group paid nothing". For a book whose Mutaties journal
     // has not been scanned that is a claim we cannot make — the honest answer is a blank.
     const g = groupStats(ROWS, basis, { ...base, dividendOf: () => null, dividendTaxOf: () => null });
     expect(g.dividendEur).toBeNull();
@@ -216,7 +216,7 @@ describe('total return: income in the numerator', () => {
     expect(holdingTotalReturn(MSFT)).toBeCloseTo((11_000 + 72.38) / 10_000 - 1, 12);
   });
 
-  it('⚠ ADDS the tax, because the tax is already negative', () => {
+  it(' ADDS the tax, because the tax is already negative', () => {
     // Subtracting it — the intuitive reading of "value + dividend - tax" — adds the withholding
     // BACK, overstating by twice the tax. Silently: the result is still a plausible number.
     const wrong = (11_000 + 85.15 - -12.77) / 10_000 - 1;
@@ -236,7 +236,7 @@ describe('total return: income in the numerator', () => {
   });
 
   it('the identity STILL closes with income in it', () => {
-    // ⚠ The whole point: the Total became a total return, so every figure built on it did too,
+    //  The whole point: the Total became a total return, so every figure built on it did too,
     // and Σ(start wt × return) must still equal it exactly.
     const rows = [MSFT, { holding_name: 'B', start_value_eur: 5_000, current_value_eur: 5_400,
                           dividend_eur: 200, dividend_tax_eur: -30 }];
@@ -246,7 +246,7 @@ describe('total return: income in the numerator', () => {
   });
 
   it('a segment with income is not flagged as partially priced', () => {
-    // ⚠ `partial` compares VALUE against VALUE. Comparing it against value+income would flag
+    //  `partial` compares VALUE against VALUE. Comparing it against value+income would flag
     // every income-bearing segment, and the * on the return would stop meaning anything.
     const rows = [MSFT];
     const g = groupStats(rows, startBasis(rows),
@@ -292,14 +292,14 @@ describe('aggregateGroups: the Total is the segment rows, summed', () => {
     expect(total.returnPct! / 100).toBeCloseTo(byHand, 12);
   });
 
-  it('⚠ and NOT the plain average of them', () => {
+  it(' and NOT the plain average of them', () => {
     // The segments are wildly different sizes; averaging their returns is a different number.
     const mean = [eq, bond].reduce((s, g) => s + g.returnPct!, 0) / 2;
     expect(total.returnPct).not.toBeCloseTo(mean, 4);
   });
 
   it('aggregating the segments equals aggregating the holdings directly', () => {
-    // ⚠ THE POINT OF THE REFACTOR. These were two code paths that happened to agree; now the
+    //  The point of the refactor. These were two code paths that happened to agree; now the
     // Total is defined as the first, and this asserts it still lands on the second.
     expect(total.returnPct! / 100).toBeCloseTo(basis.totalReturn!, 12);
     expect(total.valueEur).toBeCloseTo(
@@ -343,7 +343,7 @@ describe('the model columns', () => {
   });
 
   it('is NULL when the model names nothing here, never 0', () => {
-    // ⚠ "the strategy wants none of this" and "this book's MODEL report has not been scanned"
+    //  "the strategy wants none of this" and "this book's MODEL report has not been scanned"
     // are different claims, and only one of them is safe to make.
     const g = groupStats(ROWS2, basis, { weightOfRow: () => 0.3, isEtf: () => false });
     expect(g.modelPct).toBeNull();
@@ -351,7 +351,7 @@ describe('the model columns', () => {
   });
 
   it('carries up to the Total exactly, not rounded to cents', () => {
-    // ⚠ These are percentages. `sumMoney` would round 3.25 + 2.93 to 2dp per level, and the
+    //  These are percentages. `sumMoney` would round 3.25 + 2.93 to 2dp per level, and the
     // Total is a sum of sums — the error compounds. Measured on the return, that cost 0.0014pp.
     const a = groupStats([ROWS2[0]], basis, opts);
     const b = groupStats([ROWS2[1]], basis, opts);
@@ -385,12 +385,12 @@ describe('weightedReturn: choosing the weight basis', () => {
     expect(w.pct! / 100).toBeCloseTo(basis.totalReturn!, 12);
   });
 
-  it("⚠ another basis is a DIFFERENT number, and higher when it tilts to the winner", () => {
+  it(" another basis is a DIFFERENT number, and higher when it tilts to the winner", () => {
     const now = weightedReturn(ROWS3, (r) => todayW[r.holding_name], ret);
     expect(now.pct).toBeGreaterThan(weightedReturn(ROWS3, basis.weightOf, ret).pct!);
   });
 
-  it('⚠ RENORMALISES — a raw Σ(w × r) understates by whatever the weights miss', () => {
+  it(' RENORMALISES — a raw Σ(w × r) understates by whatever the weights miss', () => {
     // The cash line carries 0.1 of weight and no return, so Σw over usable rows is 1.0, not 1.1.
     const w = weightedReturn(ROWS3, (r) => todayW[r.holding_name], ret);
     expect(w.weightSum).toBeCloseTo(1.0, 12);           // cash excluded from the denominator

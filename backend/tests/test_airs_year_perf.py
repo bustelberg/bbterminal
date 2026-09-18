@@ -53,7 +53,7 @@ def perf(monkeypatch):
             def select(self, *a, **k): return self
             def order(self, *a, **k): return self
             def limit(self, *a, **k): return self
-            # ⚠ THE READ IS PAGED NOW, and a stub that ignored `.range()` would hand the whole
+            #  The read is paged now, and a stub that ignored `.range()` would hand the whole
             # table back on every page — an infinite loop, not a passing test. `_year_perf` was
             # reading `airs_performance` unpaged and production silently got the first 1,000 rows
             # of an ASCENDING scan, i.e. everything except the newest months (see `_paged`).

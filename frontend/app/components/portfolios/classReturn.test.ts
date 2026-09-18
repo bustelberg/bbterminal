@@ -15,7 +15,7 @@ describe('classWeightedReturn', () => {
   });
 
   it('INCLUDES what was banked on a position that was trimmed', () => {
-    // ⚠ THE BUG THIS REPLACED. The old form averaged each row's own return, which describes only
+    //  The bug this replaced. The old form averaged each row's own return, which describes only
     // the shares still held — so a trim that banked real money appeared in the Result column and
     // in no percentage anywhere. Measured on AITopSelectie: EUR 6,307 realised, 0.63pp missing.
     const heldOnly = classWeightedReturn([row(1000, 100)]);
@@ -33,7 +33,7 @@ describe('classWeightedReturn', () => {
   });
 
   it('leaves a row with no opening value out of BOTH sides', () => {
-    // ⚠ Summing every row's result over only the priced rows' opening value would divide one
+    //  Summing every row's result over only the priced rows' opening value would divide one
     // population by another — the rate would exceed the truth by whatever the excluded rows made.
     const r = classWeightedReturn([row(1000, 100), row(null, 500)]);
     expect(r.pct).toBeCloseTo(10, 10);          // NOT 60
@@ -68,7 +68,7 @@ describe('classWeightedReturn', () => {
 
   describe('cash', () => {
     it('returns 0%, not a dash, when told there is no opening value to divide by', () => {
-      // ⚠ AIRS books no Beginwaarde for a cash line. Without the flag this is `null`, which the
+      //  AIRS books no Beginwaarde for a cash line. Without the flag this is `null`, which the
       // table renders as "—" — and a dash says "we could not work this out" about the one asset
       // whose return is certain.
       const r = classWeightedReturn([row(null, 0)], true);
@@ -98,7 +98,7 @@ describe('classWeightedReturn', () => {
   });
 
   it('handles a class that lost money without flipping the coverage sign', () => {
-    // ⚠ Coverage is on ABSOLUTE result: a loss counts as much as a gain toward "is this rate
+    //  Coverage is on ABSOLUTE result: a loss counts as much as a gain toward "is this rate
     // describing all the money", and a signed ratio would go negative and read as nonsense.
     const r = classWeightedReturn([row(1000, -100), row(null, -100)]);
     expect(r.pct).toBeCloseTo(-10, 10);

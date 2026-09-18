@@ -1,6 +1,6 @@
 """Blending a portfolio's fundamentals — where the aggregation rule depends on WHAT is aggregated.
 
-⚠⚠ THERE IS NO SINGLE "WEIGHTED AVERAGE" HERE, AND USING ONE PRODUCES A CONFIDENT WRONG NUMBER.
+ THERE IS NO SINGLE "WEIGHTED AVERAGE" HERE, AND USING ONE PRODUCES A CONFIDENT WRONG NUMBER.
     Three kinds of metric live in the same `MetricRow` stream and each aggregates differently:
 
     MULTIPLE (P/E, PEG — a price OVER something)
@@ -20,7 +20,7 @@
         Absolute amounts in each company's own units. Weighting Apple's revenue by 5% and ASML's
         by 3% produces a number that is not any company's revenue and not the portfolio's either.
 
-        ⚠⚠ SO THE LINE IS CHAINED FROM WEIGHTED **GROWTH**, NOT AVERAGED FROM REBASED LEVELS
+         SO THE LINE IS CHAINED FROM WEIGHTED **GROWTH**, NOT AVERAGED FROM REBASED LEVELS
         (2026-08-12). Between two drawn points the index moves by the cap-weighted average of what
         its constituents actually did over that interval:
 
@@ -35,19 +35,19 @@
         The per-member REBASE survives for the audit views (each company's own index, anchored on
         its first POSITIVE period), but nothing sums those into the line any more.
 
-⚠⚠ ALIGNED ON THE FISCAL YEAR, NOT THE EXACT DATE — WITHOUT THIS THE BLEND IS EMPTY.
+ ALIGNED ON THE FISCAL YEAR, NOT THE EXACT DATE — WITHOUT THIS THE BLEND IS EMPTY.
     Companies close their books on different days. Measured across six real members: year-ends on
     2001-03-31, 2001-08-31, 2014-12-31 and 1998-12-31. Keyed on the raw `target_date`, almost no
     two members EVER share a key, so every period carries one company, every period falls under
     the coverage floor, and the whole series comes back empty — or, without a floor, becomes a
     line drawn from whichever single company happened to report that day.
 
-⚠ RENORMALISED AT EVERY PERIOD, NOT ONCE. Members report on different fiscal calendars and start at
+ RENORMALISED AT EVERY PERIOD, NOT ONCE. Members report on different fiscal calendars and start at
     different times, so the weight with data moves date by date. Dividing by the ORIGINAL weight
     instead would drag every early period toward zero — the series would show a rise that is
     nothing but coverage improving.
 
-⚠⚠ A FORECAST IS REBASED ON THE ACTUAL IT CONTINUES, NEVER ON ITSELF.
+ A FORECAST IS REBASED ON THE ACTUAL IT CONTINUES, NEVER ON ITSELF.
     An estimate series (`annual_eps_nri_estimate`) and the actual it extends
     (`…__EPS without NRI`) are the same quantity — one measured, one forecast — and the chart
     indexes BOTH off the actual's base so the forecast continues the line. Rebase them
@@ -56,7 +56,7 @@
     are rebased individually, so the caller passes each member's ACTUAL points as `base_points`
     and the forecast inherits that anchor.
 
-⚠ AND IT REFUSES BELOW A FLOOR. A blend over 40% of a book, drawn on the same axes as one over
+ AND IT REFUSES BELOW A FLOOR. A blend over 40% of a book, drawn on the same axes as one over
     95%, is the fabrication `MIN_COVERAGE_PCT` already refuses on the AIRS returns. `covered_pct`
     rides on every series and `MIN_BLEND_COVERAGE_PCT` is the point below which nothing is drawn.
 """
@@ -67,12 +67,12 @@ from datetime import date as _date
 
 # Below this share of the blended weight reporting on a date, that date has no honest value.
 #
-# ⚠ 60 -> 80 (2026-07-28) -> 50 (2026-08-12, on request: "if we have half the companies in a
+#  60 -> 80 (2026-07-28) -> 50 (2026-08-12, on request: "if we have half the companies in a
 # benchmark for a given period, we should display that data point"). Half the weight now draws —
 # `<` is the comparison, so exactly 50.0% clears.
 #
-# ⚠⚠ AND THE REASON IT WENT TO 80 HAS NOT GONE AWAY — IT IS AN ACCEPTED COST NOW, WHICH IS WORTH
-# KNOWING WHEN THE RIGHT EDGE OF A CHART LOOKS ODD. Books close on different dates, so early in a
+#  And the reason it went to 80 HAS NOT GONE AWAY — IT IS AN ACCEPTED COST NOW, WHICH IS WORTH
+# Knowing when the right edge of a chart looks odd. Books close on different dates, so early in a
 # fiscal year a handful of holdings have filed and the rest have not; renormalising over whoever
 # reported draws that as a full-height point in the same ink as a year everybody reported. It reads
 # as a move in the book and it is a move in the sample. Measured on the S&P revenue blend, FY2026
@@ -81,25 +81,25 @@ from datetime import date as _date
 # only, not a return to a single high floor that also hid the mid-history periods this lowering was
 # asked for.
 #
-# ⚠ KEPT IN LOCK-STEP WITH THE FRONTEND'S `marginData.MIN_YEAR_COVERAGE_PCT`, which applies the
+#  Kept in lock-step with the frontend's `marginData.MIN_YEAR_COVERAGE_PCT`, which applies the
 # same floor to the ratio cards derived on the client. Two floors that disagree put two cards on
 # the same screen spanning different fractions of the same book.
 MIN_BLEND_COVERAGE_PCT = 50.0
 
 # The same bar, counted in CONSTITUENTS rather than weight — and both must clear.
 #
-# ⚠⚠ WEIGHT ALONE LETS ONE GIANT DRAW A PERIOD. Measured 2026-08-12 on the AEX: 2026-Q2 had **2 of
+#  Weight alone lets one giant draw a period. Measured 2026-08-12 on the AEX: 2026-Q2 had **2 of
 # 22** constituents reporting and cleared the weight floor at 53.8%, because ASML is enormous. A
 # point built from two companies, drawn in the same ink as one built from twenty-two. Counted in
 # names it is 9.1% and refused.
 #
-# ⚠ AND NAMES ALONE WOULD BE WORSE, which is why this is an AND: ten 0.4% constituents would outvote
+#  And names alone would be worse, which is why this is an AND: ten 0.4% constituents would outvote
 # a missing 7% one. The two answer different questions — "how much of the index reported" and "how
 # many of it" — and a period has to survive both.
 MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
 
-# ⚠⚠ HOW BIG A MEMBER'S STARTING FIGURE MUST BE, RELATIVE TO ITS OWN TYPICAL SIZE, FOR THE RATIO
-# OFF IT TO BE A GROWTH RATE AT ALL — and this is the constant that stops ONE holding deleting a
+#  How big a member's starting figure must be, relative to its own typical size, for the ratio
+# Off it to be a growth rate at all — and this is the constant that stops ONE holding deleting a
 # whole chart (2026-08-13).
 #
 # The step is `g = v(period)/v(anchor) − 1`, guarded only by `v(anchor) > 0`. That guard catches
@@ -116,21 +116,21 @@ MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
 # 10** points and AEX quarterly **26 of 32**, with `connectNulls` drawing a confident straight line
 # across the hole. Nothing on screen said anything; `benchNote` only speaks at zero or one point.
 #
-# ⚠ IT IS SYMMETRIC, AND THE UPSIDE IS THE HALF A SIGN-CHANGE TEST WOULD MISS. The same 0.0090 base
+#  It is symmetric, and the upside is the half a sign-change test would miss. The same 0.0090 base
 # gives Prosus **+7,677%** on the way back up, which is how an index quadruples on one constituent.
 # The pathology is the DIVISOR, not the direction, so that is what is tested.
 #
-# ⚠ RELATIVE, NEVER ABSOLUTE. "0.009 is small" is not a fact about a number — it is a fact about
+#  Relative, never absolute. "0.009 is small" is not a fact about a number — it is a fact about
 # Prosus. NVIDIA's whole FCF/share series lives at 0.04–0.16 a share and is perfectly real. So the
 # bar is the member's own median |value|, which makes it scale-free and currency-free.
 #
-# ⚠⚠⚠ THE TWO MAGNITUDE HEURISTICS WERE REMOVED ON 2026-09-04, ON REQUEST. `step_growth` now refuses
+#  The two magnitude heuristics were removed on 2026-09-04, ON REQUEST. `step_growth` now refuses
 # a step ONLY where the arithmetic is undefined (a non-positive anchor) and floors it at −100%. The
 # constants and their evidence are kept HERE, unenforced, because they were read off measured
 # distributions and re-deriving them from scratch is the expensive part — if a corrupt figure ever
 # has to be caught again, start from these numbers, and prefer a STRUCTURAL test to a threshold.
 #
-# WHAT WAS REMOVED, AND WHAT IT WAS WORTH (ACWI, 2015->2025, measured the day it went):
+# What was removed, and what it was worth (acwi, 2015->2025, measured the day it went):
 #
 #     line          enforced     no base rule     neither
 #     fcf_ps         +18.85%         +25.57%      +33.93%
@@ -149,12 +149,12 @@ MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
 #    `748.588 -> 748.454` (−0.02%) and `748.439 -> 748.439` (exactly zero). A member with a big
 #    later run-up had its whole early history refused whatever happened in it.
 #
-# ── the ceiling (`_MAX_STEP_GROWTH = 100.0`): refuse a step over 100x in one year. ⚠⚠ THIS ONE HAD
-#    THE STRONGER CASE AND IT IS THE ONE TO BRING BACK FIRST if these lines ever read wrong.
+# ── the ceiling (`_MAX_STEP_GROWTH = 100.0`): refuse a step over 100x in one year.  THIS ONE HAD
+#    The stronger case and it is the one to bring back first if these lines ever read wrong.
 #    Measured on ACWI's annual FCF/share, 26,160 accepted steps across 1,712 constituents:
 #
-#        MITSUBISHI HEAVY  2024->2025      50.78 ->  86,214.52  +169,684%  moves the index +116.12pp
-#        DENSO CORP        2024->2025     172.97 -> 108,415.57   +62,580%  moves the index  +17.97pp
+#        Mitsubishi heavy  2024->2025      50.78 ->  86,214.52  +169,684%  moves the index +116.12pp
+#        Denso corp        2024->2025     172.97 -> 108,415.57   +62,580%  moves the index  +17.97pp
 #
 #    One corrupt cell in a 0.07%-weight constituent more than DOUBLED a line indexed to 100. The
 #    distribution says the >100x population is vendor error and not business: FCF/share p99 = +718%,
@@ -165,7 +165,7 @@ MIN_BLEND_COVERAGE_NAMES_PCT = 50.0
 #    vendor redenomination, not sixteen simultaneous miracles. Revenue, which has no share-count
 #    denominator to mis-scale, has ZERO steps over +10,000%.
 #
-# ⚠ SO A KNOWN-BAD CELL NOW REACHES THE CHART. The agreed trade is that a vendor figure is reported
+#  So a known-bad cell now reaches the chart. The agreed trade is that a vendor figure is reported
 #   as filed and a bad one shows up as a bad number rather than as a silently missing member. The
 #   principled replacement is structural, not a threshold: a near-exact 100x/1000x break in the
 #   share count (Japan Post Bank's `shares` is 1,000x too small, so its per-share reads +25,000%),
@@ -181,7 +181,7 @@ _MAX_CARRY_DAYS = 400
 
 # A price over something. Aggregates HARMONICALLY.
 #
-# ⚠ `indicator_q_forward_pe_ratio` IS LISTED EXPLICITLY AND MUST STAY THAT WAY. It is the code the
+#  `indicator_q_forward_pe_ratio` IS LISTED EXPLICITLY AND MUST STAY THAT WAY. It is the code the
 # Forward P/E chart actually plots, and it matches NONE of the patterns below: `RATIO_SUFFIXES`
 # is case-sensitive and this one ends in lowercase "ratio". Left to fall through it is classified
 # a LEVEL, gets rebased to 100, and the chart — which formats its value as "{v}x" — renders a
@@ -214,7 +214,7 @@ def _weighted_arithmetic(pairs: list[tuple[float, float]]) -> float | None:
 
 
 def _weighted_harmonic(pairs: list[tuple[float, float]]) -> float | None:
-    """Σw ÷ Σ(w/v). ⚠ A non-positive multiple is DROPPED, not inverted: a negative P/E (a loss)
+    """Σw ÷ Σ(w/v).  A non-positive multiple is DROPPED, not inverted: a negative P/E (a loss)
     has no meaningful reciprocal and one of them would flip the whole aggregate's sign."""
     usable = [(w, v) for w, v in pairs if v and v > 0]
     w = sum(p[0] for p in usable)
@@ -225,14 +225,14 @@ def _weighted_harmonic(pairs: list[tuple[float, float]]) -> float | None:
 
 
 def year_bucket(d: str) -> str:
-    """`2025-09-30` → `2025`. The ANNUAL alignment — see the ⚠⚠ at the top of this module."""
+    """`2025-09-30` → `2025`. The ANNUAL alignment — see the  at the top of this module."""
     return d[:4]
 
 
 def quarter_bucket(d: str) -> str:
     """`2025-09-30` → `2025-Q3`.
 
-    ⚠⚠ THE QUARTERLY ALIGNMENT, AND IT MUST MATCH THE VOCABULARY THE **WEIGHTS** ARE KEYED IN.
+     THE QUARTERLY ALIGNMENT, AND IT MUST MATCH THE VOCABULARY THE **WEIGHTS** ARE KEYED IN.
     `period_caps_eur(cadence="quarterly")` returns `{"2025-Q3": cap}`, and `_weight_at` looks a
     member's weight up BY THE BUCKET KEY. Bucketing the points by year while the caps are keyed by
     quarter means every lookup misses, every member is dropped from every period, and the series
@@ -241,7 +241,7 @@ def quarter_bucket(d: str) -> str:
     table beside it showed 84–93% of the index reporting every quarter. The card then blamed the
     coverage floor, which had never run.
 
-    ⚠ AND IT IS A CALENDAR QUARTER, deliberately the same derivation as `_ttm_by_period`'s label
+     AND IT IS A CALENDAR QUARTER, deliberately the same derivation as `_ttm_by_period`'s label
     (`(month - 1) // 3 + 1`), because that is what `period_caps_eur` emits. An off-calendar filer's
     Q3 is whatever quarter its period-end falls in — the same convention as the annual bucket,
     which puts a March year-end in the calendar year it ends in.
@@ -252,13 +252,13 @@ def quarter_bucket(d: str) -> str:
 def period_end(period: str) -> str:
     """A bucket key → the date it ends on. `2025` → `2025-12-31`, `2025-Q3` → `2025-09-30`.
 
-    ⚠ A CONVENTION, AND THE ONLY HONEST ONE AVAILABLE. Members close their books on different days,
+     A CONVENTION, AND THE ONLY HONEST ONE AVAILABLE. Members close their books on different days,
     which is why the blend aligns on a shared period rather than a raw date — so no blended point
     belongs to one real date. The period's own calendar end is the least surprising stand-in, it
     keeps a year's four quarterly points in order on the axis, and it is what `carry_forward`
     measures its staleness bound against.
     """
-    # ⚠⚠ `LTM` IS A PERIOD, NOT A DATE, AND PARSING IT AS ONE RAISES. Split on `-Q` it yields
+    #  `LTM` IS A PERIOD, NOT A DATE, AND PARSING IT AS ONE RAISES. Split on `-Q` it yields
     # `LTM-12-31`, which `carry_forward` hands to `date.fromisoformat` — a ValueError that takes the
     # whole blend down, not a wrong number. Its window ends at the newest filing, which is on or
     # before today, so today is the honest bound: it never carries backwards into a real period and
@@ -274,18 +274,18 @@ def carry_forward(by_period: dict[str, tuple[str, float]],
     """`{period: (value, reported)}` over `axis` — each period's own figure, or the latest one
     before it, with `reported` saying which.
 
-    ⚠⚠ THE CARRY IS WHAT MAKES THE CONTRIBUTOR SET STABLE, and a stable set is the whole point. A
+     THE CARRY IS WHAT MAKES THE CONTRIBUTOR SET STABLE, and a stable set is the whole point. A
     company that files semi-annually has no trailing-twelve-month point in Q1 — but its TTM revenue
     at Q1 IS its December figure; that is what "trailing" means. Without the carry it simply drops
     out of Q1, the index alternates between two different baskets, and the line sawtooths ±20% on
     composition alone (measured on the AEX: 277 → 341 → 297 → 382).
 
-    ⚠⚠ AND `reported` IS WHY THIS IS SAFE. A carried value is used for the AVERAGE and counts for
+     AND `reported` IS WHY THIS IS SAFE. A carried value is used for the AVERAGE and counts for
     NOTHING in the coverage, so the floor still sees the newest fiscal year for what it is — a
     handful of filers and everyone else held at last year's figure — and still refuses it. Merge
     the two and the floor is defeated by the very mechanism that smooths the line.
 
-    ⚠ BOUNDED. A constituent that stops reporting (delisted, acquired, or simply never filed again)
+     BOUNDED. A constituent that stops reporting (delisted, acquired, or simply never filed again)
     must fall out rather than be held at a frozen value for the rest of the axis. One year is the
     natural bound: it is the longest any live filer goes between reports, so nothing that is still
     reporting is ever dropped.
@@ -326,7 +326,7 @@ _latest_per_year = _latest_per_bucket
 def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[dict], list[dict]]:
     """Members split into those that can contribute and those that cannot, with the REASON.
 
-    ⚠ SHARED BY `blend_series` AND `blend_breakdown` ON PURPOSE. A drill-down that re-derives
+     SHARED BY `blend_series` AND `blend_breakdown` ON PURPOSE. A drill-down that re-derives
     "the same way" is a second copy of these rules, and the copy is what drifts — a panel that
     explains a number the line does not show is worse than no panel, because it is checked once
     and believed thereafter. One preparation, two readers.
@@ -347,12 +347,12 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
             continue
         raw = dict(pts)
         if kind == "level":
-            # ⚠ The anchor comes from `base_points` when given — see the docstring. Falling back to
+            #  The anchor comes from `base_points` when given — see the docstring. Falling back to
             # this series' own first point is right for a standalone level and WRONG for a
             # forecast, which would restart at 100 beside an actual that has run to 1,800.
             anchor = {d: float(v) for d, v in (m.get("base_points") or {}).items()
                       if v is not None} or pts
-            # ⚠⚠ THE FIRST **POSITIVE** PERIOD, NOT THE FIRST REPORTED ONE. 100 × v/0 is undefined
+            #  The first **POSITIVE** PERIOD, NOT THE FIRST REPORTED ONE. 100 × v/0 is undefined
             # and a negative base flips every later point's sign — but a leading ZERO on a flow line
             # is almost never a measurement. GuruFocus back-fills the years before a company existed
             # separately: Universal Music (2.68% of the AEX) sits inside Vivendi until the 2021
@@ -366,7 +366,7 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
                 continue
             base_date = positive[0]
             base = anchor[base_date]
-            # ⚠ AND ITS PRE-BASE PERIODS GO WITH IT. A zero before the anchor would rebase to 0 and
+            #  And its pre-base periods go with it. A zero before the anchor would rebase to 0 and
             # read as a company that lost everything, rather than one that had not started.
             pts = {d: v for d, v in pts.items() if d >= base_date}
             if not pts:
@@ -375,12 +375,12 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
             pts = {d: 100.0 * v / base for d, v in pts.items()}
         ok.append({"index": i, "weight": w, "weights": m.get("weights"),
                    "points": pts, "raw": raw,
-                   # ⚠ WHETHER THIS MEMBER IS A CONTINUATION — rebased on the series it EXTENDS
+                   #  Whether this member is a continuation — rebased on the series it EXTENDS
                    # (`base_points`) rather than on its own first point. The level chain needs it:
                    # a continuation must not restart the index at 100. See `blend_series`.
                    "continues": bool(m.get("base_points")),
                    "by_year": _latest_per_bucket(pts, bucket),
-                   # ⚠⚠ BUCKETED BY THE SAME FUNCTION AS THE VALUES, AND THAT IS THE WHOLE
+                   #  Bucketed by the same function as the values, and that is the whole
                    # REQUIREMENT. The caller keys its EUR totals by FILING DATE; the chain walks
                    # BUCKETED periods ("2015", or "2025-Q3"). Left unbucketed every lookup misses,
                    # the aggregate silently never fires, and both paths print identical numbers
@@ -389,7 +389,7 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
                    "fund_by_year": _latest_per_bucket(
                        {d: float(v) for d, v in (m.get("fund_points") or {}).items()
                         if v is not None}, bucket),
-                   # ⚠ THE EUROS OF THE SERIES THIS ONE CONTINUES — a forecast leg carries its
+                   #  The euros of the series this one continues — a forecast leg carries its
                    # ACTUAL's totals so the aggregate can join the two at the boundary. The euro
                    # twin of `base_points`, and needed for the same reason: without it the
                    # forecast chain restarts at 100 beside an actual that has run to 210.
@@ -403,12 +403,12 @@ def _prepare(members: list[dict], kind: str, bucket=year_bucket) -> tuple[list[d
 def step_growth(prev: float | None, now: float | None) -> float | None:
     """One member's growth over one interval — or None when it has none to give.
 
-    ⚠⚠ THE ONE DEFINITION, READ BY BOTH THE LINE (`blend_series`) AND THE PANEL THAT EXPLAINS IT
+     THE ONE DEFINITION, READ BY BOTH THE LINE (`blend_series`) AND THE PANEL THAT EXPLAINS IT
     (`_level_breakdown`). They each derive `prev`/`now` their own way, from their own member lists,
     and used to apply the rule twice — so a breakdown could attribute a −2,700% move to a holding
     the line no longer moved on. The client's twin in `HoldingsRevenueModal` mirrors this exactly.
 
-    ⚠⚠ THE TWO MAGNITUDE HEURISTICS WERE REMOVED ON 2026-09-04, ON REQUEST AND ON MEASUREMENT, and
+     THE TWO MAGNITUDE HEURISTICS WERE REMOVED ON 2026-09-04, ON REQUEST AND ON MEASUREMENT, and
     what is left is arithmetic only. They were `_MIN_STEP_BASE_FRACTION` (refuse a step whose anchor
     is under 10% of that member's own median) and `_MAX_STEP_GROWTH` (refuse a step over 100x).
 
@@ -420,7 +420,7 @@ def step_growth(prev: float | None, now: float | None) -> float | None:
     4.23pp/yr on EPS; the cap was worth another 8.36pp and 5.44pp. Revenue and share price moved by
     0.00 and 0.02pp, i.e. the guards only ever bound the per-share lines.
 
-    ⚠ WHAT THAT LETS IN, STATED PLAINLY: a member step of 2,976 -> 1,865,695 (626x in one year) now
+     WHAT THAT LETS IN, STATED PLAINLY: a member step of 2,976 -> 1,865,695 (626x in one year) now
     enters the line at full weight, as do four more above 100x, and ACWI's FCF/share reads +33.93%/yr
     where it read +18.85%. That is the deliberate trade — a vendor figure is reported as filed, and
     a bad one is a bad number rather than a silently missing member. The right way to catch the real
@@ -428,7 +428,7 @@ def step_growth(prev: float | None, now: float | None) -> float | None:
     `shares` is 1,000x too small — or an entity discontinuity at a listing date), not a threshold on
     the answer, which cannot tell a corrupt divisor from a trough year.
 
-    ⚠ AND IT REMOVED A WHOLE CLASS OF TWIN DIVERGENCE WITH THEM. Both surfaces computed the bar over
+     AND IT REMOVED A WHOLE CLASS OF TWIN DIVERGENCE WITH THEM. Both surfaces computed the bar over
     their own view of a member (the server's `at` carries a carried `2026` and `LTM` that the
     drill-down payload does not), so `Graphs` and `Tables` disagreed on exactly the members sitting
     near their own bar — 18.85% against 18.90% on ACWI FCF/share, traced to one member,
@@ -437,10 +437,10 @@ def step_growth(prev: float | None, now: float | None) -> float | None:
 
     Two refusals and a floor, in order:
 
-    * NO ANCHOR / NO VALUE — the member cannot span this interval. It sits out THIS step and joins
+    * No anchor / NO VALUE — the member cannot span this interval. It sits out THIS step and joins
       at the next; it is never dropped from the metric.
-    * A NON-POSITIVE ANCHOR — there is no ratio to a zero or a negative. Arithmetic, not judgement.
-    * FLOORED AT −100%. ⚠ BELOW ZERO THERE IS NO SCALE. A per-share figure of −0.24 against a base
+    * A non-positive anchor — there is no ratio to a zero or a negative. Arithmetic, not judgement.
+    * Floored at −100%.  BELOW ZERO THERE IS NO SCALE. A per-share figure of −0.24 against a base
       of +0.30 is not "180% worse" in any sense an INDEX can carry: an index is a product of
       (1 + g), so a term below −1 does not make it small, it makes it NEGATIVE — and a negative
       index is not a low reading, it is not an index at all. −100% is the most a level can lose, so
@@ -456,14 +456,14 @@ def step_growth(prev: float | None, now: float | None) -> float | None:
 def _weight_at(m: dict, period: str) -> float | None:
     """This member's weight IN THIS PERIOD, or None when it has none and is left out of it.
 
-    ⚠ TWO BASES, ONE FUNCTION, AND `None` MEANS SOMETHING DIFFERENT FROM 0. A universe carries
+     TWO BASES, ONE FUNCTION, AND `None` MEANS SOMETHING DIFFERENT FROM 0. A universe carries
     `weights` — the market cap as at each fiscal period, so the weighting is the index's own at the
     time rather than today's applied backwards. A PORTFOLIO does not: a holding weight is not a
     market cap and has no history here, so the scalar applies to every period. The absence of
     `weights` is therefore the signal for "single basis", which is why it must be `None` and not an
     empty dict.
 
-    ⚠ A MEMBER WITH PER-PERIOD WEIGHTS BUT NO CAP THIS PERIOD IS DROPPED FROM THIS PERIOD ONLY, and
+     A MEMBER WITH PER-PERIOD WEIGHTS BUT NO CAP THIS PERIOD IS DROPPED FROM THIS PERIOD ONLY, and
     NOT fallen back to the scalar. Mixing the two bases inside one column would weight some
     constituents by their 2018 cap and others by today's, with nothing on screen to tell them
     apart — the failure this whole change exists to remove, reintroduced one row at a time.
@@ -474,11 +474,11 @@ def _weight_at(m: dict, period: str) -> float | None:
     w = ws.get(period)
     if w:
         return w
-    # ⚠ AS-OF, NOT EXACT-MATCH. A market cap is a STOCK: the last one filed is the current one
+    #  As-of, not exact-match. A market cap is a STOCK: the last one filed is the current one
     # until a newer one exists, so a period we have no cap FOR is weighted by the newest cap we
     # have BEFORE it. Without this the current year is unweighted for months — measured on the AEX,
     # only 1 of 22 constituents had a 2026 cap, so 2026-Q1 weighted one company and 2026-Q2 none.
-    # ⚠ The keys sort correctly for both vocabularies (`2025` < `2026`, `2025-Q3` < `2025-Q4`),
+    #  The keys sort correctly for both vocabularies (`2025` < `2026`, `2025-Q3` < `2025-Q4`),
     # which is why the buckets are formatted the way they are.
     earlier = [k for k in ws if k <= period and ws[k]]
     return ws[max(earlier)] if earlier else None
@@ -489,7 +489,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
     """`members` = [{weight, points: {date: value}, base_points?}] -> one blended series.
 
     `bucket` aligns the members onto shared periods — `year_bucket` (default) or `quarter_bucket`
-    for a trailing-twelve-month series. ⚠ IT MUST MATCH HOW `weights` IS KEYED; see `quarter_bucket`
+    for a trailing-twelve-month series.  IT MUST MATCH HOW `weights` IS KEYED; see `quarter_bucket`
     for the empty series that results when it does not.
 
     `base_points` (optional, LEVELS only) is the series this one continues — a forecast passes the
@@ -502,7 +502,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
 
         level(d₀) = continue_from["level"] × Σ fund(d₀) ÷ Σ fund_base(continue_from["period"])
 
-    over the members carrying both. ⚠⚠ THIS IS MORE EXACT THAN THE GROWTH PATH'S CONTINUATION, not
+    over the members carrying both.  THIS IS MORE EXACT THAN THE GROWTH PATH'S CONTINUATION, not
     merely equivalent: that one restarts the forecast at the weighted mean of each member's value
     rebased on its OWN actual base, which only approximates where the line actually stopped. This
     one measures the real aggregate step from the last actual period into the first forecast one,
@@ -512,7 +512,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
     `covered_pct` is the share of the blended weight that REPORTED that period and
     `covered_names_pct` the share of the members that did.
 
-    ⚠⚠ THE THREE RULES THIS FUNCTION IMPLEMENTS, and they only work together:
+     THE THREE RULES THIS FUNCTION IMPLEMENTS, and they only work together:
 
       1. WEIGHT — a member's weight in a period is its cap for that YEAR over the sum of that
          year's caps (`period_caps_eur` spreads one annual cap across the year's quarters), taken
@@ -524,12 +524,12 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
          not revenue. Q1/Q3 was the 12 constituents that file quarterly; Q2/Q4 the 21 that file at
          Jun/Dec.
       3. FLOOR — a period draws only when at least half the WEIGHT **and** half the NAMES actually
-         reported it. ⚠ A CARRIED VALUE DOES NOT COUNT TOWARD EITHER, which is what stops rule 2
+         reported it.  A CARRIED VALUE DOES NOT COUNT TOWARD EITHER, which is what stops rule 2
          defeating the floor: the newest fiscal year, where a handful have filed and everyone else
          is carried, still reads 13% covered and is still refused rather than drawn as a flat line
          of last year's figures.
 
-    ⚠ THE TWO FLOORS CATCH DIFFERENT THINGS AND NEITHER IS ENOUGH ALONE. Weight-only lets one giant
+     THE TWO FLOORS CATCH DIFFERENT THINGS AND NEITHER IS ENOUGH ALONE. Weight-only lets one giant
     carry a period: measured on the AEX, 2026-Q2 had **2 of 22** constituents reporting and passed
     at 53.8% of cap because ASML is enormous. Names-only would let ten tiny constituents outvote a
     missing giant.
@@ -542,8 +542,8 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
 
     prepared, _ = _prepare(members, kind, bucket)
     by_date: dict[str, list[tuple[float, float]]] = defaultdict(list)
-    # ⚠⚠ COVERAGE IS MEASURED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD ONE, AND GETTING THIS
-    # WRONG DISABLES THE FLOOR ENTIRELY.
+    #  Coverage is measured on the **STABLE** WEIGHT, NOT THE PER-PERIOD ONE, AND GETTING THIS
+    # Wrong disables the floor entirely.
     #
     # The per-period market cap is the right basis for the AVERAGE and the wrong one for a
     # completeness measure, because it comes out of the same GuruFocus blob as the figure itself:
@@ -565,15 +565,15 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
     # The axis every member is carried across — the union of what anybody reported.
     axis = sorted({k for p in prepared for k in p["by_year"]})
     for p in prepared:
-        # ⚠ THE VALUE THIS MEMBER CONTRIBUTED AT EACH PERIOD, kept so the LEVEL path can take a
+        #  The value this member contributed at each period, kept so the LEVEL path can take a
         # ratio between two periods that need not be adjacent — see the chaining below. Carried
         # periods are in it: a member that has not reported since still holds its last figure, so
         # its growth over the interval is correctly zero rather than absent.
         p["at"] = {}
-        # ⚠ THE MEMBER'S OWN EUR TOTAL PER PERIOD, when the caller supplied one — see the aggregate
+        #  The member's own EUR total per period, when the caller supplied one — see the aggregate
         # branch below. Keyed the same way as `at`, and gated on the same weight, so the two cannot
         # disagree about who is in the index at a period.
-        # ⚠⚠ ITS OWN LOOP, NOT A LOOKUP INSIDE THE VALUES' — AND THE DECOUPLING IS THE POINT.
+        #  Its own loop, not a lookup inside the values' — and the decoupling is the point.
         # `_prepare` rebases a LEVEL member on its first POSITIVE period and throws away everything
         # before it, because `100 × v/base` needs a positive base and a negative one flips every
         # later point's sign. That is right for the growth path and irrelevant to a sum, which
@@ -581,14 +581,14 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         # truncation, so a member whose base period is negative would be missing from the sum in
         # exactly the step where its recovery is the story. Eli Lilly's −3.489 year, precisely.
         #
-        # ⚠ CARRIED BY THE SAME FUNCTION WITH THE SAME BOUND. A member's euros are a filing like
+        #  Carried by the same function with the same bound. A member's euros are a filing like
         # any other: a semi-annual filer's trailing-twelve-month FCF at Q1 IS its December figure.
         # Uncarried, it drops out of every quarter it does not file, the per-step intersection
         # shrinks to the quarterly filers, and the aggregate sawtooths on composition — the failure
         # `carry_forward` exists to prevent, quietly reintroduced one construction over.
         #
-        # ⚠ GATED ON THE WEIGHT, LIKE THE VALUES, so both maps agree about who is in the index at a
-        # period. ⚠ RESIDUAL: a member with NO positive period at all never reaches `prepared`
+        #  Gated on the weight, like the values, so both maps agree about who is in the index at a
+        # period.  RESIDUAL: a member with NO positive period at all never reaches `prepared`
         # (`_prepare` drops it as `non_positive_base`), so a perennial cash-burner is still out of
         # the sum. That is the growth path's rule leaking into this one; it is narrow (a company
         # non-positive in EVERY reported period) and it is documented rather than silently relied
@@ -617,10 +617,10 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
 
     out: list[dict] = []
     if kind == "level" and any(p["fund"] for p in prepared):
-        # ⚠⚠ THE AGGREGATE PATH: SUM THE EUROS, DO NOT AVERAGE THE GROWTH RATES.
+        #  The aggregate path: sum the euros, do not average the growth rates.
         #
         # The chain below this one takes each member's own growth and averages those growths by
-        # MARKET CAP. That is the wrong weight for a fundamental and it is biased upward:
+        # Market cap. That is the wrong weight for a fundamental and it is biased upward:
         #
         #   * WRONG WEIGHT. Growth of a sum is `Σv_i(d)/Σv_i(a) − 1`, i.e. each member's growth
         #     weighted by ITS SHARE OF THE TOTAL BEING GROWN. Weighting by cap instead gives a
@@ -632,12 +632,12 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         #     (`scripts/diagnose_blend_steps.py`), cutting the accepted-growth cap from +10,000%
         #     to +1,000% costs `revenue` 0.03pp a year and `fcf_ps` 4.06pp.
         #
-        # ⚠⚠ AND IT IS NOT ABOUT NEGATIVES, WHICH IS THE PART WORTH REMEMBERING. Revenue is never
+        #  And it is not about negatives, which is the part worth remembering. Revenue is never
         # negative, so every zero-crossing rule is a no-op on it — and the two constructions still
         # disagree by more than 5pp/yr on ACWI (~9.95% averaged against +4.60% summed). The whole
         # gap is the weight. ACWI FCF: +19.1% averaged against **+7.56%** summed.
         #
-        # ⚠⚠ SUMMING IS STILL THE CAP-WEIGHTED ANSWER, which is the part that is easy to doubt. A
+        #  Summing is still the cap-weighted answer, which is the part that is easy to doubt. A
         # cap-weighted index holds the SAME FRACTION of every company: buying `w_i = cap_i/Σcap`
         # at price `p_i` leaves `n_i = shares_i/Σcap` — the price cancels. So its claim on a
         # fundamental is `(1/Σcap)·ΣF_i`, exactly proportional to the sum, and the `1/Σcap` scale
@@ -646,13 +646,13 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         # its weight that year. A PORTFOLIO is the same statement with its own weights, its claim
         # being `w_i·F_i/cap_i`, and the caller supplies that form instead.
         #
-        # ⚠ NO GUARDS HERE, AND NONE ARE NEEDED. Every refusal in `step_growth` — non-positive
+        #  No guards here, and none are needed. Every refusal in `step_growth` — non-positive
         # base, immaterial base, the growth cap, the −100% floor — exists because that path takes a
         # ratio of a member TO ITSELF. A sum never does: a member at −200 subtracts 200 and a later
         # +200 adds it back, so a round trip through zero nets out instead of being floored one
         # year and refused the next.
         #
-        # ⚠⚠ EACH STEP IS SUMMED OVER THE MEMBERS PRESENT AT **BOTH** ENDS. A sum changes when its
+        #  Each step is summed over the members present at **BOTH** ENDS. A sum changes when its
         # members change, so comparing `Σ(everyone with a 2025 figure)` against `Σ(everyone with a
         # 2015 one)` reports composition as growth. Intersecting per step is what makes the ratio a
         # growth rate — the discipline the growth path gets for free, since a member that cannot
@@ -664,18 +664,18 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                 continue
             if anchor is None:
                 anchor = d
-                # ⚠⚠ UNLESS THIS SERIES CONTINUES ANOTHER, IN WHICH CASE 100 IS A FAKE COLLAPSE —
+                #  Unless this series continues another, in which case 100 IS A FAKE COLLAPSE —
                 # the euro twin of the `base_points` branch in the growth path below, and the fix
                 # for a chart whose actual leg ran to 210 and whose forecast leg restarted at 100.
                 # The join is the real aggregate step across the boundary: the last actual period's
                 # euros to the first forecast period's.
                 #
-                # ⚠ ONLY OVER MEMBERS CARRYING **BOTH**, for the same reason every other step is
+                #  Only over members carrying **BOTH**, for the same reason every other step is
                 # intersected: a member with a consensus but no actual (or the reverse) would make
                 # the join report composition as growth, and it lands exactly at the seam where
                 # nobody would look for it.
                 #
-                # ⚠ AND IT FALLS BACK TO 100 RATHER THAN GUESSING. No base euros, a non-positive
+                #  And it falls back to 100 RATHER THAN GUESSING. No base euros, a non-positive
                 # base sum, or nothing spanning the boundary — then this is a standalone series and
                 # 100 is the honest anchor.
                 if continue_from:
@@ -693,12 +693,12 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                     if p["fund"].get(anchor) is not None and p["fund"].get(d) is not None]
             prev_sum = sum(p["fund"][anchor] for p in both)
             now_sum = sum(p["fund"][d] for p in both)
-            # ⚠ A NON-POSITIVE AGGREGATE HAS NO RATIO. Vanishingly unlikely for an index and
+            #  A non-positive aggregate has no ratio. Vanishingly unlikely for an index and
             # possible for a small book; the honest answer is to leave the step undrawn rather
             # than to invent a sign.
             if not both or prev_sum <= 0:
                 continue
-            # ⚠⚠ AND THE NUMERATOR TOO — GUARDING ONLY THE DIVISOR IS NOT ENOUGH. A negative
+            #  And the numerator too — guarding only the divisor is not enough. A negative
             # aggregate makes the ratio negative, the level negative, and every later point a
             # sign-flipped nonsense a log axis cannot draw. The growth path ends its series for the
             # same case (`1 + step <= 0`) and for the same reason: a line that STOPS is visible
@@ -711,7 +711,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
             out.append(_point(d, level))
             anchor = d
         spanned = max((p["covered_pct"] for p in out), default=0.0)
-        # ⚠ THE CALLER IS TOLD WHICH CONSTRUCTION IT GOT, AND HOW MANY MEMBERS CARRY EUROS. A
+        #  The caller is told which construction it got, and how many members carry euros. A
         # member with no share count has no `F_i` and is therefore in `covered_pct` but not in the
         # sum — the one way this path can quietly speak for less of the index than it claims. The
         # two counts side by side make that visible instead of leaving it to be discovered.
@@ -720,7 +720,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                 "fund_members": sum(1 for p in prepared if p["fund"]),
                 "members": len(prepared)}
     if kind == "level":
-        # ⚠⚠ A LEVEL SERIES IS CHAINED FROM WEIGHTED **GROWTH**, NOT AVERAGED FROM REBASED LEVELS.
+        #  A level series is chained from weighted **GROWTH**, NOT AVERAGED FROM REBASED LEVELS.
         # Between two drawn points the index moves by the cap-weighted average of what its
         # constituents actually did over exactly that interval:
         #
@@ -732,11 +732,11 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         # has no such anchor — a member simply has no growth for a step it cannot span, and
         # contributes from the next one.
         #
-        # ⚠ AND IT NEEDS NO POSITIVE BASE. A member whose earlier value is <= 0 has no meaningful
+        #  And it needs no positive base. A member whose earlier value is <= 0 has no meaningful
         # ratio, so it sits out THAT STEP and joins at the next — instead of being dropped from the
         # metric entirely. Universal Music's fabricated 2017 zero costs it one step, not nine years.
         #
-        # ⚠ THE ANCHOR IS THE LAST **DRAWN** POINT, NOT THE PREVIOUS PERIOD. A period that fails the
+        #  The anchor is the last **DRAWN** POINT, NOT THE PREVIOUS PERIOD. A period that fails the
         # floor is not drawn, and measuring the next step from it would compound a move nobody could
         # see; measuring from the last honest point means no constituent's growth is lost and no
         # thin period leaks into the level.
@@ -747,14 +747,14 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                 continue
             if anchor is None:                    # the first honest period IS the base
                 anchor = d
-                # ⚠⚠ UNLESS THE SERIES IS A CONTINUATION, IN WHICH CASE 100 IS A FAKE COLLAPSE.
+                #  Unless the series is a continuation, in which case 100 IS A FAKE COLLAPSE.
                 # A forecast is rebased on the ACTUAL it extends (`base_points`), so its value here
                 # is already an index against that base — 1,100 for an actual that ran to 1,000.
                 # Stamping the chain's usual 100 discards it and draws the forecast restarting at
                 # 100 beside an actual at 1,000: a ~90% earnings collapse that exists only in the
                 # arithmetic, at full confidence, on a log axis. Measured on a real book at 1,808.
                 #
-                # ⚠ ONLY WHEN **EVERY** CONTRIBUTOR CONTINUES SOMETHING. Mixing a continuation with
+                #  Only when **EVERY** CONTRIBUTOR CONTINUES SOMETHING. Mixing a continuation with
                 # a self-anchored member would average an index-against-the-actual with an
                 # index-against-itself — two different bases in one number, which is the error this
                 # whole level path exists to refuse. Anything mixed falls back to 100.
@@ -766,10 +766,10 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                         level = carried
                 out.append(_point(d, level))
                 continue
-            # ⚠ ONE RULE, IN ONE PLACE — `step_growth`. The guard that used to live inline here
+            #  One rule, in one place — `step_growth`. The guard that used to live inline here
             # (`prev > 0`) missed the near-zero base, which is the failure that deletes a chart.
             #
-            # ⚠⚠ THE WEIGHT IS TAKEN AT THE **ANCHOR**, NOT AT `d`, AND THIS WAS WORTH 9 POINTS A
+            #  The weight is taken at the **ANCHOR**, NOT AT `d`, AND THIS WAS WORTH 9 POINTS A
             # YEAR (2026-08-21). `g_i` spans anchor -> d, so weighting it by the cap at `d` weights
             # each constituent's growth by an amount that already CONTAINS that growth: cap = price
             # x shares, so a name that tripled carried ~3x the weight in the very step where it
@@ -787,17 +787,17 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
             # near miss, and nothing on the chart could have shown it: the line was smooth, every
             # period cleared both coverage floors, and the drill-down reconciled to it exactly.
             #
-            # ⚠ THIS IS WHAT A CAP-WEIGHTED INDEX **IS**, not a tuning choice. Holding the index
+            #  This is what a cap-weighted index **IS**, not a tuning choice. Holding the index
             # over [anchor, d] gives Sum(V_i(d) - V_i(anchor)) / Sum V_i(anchor), i.e. the average
             # of `g_i` weighted by the cap AT THE ANCHOR. You buy at the start weights and let it
             # run; there is no portfolio whose return the end weights describe.
             #
-            # ⚠ IT CANNOT CHANGE **WHO** CONTRIBUTES, ONLY BY HOW MUCH. `p["at"][period]` is only
+            #  It cannot change **WHO** CONTRIBUTES, ONLY BY HOW MUCH. `p["at"][period]` is only
             # written where `_weight_at(p, period)` was truthy, so `at[anchor]` existing already
             # implies an anchor weight exists. A member joining after the anchor has no `g` to
             # begin with (`step_growth` needs both ends) and was never in this step.
             #
-            # ⚠ A PORTFOLIO IS UNAFFECTED, WHICH IS WHY THE BOOK'S OWN LINE NEVER LOOKED WRONG. A
+            #  A portfolio is unaffected, which is why the book's own line never looked wrong. A
             # holding has no `weights`, so `_weight_at` returns the same scalar for every period and
             # anchor and end are the same number. Only a UNIVERSE carries per-period caps — so the
             # bias sat entirely on the benchmark line, next to a correct one, in a comparison.
@@ -809,7 +809,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
             step = _weighted_arithmetic(pairs)
             if step is None:
                 continue                          # nothing spans this interval — no honest move
-            # ⚠ EVERY CONSTITUENT WIPED OUT. `step_growth` floors each member at −100%, so this can
+            #  Every constituent wiped out. `step_growth` floors each member at −100%, so this can
             # only be an exact −1: the whole panel went to or below zero over one interval. The
             # index is 0 from here and would stay 0 for ever — points a LOG axis cannot draw, which
             # is precisely the silent truncation this guard exists to end. Ending the series is the
@@ -826,7 +826,7 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         for d in sorted(by_date):
             value = combine(by_date[d])
             if value is None or not _clears(d):
-                continue    # ⚠ omitted, never drawn as a dip — see the docstring
+                continue    #  omitted, never drawn as a dip — see the docstring
             out.append(_point(d, value))
     spanned = max((p["covered_pct"] for p in out), default=0.0)
     return {"kind": kind, "points": out, "covered_pct": round(spanned, 2)}
@@ -836,12 +836,12 @@ def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> 
     """Why `blend_series` drew NOTHING even though holdings carry this metric — or None when none
     of them do.
 
-    ⚠ TAKES THE SAME `bucket` AS THE SERIES IT EXPLAINS. A diagnostic that aligned the periods
+     TAKES THE SAME `bucket` AS THE SERIES IT EXPLAINS. A diagnostic that aligned the periods
     differently from the run it is explaining would report a different set of periods from the one
     that drew nothing — which is how "no year clears the floor" came to be printed for a series
     whose periods never existed.
 
-    ⚠ "NO SERIES" AND "NOT INGESTED" ARE DIFFERENT ANSWERS AND THE UI CANNOT TELL THEM APART.
+     "NO SERIES" AND "NOT INGESTED" ARE DIFFERENT ANSWERS AND THE UI CANNOT TELL THEM APART.
     An empty chart shows one thing; the two reasons behind it are opposites. Measured on a real
     book's Dividends per Share: every holding had the line, and the portfolio card still read "No
     dividend/share ingested for this portfolio" — because a level series is rebased to 100 at its
@@ -866,11 +866,11 @@ def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> 
     prepared, dropped = _prepare(members, kind, bucket)
     combine = _weighted_harmonic if kind == "multiple" else _weighted_arithmetic
     by_year: dict[str, list[tuple[float, float]]] = defaultdict(list)
-    # The same stable basis `blend_series` measures coverage on — see the ⚠⚠ there. A diagnostic
+    # The same stable basis `blend_series` measures coverage on — see the  there. A diagnostic
     # that explained a floor decision using a different denominator from the one that made it
     # would send the reader after the wrong cause.
     cover_w: dict[str, float] = defaultdict(float)
-    # ⚠ THE SAME CARRY AS THE SERIES IT EXPLAINS. A diagnostic that aligned or carried differently
+    #  The same carry as the series it explains. A diagnostic that aligned or carried differently
     # from the run it is explaining reports a different set of periods from the one that drew
     # nothing — which is how "no year clears the floor" came to be printed for a series whose
     # periods never existed.
@@ -927,7 +927,7 @@ def blend_matrix(members: list[dict], metric_code: str) -> dict:
                    verifying the line wants to see, not have silently dropped.
       excluded     holdings with no usable data for this metric at all (no_data / no_weight / …).
 
-    ⚠ REUSES `_prepare`, LIKE `blend_series` AND `blend_breakdown`. The cells and the footer come
+     REUSES `_prepare`, LIKE `blend_series` AND `blend_breakdown`. The cells and the footer come
     from the same preparation the chart's line does, so the grid cannot show a number the line was
     not built from — the whole point of an audit view.
     """
@@ -958,13 +958,13 @@ def blend_matrix(members: list[dict], metric_code: str) -> dict:
         rows.append({**_label(p["index"]), "cells": cells})
     rows.sort(key=lambda r: r["weight_pct"], reverse=True)
 
-    # ⚠⚠ THE FOOTER IS THE LINE ITSELF, ASKED FOR RATHER THAN RE-DERIVED. It used to recompute the
+    #  The footer is the line itself, asked for rather than re-derived. It used to recompute the
     # aggregate here — a second implementation of the blend, in the one view whose entire job is to
     # let a reader check the first. The day the LEVEL path became a chained weighted-growth series
     # (see `blend_series`) this copy went on averaging rebased levels, so the audit grid's footer
     # disagreed with the chart above it by construction. One call, and they cannot drift again.
     #
-    # ⚠ IT ALSO BRINGS THE CARRY AND THE NAMES FLOOR WITH IT. Recomputing here missed both: a
+    #  It also brings the carry and the names floor with it. Recomputing here missed both: a
     # semi-annual filer dropped out of the periods it did not file in, and a period two giants
     # carried on their own passed a weight-only floor.
     series = blend_series(members, metric_code)
@@ -993,12 +993,12 @@ def merge_relative_growth(price_bd: dict, oe_bd: dict, period: str) -> dict:
     index (100 at its own first year) and `raw_value` the amount as reported. Per holding we keep
     both indices and their ratio — price ÷ OE, i.e. how much its earnings multiple has expanded.
 
-    ⚠ THE RATIO IS THE CHART'S MESSAGE, AND IT IS INVARIANT to the extra rebasing the chart does to
+     THE RATIO IS THE CHART'S MESSAGE, AND IT IS INVARIANT to the extra rebasing the chart does to
     put both lines on a common start: that normalisation scales price and OE lines by the same
     per-line constant, so price ÷ OE is unchanged. Both the raw amount and the index are surfaced,
     so the number is verifiable whichever way the reader checks it.
 
-    ⚠ REUSES `blend_breakdown` TWICE rather than re-deriving — the two lines a reader is comparing
+     REUSES `blend_breakdown` TWICE rather than re-deriving — the two lines a reader is comparing
     are decomposed by the exact rule the chart's lines are built from.
     """
     def _key(m: dict) -> str:
@@ -1040,7 +1040,7 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
                      _label) -> dict:
     """A LEVEL point, decomposed into the holdings that MOVED it.
 
-    ⚠⚠ A LEVEL'S VALUE IS NOT A SUM OF ANYTHING ANY MORE, SO IT CANNOT BE SHARED OUT. The line is
+     A LEVEL'S VALUE IS NOT A SUM OF ANYTHING ANY MORE, SO IT CANNOT BE SHARED OUT. The line is
     chained (`index[p] = index[anchor] × (1 + Σ w·g / Σ w)`), so its LEVEL at a period is a
     cumulative product and no set of per-member numbers can add up to it. What is decomposable is
     the STEP into the period — and that is the more useful question anyway: "who moved it", not
@@ -1050,16 +1050,16 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
         contribution_pp   w·g ÷ Σw, in percentage POINTS of the step — these sum to `step_pct`
         swing             the step WITHOUT this member, in pp (leave-one-out)
 
-    ⚠ THE ANCHOR IS THE PREVIOUS **DRAWN** PERIOD, taken from `blend_series` rather than assumed to
+     THE ANCHOR IS THE PREVIOUS **DRAWN** PERIOD, taken from `blend_series` rather than assumed to
     be the previous column: a period under the floor is not drawn, and a decomposition measured
     over a different interval from the one the chart moved over would not reconcile with it.
 
-    ⚠ `share_pct` IS NULL ON THE GROWTH PATH, DELIBERATELY. A share of a step is unbounded — when
+     `share_pct` IS NULL ON THE GROWTH PATH, DELIBERATELY. A share of a step is unbounded — when
     the step is near zero a 0.1pp contributor reads as 400% of it, and a member that moved the
     other way reads negative. `contribution_pp` says the same thing in a unit that stays readable,
     and the caller renders that instead.
 
-    ⚠⚠ WHERE THE CALLER SUPPLIES EUR TOTALS THE DECOMPOSITION IS EXACT AND `share_pct` IS REAL —
+     WHERE THE CALLER SUPPLIES EUR TOTALS THE DECOMPOSITION IS EXACT AND `share_pct` IS REAL —
     it is then the member's share of the ANCHOR's euros, which is a bounded [0,100] share of a sum
     rather than a share of a step, and it is the factor that actually multiplies out:
     `pp = share × growth ÷ 100`. See the aggregate branch, and note that this share is NOT the
@@ -1070,11 +1070,11 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
     order = [p["period"] for p in series["points"]]
     anchor = order[order.index(period) - 1] if period in pts and order.index(period) > 0 else None
 
-    # ⚠ THE SAME AXIS AND THE SAME CARRY AS THE LINE. `blend_series` fills `p["fund"]` on the
+    #  The same axis and the same carry as the line. `blend_series` fills `p["fund"]` on the
     # members it prepares; `blend_breakdown` prepares its OWN and does not, so the map is rebuilt
     # here rather than read as empty — which would silently take the growth path in the panel while
     # the chart above it took the aggregate one, and the two would disagree with nothing to say so.
-    # ⚠ `carry_forward`, NOT A RAW UNPACK: uncarried, a semi-annual filer would be missing from the
+    #  `carry_forward`, NOT A RAW UNPACK: uncarried, a semi-annual filer would be missing from the
     # panel in exactly the periods the line carried it through.
     _axis = sorted({k for p in prepared for k in p.get("by_year", {})})
 
@@ -1087,7 +1087,7 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
 
     rows: list[dict] = []
     if anchor is not None and any(_fund_of(p) for p in reporting):
-        # ⚠⚠ THE AGGREGATE DECOMPOSITION, AND IT IS AN IDENTITY RATHER THAN AN APPROXIMATION.
+        #  The aggregate decomposition, and it is an identity rather than an approximation.
         #
         #     G = ΣF_i(d)/ΣF_i(a) − 1 = Σ(F_i(d) − F_i(a)) / ΣF_i(a)
         #     c_i = (F_i(d) − F_i(a)) / ΣF_i(a)        so   Σc_i = G, exactly
@@ -1096,7 +1096,7 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
         # renormalisation, no residual, and no "weight that spans the interval" subtlety — the
         # column adds to the footer because the algebra says so, not because it nearly does.
         #
-        # ⚠⚠ AND NOBODY IS DROPPED, WHICH THE GROWTH PATH CANNOT MANAGE. The difference form is
+        #  And nobody is dropped, which the growth path cannot manage. The difference form is
         # defined for every member including sign-crossers: −200 → +300 contributes +500/ΣF_i(a),
         # cleanly. The `share × growth` form needs `F_i(a) > 0` and is only ever a PRESENTATION of
         # the number above — so `growth_pct` is null for a non-positive base while
@@ -1112,7 +1112,7 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
             base = f.get(anchor)
             now = f.get(period)
             in_step = id(p) in spanning and s_a > 0
-            # ⚠ LEAVE-ONE-OUT ON THE SUMS, NOT ON A WEIGHTED MEAN — the same question ("what would
+            #  Leave-one-out on the sums, not on a weighted mean — the same question ("what would
             # the step read without this member") in the construction that is actually drawn.
             rest_a, rest_d = (s_a - base, s_d - now) if in_step else (s_a, s_d)
             without = 100.0 * (rest_d / rest_a - 1.0) if in_step and rest_a > 0 else None
@@ -1121,17 +1121,17 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
                 "value": round(p["by_year"][period][1], 6) if period in p["by_year"] else None,
                 "raw_value": round(p["raw_by_year"][period][1], 6)
                 if period in p["raw_by_year"] else None,
-                # ⚠ NULL, NEVER 0 — see the growth path below. A non-positive base has no rate,
+                #  Null, never 0 — see the growth path below. A non-positive base has no rate,
                 # and printing 0.0% would read as "flat" for a member that in fact moved.
                 "growth_pct": round(100.0 * (now / base - 1.0), 4)
                 if (in_step and base > 0) else None,
                 "contribution_pp": round(100.0 * (now - base) / s_a, 4) if in_step else None,
-                # ⚠ THE MEMBER'S SHARE OF THE **EUROS** AT THE ANCHOR — the honest weight for a
+                #  The member's share of the **EUROS** AT THE ANCHOR — the honest weight for a
                 # fundamental, and the factor that makes `share × growth = pp` come out. It is NOT
                 # the market-cap weight in the column beside it, and the two differ by a lot: that
                 # is the whole finding, not a rounding difference.
                 #
-                # ⚠⚠ IT CAN EXCEED 100%, AND THAT IS CORRECT, NOT A BUG TO CLAMP. `s_a` is a sum
+                #  It can exceed 100%, AND THAT IS CORRECT, NOT A BUG TO CLAMP. `s_a` is a sum
                 # that may contain negatives, so a profitable member's share of it is `F_i/ΣF`
                 # with a denominator SMALLER than its own numerator: measured on a two-member
                 # panel with one member at −200 and one at +1,200, the second's share is 120.0%
@@ -1152,7 +1152,7 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
                 "aggregate": True, "members": rows, "excluded": excluded}
 
     if anchor is not None:
-        # ⚠⚠ A MEMBER THAT CANNOT SPAN THE INTERVAL STAYS IN THE TABLE, WITH NO GROWTH. It reported
+        #  A member that cannot span the interval stays in the table, with no growth. It reported
         # this period — it is behind the line's LEVEL — it simply has nothing to have moved FROM
         # (it did not report the anchor, or reported a non-positive figure there). Excluding it
         # would quietly shrink every consumer of this payload: `merge_relative_growth` builds the
@@ -1160,28 +1160,28 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
         # absent from the other loses its ratio for reasons that have nothing to do with it.
         contrib = []
         for p in reporting:
-            # ⚠⚠ AT THE **ANCHOR**, FOR THE SAME REASON AND BY THE SAME RULE AS THE LINE — see the
-            # ⚠⚠ in `blend_series`. This panel exists to decompose the step the chart drew; taken
+            #  At the **ANCHOR**, FOR THE SAME REASON AND BY THE SAME RULE AS THE LINE — see the
+            #  in `blend_series`. This panel exists to decompose the step the chart drew; taken
             # at `period` it would decompose a DIFFERENT step (the end-weighted one) and still sum
             # to its own total, so the table would reconcile perfectly to a number the chart no
             # longer shows. A decomposition that is internally consistent and externally wrong is
             # the worst of the two failures, because it is the one that gets checked and believed.
             w = _weight_at(p, anchor)
             at = p.get("at") or {k: v for k, (_d, v) in p["by_year"].items()}
-            # ⚠ THE SAME `step_growth` THE LINE USES, INCLUDING THE −100% FLOOR. Re-deriving "the
+            #  The same `step_growth` THE LINE USES, INCLUDING THE −100% FLOOR. Re-deriving "the
             # same way" here is how a panel comes to attribute a −2,700% move to a holding the
             # chart above it no longer moved on — and this panel is checked once and believed
             # thereafter.
             g = step_growth(at.get(anchor), at.get(period))
             contrib.append((p, abs(float(w or 0)), g if w else None))
-        # ⚠ THE DENOMINATOR IS THE MEMBERS THAT MOVED, not everyone in the table — a member with no
+        #  The denominator is the members that moved, not everyone in the table — a member with no
         # growth to measure must not dilute the step toward zero. It appears with nulls; it is not
         # counted as 0%.
         moved = [(p, w, g) for p, w, g in contrib if g is not None]
         den = sum(w for _p, w, _g in moved)
         step = 100.0 * sum(w * g for _p, w, g in moved) / den if den else None
         for p, w, g in contrib:
-            # ⚠ LEAVE-ONE-OUT BY IDENTITY, not by index — `moved` is a subset of `contrib`, so
+            #  Leave-one-out by identity, not by index — `moved` is a subset of `contrib`, so
             # positions do not line up and an index test would drop the wrong member.
             others = [(q_w, q_g) for q_p, q_w, q_g in moved if q_p is not p]
             od = sum(x for x, _ in others)
@@ -1191,7 +1191,7 @@ def _level_breakdown(members: list[dict], metric_code: str, period: str, prepare
                 "value": round(p["by_year"][period][1], 6) if period in p["by_year"] else None,
                 "raw_value": round(p["raw_by_year"][period][1], 6)
                 if period in p["raw_by_year"] else None,
-                # ⚠ NULL, NEVER 0. A member with nothing to move from did not grow by zero — it has
+                #  Null, never 0. A member with nothing to move from did not grow by zero — it has
                 # no growth to state, and a 0.0% would read as "flat" and drag the eye to a holding
                 # that simply has no prior figure.
                 "growth_pct": round(100.0 * g, 4) if g is not None else None,
@@ -1218,7 +1218,7 @@ def blend_breakdown(members: list[dict], metric_code: str, period: str) -> dict:
 
     Returns `{kind, period, value, covered_pct, members: [...], excluded: [...]}`.
 
-    ⚠⚠ "CONTRIBUTION" IS NOT ONE NUMBER, AND THE OBVIOUS ONE IS WRONG FOR A MULTIPLE.
+     "CONTRIBUTION" IS NOT ONE NUMBER, AND THE OBVIOUS ONE IS WRONG FOR A MULTIPLE.
         `w x v / Σw` is the additive share of an ARITHMETIC mean. A multiple is combined
         harmonically, where the additive quantity is the RECIPROCAL — the earnings yield, not the
         P/E. Reporting `w x PE / Σw` beside a harmonic line gives components that do not sum to
@@ -1226,13 +1226,13 @@ def blend_breakdown(members: list[dict], metric_code: str, period: str) -> dict:
         `share_pct` is computed in the space the metric is actually combined in, and it sums to
         100% by construction in all three cases.
 
-    ⚠ AND A SHARE IS NOT AN INFLUENCE. A 10% holding at a wild multiple and a 10% holding at the
+     AND A SHARE IS NOT AN INFLUENCE. A 10% holding at a wild multiple and a 10% holding at the
         average both carry ~10% of the weight; only one MOVES the number. `swing` is the
         leave-one-out delta — what the line would read without this holding — in the metric's own
         displayed unit. It answers "who is doing this to my portfolio", which a share cannot.
         The two disagree constantly, and that is the point of showing both.
 
-    ⚠ THE EXCLUSIONS ARE HALF THE ANSWER. A holding absent from a period is not a zero, and the
+     THE EXCLUSIONS ARE HALF THE ANSWER. A holding absent from a period is not a zero, and the
         reason it is absent is the difference between "has not reported yet" and "reported a loss
         and a negative multiple was dropped". Both are returned with the weight they take out of
         the denominator, so a thin point can be recognised as thin.
@@ -1256,7 +1256,7 @@ def blend_breakdown(members: list[dict], metric_code: str, period: str) -> dict:
             excluded.append({**_label(p["index"]), "reason": "no_point_in_period"})
 
     pairs = [(p["weight"], p["by_year"][period][1]) for p in reporting]
-    # ⚠ The harmonic combine DROPS a non-positive multiple (see `_weighted_harmonic`). Those
+    #  The harmonic combine DROPS a non-positive multiple (see `_weighted_harmonic`). Those
     # members are in `reporting` but contribute nothing, so they are reclassified here — otherwise
     # they would show a share of 0.0% and read as "contributed nothing", which is a different
     # claim from "was excluded because a negative P/E has no reciprocal".
@@ -1288,7 +1288,7 @@ def blend_breakdown(members: list[dict], metric_code: str, period: str) -> dict:
         without = combine(others) if others else None
         rows.append({
             **_label(p["index"]),
-            # ⚠ For a LEVEL, `value` is the rebased index and `raw_value` the amount as reported.
+            #  For a LEVEL, `value` is the rebased index and `raw_value` the amount as reported.
             # Showing only the index invites "why is Nestle's revenue 143?"; only the raw invites
             # summing figures that were never in the same currency.
             "value": round(v, 6),

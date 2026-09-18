@@ -1,7 +1,7 @@
 /**
  * The START-OF-YEAR basis a book's price return is actually built on.
  *
- * ⚠ THE `Weight` COLUMN IS TODAY'S SHARE, AND WEIGHTING A RETURN BY IT IS WRONG.
+ *  THE `Weight` COLUMN IS TODAY'S SHARE, AND WEIGHTING A RETURN BY IT IS WRONG.
  *   A holding that rose carries a bigger share of the book today than it held while it was
  *   rising, so Σ(today's weight × return) systematically overstates. Measured on the real
  *   BUS_Offensief_Dyn snapshot: +11.19% against a book that made +5.58% — exactly double.
@@ -14,7 +14,7 @@
  *   which is `totalReturn` below, to the digit. That is why both come from this one function:
  *   computing the column and the total separately is how they drift apart.
  *
- * ⚠ NORMALISED OVER THE PRICED ROWS ONLY, AND THAT IS WHAT MAKES IT CLOSE. A holding with no
+ *  Normalised over the priced rows only, and that is what makes it close. A holding with no
  *   opening value was not there when the year began — cash is exactly this, and so is anything
  *   bought since. It has real exposure today and an UNDEFINED return, so it is out of both sides
  *   of the identity. Its start weight is `null`, never 0, because a 0.00% in that column would
@@ -27,14 +27,14 @@ export type ValuedRow = {
   current_value_eur?: number | null;
   /** Gross dividend received over the window (AIRS Mutaties). */
   dividend_eur?: number | null;
-  /** Withholding on it — ⚠ NEGATIVE, as AIRS books it. */
+  /** Withholding on it —  NEGATIVE, as AIRS books it. */
   dividend_tax_eur?: number | null;
 };
 
 /**
  * What the holding is worth PLUS what it paid out — the numerator of a TOTAL return.
  *
- * ⚠ THE TAX IS ADDED, NOT SUBTRACTED, AND THAT IS NOT A TYPO. `dividend_tax_eur` is already
+ *  The tax is added, not subtracted, and that is not a typo. `dividend_tax_eur` is already
  * negative (AIRS books the withholding as a debit), so `current + gross + tax` IS
  * `current + net`. Writing the intuitive `- dividend_tax_eur` adds the tax back and overstates
  * every foreign holding's return by twice the withholding — silently, since the result is still
@@ -67,7 +67,7 @@ export type StartBasis<T extends ValuedRow> = {
 /**
  * One asset-class row (Stocks, Bonds, Alternatives…), computed from the HOLDINGS UNDER IT.
  *
- * ⚠ A GROUP ROW THAT DOES NOT ADD UP FROM ITS OWN ROWS IS A SECOND SOURCE OF TRUTH. The backend
+ *  A group row that does not add up from its own rows is a second source of truth. The backend
  *   publishes its own per-segment figures, but it computes them over the ISIN-resolution rows,
  *   while the table groups the HOLDINGS rows merged by name — two row sets that can differ, and
  *   when they do the header disagrees with the lines beneath it and nothing on screen says why.
@@ -75,7 +75,7 @@ export type StartBasis<T extends ValuedRow> = {
  *
  *   So every figure here is derived from the same columns the reader can see and add up.
  *
- * ⚠ THE SEGMENTS THEMSELVES WEIGHT TO THE BOOK. `returnPct` uses the same start-weighted
+ *  The segments themselves weight to the book. `returnPct` uses the same start-weighted
  *   definition as the total, so Σ(segment start weight × segment return) is the book's return —
  *   the identity holds one level up as well. That is only true because both come from
  *   `startBasis`, over the same priced rows.
@@ -98,13 +98,13 @@ export type GroupStats = {
    */
   contributionPct: number | null;
   /** Σ Beginwaarde over ALL the group's rows — what the Beginwaarde column below adds up to.
-   *  ⚠ NOT `startValueEur`, which spans the PRICED rows only because that is what the return is
+   *   NOT `startValueEur`, which spans the PRICED rows only because that is what the return is
    *  computed over. They differ the moment a row has an opening value but no current one, and a
    *  displayed column that does not equal the column beneath it is the bug this file exists to
    *  prevent one level down. */
   startEurAll: number;
   valueEur: number;
-  /** ⚠ The group's REAL opening value over the PRICED rows. Never reconstruct it from
+  /**  The group's REAL opening value over the PRICED rows. Never reconstruct it from
    *  `pricedValueEur / (1 + returnPct)` — that derives the inputs from the answer, so it "explains"
    *  a figure with itself and cannot disagree with it even when it is wrong. */
   startValueEur: number;
@@ -138,7 +138,7 @@ export function groupStats<T extends ValuedRow>(
     actualOf?: (r: T) => number | null | undefined;
   },
 ): GroupStats {
-  // ⚠ Null when nothing below has a figure, 0 only when something does and it sums to zero.
+  //  Null when nothing below has a figure, 0 only when something does and it sums to zero.
   // A money column reads a 0 as "paid nothing", which is a claim we cannot make about a book
   // whose journal we have not scanned.
   const sumOrNull = (f?: (r: T) => number | null | undefined) => {
@@ -153,7 +153,7 @@ export function groupStats<T extends ValuedRow>(
   };
   const priced = group.filter((r) => basis.weightOf(r) != null);
   const gStart = priced.reduce((s, r) => s + (r.start_value_eur ?? 0), 0);
-  // ⚠ TWO SUMS, AND MIXING THEM BREAKS `partial`. `gNow` is the RETURN's numerator (value +
+  //  Two sums, and mixing them breaks `partial`. `gNow` is the RETURN's numerator (value +
   // income); `gNowRaw` is what the group is WORTH. Comparing a with-income sum against a plain
   // value would flag every income-bearing segment as partially priced.
   const gNow = priced.reduce((s, r) => s + (valueWithIncome(r) ?? 0), 0);
@@ -175,7 +175,7 @@ export function groupStats<T extends ValuedRow>(
     partial: Math.abs(valueEur - gNowRaw) > 1,
     dividendEur: sumOrNull(opts.dividendOf),
     dividendTaxEur: sumOrNull(opts.dividendTaxOf),
-    // ⚠ Percentages, so summed EXACTLY — `sumOrNull` rounds to cents, which is right for euros
+    //  Percentages, so summed EXACTLY — `sumOrNull` rounds to cents, which is right for euros
     // and wrong here (see `aggregateGroups`, where rounding a percentage cost 0.0014pp).
     modelPct: sumPct(opts.modelOf),
     actualPct: sumPct(opts.actualOf),
@@ -188,7 +188,7 @@ export function groupStats<T extends ValuedRow>(
 export function startBasis<T extends ValuedRow>(rows: T[]): StartBasis<T> {
   const priced = rows.filter((r) => (r.start_value_eur ?? 0) !== 0 && r.current_value_eur != null);
   const startSum = priced.reduce((s, r) => s + (r.start_value_eur ?? 0), 0);
-  // ⚠ INCOME IS IN THE NUMERATOR. The Total is a TOTAL return now, so every figure built on
+  //  Income is in the numerator. The Total is a TOTAL return now, so every figure built on
   // it (the row returns, the segment returns, the contributions) is one too — and the identity
   // Sigma(start wt x return) == totalReturn still closes, because both sides moved together.
   const nowSum = priced.reduce((s, r) => s + (valueWithIncome(r) ?? 0), 0);
@@ -208,18 +208,18 @@ export function startBasis<T extends ValuedRow>(rows: T[]): StartBasis<T> {
  * The Total row: the SAME aggregation, one level up — over the segment rows rather than the
  * holdings.
  *
- * ⚠ THE POINT IS THAT THERE IS ONLY ONE RULE. Every money column is a plain sum of the column
+ *  The point is that there is only one rule. Every money column is a plain sum of the column
  * above it, and the return is the start-weighted sum. The Total used to re-derive itself straight
  * from the holdings, which is a second code path that merely happened to agree — and a header
  * that agrees by coincidence starts disagreeing the day either side changes.
  *
- * ⚠ FEED IT EVERY GROUP, INCLUDING THE UNGROUPED ONE. The table renders a trailing block for
+ *  Feed it every group, including the ungrouped one. The table renders a trailing block for
  * holdings that belong to no segment (their name is in the holdings payload but not the ISIN one),
  * and that block has no header. Aggregating only the groups that DREW a header would silently drop
  * those rows from the book's totals.
  */
 export function aggregateGroups(groups: GroupStats[]): GroupStats {
-  // ⚠ TWO SUMS, AND USING THE MONEY ONE ON A PERCENTAGE IS A REAL BUG. `sumMoney` rounds to
+  //  Two sums, and using the money one on a percentage is a real bug. `sumMoney` rounds to
   // cents, which is right for euros and WRONG for `contributionPct`/`startWeightPct`: those feed
   // a division, so rounding them first pushes the Total's return off the holdings-level answer.
   // Measured when this was one function: 4.5300% against a true 4.5286%.
@@ -236,7 +236,7 @@ export function aggregateGroups(groups: GroupStats[]): GroupStats {
   };
   const sum = (f: (g: GroupStats) => number) => groups.reduce((s, g) => s + f(g), 0);
   const startWeightPct = sumExact((g) => g.startWeightPct);
-  // ⚠ The return is the START-WEIGHTED sum of the segments' returns, which is exactly the sum of
+  //  The return is the START-WEIGHTED sum of the segments' returns, which is exactly the sum of
   // their contributions — each segment's own return times the share of the book it opened with.
   // Averaging the segment returns, or weighting them by today's Weight, is the same error the
   // holdings level already documents, one level up.
@@ -286,14 +286,14 @@ export type WeightedReturn = {
 /**
  * A weighted return on ANY weight column.
  *
- * ⚠ RENORMALISED, AND THAT IS NOT A REFINEMENT — IT IS WHAT MAKES THE NUMBER MEAN ANYTHING.
+ *  Renormalised, and that is not a refinement — it is what makes the number mean anything.
  *   None of these columns sums to 100% over the rows that HAVE a return. Measured on
  *   BUS_Neutraal_Dyn: Model wt sums to 98.70% (the model names things the book does not hold),
  *   Weight to 99.99%, and every basis loses the cash line and anything bought during the year,
  *   which carry weight but have no return at all. Σ(w × r) taken raw therefore understates by
  *   whatever the weights happen to miss — silently, since the result is still a plausible percent.
  *
- * ⚠ ONLY `start` IS THE BOOK'S ACTUAL RETURN. On that basis Σ(w × r) is an IDENTITY with
+ *  ONLY `start` IS THE BOOK'S ACTUAL RETURN. On that basis Σ(w × r) is an IDENTITY with
  *   Σcurrent ÷ Σstart − 1. Every other basis answers a DIFFERENT question — "what would this have
  *   returned weighted like that?" — and must be labelled as the hypothetical it is. Weighting by
  *   today's share reads +11.19% on a book that made +5.58%, because a holding that doubled now

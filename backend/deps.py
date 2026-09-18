@@ -44,11 +44,11 @@ print(f"[deps] SUPABASE_URL = {os.environ.get('SUPABASE_URL', '<UNSET>')}", flus
 class _CachingSession:
     """The PostgREST session, with a per-request memo on identical GETs.
 
-    ⚠ IT IS INERT UNLESS SOMETHING OPTED IN. Outside a `common.read_cache.read_cache()` block —
+     IT IS INERT UNLESS SOMETHING OPTED IN. Outside a `common.read_cache.read_cache()` block —
     which is everything except the endpoints that asked for it — `send` is the base client's,
     byte for byte. There is no global cache here and no TTL to reason about.
 
-    ⚠ IT SUBCLASSES THE SESSION RATHER THAN PATCHING `httpx.Client`. Yahoo, GuruFocus, OpenFIGI,
+     IT SUBCLASSES THE SESSION RATHER THAN PATCHING `httpx.Client`. Yahoo, GuruFocus, OpenFIGI,
     iShares and Supabase Storage all use their own `httpx.Client`s; a patch on the class would
     quietly memoize a vendor call whose repetition may be the entire point (a paced price loop
     asking about a symbol twice is not a duplicate).
@@ -63,7 +63,7 @@ class _CachingSession:
         # Composition, not inheritance of httpx.Client — wrapping keeps us clear of httpx's own
         # constructor and attribute surface changing under us.
         #
-        # ⚠ THE FORWARDING IS READ-ONLY, WHICH IS SAFE ONLY BECAUSE NOTHING WRITES TO THE SESSION.
+        #  The forwarding is read-only, which is safe only because nothing writes to the session.
         # `__getattr__` forwards attribute READS to the real client, but an assignment
         # (`session.headers = ...`) would land on this wrapper and be silently ignored by the
         # client underneath. Checked against the installed postgrest 2.28.3: the entire surface it
@@ -78,12 +78,12 @@ class _CachingSession:
     def _send(self, method: str, url: Any, **kw: Any) -> Any:
         """One PostgREST call, retried once when the failure is a TRANSPORT fault.
 
-        ⚠⚠ ONLY FOR IDEMPOTENT METHODS, AND THE ASYMMETRY IS THE WHOLE POINT. A read that times
+         ONLY FOR IDEMPOTENT METHODS, AND THE ASYMMETRY IS THE WHOLE POINT. A read that times
         out can be repeated; a POST or PATCH that times out MAY ALREADY HAVE BEEN APPLIED —
         the timeout is about the response, not the write — so retrying one risks a double write
         with no way to tell afterwards. GET and HEAD retry; everything else raises.
 
-        ⚠ WHY THIS EXISTS: a transient stall was 500-ing whole pages. Production, 2026-08-11:
+         WHY THIS EXISTS: a transient stall was 500-ing whole pages. Production, 2026-08-11:
         `httpcore.ReadTimeout` on `GET /api/airs/portfolios/overview`, thrown out of `_year_perf`.
         That read is `airs_performance` — **1,815 rows, 608 kB, two pages** — so it is not a slow
         query and no amount of optimising it would have helped. One stall against a 30s timeout on
@@ -91,7 +91,7 @@ class _CachingSession:
         intent that was never implemented: "read endpoints catch + return empty, so a slow
         dependency degrades gracefully rather than wedging the UI".
 
-        ⚠ ONE EXTRA ATTEMPT, NOT FIVE. The timeout is 30s, so a retry is expensive; two attempts
+         ONE EXTRA ATTEMPT, NOT FIVE. The timeout is 30s, so a retry is expensive; two attempts
         cover the stall-and-recover case that actually happens while capping the worst case at
         ~60s rather than minutes. A dependency that is genuinely down should surface as an error,
         not as a page that hangs for five minutes first.
@@ -114,7 +114,7 @@ class _CachingSession:
                     method, str(url).split("?")[0])
                 time.sleep(0.5)
                 continue
-            # ⚠⚠ A STATEMENT TIMEOUT ARRIVES AS A SUCCESSFUL HTTP RESPONSE CARRYING AN ERROR BODY,
+            #  A statement timeout arrives as a successful HTTP response carrying an error body,
             # which is why the `except` above cannot see it. Postgres cancels the query, PostgREST
             # reports `{"code": "57014"}`, and postgrest-py raises `APIError` only later, when the
             # caller parses. Production 2026-08-11: this 500'd
@@ -122,12 +122,12 @@ class _CachingSession:
             # bulk clone saturated the disk — a query that takes milliseconds when nothing else is
             # running.
             #
-            # ⚠ 57014 ONLY, AND ONLY FOR A READ. It is a RESOURCE verdict ("this took too long
+            #  57014 ONLY, AND ONLY FOR A READ. It is a RESOURCE verdict ("this took too long
             # right now"), which the next attempt may well not hit — unlike a syntax error or a
             # constraint violation, which are facts about the query and must surface immediately.
             # Retrying those would waste the whole timeout again and delay the report.
             #
-            # ⚠ AND IT IS LOGGED AT WARNING, because uvicorn leaves the root logger there. A query
+            #  And it is logged at warning, because uvicorn leaves the root logger there. A query
             # that is slow for a REAL reason (a missing index) must not be silently papered over by
             # a retry that usually succeeds — the line is what makes the difference visible.
             if attempt == 1 and idempotent and not r.is_success and b'"57014"' in r.content:
@@ -140,7 +140,7 @@ class _CachingSession:
         raise AssertionError("unreachable")   # the loop either returns or raises
 
     def request(self, method: str, url: Any, **kw: Any) -> Any:
-        """⚠ `request`, NOT `send` — postgrest builds no `Request` object.
+        """ `request`, NOT `send` — postgrest builds no `Request` object.
 
         `RequestConfig.send()` calls `session.request(method, path, json=, params=, headers=,
         auth=)`, so an override of `send` is never reached: the memo silently did nothing, the
@@ -156,7 +156,7 @@ class _CachingSession:
             # A write invalidates the snapshot — see `note_write`.
             read_cache.note_write()
             return self._send(method, url, **kw)
-        # ⚠ THE KEY INCLUDES `prefer` AND `range`. The same URL asked with `Prefer: count=exact`,
+        #  The key includes `prefer` AND `range`. The same URL asked with `Prefer: count=exact`,
         # or over a different `Range`, is a DIFFERENT question — pagination and the count variant
         # both ride on HEADERS rather than on the query string, so a URL-only key would serve
         # page 1 for every page of a paged read. That is the one mistake here that would produce
@@ -170,7 +170,7 @@ class _CachingSession:
         import time  # noqa: PLC0415
 
         t0 = time.perf_counter()
-        # ⚠ THROUGH `_send`, LIKE EVERY OTHER PATH. A memo MISS is an ordinary read and needs the
+        #  THROUGH `_send`, LIKE EVERY OTHER PATH. A memo MISS is an ordinary read and needs the
         # same transport resilience; routing it around the retry would mean the first caller of a
         # query is the only one exposed to a transient stall — the hardest kind of flake to
         # reproduce, because a second attempt would have been served from the memo anyway.
@@ -338,7 +338,7 @@ def paginate(query: Callable[[int, int], Any], *, page_size: int = 1000) -> Iter
     offset/`.range()` loop that PostgREST's row cap forces on every
     full-table scan.
 
-    ⚠⚠ IT ADVANCES BY WHAT CAME BACK AND MEASURES THE CAP; IT DOES NOT ASSUME
+     IT ADVANCES BY WHAT CAME BACK AND MEASURES THE CAP; IT DOES NOT ASSUME
     `page_size` IS THE CAP. This used to `return` on `len(data) < page_size` and
     step `offset += page_size`, which is the banned assumption in both halves:
     the server's `db-max-rows` — not our `.range()` — decides how many rows
@@ -350,12 +350,12 @@ def paginate(query: Callable[[int, int], Any], *, page_size: int = 1000) -> Iter
     every full-table read in the app truncates at once, with no empty cell and
     no error (`project_postgrest_max_rows_trap`).
 
-    ⚠ THE CAP IS MEASURED, NOT ASSUMED: once a page has returned N rows the
+     THE CAP IS MEASURED, NOT ASSUMED: once a page has returned N rows the
     server has PROVEN it will return N, so a later page shorter than N ran out
     of ROWS rather than hitting a cap, and we can stop without probing. Same
     rule as `routers/_airs_ref._paged`.
 
-    ⚠ THE PRICE IS ONE EMPTY REQUEST when the read never proves a page — a table
+     THE PRICE IS ONE EMPTY REQUEST when the read never proves a page — a table
     that fits inside the first page, or one whose size is an exact multiple of
     the cap. Nothing has been PROVEN there, and the two states it cannot
     distinguish ("that was all the rows" and "that was all the server would
@@ -381,6 +381,6 @@ def paginate(query: Callable[[int, int], Any], *, page_size: int = 1000) -> Iter
             # Shorter than a page the server has already delivered — out of rows, not capped.
             return
         proven = max(proven, n)
-        # ⚠ BY `n`, NEVER BY `page_size`: they differ on exactly the runs this guards against,
+        #  BY `n`, NEVER BY `page_size`: they differ on exactly the runs this guards against,
         # and stepping by the larger of the two SKIPS the rows in between.
         offset += n

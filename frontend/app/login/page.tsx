@@ -23,7 +23,7 @@ function isAllowed(email: string): boolean {
 }
 
 /**
- * ⚠ `useSearchParams` FORCES A SUSPENSE BOUNDARY, and without one the whole route opts out of
+ *  `useSearchParams` FORCES A SUSPENSE BOUNDARY, and without one the whole route opts out of
  * static rendering. One wrapper here is cheaper than a build-time error nobody expects on a page
  * this simple.
  */
@@ -41,13 +41,13 @@ function LoginForm() {
   const [supabase] = useState(() => createClient())
 
   /**
-   * ⚠⚠ THE SENTENCE `/auth/confirm` SENDS WHEN A LINK FAILS. Before this it sent nothing and the
+   *  The sentence `/auth/confirm` SENDS WHEN A LINK FAILS. Before this it sent nothing and the
    * failure was invisible: the route redirected to `/set-password` whatever had happened, and the
    * person met "Auth session missing" after choosing a password. The message is composed there
    * (`describeAuthError`), so this page only has to show it — and it opens in signup mode, because
    * every one of those failures is somebody trying to get IN, and what they need is another link.
    *
-   * ⚠ SEEDED INTO `useState`, NOT SET FROM AN EFFECT. It is derived from the URL, which is known at
+   *  Seeded into `useState`, NOT SET FROM AN EFFECT. It is derived from the URL, which is known at
    * first render; assigning it in an effect renders once with no message and again with it, and is
    * what `react-hooks/set-state-in-effect` is pointing at. The user can still dismiss it by
    * submitting — that is why it is state at all and not a plain constant.
@@ -87,7 +87,7 @@ function LoginForm() {
         },
       })
       if (error) {
-        // ⚠ THE RAW MESSAGE IS "email rate limit exceeded", WHICH READS AS A BUG. The built-in mail
+        //  The raw message is "email rate limit exceeded", WHICH READS AS A BUG. The built-in mail
         // service is capped at 2/hour PROJECT-WIDE and cannot be raised without custom SMTP — and
         // every failure path in this flow ends by telling someone to request another link, so the
         // third one silently cannot be sent. See `describeSendError`.
@@ -100,7 +100,7 @@ function LoginForm() {
     } else {
       const { error } = await supabase.auth.signInWithPassword({ email, password })
       if (error) {
-        // ⚠ FULL DETAIL TO THE CONSOLE, ONE SENTENCE TO THE SCREEN — the house rule, and this was
+        //  Full detail to the console, one sentence to the screen — the house rule, and this was
         // the last place in the flow still printing a library string. "Invalid login credentials"
         // is Supabase deliberately refusing to say WHICH half was wrong (saying so would enumerate
         // accounts), so the screen has to turn that into something a person can act on.
@@ -189,7 +189,7 @@ function LoginForm() {
         </button>
       </form>
 
-      {/* ⚠ SIGN-IN MODE ONLY. In signup mode the button above already sends a link, so offering a
+      {/*  SIGN-IN MODE ONLY. In signup mode the button above already sends a link, so offering a
           second way to ask for one beside it is two controls doing one thing. */}
       {signin && (
         <p className="mt-4 text-xs text-fg-faint text-center leading-relaxed">

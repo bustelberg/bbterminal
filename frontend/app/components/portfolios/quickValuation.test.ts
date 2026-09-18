@@ -41,7 +41,7 @@ describe('priceVsMetric', () => {
   });
 
   it('draws EVERY paired year from the floor when no cap is asked for', () => {
-    // ⚠ THE DEFAULT USED TO BE 10 AND THE TAB PASSED IT. The Graphs tab draws every year its
+    //  The default used to be 10 AND THE TAB PASSED IT. The Graphs tab draws every year its
     // endpoints return, so the two tabs of one modal disagreed about when the history begins.
     const rows = Array.from({ length: 12 }, (_, i) => 2014 + i)
       .flatMap((y) => [m(PRICE, y, y), m(FCF, y, 1)]);
@@ -51,7 +51,7 @@ describe('priceVsMetric', () => {
 
   it('honours the 2017 house floor even when BOTH series reach the 1990s', () => {
     /**
-     * ⚠⚠ THE NVIDIA CASE, AND THE ONE A "start where the fundamentals start" RULE ALONE MISSES.
+     *  The nvidia case, and the one a "start where the fundamentals start" RULE ALONE MISSES.
      * NVIDIA reports per-share figures nearly as far back as its price, so clipping to the first
      * value year still began in 1999. The Graphs cards start at 2015 because the `*-inputs`
      * endpoints are floored server-side at `_BLEND_START = "2015-01-01"`; `/by-isin/{isin}/metrics`
@@ -67,7 +67,7 @@ describe('priceVsMetric', () => {
 
   it('starts LATER than the floor when the per-share series does', () => {
     /**
-     * ⚠ THE FLOOR ALONE IS NOT ENOUGH EITHER — the two rules compose. A company whose fundamentals
+     *  The floor alone is not enough either — the two rules compose. A company whose fundamentals
      * begin in 2019 would otherwise draw four years of a lone price line INSIDE the floor, which is
      * the same defect the floor exists to prevent and which the floor cannot catch.
      */
@@ -79,7 +79,7 @@ describe('priceVsMetric', () => {
   });
 
   it('keeps a LEADING run with no price — that gap is information, unlike a leading price run', () => {
-    // ⚠ THE CLIP IS ASYMMETRIC. A missing price over years we do have figures for is a real gap
+    //  The clip is asymmetric. A missing price over years we do have figures for is a real gap
     // (an unlisted stretch, a listing we cannot price); a price with no figures is just a lone line.
     const out = priceVsMetric([m(FCF, 2017, 5), m(FCF, 2018, 6), m(PRICE, 2018, 100)]);
     expect(out.map((p) => p.year)).toEqual([2017, 2018]);
@@ -93,7 +93,7 @@ describe('priceVsMetric', () => {
 
   it('a price-only year does not push a paired year off the start', () => {
     /**
-     * ⚠⚠ THE REPORTED BUG, AND IT IS ABOUT THE UNION. GuruFocus publishes `Month End Stock Price`
+     *  The reported bug, and it is about the union. GuruFocus publishes `Month End Stock Price`
      * for a fiscal year as soon as it ends; the FCF for that year lands months later with the
      * filing. So the union carries one more recent year than the fundamentals do — and under the
      * old `slice(-10)` over the union, that price-only year consumed a slot and the oldest PAIRED
@@ -112,7 +112,7 @@ describe('priceVsMetric', () => {
   });
 
   it('keeps the later observation when a year-end change reports twice', () => {
-    // ⚠ THE FCF ROW IS LOAD-BEARING FIXTURE, NOT PART OF WHAT IS ASSERTED. The window now starts
+    //  The FCF row is load-bearing fixture, not part of what is asserted. The window now starts
     // at the first year the per-share series reports, so a price-only fixture draws nothing at
     // all — correctly. This test is about `byYear` picking the later of two observations for one
     // fiscal year; it needs a year the chart is willing to draw for that to be observable.
@@ -139,7 +139,7 @@ describe('BASIS — the two bases the tab switches between', () => {
     expect(priceVsMetric(rows, BASIS.eps.codes)[0].value).toBe(8);
   });
 
-  it('⚠ EPS is `EPS without NRI`, not `EPS (Diluted)`', () => {
+  it(' EPS is `EPS without NRI`, not `EPS (Diluted)`', () => {
     // The rest of the app (egmInputs, earnings/types) values on the NRI-stripped line. Reading raw
     // diluted EPS here would make this tab disagree with the EGM tab in the same modal.
     expect(EPS_PS_CODES.every((c) => c.endsWith('EPS without NRI'))).toBe(true);
@@ -171,14 +171,14 @@ describe('BASIS — the two bases the tab switches between', () => {
     expect(100 / (y as number)).toBeCloseTo(12.5, 6);
   });
 
-  it('⚠ has an analyst consensus for EPS and NONE for FCF', () => {
+  it(' has an analyst consensus for EPS and NONE for FCF', () => {
     // Not a gap in our ingest — nobody forecasts capex, so no free-cash-flow consensus exists to
     // fetch. `null` is what makes the forward half of the chart absent rather than modelled.
     expect(BASIS.eps.estimateCodes).toEqual(EPS_EST_CODES);
     expect(BASIS.fcf.estimateCodes).toBeNull();
   });
 
-  it('⚠ prefers the NRI-stripped estimate, matching the NRI-stripped history', () => {
+  it(' prefers the NRI-stripped estimate, matching the NRI-stripped history', () => {
     // AB Sagax 2026: 12.09 on the NRI line vs 13.30 on the other. Dividing today's price by the
     // wrong one steps the multiple exactly where history hands over to forecast — a re-rating
     // that is pure bookkeeping.
@@ -226,14 +226,14 @@ describe('forwardEstimates', () => {
     ]);
   });
 
-  it('⚠ drops an estimate the company has already reported', () => {
+  it(' drops an estimate the company has already reported', () => {
     // GuruFocus keeps the row after the actual lands. Left in, the ladder opens with a forecast
     // of a year we hold the actual for — the same year twice, once measured and once guessed.
     const rows = [est(EPS_EST_CODES[0], 2025, 11), est(EPS_EST_CODES[0], 2026, 13)];
     expect(forwardEstimates(rows, EPS_EST_CODES, 2025).map((f) => f.year)).toEqual([2026]);
   });
 
-  it('⚠ is a PRIORITY list, not a union', () => {
+  it(' is a PRIORITY list, not a union', () => {
     // Filling 2026 from the NRI series and 2027 from the other puts that convention step INSIDE
     // the forecast, where nothing marks it at all. First code that answers wins, outright.
     const rows = [est(EPS_EST_CODES[0], 2026, 12.09), est(EPS_EST_CODES[1], 2027, 14.06)];
@@ -250,7 +250,7 @@ describe('forwardEstimates', () => {
   });
 });
 
-// ⚠ THE RULE THIS FILE EXISTS TO HOLD: the forward half of the multiple chart is published
+//  The rule this file exists to hold: the forward half of the multiple chart is published
 // consensus or it is NOTHING. A trend fit shipped there briefly and was removed — it drew at the
 // same weight, with the same decimals, on the same axis as a consensus, and a reader has no way to
 // tell a house extrapolation from what the market actually expects.
@@ -261,7 +261,7 @@ describe('medianOf', () => {
     expect(medianOf([])).toBeNull();
   });
 
-  it('⚠ ignores the collapsed-earnings year a mean would follow', () => {
+  it(' ignores the collapsed-earnings year a mean would follow', () => {
     // Nine ordinary years and one where earnings nearly touched zero. The mean says this company
     // typically trades at 45×; it has traded at ~20× in nine years out of ten.
     const xs = [18, 19, 20, 21, 22, 20, 19, 21, 20, 300];
@@ -332,7 +332,7 @@ describe('yieldOf', () => {
     expect(yieldOf(6, 120)).toBeCloseTo(5);
   });
 
-  it('⚠ KEEPS a negative yield — this is where a yield and a multiple part company', () => {
+  it(' KEEPS a negative yield — this is where a yield and a multiple part company', () => {
     // −5% reads as "burned cash equal to 5% of the price", which is what happened. The same year
     // as a multiple would be −20x, sorting below every cheap year as if it were the bargain of
     // the decade. The ratio does not invert across zero, so nothing is dropped.
@@ -354,7 +354,7 @@ describe('rebase', () => {
     expect(out.rows[1].value).toBeCloseTo(120);   // price ran ahead of the cash
   });
 
-  it('⚠ anchors on the first year BOTH are positive, not the first year shown', () => {
+  it(' anchors on the first year BOTH are positive, not the first year shown', () => {
     // Rebasing off a cash-burn year divides by a negative: every later point flips sign and the
     // chart draws a recovery as a collapse.
     const out = rebase([
@@ -410,14 +410,14 @@ describe('priceAtYield / cagrBetween — the price-target calculator', () => {
     expect(cagrBetween(200.77, target, 2) as number).toBeCloseTo(-0.383, 3);
   });
 
-  it('⚠ a zero or negative yield has no price', () => {
+  it(' a zero or negative yield has no price', () => {
     // 0% divides to infinity — any price is "justified" by no cash flow at all; a negative yield
     // flips the sign and returns a healthy-looking number built on nonsense.
     expect(priceAtYield(4.05, 0)).toBeNull();
     expect(priceAtYield(4.05, -2)).toBeNull();
   });
 
-  it('⚠ a cash-burning forecast has no price either', () => {
+  it(' a cash-burning forecast has no price either', () => {
     expect(priceAtYield(-1.2, 5.3)).toBeNull();
     expect(priceAtYield(0, 5.3)).toBeNull();
   });
@@ -464,14 +464,14 @@ describe('priceTarget — one computation, two readers', () => {
 });
 
 /**
- * ⚠⚠ THE FEATURE THIS UNDERWRITES: the Quick Valuation panel shows the forecast per-share GROWTH
+ *  The feature this underwrites: the Quick Valuation panel shows the forecast per-share GROWTH
  * RATE and the forecast per-share VALUE as two editable views of ONE assumption, and typing either
  * moves the price target on the chart. That only works if the two directions are exact inverses —
  * otherwise a typed rate produces an end value that implies a slightly different rate, the box
  * rewrites itself under the caret, and the pair fights whoever is using it.
  */
 describe('compoundFrom — cagrBetween run backwards', () => {
-  it('⚠⚠ ROUND-TRIPS EXACTLY, which is what lets both boxes be editable', () => {
+  it(' ROUND-TRIPS EXACTLY, which is what lets both boxes be editable', () => {
     const base = 12.4;
     for (const years of [1, 5, 10]) {
       for (const end of [3.1, 12.4, 41.2, 900]) {
@@ -488,14 +488,14 @@ describe('compoundFrom — cagrBetween run backwards', () => {
     expect(compoundFrom(10, -50, 2) as number).toBeCloseTo(2.5, 9);
   });
 
-  it('⚠ REFUSES A NON-POSITIVE BASE — a cash burn does not "grow at 12%" to anywhere', () => {
+  it(' REFUSES A NON-POSITIVE BASE — a cash burn does not "grow at 12%" to anywhere', () => {
     // FCF/share and EPS both go negative; whole cards on this tab exist because they do. A base of
     // -2.10 compounding to -6.52 would render as a forecast rather than as the nonsense it is.
     expect(compoundFrom(-2.1, 12, 10)).toBeNull();
     expect(compoundFrom(0, 12, 10)).toBeNull();
   });
 
-  it('⚠ REFUSES -100% OR WORSE — it lands on zero, which divides into an infinite price target', () => {
+  it(' REFUSES -100% OR WORSE — it lands on zero, which divides into an infinite price target', () => {
     expect(compoundFrom(10, -100, 5)).toBeNull();
     expect(compoundFrom(10, -140, 5)).toBeNull();
   });
@@ -506,7 +506,7 @@ describe('compoundFrom — cagrBetween run backwards', () => {
     expect(compoundFrom(10, 12, 0)).toBeNull();
   });
 
-  it('⚠ AN EXTREME RATE THAT OVERFLOWS IS null, NOT Infinity — a price target divides by it', () => {
+  it(' AN EXTREME RATE THAT OVERFLOWS IS null, NOT Infinity — a price target divides by it', () => {
     expect(compoundFrom(1e300, 1e6, 10)).toBeNull();
   });
 });

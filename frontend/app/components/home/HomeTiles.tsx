@@ -7,14 +7,14 @@ import { type HomeTileKey } from './homeTileKeys';
 /**
  * The home page's heading and tile grid, in the reader's language.
  *
- * ⚠⚠ A CLIENT COMPONENT BECAUSE THE LANGUAGE IS A CLIENT FACT. `useLang` reads `localStorage`
+ *  A client component because the language is a client fact. `useLang` reads `localStorage`
  * through `useSyncExternalStore`; the server has no such preference and `i18n.ts`'s
  * `getServerSnapshot` deliberately returns `'en'` so the server HTML and the first client render
  * agree. The page itself must stay a SERVER component — it reads the session and the `view_as`
  * cookie to decide the role — so the split is: server decides WHICH tiles, client decides what
  * they SAY.
  *
- * ⚠ IT RECEIVES HREFS, NOT COPY. Passing rendered strings down would put the English in the server
+ *  It receives hrefs, not copy. Passing rendered strings down would put the English in the server
  * component again and the switch would move nothing; passing the keys lets this component look them
  * up per language. It also keeps the role filter honest — the server filters the same `HomeTileKey`
  * values `isUserAllowedPath` is given, so a tile can never be advertised for a page the gate

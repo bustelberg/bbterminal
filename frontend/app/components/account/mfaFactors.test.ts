@@ -11,7 +11,7 @@ const factor = (id: string, status: Factor['status'], friendly_name?: string): F
 
 describe('unverified factors', () => {
   it('finds the leftovers an abandoned enrolment creates', () => {
-    // ⚠ THE TRAP THIS EXISTS FOR: pressing Add and closing the tab leaves a REAL factor that
+    //  The trap this exists for: pressing Add and closing the tab leaves a REAL factor that
     // counts against `max_enrolled_factors`. Ten closed tabs and enrolment starts failing with
     // "too many factors" on a page listing none of them.
     const all = [factor('a', 'verified'), factor('b', 'unverified'), factor('c', 'unverified')]
@@ -29,7 +29,7 @@ describe('unverified factors', () => {
 })
 
 describe('verifyOrder', () => {
-  it('⚠⚠ tries the OTHER authenticators first, so a lost device can still be removed', () => {
+  it(' tries the OTHER authenticators first, so a lost device can still be removed', () => {
     // The commonest reason to remove a factor is that the phone is gone. Checking the code
     // against the factor being removed first would make a spare device useless — you could enrol
     // one and still be unable to clear the dead entry.
@@ -49,7 +49,7 @@ describe('verifyOrder', () => {
 })
 
 describe('normaliseCode', () => {
-  it('⚠ strips the space authenticator apps display', () => {
+  it(' strips the space authenticator apps display', () => {
     // Apps show "123 456"; people copy the space with it. A stray character fails verification,
     // which sends the reader to check their phone's clock over a typo they cannot see.
     expect(normaliseCode('123 456')).toBe('123456')
@@ -87,7 +87,7 @@ describe('groupSecret', () => {
 })
 
 describe('suggestName', () => {
-  it('⚠ avoids the duplicate GoTrue rejects, which would only surface after the QR is scanned', () => {
+  it(' avoids the duplicate GoTrue rejects, which would only surface after the QR is scanned', () => {
     const all = [factor('a', 'verified', 'Authenticator')]
     expect(suggestName(all)).toBe('Authenticator 2')
   })
@@ -107,7 +107,7 @@ describe('suggestName', () => {
 })
 
 describe('qrSvg', () => {
-  it('⚠⚠ gives the QR a viewBox, or CSS CLIPS it instead of scaling it', () => {
+  it(' gives the QR a viewBox, or CSS CLIPS it instead of scaling it', () => {
     // The real tag, measured: `<svg width="219" height="219">` and no viewBox. Without a
     // coordinate system, CSS width/height resizes the WINDOW, not the drawing — so `w-44`
     // (192.5px at this app's 17.5px rem) painted a QR with 12% cut off the right and bottom,
@@ -118,7 +118,7 @@ describe('qrSvg', () => {
     const out = qrSvg(raw)
     expect(out).toContain('viewBox="0 0 219 219"')
     expect(out.startsWith('<svg')).toBe(true)
-    // ⚠ The fixed size must GO. Left in, it still beats CSS in some engines.
+    //  The fixed size must GO. Left in, it still beats CSS in some engines.
     expect(/<svg[^>]*\swidth=/.test(out)).toBe(false)
     expect(/<svg[^>]*\sheight=/.test(out)).toBe(false)
     expect(out).toContain('<rect/>')
@@ -129,14 +129,14 @@ describe('qrSvg', () => {
     expect(qrSvg(raw)).toBe(raw)
   })
 
-  it('⚠ drops the XML prolog GoTrue actually sends', () => {
+  it(' drops the XML prolog GoTrue actually sends', () => {
     // Through `innerHTML` the parser is in HTML mode, where an XML declaration becomes a bogus
     // comment — error recovery nobody chose, on the one image the whole enrolment turns on.
     const out = qrSvg('<?xml version="1.0"?>\n<!DOCTYPE svg><svg viewBox="0 0 1 1"><rect/></svg>')
     expect(out).toBe('<svg viewBox="0 0 1 1"><rect/></svg>')
   })
 
-  it('⚠ falls back to the input rather than to empty', () => {
+  it(' falls back to the input rather than to empty', () => {
     // A QR that renders oddly is recoverable; a blank square is not.
     expect(qrSvg('not markup at all')).toBe('not markup at all')
     expect(qrSvg('<svg><rect/></svg>')).toBe('<svg><rect/></svg>')   // no size to derive from

@@ -6,21 +6,21 @@ import { type AlignedRow } from './multiplesSeries';
 /**
  * The data behind the multiple-through-time chart: the vendor's forward multiple, by date.
  *
- * ⚠⚠ IT USED TO CARRY THE CLOSE AND THE PER-SHARE EACH POINT WAS DIVIDED FROM, and it does not any
+ *  It used to carry the close and the per-share each point was divided from, and it does not any
  * more because the line those belonged to was removed (2026-08-21, on request — see
  * `MultipleHistoryChart`). That is not lost detail: the trailing multiple was OUR division and so
  * had two operands worth showing, while the forward one is GuruFocus's published indicator, read
  * straight through. A "Close ÷ EPS" pair beside it would be arithmetic nobody performed.
  *
- * ⚠ IT IS HANDED THE PLOTTED ROWS, NOT AN ISIN — the same rule as `QuickValuationInputsModal`, so
+ *  It is handed the plotted rows, not an ISIN — the same rule as `QuickValuationInputsModal`, so
  * the table cannot arrive at a different multiple than the line it was opened from.
  *
- * ⚠ DATE PER ROW, NOT PER COLUMN — deliberately the TRANSPOSE of the fiscal-year drill-down beside
+ *  Date per row, not per column — deliberately the TRANSPOSE of the fiscal-year drill-down beside
  * it. That one has ten columns and four lines, so lines-as-rows fits on a screen. This series is
  * weekly for a decade — ~550 observations — which as columns is a horizontal scroll nobody can
  * read. Same panel, different shape, because the data has a different shape.
  *
- * ⚠ NEWEST FIRST, which is also the opposite of the sibling. A reader arrives here from today's
+ *  Newest first, which is also the opposite of the sibling. A reader arrives here from today's
  * number wanting to know what it was computed from; making them scroll a decade to reach it would
  * be a strange greeting. The chart is still drawn oldest-left — this is a table, not the chart.
  */
@@ -58,7 +58,7 @@ export default function MultipleHistoryModal({
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
           <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
           <button type="button" onClick={onClose}
-            className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+            className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-3">
@@ -87,11 +87,11 @@ export default function MultipleHistoryModal({
                   return (
                     <tr key={r.t} className="border-t border-neutral-800/40 hover:bg-overlay/[0.02]">
                       <td className="px-3 py-1 whitespace-nowrap font-mono text-fg-soft">{day(r.t)}</td>
-                      {/* ⚠ TEXT WEARS TEXT TOKENS, NEVER THE SERIES COLOUR — the house dataviz
+                      {/*  TEXT WEARS TEXT TOKENS, NEVER THE SERIES COLOUR — the house dataviz
                           rule. The amber here is the warning ramp, not the chart's amber line. */}
                       <td className={`px-3 py-1 text-right font-mono font-medium ${over ? 'text-warn-300' : 'text-fg-soft'}`}
                         title={over ? `Above ${OUTLIER_MULT}× the median (${mult(median)}) — a collapsed denominator, not a valuation. Drawn, but off the top of the chart's axis.` : undefined}>
-                        {over ? '⚠ ' : ''}{mult(r.fwd)}
+                        {over ? ' ' : ''}{mult(r.fwd)}
                       </td>
                     </tr>
                   );
@@ -100,7 +100,7 @@ export default function MultipleHistoryModal({
             </table>
           </div>
 
-          {/* ⚠ THE "blank Close is not a missing price" NOTE WENT WITH THE TRAILING COLUMNS. It
+          {/*  THE "blank Close is not a missing price" NOTE WENT WITH THE TRAILING COLUMNS. It
               explained rows whose timestamp came from the OTHER series; with one series every row
               is an observation of it, so there is nothing left to explain. */}
         </div>

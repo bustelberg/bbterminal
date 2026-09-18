@@ -84,13 +84,13 @@ class TestReturnsFromCurve:
 class TestSeriesBlock:
     """The encoding the instrument table charts from — one shared date axis, per-key columns.
 
-    ⚠ THE ENCODING IS A MEASUREMENT, NOT A STYLE CHOICE. See `_series_block`: the obvious
+     THE ENCODING IS A MEASUREMENT, NOT A STYLE CHOICE. See `_series_block`: the obvious
     `[[date, value], …]` per instrument costs 1,270 KB raw against this shape's 452 KB on the
     real book, because it repeats a 10-byte date string once per instrument per trading day.
     """
 
     def test_one_axis_is_the_union_and_a_gap_is_null_not_zero(self):
-        # ⚠ THE ASSERTION THIS CLASS EXISTS FOR. Two venues on different calendars: A trades on
+        #  The assertion this class exists for. Two venues on different calendars: A trades on
         # the 6th, B does not. B's column must carry None there — a 0.0 would be a price of zero,
         # which the sparkline draws as a crash to the floor and back on every foreign holiday.
         eur = {
@@ -114,7 +114,7 @@ class TestSeriesBlock:
         assert block["values"]["a:1"] == [10.0]
 
     def test_a_lookthrough_key_reads_the_wrapped_models_curve(self):
-        # ⚠ `p:` NOT `a:` — a certificate has no asset series of its own. The two id spaces are
+        #  `p:` NOT `a:` — a certificate has no asset series of its own. The two id spaces are
         # disjoint sets of small integers, so keying them both as bare numbers would collide
         # analysis_id 7 with portfolio 7 and chart one as the other.
         eur = {7: [("2026-01-02", 50.0)]}

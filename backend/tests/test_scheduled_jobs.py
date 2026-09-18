@@ -1,12 +1,12 @@
 """The automatic-jobs overview: declared vs registered vs actually ran.
 
-⚠⚠ THE FAILURE BEING GUARDED IS "A JOB QUIETLY STOPPED EXISTING", and every source on its own reads
+ THE FAILURE BEING GUARDED IS "A JOB QUIETLY STOPPED EXISTING", and every source on its own reads
 as healthy while it happens. `list_scheduled_jobs()` is empty under `DISABLE_SCHEDULER`, empty
 before startup, and empty of any job whose `add_job` threw — none of which is distinguishable from
 an idle scheduler by looking at the list. So the declaration is the fixed point, and these tests pin
 the three ways the join is allowed to disagree with it.
 
-⚠ AND `unknown` IS PINNED AS A FIRST-CLASS OUTCOME. Six of the eight jobs leave no durable record
+ AND `unknown` IS PINNED AS A FIRST-CLASS OUTCOME. Six of the eight jobs leave no durable record
 yet, so "did it run" has no answer for them; reporting green would be a fabrication and red would
 cry wolf. Either one teaches the reader to stop reading the page, which is the only way a monitoring
 surface really fails.
@@ -50,7 +50,7 @@ class TestTheDeclarationIsTheFixedPoint:
         assert len(ids) == len(set(ids))
 
     def test_the_prose_cadence_agrees_with_the_trigger_that_fires(self):
-        """⚠ THE ONE WAY THIS FILE CAN LIE. `cadence` is written by hand for the page while
+        """ THE ONE WAY THIS FILE CAN LIE. `cadence` is written by hand for the page while
         `trigger` is what APScheduler runs; nothing else forces them to describe the same schedule,
         and a page confidently reporting a cadence nothing runs at is worse than no page."""
         for s in SCHEDULED_JOBS:
@@ -65,7 +65,7 @@ class TestTheDeclarationIsTheFixedPoint:
                 assert "Amsterdam" in s.cadence, s.id
 
     def test_the_scheduler_registers_every_declared_id(self):
-        """⚠ STATIC, BECAUSE THE RUNTIME CANNOT ANSWER IT. A declared job nothing registers is
+        """ STATIC, BECAUSE THE RUNTIME CANNOT ANSWER IT. A declared job nothing registers is
         exactly the fault this whole feature exists to surface — and it would be surfaced only on a
         live instance, at whatever hour someone happened to look."""
         import scheduler
@@ -75,7 +75,7 @@ class TestTheDeclarationIsTheFixedPoint:
             assert f'_register("{s.id}"' in src, s.id
 
     def test_the_reaper_writes_the_marker_the_overview_matches_on(self):
-        """⚠ ONE STRING, TWO READERS. `scheduler` stamps it and `_scheduled_jobs_status` matches
+        """ ONE STRING, TWO READERS. `scheduler` stamps it and `_scheduled_jobs_status` matches
         it; a literal copied into either would stop agreeing the day someone reworded the message,
         and the overview would silently go back to calling every restart a job fault."""
         import scheduler
@@ -121,7 +121,7 @@ class TestTheThreeWayDisagreement:
         assert "not registered" in rows[0]["reason"]
 
     def test_missing_outranks_a_healthy_history(self):
-        """⚠ A JOB THAT RAN FINE YESTERDAY AND IS GONE TODAY IS THE WORST ROW ON THE PAGE, not the
+        """ A JOB THAT RAN FINE YESTERDAY AND IS GONE TODAY IS THE WORST ROW ON THE PAGE, not the
         best. Ordering the checks the other way would render it green off its own last success."""
         s = _spec(evidence=("j",))
         rows = build_rows([s], [], [_run("j", 1)], NOW, scheduler_running=True)
@@ -136,7 +136,7 @@ class TestTheThreeWayDisagreement:
         assert "only in the logs" in rows[0]["reason"]
 
     def test_a_recording_job_with_no_row_yet_is_UNKNOWN_too_but_says_something_else(self):
-        """⚠ TWO SHADES OF `unknown`, AND THE WORDING CARRIES THE DIFFERENCE. Above we cannot see
+        """ TWO SHADES OF `unknown`, AND THE WORDING CARRIES THE DIFFERENCE. Above we cannot see
         the job at all; here we can — it writes a durable row — and there is nothing to see, which
         is a real gap worth chasing rather than an instrumentation hole."""
         rows = build_rows([_spec(evidence=("j",))], [_reg("j")], [], NOW, scheduler_running=True)
@@ -145,7 +145,7 @@ class TestTheThreeWayDisagreement:
         assert "never recorded" in rows[0]["reason"]
 
     def test_a_process_killed_MID_RUN_is_interrupted_not_an_error(self):
-        """⚠⚠ A DEPLOY, AN OOM, OR `uvicorn --reload` IS NOT A BROKEN JOB. The reaper stamps such a
+        """ A DEPLOY, AN OOM, OR `uvicorn --reload` IS NOT A BROKEN JOB. The reaper stamps such a
         run `error` — correct, it certainly did not finish — but the fix is "run it again", not
         "debug it", and rendering it identically to a real fault paints a red row on every local
         restart. A reader who learns to discount red rows discounts the real one too."""
@@ -156,7 +156,7 @@ class TestTheThreeWayDisagreement:
         assert "run it again" in rows[0]["reason"]
 
     def test_but_an_interrupted_run_does_NOT_satisfy_the_freshness_check(self):
-        """⚠ THE WORK DID NOT HAPPEN. Treating it as a run would let a job interrupted months ago
+        """ THE WORK DID NOT HAPPEN. Treating it as a run would let a job interrupted months ago
         sit amber for ever while its data went stale — so past its own allowance it is `overdue`,
         which is what a reader needs to act on."""
         run = _run("j", 40 * 24, "error", f"{ORPHAN_MARKER} — auto-reaped on next startup.")
@@ -166,7 +166,7 @@ class TestTheThreeWayDisagreement:
         assert "nothing has completed since" in rows[0]["reason"]
 
     def test_a_CANCELLED_run_did_not_finish_either(self):
-        """⚠ THE RUN-NOW BUTTON CAN PRODUCE THIS. Somebody pressed Stop — not a fault, and
+        """ THE RUN-NOW BUTTON CAN PRODUCE THIS. Somebody pressed Stop — not a fault, and
         everything written is kept, but the work did not complete, so it must not read as `ok` and
         must not satisfy the freshness check."""
         rows = build_rows([_spec(evidence=("j",))], [_reg("j")], [_run("j", 2, "cancelled")],
@@ -194,7 +194,7 @@ class TestTheThreeWayDisagreement:
         assert rows[0]["status"] == "overdue"
 
     def test_a_weekend_gap_on_a_weekday_job_is_NOT_overdue(self):
-        """⚠ `max_age_hours` IS NOT THE CADENCE. A Mon–Fri job is three days idle every weekend by
+        """ `max_age_hours` IS NOT THE CADENCE. A Mon–Fri job is three days idle every weekend by
         design; a threshold set to the cadence would cry wolf every Monday."""
         rows = build_rows([_spec(evidence=("j",), max_age_hours=80)], [_reg("j")],
                           [_run("j", 66)], NOW, scheduler_running=True)
@@ -206,7 +206,7 @@ class TestTheThreeWayDisagreement:
         assert rows[0]["status"] == "ok"
 
     def test_a_SKIPPED_run_is_a_success(self):
-        """⚠ SEVERAL OF THESE JOBS ARE DESIGNED TO NO-OP — the month-end refresh acts twice a
+        """ SEVERAL OF THESE JOBS ARE DESIGNED TO NO-OP — the month-end refresh acts twice a
         month, the asset-price refresh stands down while the ingest queue is live. Scoring that as
         a failure would put a permanent red row on the page for healthy behaviour."""
         rows = build_rows([_spec(evidence=("j",))], [_reg("j")], [_run("j", 2, "skipped")], NOW,
@@ -219,7 +219,7 @@ class TestTheThreeWayDisagreement:
         assert rows[0]["status"] == "running"
 
     def test_a_row_stuck_in_RUNNING_past_its_allowance_is_an_error(self):
-        """⚠⚠ THE FAILURE THAT USED TO BE INVISIBLE. `record_run` writes on ENTRY precisely so a job
+        """ THE FAILURE THAT USED TO BE INVISIBLE. `record_run` writes on ENTRY precisely so a job
         killed mid-flight — redeploy, OOM, --reload — leaves this behind instead of nothing; a row
         that never closed and is long past its own cadence means the process died and nobody has
         run it since."""
@@ -262,7 +262,7 @@ class TestUndeclaredJobs:
         assert rows[0]["status"] == "ok"
 
     def test_the_pipeline_jobs_are_observable_WITHOUT_recording(self):
-        """⚠ THEY WRITE A RICHER `ingest_run` ROW ALREADY. A second, thinner record beside it would
+        """ THEY WRITE A RICHER `ingest_run` ROW ALREADY. A second, thinner record beside it would
         be two accounts of one event, free to disagree."""
         s = _spec(records=False, evidence=("price_update",))
         rows = build_rows([s], [_reg("j")], [_run("price_update", 2)], NOW, scheduler_running=True)
@@ -270,7 +270,7 @@ class TestUndeclaredJobs:
         assert rows[0]["status"] == "ok"
 
     def test_a_registered_job_nothing_declares_is_REPORTED(self):
-        """⚠ NOT DROPPED. It is either a legitimate dynamic one-shot (the startup catch-up, the
+        """ NOT DROPPED. It is either a legitimate dynamic one-shot (the startup catch-up, the
         +3h stale-price retry) or the residue of a rename the declaration never learned about —
         and silently filtering it is how the page comes to describe a system it no longer matches.
         """
@@ -309,7 +309,7 @@ class TestEvidenceNames:
         assert evidence_names([_spec()]) == []
 
     def test_the_real_declaration_asks_for_a_handful_of_names(self):
-        """⚠ THE READ IS ONE ROW PER NAME, so this is also the query count. It was a windowed
+        """ THE READ IS ONE ROW PER NAME, so this is also the query count. It was a windowed
         `.limit(500)` once, and the window filled with `price_update` rows and pushed the month-end
         refresh — idle for 35 days BY DESIGN — off the end, reporting it as never recorded."""
         assert len(evidence_names(list(SCHEDULED_JOBS))) <= 6
@@ -335,7 +335,7 @@ class TestTimestamps:
 
 
 class TestATickThatNeverRanIsItsOwnVerdict:
-    """⚠⚠ THE STATE THAT DID NOT EXIST UNTIL 2026-09-01, AND ITS ABSENCE IS WHY A PRODUCTION JOB
+    """ THE STATE THAT DID NOT EXIST UNTIL 2026-09-01, AND ITS ABSENCE IS WHY A PRODUCTION JOB
     COULD SIT 20.9 DAYS STALE WITH NOTHING TO READ. Every other status here reasons about a job
     that STARTED — `record_run` is a context manager around real work, so it cannot speak for work
     that never began. A tick lost to a misfire, or to a process that was not alive at the fire
@@ -344,7 +344,7 @@ class TestATickThatNeverRanIsItsOwnVerdict:
     sentence the page used to have to guess at."""
 
     def test_it_renders_as_missed_and_repeats_the_recorded_reason(self):
-        """⚠ THE ROW'S OWN `detail`, NEVER A STRING BUILT HERE. It names the fire time and the
+        """ THE ROW'S OWN `detail`, NEVER A STRING BUILT HERE. It names the fire time and the
         moment the process actually started — facts only the writer had. Re-deriving a reason at
         render time would be a second, poorer answer to a question already answered."""
         why = ("no run recorded for the 2026-09-01 05:00 UTC tick — this process did not start "
@@ -357,7 +357,7 @@ class TestATickThatNeverRanIsItsOwnVerdict:
         assert rows[0]["reason"] == why
 
     def test_a_missed_tick_cannot_satisfy_the_freshness_check(self):
-        """⚠ NO WORK HAPPENED, so past its own allowance the job is genuinely late and says so —
+        """ NO WORK HAPPENED, so past its own allowance the job is genuinely late and says so —
         the same rule `interrupted` and `cancelled` follow. A `missed` row counted as a run would
         turn the evidence of an outage into proof there wasn't one."""
         fresh = build_rows([_spec(evidence=("j",), max_age_hours=30)], [_reg("j")],
@@ -369,7 +369,7 @@ class TestATickThatNeverRanIsItsOwnVerdict:
         assert "nothing has completed in 1.7 days" in late[0]["reason"]
 
     def test_a_real_run_after_a_miss_wins(self):
-        """⚠ `_latest_run` TAKES THE NEWEST ACROSS EVERY NAME, which is what makes it safe for a
+        """ `_latest_run` TAKES THE NEWEST ACROSS EVERY NAME, which is what makes it safe for a
         job's id to be a lookup name even when it proves itself through `ingest_run`. A run and a
         miss are different events, not two accounts of one."""
         miss = _run("j", 6, "missed")
@@ -378,7 +378,7 @@ class TestATickThatNeverRanIsItsOwnVerdict:
         assert rows[0]["status"] == "ok"
 
     def test_a_pipeline_job_is_looked_up_under_its_OWN_id_as_well(self):
-        """⚠⚠ THE HALF THAT WOULD HAVE MADE THE WHOLE FEATURE A NO-OP ON THE JOB THAT NEEDED IT.
+        """ THE HALF THAT WOULD HAVE MADE THE WHOLE FEATURE A NO-OP ON THE JOB THAT NEEDED IT.
         `daily_pipeline` is `records=False` — it proves itself through `ingest_run` — so `names`
         used to exclude its id entirely. But a missed tick can only ever be recorded under the id
         (there is no phase history for work that never started), so the gap scan's evidence for the
@@ -391,7 +391,7 @@ class TestATickThatNeverRanIsItsOwnVerdict:
         assert rows[0]["reason"] == "the 05:00 tick never ran"
 
     def test_but_the_queue_worker_is_still_UNOBSERVABLE_rather_than_accused(self):
-        """⚠⚠ THE GATE ON THAT WIDENING. `asset_ingest_queue` is `records=False` with no evidence
+        """ THE GATE ON THAT WIDENING. `asset_ingest_queue` is `records=False` with no evidence
         AND an interval trigger — genuinely unobservable, and the gap scan skips it because a job
         that fires every 20 seconds is DESIGNED to be absent whenever the process is. Adding its id
         unconditionally would move it from "leaves no durable record" to "never recorded — a real

@@ -1,7 +1,7 @@
 /**
  * The Tables tab's comparison target — /research-dashboard's company B.
  *
- * ⚠⚠ WHAT THIS GUARDS IS A SCREEN THAT LOOKED RIGHT. `LongEquityTab` took `compare` and `TablesTab`
+ *  What this guards is a screen that looked right. `LongEquityTab` took `compare` and `TablesTab`
  * did not, so on /research-dashboard the Graphs tab drew company A against company B while the
  * Tables tab beside it summarised A against ACWI — two tabs of one modal, one pair of picked names,
  * two different comparisons, and nothing on either tab saying so. `tablesCopy` already records the
@@ -21,7 +21,7 @@ import { benchBody, isUniverseTarget, type BenchTarget } from './benchSeries';
 const src = (f: string) => readFileSync(join(__dirname, f), 'utf8');
 
 describe('the comparison sentinel', () => {
-  it('⚠⚠ is the SAME string in both tabs, which share one selector shape', () => {
+  it(' is the SAME string in both tabs, which share one selector shape', () => {
     // Each tab keeps its own copy (one is a heavy chart module, this is a string), so the equality
     // is asserted rather than imported. They collide in one `useState` with the index names, so a
     // drift here is a tab that silently falls back to an index.
@@ -30,14 +30,14 @@ describe('the comparison sentinel', () => {
     expect(grab('TablesTab.tsx')).toBe('__compare__');
   });
 
-  it('⚠ is not a name any index could take', () => {
+  it(' is not a name any index could take', () => {
     // It shares a state slot with `CAGR_BENCHMARKS`; an index literally called `__compare__` would
     // make the two indistinguishable.
     expect(src('CagrTable.tsx')).not.toContain('__compare__');
   });
 });
 
-describe('⚠⚠ the column header reads the TARGET, never the selection', () => {
+describe(' the column header reads the TARGET, never the selection', () => {
   /**
    * `bench` is now either an index name or the sentinel. Printing it puts the literal string
    * `__compare__` in a column header the moment a company is picked — which is exactly the trap
@@ -59,7 +59,7 @@ describe('⚠⚠ the column header reads the TARGET, never the selection', () =>
 });
 
 describe('a company target is a one-holding book, an index is a universe', () => {
-  /** ⚠ THE REASON THIS NEEDED NO NEW ENDPOINT. Both arms of the union already serialise. */
+  /**  THE REASON THIS NEEDED NO NEW ENDPOINT. Both arms of the union already serialise. */
   const company: BenchTarget = { isin: 'US67066G1040', label: 'NVIDIA Corporation', cadence: 'annual' };
   const index: BenchTarget = { universe: 'ACWI', label: 'ACWI', cadence: 'annual' };
 
@@ -74,14 +74,14 @@ describe('a company target is a one-holding book, an index is a universe', () =>
     expect(JSON.parse(benchBody(index))).toEqual({ universe: 'ACWI', cadence: 'annual' });
   });
 
-  it('⚠ and the ONE discriminator tells them apart', () => {
+  it(' and the ONE discriminator tells them apart', () => {
     expect(isUniverseTarget(index)).toBe(true);
     expect(isUniverseTarget(company)).toBe(false);
   });
 });
 
 describe('the modal hands the same `compare` to both tabs', () => {
-  it('⚠ or Graphs and Tables answer two different questions on one screen', () => {
+  it(' or Graphs and Tables answer two different questions on one screen', () => {
     const s = src('OwnerEarningsModal.tsx');
     // Both call sites must carry it. Counted rather than located, so a reorder does not fail this.
     expect((s.match(/^\s*compare=\{compare\}/gm) ?? []).length).toBe(2);

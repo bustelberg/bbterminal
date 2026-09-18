@@ -68,13 +68,13 @@ def latest_db_price_date() -> date | None:
     table. Used as a fast pre-flight gate so we don't run a heavy compute
     against stale DB data. Returns None if the table is empty.
 
-    ⚠ BOTH constants are load-bearing, and they must match
+     BOTH constants are load-bearing, and they must match
     `idx_metric_data_close_price_date`'s predicate EXACTLY
     (`metric_code='close_price' AND source_code='gurufocus'`) or the partial
     index does not apply and prod seq-scans a 70M-row table into the 8s
     statement timeout (57014).
 
-    ⚠ The previous index here was `(source_code, target_date)`, and the comment
+     The previous index here was `(source_code, target_date)`, and the comment
     claiming it "stops at the first close_price row" was wrong:
     `metric_code` was not in it, so it was a FILTER and the scan walked every
     row dated after the last close — 188,286 of them, ALL `is_prediction`
@@ -111,7 +111,7 @@ def strategy_hash(req: "BacktestRequest") -> str:
         "top_n_per_sector": req.top_n_per_sector,
         "max_companies": req.max_companies,
         "min_price_score": req.min_price_score,
-        # ⚠⚠ PART OF THE IDENTITY, BECAUSE IT CHANGES THE SCORES THEMSELVES. Two requests
+        #  Part of the identity, because it changes the scores themselves. Two requests
         # identical but for this produce different picks from the same signals; a hash blind to it
         # would serve one strategy's cached snapshot to the other.
         "score_normalization": getattr(req, "score_normalization", "minmax"),
@@ -139,7 +139,7 @@ def backtest_strategy_hash(req: "BacktestRequest") -> str:
         "top_n_per_sector": req.top_n_per_sector,
         "max_companies": req.max_companies,
         "min_price_score": req.min_price_score,
-        # ⚠⚠ PART OF THE IDENTITY, BECAUSE IT CHANGES THE SCORES THEMSELVES. Two requests
+        #  Part of the identity, because it changes the scores themselves. Two requests
         # identical but for this produce different picks from the same signals; a hash blind to it
         # would serve one strategy's cached snapshot to the other.
         "score_normalization": getattr(req, "score_normalization", "minmax"),
@@ -240,7 +240,7 @@ def persist_daily_picks(hash_: str, config: dict, daily_picks: list[dict]) -> No
         ).execute()
 
 
-# ⚠ THE MOST RECENT DAYS ARE NEVER SERVED FROM CACHE, AND THIS IS NOT PARANOIA.
+#  The most recent days are never served from cache, and this is not paranoia.
 # A day's selection is a function of the closes known BEFORE it, and those keep
 # arriving: GuruFocus publishes some closes days late and `ingest/prices.py` writes
 # them with their true (earlier) target_date, so a selection computed on Monday for
@@ -253,7 +253,7 @@ DAILY_HOLDINGS_TAIL_DAYS = 5
 # The columns a cached selection has to carry for the daily loop to rebuild the day
 # without re-scoring. Everything else on a holding (prices, weight, returns) is
 # re-derived per run — see the migration.
-# ⚠ THE CATEGORY SCORES ARE IN HERE FOR A REASON. The daily-holdings table shows a
+#  The category scores are in here for a reason. The daily-holdings table shows a
 # price and a volume score per company, and those come off `score_price` /
 # `score_volume` on the scored frame. Leave them out of the cache and a REUSED day
 # renders them blank while a freshly computed one fills them — which reads as "we
@@ -288,7 +288,7 @@ def fetch_daily_holdings_cache(hash_: str, start: str, end: str) -> dict[str, di
 def persist_daily_holdings_cache(hash_: str, days: dict[str, dict]) -> None:
     """Store freshly computed days (selection + sector scores). Best-effort — see above.
 
-    ⚠ THIS IS NOT `current_picks_day` AND MUST NEVER BE POINTED AT IT. Both are keyed
+     THIS IS NOT `current_picks_day` AND MUST NEVER BE POINTED AT IT. Both are keyed
     (strategy_hash, target_date); that one records what the pipeline DECIDED with the
     data it had, this one records a RECALCULATION on today's data. An upsert into the
     wrong table replaces the decision with the recalculation and the original is gone.

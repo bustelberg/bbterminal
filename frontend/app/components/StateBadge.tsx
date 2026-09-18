@@ -1,14 +1,14 @@
 /**
  * The small uppercase badge a cell wears when it holds a STATE instead of a value.
  *
- * ⚠⚠ ONE COMPONENT, BECAUSE THE SAME WORD MUST LOOK THE SAME EVERYWHERE. `UNSUBSCRIBED` means one
+ *  One component, because the same word must look the same everywhere. `UNSUBSCRIBED` means one
  * thing in this app — GuruFocus lists this instrument only on exchanges outside our subscription,
  * so the data is unobtainable rather than missing — and it appears on the /asset-pipeline grid, on
  * /companies and in the fundamentals drill-downs. Three hand-rolled spans is three chances for the
  * same fact to render as three different things, at which point the reader has to learn each table
  * separately instead of learning the vocabulary once.
  *
- * ⚠ A BADGE IS FOR AN ANSWER, NOT A BLANK. Each one names a reason a cell cannot hold a number, and
+ *  A badge is for an answer, not a blank. Each one names a reason a cell cannot hold a number, and
  * every one of them is a dead end already paid for — so it must not read as an invitation to
  * retry. The `title` carries the full explanation; the label is the two words you can scan a
  * column for.
@@ -16,7 +16,7 @@
 
 /** The tones, so a caller picks from the vocabulary rather than inventing a colour.
  *
- * ⚠ `warn` vs `warnSoft` IS A REAL DISTINCTION, not two shades of the same idea: `warn` is
+ *  `warn` vs `warnSoft` IS A REAL DISTINCTION, not two shades of the same idea: `warn` is
  * "unobtainable — stop asking" (UNSUBSCRIBED, NOT EQUITY's louder cousins) and `warnSoft` is "a
  * gap we could still close" (NO DATA). `muted`/`faint` are for the states that are simply facts
  * about the instrument and carry no urgency at all. */
@@ -35,7 +35,7 @@ export function StateBadge({ label, tone, title }: {
   /**
    * Why the cell holds this instead of a number, as a native `title`.
    *
-   * ⚠ OPTIONAL ONLY BECAUSE `InfoTip` EXISTS — never because a badge may go unexplained. A caller
+   *  Optional only because `InfoTip` EXISTS — never because a badge may go unexplained. A caller
    * that wraps this in an `InfoTip` must NOT also pass a title: the browser would sit on the
    * native one for a second or two and then show a second tooltip over the instant one. Omit it
    * there, pass it everywhere else.

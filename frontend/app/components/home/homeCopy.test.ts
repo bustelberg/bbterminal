@@ -1,7 +1,7 @@
 /**
  * The home page's copy, pinned in both languages.
  *
- * ⚠ THE COMPILER ALREADY CATCHES A MISSING TILE — `Record<HomeTileKey, Tile>` will not build with
+ *  The compiler already catches a missing tile — `Record<HomeTileKey, Tile>` will not build with
  * one absent. What it cannot see is the two maps disagreeing with `HOME_TILE_ORDER` (a key nobody
  * renders, or a rendered href with no copy), an empty string, or a Dutch entry left as its English
  * source. Those are what this file is for.
@@ -23,13 +23,13 @@ describe('HOME_TILE_ORDER', () => {
     expect(new Set(ORDER).size).toBe(ORDER.length);
   });
 
-  it('⚠ every entry is a plausible route, so no tile is a dead click', () => {
+  it(' every entry is a plausible route, so no tile is a dead click', () => {
     // A typo'd href renders a tile `isUserAllowedPath` rejects, which an admin still sees and whose
     // click 404s. One leading slash, no trailing one.
     for (const href of ORDER) expect(href).toMatch(/^\/[a-z0-9_-]+$/);
   });
 
-  it('⚠ the user-visible subset is exactly what the route gate allows', () => {
+  it(' the user-visible subset is exactly what the route gate allows', () => {
     // The home grid filters this array through the SAME allow-list the route gate uses, so the two
     // cannot drift — that drift is why this filter exists (the page once advertised admin-only
     // pages while hiding /schedule). `/earnings` left the user tier on 2026-09-07.
@@ -38,9 +38,9 @@ describe('HOME_TILE_ORDER', () => {
   });
 });
 
-describe('⚠⚠ the server/client boundary', () => {
+describe(' the server/client boundary', () => {
   /**
-   * THE ONLY TEST HERE THAT READS SOURCE, AND IT GUARDS A RUNTIME FAILURE NOTHING ELSE CAN SEE.
+   * The only test here that reads source, and it guards a runtime failure nothing else can see.
    *
    * `app/page.tsx` is a SERVER component and imports `HOME_TILE_ORDER` as DATA. If that array ever
    * moves back into a `'use client'` module, the bundler hands the server a client-reference PROXY
@@ -58,7 +58,7 @@ describe('⚠⚠ the server/client boundary', () => {
     expect(src).not.toMatch(/^\s*['"]use client['"]/);
   });
 
-  it('⚠ and the copy module does NOT re-export it, which would restore the same trap', () => {
+  it(' and the copy module does NOT re-export it, which would restore the same trap', () => {
     // A re-export from `homeCopy.ts` would let a server component import the array through a
     // `'use client'` module again — same proxy, same TypeError, with nothing in the import path
     // hinting why. Data comes from `homeTileKeys.ts` directly, for every caller.
@@ -69,7 +69,7 @@ describe('⚠⚠ the server/client boundary', () => {
 });
 
 describe('the two languages cannot drift', () => {
-  it('⚠ both cover exactly the tiles that are rendered — no orphans, no gaps', () => {
+  it(' both cover exactly the tiles that are rendered — no orphans, no gaps', () => {
     const expected = [...ORDER].sort();
     for (const lang of LANGS) {
       expect(Object.keys(HOME_COPY[lang].tiles).sort()).toEqual(expected);
@@ -88,7 +88,7 @@ describe('the two languages cannot drift', () => {
     }
   });
 
-  it('⚠⚠ every DESCRIPTION differs between the languages', () => {
+  it(' every DESCRIPTION differs between the languages', () => {
     // The failure this catches is a Dutch entry copy-pasted from the English and never translated:
     // it compiles, it renders, and it looks finished. Descriptions are full sentences, so no two
     // legitimately coincide — unlike LABELS, where `Backtest` and `Benchmarks` are the same word in
@@ -101,7 +101,7 @@ describe('the two languages cannot drift', () => {
     expect(HOME_COPY.nl.intro).not.toBe(HOME_COPY.en.intro);
   });
 
-  it('⚠ keeps product names untranslated — they are what the things are CALLED', () => {
+  it(' keeps product names untranslated — they are what the things are CALLED', () => {
     // A translated `MomentumTopSelectie` would name a strategy that does not exist in the app; the
     // same goes for the vendors and the index families.
     expect(HOME_COPY.nl.tiles['/schedule'].description).toContain('MomentumTopSelectie');

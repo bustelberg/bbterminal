@@ -1,6 +1,6 @@
 """The risk variant of a model portfolio — Offensief / Beperkt Offensief / Neutraal / Defensief.
 
-⚠ ONE RULE ORDER IS RIGHT AND SIX OF SEVEN CASES CANNOT TELL YOU WHICH.
+ ONE RULE ORDER IS RIGHT AND SIX OF SEVEN CASES CANNOT TELL YOU WHICH.
 
 "bep offensief" CONTAINS "offensief", so testing Offensief first misclassifies Beperkt Offensief.
 But it only does so for the ONE model that spells it with a separator — measured 2026-07-16:
@@ -24,7 +24,7 @@ from routers._airs_portfolio_variant import VARIANTS, portfolio_variant
 
 
 class TestTheOrderingTrap:
-    """⚠ Read the module docstring before reordering `_RULES`."""
+    """ Read the module docstring before reordering `_RULES`."""
 
     def test_the_separator_spelling_is_beperkt_not_offensief(self):
         """THE case. Its name tokenises to [bus, bep, offensief, fx] — a standalone `offensief`."""

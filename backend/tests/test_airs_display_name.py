@@ -4,7 +4,7 @@ AIRS's `Portefeuille` is a 24-char code — "BUS_BM_AAN_kw_USD_2026_d", "TOPS_OF
 identifier squeezed through a legacy form field, not a label anyone would choose. `display_name`
 is the label, shown beside the code rather than instead of it.
 
-⚠ THE ONE THING THAT MUST NEVER HAPPEN. `display_name` is a column on `airs_model_portfolio`, a
+ THE ONE THING THAT MUST NEVER HAPPEN. `display_name` is a column on `airs_model_portfolio`, a
 table the scan rewrites on every rescan. That is only safe because `save_portfolios` builds an
 EXPLICIT payload and upserts `on_conflict="id"`, so PostgREST SETs only the columns it names.
 
@@ -24,7 +24,7 @@ from routers import _airs_portfolio_store as store
 
 
 class TestTheScanMustNeverWriteTheChosenName:
-    """⚠ Read the module docstring before touching this."""
+    """ Read the module docstring before touching this."""
 
     def test_the_upsert_payload_does_not_carry_display_name(self):
         src = inspect.getsource(store.save_portfolios)

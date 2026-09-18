@@ -1,6 +1,6 @@
 """The staleness ANCHOR — the thing that decides whether the daily price refresh has any work.
 
-⚠ A FLEET CANNOT SEE ITS OWN DRIFT. `global_latest_close` anchors on the newest close WE HOLD,
+ A FLEET CANNOT SEE ITS OWN DRIFT. `global_latest_close` anchors on the newest close WE HOLD,
 which is right for a weekend, a holiday and a Yahoo outage — and blind to the failure that matters
 most, because in it every row ages TOGETHER. Measured 2026-07-29: our newest close anywhere was
 2026-07-23, six days earlier; AMD's own last close was 2026-07-22, i.e. ONE day behind that anchor,
@@ -40,7 +40,7 @@ class TestNewestDatedClose:
         assert newest_dated_close(chart([(JUL27, None), (JUL28, None)])) is None
 
     def test_an_empty_or_missing_result_yields_no_anchor(self):
-        """⚠ None must mean 'fall back to our own maximum', never 'today'. A throttled probe that
+        """ None must mean 'fall back to our own maximum', never 'today'. A throttled probe that
         answered with the calendar would turn a Yahoo outage into a 6,000-instrument stampede at
         the one moment fetching cannot work."""
         assert newest_dated_close(None) is None

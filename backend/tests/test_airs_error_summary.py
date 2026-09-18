@@ -43,7 +43,7 @@ class TestItGroupsByCause:
         assert out[0]["report"] == "Mutaties" and out[0]["count"] == 2
 
     def test_a_trailing_detail_does_not_scatter_one_cause(self):
-        """⚠ THE KEY IS TRUNCATED FOR EXACTLY THIS. Two failures of the same kind usually differ in
+        """ THE KEY IS TRUNCATED FOR EXACTLY THIS. Two failures of the same kind usually differ in
         a trailing date or account code; keying on the whole string would produce a dozen groups of
         one — the un-summarised list this exists to replace."""
         base = "no valued Vermogensoverzicht in the last 7 days (Response too small for account "

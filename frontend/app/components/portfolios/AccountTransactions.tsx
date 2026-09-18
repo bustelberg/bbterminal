@@ -6,14 +6,14 @@ import { API_URL } from '../../../lib/apiUrl';
 import type { AirsAccountTransactions } from '../../../lib/types/api';
 
 /**
- * WHAT THIS BOOK BOUGHT AND SOLD — the AIRS Transacties report, beside the positions it produced.
+ * What this book bought and sold — the AIRS Transacties report, beside the positions it produced.
  *
  * The three reports already on this screen say what a book HOLDS (Vermogensoverzicht), what it
  * EARNED (Mutaties) and what its strategy ASKS FOR (Model). None of them says what it DID: a
  * position that appeared mid-year, one that was sold out entirely, and a weight that drifted purely
  * because the market moved are indistinguishable from the outside.
  *
- * ⚠ THE COLUMNS ARE RENDERED FROM THE PAYLOAD, NOT DECLARED HERE, AND THAT IS DELIBERATE. No column
+ *  The columns are rendered from the payload, not declared here, and that is deliberate. No column
  * of the TRANS report has ever been measured — `rapport_types=TRANS` was probed in 2026-07 and
  * confirmed only to return an XLS. Every other AIRS table in this app names its columns because
  * somebody read the sheet first. Hard-coding a guess would put "Bedrag" in a column headed
@@ -21,12 +21,12 @@ import type { AirsAccountTransactions } from '../../../lib/types/api';
  * number rather than an error. This table shows the report AS the report until the sheet has been
  * seen; then the columns that matter get promoted, formatted and explained like every other.
  *
- * ⚠ ALIGNMENT COMES FROM THE SERVER'S `kinds`, WHICH IS A DTYPE, NOT A MEANING. A column pandas
+ *  Alignment comes from the server's `kinds`, WHICH IS A DTYPE, NOT A MEANING. A column pandas
  * read as text stays left-aligned and unformatted even if it is named like an amount — that is a
  * visible fact about the export, and hiding it behind a number formatter is how a column that only
  * sometimes parses gets trusted.
  *
- * ⚠ AN EMPTY TABLE MUST NAME ITS OWN CAUSE. Three very different things produce zero rows — the
+ *  An empty table must name its own cause. Three very different things produce zero rows — the
  * book did not trade, AIRS has no such report for it, or we could not ask — and a bare "no
  * transactions" asserts the first. `note` carries the reason and is always shown when present.
  */
@@ -52,7 +52,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
         + `from ${j.source} in ${Math.round(performance.now() - t0)}ms`, j.note ?? '');
       setData(j);
     } catch (e) {
-      // ⚠ THE DETAIL GOES TO THE CONSOLE, ONE SHORT LINE TO THE UI. A stack trace in a table cell
+      //  The detail goes to the console, one short line to the ui. A stack trace in a table cell
       // is not a message a reader can act on.
       console.warn(`[AIRS transactions] ${portefeuille} failed`, e);
       setErr('Could not load transactions — see the console for the full error.');
@@ -79,7 +79,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
         <span className={`text-[9px] text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
         <span className="font-medium text-fg-strong">Transactions</span>
         <span className="text-fg-faint">
-          {/* ⚠ BEFORE THE FIRST OPEN WE DO NOT KNOW THE COUNT, AND SAYING SO BEATS SHOWING "0".
+          {/*  BEFORE THE FIRST OPEN WE DO NOT KNOW THE COUNT, AND SAYING SO BEATS SHOWING "0".
               The count costs an AIRS download; a 0 rendered while nothing has been asked is a
               claim that this book never traded. */}
           {loading ? 'loading…'
@@ -90,7 +90,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
         {data && (
           <span className="ml-auto flex items-center gap-2 text-[11px] text-fg-faint">
             <span>{data.datum_van} → {data.datum_tot}</span>
-            {/* ⚠ A CACHED ANSWER SHOWN AS FRESH IS HOW A STALE FIGURE GETS TRUSTED. Same rule the
+            {/*  A CACHED ANSWER SHOWN AS FRESH IS HOW A STALE FIGURE GETS TRUSTED. Same rule the
                 model-portfolio positions follow. */}
             {data.cached_at && <span title={`Stored ${data.cached_at}`}>cached</span>}
           </span>
@@ -105,7 +105,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
           {data?.note && (
             <p className="text-[11px] text-warn-500 px-1">{data.note}</p>
           )}
-          {/* ⚠ THE ACTION IS OFFERED ON THE FAILURE PATH TOO. The auto-load fires once and then
+          {/*  THE ACTION IS OFFERED ON THE FAILURE PATH TOO. The auto-load fires once and then
               stops (a loop against a failing AIRS session helps nobody), so without this a
               transient failure could only be cleared by collapsing the whole account row. */}
           {(data || err) && (
@@ -115,7 +115,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
                 className="px-2 py-1 rounded-md border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 disabled:opacity-50 transition-colors">
                 {loading ? 'Loading…' : data ? 'Refresh from AIRS' : 'Try again'}
               </button>
-              {/* ⚠ SAID ON SCREEN, NOT ONLY IN THE CODE. A reader looking at unfamiliar column
+              {/*  SAID ON SCREEN, NOT ONLY IN THE CODE. A reader looking at unfamiliar column
                   headings deserves to know they are AIRS's own and not ours — otherwise a missing
                   column reads as a bug in this page. */}
               {data && (
@@ -162,7 +162,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
                             className={`px-3 py-1.5 ${kind === 'text'
                               ? 'text-fg-soft'
                               : 'text-right font-mono tabular-nums text-fg'}`}>
-                            {/* ⚠ A BLANK IS A BLANK, NEVER A 0. The server already turns an empty
+                            {/*  A BLANK IS A BLANK, NEVER A 0. The server already turns an empty
                                 Excel cell into null rather than the truthy string "nan"; printing
                                 a 0 here would put a number where the report has none. */}
                             {v == null ? <span className="text-fg-faint">—</span>
@@ -184,7 +184,7 @@ export default function AccountTransactions({ portefeuille }: { portefeuille: st
 }
 
 /** A number as the sheet reports it — thousands separated, up to 6 decimals, NOTHING assumed about
- *  units. ⚠ No currency symbol and no rounding to 2dp: we do not know which columns are amounts,
+ *  units.  No currency symbol and no rounding to 2dp: we do not know which columns are amounts,
  *  which are quantities and which are prices, and a € in front of a share count would be a claim.
  *  `maximumFractionDigits: 6` because a quantity or an FX rate carries more than two and truncating
  *  one silently changes the value on screen. */

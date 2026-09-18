@@ -14,7 +14,7 @@ export type Period = string;
 /**
  * The two sliders' axes, derived from the periods the server actually returned.
  *
- * ⚠ THE QUARTER AXIS IS PER YEAR, NOT GLOBAL, AND THAT IS THE POINT. A TTM point needs four
+ *  The quarter axis is per year, not global, and that is the point. A TTM point needs four
  * quarters behind it, and the current year has only the quarters that have been filed — so a
  * global `[Q1..Q4]` would offer positions that resolve to no data and read as "the index has
  * nothing here". `quartersByYear` is what lets the control grey out what does not exist rather
@@ -48,7 +48,7 @@ export function periodKey(year: string, quarter: number | null): Period {
 /**
  * How the selected period should be NAMED on screen.
  *
- * ⚠ `TTM → Q3` AND NEVER `Q3`. The quarterly basis here is trailing twelve months (see
+ *  `TTM → Q3` AND NEVER `Q3`. The quarterly basis here is trailing twelve months (see
  * `_benchmark_fundamental_grid`), so a cell under a `Q3` heading would read as three months of
  * revenue when it is twelve — the number is about 4x what the label implies, and nothing on screen
  * would contradict it. The label is the only thing standing between the reader and that.
@@ -78,18 +78,18 @@ export type AggCell = { value: number; contributors: number };
 /**
  * The index row: what the whole benchmark looked like in this period.
  *
- * ⚠ THREE KINDS OF COLUMN, AND USING THE WRONG ONE PRODUCES A NUMBER THAT STILL RENDERS FINE.
+ *  Three kinds of column, and using the wrong one produces a number that still renders fine.
  *  * `sum` — a currency amount (revenue, market cap, equity). The index total is the sum.
  *  * `weighted_mean` — already a RATE (ROIC %). Summing 400 companies' ROIC gives ~5,000%, which
  *    the cell would happily print with a % sign after it. The only honest aggregate is the mean,
  *    and the only honest mean here is cap-weighted.
- *  * `none` — ⚠ A REFUSAL, AND IT IS AN ANSWER. A share COUNT and a PER-SHARE amount have no
+ *  * `none` —  A REFUSAL, AND IT IS AN ANSWER. A share COUNT and a PER-SHARE amount have no
  *    index-level total: "the S&P 500's share count" is not a quantity, and summed dividends-per-
  *    share across 500 companies is a well-formed number with no referent. The cell shows a dash.
  * The kind is declared by the server off the column's UNIT (`column.agg`) — not off its TTM
  * roll-up rule, which answers aggregation over TIME and disagrees on exactly the lines that matter.
  *
- * ⚠ A WEIGHTED MEAN RENORMALISES OVER THE ROWS THAT HAVE THE METRIC, and `contributors` is how
+ *  A weighted mean renormalises over the rows that have the metric, and `contributors` is how
  * that stops being silent. A rate present for 200 of 480 constituents is a real average of those
  * 200; presented without the count it reads as the index's. A SUM is not renormalisable at all —
  * a missing company just understates the total — which is why the whole row is withheld under the
@@ -136,7 +136,7 @@ export function aggregateRow(
 /**
  * EUR millions → a figure a person can read.
  *
- * ⚠ THE INPUT IS MILLIONS, which is the convention everywhere GuruFocus financials are handled in
+ *  The input is millions, which is the convention everywhere GuruFocus financials are handled in
  * this app. Rendering 181,171 as "€181,171" (rather than €181.2bn) is not a formatting preference
  * — it is off by a factor of a million and looks like a plausible euro amount.
  */
@@ -153,7 +153,7 @@ export function fmtMillions(v: number | null | undefined): string {
 /**
  * What ONE grid cell should say. Three answers, never a bare dash.
  *
- * ⚠⚠ A DASH IS NOT AN ANSWER, IT IS THE ABSENCE OF ONE — and this grid has three different reasons
+ *  A dash is not an answer, it is the absence of one — and this grid has three different reasons
  * for an empty cell that a dash renders identically:
  *
  *   value        we hold the figure.
@@ -168,7 +168,7 @@ export function fmtMillions(v: number | null | undefined): string {
  * through nineteen metric columns: by the time you are asking "why is this empty?", the name cell
  * is off screen. The answer has to travel with the cell.
  *
- * ⚠ `unavailable` IS A PROPERTY OF THE ROW, `missing` OF THE CELL. A company on a subscribed
+ *  `unavailable` IS A PROPERTY OF THE ROW, `missing` OF THE CELL. A company on a subscribed
  * exchange can still lack one line — a bank reports no gross margin — so a row being fetchable
  * does not make every one of its cells fillable. The two are combined here rather than guessed at
  * either end.
@@ -181,7 +181,7 @@ export type CellState =
 export function cellState(
   v: number | null | undefined, unit: string, unavailableLabel?: string | null,
 ): CellState {
-  // ⚠ THE VALUE WINS. A row can be flagged unavailable and still carry figures fetched before the
+  //  The value wins. A row can be flagged unavailable and still carry figures fetched before the
   // exchange fell out of coverage; badging over a number we actually hold would hide real data.
   if (v != null && Number.isFinite(v)) return { kind: 'value', text: fmtCell(v, unit) };
   if (unavailableLabel) return { kind: 'unavailable', text: unavailableLabel };
@@ -197,9 +197,9 @@ export function fmtCell(v: number | null | undefined, unit: string): string {
 }
 
 /**
- * THE ROW ORDER — and it is deliberately blind to the period on screen.
+ * The row order — and it is deliberately blind to the period on screen.
  *
- * ⚠⚠ THE `anchor` IS NOT THE SELECTED PERIOD, AND SUBSTITUTING IT WOULD BE THE BUG THIS EXISTS TO
+ *  THE `anchor` IS NOT THE SELECTED PERIOD, AND SUBSTITUTING IT WOULD BE THE BUG THIS EXISTS TO
  * PREVENT. Ranking companies by the period being viewed means every row moves as the slider moves:
  * the eye cannot track one company across periods, and "the third-largest" is a different business
  * at each stop — which makes a cross-period comparison, the only reason to have a slider, actually
@@ -219,17 +219,17 @@ export function orderedIds(
   /**
    * The IDENTITY columns, sorted as text.
    *
-   * ⚠⚠ THEY READ FROM `identity`, NOT `order`. `order` is the anchor period's payload and exists so
+   *  They read from `identity`, NOT `order`. `order` is the anchor period's payload and exists so
    * the running order does not move when the slider does; a name and a ticker are not properties of
    * a PERIOD at all. Reading them from `order` would drop every company absent from the anchor
    * period to the bottom of an alphabetical sort — a company with a name, sorted as though it had
    * none.
    *
-   * ⚠ `weight` IS DELIBERATELY THE CAP. A weight IS `cap ÷ Σcap`, so the two orders are identical
+   *  `weight` IS DELIBERATELY THE CAP. A weight IS `cap ÷ Σcap`, so the two orders are identical
    * by construction; computing it separately would be a second definition of the same ranking, and
    * the day one changed they would silently disagree by a rounding step.
    */
-  // ⚠ `Partial<Record<…>>` SO THE LOOKUP IS `T | undefined`. A bare `Record<string, T>`
+  //  `Partial<Record<…>>` SO THE LOOKUP IS `T | undefined`. A bare `Record<string, T>`
   // types every key as present, so `if (textOf)` narrows to always-true and the numeric
   // branch below becomes unreachable — silently, for every metric column.
   const TEXT: Partial<Record<string, (r: FundamentalGridRow) => string | null>> = {
@@ -258,12 +258,12 @@ export function orderedIds(
       if (textOf) {
         const a = str(ia);
         const b = str(ib);
-        // ⚠ THE SAME ABSENT-LAST RULE AS THE NUMBERS, and for the same reason: a company with no
+        //  The same absent-last rule as the numbers, and for the same reason: a company with no
         // ticker on file is not alphabetically first, and letting it head the list says it is.
         if (a === null && b === null) return ia - ib;
         if (a === null) return 1;
         if (b === null) return -1;
-        // ⚠ `localeCompare`, NOT `<`. Raw comparison is by code point, which files every lower-case
+        //  `localeCompare`, NOT `<`. Raw comparison is by code point, which files every lower-case
         // name after every upper-case one ("ASML", "Aegon", "adidas") and puts accented names in a
         // block of their own — an alphabet nobody reading a European index would recognise.
         return (dir === 'desc' ? -1 : 1) * a.localeCompare(b, undefined, { sensitivity: 'base' })
@@ -271,7 +271,7 @@ export function orderedIds(
       }
       const x = val(ia);
       const y = val(ib);
-      // ⚠ ABSENT SORTS LAST IN BOTH DIRECTIONS. A company we could not price is not the smallest
+      //  Absent sorts last in both directions. A company we could not price is not the smallest
       // company in the index, and letting it head an ascending sort says exactly that.
       if (x === null && y === null) return ia - ib;
       if (x === null) return 1;
@@ -283,9 +283,9 @@ export function orderedIds(
 }
 
 /**
- * COLUMN WIDTHS, IN REM — COMPUTED FROM THE HEADINGS, NEVER FROM THE DATA.
+ * Column widths, in rem — computed from the headings, never from the data.
  *
- * ⚠⚠ THIS IS WHY THE TABLE USES `table-fixed`. An auto-layout table sizes its columns from their
+ *  This is why the table uses `table-fixed`. An auto-layout table sizes its columns from their
  * CONTENT, so the geometry is a function of the period on screen: 2018 holds fewer figures and
  * shorter ones than 2025, columns shrank to fit, and the headings wrapped onto a second line —
  * the whole header bar changing shape as the slider moved. It is the same defect class as the
@@ -309,27 +309,27 @@ export function measureWidthRem(label: string): number {
 }
 
 /** The identity columns, which hold names rather than figures and so are sized by hand.
- *  ⚠ THE LIST MUST LINE UP WITH THE COLUMNS ACTUALLY RENDERED — a `<col>` list one short does not
+ *   The list must line up with the columns actually rendered — a `<col>` list one short does not
  *  fail, every column after the gap silently takes its neighbour's width. Weight is unconditional
  *  (see `weightPct`), so this is a constant rather than the flag it briefly was. */
 export function fixedWidthsRem(withFetch: boolean): number[] {
   //      #  Company  [Fetch]  Exch  Ticker  Ccy  Cap (€)  Weight
   //
-  // ⚠ EXCHANGE SITS LEFT OF TICKER BECAUSE IT IS THE OTHER HALF OF THE IDENTIFIER, not a detail
+  //  Exchange sits left of ticker because it is the other half of the identifier, not a detail
   // about it: GuruFocus addresses a stock as `EXCHANGE:TICKER` and a bare ticker is ambiguous
   // across venues. 5rem fits the longest codes in use (`NASDAQ`, `OTCPK`) without wrapping —
   // a wrapped header is the layout break this table's fixed widths exist to prevent.
   //
-  // ⚠ THE 3rem `#` COLUMN IS ALSO THE STICKY OFFSET. It and Company both pin when the table
+  //  THE 3rem `#` COLUMN IS ALSO THE STICKY OFFSET. It and Company both pin when the table
   // scrolls sideways, so Company sticks at `left-[3rem]` — this number and that class have to
   // agree or the name column slides over the row numbers and hides them.
   //
-  // ⚠ THE FETCH COLUMN IS ADMIN-ONLY, hence the flag: the ingest it fires spends GuruFocus quota
+  //  The fetch column is admin-only, hence the flag: the ingest it fires spends GuruFocus quota
   // and the API gate holds it to admins, so a non-admin must not be shown a button that 403s. The
   // column count therefore varies by ROLE — never by data, which is the thing that has to stay
-  // fixed (see the ⚠⚠ on `measureWidthRem`).
+  // fixed (see the  on `measureWidthRem`).
   //
-  // ⚠ IT WAS BRIEFLY TWO COLUMNS (`Table` / `All`) AND ONE IS RIGHT. A per-row button should
+  //  It was briefly two columns (`Table` / `All`) AND ONE IS RIGHT. A per-row button should
   // fetch what its table SHOWS, and all nineteen columns here come from the statements feed. The
   // other two feeds are reachable where they are displayed — `/api/earnings/{cid}/refresh` has a
   // per-source refresh on the page that draws them — so offering them here only spent two extra
@@ -349,8 +349,8 @@ export function gridWidths(labels: readonly string[], withFetch: boolean): {
 /**
  * `w = this company's cap / the sum of the caps we HAVE`, as a percent.
  *
- * ⚠⚠ IT IS A SHARE OF WHAT WE COULD PRICE, NOT THE INDEX'S WEIGHT, AND THE TWO DIVERGE MOST WHERE
- * IT MATTERS. Two separate reasons, both live:
+ *  It is a share of what we could price, not the index's weight, and the two diverge most where
+ * It matters. Two separate reasons, both live:
  *
  *  * A CAPPED INDEX. Euronext caps an AEX constituent at 15% at each review — uncapped, ASML is
  *    37.53% of it. This column will show ~37%, and that figure is a true statement about the caps

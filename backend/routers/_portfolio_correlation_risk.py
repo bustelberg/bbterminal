@@ -14,7 +14,7 @@ Two uses, both here and both about risk:
     Lower correlation with the index ⇒ higher tracking error, mechanically. The panel prints both
     sides of that identity so it can be checked rather than asserted.
 
-⚠⚠ THIS IS NOT ATTRIBUTION AND MUST NEVER BE MERGED WITH IT. Attribution (Brinson-Fachler) is a
+ THIS IS NOT ATTRIBUTION AND MUST NEVER BE MERGED WITH IT. Attribution (Brinson-Fachler) is a
 DECOMPOSITION of the active return — allocation `(wᵢᵖ − wᵢᵇ)(Rᵢᵇ − Rᵇ)`, selection
 `wᵢᵇ(Rᵢᵖ − Rᵢᵇ)`, and their interaction — whose terms sum EXACTLY to the active return. Correlation
 appears nowhere in it, sums to nothing, and answers a different question: attribution says where the
@@ -22,7 +22,7 @@ excess came FROM, correlation says how much the book can diverge AT ALL. They ar
 this app on purpose (`AttributionPanel` is its own dialog), and a combined view would imply the two
 reconcile. They do not; they are not that kind of number.
 
-⚠ SAME SERIES AS THE TRACKING ERROR, from `build_paired_series`. The identity above is only
+ SAME SERIES AS THE TRACKING ERROR, from `build_paired_series`. The identity above is only
 checkable if both views measure the same periods, the same sleeve and the same renormalisation.
 """
 from __future__ import annotations
@@ -36,7 +36,7 @@ from routers._tracking_error import (
 
 #: Fewest overlapping observations a PAIR of holdings needs before its ρ is reported.
 #:
-#: ⚠ A CORRELATION OVER TEN WEEKS IS NOISE WITH A SIGN. Its standard error is ~1/√n, so at n=10 a
+#:  A CORRELATION OVER TEN WEEKS IS NOISE WITH A SIGN. Its standard error is ~1/√n, so at n=10 a
 #: reading of 0.30 is indistinguishable from 0.0 and from 0.6 alike — and rendered as a coloured
 #: cell it looks exactly as authoritative as one measured over five years. Below this the cell is
 #: null (drawn as the grid's own "no number here" mark), never a faint colour.
@@ -67,11 +67,11 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
     sd_p = float(np.std(p, ddof=1))
     sd_b = float(np.std(b, ddof=1))
     sd_a = float(np.std(a, ddof=1))
-    # ⚠ ddof=1 EVERYWHERE, matching `annualized_stats`, or the identity below fails by a factor of
+    #  ddof=1 EVERYWHERE, matching `annualized_stats`, or the identity below fails by a factor of
     # (T−1)/T — small, constant, and exactly the kind of discrepancy that reads as a real finding.
     rho = (float(np.corrcoef(p, b)[0][1]) if sd_p > 0 and sd_b > 0 else None)
 
-    # ⚠ THE IDENTITY, RECOMPUTED FROM ρ RATHER THAN ASSUMED. `σ_a² = σ_p² + σ_b² − 2ρσ_pσ_b` is the
+    #  The identity, recomputed from ρ RATHER THAN ASSUMED. `σ_a² = σ_p² + σ_b² − 2ρσ_pσ_b` is the
     # claim the panel makes; returning both sides lets the reader see it hold instead of trusting
     # that it does. They agree to floating-point noise when everything is right, and visibly
     # diverge if either series is ever built differently — which is the point.
@@ -82,14 +82,14 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
     per = built["per_holding"]
     names = built["names"]
     weight = built["weight"]
-    # ⚠ PAIRWISE-COMPLETE, NOT LISTWISE. A single holding that listed two years ago would, under
+    #  Pairwise-complete, not listwise. A single holding that listed two years ago would, under
     # listwise deletion, truncate EVERY pair in the book to its own short history — one late
     # arrival silently rewriting the whole matrix. `DataFrame.corr` pairs each column pair on the
     # periods both of them have; `min_periods` then nulls the pairs that are still too thin.
     frame = pd.DataFrame({i: per[i] for i in sorted(per)})
     corr = frame.corr(min_periods=MIN_PAIR_OBS)
 
-    # ⚠ ORDERED BY WEIGHT, DESCENDING — a matrix ordered alphabetically or by ISIN puts the two
+    #  Ordered by weight, descending — a matrix ordered alphabetically or by ISIN puts the two
     # positions that actually matter at opposite corners. The reader is looking for concentration.
     order = sorted(corr.columns, key=lambda i: -weight.get(i, 0.0))
     labels = [names.get(i) or i for i in order]
@@ -109,7 +109,7 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
             if v is not None:
                 pairs.append({"a": labels[x], "b": labels[y], "rho": v})
     by_rho = sorted(pairs, key=lambda r: r["rho"])
-    # ⚠ THE MEAN OFF-DIAGONAL ρ IS THE ONE NUMBER THAT SUMMARISES A MATRIX, and it is an UNWEIGHTED
+    #  The mean off-diagonal ρ IS THE ONE NUMBER THAT SUMMARISES A MATRIX, and it is an UNWEIGHTED
     # mean of the pairs on purpose: it answers "are these names alike?", a question about the
     # selection, not about the sizing. Weighting it by position size would answer a different
     # question and quietly make a concentrated book look better diversified than its names are.
@@ -122,7 +122,7 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         "periods_per_year": ppy,
         "observations": len(a),
         "years": years,
-        # ⚠ THE WINDOW THE PAIRED GRID ACTUALLY REACHED, not `years` back from today — identical
+        #  The window the paired grid actually reached, not `years` back from today — identical
         # reasoning to `_tracking_error`, and it must be the SAME two dates because both views read
         # one `build_paired_series`. Two panels quoting different windows for one series is the
         # discrepancy the shared builder exists to make impossible.
@@ -130,7 +130,7 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         "window_to": (dates[-1] if dates else None),
 
         # ── portfolio vs benchmark ──
-        # ⚠ NOT ROUNDED HERE. `r_squared` below is ρ², and rounding ρ in the payload while squaring
+        #  Not rounded here. `r_squared` below is ρ², and rounding ρ in the payload while squaring
         # the full-precision value would put a ρ on screen that does not square to the R² beside it.
         # Formatting belongs to the view, which shows both to two decimals; the reconciliation has
         # to survive being checked at whatever precision is displayed.
@@ -140,7 +140,7 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         # The SAME quantity the tracking-error view reports, from the same series.
         "active_vol_pct": sd_a * rt * 100.0,
         "implied_active_vol_pct": None if implied is None else implied * rt * 100.0,
-        # ⚠ HOW FAR THE IDENTITY MISSES, IN PERCENTAGE POINTS. Rounding noise is ~1e-13; anything a
+        #  How far the identity misses, in percentage points. Rounding noise is ~1e-13; anything a
         # reader could see means the two series stopped being the same two series.
         "identity_gap_pp": (None if implied is None else abs(implied - sd_a) * rt * 100.0),
         # ρ² — the share of the book's variance the index explains. Stated because "correlation
@@ -151,7 +151,7 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         "labels": labels,
         "matrix": grid,
         "mean_pair_corr": None if mean_rho is None else round(mean_rho, 4),
-        # ⚠ THE NUMERATOR, so the card can print the division instead of asserting its answer. It
+        #  The numerator, so the card can print the division instead of asserting its answer. It
         # cannot be rebuilt on the client from `mean_pair_corr × pairs_measured`: the mean is
         # rounded to 4dp, so over ~950 pairs that reconstruction drifts in the digits it is meant
         # to justify — and deriving an operand FROM the result is backwards in any case.

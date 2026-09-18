@@ -30,7 +30,7 @@ export type SnapshotChartConfig = {
   buildSeries: (m: MetricRow[], cadence: ChartCadence) => { date: string; value: number }[];
   /** The single stored metric code this chart plots, when there IS one.
    *
-   * ⚠ SET IT ONLY WHEN buildSeries READS ONE CODE. It is the key a portfolio drill-down asks the
+   *  SET IT ONLY WHEN buildSeries READS ONE CODE. It is the key a portfolio drill-down asks the
    * backend to decompose, and the backend can only decompose a code it stores. Three charts here
    * are DERIVED — interest coverage (operating income / interest expense), FCF/NI (a ratio of two
    * lines) and PEG (recomputed daily) — so no stored code explains their line. Naming one anyway

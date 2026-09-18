@@ -43,7 +43,7 @@ def _guess(fonds, isin, owner, portfolios, comp):
 
 
 class TestTheWrapperTrap:
-    """⚠ THE ONE THAT MAKES THE NAME SCORE UNUSABLE ON ITS OWN.
+    """ THE ONE THAT MAKES THE NAME SCORE UNUSABLE ON ITS OWN.
 
     `TOPS_STS_L`'s description is literally "StarTopSelectie" — the closest string to "Star
     Selection Index" in the whole list of 95. It is also the one answer that is definitely
@@ -80,7 +80,7 @@ class TestTheWrapperTrap:
 
 
 class TestTheSubsetTrap:
-    """⚠ `token_set_ratio` SCORES A SUBSET AS A PERFECT MATCH, and the portfolio codes are short.
+    """ `token_set_ratio` SCORES A SUBSET AS A PERFECT MATCH, and the portfolio codes are short.
 
     stem('BUS_EUR_OFF_FX') is 'eur', which is a SUBSET of stem('Shell PLC EUR') — so token_set
     called it 100 and the first version of this module linked *every* EUR-quoted holding (Shell,
@@ -101,7 +101,7 @@ class TestTheSubsetTrap:
 
 
 class TestTheProductLineTrap:
-    """⚠ THE STEMMER DELETES THE VERY WORD THAT SEPARATES TWO PRODUCT LINES.
+    """ THE STEMMER DELETES THE VERY WORD THAT SEPARATES TWO PRODUCT LINES.
 
     "TopSelectie" has to come off — every strategy carries it, so it discriminates nothing. But
     stripping it makes these two identical:

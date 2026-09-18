@@ -117,7 +117,7 @@ PRICE_SOURCE = "yfinance"
 def _fx_source(currency: str | None) -> str | None:
     """Which vendor supplied the EUR conversion for a holding quoted in `currency`.
 
-    ⚠⚠ THE ANSWER TO "GURUFOCUS OR YFINANCE?" IS: NEITHER, FOR THIS LEG — AND THAT IS THE POINT
+     THE ANSWER TO "GURUFOCUS OR YFINANCE?" IS: NEITHER, FOR THIS LEG — AND THAT IS THE POINT
     OF SHOWING IT. Every price behind this matrix is yfinance (`asset_price`); GuruFocus
     (`metric_data`) prices the /benchmarks index and the momentum engine and never enters this
     path, because the AIRS books live in the ISIN/asset world and GuruFocus lives in the
@@ -131,7 +131,7 @@ def _fx_source(currency: str | None) -> str | None:
     is derived from the same routing the fetcher uses, which is why it must import that routing
     and not keep its own list.
 
-    ⚠ A MINOR UNIT IS NOT A CURRENCY. `GBp` is pence and `fx_rate` has no such row; it resolves
+     A MINOR UNIT IS NOT A CURRENCY. `GBp` is pence and `fx_rate` has no such row; it resolves
     through `SUBUNIT` to GBP, which is ECB's. Classifying the literal string would report nine
     London holdings as having no FX source at all.
 
@@ -158,7 +158,7 @@ def _fx_source(currency: str | None) -> str | None:
 def _median_adv(analysis_ids: list[int]) -> dict[int, float]:
     """`analysis_id -> median daily traded value in EUR`, from `asset_grid`.
 
-    ⚠⚠ THIS COLUMN IS HERE BECAUSE THE CORRELATION IS ONLY AS GOOD AS THE VENUE ITS PRICES COME
+     THIS COLUMN IS HERE BECAUSE THE CORRELATION IS ONLY AS GOOD AS THE VENUE ITS PRICES COME
     FROM, AND THIS BOOK HAS A BAD ONE AT THE TOP OF IT. Measured 2026-08-10: Hermès
     (`FR0000052292`) is priced off **HMI.HA — Hanover — at a median EUR 4,946/day** against a
     EUR 173bn market cap, and it is held by 19 of the 44 models, joint-most of any instrument
@@ -190,7 +190,7 @@ def _series_block(inst: dict[str, dict],
                   start: str) -> dict:
     """The charted series for every instrument, on ONE shared date axis.
 
-    ⚠⚠ THE ENCODING IS MEASURED, NOT PREFERRED. 229 assets over a trailing year is ~57,000 points,
+     THE ENCODING IS MEASURED, NOT PREFERRED. 229 assets over a trailing year is ~57,000 points,
     and the obvious shape — `[[date, value], …]` per instrument — repeats a 10-byte date string
     once per instrument per day. Measured on this data:
 
@@ -203,11 +203,11 @@ def _series_block(inst: dict[str, dict],
     transfer. And note the last row — thinning the series to 120 points saves 3 KB of gzip and
     throws away half the resolution, so there is no version of this worth downsampling.
 
-    ⚠ A NULL IS A DAY THAT INSTRUMENT DID NOT TRADE, NOT A ZERO. The axis is the UNION of every
+     A NULL IS A DAY THAT INSTRUMENT DID NOT TRADE, NOT A ZERO. The axis is the UNION of every
     instrument's dates, so a Tokyo name has a null on a Japanese holiday that Paris traded
     through. Rendering those as 0 would draw a spike to the floor on every foreign holiday.
 
-    ⚠ TWO UNITS SHARE THIS BLOCK AND THEY ARE NOT THE SAME KIND OF NUMBER. A direct instrument's
+     TWO UNITS SHARE THIS BLOCK AND THEY ARE NOT THE SAME KIND OF NUMBER. A direct instrument's
     values are EUR PRICES; a look-through certificate's are an INDEX based at 100 on the first day
     its wrapped basket was fully priceable (`_lookthrough_series`), because the certificate itself
     has no price we can fetch — that index IS what entered the correlation for that leg. Each row
@@ -250,7 +250,7 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
              if g.get("has_fixed_model")
              and isinstance(g.get("holdings"), int) and g["holdings"] > _MIN_HOLDINGS
              and g.get("positions_datum")]
-    # ⚠ SORTED BY WHAT IS SHOWN, not by AIRS's code. Both axes are labelled with
+    #  Sorted by what is shown, not by AIRS's code. Both axes are labelled with
     # `portfolio_label`, so ordering by `name` while displaying the chosen name would render a
     # matrix whose axes look shuffled — alphabetical by a key the reader cannot see is
     # indistinguishable from unsorted.
@@ -268,7 +268,7 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
     # is where the identifier survives).
     names = {g["id"]: portfolio_label(g) for g in ports}
     codes = {g["id"]: (g.get("name") or "") for g in ports}
-    # ⚠ LABELS FOR EVERY MODEL, NOT JUST THE LISTED ONES. A certificate can wrap a model that is
+    #  Labels for every model, not just the listed ones. A certificate can wrap a model that is
     # NOT in the matrix — the wrapped `…TopSelectie OFF FX` books are frequently under the >5
     # holdings rule or hold a single line — and naming its row off `names` alone would leave the
     # one field that explains the row blank precisely where it is needed. The matrix axes still
@@ -315,7 +315,7 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
     }
 
     # ── per-portfolio legs, then a dated return series per window ──────────────────────────────
-    # ⚠ THE INSTRUMENT TABLE IS BUILT IN THIS LOOP, NOT IN A SECOND PASS. Every fact it shows —
+    #  The instrument table is built in this loop, not in a second pass. Every fact it shows —
     # which series a leg resolved to, whether that came from the ISIN or from looking through a
     # certificate, whose weight fell out as unpriceable — is decided HERE, once, and a second pass
     # asking the same questions again is a second implementation that can answer them differently.
@@ -343,8 +343,8 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
                 "weight_pct_sum": 0.0,
                 "_pids": set(),
             }
-        # ⚠ DISTINCT PORTFOLIOS, hence a set: a model may list one instrument TWICE (VTopSelectie
-        # OFF FX holds CapitaLand at 2% and again at 3%), and counting rows would report it held
+        #  Distinct portfolios, hence a set: a model may list one instrument TWICE (VTopSelectie
+        # Off fx holds CapitaLand at 2% and again at 3%), and counting rows would report it held
         # by more books than exist. The weights still both count — that is one 5% position.
         rec["_pids"].add(pid)
         rec["weight_pct_sum"] = round(rec["weight_pct_sum"] + float(row.get("percentage") or 0), 4)
@@ -381,7 +381,7 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
                     if tgt not in lookthrough_cache:
                         lookthrough_cache[tgt] = _lookthrough_series(by_pf.get(tgt, []), ex, eur)
                     s = lookthrough_cache[tgt] or None
-                    # ⚠ RECORDED EVEN WHEN THE SERIES CAME BACK EMPTY. `_lookthrough_series`
+                    #  Recorded even when the series came back empty. `_lookthrough_series`
                     # returns [] when the wrapped model is itself under-covered, and a row that
                     # says only "unpriced" would send the reader looking for a missing listing
                     # when the truth is that we know exactly what it wraps and could not price
@@ -401,7 +401,7 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
     ytd_m, ytd_obs = _matrix(ytd_series, ids_order)
     t12_m, t12_obs = _matrix(t12_series, ids_order)
 
-    # ⚠ THE WIDEST WINDOW, ONCE — the UI's YTD/12m toggle then slices client-side. Shipping the
+    #  The widest window, once — the UI's YTD/12m toggle then slices client-side. Shipping the
     # window the toggle currently shows would make switching it a REFETCH, and the refetch would
     # repeat the price load, which is the entire cost of this endpoint (the matrices themselves
     # are 44x44 floats). Trailing-12m contains YTD, so one load answers both.
@@ -418,18 +418,18 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
         instruments.append({
             **{k: v for k, v in rec.items() if k != "_pids"},
             "in_portfolios": len(rec["_pids"]),
-            # ⚠ THE UNIT IS PER ROW — see `_series_block`. EUR for a real listing, an index based
+            #  The unit is per row — see `_series_block`. EUR for a real listing, an index based
             # at 100 for a certificate priced through the model it wraps.
             "unit": ("index" if rec["state"] == "lookthrough"
                      else "eur" if rec["state"] == "direct" else None),
-            # ⚠ THE VENDOR BEHIND THE ROW, and it is the same one for every priced row here —
+            #  The vendor behind the row, and it is the same one for every priced row here —
             # which IS the finding, not a redundancy. A look-through row is still yfinance
             # underneath: it is the wrapped model's basket, priced the same way.
             "price_source": PRICE_SOURCE if rec["series_key"] else None,
             # ...and the SECOND vendor, the one a "which source?" question usually forgets: a EUR
             # level for a USD holding is a yfinance close times an ECB rate. None for a EUR
             # holding, which needs no conversion.
-            # ⚠ A LOOK-THROUGH ROW HAS NO CURRENCY OF ITS OWN — it is a BASKET, and each holding
+            #  A look-through row has no currency of its own — it is a BASKET, and each holding
             # inside it converts on its own rate (the certificate itself is a CH line we cannot
             # price at all, so `currency` is None here anyway). Naming one vendor would describe
             # a conversion that never happened at this level.

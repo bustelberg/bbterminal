@@ -10,11 +10,11 @@ YTD has five of them:
     FX            fx_rate                         EUR conversion         <- ECB / Yahoo
     links         airs_portfolio_link             certificates           <- our own choices
 
-⚠ WHICH IS WHY THE OLD "Refresh from AIRS" COULD NOT FIX IT. It re-read the composition and
+ WHICH IS WHY THE OLD "Refresh from AIRS" COULD NOT FIX IT. It re-read the composition and
 nothing else, so a wrong return caused by a missing price series or a short FX history survived
 every press — and looked like the button was broken rather than aimed at the wrong input.
 
-⚠ THE FX STEP IS THE ONE NOTHING ELSE IN THE APP DOES. `sync_fx_rates_to_db` reads the stored max
+ THE FX STEP IS THE ONE NOTHING ELSE IN THE APP DOES. `sync_fx_rates_to_db` reads the stored max
 and fetches from max+1, so it can only extend FORWARD. A currency whose history STARTS after the
 window opens is therefore never repaired by anything, in any environment, ever — and it fails in
 the worst direction: `_eur_series` drops every close with no rate on or before it, the holding
@@ -100,7 +100,7 @@ class TestTheFxStepRepairsHistoryBACKWARDS:
         assert asked and asked[0][0] == "JPY"
 
     def test_it_asks_for_the_MAJOR_currency_never_the_minor_unit(self, fx_env):
-        """⚠ `GBp` IS PENCE, NOT A CURRENCY CODE. `fx_rate` has GBP and has never had GBp, so
+        """ `GBp` IS PENCE, NOT A CURRENCY CODE. `fx_rate` has GBP and has never had GBp, so
         requesting the literal string returns nothing, `_rate` finds no table, and every
         pence-quoted holding reads as unpriceable with all its bars present — measured across 13
         AIRS portfolios. The minor unit resolves through the shared `SUBUNIT` map."""

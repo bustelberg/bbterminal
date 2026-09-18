@@ -1,7 +1,7 @@
 /**
- * WHICH COMPANY THE FUNDAMENTAL MODAL IS VALUING, when /research-dashboard has picked two.
+ * Which company the fundamental modal is valuing, when /research-dashboard has picked two.
  *
- * ⚠⚠ QUICK AND DEEP VALUATION ARE THE ONLY TABS THAT CANNOT DRAW A PAIR. Graphs and Tables put
+ *  Quick and deep valuation are the only tabs that cannot draw a pair. Graphs and Tables put
  * company B on the benchmark line, so both companies are on screen at once and there is nothing to
  * switch between; a reverse DCF and a price-vs-FCF multiple each want ONE share price, ONE share
  * count and one set of saved assumptions, so a second company has nothing to be drawn beside.
@@ -9,7 +9,7 @@
  * and the only way to value B was to swap the two pickers on the page — which throws the comparison
  * away to get at half of it.
  *
- * ⚠⚠ SO THERE ARE TWO ANSWERS HERE, NOT ONE, AND CONFLATING THEM IS THE BUG THIS MODULE EXISTS TO
+ *  So there are two answers here, not one, and conflating them is the bug this module exists to
  * PREVENT:
  *
  *   * `valued` — what the two valuation tabs READ. It follows the switch on every tab, including
@@ -20,13 +20,13 @@
  *     switch ONLY on the two tabs the switch governs, because Graphs and Tables always take A as
  *     their subject with B on the benchmark line.
  *
- * ⚠⚠ THE HEAD HAS TO FOLLOW AT ALL, WHICH IS THE HALF THAT IS EASY TO MISS. Neither valuation tab
+ *  The head has to follow at all, which is the half that is easy to miss. Neither valuation tab
  * prints the company anywhere a reader looks first — the name reaches a toast label, one
  * empty-state sentence and the two sub-modals — so the modal's 2xl heading is the ONLY thing on
  * screen saying whose cash flows these are. Left naming A while the panel valued B, every figure
  * under it is attributed to the wrong company by the one line that attributes anything.
  *
- * ⚠ AND THE REFRESH BUTTON FOLLOWS FOR THE REASON `OwnerEarningsModal` already states about it:
+ *  And the refresh button follows for the reason `OwnerEarningsModal` already states about it:
  * "a control's scope must match its screen, or it is a trap". A button that refetched A while the
  * reader watched B is exactly the case that rule was written for.
  *
@@ -40,13 +40,13 @@ export type ValueSide = 'a' | 'b';
 /**
  * A company, in the shape the tabs take it.
  *
- * ⚠ `isin` IS `''` AND `name` IS `null` WHEN ABSENT, never `undefined` — every caller writes
+ *  `isin` IS `''` AND `name` IS `null` WHEN ABSENT, never `undefined` — every caller writes
  * `name || isin` for a display label, and `undefined` there is the string "undefined" one optional
  * chain away.
  */
 export type ValuationSubject = { isin: string; name: string | null };
 
-/** The tabs the switch governs. ⚠ The KEYS, not the labels — the labels are translated. */
+/** The tabs the switch governs.  The KEYS, not the labels — the labels are translated. */
 const VALUATION_TABS: ReadonlySet<string> = new Set(['quickval', 'deepval']);
 
 export function valuationSubject({ isin, name, compare, side, tab }: {
@@ -67,7 +67,7 @@ export function valuationSubject({ isin, name, compare, side, tab }: {
   const a: ValuationSubject = { isin: isin ?? '', name: name ?? null };
   const onValuationTab = VALUATION_TABS.has(tab);
   /**
-   * ⚠ THE `compare &&` GUARD IS WHAT MAKES THE SIDE SAFE TO HOLD IN STATE. With no company B the
+   *  THE `compare &&` GUARD IS WHAT MAKES THE SIDE SAFE TO HOLD IN STATE. With no company B the
    * side collapses to A here, so nothing has to reset it in an effect when B is cleared — and an
    * effect is exactly how a stale B would survive one render and value a company that is no longer
    * on the page.

@@ -1,6 +1,6 @@
 """Cancelling ONE portfolio's re-scan — the button that used to change nothing.
 
-⚠⚠ THIS REVERSES A DOCUMENTED REFUSAL (2026-08-13). `airs_portfolio_refresh_job` passed no
+ THIS REVERSES A DOCUMENTED REFUSAL (2026-08-13). `airs_portfolio_refresh_job` passed no
 `should_stop` and argued that stopping mid-cascade leaves the parent fresh against stale children,
 "the state this endpoint exists to avoid". The argument proves too much — `cascade=False` produces
 that same state deliberately, and it is a supported mode — while what the refusal actually bought
@@ -11,7 +11,7 @@ A control that does nothing is worse than a documented compromise, because it is
 teaches the reader that Cancel is decorative on every other card too. So the scan stops between
 accounts and the outcome NAMES what it left behind.
 
-⚠ BETWEEN ACCOUNTS, NEVER INSIDE ONE. An account's reports are downloaded and stored as a unit;
+ BETWEEN ACCOUNTS, NEVER INSIDE ONE. An account's reports are downloaded and stored as a unit;
 stopping halfway would leave a book holding two fresh reports and two stale ones with nothing to
 say which — the failure the `_LOCK`-and-unit design exists to prevent, and the one real constraint
 that survives.
@@ -35,7 +35,7 @@ def fleet(monkeypatch):
     scanned: list[str] = []
 
     def _scan_one(name, _van, _tot, on_report=None):
-        # ⚠ THE SAME SIGNATURE AS THE REAL `scan_one`, `on_report` INCLUDED. This double took three
+        #  The same signature as the real `scan_one`, `on_report` INCLUDED. This double took three
         # positional arguments only, so the day the caller started narrating each download
         # (`on_report=_report`, airs_vermogen.py:1440) three tests here died on a TypeError raised
         # inside the production call — reporting a signature change as a cancellation bug. A stub
@@ -58,7 +58,7 @@ class TestCancelActuallyStops:
         assert fleet == []
         assert res["status"] == "cancelled"
         assert res["cancelled_at"] == "PARENT"
-        # ⚠ THE BOOKS IT DID NOT REACH ARE NAMED. A cancelled refresh whose outcome does not say
+        #  The books it did not reach are named. A cancelled refresh whose outcome does not say
         # what is now stale is indistinguishable on screen from one that finished.
         assert res["stale_books"] == ["KID1", "KID2", "KID3"]
 
@@ -84,7 +84,7 @@ class TestCancelActuallyStops:
         assert [c["portefeuille"] for c in res["cascaded"]] == ["KID1"]
 
     def test_cancelled_outranks_ok(self, fleet):
-        """⚠ THE PARENT'S OWN REPORTS ARE FRESH, so `ok` is defensible on its own terms and
+        """ THE PARENT'S OWN REPORTS ARE FRESH, so `ok` is defensible on its own terms and
         completely misleading: the books its look-through figures are computed FROM were not
         re-read. One word for "we stopped"."""
         res = V.refresh_one_portfolio("PARENT", should_stop=lambda: True)
@@ -109,7 +109,7 @@ class TestNothingChangesWithoutTheHook:
         assert res["status"] == "ok"
 
     def test_the_lock_is_released_on_the_cancel_path(self, fleet):
-        """⚠ THE SCAN MUST REACH ITS OWN `finally`, which is why the job passes a FLAG rather than
+        """ THE SCAN MUST REACH ITS OWN `finally`, which is why the job passes a FLAG rather than
         calling `ctx.check()` inside. Unwinding by exception would leave the shared AirSPMS session
         locked against every later refresh — a cancel that breaks the button for good."""
         V.refresh_one_portfolio("PARENT", should_stop=lambda: True)

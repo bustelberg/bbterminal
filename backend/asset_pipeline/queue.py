@@ -74,7 +74,7 @@ def enqueue(identifiers: list[str], skip_existing: bool = True) -> dict:
 def status() -> dict:
     """Queue counts by status + whether there's outstanding work.
 
-    ⚠ `working` means "there is work OUTSTANDING", NOT "a worker is running". A backlog nobody is
+     `working` means "there is work OUTSTANDING", NOT "a worker is running". A backlog nobody is
     draining reports `working: True` for ever — this queue sat at 9,945 pending, untouched since
     2026-07-07, and still called itself working. To ask whether a worker is ALIVE (e.g. before
     adding Yahoo load of your own), use `is_worker_active()`, which reads the heartbeat.
@@ -159,7 +159,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
     next tick retries once Yahoo recovers. `verbose` prints each ISIN's OpenFIGI
     + yfinance result to stdout. Returns per-tick counts.
 
-    ⚠ `isins` PICKS THE SLICE BY IDENTITY INSTEAD OF BY AGE, AND WITHOUT IT AN INTERACTIVE CALLER
+     `isins` PICKS THE SLICE BY IDENTITY INSTEAD OF BY AGE, AND WITHOUT IT AN INTERACTIVE CALLER
     CANNOT REACH ITS OWN WORK. The default order is `added_at` — right for a background worker
     chewing through a backlog, and useless for "resolve THIS benchmark now": the queue holds ~10,000
     pending ISINs, so a benchmark's 71 constituents enqueued a second ago are ~10,000 places from
@@ -225,14 +225,14 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
     def _report(isin: str, outcome: str, detail: str = "") -> None:
         """Tell the CALLER, per ISIN, as it happens.
 
-        ⚠⚠ WITHOUT THIS A SLICE IS SILENT FOR MINUTES. The refresh emitted one line — "resolving 16
+         WITHOUT THIS A SLICE IS SILENT FOR MINUTES. The refresh emitted one line — "resolving 16
         unmapped ISIN(s)…" — and then nothing until all sixteen were done. Each ISIN is a paced
         Yahoo resolve (search + quote + profile, 10-30s of timeouts each in the worst case) run
         `YAHOO_CONCURRENCY`-wide, so a slice legitimately takes minutes; with no line in between it
         is indistinguishable from a hang, and the operator's only move is to give up on a job that
         was working. Reported as "this one seems to be just stuck".
 
-        ⚠ IT MUST NOT THROW. It runs inside a worker thread mid-slice; an exception here would fail
+         IT MUST NOT THROW. It runs inside a worker thread mid-slice; an exception here would fail
         an ISIN that actually resolved. Swallowed, like every other reporting hook in this repo.
         """
         if not on_each:
@@ -286,7 +286,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
         results = list(ex.map(_one, ids))
     ok = results.count("ok")
     failed = results.count("failed")
-    # ⚠ `unmapped` IS AN OUTCOME, NOT A GAP IN THE TALLY. OpenFIGI identified the security and
+    #  `unmapped` IS AN OUTCOME, NOT A GAP IN THE TALLY. OpenFIGI identified the security and
     # Yahoo has no daily series for it (a bond, a structured product, a delisted line) — the row is
     # marked done and will never be retried, which is correct and is NOT a failure. It was counted
     # in neither `ok` nor `failed`, so a slice that resolved 25 such ISINs reported `processed: 0`
@@ -296,7 +296,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
         store.set_default_executions()
     except Exception:  # noqa: BLE001
         pass
-    # ⚠ MANUAL OVERRIDES GO BACK ON LAST, OR THIS SLICE JUST UNDID THEM. A resolution writes
+    #  Manual overrides go back on last, or this slice just undid them. A resolution writes
     # `asset_execution` per ISIN and picks the listing BY NAME, which is exactly how a wrong share
     # class gets chosen (iShares Global Corp Bond "EUR" hedged vs "USD (Dist)" — three characters
     # apart, different currency exposure). Both are no-ops when nothing drifted: they compare the
@@ -337,7 +337,7 @@ def requeue_unmapped() -> dict:
     isins = [
         r["isin"] for r in rows
         if r.get("openfigi_figi") and (r.get("openfigi_type") or "") not in _UNPRICEABLE_TYPES
-        # ⚠⚠ A DELIBERATE UNMAP IS NOT A THROTTLE CASUALTY — see `store.MANUAL_UNMAP_PREFIX`. This
+        #  A deliberate unmap is not a throttle casualty — see `store.MANUAL_UNMAP_PREFIX`. This
         # function's premise is that a `not_found` row failed only because Yahoo was busy, which is
         # true of almost all of them and false of exactly the ones somebody unmapped because the
         # resolver had them on a different instrument. Re-queueing those runs the same resolver
@@ -351,7 +351,7 @@ def requeue_unmapped() -> dict:
 def requeue_suspects(only: list[str] | None = None, apply: bool = False) -> dict:
     """The wrong-company mis-mapped rows — LISTED by default, re-queued only when asked.
 
-    ⚠⚠ IT USED TO RE-QUEUE ALL OF THEM, UNASKED, AND THAT IS THE DESTRUCTIVE RE-RESOLVE THIS
+     IT USED TO RE-QUEUE ALL OF THEM, UNASKED, AND THAT IS THE DESTRUCTIVE RE-RESOLVE THIS
     PIPELINE IS BUILT AROUND AVOIDING. `same_company` is the right test for an operating company
     and it is WRONG far more often than it is right on this population: measured 2026-09-04 on the
     live grid, 110 rows fail it and only ~15 are genuinely the wrong company. The other ~95 are
@@ -361,7 +361,7 @@ def requeue_suspects(only: list[str] | None = None, apply: bool = False) -> dict
     the Alphabet-to-Vienna failure waiting to happen: Yahoo answers an overloaded caller with an
     EMPTY list, so a re-resolution of a CORRECT row can only move it to a thinner listing.
 
-    ⚠ AND NO THRESHOLD RESCUES IT — three rules were scored against the 15 hand-checked errors:
+     AND NO THRESHOLD RESCUES IT — three rules were scored against the 15 hand-checked errors:
     the type allowlist alone catches all 15 but would re-resolve 38 correct rows; type AND a
     country mismatch cuts that to 11 false positives but misses 3 real ones (including the Abu
     Dhabi bank that started this); "a bare US ticker for a non-US ISIN" is structural and clean but
@@ -369,7 +369,7 @@ def requeue_suspects(only: list[str] | None = None, apply: bool = False) -> dict
     automatic gate in the data on the row, so the decision stays with a person and this function's
     job is to make it a SHORT list rather than to act on a long one.
 
-    ⚠ THE VERDICT IS READ, NOT RE-DERIVED. `identity_status` is stamped at resolve time by
+     THE VERDICT IS READ, NOT RE-DERIVED. `identity_status` is stamped at resolve time by
     `resolve.identity_status`, which is this same `same_company` call; computing it again here was
     a second copy of the detector, free to drift from the badge the grid shows.
 
@@ -399,7 +399,7 @@ def requeue_suspects(only: list[str] | None = None, apply: bool = False) -> dict
         unknown = []
 
     if not apply and only is None:
-        # ⚠ REPORT, NOT ACT. Returning the rows lets the caller print them; `queued` is 0 and says
+        #  Report, not act. Returning the rows lets the caller print them; `queued` is 0 and says
         # so, rather than a dry run that looks like it did something.
         return {"suspects": len(suspects), "rows": rows, "queued": 0, "skipped": 0,
                 "applied": False, "unknown": unknown}

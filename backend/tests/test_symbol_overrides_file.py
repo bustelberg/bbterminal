@@ -1,12 +1,12 @@
 """`asset_pipeline/symbol_overrides.json` — the checked-in wrong-listing fixes.
 
-⚠⚠ THIS FILE IS THE ONLY THING THAT CATCHES A TYPO IN IT. `load_file_overrides()` deliberately
+ THIS FILE IS THE ONLY THING THAT CATCHES A TYPO IN IT. `load_file_overrides()` deliberately
 swallows a parse error (one broken bracket must not un-pin every other ISIN, and the DB overrides
 still apply) — so a malformed file costs nothing but a log line at 05:00, and the symptom appears
 weeks later as a constituent quietly back on a Stuttgart listing doing EUR 3k/day. CI is where that
 has to be caught, which is what these assertions are.
 
-⚠ NO DB, NO NETWORK. The loader reads a file; only `load_symbol_overrides()` (the merge with the
+ NO DB, NO NETWORK. The loader reads a file; only `load_symbol_overrides()` (the merge with the
 table) touches Supabase, and that is not what is tested here.
 """
 from __future__ import annotations
@@ -30,14 +30,14 @@ class TestTheOverridesFileIsWellFormed:
         assert isinstance(_entries(), list)
 
     def test_every_isin_is_a_real_isin(self):
-        """⚠ CHECK DIGIT, NOT JUST SHAPE. A mistyped ISIN does not fail loudly anywhere downstream —
+        """ CHECK DIGIT, NOT JUST SHAPE. A mistyped ISIN does not fail loudly anywhere downstream —
         `_needs_repoint` simply finds no execution row, logs `has no execution row to repoint` and
         moves on, so the override reads as applied and the listing never changes."""
         for e in _entries():
             assert is_valid_isin(e["isin"]), f"{e.get('name')}: {e['isin']} is not a valid ISIN"
 
     def test_every_entry_names_a_symbol_and_says_why(self):
-        """⚠ THE `note` IS NOT DECORATION. An override is a human overruling the ranker; the next
+        """ THE `note` IS NOT DECORATION. An override is a human overruling the ranker; the next
         person to read this file has to be able to tell a measured wrong-listing fix from a guess,
         or the safe move becomes "leave it alone for ever"."""
         for e in _entries():

@@ -14,12 +14,12 @@ Hold ASML at exactly its index weight and the old basis still reported a 14pp se
 it. The gaps were also ONE-DIRECTIONAL (the holdings snapshot trails the latest close), so they
 biased rather than cancelled.
 
-⚠ IT FIXED A SECOND FAULT THAT WAS WORSE. `_expand_book_rows` splits a certificate's start AND
+ IT FIXED A SECOND FAULT THAT WAS WORSE. `_expand_book_rows` splits a certificate's start AND
 current value by each holding's share, so every instrument inside one came out with the WRAPPER's
 return — BUS_Offensief's 23 wrapped legs carried FOUR distinct returns between them. Pricing the
 instrument closes both faults with one source: 48 distinct returns across 48 priced legs.
 
-⚠ WHAT THIS DELIBERATELY GAVE UP. These legs no longer reproduce AIRS's `cumulatief_rendement` —
+ WHAT THIS DELIBERATELY GAVE UP. These legs no longer reproduce AIRS's `cumulatief_rendement` —
 they are not AIRS's numbers. That is correct for a RELATIVE decomposition (a difference between two
 vendors is not alpha), and `airs_return_pct` rides along on every leg so the gap can be shown
 rather than discovered. The income is still loaded and still reported per leg, but is OUT of the
@@ -40,7 +40,7 @@ START = "2026-01-01"
 @dataclass
 class _Income:
     gross_eur: float
-    tax_eur: float          # ⚠ NEGATIVE, as AIRS books it
+    tax_eur: float          #  NEGATIVE, as AIRS books it
     payments: int = 1
 
 
@@ -49,7 +49,7 @@ def book(monkeypatch):
     """One paired book: a dividend payer with withholding, a payer with none, a holding the
     journal has no line for, and cash.
 
-    ⚠ THE AIRS VALUES AND THE PRICE MARKS DISAGREE ON PURPOSE — that disagreement IS the subject.
+     THE AIRS VALUES AND THE PRICE MARKS DISAGREE ON PURPOSE — that disagreement IS the subject.
     `US Payer` is +10% on AIRS's own valuation, +18.5% once its dividend is added, and +25% on the
     price series, so a test that reads one where it means another cannot pass by accident.
     """
@@ -92,7 +92,7 @@ def _by_name(legs):
 
 
 class TestTheReturnComesFromThePriceSeries:
-    """⚠ The benchmark is built from `asset_price`. Our side must be too, or the same instrument
+    """ The benchmark is built from `asset_price`. Our side must be too, or the same instrument
     carries two different numbers into one subtraction and the difference reads as skill."""
 
     def test_the_leg_uses_the_mark_not_the_books_own_valuation(self, book):
@@ -107,7 +107,7 @@ class TestTheReturnComesFromThePriceSeries:
         assert {leg["return_basis"] for leg in basis.book_legs(7, START)} == {"price"}
 
     def test_a_holding_the_price_series_cannot_reach_has_no_return(self, book, monkeypatch):
-        # ⚠ None, so `split_legs` reports it as `unpriced` — the one exclusion that is a genuine
+        #  None, so `split_legs` reports it as `unpriced` — the one exclusion that is a genuine
         # gap rather than an answer, and the one the panel already warns about loudly.
         monkeypatch.setattr(basis, "compute_holding_marks", lambda _i, _s: {})
         assert _by_name(basis.book_legs(7, START))["US Payer"]["return_pct"] is None
@@ -158,7 +158,7 @@ class TestAbsencesStayApart:
 
 
 class TestTheWeightIsStillTheOpeningValue:
-    """⚠ UNCHANGED, AND DELIBERATELY. A weight does not need the two sides to share a vendor —
+    """ UNCHANGED, AND DELIBERATELY. A weight does not need the two sides to share a vendor —
     Brinson compares OUR weight against the INDEX's by construction. Only the return had to be
     unified. Weighting by the CURRENT value overweights the winners: measured on AITopSelectie,
     +58.75% against the book's true +44.99%."""
@@ -171,7 +171,7 @@ class TestTheWeightIsStillTheOpeningValue:
 
 class TestBothPathsShareOneBasis:
     def test_the_book_path_takes_the_window_like_the_model_path(self):
-        """⚠ It used to ignore `start` entirely, so switching `source` changed the VENDOR as well
+        """ It used to ignore `start` entirely, so switching `source` changed the VENDOR as well
         as the weights — two variables at once, on a control the reader thinks moves one."""
         import inspect
 

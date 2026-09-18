@@ -5,18 +5,18 @@
  *
  *     C₁₀ = Σᵢ₌₁¹⁰ w₍ᵢ₎        HHI = Σ wᵢ²        N_eff = 1 / HHI
  *
- * ⚠⚠ ON COMPANIES, NOT ON LINES — the same folding Active share uses. Alphabet A + Alphabet C is
+ *  On companies, not on lines — the same folding Active share uses. Alphabet A + Alphabet C is
  * ONE position, and counting two would understate concentration exactly at the top, where the ten
  * largest are decided. Two views of the same book disagreeing about how many positions it holds
- * would be worse than either. (The code says `issuer` and still should — see the ⚠ in
+ * would be worse than either. (The code says `issuer` and still should — see the  in
  * `ActiveSharePanel` for why the screen says company and the fold does not.)
  *
- * ⚠⚠ BOTH DENOMINATORS ARE ON SCREEN. "Of the stock sleeve" is what compares across books and is
+ *  Both denominators are on screen. "Of the stock sleeve" is what compares across books and is
  * the panel's convention everywhere else; "of the whole book" is what is true in absolute terms for
  * a book carrying 30% cash. The choice genuinely changes the number, so making it silently would be
  * picking a side of a real question on the reader's behalf.
  *
- * ⚠ HHI IS THE BETTER MEASURE AND C₁₀ IS THE ONE PEOPLE ASK FOR, so both are here with N_eff given
+ *  Hhi is the better measure and C₁₀ IS THE ONE PEOPLE ASK FOR, so both are here with N_eff given
  * the most prominent tile. A cut at exactly ten is arbitrary: two books with identical C₁₀ can be an
  * even ten-name portfolio and one dominated by its top three. N_eff has no cut-off and reads in
  * units anybody can hold in their head.
@@ -36,25 +36,25 @@ import { withWorked, subNum } from './workedFormula';
 import type { PortfolioConcentration } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
-/** ⚠ TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
+/**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
  *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
  *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
  *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
 /**
- * EVERY SYMBOL THIS VIEW USES, DEFINED ONCE — same rule as the other risk views.
+ * Every symbol this view uses, defined once — same rule as the other risk views.
  *
- * ⚠ `wᵢ` CARRIES THREE OF THE FOUR CARDS (HHI squares it, C₁₀ sorts it, the largest position IS
+ *  `wᵢ` CARRIES THREE OF THE FOUR CARDS (HHI squares it, C₁₀ sorts it, the largest position IS
  * it), so one definition is the only way they describe the same quantity.
  */
 const LEGEND = {
   w: (bookName: string) => `one company's weight in ${v(bookName)}'s stock sleeve, as a fraction of 1`,
   wSorted: 'the same weights sorted largest first — the bracket is what makes (i) a RANK rather '
     + 'than a name',
-  // ⚠ ONE SENTENCE, AND IT SAYS WHAT THE NUMBER IS RATHER THAN WHY THE FORMULA WORKS. The reading
+  //  One sentence, and it says what the number is rather than why the formula works. The reading
   // is exact rather than an analogy: `Σwᵢ²` IS the probability of drawing the same company twice.
-  // ⚠ The scale caveat that used to follow it (ours is 0…1; antitrust quotes the same measure
+  //  The scale caveat that used to follow it (ours is 0…1; antitrust quotes the same measure
   // ×10,000) is real but belongs to somebody comparing against an outside threshold, which is not
   // what this legend is for.
   hhi: 'the chance that two euros drawn at random from the sleeve land in the SAME company — that '
@@ -123,9 +123,9 @@ export default function ConcentrationView({
   const rows = data?.top ?? [];
 
   /**
-   * WHAT THESE CARDS ARE MEASURED FROM — built once.
+   * What these cards are measured from — built once.
    *
-   * ⚠⚠ NO PRICE SERIES IS INVOLVED, WHICH IS WHY THIS VIEW'S `where` IS NOT THE OTHER FOUR'S.
+   *  No price series is involved, which is why this view's `where` IS NOT THE OTHER FOUR'S.
    * Concentration reads WEIGHTS, through the same `build_issuer_weights` active share uses — so
    * the vendors to name are the AIRS scan and the yfinance market caps, not a daily close.
    */
@@ -136,7 +136,7 @@ export default function ConcentrationView({
     : '';
 
   /**
-   * ⚠ THE BOOK'S DATE ALONE FOR ITS OWN THREE CARDS — no index appears in them, so dating the
+   *  The book's date alone for its own three cards — no index appears in them, so dating the
    * caps beside them would date a side the number does not contain. Same split as the Stocks tile
    * on Active share.
    */
@@ -176,7 +176,7 @@ export default function ConcentrationView({
                   { sym: String.raw`HHI`, is: LEGEND.hhi },
                   { sym: String.raw`N_{\text{eff}}`, is: LEGEND.nEff },
                 ]}
-                /* ⚠ NO `how`. It argued why this measure leads over C₁₀ — an editorial comparison
+                /*  NO `how`. It argued why this measure leads over C₁₀ — an editorial comparison
                    between two tiles, not a fact about this one. The `N_eff` legend row already
                    says what the number IS, and the file header keeps the reasoning for whoever
                    changes the ordering. */
@@ -198,7 +198,7 @@ export default function ConcentrationView({
                   { sym: String.raw`w_{(i)}`, is: LEGEND.wSorted },
                   { sym: String.raw`C_{10}`, is: LEGEND.c10 },
                 ]}
-                how={'⚠⚠ TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is '
+                how={' TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is '
                   + 'what compares across books; the line beneath is of the whole book including '
                   + `cash and funds (the sleeve is ${pct2(data.stocks_pct)} of it). A book that is `
                   + '30% cash really is less concentrated in absolute terms.'} />} />} />
@@ -218,7 +218,7 @@ export default function ConcentrationView({
                   { sym: 'w_i', is: LEGEND.w(portfolioName) },
                   { sym: String.raw`C_1`, is: LEGEND.c1 },
                 ]}
-                how={'⚠ A BIG POSITION IS NOT AUTOMATICALLY A BIG BET. Apple at 6% against an index '
+                how={' A BIG POSITION IS NOT AUTOMATICALLY A BIG BET. Apple at 6% against an index '
                   + 'holding 5% is a 1pp bet; the same 6% in a name the index does not hold is a '
                   + '6pp one. The table below carries both.'} />} />} />
             <Tile label={`${data.benchmark} effective`}
@@ -231,7 +231,7 @@ export default function ConcentrationView({
                   + `${portfolioName} — same measure, so the two counts are directly comparable.`}
                 where={where}
                 when={whenBoth}
-                how={'For scale. ⚠ A cap-weighted index is far more concentrated than its member '
+                how={'For scale.  A cap-weighted index is far more concentrated than its member '
                   + 'count suggests, so this is usually a small fraction of it — which is the '
                   + 'honest comparison, not the raw count.'} />} />} />
           </div>

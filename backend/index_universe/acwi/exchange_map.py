@@ -14,7 +14,7 @@ import os
 from dataclasses import dataclass
 
 
-# ⚠ `CBOE` AND `CBOE BZX` ARE BOTH HERE BECAUSE BOTH SPELLINGS REACH THIS MODULE. `_build_symbol`
+#  `CBOE` AND `CBOE BZX` ARE BOTH HERE BECAUSE BOTH SPELLINGS REACH THIS MODULE. `_build_symbol`
 # in `ingest/earnings/_common.py` and `_gf_listing`'s own US set both say `CBOE`; this one said
 # only `CBOE BZX`, so a Cboe-listed company was US enough to be addressed as a bare ticker and not
 # US enough to be considered covered. No company in the database carries either code today, which
@@ -351,9 +351,9 @@ FEASIBLE_GF_EXCHANGES = frozenset([
     "",  # US (NYSE, NASDAQ, Cboe BZX)
     "OTCPK",  # US OTC Pink — GuruFocus prices these (e.g. QinetiQ QNTQF), USD
 
-    # US ETF venues. GuruFocus's own `exchange_list` puts these in region USA:
-    #   NAS  NYSE  OTCPK  OTCBB  AMEX  ARCA  IEXG  BATS  GREY
-    # ARCA (NYSE Arca) is where most US ETFs actually list — of SPY / IWM / VOO /
+    # Us ETF venues. GuruFocus's own `exchange_list` puts these in region USA:
+    #   Nas  nyse  otcpk  otcbb  amex  arca  iexg  bats  grey
+    # Arca (nyse Arca) is where most US ETFs actually list — of SPY / IWM / VOO /
     # XLU / EDV / GLD / QQQ, SIX are ARCA and only QQQ is NAS. Omitting it doesn't
     # merely lose coverage, it MIS-RESOLVES: SPY and GLD also list on SGX, which IS
     # in this set, so an unknown ARCA silently hands you the SINGAPORE line of SPY.
@@ -366,16 +366,16 @@ FEASIBLE_GF_EXCHANGES = frozenset([
     # exchange), same as India. Continental Europe is covered.
     "XTER", "XPAR", "XAMS", "XBRU", "XLIS", "MIL", "XMAD", "XSWX",
     "OSTO", "OCSE", "OSL", "OHEL", "WAR", "XPRA", "ATH", "BUD", "IST",
-    # ⚠⚠ VIENNA AND FRANKFURT WERE MISSING, AND THE OMISSION COST DATA (added 2026-09-01).
+    #  Vienna and frankfurt were missing, and the omission cost data (added 2026-09-01).
     # Every other continental venue was here, so these two read as "unsubscribed" — which meant
     # three companies holding a total of **53,879** `metric_data` rows were treated as outside the
     # subscription: VERBUND AG (39,523), Erste Group Bank (13,894) and Verisure (462). The
     # `refuse_unsubscribed` gate added the same day would have stopped refreshing all three.
-    # ⚠ THE EVIDENCE IS VERBUND: its GuruFocus price history and our own independent yfinance
+    #  The evidence is verbund: its GuruFocus price history and our own independent yfinance
     # series **agree on 75 of 75 periods** (`ingest.earnings.price_sanity`). A region GuruFocus does
     # not sell us cannot produce that — Diploma, genuinely unsubscribed on the LSE, disagreed on 10
     # of 25. So the vendor does cover these; this map did not.
-    # ⚠ NOT PROBED LIKE THE ORIGINALS. The rest of this set was built by calling every exchange and
+    #  Not probed like the originals. The rest of this set was built by calling every exchange and
     # reading the 403s; these two are inferred from data we already hold, which costs no quota but
     # is one step weaker. If either ever starts returning "unsubscribed", that is the thing to
     # re-check first.
@@ -395,7 +395,7 @@ FEASIBLE_GF_EXCHANGES = frozenset([
 #: Exchange codes GuruFocus's own `isin/{ISIN}` endpoint returns that differ from the codes used
 #: everywhere else here (`gurufocus_exchange.exchange_code`, `_build_symbol`, this file's own set).
 #:
-#: ⚠⚠ IT LIVES HERE NOW, WITH THE COVERAGE SET IT HAS TO AGREE WITH (moved 2026-09-01). It used to
+#:  IT LIVES HERE NOW, WITH THE COVERAGE SET IT HAS TO AGREE WITH (moved 2026-09-01). It used to
 #: sit in `routers/_gf_listing.py`, whose docstring already warned it "is the first place to look
 #: when a US listing mysteriously reads as out-of-coverage" — and then
 #: `is_gf_subscribed_exchange`, one module away, did not apply it. `NAS` therefore answered False:
@@ -412,7 +412,7 @@ def is_gf_subscribed_exchange(exchange_code: str | None) -> bool:
     `_US_EXCHANGES`; every other exchange is matched by its code directly.
     Unknown/empty exchange → False (we can't claim coverage).
 
-    ⚠ IT NORMALISES FIRST. The same venue reaches this by several spellings — `NAS` from the
+     IT NORMALISES FIRST. The same venue reaches this by several spellings — `NAS` from the
     vendor's `isin/` payload, `NASDAQ` from our own `gurufocus_exchange` row — and a coverage
     answer that depends on which caller spelled it is not an answer. See `GF_EXCHANGE_ALIASES`.
     """

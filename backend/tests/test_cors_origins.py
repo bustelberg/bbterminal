@@ -6,7 +6,7 @@ the parsing is pinned rather than eyeballed — the three ways to get it subtly 
 slash, whitespace, an empty segment from a stray comma) all produce an entry that matches nothing
 and looks fine in the dashboard.
 
-⚠ `RAILWAY_PUBLIC_DOMAIN` is the BACKEND's own domain. It is not, and has never been, the frontend
+ `RAILWAY_PUBLIC_DOMAIN` is the BACKEND's own domain. It is not, and has never been, the frontend
 that calls it — a second Railway environment does not get its Vercel project allowed by existing.
 """
 from __future__ import annotations
@@ -33,12 +33,12 @@ class TestTheAllowList:
         assert "https://bbterminal.vercel.app" in got
 
     def test_both_spellings_of_the_dev_server_are_allowed(self, monkeypatch):
-        """⚠⚠ `localhost` AND `127.0.0.1` ARE DIFFERENT ORIGINS, and for a while only one was here.
+        """ `localhost` AND `127.0.0.1` ARE DIFFERENT ORIGINS, and for a while only one was here.
 
         `npm run dev` prints both, a bookmark keeps whichever was clicked, and Starlette compares
         the `Origin` header verbatim — so a tab on `http://127.0.0.1:3000` got `400 Disallowed CORS
         origin` on every preflight while the same request from `http://localhost:3000` returned
-        200. ⚠ The browser cannot see any of that: a rejected preflight surfaces as
+        200.  The browser cannot see any of that: a rejected preflight surfaces as
         `TypeError: Failed to fetch` with no status and no body, i.e. exactly what a dead backend
         looks like, so the diagnosis lives in the server log and nowhere else.
         """
@@ -65,7 +65,7 @@ class TestTheAllowList:
         assert " https://b.vercel.app" not in got
 
     def test_a_trailing_slash_is_dropped(self, monkeypatch):
-        """⚠ Starlette compares the `Origin` header verbatim, and a browser NEVER sends a trailing
+        """ Starlette compares the `Origin` header verbatim, and a browser NEVER sends a trailing
         slash. Copy a URL out of the address bar and you get one — an entry that can never match,
         failing identically to having forgotten it."""
         got = _origins(monkeypatch, "https://a.vercel.app/")
@@ -82,7 +82,7 @@ class TestTheAllowList:
         assert _origins(monkeypatch, "") == _origins(monkeypatch, None)
 
     def test_a_bare_hostname_is_assumed_https(self, monkeypatch):
-        """⚠ The fourth silent typo, and the most natural one to make. A browser always sends a
+        """ The fourth silent typo, and the most natural one to make. A browser always sends a
         full origin, so `bbterminal-dev.vercel.app` can never match — and it fails identically to
         never having set the variable, which is what makes it expensive to diagnose."""
         got = _origins(monkeypatch, "bbterminal-dev.vercel.app")

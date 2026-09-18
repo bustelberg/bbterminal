@@ -1,6 +1,6 @@
 """The Analyse modal must carry the SECOND date, or it cannot agree with the row that opened it.
 
-⚠⚠ THE REPORTED SYMPTOM (2026-08-18): "this row shows it's up to date but when I click Analyse I
+ THE REPORTED SYMPTOM (2026-08-18): "this row shows it's up to date but when I click Analyse I
 see different out of date numbers, and a refresh should get a portfolio fully up to date so these
 rows and modal numbers cannot be out of sync."
 
@@ -11,7 +11,7 @@ so it stays quiet on AIRS's own batch lag. The modal's payload carried only the 
 `lagOwner` returned null, `stale` could not rule out that the gap was ours, and every ⓘ inside the
 modal went amber on a book the row called current.
 
-⚠ AND NO REFRESH COULD CLEAR IT, which is the part that makes this worse than a wrong colour. A
+ AND NO REFRESH COULD CLEAR IT, which is the part that makes this worse than a wrong colour. A
 refresh updates `airs_account_roster.reports_at` — exactly the fact that would have silenced the
 badge — and the modal never received it. Pressing the button changed nothing visible, so the
 button read as broken.
@@ -48,7 +48,7 @@ class TestItReadsTheSameFactTheRowReads:
         assert _book_fetched_at("AITopSelectie OFF DYN") == SCANNED
 
     def test_it_matches_the_row_on_case_and_padding(self, monkeypatch):
-        """⚠ `_fetched_at` KEYS ON THE LOWER-CASED, STRIPPED NAME and the payload carries AIRS's
+        """ `_fetched_at` KEYS ON THE LOWER-CASED, STRIPPED NAME and the payload carries AIRS's
         own casing. A lookup that missed on case would return None — which is not a loud failure
         here, it is the amber badge coming back for the books whose names happen to differ."""
         _roster(monkeypatch, [{"portefeuille": "  AITopSelectie OFF DYN  ", "reports_at": SCANNED}])
@@ -56,7 +56,7 @@ class TestItReadsTheSameFactTheRowReads:
 
 
 class TestItDeclinesRatherThanGuesses:
-    """⚠ None IS AN ANSWER — `Provenance` treats it exactly as an absent prop and says nothing
+    """ None IS AN ANSWER — `Provenance` treats it exactly as an absent prop and says nothing
     about whose lag it is, which is the honest outcome when there is no book to have scanned."""
 
     def test_an_unpaired_portfolio_has_no_book_and_therefore_no_scan(self, monkeypatch):

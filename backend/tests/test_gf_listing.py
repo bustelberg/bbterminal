@@ -122,7 +122,7 @@ class TestPickListing:
 
     def test_apple_resolves_to_nasdaq_not_zurich(self):
         # THE regression case. AAPL survives the subscription filter on XSWX (CHF),
-        # XTER, MIL, WAR and NAS. Only NASDAQ matches BOTH the ticker and the USD
+        # Xter, mil, war and NAS. Only NASDAQ matches BOTH the ticker and the USD
         # currency of the asset row, so it must win outright.
         r = pick(APPLE, "AAPL", "USD")
         assert r.status == "ok"
@@ -174,7 +174,7 @@ class TestPickListing:
         assert pick(list(reversed(cands)), "XYZ", "EUR").listing == pick(cands, "XYZ", "EUR").listing
 
     def test_only_unsubscribed_listings(self):
-        # ⚠ WAS `LSE + WBO` UNTIL 2026-09-01, on the belief GuruFocus would 403 both. Vienna turned
+        #  WAS `LSE + WBO` UNTIL 2026-09-01, on the belief GuruFocus would 403 both. Vienna turned
         # out to be covered — VERBUND's vendor price history agrees with our own independent series
         # on 75 of 75 periods — so `WBO` joined `FEASIBLE_GF_EXCHANGES` and this pair stopped being
         # an example of the thing it was testing. LSE and India are the genuinely refused ones.
@@ -219,13 +219,13 @@ class TestPickListing:
 
 
 class TestViennaAndFrankfurtAreCovered:
-    """⚠⚠ THEY WERE MISSING FROM `FEASIBLE_GF_EXCHANGES` UNTIL 2026-09-01, and the omission was
+    """ THEY WERE MISSING FROM `FEASIBLE_GF_EXCHANGES` UNTIL 2026-09-01, and the omission was
     silent because nothing asks a coverage map whether it is complete. Every other continental
     venue was in it, so `WBO` and `FRA` read as "outside the subscription" and three companies
     holding 53,879 `metric_data` rows between them — VERBUND AG (39,523), Erste Group Bank (13,894)
     and Verisure (462) — were classed as unfetchable.
 
-    ⚠ THE EVIDENCE IS CROSS-SOURCE, not a probe: VERBUND's GuruFocus price history and our own
+     THE EVIDENCE IS CROSS-SOURCE, not a probe: VERBUND's GuruFocus price history and our own
     independent yfinance series agree on 75 of 75 periods (`ingest.earnings.price_sanity`). A
     region the vendor does not sell us cannot produce that — Diploma, genuinely unsubscribed on the
     LSE, disagreed on 10 of 25."""
@@ -236,7 +236,7 @@ class TestViennaAndFrankfurtAreCovered:
             assert is_gf_subscribed_exchange(code), f"{code} must be reachable"
 
     def test_the_genuinely_unsubscribed_are_untouched(self):
-        """⚠ THE OTHER HALF OF THE CHANGE. Widening a coverage map is only safe if it widens by
+        """ THE OTHER HALF OF THE CHANGE. Widening a coverage map is only safe if it widens by
         exactly what was intended — LSE is the reason `refuse_unsubscribed` exists."""
         from index_universe.acwi.exchange_map import is_gf_subscribed_exchange
         for code in ("LSE", "DUB", "NSE", "BOM", "TSX", "TSXV", "ASX", "NZSE"):
@@ -244,14 +244,14 @@ class TestViennaAndFrankfurtAreCovered:
 
 
 class TestTheFrankfurtFloorLosesATie:
-    """⚠⚠ ADDING `FRA` TO THE COVERAGE MAP NEARLY LET THE ALPHABET PICK A LISTING. A German company
+    """ ADDING `FRA` TO THE COVERAGE MAP NEARLY LET THE ALPHABET PICK A LISTING. A German company
     lists on both Xetra (`XTER`, where the volume and the history are) and the Frankfurt floor
     (`FRA`, thin) under the SAME ticker in the SAME currency — so the two score identically and only
     the tie-break separates them. That tie-break was the exchange code ascending, and
     `"FRA" < "XTER"`. This is the Stuttgart failure (`LLY.SG`, EUR 1.6M/day against Nasdaq's
     28,076M) reached through a sort key instead of a bad match.
 
-    ⚠⚠ THE `BAYER` FIXTURE ABOVE CANNOT SHOW IT, WHICH IS WHY THIS PASSES ITS OWN CURRENCY MAP.
+     THE `BAYER` FIXTURE ABOVE CANNOT SHOW IT, WHICH IS WHY THIS PASSES ITS OWN CURRENCY MAP.
     `EXCH_CCY` has no `FRA` entry, so in that fixture Frankfurt scores one lower than Xetra on the
     currency match and loses on score rather than on the tie-break. In PRODUCTION the currency comes
     from `gurufocus_exchange`, where `FRA` is EUR — so the tie is real there and invisible here."""
@@ -264,7 +264,7 @@ class TestTheFrankfurtFloorLosesATie:
         assert r.listing == ("BAYN", "XTER")
 
     def test_and_the_order_of_the_candidates_does_not_matter(self):
-        """⚠ THE VENDOR'S LIST ORDER IS NOT A PREFERENCE. `max` keeps the first of equal keys, so a
+        """ THE VENDOR'S LIST ORDER IS NOT A PREFERENCE. `max` keeps the first of equal keys, so a
         tie-break that did not actually separate these would silently follow whichever the vendor
         happened to list first."""
         ccy = {**EXCH_CCY, "FRA": "EUR"}
@@ -277,7 +277,7 @@ class TestTheFrankfurtFloorLosesATie:
             assert r.listing == ("BAYN", "XTER")
 
     def test_but_a_company_held_ONLY_on_the_floor_still_resolves(self):
-        """⚠⚠ THE POINT OF A TIE-BREAK IS THAT IT ONLY BREAKS TIES. Verisure is on `FRA` and nowhere
+        """ THE POINT OF A TIE-BREAK IS THAT IT ONLY BREAKS TIES. Verisure is on `FRA` and nowhere
         else we hold; demoting the venue must not refuse it, or this change would have taken data
         away from the very company it was made to unblock."""
         ccy = {**EXCH_CCY, "FRA": "EUR"}
@@ -287,7 +287,7 @@ class TestTheFrankfurtFloorLosesATie:
         assert r.listing == ("6R9", "FRA")
 
     def test_a_us_listing_still_outranks_both(self):
-        """⚠ THE NEW KEY SITS AFTER THE US ONE, so it cannot disturb the existing preference."""
+        """ THE NEW KEY SITS AFTER THE US ONE, so it cannot disturb the existing preference."""
         ccy = {**EXCH_CCY, "FRA": "EUR"}
         r = pick_listing([{"symbol": "BAYZF", "exchange": "OTCPK"},
                           {"symbol": "BAYZF", "exchange": "FRA"}],

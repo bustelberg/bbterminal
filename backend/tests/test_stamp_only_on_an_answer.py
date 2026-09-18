@@ -1,12 +1,12 @@
 """A feed is stamped only when the vendor actually ANSWERED.
 
-⚠⚠ THIS BECAME LOAD-BEARING THE MOMENT THE STAMP STARTED SUPPRESSING CALLS. `company.<feed>_fetched_at`
+ THIS BECAME LOAD-BEARING THE MOMENT THE STAMP STARTED SUPPRESSING CALLS. `company.<feed>_fetched_at`
 now silences a feed for `SMART_RETRY_EMPTY_AFTER_DAYS` (30) when nothing came back — which is the whole
 saving. The other edge of that: a stamp written after a FAILED call records "we asked, there is
 nothing" as a fact, and the feed goes quiet for a month over a transient vendor problem. The gap is
 silent and looks exactly like real coverage.
 
-⚠ AND THE THROTTLE SIGNATURE HERE IS AN EMPTY BODY, NOT A 429 — `_api_request_cf` turns one into
+ AND THE THROTTLE SIGNATURE HERE IS AN EMPTY BODY, NOT A 429 — `_api_request_cf` turns one into
 `data=None`. Zero rows from a throttled call and zero rows from a company GuruFocus genuinely has no
 forward P/E for are indistinguishable by CONTENT, so they can only be told apart by whether the
 REQUEST succeeded. This matters more the faster we ask: the whole reason to lower
@@ -39,7 +39,7 @@ def _rig(monkeypatch, api_result):
     monkeypatch.setattr(ind, "_upsert_metric_rows", lambda _sb, rows: (len(rows), 0))
     monkeypatch.setattr(ind, "_stamp_fetched",
                         lambda _sb, _cid, source, _log: stamped.append(source))
-    # ⚠ IT PARSES THE PAYLOAD, RATHER THAN JUST CHECKING IT IS TRUTHY. `{"indicator": []}` — a
+    #  It parses the payload, rather than just checking it is truthy. `{"indicator": []}` — a
     # well-formed response carrying no series, which is the case this file exists to separate from a
     # failed request — is itself truthy, so a `not data` fake handed back a row for it and the test
     # asserting "nothing was loaded" failed against correct code.
@@ -66,7 +66,7 @@ class TestAnEmptyANSWERIsStamped:
 
 
 class TestAFAILEDCallIsNotStamped:
-    """⚠ THE ONE THAT MATTERS. A transient empty body must not buy 30 days of silence."""
+    """ THE ONE THAT MATTERS. A transient empty body must not buy 30 days of silence."""
 
     def test_an_empty_body_does_not_stamp(self, monkeypatch):
         _res, stamped = _rig(monkeypatch, _Api(None, log="GuruFocus returned empty body"))

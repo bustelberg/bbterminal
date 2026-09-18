@@ -37,7 +37,7 @@ describe('createLiveReload', () => {
     expect(r.started()).toBe(1);
   });
 
-  it('⚠⚠ NEVER RUNS TWO AT ONCE — the whole reason it exists', async () => {
+  it(' NEVER RUNS TWO AT ONCE — the whole reason it exists', async () => {
     const r = rig();
     r.lr.onProgress(1);
     for (let i = 2; i <= 20; i += 1) r.lr.onProgress(i);
@@ -68,7 +68,7 @@ describe('createLiveReload', () => {
     expect(r.started()).toBe(1);
   });
 
-  it('⚠ ignores a LOWER count, so an out-of-order frame cannot walk it backwards', async () => {
+  it(' ignores a LOWER count, so an out-of-order frame cannot walk it backwards', async () => {
     const r = rig(1000);
     r.lr.onProgress(10);
     await r.settle();
@@ -87,7 +87,7 @@ describe('createLiveReload', () => {
     expect(r.started()).toBe(2);
   });
 
-  it('⚠ a FAILED reload does not stop the next one', async () => {
+  it(' a FAILED reload does not stop the next one', async () => {
     let started = 0;
     let t = 0;
     const timers: (() => void)[] = [];

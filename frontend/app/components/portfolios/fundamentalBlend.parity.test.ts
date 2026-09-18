@@ -3,10 +3,10 @@ import rawFixture from './__fixtures__/blendParity.json';
 import { buildBlend, type Resp, type Row } from './fundamentalBlend';
 
 /**
- * THE CLIENT HALF OF A CROSS-LANGUAGE PARITY PIN — `backend/tests/test_blend_client_parity.py` is
+ * The client half of a cross-language parity pin — `backend/tests/test_blend_client_parity.py` is
  * the other, and the two read the SAME fixture.
  *
- * ⚠⚠ NOTHING PINNED THESE TWO AGAINST EACH OTHER UNTIL 2026-09-03, WHICH IS WHY THEY DRIFTED.
+ *  Nothing pinned these two against each other until 2026-09-03, WHICH IS WHY THEY DRIFTED.
  * `blend_series` draws the chart and `buildBlend` reproduces it under the chart, in another
  * language, from another endpoint's payload — the whole design of the drill-down rests on the two
  * agreeing, and `tests/test_blend_stream_parity.py` only pins the two SERVER paths against one
@@ -14,11 +14,11 @@ import { buildBlend, type Resp, type Row } from './fundamentalBlend';
  * reported disagreeing with itself on ACWI, +10.9%/yr share price on `Graphs` against +10.8% in
  * `Tables`, and +4.5% against +4.6% on revenue.
  *
- * ⚠ A DIFFERENCE THAT SMALL IS THE POINT. Nothing looks wrong on either screen — both lines are
+ *  A difference that small is the point. Nothing looks wrong on either screen — both lines are
  * smooth, both clear their coverage floors, both drill-downs reconcile to their own line. Only the
  * two numbers side by side say anything, and only to a reader who happens to open both tabs.
  *
- * ⚠ THE EXPECTED SERIES IS NOT A CAPTURED BASELINE. It is worked by hand in the fixture's `_doc`;
+ *  The expected series is not a captured baseline. It is worked by hand in the fixture's `_doc`;
  * a baseline snapshotted off one implementation would pin that implementation's bugs as the
  * contract, which on a parity test is the one thing that cannot be allowed.
  */
@@ -50,7 +50,7 @@ const payload = (): { resp: Resp; rows: Row[] } => {
     status: 'ok',
     revenue: m.values,
     market_cap_eur: m.market_cap_eur,
-    // ⚠ `{}`, NOT ABSENT, for a constituent with no cap — that is what the endpoint ships
+    //  `{}`, NOT ABSENT, for a constituent with no cap — that is what the endpoint ships
     // (`caps.get(company_id, {})`), and the two are different answers to `wAt`: an empty map means
     // "out of every period's average", an absent one means "one flat weight for every period".
     market_cap_by_period: Object.fromEntries(
@@ -65,7 +65,7 @@ describe('buildBlend against the server blend', () => {
     const { resp } = payload();
     const blend = buildBlend(resp, fx.metric);
 
-    // ⚠ THE DRAWN SET FIRST, BECAUSE IT IS WHAT DIVERGED. A refused period is not a missing point:
+    //  The drawn set first, because it is what diverged. A refused period is not a missing point:
     // the chain skips it, the next step spans two intervals instead of one, and every level after
     // it is a product over a different partition. Asserting only the endpoint would let a line
     // reach the right 2018 by a route the chart never took.
@@ -80,7 +80,7 @@ describe('buildBlend against the server blend', () => {
     const { resp } = payload();
     const blend = buildBlend(resp, fx.metric);
 
-    // ⚠⚠ THE DEFECT ITSELF, IN ONE ASSERTION. `Echo` has no market cap, so it can never carry a
+    //  The defect itself, in one assertion. `Echo` has no market cap, so it can never carry a
     // weight and is out of every average — but it was still in `parts.length`, the denominator of
     // `coverN[y] / parts.length`. Two reporters out of five reads 40% and is refused; out of the
     // four members the server actually blends it reads 50% and is drawn. `earnings.py`'s
@@ -97,20 +97,20 @@ describe('buildBlend against the server blend', () => {
     const blend = buildBlend(resp, fx.metric);
     const echo = rows[rows.length - 1];
 
-    // ⚠ ITS SERIES RUNS 100 -> 800 (+100%/yr), so a leak would be unmissable rather than a rounding
+    //  Its series runs 100 -> 800 (+100%/yr), so a leak would be unmissable rather than a rounding
     // difference — the line would be dragged from +9.2%/yr to well past +20%.
     expect(echo.market_cap_eur).toBe(0);
     for (const period of fx.periods) expect(blend.wAt(echo, period)).toBeNull();
     expect(blend.contrib.get(echo)).toBeUndefined();
 
-    // ⚠ AND IT IS STILL A ROW OF THE TABLE. `all_constituents=True` exists so the drill-down can
+    //  And it is still a row of the table. `all_constituents=True` exists so the drill-down can
     // say "in the index, not in the line"; dropping it from the payload's rows would hide the one
     // fact that panel is for. What changed is the DENOMINATOR, not the listing.
     expect(resp.rows).toContain(echo);
   });
 
   it('is a no-op for a portfolio, whose 0-weight holdings the server does count', () => {
-    // ⚠⚠ `market_cap_eur` IS THE INDEX PATH'S OWN FIELD and the subject of `require_market_cap`,
+    //  `market_cap_eur` IS THE INDEX PATH'S OWN FIELD and the subject of `require_market_cap`,
     // so absence has to mean "leave this alone". A book's holding weight is not a market cap, and
     // the two sides already agree about one: `_prepare` drops it as `no_weight` while `total_n`
     // still counts it, which is 2 of 3 here — so a client that dropped the row from `parts` would

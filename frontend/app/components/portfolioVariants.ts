@@ -4,14 +4,14 @@
  * page cannot offer different profiles, label the same one differently, or disagree about which
  * models are in it.
  *
- * ⚠ THE CLASSIFICATION IS THE BACKEND'S, AND MUST STAY THERE. `_airs_portfolio_variant` decides
+ *  The classification is the backend's, and must stay there. `_airs_portfolio_variant` decides
  * which profile a model has, off AIRS's own name; this file only filters on string equality.
  * The rule is not portable: "bep offensief" CONTAINS "offensief", so a naive reimplementation
  * puts Beperkt Offensief models in the Offensief filter — and does it for only ONE of the five
  * (the four spelled BEPOF/Bepoff/BEPOFF/BEOFF survive), which is exactly the sort of bug a
  * reasonable test misses.
  *
- * ⚠ THESE STRINGS MUST MATCH `_airs_portfolio_variant.VARIANTS` EXACTLY. A profile spelled
+ *  These strings must match `_airs_portfolio_variant.VARIANTS` EXACTLY. A profile spelled
  * differently here matches nothing and renders an empty result that reads as "we own none of
  * those" rather than as a typo.
  */

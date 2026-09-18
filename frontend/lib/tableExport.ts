@@ -38,7 +38,7 @@ function todayStamp(): string {
 export type ExportOptions = {
   /** Append `_YYYY-MM-DD` to the filename. Default true.
    *
-   * ⚠ TURN IT OFF ONLY WHEN THE BASENAME ALREADY CARRIES ITS OWN PERIOD. The stamp exists so
+   *  Turn it off only when the basename already carries its own period. The stamp exists so
    * two downloads in a session do not overwrite, and it is TODAY — which on a file named for
    * a month is a second, disagreeing date: "MomentumTopSelectie Neutraal September" stamped
    * on 5 September reads as September's portfolio downloaded in September, and the same file
@@ -48,13 +48,13 @@ export type ExportOptions = {
 
 /** Sanitize a basename — drop anything not safe for a filename.
  *
- * ⚠ SPACES SURVIVE. They used to be replaced with `_`, which mangled every caller that
+ *  Spaces survive. They used to be replaced with `_`, which mangled every caller that
  * interpolates a human name into the filename (an AIRS book, a strategy) and turned
  * "MomentumTopSelectie Neutraal September" into an identifier rather than a label. A space is
  * legal in a filename on every platform this app runs on; the characters that are NOT are
  * excluded by the allowlist below, which is unchanged.
  *
- * ⚠ ANYTHING REMOVED BECOMES A SPACE, NOT NOTHING, so a name containing a slash reads as two
+ *  Anything removed becomes a space, not nothing, so a name containing a slash reads as two
  * words rather than one run-together one. Runs collapse and the ends are trimmed, so the
  * result never has a leading, trailing or doubled separator. */
 function sanitizeBasename(name: string): string {

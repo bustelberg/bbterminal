@@ -15,9 +15,9 @@ export function TipCardLanguageProvider({ lang, children }: {
 /**
  * Prose on its way into a card field, with any marked live values badged.
  *
- * ⚠ A STRING GOES THROUGH THE BADGER; ANYTHING ELSE IS PASSED STRAIGHT THROUGH. Several call sites
+ *  A string goes through the badger; anything else is passed straight through. Several call sites
  * hand these fields real JSX (a link, a nested tip), and those have already decided how they look.
- * ⚠ And an unmarked string comes out unchanged, which is what lets copy adopt `v()` one string at a
+ *  And an unmarked string comes out unchanged, which is what lets copy adopt `v()` one string at a
  * time instead of in one 660-string commit.
  */
 const prose = (n: React.ReactNode) =>
@@ -25,12 +25,12 @@ const prose = (n: React.ReactNode) =>
 
 /** THE tooltip card. One shell, every info icon.
  *
- * ⚠ THIS EXISTS BECAUSE THERE WERE TWO. A number's provenance rendered as a designed card
+ *  This exists because there were two. A number's provenance rendered as a designed card
  * (a micro-label, a bold source, a rule, then labelled fields) while every other tooltip rendered
  * as a bare paragraph. Same icon, same gesture, two different objects — so the structured one read
  * as a feature of certain cells rather than as the way this app explains itself.
  *
- * ⚠ THE SHELL IS SHARED; THE FIELDS ARE NOT, AND MUST NOT BE. A definition has no Source, no When
+ *  The shell is shared; the fields are not, and must not be. A definition has no Source, no When
  * and no How: it explains a CONCEPT, not the origin of a number. Rendering "Source: —" over a
  * definition would fabricate provenance for something that never had any, which is the exact
  * failure the provenance card was built to prevent. So both cards share the chrome — label, title,
@@ -73,19 +73,19 @@ export function Field({ label, children }: { label: string; children: React.Reac
 }
 
 /**
- * THE ARITHMETIC, WORKED, WITH THIS SCREEN'S OWN NUMBERS IN IT — see `portfolios/workedFormula`.
+ * The arithmetic, worked, with this screen's own numbers in it — see `portfolios/workedFormula`.
  *
- * ⚠⚠ IT IS TYPESET, NOT WRITTEN OUT IN UNICODE (2026-08-22). `½ · Σ |wᵖ − wᵇ|` in a mono face is
+ *  It is typeset, not written out in unicode (2026-08-22). `½ · Σ |wᵖ − wᵇ|` in a mono face is
  * not a formula, it is a row of glyphs that resemble one — a summation with no limits, superscripts
  * that are baseline-shifted characters rather than real scripts, a fraction that is one codepoint
  * and cannot grow, and `Σ` given the same advance width as a comma. Reported, correctly, as "still
  * very hard to see". KaTeX sets the same expression properly; see `lib/formula`.
  *
- * ⚠ IT IS A BLOCK, NOT A `Field`. `Field`'s value column is about 14rem next to its label, and
+ *  It is a block, not a `Field`. `Field`'s value column is about 14rem next to its label, and
  * display maths reflowed through that is unreadable in exactly the way that makes a reader stop
  * checking.
  *
- * ⚠⚠ IT SITS IN THE `how` SECTION, WHICH REVERSES THE EARLIER DECISION (it used to sit under
+ *  It sits in the `how` SECTION, WHICH REVERSES THE EARLIER DECISION (it used to sit under
  * `where`, on the reasoning that prose and maths describing the same thing must be adjacent). Two
  * things changed that. `where` names the INPUTS — how many observations, over what window, against
  * which tracker — and a formula is not an input; `how` is where the card says how to read the
@@ -94,7 +94,7 @@ export function Field({ label, children }: { label: string; children: React.Reac
  * which was the whole argument for keeping it beside `where`.
  */
 export function Worked({ text }: { text: string }) {
-  // ⚠⚠ ONE TYPESET EXPRESSION, NOT TWO BLOCKS. `withWorked` joins the symbolic half and the
+  //  One typeset expression, not two blocks. `withWorked` joins the symbolic half and the
   // substituted half with `\\[4pt]` — a LaTeX line break — so KaTeX sets them as one display,
   // aligned and in one face. The previous version split on a blank line and styled each half
   // differently, which is what made them read as two unrelated objects: mono digits under
@@ -108,24 +108,24 @@ export function Worked({ text }: { text: string }) {
 
 /** One row of a {@link Legend}: the symbol as it appears in the formula, and what it stands for. */
 export type FormulaSymbol = {
-  /** ⚠ LaTeX, NOT A UNICODE LOOKALIKE — it is set by the same renderer as the formula above it. */
+  /**  LaTeX, NOT A UNICODE LOOKALIKE — it is set by the same renderer as the formula above it. */
   sym: string;
   is: React.ReactNode;
 };
 
 /**
- * WHAT EACH SYMBOL IN THE FORMULA ABOVE ACTUALLY IS.
+ * What each symbol in the formula above actually is.
  *
- * ⚠⚠ TYPESET BY KaTeX, NOT WRITTEN AS TEXT, AND THAT IS THE ENTIRE POINT. A legend that renders
+ *  Typeset by KaTeX, NOT WRITTEN AS TEXT, AND THAT IS THE ENTIRE POINT. A legend that renders
  * `w_i^p` as "w_i^p" in the UI font asks the reader to match two differently-shaped objects and
  * trust that they are the same variable — which is the same failure `lib/formula` exists to fix
  * one level up, reintroduced in the very place that explains the notation. Same engine, same face,
  * same scripts: the symbol in the row IS the symbol in the equation.
  *
- * ⚠ THE SYMBOL COLUMN IS FIXED-WIDTH AND RIGHT-ALIGNED, so the descriptions form a single column
+ *  The symbol column is fixed-width and right-aligned, so the descriptions form a single column
  * the eye can run down. Ragged-left definitions read as a list of unrelated notes.
  *
- * ⚠ IT DEFINES WHAT THE FORMULA USES AND NOTHING ELSE. A legend that also explains a constant the
+ *  It defines what the formula uses and nothing else. A legend that also explains a constant the
  * reader can see (the ½, the T−1) turns four rows into eight and buries the two symbols that were
  * genuinely opaque; the constants belong in `how`, where the reasoning for them already lives.
  */
@@ -137,7 +137,7 @@ export function Legend({ items }: { items: readonly FormulaSymbol[] }) {
           <span className="shrink-0 min-w-[3rem] text-right leading-none">
             <Formula inline tex={s.sym} />
           </span>
-          {/* ⚠ THROUGH `prose` TOO — a legend row routinely carries a live operand ("the number of
+          {/*  THROUGH `prose` TOO — a legend row routinely carries a live operand ("the number of
               paired periods (261 here)"), and a badge that appears in the card body but not four
               lines below it reads as two different kinds of number rather than one convention. */}
           <span className="min-w-0 text-[12px] text-fg-muted">{prose(s.is)}</span>
@@ -168,7 +168,7 @@ export function AspectCard({ what, where, when, how, worked, legend }: {
     <TipCard label={label.what} title={prose(what)}>
       {where != null && where !== '' && <Field label={label.where}>{prose(where)}</Field>}
       {when != null && when !== '' && <Field label={label.when}>{prose(when)}</Field>}
-      {/* ⚠ THE THREE ARE ONE GROUP, not three siblings — the prose, the maths it describes and the
+      {/*  THE THREE ARE ONE GROUP, not three siblings — the prose, the maths it describes and the
           key to that maths are the How section, and spacing them like separate fields would put
           the legend as far from its formula as from the sentence above it. */}
       {(how != null && how !== '') || worked || legend?.length ? (
@@ -188,7 +188,7 @@ const MAX_TITLE_LEN = 48;
 /**
  * Split "Term — explanation" into a card title and its body.
  *
- * ⚠ IT IS DELIBERATELY CONSERVATIVE, BECAUSE A WRONG SPLIT IS WORSE THAN NO SPLIT. Promoting the
+ *  It is deliberately conservative, because a wrong split is worse than no split. Promoting the
  * first clause of a sentence to a bold heading leaves a body that begins mid-thought — the tooltip
  * still renders, still looks designed, and reads as gibberish. So a fragment must be SHORT and
  * must not already contain sentence punctuation; anything else keeps the whole text as the body,

@@ -1,13 +1,13 @@
 /**
  * The Long Equity card headings, in both languages.
  *
- * ⚠⚠ THE ENGLISH SIDE IS A REGRESSION TEST, NOT A TRANSLATION TEST. These sixteen strings were
- * LIFTED OUT of fourteen components' `<h4>`s into one table; every one of them was previously a
+ *  The english side is a regression test, not a translation test. These sixteen strings were
+ * Lifted out of fourteen components' `<h4>`s into one table; every one of them was previously a
  * literal beside the markup that drew it. A typo made during that move renames a chart, and a
  * renamed chart is not something the reader can catch — there is no second copy on screen to
  * disagree with it. So the English is asserted verbatim.
  *
- * ⚠ AND `croic`/`roic` ARE ASSERTED AGAINST `MODES`, which is the real invariant rather than a
+ *  AND `croic`/`roic` ARE ASSERTED AGAINST `MODES`, which is the real invariant rather than a
  * restatement of the constant. `CashReturnCard` draws its heading from here and its basis-switch
  * tooltip from `MODES[k].title`/`.what`/`.where` — two strings, side by side, naming the same
  * metric. If they drift, the card's own explanation describes a different ratio from its title.
@@ -23,7 +23,7 @@ import { CHART_KEYS, CHART_TITLES, chartTitle, type ChartKey } from './longEquit
 /** Exactly what each `<h4>` rendered before the strings moved into `longEquityCopy`. */
 const ENGLISH_BEFORE: Record<ChartKey, [string, string]> = {
   //                        [ sbc off,                    sbc on                     ]
-  // ⚠ NOT A "BEFORE" — this card was added AFTER the strings moved here, so there is no earlier
+  //  NOT A "BEFORE" — this card was added AFTER the strings moved here, so there is no earlier
   // `<h4>` for it to have survived unchanged. It is in the table because the table is keyed on
   // `ChartKey` and a missing key would fail on destructure rather than on an assertion, which
   // names the wrong problem. What it pins is the same thing for a new heading as for an old one:
@@ -31,7 +31,7 @@ const ENGLISH_BEFORE: Record<ChartKey, [string, string]> = {
   sharePrice: ['Share price', 'Share price'],
   epsNri: ['EPS (excl. non-recurring)', 'EPS (excl. non-recurring)'],
   revenue: ['Revenue', 'Revenue'],
-  // ⚠ RENAMED 2026-08-21, ON REQUEST: the slash became the word. "FCF / share" reads as a
+  //  RENAMED 2026-08-21, ON REQUEST: the slash became the word. "FCF / share" reads as a
   // division in a list of headings that are names, and the Dutch was worse — "Vrije kasstroom /
   // aandeel" next to "Winst per aandeel" said the same relation two different ways.
   fcfPs: ['FCF per share', 'FCF per share'],
@@ -47,7 +47,7 @@ const ENGLISH_BEFORE: Record<ChartKey, [string, string]> = {
   dividendYield: ['Dividend yield', 'Dividend yield'],
   fcfYield: ['FCF yield', 'FCF-SBC yield'],
   grossMargin: ['Gross margin', 'Gross margin'],
-  // ⚠ U+2212 MINUS, not a hyphen — the character the card has always used.
+  //  U+2212 MINUS, not a hyphen — the character the card has always used.
   cashConversion: ['FCF / Net Income', '(FCF − SBC) / Net Income'],
 };
 
@@ -59,7 +59,7 @@ describe('the English headings survived the move unchanged', () => {
   });
 
   it('the capital-return headings agree with the basis switch that explains them', () => {
-    // ⚠ NOT A RESTATEMENT OF A CONSTANT — `MODES` feeds the tooltip on the same card's switch.
+    //  Not a restatement of a constant — `MODES` feeds the tooltip on the same card's switch.
     expect(chartTitle('en', 'croic')).toBe(MODES.croic.title);
     expect(chartTitle('en', 'roic')).toBe(MODES.roic.title);
   });
@@ -79,7 +79,7 @@ describe('both languages are complete', () => {
   });
 
   it('only the three SBC-driven headings change with the checkbox', () => {
-    // ⚠ IN BOTH LANGUAGES. A translation that folds the two states into one phrase would leave the
+    //  In both languages. A translation that folds the two states into one phrase would leave the
     // checkbox with no visible effect on that card — the state is legible from the heading, and
     // that is the only place it is stated per card.
     for (const lang of LANGS) {
@@ -91,7 +91,7 @@ describe('both languages are complete', () => {
 
 describe('the two translated surfaces agree with each other', () => {
   /**
-   * ⚠⚠ THE `Tables` TAB SUMMARISES THESE CARDS, IN THE SAME MODAL. Its rows are named in
+   *  THE `Tables` TAB SUMMARISES THESE CARDS, IN THE SAME MODAL. Its rows are named in
    * `tablesCopy`; these headings are named here. Two tables of the same metrics under two different
    * Dutch names is a summary of something else, and nothing on screen would say which name is the
    * real one. This pins the overlap rather than trusting two files to be edited together.
@@ -109,7 +109,7 @@ describe('the two translated surfaces agree with each other', () => {
 });
 
 describe('an unkeyed config keeps its English heading', () => {
-  /** ⚠ `titleKey` IS OPTIONAL so a `MetricCfg` built outside Long Equity (`QuickValuationTab`) is
+  /**  `titleKey` IS OPTIONAL so a `MetricCfg` built outside Long Equity (`QuickValuationTab`) is
    *  not forced into a table it has no entry in — `MetricGrowthCard` falls back to `cfg.title`. */
   it('every Long Equity key exists in both tables', () => {
     for (const lang of LANGS) {

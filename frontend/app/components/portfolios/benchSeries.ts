@@ -6,8 +6,8 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 /**
  * The benchmark line every Long Equity chart can carry.
  *
- * ⚠ IT IS THE SAME ENDPOINT, THE SAME BODY SHAPE AND THE SAME CLIENT-SIDE HELPER AS THE
- * PORTFOLIO'S OWN LINE — only `{holdings|portfolio_id}` is swapped for `{universe}`. That is the
+ *  It is the same endpoint, the same body shape and the same client-side helper as the
+ * Portfolio's own line — only `{holdings|portfolio_id}` is swapped for `{universe}`. That is the
  * whole design. A chart with two lines on one axis is only honest if both were computed the same
  * way, and the surest way to guarantee that is for there to be exactly one computation: the card
  * calls `marginByYear` (or `debtRatioByYear`, …) twice, over two row sets. There is no
@@ -17,13 +17,13 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
  * carries `market_cap_eur` as the weight), so the card's existing weighted average IS the
  * weighted-average benchmark the user asked for — nothing extra to weight here.
  *
- * ⚠ COVERAGE IS NOT 100% and differs per index. Only companies whose fundamentals we have ingested
+ *  Coverage is not 100% and differs per index. Only companies whose fundamentals we have ingested
  * contribute; an index we have barely ingested draws a confident-looking line over a fraction of
  * itself. The server reports what it drew — see `benchmark_margin`'s `coverage_pct`.
  */
 
 /**
- * ⚠ THE BENCHMARK IS GREEN (`chartTheme.pos`) ON EVERY CHART, WITHOUT EXCEPTION. It has to be one
+ *  The benchmark is green (`chartTheme.pos`) ON EVERY CHART, WITHOUT EXCEPTION. It has to be one
  * colour or the eye re-learns which line is the index on each of the fourteen cards. Validated
  * rather than eyeballed (`dataviz/scripts/validate_palette.js`): green↔the accent blue scores ΔE
  * 19.1 deutan, 20.7 normal. On the two cards that also carry an amber TREND line, green↔amber is
@@ -37,7 +37,7 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
 /**
  * A benchmark to draw beside the book: the index label + the cadence the tab is on.
  *
- * ⚠⚠ `'daily'` IS DELIBERATELY NOT IN THIS UNION, AND IT IS NOT AN OVERSIGHT. The two yield
+ *  `'daily'` IS DELIBERATELY NOT IN THIS UNION, AND IT IS NOT AN OVERSIGHT. The two yield
  * cards offer a per-card daily toggle, but it only ever moves `holdingsTarget` — the benchmark
  * stays on the tab's cadence. Measured 2026-08-18 against the S&P 500: a DAILY benchmark request
  * returns 490 per-constituent series, 11s of server time and **54 MB** of JSON, all of it reduced
@@ -49,7 +49,7 @@ import { MIN_YEAR_COVERAGE_PCT } from './marginData';
  */
 type BenchBase = {
   /**
-   * The display name of the second line. ⚠⚠ EVERY CARD LABELS WITH THIS, never with `universe`.
+   * The display name of the second line.  EVERY CARD LABELS WITH THIS, never with `universe`.
    * It used to read `benchTarget.universe` in 47 places, which was fine while the second line could
    * only ever be an index — and became a blank legend the moment it could be a company. The union
    * below is deliberately shaped so `.universe` does not typecheck: a half-finished migration here
@@ -63,14 +63,14 @@ type BenchBase = {
 /**
  * What to draw beside the book: a cap-weighted INDEX, or one other COMPANY.
  *
- * ⚠⚠ A COMPANY IS A ONE-HOLDING BOOK, AND THAT IS WHY THIS COSTS ALMOST NOTHING. Every `*-inputs`
+ *  A company is a one-holding book, and that is why this costs almost nothing. Every `*-inputs`
  * endpoint already takes `{holdings:[…]}` — it is how a portfolio is charted — so a comparison
  * against another company needs no new endpoint, no new blend rule and no new chart code. Measured
  * 2026-08-19: `{holdings:[{isin, weight:1}]}` returns one row at `weight_pct = 100` in 100-565 ms.
  * The alternative, a bespoke "compare" pipeline, would be a second definition of every ratio on
  * this tab.
  *
- * ⚠ `market_cap_by_period` IS ABSENT FOR A COMPANY, AND THAT IS CORRECT. `weightAt` reads its
+ *  `market_cap_by_period` IS ABSENT FOR A COMPANY, AND THAT IS CORRECT. `weightAt` reads its
  * absence as "the single weight applies to every period" — which for one company at 100% is
  * exactly right. An index gets per-period cap weights because it has constituents; a company has
  * nothing to weight.
@@ -92,7 +92,14 @@ export function benchBody(t: BenchTarget): string {
     : { holdings: [{ isin: t.isin, name: t.label, weight: 1 }], cadence: t.cadence });
 }
 
-/** Identity for the fetch effect. ⚠ THE ISIN/LABEL AND THE CADENCE, not the label alone — two
+/** Serialize either a normal holdings target or a comparison target for a `*-inputs` endpoint. */
+export function inputsBody(t: object): string {
+  return 'isin' in t && !('holdings' in t) && !('portfolio_id' in t)
+    ? benchBody(t as BenchTarget)
+    : JSON.stringify(t);
+}
+
+/** Identity for the fetch effect.  THE ISIN/LABEL AND THE CADENCE, not the label alone — two
  *  companies can share a name (dual listings) and a stale line under a new name is the failure
  *  this key exists to prevent. */
 export const benchKey = (t: BenchTarget | null | undefined): string =>
@@ -101,7 +108,7 @@ export const benchKey = (t: BenchTarget | null | undefined): string =>
 /**
  * Row order in every Long Equity hover: the BENCHMARK first, then the book. Pass as `itemSorter`.
  *
- * ⚠⚠ IT WAS ALREADY COMING OUT THIS WAY, BY ACCIDENT, AND THAT IS THE REASON TO DECLARE IT.
+ *  It was already coming out this way, by accident, and that is the reason to declare it.
  * Recharts' default sorter is `'name'` — alphabetical on the SERIES name, not on the label the
  * formatter produces — and every benchmark line here is named `bench`, which happens to sort before
  * `margin`, `ratio`, `value`, `yld` and `trend`. Rename one series (or add a card whose line is
@@ -109,7 +116,7 @@ export const benchKey = (t: BenchTarget | null | undefined): string =>
  * screen of fourteen charts where the reader has learned the first row is the index. An order the
  * eye relies on across a whole tab cannot rest on the alphabet.
  *
- * ⚠ THE INDEX GOES FIRST because it is the constant: it is the same line on all fourteen cards,
+ *  The index goes first because it is the constant: it is the same line on all fourteen cards,
  * so a fixed position makes it the thing you read past rather than the thing you have to find. The
  * book's own line — the one that differs per card and per portfolio — reads as the answer beneath.
  *
@@ -124,7 +131,7 @@ export type CapTable = Record<string, Record<string, number>>;
 /**
  * Which endpoints have had `market_cap_by_period` LIFTED OUT of their rows.
  *
- * ⚠ THE `*-inputs` FAMILY, AND NOT `portfolio-revenue-matrix`. That one is a drill-down that
+ *  THE `*-inputs` FAMILY, AND NOT `portfolio-revenue-matrix`. That one is a drill-down that
  * renders the cap and the weight in its own cells, so it still ships them inline and must not have
  * a second copy spliced over the top. Naming the rule here rather than at eleven call sites is
  * what keeps a new card from silently drawing a flat-weighted index line — see `spliceCaps` for
@@ -135,7 +142,7 @@ const CAPS_LIFTED_OUT = /-inputs$/;
 /**
  * Put the shared cap table back on the rows, exactly as the server used to.
  *
- * ⚠⚠ `{}` AND ABSENT ARE DIFFERENT ANSWERS AND THIS IS WHERE THAT IS PRESERVED. `weightAt` reads
+ *  `{}` AND ABSENT ARE DIFFERENT ANSWERS AND THIS IS WHERE THAT IS PRESERVED. `weightAt` reads
  * an EMPTY `market_cap_by_period` as "this constituent is out of every period's average" and a
  * MISSING one as "fall back to `weight_pct`, flat, for all of them". So every row of an index
  * response gets the key — `{}` when we hold no cap for it (4 of ACWI's 1,514) — and none of them
@@ -165,13 +172,13 @@ export function spliceCaps<T>(data: T, caps: CapTable): T {
  * that matches the portfolio exactly, and there is no way for the reader to tell which they got.
  * The full detail goes to the console, as everywhere else here.
  *
- * ⚠⚠ TWO REQUESTS, AND THE SECOND IS NOT OPTIONAL. `market_cap_by_period` used to ride on every
+ *  Two requests, and the second is not optional. `market_cap_by_period` used to ride on every
  * row of all ten card responses — the same table ten times, measured at 29.9% of each ACWI payload
  * (~4.8 MB of the tab's 13.21 MB), which gzip cannot dedupe because it cannot see across
  * responses. It now comes from `/universe-period-caps` once. The ten cards ask for it in the same
  * instant and `apiFetch` stores the in-flight promise, so that is ONE request, not ten.
  *
- * ⚠⚠ AND THE CARD WAITS FOR BOTH. Handing over rows the moment they land, with the caps still in
+ *  And the card waits for both. Handing over rows the moment they land, with the caps still in
  * flight, would draw a line weighted by `weight_pct` — today's cap, flat across every year — which
  * is precisely the look-ahead bias `weightAt` exists to avoid, and it would then silently redraw.
  * For the same reason a FAILED cap fetch is an ERROR here, not a fallback: an index line that
@@ -184,7 +191,7 @@ export function useBenchInputs<T>(
    * `/fundamental-blend-metrics`, which narrows an index blend from "every charted code per
    * constituent" to one chunked query per metric.
    *
-   * ⚠⚠ IT MUST BE A MODULE CONSTANT, NOT AN INLINE OBJECT. The effect re-runs on `benchKey(target)`
+   *  It must be a module constant, not an inline object. The effect re-runs on `benchKey(target)`
    * alone, so a value that changes identity every render would be read once and then silently
    * ignored — the request would keep the FIRST body for the life of the component. A literal
    * spelled at the call site is the shape that fails that way; a shared constant cannot.
@@ -205,7 +212,7 @@ export function useBenchInputs<T>(
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
       });
       /** The body, or a thrown reason — one shape for both requests.
-       *  ⚠ THE RESPONSE TRAVELS WITH THE ERROR (`cause`) so the console keeps the full diagnostic
+       *   The response travels with the error (`cause`) so the console keeps the full diagnostic
        *  — including WHICH of the two requests failed — while the UI gets `message`, one short
        *  line. Same rule as everywhere else here. */
       const read = async (p: string): Promise<unknown> => {
@@ -218,7 +225,7 @@ export function useBenchInputs<T>(
         return b;
       };
       try {
-        // ⚠ ONLY FOR AN INDEX. `/universe-period-caps` 422s for a company by design — a holding
+        //  Only for an index. `/universe-period-caps` 422s for a company by design — a holding
         // weight is not a market cap and has no history — and asking anyway would turn every
         // company comparison into an error on all ten cards.
         const wantCaps = CAPS_LIFTED_OUT.test(path) && isUniverseTarget(target);
@@ -245,23 +252,23 @@ export function useBenchInputs<T>(
 /**
  * Why a selected benchmark drew no line (or barely one) — one short sentence, or null.
  *
- * ⚠ THE ABSENCES LOOK IDENTICAL ON SCREEN AND HAVE DIFFERENT FIXES: the request is still in flight
+ *  The absences look identical on screen and have different fixes: the request is still in flight
  * (wait), the request failed (read the console), or it succeeded and every period fell under the
  * weight-coverage floor (`MIN_YEAR_COVERAGE_PCT`). Collapsing them into "no line" is the same
  * mistake as showing an unpriced holding as 0%.
  *
- * ⚠ THE FLOOR IS WHY A WHOLE CARD CAN HAVE NO INDEX LINE, AND IT IS USUALLY STRUCTURAL RATHER THAN
- * A GAP IN OUR INGEST. Measured 2026-08-04 on "Interest / op. profit": the ratio needs a POSITIVE
+ *  The floor is why a whole card can have no index line, and it is usually structural rather than
+ * A gap in our ingest. Measured 2026-08-04 on "Interest / op. profit": the ratio needs a POSITIVE
  * operating income, and **a bank does not report an operating income line at all** (GuruFocus
  * template 'B') — ING, ABN AMRO, JPMorgan, Bank of America, Morgan Stanley and Goldman all carry
  * interest expense with no operating income, and insurers (NN, ASR, Aegon) carry neither. Their
  * weight still sits in the denominator, so AEX coverage lands at 72–80% and cleared the 80% floor
  * in exactly ONE year of twelve; the S&P cleared it in none. A book of 20 industrials clears it
- * every year, which is why the portfolio line is there and the index's is not. ⚠ Those measured
+ * every year, which is why the portfolio line is there and the index's is not.  Those measured
  * figures are why the floor moved to 50 (2026-08-12): at 72–80% covered, that card's index line was
  * being withheld over a fifth of a book it genuinely spans.
  *
- * ⚠ ONE PERIOD IS CALLED OUT SEPARATELY, because a lone dot on a chart reads as a rendering glitch.
+ *  One period is called out separately, because a lone dot on a chart reads as a rendering glitch.
  * (It is also why the benchmark carries dots at all — a one-point series drawn as a bare line is
  * invisible, which is how this was mistaken for a missing fetch in the first place.)
  */
@@ -271,7 +278,7 @@ export function benchNote(
   /**
    * Whether THIS caller applied the coverage floor to `series`.
    *
-   * ⚠⚠ IT USED TO ASSERT THE FLOOR UNCONDITIONALLY, AND THAT SENT ME AFTER THE WRONG BUG. The ratio
+   *  It used to assert the floor unconditionally, and that sent me after the wrong bug. The ratio
    * cards build their series through `*ByYear`, which applies `MIN_YEAR_COVERAGE_PCT` here — for
    * them the sentence is measured and true. The GROWTH cards pass raw blended rows with no floor
    * applied on the client at all, so an empty series there could be anything, and naming the floor
@@ -294,7 +301,7 @@ export function benchNote(
     return series.size === 1
       ? `${target.label}: one period only — a single dot, not a line` : null;
   }
-  // ⚠ THE NUMBER IS READ, NEVER SPELT. It used to be "80%" in both strings, so the day the floor
+  //  The number is read, never spelt. It used to be "80%" in both strings, so the day the floor
   // moved the legend would have gone on quoting a floor that no longer existed — a caption that
   // contradicts the chart it explains, and nothing would have failed.
   if (!series || series.size === 0) {
@@ -310,7 +317,7 @@ export function benchNote(
 /**
  * The chart rows for a portfolio series + an optional benchmark series.
  *
- * ⚠ THE X UNION, NOT THE PORTFOLIO'S PERIODS. An index reaches back further than most books, and
+ *  The x union, not the portfolio's periods. An index reaches back further than most books, and
  * clipping it to the book's own span would silently redraw the benchmark's history every time a
  * holding changed. `connectNulls` on both lines covers the ragged ends.
  */
@@ -332,7 +339,7 @@ export function mergeSeries(
  * Rebase one or both level series to 100 at a COMMON anchor — the axis the level cards actually
  * plot. Returns the indexed maps plus the anchor year, or null when nothing can be anchored.
  *
- * ⚠ THE RATIO CARDS NEED NOTHING LIKE THIS; the level cards cannot do without it. A margin is a %
+ *  The ratio cards need nothing like this; the level cards cannot do without it. A margin is a %
  * and the two lines are already in the same unit. Revenue is EUR millions for one company and a
  * blended index for the S&P — drawn raw they are two scales on one axis, i.e. the dual-axis
  * mistake with the second axis hidden, and the reader would compare a company against 100.
@@ -345,36 +352,36 @@ export function mergeSeries(
  * as absolute is how you conclude the S&P's revenue is EUR 300bn. Indexed, neither line pretends
  * to be an amount, and the actual values live in the hover.
  *
- * ⚠⚠ THE ANCHOR IS THE FIRST YEAR THE SERIES SHARE, NEVER EACH SERIES' OWN FIRST POINT. A company
+ *  The anchor is the first year the series share, never each series' own first point. A company
  * whose data starts in 2018 rebased on 2018, drawn against an index rebased on 2015, compares a
  * seven-year path against a four-year one and calls the difference performance. Same rule, and the
  * same reason, as `rebaseOnto` — which this replaces on the level cards, because indexing BOTH
  * sides is honest where scaling one onto the other only looks like it.
  *
- * ⚠ BOTH VALUES AT THE ANCHOR MUST BE > 0. Dividing by zero is obvious; dividing by a NEGATIVE is
+ *  Both values at the anchor must be > 0. Dividing by zero is obvious; dividing by a NEGATIVE is
  * the dangerous one, because it silently FLIPS the series and the chart still renders — a company
  * whose FCF/share began negative would appear to collapse as it recovered. This is not
  * hypothetical: the dividend-per-share card was dropped from this tab precisely because its series
  * starts at 0.00 and the level rebase cannot survive it.
  *
- * ⚠ REFUSES RATHER THAN INVENTING ONE. A null here means the caller keeps ABSOLUTE values, which
+ *  Refuses rather than inventing one. A null here means the caller keeps ABSOLUTE values, which
  * is the honest fallback — the raw number is always true, it just is not comparable.
  */
 /**
  * Does this level series change sign — i.e. can it be an INDEX ON A LOG AXIS at all?
  *
- * ⚠⚠ THE TWO DECISIONS ("index it?" and "which axis?") ARE ONE DECISION, AND SPLITTING THEM IS
- * WHAT BROKE. `rebaseSeries` refused to index a sign-changing series and the card fell back to
+ *  The two decisions ("index it?" and "which axis?") ARE ONE DECISION, AND SPLITTING THEM IS
+ * What broke. `rebaseSeries` refused to index a sign-changing series and the card fell back to
  * absolute values, saying so in the legend — but the Y axis stayed LOGARITHMIC and the chart data
  * still nulled everything ≤ 0. The fallback promised the real numbers and then hid exactly the
  * ones that had triggered it. Measured: AMD's 2015-16 losses and Intel's 2024 were invisible on
  * both paths, so a reader saw a line that simply began late, with nothing to say why.
  *
- * ⚠ `!(v > 0)` RATHER THAN `v <= 0`, so a null or a NaN counts as "cannot be logged" too. A hole
+ *  `!(v > 0)` RATHER THAN `v <= 0`, so a null or a NaN counts as "cannot be logged" too. A hole
  * in the series is not a sign change, but it is equally unplottable on a log axis, and the honest
  * axis for either is the linear one.
  *
- * ⚠ REVENUE NEVER TRIPS THIS. It is EPS, FCF/share and net income — the lines that go negative —
+ *  Revenue never trips this. It is EPS, FCF/share and net income — the lines that go negative —
  * which is why the check is on the DATA and not on the metric's name.
  */
 export function seriesCrossesZero(values: Iterable<number | null | undefined>): boolean {

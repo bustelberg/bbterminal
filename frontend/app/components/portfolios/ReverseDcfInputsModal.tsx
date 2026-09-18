@@ -10,7 +10,7 @@ import { useDeepValuationCopy } from './deepValuationCopy';
  * The three company figures the reverse DCF reads, with where each came from — the value, the
  * fiscal period and the metric code.
  *
- * ⚠ IT CALLS `reverseDcfWorking`, WHICH `reverseDcfSource` REDUCES TO THE PANEL'S SCALARS. One
+ *  It calls `reverseDcfWorking`, WHICH `reverseDcfSource` REDUCES TO THE PANEL'S SCALARS. One
  * extraction, two readers: the table cannot show a number the model was not given.
  */
 
@@ -18,7 +18,7 @@ export default function ReverseDcfInputsModal({
   metrics, currency, name, isin, fcf, target, discountRate, years, perpetuityGrowth, today, onClose,
 }: {
   metrics: MetricRow[];
-  /** ⚠ THE PANEL'S OWN `today`, so "next fiscal year" means the same period in both. */
+  /**  THE PANEL'S OWN `today`, so "next fiscal year" means the same period in both. */
   today: string;
 
   currency?: string | null;
@@ -48,7 +48,7 @@ export default function ReverseDcfInputsModal({
     [t.dcfModal.rowSharePrice, w.price, 'plain'],
     [t.dcfModal.rowShares, w.shares, 'plain'],
     [t.dcfModal.rowFcf, w.fcf, 'money'],
-    // ⚠ THE ONE ROW WHOSE PERIOD IS IN THE FUTURE. Everything else in this table is a filing; this
+    //  The one row whose period is in the future. Everything else in this table is a filing; this
     // is the consensus the forward base is derived from (`forwardFcf` nets capex off it), and its
     // `when` column is what makes the difference visible — the section's own caption says "as
     // filed, nothing forecast", which stopped being true the day the base could be a forecast.
@@ -65,7 +65,7 @@ export default function ReverseDcfInputsModal({
           <h2 className="text-fg-strong font-medium">{t.dcfModal.title}</h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
           <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
-          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-4 space-y-6 min-w-0">
@@ -91,7 +91,7 @@ export default function ReverseDcfInputsModal({
                       <td className={`px-3 py-1 text-right font-mono ${obs.used == null ? 'text-warn-300' : 'text-fg-soft'}`}>
                         {obs.used == null ? 'n/a' : (kind === 'money' ? mn(obs.used) : n2(obs.used))}
                       </td>
-                      {/* ⚠⚠ A TTM ROW IS A SUM OF FOUR QUARTERS, NOT THE FIGURE FILED AT THAT DATE.
+                      {/*  A TTM ROW IS A SUM OF FOUR QUARTERS, NOT THE FIGURE FILED AT THAT DATE.
                           Printed bare, `2026-06-30 · −89,325` is a quarter-end over a number four
                           times any quarter's size — which reads as a vendor error rather than a
                           window, in the one table whose whole job is to show where a number came

@@ -1,13 +1,13 @@
 /**
- * WHERE EACH DECISION SITS ON THE YEAR — layout for the holding-timing timeline.
+ * Where each decision sits on the year — layout for the holding-timing timeline.
  *
  * The panel's three lines say the trading was worth €3,028. They cannot say that it was ONE sale
  * near the high and ONE repurchase near the low, two months apart. A date column can't either:
  * `03 Feb` and `23 Apr` are eight characters that carry no shape. Placed on an axis against the
  * price they were struck at, the decision reads at a glance.
  *
- * ⚠⚠ THESE ARE THE PRICES WE OBSERVED, NOT A PRICE HISTORY, AND THE DISTINCTION IS THE WHOLE
- *    HONESTY OF THE PICTURE. Every point is a real number we hold — the opening value, each traded
+ *  These are the prices we observed, not a price history, and the distinction is the whole
+ *    Honesty of the picture. Every point is a real number we hold — the opening value, each traded
  *    price, today's value — and the segments between them are STRAIGHT LINES, not the path the
  *    price took. Adobe fell to €204 and came back; drawn as a line from €246 to €204 it looks
  *    monotonic, and a reader would conclude the repurchase was made on the way down rather than at
@@ -16,11 +16,11 @@
  *    would NOT pass through the AIRS-traded points, and a curve that misses its own markers is
  *    worse than a line that admits it is one.
  *
- * ⚠ A TRADE WITH NO DATE CANNOT BE PLACED, AND IS COUNTED RATHER THAN DROPPED. Silently omitting it
+ *  A trade with no date cannot be placed, and is counted rather than dropped. Silently omitting it
  *    leaves a timeline whose markers don't add up to the table beside it; `undated` is returned so
  *    the caller can say so.
  *
- * ⚠ NO WINDOW, NO PICTURE. `buildTimeline` returns null without both bounds rather than inferring
+ *  No window, no picture. `buildTimeline` returns null without both bounds rather than inferring
  *    an axis from the trades themselves — an axis running first-trade → last-trade puts the first
  *    decision at the very start of the year, which is precisely the claim the chart exists to make
  *    and would be making up.
@@ -110,7 +110,7 @@ export function buildTimeline(
     raw.push({
       kind: tr.kind === 'sell' ? 'sell' : 'buy',
       date: tr.datum as string,
-      // ⚠ CLAMPED INTO THE WINDOW. A trade dated outside it (a stale snapshot, a settlement date
+      //  Clamped into the window. A trade dated outside it (a stale snapshot, a settlement date
       // past `tot`) would otherwise be drawn off the frame, where it reads as absent.
       t: Math.min(Math.max(t, t0), t1),
       price: tr.price_eur,
@@ -137,7 +137,7 @@ export function buildTimeline(
   const x = (t: number) => TL.padL + ((t - t0) / (t1 - t0)) * plotW;
   const y = (p: number) => TL.top + (1 - (p - lo) / (hi - lo)) * plotH;
 
-  // ⚠ GREEDY TWO-LANE PACKING, not alternating. Alternating looks tidy on two trades and collides
+  //  Greedy two-lane packing, not alternating. Alternating looks tidy on two trades and collides
   // on three clustered ones; this only steps down when the previous label in that lane is still
   // within `minLabelGap`.
   const laneLastX = [-Infinity, -Infinity];

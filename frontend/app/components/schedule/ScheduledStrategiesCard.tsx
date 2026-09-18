@@ -95,7 +95,7 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                       onDragStart={() => setDragId(s.id)}
                       onDragEnd={() => { setDragId(null); setOverId(null); }}
                       title="Drag to reorder"
-                      className="shrink-0 cursor-grab active:cursor-grabbing text-fg-faint hover:text-fg-muted select-none px-0.5 text-sm leading-none"
+                      className="shrink-0 cursor-grab active:cursor-grabbing text-fg-faint hover:text-fg-muted px-0.5 text-sm leading-none"
                     >
                       ⠿
                     </span>
@@ -169,7 +169,7 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                         }`}
                         title="Toggle whether non-admin users can see this strategy on the read-only /schedule view"
                       >
-                        {s.user_visible ? '✓ Visible to user' : 'Hidden from user'}
+                        {s.user_visible ? ' Visible to user' : 'Hidden from user'}
                       </button>
                       <button
                         type="button"

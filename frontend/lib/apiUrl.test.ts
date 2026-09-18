@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { resolveApiUrl } from './apiUrl'
 
 /**
- * ⚠ THE RULE THIS PINS SHIPPED BROKEN TO REAL USERS. `NEXT_PUBLIC_API_URL` is inlined at BUILD
+ *  The rule this pins shipped broken to real users. `NEXT_PUBLIC_API_URL` is inlined at BUILD
  * time, so a Vercel build with it unset baked `http://localhost:8000` into every call — and the
  * deployed site then asked each VISITOR'S OWN MACHINE for the data. Chrome surfaced that as
  * "Access other apps and services on this device" (its Local Network Access prompt), i.e. the

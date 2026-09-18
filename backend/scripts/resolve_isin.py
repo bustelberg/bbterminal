@@ -9,14 +9,14 @@ WHY THIS EXISTS
     + `_consensus_anchor`, which are right for a share class and wrong for an operating
     company. Nothing resolved a NAMED, NEVER-RESOLVED equity. This does.
 
-⚠ `not_found` IS OFTEN A LIE, AND THAT IS THE WHOLE POINT
+ `not_found` IS OFTEN A LIE, AND THAT IS THE WHOLE POINT
     Yahoo answers an overloaded caller with an EMPTY RESULT, not a 429 — so a bulk sweep that
     hits the soft throttle writes `not_found` over perfectly good companies, and the marker is
     indistinguishable from a real absence. Measured: SMIC (`KYG8020E1199`) sat `not_found`
     while `0981.HK` does EUR 1.06bn/day with 22.4 years of history. A stuck `not_found` on a
     liquid name is a retry candidate, not a verdict.
 
-⚠ IT WILL NOT TOUCH AN ALREADY-RESOLVED ROW WITHOUT `--force`
+ IT WILL NOT TOUCH AN ALREADY-RESOLVED ROW WITHOUT `--force`
     Re-resolving is DESTRUCTIVE and silently so — under load Yahoo's empty candidate set hands
     the win to whatever thin foreign line survives, which is how Alphabet went from GOOGL
     (EUR 8.79bn/day) to GOOA.VI Vienna (EUR 76,634/day), a 75,000x thinner listing, with no
@@ -132,7 +132,7 @@ def _resolve_one(isin: str, *, apply: bool, force: bool, yahoo_isin: bool) -> st
     print(f"   RESOLVED -> {an.get('symbol')}  ({ex.get('currency') or '?'}, "
           f"{ex.get('exchange') or '?'})  adv_eur={new_adv:,.0f}  from {ex.get('first_date')}")
 
-    # ⚠ Upgrade-only. A forced repoint must never leave the row on a THINNER listing than it
+    #  Upgrade-only. A forced repoint must never leave the row on a THINNER listing than it
     #   already had — that is precisely the damage a throttled miss on the primary causes.
     if force and old_adv > 0 and new_adv <= old_adv:
         print(f"   KEPT — incumbent is more liquid (EUR {old_adv:,.0f} >= EUR {new_adv:,.0f}); "

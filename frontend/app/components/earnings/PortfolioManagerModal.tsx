@@ -148,7 +148,7 @@ export default function PortfolioManagerModal({
           <div className="mx-5 mt-4 text-sm text-neg-300 bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2">{err}</div>
         )}
         {notice && !err && (
-          <div className="mx-5 mt-4 text-sm text-pos-300 bg-pos-500/10 border border-pos-500/20 rounded-lg px-3 py-2">{notice} ✓</div>
+          <div className="mx-5 mt-4 text-sm text-pos-300 bg-pos-500/10 border border-pos-500/20 rounded-lg px-3 py-2">{notice} </div>
         )}
 
         {importing ? (

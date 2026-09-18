@@ -13,7 +13,7 @@ import CollapsibleCard from '../momentum/CollapsibleCard';
 import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
 import { tailRunToConsole } from './runConsole';
 import { relTime, formatExecAt, countdownLeft, formatDur } from './utils';
-// ⚠ THE FETCHING MOVED OUT (step 3). This file draws; `usePipelineActivity` reads. That is what
+//  The fetching moved out (step 3). This file draws; `usePipelineActivity` reads. That is what
 // lets a panel be rendered from a registry inside a table row instead of only where its own
 // stream-owning component happened to sit.
 import type {
@@ -91,23 +91,23 @@ type UniverseStaleness = {
 };
 
 /**
- * THE PANEL EACH JOB OWNS — a registry, so the jobs table renders a job's detail without knowing
+ * The panel each job owns — a registry, so the jobs table renders a job's detail without knowing
  * anything about what that detail IS.
  *
- * ⚠⚠ THIS IS WHAT RETIRED THE "Smart pipeline activity" CARD. Those four sections used to be a
+ *  This is what retired the "Smart pipeline activity" CARD. Those four sections used to be a
  * page-level component with its own heading, sitting below the table and duplicating its
  * countdowns; the table then had to LINK DOWN to it. Now the table is the only index, a job's
  * detail is behind its own row, and adding a panel for a new job is an entry here rather than an
  * edit to the page.
  *
- * ⚠ ONE JOB CAN OWN TWO PANELS. `daily_pipeline` is ONE scheduler entry that fires price-update and
+ *  One job can own two panels. `daily_pipeline` is ONE scheduler entry that fires price-update and
  * rebalance in order — pointing it at a single card would quietly claim the other belongs to
  * something else.
  *
- * ⚠ AND MOST JOBS OWN NONE, WHICH IS THE NORMAL CASE. `fx_sync` has nothing to add to its own row;
+ *  And most jobs own none, which is the normal case. `fx_sync` has nothing to add to its own row;
  * a panel invented for symmetry is a card that repeats the table.
  *
- * ⚠ THE CONTEXT IS PASSED IN, NEVER FETCHED HERE. `usePipelineActivity` is called once by the
+ *  The context is passed in, never fetched here. `usePipelineActivity` is called once by the
  * table; a panel that opened its own stream would put a second SSE consumer (and six polling
  * fallbacks) behind every row a reader expands.
  */
@@ -133,11 +133,11 @@ export const JOB_PANELS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
       />
     </>
   ),
-  /* ⚠ RENAMED FROM `month_end_price_refresh` (2026-09-02) — the key IS the JobSpec id, so when
+  /*  RENAMED FROM `month_end_price_refresh` (2026-09-02) — the key IS the JobSpec id, so when
      that job was replaced by `daily_price_slice` this panel would have silently stopped rendering
      and the row would have collapsed to a generic one, losing the budget + coverage console that
      is the whole reason these two jobs have no Run-now button.
-     ⚠ It still watches `full_price_refresh` for `running`/`lastRun`: that op survives as the
+      It still watches `full_price_refresh` for `running`/`lastRun`: that op survives as the
      MANUAL full pass behind this section's own button, and the section is where you press it. The
      scheduled work is `price_slice`, which /schedule reads through the JobSpec's `evidence`. */
   daily_price_slice: (ctx) => (
@@ -156,29 +156,29 @@ export const JOB_PANELS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
 };
 
 /**
- * THE ACTION COLUMN'S BUTTON, FOR A JOB THE GENERIC ONE CANNOT SERVE.
+ * The action column's button, for a job the generic one cannot serve.
  *
- * ⚠⚠ `RunControl` RENDERS OFF `j.runnable`, WHICH IS `JOB_BODIES` MEMBERSHIP — and the two
+ *  `RunControl` RENDERS OFF `j.runnable`, WHICH IS `JOB_BODIES` MEMBERSHIP — and the two
  * pipeline jobs are deliberately absent from it (they fire their own daemon threads and narrate
  * into `ingest_run`, so `start_job_now`'s registry job would put a second progress surface on a
  * run that already has one). That is the same conflation the watchdog had to be rescued from:
  * membership was answering both "can this be run" and "does the table draw a button". This map
  * answers only the second, for the rows where the answer is yes but the generic control is wrong.
  *
- * ⚠ IT FIRES `rebalance` ALONE, NOT THE 05:00 SEQUENCE. The row is `daily_pipeline` = price-update
+ *  It fires `rebalance` ALONE, NOT THE 05:00 SEQUENCE. The row is `daily_pipeline` = price-update
  * THEN rebalance, and the whole point of this button is the one action somebody wants on demand:
  * re-decide the strategies. The rebalance op prices its own universe up to the deciding bar first
  * (`_run_rebalance_pipeline_sync`), so it is self-sufficient — it does not need the price-update
  * op to have run, which is exactly why it can stand alone here. The price-update button stays in
  * the panel for the times you want only that.
  *
- * ⚠ DUE-ONLY, deliberately. `force=true` re-decides an already-decided period, which breaks the
+ *  DUE-ONLY, deliberately. `force=true` re-decides an already-decided period, which breaks the
  * per-period lock that keeps each historical decision reproducible; that override stays behind its
  * own confirming button inside the panel. This one is never a silent no-op either — the backend
  * says "all enabled strategies are already rebalanced for their current period" and points at
  * Force.
  *
- * ⚠ MOST JOBS ARE ABSENT AND SHOULD STAY ABSENT: they have a body, so `RunControl` already draws
+ *  Most jobs are absent and should stay absent: they have a body, so `RunControl` already draws
  * a correct button with a working Cancel.
  */
 export const ROW_ACTIONS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
@@ -195,7 +195,7 @@ export const ROW_ACTIONS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
   ),
 };
 
-// ⚠ `DailyHoldingsSection` IS NOT RE-EXPORTED FROM HERE. It was the fourth card of the retired
+//  `DailyHoldingsSection` IS NOT RE-EXPORTED FROM HERE. It was the fourth card of the retired
 // component but it is not a job — no schedule, no run row, writes nothing — so it has no row to
 // live behind. `/schedule` imports it directly and hands it the strategies the page already has,
 // rather than it opening the activity stream for one read.
@@ -209,7 +209,7 @@ export const ROW_ACTIONS: Record<string, (ctx: PipelineCtx) => ReactNode> = {
  * a failed poll must not touch the pipeline, which is running server-side
  * regardless. */
 function startRun(url: string, label: string): void {
-  // ⚠⚠ THE FAILURE PATH USED TO BE CONSOLE-ONLY, AND THAT IS THE WHOLE OF "I PRESS IT AND NOTHING
+  //  The failure path used to be console-only, and that is the whole of "I PRESS IT AND NOTHING
   // HAPPENS". `apiFetch` RESOLVES on a 4xx/5xx — it returns the Response rather than throwing — so
   // a rejected trigger fell into the `!body?.run_id` branch, wrote one `console.warn` and returned.
   // Meanwhile `useRunNow` clears `pending` on a 1.5s timer and `busy` only becomes true once the
@@ -217,12 +217,12 @@ function startRun(url: string, label: string): void {
   // therefore says "Starting…", then goes back to normal, having reported the failure nowhere a
   // person was looking. Reported in production against a run that never began.
   //
-  // ⚠ THE HOUSE RULE IS *BOTH*, and only half of it was implemented: the full diagnostic to the
+  //  The house rule is *BOTH*, and only half of it was implemented: the full diagnostic to the
   // console, ONE SHORT LINE in the UI. `startLocalJob` is that line — it puts a card in the same
   // toast stack every other job on this page reports through, green with the run id or red with
   // the status, so a trigger that 401s or 500s looks different from one that worked.
   //
-  // ⚠ THE CARD RESOLVES AS SOON AS THE RUN IS *TRIGGERED*, not when the run finishes. The tail is
+  //  The card resolves as soon as the run is *TRIGGERED*, not when the run finishes. The tail is
   // a VIEW of the run — a closed tab or a failed poll must never touch a pipeline that is running
   // server-side regardless — and the run's own progress already has two surfaces (this row's panel
   // and the console transcript). A card that stayed open for a 25-minute rebalance would be a
@@ -232,7 +232,7 @@ function startRun(url: string, label: string): void {
     const body = (await r.json().catch(() => null)) as
       { run_id?: number; detail?: unknown } | null;
     if (!r.ok || !body?.run_id) {
-      // ⚠ THE STATUS IS THE ACTIONABLE HALF — 401 is a session, 409 a run already in flight, 500 a
+      //  The status is the actionable half — 401 is a session, 409 a run already in flight, 500 a
       // backend fault, and they need different responses from the reader. FastAPI puts the reason
       // in `detail`; it is truncated because this is a toast, and the console has the whole thing.
       const detail = body?.detail ? ` — ${String(body.detail).slice(0, 140)}` : '';
@@ -265,7 +265,7 @@ function useRunNow(job: string, busy: boolean, universe?: string) {
 
 function RunNowButton({ job, busy, label = 'Run now', title, size = 'md' }: {
   job: string; busy: boolean;
-  /** ⚠ THE VERB, NOT A DEFAULT. Inside a section header "Run now" is unambiguous — the card it
+  /**  THE VERB, NOT A DEFAULT. Inside a section header "Run now" is unambiguous — the card it
    *  sits in names the run. In the Automatic-jobs ACTION COLUMN there is no such card and the row
    *  is `daily_pipeline`, which is price-update AND rebalance, so a bare "Run now" there would
    *  claim to fire both. */
@@ -334,7 +334,7 @@ function ForceRebalanceButton({ busy }: { busy: boolean }) {
 /** Exact time (the viewer's local timezone, with the tz abbreviation) + a precise "Xd Yh left"
  * countdown.
  *
- * ⚠ ONE CALLER LEFT, AND IT IS NOT A SCHEDULER TIME. This used to head every pipeline section with
+ *  One caller left, and it is not a scheduler time. This used to head every pipeline section with
  * that section's next FIRE time — the same value the Automatic jobs table reads, so the page ran
  * two clocks for one event. The only survivor is the rebalance card's `nextDue`: the earliest date
  * a strategy is actually due, which no scheduler knows and the table cannot show. */
@@ -478,14 +478,14 @@ function PriceUpdateSection({
 }: {
   running: RunningJob | null;
   lastRun: IngestRun | null;
-  /** ⚠ THE ONE-SHOT RETRY STAYS — it is NOT the daily schedule. The backend schedules it +3h out
+  /**  THE ONE-SHOT RETRY STAYS — it is NOT the daily schedule. The backend schedules it +3h out
    *  only when held prices are still behind, so it exists sometimes and the table has no row for
    *  it; "↻ trying again in" is a fact about THIS job's last outcome, not a second clock. */
   retryAt: string | null;
   schedulerOff: boolean;
   held: HeldCompaniesResponse | null | undefined;
   nowMs: number;
-  /** ⚠ TRUE OUTSIDE A ROW, FALSE INSIDE ONE. Rendered from `JOB_PANELS` the card is already behind
+  /**  TRUE OUTSIDE A ROW, FALSE INSIDE ONE. Rendered from `JOB_PANELS` the card is already behind
    *  a disclosure the reader just opened, so starting collapsed would cost a second click to see
    *  the thing they asked for. */
   collapsed?: boolean;
@@ -520,7 +520,7 @@ function PriceUpdateSection({
             schedulerOff={schedulerOff}
             lastRun={lastRun}
             nowMs={nowMs}
-            // ⚠ NO "NEXT RUN" HERE ANY MORE — the Automatic jobs table above owns every "when"
+            //  NO "NEXT RUN" HERE ANY MORE — the Automatic jobs table above owns every "when"
             // (2026-08-13). It and `/api/schedule/upcoming` both read `list_scheduled_jobs()`, so
             // this card was a second live countdown to the same fire time, free to disagree with
             // the one two rows up. What is left is what only this card can say: what it will do,
@@ -556,7 +556,7 @@ function PriceUpdateSection({
       )}
       {held && (
         <>
-          {/* ⚠ THE COUNTS ARE NOT REPEATED HERE. The header already carries "N held", the stale /
+          {/*  THE COUNTS ARE NOT REPEATED HERE. The header already carries "N held", the stale /
               fresh verdict and "through <date>"; this block restated all four one line below them,
               which is the kind of duplication that makes a panel read as noise and gives two
               places for one fact to be wrong in. The per-company breakdown is the table itself. */}
@@ -598,7 +598,7 @@ function RebalanceSection({
 }: {
   running: RunningJob | null;
   lastRun: IngestRun | null;
-  /** ⚠ NOT A SCHEDULER TIME, WHICH IS WHY IT SURVIVED THE CLEAN-UP. This is the earliest
+  /**  NOT A SCHEDULER TIME, WHICH IS WHY IT SURVIVED THE CLEAN-UP. This is the earliest
    *  `next_due_at` across the enabled STRATEGIES — when a rebalance will next have something to
    *  do. The table's "next run" is when the 05:00 tick fires, which is tomorrow either way. */
   nextDue: string | null;
@@ -644,7 +644,7 @@ function RebalanceSection({
         </>
       }
     >
-      {/* ⚠ "Next rebalance due" IS IN THE HEADER AND NOWHERE ELSE. `NextRun` already renders that
+      {/*  "Next rebalance due" IS IN THE HEADER AND NOWHERE ELSE. `NextRun` already renders that
           exact timestamp plus its countdown in `idleNode` two lines above; the body repeated it as
           a date and a relative time, so one card showed one fire time three ways. */}
       {running && (
@@ -674,7 +674,7 @@ function RebalanceSection({
         if (lastRun.status === 'error') {
           return (
             <div className="rounded-lg border border-neg-500/25 bg-neg-500/10 px-3 py-2">
-              <div className="font-medium text-neg-300">✗ {trigger} failed {when}</div>
+              <div className="font-medium text-neg-300"> {trigger} failed {when}</div>
               {(lastRun.error_summary || lastRun.current_message) && (
                 <div className="text-neg-300/80 mt-0.5 whitespace-pre-line">{lastRun.error_summary ?? lastRun.current_message}</div>
               )}
@@ -685,7 +685,7 @@ function RebalanceSection({
           return (
             <div className="rounded-lg border border-pos-500/25 bg-pos-500/10 px-3 py-2">
               <div className="font-medium text-pos-300">
-                ✓ Rebalanced {when} — {rebalanced.map((m) => `${m.strategy_name} (${m.holdings_count})`).join(', ')}
+                 Rebalanced {when} — {rebalanced.map((m) => `${m.strategy_name} (${m.holdings_count})`).join(', ')}
               </div>
               {lastRun.current_message && <div className="text-fg-subtle mt-0.5">{lastRun.current_message}</div>}
             </div>
@@ -741,7 +741,7 @@ function CoverageLine({ label, c, tone, marked, onMark }: {
       {c.exchange && <span className="text-fg-faint">·{c.exchange}</span>}
       <span className="text-fg-soft truncate max-w-[200px]">{c.company_name ?? '—'}</span>
       {onMark && (marked ? (
-        <span className="text-[11px] text-warn-300">✓ illiquid · refreshing…</span>
+        <span className="text-[11px] text-warn-300"> illiquid · refreshing…</span>
       ) : (
         <button
           type="button"
@@ -775,13 +775,13 @@ function CovEnd({ e }: { e: CoverageEndpoint | null }) {
 }
 
 /** A depth/gap readout line for one metric: history start, members-with-data,
- * <1yr count, gap count — green ✓ when complete, amber ⚠ otherwise. */
+ * <1yr count, gap count — green  when complete, amber  otherwise. */
 function HistoryLine({ label, m, members }: { label: string; m: HistoryMetric; members: number }) {
   const ok = m.no_data === 0 && m.short === 0 && m.gaps === 0;
   const yr = (m.start ?? '') && m.start! <= new Date(Date.now() - 365 * 864e5).toISOString().slice(0, 10);
   return (
     <div className="flex items-center gap-1.5 flex-wrap pl-1 text-[12px]">
-      <span className={ok ? 'text-pos-400' : 'text-warn-300'}>{ok ? '✓' : '⚠'}</span>
+      <span className={ok ? 'text-pos-400' : 'text-warn-300'}>{ok ? '' : ''}</span>
       <span className="text-fg-muted w-9 shrink-0">{label}</span>
       <span className="text-fg-subtle">from</span>
       <span className={`font-mono ${yr ? 'text-fg-soft' : 'text-warn-300'}`}>{m.start ?? '—'}</span>
@@ -1124,10 +1124,10 @@ function UniverseCoverageRow({ u, busy, progress, onTrigger }: {
                       <Spinner className="h-3 w-3" />{staleRun.message ?? 'Refreshing…'}
                     </span>
                   ) : staleRun.status === 'error' ? (
-                    <span className="text-[12px] text-neg-300">✗ Refresh failed: {staleRun.errorSummary ?? staleRun.message ?? 'unknown error'}</span>
+                    <span className="text-[12px] text-neg-300"> Refresh failed: {staleRun.errorSummary ?? staleRun.message ?? 'unknown error'}</span>
                   ) : (
                     <span className={`text-[12px] ${staleRun.errors || staleRun.forbidden ? 'text-warn-300' : 'text-pos-300'}`}>
-                      ✓ Refreshed {staleRun.prices} price / {staleRun.volumes} volume series
+                       Refreshed {staleRun.prices} price / {staleRun.volumes} volume series
                       {staleRun.forbidden ? `, ${staleRun.forbidden} forbidden` : ''}
                       {staleRun.errors ? `, ${staleRun.errors} errors` : ''}
                       {` · ${detail.counts.flagged} still flagged`}
@@ -1413,13 +1413,13 @@ function StalePricesPanel({ busy }: { busy: boolean }) {
               <button type="button" onClick={() => setLastResults(null)} className="text-[11px] text-fg-muted hover:text-fg">dismiss</button>
             </div>
             <div className="text-[12px] flex items-center gap-3 flex-wrap">
-              <span className={updated.length > 0 ? 'text-pos-300' : 'text-fg-faint'}>✓ {updated.length} updated</span>
+              <span className={updated.length > 0 ? 'text-pos-300' : 'text-fg-faint'}> {updated.length} updated</span>
               <span className={unchanged.length > 0 ? 'text-warn-300' : 'text-fg-faint'}>— {unchanged.length} no newer data</span>
             </div>
             <div className="max-h-40 overflow-auto space-y-0.5 pt-0.5">
               {lastResults.map((r) => (
                 <div key={r.company_id} className="text-[12px] flex items-center gap-2">
-                  <span className={r.status === 'updated' ? 'text-pos-400' : 'text-warn-300'}>{r.status === 'updated' ? '✓' : '—'}</span>
+                  <span className={r.status === 'updated' ? 'text-pos-400' : 'text-warn-300'}>{r.status === 'updated' ? '' : '—'}</span>
                   <span className="font-mono whitespace-nowrap">{r.ticker ?? '—'}{r.exchange && <span className="text-fg-faint">·{r.exchange}</span>}</span>
                   {r.status === 'updated' ? (
                     <span className="text-fg-subtle">
@@ -1522,7 +1522,7 @@ function FullPriceRefreshSection({
 
   return (
     <CollapsibleCard
-      /* ⚠ NOT "Month-end" ANY MORE. That tick was replaced by `price_slice` on 2026-09-02 — one
+      /*  NOT "Month-end" ANY MORE. That tick was replaced by `price_slice` on 2026-09-02 — one
          pass a month against a 30-day staleness guard is the same period, so coverage collapsed in
          the days before each refresh. This op survives as the MANUAL full pass (a bulk import, a
          vendor correction), and a title still promising a month-end schedule described a job that
@@ -1537,7 +1537,7 @@ function FullPriceRefreshSection({
             schedulerOff={schedulerOff}
             lastRun={lastRun}
             nowMs={nowMs}
-            // ⚠ NO "NEXT RUN" HERE — see the same note on the price-update card. The table above
+            //  NO "NEXT RUN" HERE — see the same note on the price-update card. The table above
             // is the single reader of the scheduler.
             idleNode={<LastResult run={lastRun} nowMs={nowMs} />}
           />
@@ -1552,7 +1552,7 @@ function FullPriceRefreshSection({
         </>
       }
     >
-      {/* ⚠ THE PARAGRAPH IS GONE AND THE SECOND SENTENCE OF IT WAS WRONG. It described a daily tick
+      {/*  THE PARAGRAPH IS GONE AND THE SECOND SENTENCE OF IT WAS WRONG. It described a daily tick
           that "acts only in the last days of the month" — the month-end gating that was deleted in
           2026-09-02, so the panel was explaining a schedule this op has not had for days. What it
           does is now the title (a manual full pass) and the budget bars below (what it may spend);

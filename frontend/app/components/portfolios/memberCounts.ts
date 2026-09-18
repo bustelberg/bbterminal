@@ -4,16 +4,16 @@ import { type Lang } from '../../../lib/i18n';
  * "36 of 42 companies" — how many holdings a blended line was actually drawn from, and why the
  * others are missing.
  *
- * ⚠⚠ A LINE DRAWN FROM FEWER COMPANIES THAN ITS LABEL NAMES IS INVISIBLE, WHICH IS THE WHOLE
+ *  A line drawn from fewer companies than its label names is invisible, which is the whole
  * HAZARD. Both of this app's blend constructions can quietly leave holdings out, for reasons that
  * have nothing to do with each other:
  *
  *   * `positive_only` — a CHOSEN survivorship filter. `fcf_ps` and `eps_nri` are drawn from the
  *     companies positive in every period (`earnings._POSITIVE_ONLY_METRICS`), which deletes the
  *     cash-burners, the recoveries and every bank whose free cash flow swings on deposit flows.
- *     What remains looks exactly like an index line. ⚠ For a metric with a forecast leg the rule
+ *     What remains looks exactly like an index line.  For a metric with a forecast leg the rule
  *     spans the CONSENSUS too, so a profitable company analysts expect to lose money is out of the
- *     whole line rather than out of half of it. ⚠⚠ IT BELONGS TO A **GROWTH** LINE AND NOWHERE
+ *     whole line rather than out of half of it.  IT BELONGS TO A **GROWTH** LINE AND NOWHERE
  *     ELSE: it exists because a year-on-year chain divides a member by itself. The FCF-SBC margin
  *     card had the same filter for an afternoon (2026-08-31) and it was removed — an average of
  *     ratios needs no positives, so there the rule was survivorship with nothing bought for it.
@@ -21,13 +21,13 @@ import { type Lang } from '../../../lib/i18n';
  *     per-share filing into euros, and a member without one contributes nothing to the sum. Nobody
  *     decided to exclude it; it simply is not there.
  *
- * ⚠⚠ AND THE SECOND ONE WENT UNCOUNTED FOR MONTHS, WHICH IS WHY THIS MODULE EXISTS RATHER THAN A
- * STRING IN THE CARD. `blend_series` measured it (`fund_members`) and `_blend_rows` threw the
+ *  And the second one went uncounted for months, which is why this module exists rather than a
+ * String in the card. `blend_series` measured it (`fund_members`) and `_blend_rows` threw the
  * number away, so the FCF card said "36 of 42" and the EPS card beside it said nothing at all —
  * and "nothing at all" is exactly what a card with no drops says too. The reader had no way to
  * tell "EPS used everything" from "nobody counted".
  *
- * ⚠ THE PROSE IS PICKED FROM THE SERVER'S `rule`, NEVER FROM THE METRIC NAME. The rules move: the
+ *  The prose is picked from the server's `rule`, NEVER FROM THE METRIC NAME. The rules move: the
  * single lever that turned `fcf_ps` from a euro sum into a filtered average was a set membership in
  * `routers/earnings.py`, and a client that re-derived the reason from "is this the FCF card" would
  * be a second copy of that decision — printing a confident wrong explanation of a number that was
@@ -66,7 +66,7 @@ export function coverageCount(coverage?: CoverageEnvelope | null): MemberCount |
 /**
  * The counts for a card, whichever of its metric-code spellings the blend actually saw.
  *
- * ⚠ A CARD KNOWS SEVERAL CODES (`cfg.codes` carries both GuruFocus section spellings), so it takes
+ *  A card knows several codes (`cfg.codes` carries both GuruFocus section spellings), so it takes
  * the first that answered rather than assuming which one this company files under — the same reason
  * `noteFor` exists in `blendNotes`.
  */
@@ -79,7 +79,7 @@ export function countFor(
   return undefined;
 }
 
-/** Was anything withheld? ⚠ `considered === total` is every other card, every day. */
+/** Was anything withheld?  `considered === total` is every other card, every day. */
 const withheld = (c?: MemberCount): c is MemberCount =>
   !!c && c.considered < c.total;
 
@@ -99,7 +99,7 @@ export function showMetricCountLine(
 }
 
 /**
- * ⚠⚠ THE LOCALE IS NOT DECORATION HERE. `toLocaleString('en-US')` prints 1,761; Dutch prints
+ *  The locale is not decoration here. `toLocaleString('en-US')` prints 1,761; Dutch prints
  * 1.761, and a thousands separator that reads as a decimal point in the reader's own language is
  * a wrong number rather than an odd-looking one — on a card whose whole job is to disclose a
  * count. It follows the language, like the words around it.
@@ -115,12 +115,12 @@ const COUNT_OF: Record<Lang, (label: string, n: string, of: string, companies: b
 /**
  * The count line under a card's title, or `null` when both lines used everything they had.
  *
- * ⚠ BOTH SIDES, SEPARATELY, AND ONLY THE ONES THAT DROPPED ANYTHING. The book and the index are two
+ *  Both sides, separately, and only the ones that dropped anything. The book and the index are two
  * blends over two sets of companies; one count standing for both would be wrong on whichever it was
  * not, and printing "42 of 42" on the side that withheld nothing is noise on thirteen charts to
  * make one honest.
  *
- * ⚠ THE OWN LINE IS GATED ON `isAgg`. A single company is one member and the count is a tautology.
+ *  The own line is gated on `isAgg`. A single company is one member and the count is a tautology.
  */
 export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel, lang, always = false }: {
   own?: MemberCount;
@@ -141,7 +141,7 @@ export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel, lang,
       bench.total.toLocaleString(LOCALE[lang]), false));
   }
   if (!parts.length) return null;
-  // ⚠ THE RULE IS PER METRIC, NOT PER LINE — `_blend_rows` is the one place a book and an index
+  //  The rule is per metric, not per line — `_blend_rows` is the one place a book and an index
   // build their members, so both sides were filtered by the same rule and either may name it. The
   // shown side is preferred so the sentence explains a number that is actually on screen.
   const rule = (isAgg && own && (always || withheld(own)) ? own.rule : undefined)
@@ -169,7 +169,7 @@ export const MEMBER_COUNT_CARD: Record<Lang, { what: string; where: string; when
 /**
  * What the ⓘ beside the count says, per `rule`, in the reader's language.
  *
- * ⚠ NO EM DASHES IN ANY OF IT (2026-09-07, on request: "geen long dashes in info icons"). An ⓘ card
+ *  No em dashes in any of it (2026-09-07, on request: "geen long dashes in info icons"). An ⓘ card
  * is read inside a narrow popover, where a dash sets a clause adrift from the sentence it
  * qualifies. The same thought takes a full stop, a colon or a semicolon here.
  */
@@ -195,8 +195,8 @@ export function memberCountHow(rule: string, lang: Lang): string {
         + 'The excluded companies are still in the per-holding table behind the chart.';
   }
   if (rule === 'aggregate') {
-    // ⚠⚠ IT USED TO SAY "it needs a share count", WHICH IS THE WRONG REASON FOR THE ONLY
-    // METRIC THAT CAN SHOW THIS. A share count converts a PER-SHARE filing into a company
+    //  It used to say "it needs a share count", WHICH IS THE WRONG REASON FOR THE ONLY
+    // Metric that can show this. A share count converts a PER-SHARE filing into a company
     // total, and the only aggregated metric left is revenue, which is a total already
     // (`_AGGREGATABLE_TOTAL`, `per_share = false`). Measured on ACWI: 1,511 of 1,511
     // constituents carry euros and the line is still drawn from 1,509 — the two missing are
@@ -219,7 +219,7 @@ export function memberCountHow(rule: string, lang: Lang): string {
         + 'here. They are still in the per-holding table behind the chart.';
   }
 
-  // ⚠ THE HONEST FALLBACK. An older payload carries no `rule`, and inventing one of the two
+  //  The honest fallback. An older payload carries no `rule`, and inventing one of the two
   // explanations for a count whose cause is unknown is the exact failure this module documents.
   return lang === 'nl'
     ? 'Sommige ondernemingen zitten niet in deze lijn. De tabel per positie achter de grafiek '

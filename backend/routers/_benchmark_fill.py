@@ -14,14 +14,14 @@ WHY A BENCHMARK READS 0 MEMBERS WITH A FULL UNIVERSE BEHIND IT
     in the grid. The universe was never the problem. `_classify` is what tells those four states
     apart, and it is pure, which is what makes it testable without a database.
 
-⚠ RESOLUTION GOES THROUGH THE QUEUE'S OWN SLICE, NEVER A SECOND RESOLVER. Yahoo answers an
+ RESOLUTION GOES THROUGH THE QUEUE'S OWN SLICE, NEVER A SECOND RESOLVER. Yahoo answers an
     overloaded caller with an EMPTY result rather than a 429, and an empty candidate set is
     exactly how a resolution lands on a thin foreign listing (NVDA-on-Stuttgart,
     Alphabet-on-Vienna). The repo's answer is ONE Yahoo consumer: `asset_ingest_queue`, drained by
     a single paced worker. `_drain_now` runs that worker's own unit of work and stands down when
     something else is already draining.
 
-⚠ A MEMBER WITH NO ISIN CANNOT BE REACHED FROM HERE AT ALL. 189 ACWI members have none (156
+ A MEMBER WITH NO ISIN CANNOT BE REACHED FROM HERE AT ALL. 189 ACWI members have none (156
     Indian, 28 British) and GuruFocus cannot supply one either — it is blind to those markets.
     They are counted and named, never quietly dropped: a coverage figure that silently excludes
     India is worse than no figure.
@@ -54,7 +54,7 @@ def _classify(companies: list[dict], grid: dict[str, dict]) -> dict[str, list[st
         if not priced:
             out[_NEEDS_RESOLVE].append(isin)
         elif float(g.get("market_cap_eur") or 0) <= 0:
-            # ⚠ RESOLVED AND PRICED BUT UNWEIGHABLE — the state that looks like success in the
+            #  Resolved and priced but unweighable — the state that looks like success in the
             # asset grid and still contributes nothing to the index.
             out[_NEEDS_CAP].append(isin)
         else:
@@ -76,20 +76,20 @@ def _rebuild_sp500() -> bool:
     """Rebuild the SP500 universe from the Wikipedia reconstruction — the same code the /sp500
     page's import runs, scoped to what the benchmark actually stores.
 
-    ⚠ SP500 IS NOT A `UniverseTemplate`, AND MUST NOT BECOME ONE. Registering it in `TEMPLATES`
+     SP500 IS NOT A `UniverseTemplate`, AND MUST NOT BECOME ONE. Registering it in `TEMPLATES`
     would stamp `template_key` on its universe row, and `/api/index-universe/indexes` — the list
     the /sp500 page itself renders — EXCLUDES any row with one. The index would vanish from its own
     page as a side effect of making a button work elsewhere. So the route back is wired here, where
     only Refresh sees it, instead of in the registry everything else reads.
 
-    ⚠ ONLY THE LATEST MONTH'S TICKERS ARE RESOLVED. `reconstruct_monthly_holdings` walks back to
+     ONLY THE LATEST MONTH'S TICKERS ARE RESOLVED. `reconstruct_monthly_holdings` walks back to
     2000 and its union is 852 tickers, 286 of which have no company row — every one an OpenFIGI
     lookup for a name delisted a decade ago. `store_index_membership` keeps ONLY the newest month
     anyway (the single-snapshot model), so resolving the history buys nothing and costs the slowest
     part of the job. Measured 2026-07-30: the current set is 503 tickers, 491 already present — 12
     to resolve.
 
-    ⚠ THE FULL CHANGELOG IS PASSED BACK, NOT `[]`. `store_index_membership` OVERWRITES the stored
+     THE FULL CHANGELOG IS PASSED BACK, NOT `[]`. `store_index_membership` OVERWRITES the stored
     `index_changes/SP500.json` with whatever it is given, and that file backs
     `/api/index-universe/changes` and the /sp500 page's history. Deleting a universe never touched
     it; handing over an empty list would erase it as a side effect.
@@ -136,7 +136,7 @@ def _build_universe(label: str) -> bool:
     (ACWI / AEX / LEONTEQ / LONGEQUITY), or — for SP500 alone — the Wikipedia reconstruction, which
     deliberately stayed out of the template registry (see `_rebuild_sp500`).
 
-    ⚠ BEST-EFFORT, AND A FAILURE IS NOT AN EXCEPTION HERE. The reconstruction scrapes third parties
+     BEST-EFFORT, AND A FAILURE IS NOT AN EXCEPTION HERE. The reconstruction scrapes third parties
     (iShares, Wikipedia, MSCI); a bad day there must leave the caller reporting "could not build"
     rather than 500-ing a run whose other steps — capping and pricing — are unaffected.
     """
@@ -179,7 +179,7 @@ def _constituent_analysis_ids(label: str) -> list[int]:
 def _drop_caps(analysis_ids: list[int]) -> int:
     """Clear the market caps Refresh re-quotes (`_benchmark_refresh._caps`). Returns rows cleared.
 
-    ⚠ `market_cap_checked_at` GOES TOO. It exists so a name Yahoo has no cap for is not re-asked
+     `market_cap_checked_at` GOES TOO. It exists so a name Yahoo has no cap for is not re-asked
     for ever; leaving it set would make this look like a cap we had already given up on rather than
     one we deliberately cleared.
     """
@@ -197,7 +197,7 @@ def _drop_caps(analysis_ids: list[int]) -> int:
 def _drop_window_prices(analysis_ids: list[int], lookback: str) -> int:
     """Delete every close from `lookback` onward for these instruments. Returns rows deleted.
 
-    ⚠ THE TAIL, NEVER A HOLE IN THE MIDDLE. Everything from the lookback forward goes, so each
+     THE TAIL, NEVER A HOLE IN THE MIDDLE. Everything from the lookback forward goes, so each
     series simply ENDS earlier — which is a state the fleet already knows how to repair: the last
     close falls behind the market anchor, `price_refresh.find_stale` sees it, and `extend_series`
     fetches the gap. Deleting an interior slice instead would leave the newest close untouched, no
@@ -208,7 +208,7 @@ def _drop_window_prices(analysis_ids: list[int], lookback: str) -> int:
     explicitly (`_benchmark_refresh._prices`), the 06:00 asset-price tick refills it overnight, and the AIRS
     holdings page refills a held name the moment someone expands its row.
 
-    ⚠ IT IS STILL SHARED DATA. Measured 2026-07-30: 152 of ACWI's 1,684 constituents (86 of the
+     IT IS STILL SHARED DATA. Measured 2026-07-30: 152 of ACWI's 1,684 constituents (86 of the
     S&P's, 11 of the AEX's) are also held in an AIRS book, so their YTD marks vanish here and those
     portfolio figures read short until something refills them. That cost is stated at the click.
     """
@@ -234,7 +234,7 @@ def reset_benchmark(label: str, *, drop_caps: bool = True, drop_prices: bool = T
     resolved and already capped goes straight into the `usable` bucket, so the cap backfill and the
     price fetch never run and the counts read like success without either having done anything.
 
-    ⚠ IT DOES NOT TOUCH THE ASSET GRID, THE SYMBOL, OR THE PRE-WINDOW HISTORY. Those are what make
+     IT DOES NOT TOUCH THE ASSET GRID, THE SYMBOL, OR THE PRE-WINDOW HISTORY. Those are what make
     the refill cheap AND safe: every instrument keeps `status='ok'`, its `analysis_id` and its
     Yahoo symbol, so Refresh re-fetches prices for a KNOWN symbol (`extend_series`) and nothing is
     ever re-RESOLVED. A re-resolve is the documented way a constituent lands on a thin foreign
@@ -242,16 +242,16 @@ def reset_benchmark(label: str, *, drop_caps: bool = True, drop_prices: bool = T
     to a Vienna line 75,000x thinner. Deleting `bars` or the grid row is what would trigger that,
     and it is exactly what this does not do.
 
-    ⚠ IT REFUSES A FROZEN SNAPSHOT. A frozen universe is a saved artifact a backtest is pinned to
+     IT REFUSES A FROZEN SNAPSHOT. A frozen universe is a saved artifact a backtest is pinned to
     — reproducibility is its entire purpose — and no template can rebuild one. Only the live
     (`frozen_at IS NULL`) row is deletable, so a snapshot that happens to share this label survives.
 
-    ⚠ AND IT REFUSES TO ORPHAN A DERIVED CHILD. `parent_universe_id` is ON DELETE SET NULL, not
+     AND IT REFUSES TO ORPHAN A DERIVED CHILD. `parent_universe_id` is ON DELETE SET NULL, not
     CASCADE, so a tightened variant of this universe would quietly lose its parent and go on being
     listed as though nothing had happened. Naming them and stopping is the honest answer; there is
     none for this label today, so the normal case never sees it.
 
-    ⚠⚠ AND — THE ONE THAT MATTERS — IT REFUSES A LABEL REFRESH CANNOT REBUILD. This exists so the
+     AND — THE ONE THAT MATTERS — IT REFUSES A LABEL REFRESH CANNOT REBUILD. This exists so the
     operator can reset and watch Refresh rebuild, which is a promise about the label: `_build_universe`
     is the only route back. `rebuildable()` is that question, asked in ONE place by both this guard
     and the rebuild itself, so a label can never be deletable and unrebuildable at the same time.
@@ -316,24 +316,24 @@ def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS,
                on_each: Callable[[str, str], None] | None = None) -> dict:
     """Resolve a bounded slice of the ingest queue RIGHT NOW, rather than leaving it for a worker.
 
-    ⚠ "QUEUED FOR INGEST" IS A PROMISE ABOUT A PROCESS THAT MAY NOT EXIST. The in-process worker is
+     "QUEUED FOR INGEST" IS A PROMISE ABOUT A PROCESS THAT MAY NOT EXIST. The in-process worker is
     ON by default (`ASSET_QUEUE_INPROCESS=0` opts out); a standalone worker may be used when the
     backend is explicitly configured not to drain the queue itself. Measured in
     production 2026-07-30: the button on the AEX reported "25 queued for ingest (a paced worker drains
     them — minutes to hours)" and nothing ever drained them. A button that reports work no one will
     do is worse than a button that does nothing, because it reads like progress.
 
-    ⚠ IT IS THE WORKER'S OWN STEP, NOT A SECOND RESOLVER. `queue.process_slice` is THE one Yahoo
+     IT IS THE WORKER'S OWN STEP, NOT A SECOND RESOLVER. `queue.process_slice` is THE one Yahoo
     consumer's unit of work — OpenFIGI batch lookup, then the throttled resolve+store, marking each
     done/failed. Writing a faster path here would be a second consumer with its own idea of pacing,
     which is precisely how a resolution lands on a thin foreign listing (Yahoo answers an
     overloaded caller with an EMPTY search, not a 429).
 
-    ⚠ AND IT STANDS DOWN IF A WORKER IS ALREADY LIVE. Two drainers competing for the throttle is
+     AND IT STANDS DOWN IF A WORKER IS ALREADY LIVE. Two drainers competing for the throttle is
     the same failure from the other direction, so when `is_worker_active()` says something is
     already consuming Yahoo, the queue is left to it and the caller is told that is what happened.
 
-    ⚠ SCOPED TO **THIS BENCHMARK'S** ISINs. The queue is FIFO by `added_at` and holds ~10,000
+     SCOPED TO **THIS BENCHMARK'S** ISINs. The queue is FIFO by `added_at` and holds ~10,000
     pending rows, so an unscoped slice resolves ten-thousand-place-old strangers and leaves the 71
     constituents this press just enqueued exactly where they were. Measured 2026-07-30 — the press
     reported work and the benchmark did not move.
@@ -341,13 +341,13 @@ def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS,
     global _LAST_SELF_DRAIN
     from asset_pipeline import queue as _queue  # noqa: PLC0415
 
-    # ⚠ THE GUARD MUST NOT SEE ITS OWN FOOTPRINTS. `is_worker_active()` answers "has anything moved
+    #  The guard must not see its own footprints. `is_worker_active()` answers "has anything moved
     # a row out of pending recently" — and draining a slice IS that. So the first press made the
     # second one stand down for ten minutes and report `worker_live`, i.e. pressing it twice did
     # nothing the second time, which is the exact symptom this whole change exists to remove.
     # Comparing the queue's newest activity with the timestamp OUR last drain left tells the two
     # apart: unchanged means we are the only thing touching it, and we may carry on.
-    # ⚠ ONE MINUTE, NOT THE DEFAULT TEN. The in-process worker ticks every 20 SECONDS, so anything
+    #  One minute, not the default ten. The in-process worker ticks every 20 SECONDS, so anything
     # actually draining shows activity inside a minute. The 10-minute default is calibrated for the
     # opposite question — "is this backlog abandoned?" — and here it means a single drain (ours or
     # anyone's) locks the button out for ten minutes, which to the operator is indistinguishable
@@ -358,7 +358,7 @@ def _drain_now(isins: list[str], limit: int = _RESOLVE_PER_PRESS,
                   seen)
         return {"processed": 0, "ok": 0, "failed": 0, "unmapped": 0,
                 "remaining": len(isins), "worker_live": True}
-    # ⚠ `on_each` FORWARDED, so a caller with a progress channel can narrate PER ISIN. A
+    #  `on_each` FORWARDED, so a caller with a progress channel can narrate PER ISIN. A
     # slice is minutes of paced Yahoo work; one line before it and nothing until it ends
     # is indistinguishable from a hang. See `process_slice._report`.
     done = _queue.process_slice(limit, isins=isins, on_each=on_each)

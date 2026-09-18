@@ -39,12 +39,12 @@ def _progress_name(airs_name: str) -> str:
 def _acquire_session(wait: float | None = None) -> bool:
     """Take the ONE authenticated AirSPMS session, refusing (`None`) or queueing (`wait` seconds).
 
-    ⚠⚠ THERE IS EXACTLY ONE SESSION AND IT CANNOT BE DRIVEN BY TWO THREADS. That is not a
+     THERE IS EXACTLY ONE SESSION AND IT CANNOT BE DRIVEN BY TWO THREADS. That is not a
     throughput choice to be tuned away: `airs_scanner._session` is a single logged-in cookie jar,
     and two threads issuing report downloads through it interleave into each other's responses.
     Everything that scrapes AirSPMS passes through here.
 
-    ⚠ WHICH IS THE HONEST ANSWER TO "REFRESH ALL COULD JUST RUN THESE CONCURRENTLY". It can, and
+     WHICH IS THE HONEST ANSWER TO "REFRESH ALL COULD JUST RUN THESE CONCURRENTLY". It can, and
     it is worth doing — but only the parts that do not touch AIRS. A full portfolio refresh is one
     AIRS leg (the reports, the composition) and four that talk to Yahoo, OpenFIGI, the ECB and our
     own database; the second group is where the minutes are and it parallelises freely. So this
@@ -68,7 +68,7 @@ _STATUS: dict = {
     "started_at": None,
     "finished_at": None,
     "status": None,            # None | running | ok | error
-    # ⚠ ONE SHORT LINE, and it is the WHOLE user-facing report — see `format_run_message`. The
+    #  One short line, and it is the WHOLE user-facing report — see `format_run_message`. The
     # per-report breakdown that used to live here is in `detail`, for the log and the console.
     "message": None,
     "detail": None,
@@ -104,7 +104,7 @@ _EXPECTED_ROSTER = 44
 # Cleared at the start of every run: "unvalued" is true until AirSPMS's next end-of-day batch, not
 # for ever.
 #
-# ⚠⚠ A SET OF DATES ONCE, AND THAT SHAPE WAS THE BUG (2026-08-21). One failure was taken as proof
+#  A set of dates once, and that shape was the bug (2026-08-21). One failure was taken as proof
 # the date had no valuation FLEET-WIDE, so it was skipped for every later account. But a failure is
 # only ever proof about the book that made it: books are valued on different cadences — this file
 # says so itself two paragraphs down — so a book last valued a week ago walks back through six
@@ -122,9 +122,9 @@ _NEWEST_VALUED: str | None = None
 
 # When the memo above was last started, on the monotonic clock — and how long it may live.
 #
-# ⚠⚠ THE MEMO EXPIRES ON A CLOCK RATHER THAN ON SOMEBODY REMEMBERING TO CLEAR IT (2026-08-22).
+#  The memo expires on a clock rather than on somebody remembering to clear it (2026-08-22).
 # `run_airs_vermogen_refresh_sync` cleared it at the top of a fleet run and documented why: "PER
-# RUN, NOT PER PROCESS — caching it beyond one run would make a scan an hour later skip the very
+# Run, not per process — caching it beyond one run would make a scan an hour later skip the very
 # date that has since been valued." That was correct and it covered exactly ONE of the three entry
 # points. `refresh_one_portfolio` — the per-row Refresh button, the Analyse modal's Refresh, and
 # `refresh_many`/`refresh_portfolio_fully` under the 05:00 model-prices job — never cleared it, and
@@ -134,15 +134,15 @@ _NEWEST_VALUED: str | None = None
 # rules out are, by construction, the NEWEST ones — today, and the weekend behind it — which are
 # precisely the dates that have since been valued by the time anyone presses the button. The walk
 # skipped them, landed on something older or exhausted its horizon, and the row kept the badge.
-# Reported as "I still see ⚠ Vermogensoverzicht behind most portfolios" after the cascade fix, and
+# Reported as "I still see  Vermogensoverzicht behind most portfolios" after the cascade fix, and
 # it is the same failure one level up: a memo outliving the fact it records.
 #
-# ⚠ A TTL RATHER THAN A CLEAR IN EACH ENTRY POINT, because this is the second time this memo has
+#  A ttl rather than a clear in each entry point, because this is the second time this memo has
 # poisoned a later caller and adding a fourth entry point would be the third. "This date has no
 # valuation" is true only until AirSPMS's next end-of-day batch, so an expiry IS the fact's real
 # shape; nothing has to remember anything.
 #
-# ⚠ EXPIRY ONLY EVER COSTS REQUESTS, NEVER CORRECTNESS. A fleet run longer than the TTL re-pays the
+#  Expiry only ever costs requests, never correctness. A fleet run longer than the TTL re-pays the
 # discovery for its remaining accounts — a handful of round trips against a run of ~113, and the
 # alternative is the run holding a memo that has outlived the batch it describes.
 _MEMO_STARTED_AT: float | None = None
@@ -150,11 +150,11 @@ _MEMO_TTL_S = 900
 
 # How many DIFFERENT accounts must fail on a date before it counts as fleet-wide unvalued.
 #
-# ⚠ A QUORUM, BECAUSE THE TWO CASES LOOK IDENTICAL FROM ONE ACCOUNT. A weekend or a batch that has
+#  A quorum, because the two cases look identical from one account. A weekend or a batch that has
 # not run fails for EVERY book; a book valued weekly fails alone. Nothing in the response
 # distinguishes them, so the only available signal is agreement between books.
 #
-# ⚠⚠ AND A QUORUM ALONE STILL DOES NOT FIX IT — measured on the real fleet (29 books, valuation
+#  And a quorum alone still does not fix it — measured on the real fleet (29 books, valuation
 # dates spread over 8 days). Books share cadences, so THREE books that are all a week behind rule
 # out the very date a fourth book needs, and the failure comes straight back:
 #
@@ -169,14 +169,14 @@ _MEMO_TTL_S = 900
 # valuation for anybody. A date OLDER than a proven success is never ruled out — which is exactly
 # the case that broke, and the reason the cheap version cannot be recovered by raising the quorum.
 #
-# ⚠ THE COST IS REAL AND IS THE RIGHT TRADE: ~113 downloads a run against ~29. It buys back the
+#  The cost is real and is the right trade: ~113 downloads a run against ~29. It buys back the
 # documented win (today, and Sat/Sun on a Monday, are ruled out after three books discover it) while
 # leaving no book unrefreshed. The old number was cheap because 7 of 29 books silently did not run.
 _UNVALUED_QUORUM = 3
 
 # How far back to look for a book's own last valuation.
 #
-# ⚠ 7 WAS TOO SHORT AND THAT IS A SECOND, INDEPENDENT DEFECT. Of the 29 books badged on 2026-08-21,
+#  7 WAS TOO SHORT AND THAT IS A SECOND, INDEPENDENT DEFECT. Of the 29 books badged on 2026-08-21,
 # two were last valued 08-13 and 08-14 — 8 and 7 days back — so even with an empty memo the walk
 # could never have reached them. The horizon has to cover the slowest cadence we actually see, not
 # the fastest.
@@ -186,7 +186,7 @@ _WALK_BACK_DAYS = 14
 def _reset_valuation_memo() -> None:
     """Start a fresh memo. See `_MEMO_STARTED_AT`.
 
-    ⚠ BOTH HALVES TOGETHER, ALWAYS. `_NEWEST_VALUED` is the licence to rule a date out and
+     BOTH HALVES TOGETHER, ALWAYS. `_NEWEST_VALUED` is the licence to rule a date out and
     `_UNVALUED_DATES` is what it licences; keeping either without the other licences one run's
     answer against another run's evidence.
     """
@@ -198,7 +198,7 @@ def _reset_valuation_memo() -> None:
 def _expire_valuation_memo() -> None:
     """Drop the memo once it is older than `_MEMO_TTL_S` — called before every walk.
 
-    ⚠ THE CHECK IS ON THE READ PATH, NOT ON THE ENTRY POINTS. That is the whole point: any caller
+     THE CHECK IS ON THE READ PATH, NOT ON THE ENTRY POINTS. That is the whole point: any caller
     that reaches `_vermogen_most_recent` gets a memo no older than the TTL, whether it remembered
     to start a run or not. A caller added tomorrow inherits the protection by existing.
     """
@@ -219,7 +219,7 @@ def _discover_portfolios() -> list[str]:
         elif msg_type == "error":
             raise RuntimeError(kw.get("message") or "scan error")
         elif msg_type == "progress" and kw.get("message"):
-            # ⚠ DISCOVERY USED TO NARRATE TO NOBODY. The scraper already emitted every step — which
+            #  Discovery used to narrate to nobody. The scraper already emitted every step — which
             # filters it sent, AIRS's own "N Items in selectie", the per-page row counts — and this
             # sink threw all of it away, so the roster arrived as a bare number with no way to ask
             # how it was arrived at. It is the one phase where the answer is a COUNT, and a count
@@ -241,14 +241,14 @@ def _discover_portfolios() -> list[str]:
 def _record_roster(names: list[str]) -> None:
     """Persist WHICH accounts AIRS listed on this pass — the roster `list_accounts` reads.
 
-    ⚠ WITHOUT THIS THE ANSWER IS THROWN AWAY. The discovery already knows the live set; it just
+     WITHOUT THIS THE ANSWER IS THROWN AWAY. The discovery already knows the live set; it just
     used it to drive the scrape and forgot it. `airs_performance` cannot recover it: it says what
     a book made, which stays true long after AIRS stops listing the book.
 
-    ⚠ ONE TIMESTAMP FOR THE WHOLE BATCH, so "the live set" is exactly `last_seen_at = max(...)`.
+     ONE TIMESTAMP FOR THE WHOLE BATCH, so "the live set" is exactly `last_seen_at = max(...)`.
     Stamping each row with its own now() would make that comparison a race against the write.
 
-    ⚠ AN EMPTY OR SUSPICIOUSLY SMALL DISCOVERY IS NOT WRITTEN. A login failure or a changed
+     AN EMPTY OR SUSPICIOUSLY SMALL DISCOVERY IS NOT WRITTEN. A login failure or a changed
     selector returns few rows, not an error, and recording that would retire the entire table on
     the strength of a failed scrape. Better to keep yesterday's roster than to publish a wrong one.
     """
@@ -271,7 +271,7 @@ def _record_roster(names: list[str]) -> None:
 # The reports an account needs for every figure on the portfolios page to describe the same
 # moment. Order is display order, not fetch order.
 #
-# ⚠ `trans` JOINED THIS LIST ON 2026-08-05 AND THAT IS A DELIBERATE RE-DEFINITION OF "COMPLETE".
+#  `trans` JOINED THIS LIST ON 2026-08-05 AND THAT IS A DELIBERATE RE-DEFINITION OF "COMPLETE".
 # Transacties used to be fetched ONLY when someone opened the Transactions panel, so after months
 # of daily fleet scans exactly TWO of 44 books had ever had theirs stored — and every figure that
 # needs flows (invested capital, money-weighted return, the realised leg, the whole look-through
@@ -286,19 +286,19 @@ REPORTS = ("att", "volk", "mut", "trans", "model")
 def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
     """Persist which reports each account yielded on this pass — what `list_accounts` gates on.
 
-    ⚠ THE OUTCOME IS THE FETCH'S, NOT THE TABLE'S. A book with no transactions this year returns a
+     THE OUTCOME IS THE FETCH'S, NOT THE TABLE'S. A book with no transactions this year returns a
     valid EMPTY Mutaties report; counting rows afterwards would mark it incomplete and hide a
     perfectly healthy account. `outcomes` therefore carries what the `try` blocks observed.
 
-    ⚠ ONE TIMESTAMP FOR THE WHOLE BATCH, exactly as `_record_roster` does and for the same reason:
+     ONE TIMESTAMP FOR THE WHOLE BATCH, exactly as `_record_roster` does and for the same reason:
     "this refresh's verdict" is then `reports_at = max(...)`, not a race against the write.
 
     Best-effort — bookkeeping must never fail the scrape that produced it.
     """
-    # ⚠ IT MUST NOT TOUCH `last_seen_at` — THAT FIELD BELONGS TO DISCOVERY, AND WRITING IT HERE
-    # MADE ROWS DISAPPEAR. `_live_accounts` is "the accounts AIRS listed on the most recent
+    #  It must not touch `last_seen_at` — THAT FIELD BELONGS TO DISCOVERY, AND WRITING IT HERE
+    # Made rows disappear. `_live_accounts` is "the accounts AIRS listed on the most recent
     # discovery", computed as `last_seen_at == max(last_seen_at)`. This function runs per account
-    # AS THE SCAN PROGRESSES, so stamping it here re-defined "the live set" to mean "the accounts
+    # As the scan progresses, so stamping it here re-defined "the live set" to mean "the accounts
     # scanned so far": mid-run the portfolios table filled with all 44 and then collapsed to the
     # one book that had just been scanned (measured 2026-07-30 — `BUS_WTS_StMerken_Dyn`, alone).
     #
@@ -308,11 +308,11 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
     #
     # "AIRS listed this account" and "we scanned this account" are different facts about different
     # sets. `reports_at` is this function's timestamp; `last_seen_at` is `_record_roster`'s.
-    # ⚠ UPDATE ONLY — AN ACCOUNT DISCOVERY HAS NEVER SEEN CANNOT BE INSERTED HERE. `last_seen_at`
+    #  Update only — an account discovery has never seen cannot be inserted here. `last_seen_at`
     # is NOT NULL with no default, by design (see the migration: the live set IS
     # `last_seen_at = max(...)`, so a per-row default would let this function redefine it).
     #
-    # ⚠⚠ THE FIRST ATTEMPT AT THIS FIX WAS THE `known` READ BELOW AND IT DID NOT WORK — see the
+    #  The first attempt at this fix was the `known` READ BELOW AND IT DID NOT WORK — see the
     # note on the write itself. Omitting a NOT NULL column fails whether or not the row exists,
     # because Postgres validates the tuple before it arbitrates the conflict. The read survives
     # only to WARN about accounts discovery has not seen; the write is now a plain UPDATE.
@@ -357,7 +357,7 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
     todo = [n for n in names if n in known]
     if not todo:
         return
-    # ⚠⚠ UPDATE, NOT UPSERT — AND THE `known` GUARD ABOVE NEVER FIXED THIS (2026-08-13). PostgREST's
+    #  Update, not upsert — and the `known` GUARD ABOVE NEVER FIXED THIS (2026-08-13). PostgREST's
     # upsert is `INSERT ... ON CONFLICT DO UPDATE`, and Postgres forms and VALIDATES the candidate
     # tuple before it arbitrates the conflict: a payload omitting `last_seen_at` — NOT NULL with no
     # default, by design — fails 23502 even when the row exists and would have been updated.
@@ -371,7 +371,7 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
     # table is what marks a row "att did not arrive", so the failure suppressed exactly the warning
     # it should have raised, and a stale figure kept looking healthy.
     #
-    # ⚠ GROUPED BY THE OUTCOME SET, so a 44-account fleet scan is ~3 requests rather than 44: almost
+    #  Grouped by the outcome set, so a 44-account fleet scan is ~3 requests rather than 44: almost
     # every book yields the same `{att,model,mut,trans,volk}`, and the ones that differ are the
     # interesting ones. An `update ... in (…)` cannot carry a per-row value, which is exactly why
     # the grouping is by the value.
@@ -393,11 +393,11 @@ def _record_reports(outcomes: dict[str, list[str]], stamp: str) -> None:
 # so re-downloading four reports for an account we fully scanned this morning buys nothing and
 # costs ~44× that. Env-tunable; the daily job's interval is far longer, so it still scans the fleet
 # once a day exactly as before — this only collapses the repeat presses in between.
-# ⚠ 20, NOT 12 — AIRS VALUES ONCE A DAY. The window only has to be shorter than the gap between
+#  20, NOT 12 — AIRS VALUES ONCE A DAY. The window only has to be shorter than the gap between
 # two valuations; at 12h a mid-afternoon press re-downloaded the whole fleet for a valuation that
 # had not moved since the morning. 20h still guarantees the daily job (a fixed weekday-morning
 # tick, ~24h apart — see `scheduled_jobs.SCHEDULED_JOBS`) never skips a real one, and collapses
-# every repeat press in between. ⚠ The time is NOT restated here: it moved 10:00 → 09:30 and a
+# every repeat press in between.  The time is NOT restated here: it moved 10:00 → 09:30 and a
 # second copy of it would now be wrong. What this window depends on is the ~24h SPACING, not the
 # hour — and the daily job forces anyway, so it cannot be skipped by this at all.
 AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "20"))
@@ -407,7 +407,7 @@ AIRS_FRESH_HOURS = float(os.environ.get("AIRS_FRESH_HOURS", "20"))
 # model-portfolios table uses, so "too small to be real" means one thing across the app.
 MIN_REAL_HOLDINGS = int(os.environ.get("AIRS_MIN_REAL_HOLDINGS", "5"))
 
-# ⚠⚠ HOW LONG A SKIPPED BOOK MAY GO UNREAD BEFORE IT IS READ ANYWAY. The size skip below is a COST
+#  How long a skipped book may go unread before it is read anyway. The size skip below is a COST
 # decision — 60-odd downloads a run on books nobody opens — and a cost decision must not become a
 # permanent exemption: a book that is never re-read has an `as_of` that never moves, so its row
 # wears the amber "N trading days old" badge for ever while the run reports the fleet up to date.
@@ -429,12 +429,12 @@ def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict],
     `counts` is the last known holdings per account (`_holding_counts`); `verdicts` is the roster's
     record of which reports each account last yielded (`_roster_verdicts`).
 
-    ⚠ IT IS DECIDED ON THE PREVIOUS SCAN, WHICH IS THE ONLY THING AVAILABLE. Holdings are what the
+     IT IS DECIDED ON THE PREVIOUS SCAN, WHICH IS THE ONLY THING AVAILABLE. Holdings are what the
     Vermogensoverzicht returns, so a book's size cannot be known before fetching it. Using the last
     known count means the first scan of an account always happens; from then on a shell costs
     nothing.
 
-    ⚠ ZERO AND UNKNOWN LOOK IDENTICAL IN `counts`, AND CONFLATING THEM BREAKS IT IN ONE DIRECTION
+     ZERO AND UNKNOWN LOOK IDENTICAL IN `counts`, AND CONFLATING THEM BREAKS IT IN ONE DIRECTION
     OR THE OTHER. A book that stores no holdings has no rows in `airs_holding`, so it is simply
     ABSENT — indistinguishable from one that has never been scanned. Treating absence as bogus would
     skip a brand-new account for ever (it could never acquire the holdings that would rescue it);
@@ -445,7 +445,7 @@ def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict],
     Measured 2026-07-30: 15 of 46 books qualify — 5 benchmarks at 1 holding, 10 shells at 0 — which
     is 60 downloads a run spent on books nobody looks at. `force` re-checks everything regardless.
 
-    ⚠⚠ BUT A SKIP IS NOT AN EXEMPTION, AND FOR FOUR BOOKS IT HAD BECOME ONE. `max_stale_hours`
+     BUT A SKIP IS NOT AN EXEMPTION, AND FOR FOUR BOOKS IT HAD BECOME ONE. `max_stale_hours`
     re-admits a book we have not read in that long (`AIRS_BOGUS_MAX_AGE_HOURS`, 14 days), because a
     permanently skipped account is one whose `as_of` can never move: its row wears "13 trading days
     old" for ever, `lagOwner` correctly reports the lag as OURS — the one verdict that tells the
@@ -453,11 +453,11 @@ def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict],
     four `BUS_BM_*` benchmarks, last read 2026-07-30, were exactly those rows. Pass
     `max_stale_hours=None` for the pure size question with no clock in it.
 
-    ⚠ A BOOK WITH NO `reports_at` IS NOT RE-ADMITTED BY THE CLOCK. It cannot be stale-by-time if we
+     A BOOK WITH NO `reports_at` IS NOT RE-ADMITTED BY THE CLOCK. It cannot be stale-by-time if we
     have no time for it — and it is only in `verdicts` at all because a previous run wrote its
     `reports_ok`, so `volk` above has already established that we fetched it.
 
-    ⚠⚠ AND ONLY A **VISIBLE** BOOK IS RE-ADMITTED, WHICH IS THE POINT OF THE WHOLE EXERCISE. The
+     AND ONLY A **VISIBLE** BOOK IS RE-ADMITTED, WHICH IS THE POINT OF THE WHOLE EXERCISE. The
     justification for reading a one-holding book at all is that its ROW carries a badge a reader
     cannot clear; a hidden account (`airs_account_hidden`) has no row, so a stale one is invisible by
     construction and re-reading it buys nothing. Measured 2026-08-17: 16 books are too small, and
@@ -487,7 +487,7 @@ def bogus_accounts(counts: dict[str, int], verdicts: dict[str, dict],
 def _older_than(stamp: str | None, cutoff: datetime) -> bool:
     """Is `stamp` (an ISO timestamp, possibly naive) strictly before `cutoff`?
 
-    ⚠ AN UNPARSEABLE OR ABSENT STAMP IS "NOT OLD", so a bad value cannot silently re-admit every
+     AN UNPARSEABLE OR ABSENT STAMP IS "NOT OLD", so a bad value cannot silently re-admit every
     skipped book on every run — that would quietly undo the saving the skip exists for, and nothing
     on screen would say why the scan got slower.
     """
@@ -502,7 +502,7 @@ def _older_than(stamp: str | None, cutoff: datetime) -> bool:
     return ts < cutoff
 
 
-# ⚠⚠ WHERE THE RUN'S NARRATION GOES **NOW**. `_emit` writes to `_STATUS["log"]`, which the
+#  Where the run's narration goes **NOW**. `_emit` writes to `_STATUS["log"]`, which the
 # portfolios panel used to POLL — and stopped, when "Refresh all" became a job reporting into the
 # shared toast. Nothing re-pointed the log at the new surface, so every phase that narrates through
 # `_emit` was narrating to nobody, and `on_step` was wired only to the account loop.
@@ -514,7 +514,7 @@ def _older_than(stamp: str | None, cutoff: datetime) -> bool:
 # a silent scrape is indistinguishable from a hung one, and this file's own `_emit` docstring says
 # so about the phase it then left silent.
 #
-# ⚠ MODULE-LEVEL IS SAFE HERE FOR THE SAME REASON `_STATUS` IS: `_LOCK` serialises every writer
+#  Module-level is safe here for the same reason `_STATUS` IS: `_LOCK` serialises every writer
 # (the fleet run, a single-row refresh and the scheduler all take it), so there is exactly one run
 # at a time. It is set inside the lock hold and cleared in the same `finally` that releases it.
 _PROGRESS: Callable[[int, int, str], None] | None = None
@@ -536,13 +536,13 @@ def _say(done: int, total: int, message: str) -> None:
 def _emit(kind: str, **fields) -> None:
     """Append one step to the run's live log — what the scan is doing, as it does it.
 
-    ⚠ AND FORWARD IT TO THE JOB'S PROGRESS LINE — see `_PROGRESS`. Every phase before the account
+     AND FORWARD IT TO THE JOB'S PROGRESS LINE — see `_PROGRESS`. Every phase before the account
     loop (discovery, the roster check, the plan) reports ONLY through here, so without this the
     toast sits on "starting…" through all of it. The bar's position is unchanged: these lines
     narrate work that has no denominator yet, and re-reporting `0/0` mid-loop would blank a bar
     that is genuinely at 12/44.
 
-    ⚠ A MINUTES-LONG SCRAPE WITH NO NARRATION IS INDISTINGUISHABLE FROM A HUNG ONE. The fleet pass
+     A MINUTES-LONG SCRAPE WITH NO NARRATION IS INDISTINGUISHABLE FROM A HUNG ONE. The fleet pass
     is 44 accounts x 4 downloads behind a headless browser; before this the only thing anyone could
     see was `i/n: name…` and, at the very end, a summary. Which portfolios AIRS listed, which were
     skipped and why, and which of the four reports arrived for whom were all invisible while it
@@ -567,7 +567,7 @@ def _emit(kind: str, **fields) -> None:
 def _parse_stamp(raw: str | None) -> datetime | None:
     """A Postgres timestamptz string → an aware datetime, or None if it isn't one.
 
-    ⚠ UNPARSEABLE MUST MEAN "SCAN IT". Every caller treats None as stale, so a format we don't
+     UNPARSEABLE MUST MEAN "SCAN IT". Every caller treats None as stale, so a format we don't
     recognise costs one scan; the opposite default would silently skip an account for ever on the
     strength of a string we couldn't read.
     """
@@ -600,13 +600,13 @@ def accounts_to_scan(
         a partial account would make a transient failure permanent)
       - the verdict is older than `max_age_hours`      → scan
 
-    ⚠ IT GATES ON WHAT WE FETCHED, NOT ON WHAT THE DATA SAYS. The tempting rule — "skip an account
+     IT GATES ON WHAT WE FETCHED, NOT ON WHAT THE DATA SAYS. The tempting rule — "skip an account
     whose newest snapshot equals the fleet's newest snapshot" — punishes exactly the accounts that
     are fine: `_vermogen_most_recent` walks back to each book's own last VALUED date, and a book
     valued monthly legitimately sits weeks behind a daily-valued one. Under that rule it would
     never match the fleet maximum and would be re-downloaded on every single press, for ever.
 
-    ⚠ A FUTURE STAMP IS STALE, NOT ETERNALLY FRESH. Clock skew or one bad row would otherwise pin
+     A FUTURE STAMP IS STALE, NOT ETERNALLY FRESH. Clock skew or one bad row would otherwise pin
     an account in the skip list permanently, and the failure is invisible — it looks like the
     refresh working quickly.
     """
@@ -628,12 +628,12 @@ def accounts_to_scan(
 def _roster_names() -> list[str]:
     """The accounts the LAST successful discovery found — the fallback when this one cannot run.
 
-    ⚠ THIS IS A DEGRADED ANSWER AND ONLY THE CALLER CAN DECIDE THAT IT IS GOOD ENOUGH. It is the
+     THIS IS A DEGRADED ANSWER AND ONLY THE CALLER CAN DECIDE THAT IT IS GOOD ENOUGH. It is the
     previous scrape's output, so it cannot contain a portfolio opened since; the caller says so
     on the run rather than letting a short list pass for a complete one. See the discovery
     fallback in `run_airs_vermogen_refresh_sync`.
 
-    ⚠ EMPTY ON FAILURE, never a partial guess — the caller's `_MIN_ROSTER` floor then declines the
+     EMPTY ON FAILURE, never a partial guess — the caller's `_MIN_ROSTER` floor then declines the
     fallback and reports the original discovery error, which is the honest outcome when we know
     neither the live population nor the stored one.
     """
@@ -651,7 +651,7 @@ def _roster_names() -> list[str]:
 def _roster_verdicts() -> dict[str, dict]:
     """`portefeuille` → its last recorded `{reports_ok, reports_at}`. One row per account (~44).
 
-    ⚠ ON FAILURE IT RETURNS EMPTY, WHICH MEANS "SCAN EVERYTHING". Failing toward doing the work
+     ON FAILURE IT RETURNS EMPTY, WHICH MEANS "SCAN EVERYTHING". Failing toward doing the work
     costs a slow refresh; failing the other way would skip the fleet on the strength of a dropped
     connection and report it as up to date.
     """
@@ -667,7 +667,7 @@ def _roster_verdicts() -> dict[str, dict]:
 
 # The tables a "delete this account" clears, and the ONLY ones it touches.
 #
-# ⚠ `airs_account_hidden` IS DELIBERATELY ABSENT. That row is a human DECISION to keep an account off the list;
+#  `airs_account_hidden` IS DELIBERATELY ABSENT. That row is a human DECISION to keep an account off the list;
 # clearing it would resurrect an account somebody deliberately hid, as a side effect of a refresh
 # test.
 _DELETABLE_TABLES = (
@@ -683,12 +683,12 @@ _DELETABLE_TABLES = (
 def delete_account(portefeuille: str) -> dict:
     """Remove ONE account's scraped rows so a refresh can be watched rebuilding them.
 
-    ⚠ THIS IS A REAL DELETE, AND `airs_account_hidden` EXISTS BECAUSE THAT IS USUALLY WRONG. To
+     THIS IS A REAL DELETE, AND `airs_account_hidden` EXISTS BECAUSE THAT IS USUALLY WRONG. To
     take an unwanted account off the list, hide it — the next scrape puts deleted rows straight
     back, so deleting achieves nothing and costs history. This is for the other case: proving the
     refresh actually refills a gap.
 
-    ⚠ AND IT LOSES HISTORY THE REFRESH CANNOT RESTORE. A scan fetches `1 Jan → today`, so any
+     AND IT LOSES HISTORY THE REFRESH CANNOT RESTORE. A scan fetches `1 Jan → today`, so any
     `airs_performance` month before January is gone for good — the caller must say so before
     asking. The counts returned are what was actually removed, per table, so the damage is stated
     rather than assumed.
@@ -714,13 +714,13 @@ def summarise_errors(errors: list[dict]) -> list[dict]:
     """Group failures by CAUSE, commonest first — the difference between an actionable message and
     a number.
 
-    ⚠ "27 report(s) failed" IS NOT A DIAGNOSIS. It says something is wrong, gives no handle on
+     "27 report(s) failed" IS NOT A DIAGNOSIS. It says something is wrong, gives no handle on
     what, and 27 individual lines are no better — nobody reads 27 stack summaries looking for the
     pattern. Grouped, the same data says "13 × Vermogensoverzicht: no valued snapshot in the last
     7 days" and the fix is obvious (those books have not been valued yet), versus "14 × Model:
     login expired", which is a different fix entirely.
 
-    ⚠ THE MESSAGE IS TRUNCATED FOR THE KEY, NOT FOR DISPLAY. Two failures of the same kind often
+     THE MESSAGE IS TRUNCATED FOR THE KEY, NOT FOR DISPLAY. Two failures of the same kind often
     differ in a trailing detail (a date, an account code), and keying on the whole string would
     scatter one cause across a dozen groups of one — which is exactly the un-summarised list this
     exists to replace.
@@ -747,17 +747,17 @@ def count_outcomes(
     """What the run DID, in the four words an operator actually asks in: added, updated, already up
     to date, failed. Pure — `outcomes` is `{scanned account: the reports that arrived}`.
 
-    ⚠ "NEW" IS DECIDED AGAINST THE ROSTER, NOT AGAINST AIRS. `known` is the accounts we already had
+     "NEW" IS DECIDED AGAINST THE ROSTER, NOT AGAINST AIRS. `known` is the accounts we already had
     a roster row for BEFORE this run started (`_roster_verdicts`, read once, before the loop). An
     account AIRS has always had but we have never scanned is genuinely *added* here — the sentence
     is about our database, which is the thing the button changed.
 
-    ⚠ AND AN ACCOUNT THAT STORED NOTHING IS `failed`, NOT `updated`. Every report can fail while
+     AND AN ACCOUNT THAT STORED NOTHING IS `failed`, NOT `updated`. Every report can fail while
     the account is still visited; counting the visit as an update would report work that did not
     happen, in the one number somebody reads to decide whether to press the button again. So the
     test is `outcomes[name]` being non-empty — at least one report arrived and was written.
 
-    ⚠⚠ `small` IS THE FIFTH COUNT AND IT EXISTS BECAUSE THE PARTITION HAD QUIETLY STOPPED BEING ONE.
+     `small` IS THE FIFTH COUNT AND IT EXISTS BECAUSE THE PARTITION HAD QUIETLY STOPPED BEING ONE.
     The books `bogus_accounts` drops are removed from `todo` AFTER `accounts_to_scan` has split the
     fleet, so they were in neither `skipped` nor `outcomes` — they were in nothing. Measured
     2026-08-17: 45 accounts on the page, 16 of them dropped as too small, and the summary described
@@ -784,20 +784,20 @@ def count_outcomes(
 def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) -> str:
     """The ONE line the page shows. Pure.
 
-    ⚠ THIS IS THE WHOLE USER-FACING REPORT, AND THAT IS THE POINT. It used to read "30/44 accounts
+     THIS IS THE WHOLE USER-FACING REPORT, AND THAT IS THE POINT. It used to read "30/44 accounts
     complete — 0 already current, 44 scanned: Rendement 44/44, Vermogensoverzicht 44/44 (710
     holdings), Mutaties 972 rows, Model 699 rows; 14 report(s) failed" — five report names, six
     ratios and two row counts, none of which answers "did it work". Per-report totals, per-cause
     failure groups and the raw error list all still exist; they go to the log and to `detail`.
 
-    ⚠ `failed` IS THE ONE EXCEPTION AND IT STAYS. The banner turns amber when reports failed, and a
+     `failed` IS THE ONE EXCEPTION AND IT STAYS. The banner turns amber when reports failed, and a
     colour with no reason beside it is worse than no colour at all — the reader knows only that
     something is wrong. One word ("2 failed") is not a report; it is what the amber means.
 
     All three good counts show even at zero: a fixed shape is read at a glance, whereas a line that
     drops its clauses has to be parsed before it can be understood.
 
-    ⚠⚠ IT SAID "ALREADY UP TO DATE" AND THAT DIRECTLY CONTRADICTED THE ROW BADGES. Every count here
+     IT SAID "ALREADY UP TO DATE" AND THAT DIRECTLY CONTRADICTED THE ROW BADGES. Every count here
     is about OUR COPY — what we fetched, and when — while the ⓘ on each row measures **AIRS's
     valuation date**. Both were true at once and they read as opposites: the run reported
     "44 already up to date" while `DealmakersTopSelectie Offensief` wore "3 trading days old"
@@ -816,7 +816,7 @@ def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) 
     line = (f"{a} portfolio{'' if a == 1 else 's'} added, "
             f"{counts['updated']} re-read, "
             f"{counts['up_to_date']} skipped (we read them within {AIRS_FRESH_HOURS:g}h)")
-    # ⚠ THE BOOKS THE RUN NEVER LOOKED AT, NAMED — see `count_outcomes`. Without this clause they
+    #  The books the run never looked at, named — see `count_outcomes`. Without this clause they
     # are in no count at all, and the line reads as a statement about the whole fleet while
     # describing two thirds of it. Only shown when there are some: a fixed shape is worth having
     # for the three counts a run always produces, and this one is a property of the fleet.
@@ -825,7 +825,7 @@ def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) 
                  f"re-read anyway after {AIRS_BOGUS_MAX_AGE_HOURS / 24:g} days)")
     if counts.get("failed"):
         line += f", {counts['failed']} failed"
-    # ⚠ THE DATA'S OWN DATE, NOT OURS — see above. Named "AIRS valuation" rather than "as of" so it
+    #  The data's own date, not ours — see above. Named "AIRS valuation" rather than "as of" so it
     # cannot be read as the time of the scan.
     if newest_as_of:
         line += f" · newest AIRS valuation {newest_as_of}"
@@ -835,11 +835,11 @@ def format_run_message(counts: dict[str, int], newest_as_of: str | None = None) 
 def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     """Fetch + store ONE account's four AIRS reports. THE only place that work is written.
 
-    ⚠ IT DOES NOT TAKE `_LOCK`. Both callers hold it already — `refresh_one_portfolio` for a single
+     IT DOES NOT TAKE `_LOCK`. Both callers hold it already — `refresh_one_portfolio` for a single
     row, `run_airs_vermogen_refresh_sync` for the whole fleet — and taking it here would deadlock
     the fleet run against itself on its very first account.
 
-    ⚠ THIS EXISTS BECAUSE THERE WERE TWO COPIES. "Refresh all" ran a bespoke loop and the per-row
+     THIS EXISTS BECAUSE THERE WERE TWO COPIES. "Refresh all" ran a bespoke loop and the per-row
     "Refresh" ran its own near-identical block: four try/excepts each, duplicated error strings,
     duplicated outcome bookkeeping. Two implementations of "scan an account" is one more than the
     number of ways an account can be scanned, and they had already drifted — only one of them
@@ -854,7 +854,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     from routers.airs import _parse_att_excel, _save_performance_to_db  # noqa: PLC0415
 
     ok: list[str] = []
-    # ⚠ STRUCTURED, NOT PRE-FORMATTED STRINGS. The fleet run groups 27 failures by CAUSE so the
+    #  Structured, not pre-formatted strings. The fleet run groups 27 failures by CAUSE so the
     # operator sees "13 × Vermogensoverzicht: no valued snapshot in the last 7 days" instead of a
     # bare count — and regex-ing that back out of "BUS_X (Vermogensoverzicht: RuntimeError: …)"
     # would be parsing a message we formatted ourselves one line earlier.
@@ -874,7 +874,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     def _say(report: str, status: str, detail: str = "") -> None:
         """Report ONE download's outcome the moment it is known.
 
-        ⚠ AS IT HAPPENS, NOT AT THE END. A fleet pass is 44 accounts x 4 downloads and runs for
+         AS IT HAPPENS, NOT AT THE END. A fleet pass is 44 accounts x 4 downloads and runs for
         minutes; reporting only on completion means the operator watches a spinner and cannot tell
         a slow scan from a hung one, or see which account it is stuck on. Three outcomes, kept
         apart on purpose: `ok` stored something, `no_data` is AIRS answering that this book has no
@@ -887,7 +887,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
                 pass
 
     def _step(code: str, label: str, fn) -> None:
-        # ⚠ EVERY REPORT TIMED. A scan is 4 downloads x N books behind a headless browser and it is
+        #  Every report timed. A scan is 4 downloads x N books behind a headless browser and it is
         # not obvious which of the four is slow — Vermogensoverzicht walks back over unvalued dates,
         # the others are one request. Naming the seconds is what turns "can we speed it up" into a
         # question with an answer.
@@ -900,10 +900,10 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
             ok.append(code)
             _say(label, "ok", f"{_step_detail(code)} ({_ms()})")
         except AirsNoData as e:
-            # ⚠ RETRIEVED, AND EMPTY. AIRS answered; this book simply has no such report — 14 of
+            #  Retrieved, and empty. AIRS answered; this book simply has no such report — 14 of
             # 44 have no fixed MODEL because they are benchmarks, `meervoudig` books or test
             # shells. Counting it as `ok` is what makes the account COMPLETE, which is what stops
-            # it wearing a permanent ⚠ and being re-scanned on every run for ever. See `AirsNoData`
+            # it wearing a permanent  and being re-scanned on every run for ever. See `AirsNoData`
             # for why this is safe to distinguish from a dead session.
             ok.append(code)
             _say(label, "no_data", f"AIRS has no such report for this book ({_ms()})")
@@ -932,7 +932,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
         from airs_scanner import AirsNoData  # noqa: PLC0415
         from routers._airs_transacties import _fetch_live, _store, ytd_window  # noqa: PLC0415
 
-        # ⚠⚠ `ytd_window()`, NOT THIS SCAN'S `van`/`tot`. The Transactions panel treats a snapshot
+        #  `ytd_window()`, NOT THIS SCAN'S `van`/`tot`. The Transactions panel treats a snapshot
         # of a DIFFERENT window as not-this-answer and re-fetches — so storing under any other
         # window writes a row the panel will never accept, and every open would go back out to
         # AIRS as if nothing had been cached. The two happen to be equal today; relying on that is
@@ -941,7 +941,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
         try:
             sheet = _fetch_live(name, tvan, ttot)
         except AirsNoData:
-            # ⚠ STORE THE EMPTY SNAPSHOT, THEN RE-RAISE. `_step` turns `AirsNoData` into `no_data`
+            #  Store the empty snapshot, then re-raise. `_step` turns `AirsNoData` into `no_data`
             # and counts the account complete; without the write the book would be marked complete
             # while holding nothing, so the panel would re-download on every single open. Same
             # bargain `account_transactions` already strikes — one behaviour, two entry points.
@@ -1015,7 +1015,7 @@ def _save_mutaties(portefeuille: str, van: str, tot: str) -> int:
     far", so a narrower re-scan that only deleted its own range would leave last run's rows for the
     days it no longer covers and double-count them. One account, one current journal.
 
-    ⚠ A book with no dividends yet is an EMPTY journal, which is an answer, not a failure. The
+     A book with no dividends yet is an EMPTY journal, which is an answer, not a failure. The
     caller treats a raised error as a failure, so a legitimately empty download must return 0.
     """
     from airs_mutaties import parse_mutaties  # noqa: PLC0415
@@ -1048,7 +1048,7 @@ def _save_mutaties(portefeuille: str, van: str, tot: str) -> int:
 def _save_model_weights(portefeuille: str, van: str, tot: str) -> int:
     """Download and store this book's OWN model weights (`rapport_types=MODEL`).
 
-    ⚠ THIS IS WHAT REPLACES THE FIXED↔DYNAMIC PAIRING. The weights are scoped to the dynamic
+     THIS IS WHAT REPLACES THE FIXED↔DYNAMIC PAIRING. The weights are scoped to the dynamic
     portfolio, so there is no second AirSPMS portfolio to guess a partner for — and no
     mis-pairing that files a book's money under another strategy's name.
 
@@ -1062,7 +1062,7 @@ def _save_model_weights(portefeuille: str, van: str, tot: str) -> int:
     if not weights:
         return 0
     total = model_total_pct(weights)
-    # ⚠ Measured at EXACTLY 100.000 on every book. A partial sheet understates every weight and
+    #  Measured at EXACTLY 100.000 on every book. A partial sheet understates every weight and
     # looks entirely normal, so it is refused rather than stored.
     if not (95.0 <= total <= 105.0):
         raise RuntimeError(
@@ -1084,7 +1084,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
     via `_LOCK` (a second trigger while one runs returns busy). Returns the final
     status dict. Call from a thread — it does blocking Playwright + DB work.
 
-    ⚠ INCREMENTAL BY DEFAULT. Discovery always runs against AIRS — the live list is the point, and
+     INCREMENTAL BY DEFAULT. Discovery always runs against AIRS — the live list is the point, and
     it is what refills an account somebody deleted — but an account whose last pass got all four
     reports within `AIRS_FRESH_HOURS` is skipped rather than re-downloaded (`accounts_to_scan`).
     `force=True` scans every discovered account regardless.
@@ -1093,7 +1093,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
     `/api/airs/vermogen/refresh/job`. Both optional and both no-ops when absent, so the scheduler
     and the plain POST keep exactly today's behaviour.
 
-    ⚠ CANCELLATION IS CHECKED BETWEEN ACCOUNTS, NEVER INSIDE ONE. An account's four reports are
+     CANCELLATION IS CHECKED BETWEEN ACCOUNTS, NEVER INSIDE ONE. An account's four reports are
     downloaded and stored as a unit; stopping midway would leave it holding two fresh reports and
     two stale ones, with nothing on the row to say which. Between accounts the state is always
     consistent — every book is either fully re-read or untouched — so that is the only safe
@@ -1106,7 +1106,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
     _PROGRESS = on_step
     _PROGRESS_AT.update(done=0, total=0)
     try:
-        # ⚠ THE FIRST LINE GOES OUT BEFORE ANY WORK, so the toast leaves "starting…" within a
+        #  The first line goes out before any work, so the toast leaves "starting…" within a
         # second of the press rather than at the first account — and it names the SLOW thing, so a
         # reader who presses this at 09:00 knows the wait is a browser login and not a stuck job.
         _say(0, 0, "signing in to AirSPMS and discovering portfolios…")
@@ -1133,11 +1133,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             "error_summary": [],
             "log": [],
         })
-        # ⚠ PER RUN, NOT PER PROCESS. "This date has no valuation" is true until AirSPMS's next
+        #  Per run, not per process. "This date has no valuation" is true until AirSPMS's next
         # end-of-day batch; caching it beyond one run would make a scan an hour later skip the very
         # date that has since been valued.
         #
-        # ⚠ THE TTL IN `_vermogen_most_recent` NOW GUARANTEES THIS ANYWAY, and the explicit reset
+        #  The ttl in `_vermogen_most_recent` NOW GUARANTEES THIS ANYWAY, and the explicit reset
         # stays because a fleet run is the one caller that genuinely wants a clean slate at a known
         # moment rather than "some time in the last quarter of an hour". It is no longer the thing
         # holding the invariant up — which is the point, since for months it was, and it only ever
@@ -1150,17 +1150,17 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         try:
             names = _discover_portfolios()
         except Exception as e:
-            # ⚠⚠ DISCOVERY IS THE RISKIEST STEP AND WAS THE ONLY FATAL ONE (2026-08-22). It is the
+            #  Discovery is the riskiest step and was the only fatal one (2026-08-22). It is the
             # single place that drives somebody else's UI with a browser, and a menu item that
             # became unclickable ended a 46-account run at step one:
             #
             #   [airs_vermogen] discovery failed: TimeoutError: ElementHandle.click: Timeout 30000ms
             #   [job] Refresh all portfolios (airs.vermogen.refresh) failed
             #
-            # Nothing was scanned, and the refresh is exactly what clears a ⚠ Vermogensoverzicht
+            # Nothing was scanned, and the refresh is exactly what clears a  Vermogensoverzicht
             # badge — so a broken menu presented as forty-six stale books.
             #
-            # ⚠ BUT WE ALREADY KNOW THE ACCOUNTS. `airs_account_roster` is the previous discovery's
+            #  But we already know the accounts. `airs_account_roster` is the previous discovery's
             # own output, and the population changes a few times a year. Refusing to scan a roster
             # we are holding, because we could not re-derive the identical list, throws away the
             # entire run to protect against a difference that is usually empty.
@@ -1173,11 +1173,11 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                 })
                 _log.warning("[airs_vermogen] discovery failed: %s: %s", type(e).__name__, e)
                 return dict(_STATUS)
-            # ⚠ LOUD, AND CARRIED TO THE END. A degraded run must not look like a clean one: a book
+            #  Loud, and carried to the end. A degraded run must not look like a clean one: a book
             # added since the last discovery is NOT in this list and will not be scanned, which is
             # invisible from the result. `_MIN_ROSTER` is the same floor `_record_roster` uses to
             # decide a discovery is untrustworthy — one definition of "too few to believe".
-            degraded = (f"⚠ Portfolio discovery failed ({type(e).__name__}) — scanning the "
+            degraded = (f" Portfolio discovery failed ({type(e).__name__}) — scanning the "
                         f"{len(names)} accounts from the last successful discovery instead. "
                         "A portfolio added since then is NOT in this run.")
             _log.warning("[airs_vermogen] discovery failed: %s: %s — falling back to the stored "
@@ -1186,29 +1186,29 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             _STATUS["message"] = degraded
 
         _STATUS["portfolios_found"] = len(names)
-        # ⚠ THE ROSTER ITSELF, NAMED. "44 found" is a number you cannot check; the 44 names are the
+        #  The roster itself, named. "44 found" is a number you cannot check; the 44 names are the
         # thing to compare against AIRS's own "44 Items in selectie", and the only way to see that
         # discovery picked the Interne/actief/no-consolidation population and not some other one.
         _emit("discovered", count=len(names), names=names,
               message=f"AIRS lists {len(names)} portfolios")
-        # ⚠ THE EXPECTED COUNT IS 44, AND ANYTHING ELSE IS WORTH SAYING OUT LOUD. The three filters
+        #  The expected count is 44, AND ANYTHING ELSE IS WORTH SAYING OUT LOUD. The three filters
         # (Actieve / Interne / Zonder consolidatie) define exactly that population; a different
         # number means either a filter stopped applying or AIRS's own roster changed, and those need
         # opposite responses. The scraper's own "N Items in selectie" comparison, emitted just
         # above, says which.
         if len(names) != _EXPECTED_ROSTER:
             _emit("roster_unexpected", count=len(names), expected=_EXPECTED_ROSTER,
-                  message=(f"⚠ EXPECTED {_EXPECTED_ROSTER} portfolios, got {len(names)}. If AIRS's "
+                  message=(f" EXPECTED {_EXPECTED_ROSTER} portfolios, got {len(names)}. If AIRS's "
                            f"own 'Items in selectie' above also says {len(names)}, the roster "
                            f"genuinely changed; if it says {_EXPECTED_ROSTER}, a filter or the "
                            f"pager is wrong."))
-        # ⚠ THE SKIP IS DECIDED ONCE, BEFORE THE LOOP, AGAINST THE VERDICTS AS THEY WERE AT THE
+        #  The skip is decided once, before the loop, against the verdicts as they were at the
         # START. Re-reading per account would let this run's own writes shorten its own worklist.
-        # ⚠ READ ONCE, HERE. `known` is which accounts we already had a roster row for BEFORE this
+        #  Read once, here. `known` is which accounts we already had a roster row for BEFORE this
         # run wrote any — that is what makes "added" mean anything. Re-reading it after the loop
         # would find every account known (this run just recorded them all) and report 0 added for
         # ever, including on the very first scan of a new book.
-        # ⚠ THE DENOMINATOR ARRIVES HERE, AND THE BAR SHOULD TAKE IT IMMEDIATELY. Discovery has an
+        #  The denominator arrives here, and the bar should take it immediately. Discovery has an
         # unknown length (indeterminate bar); from this point the run knows it is 44 accounts, and
         # the planning reads below are seconds of database work that would otherwise be one more
         # silent gap between "AIRS lists 44 portfolios" and the first account.
@@ -1217,7 +1217,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         known = set(verdicts)
         todo, current = accounts_to_scan(
             names, verdicts, datetime.now(timezone.utc), force=force)
-        # ⚠ THE SECOND SKIP, AND IT IS ABOUT THE BOOK RATHER THAN THE CLOCK. `accounts_to_scan`
+        #  The second skip, and it is about the book rather than the clock. `accounts_to_scan`
         # answers "is this account's data fresh"; this answers "is this account worth fetching at
         # all". A benchmark with one holding and a `_MV` shell with none are re-downloaded four
         # times each, every run, for ever — and they are precisely the books that can never be
@@ -1227,14 +1227,14 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         )
 
         bogus: set[str] = set()
-        # ⚠ HELD FOR THE SUMMARY, NOT ONLY FOR THE LOG. These names used to exist solely inside the
+        #  Held for the summary, not only for the log. These names used to exist solely inside the
         # `plan_bogus` event; the one line the page shows never mentioned them, so two thirds of the
         # fleet could go unread and the sentence still read as a report on all of it.
         skipped_bogus: list[str] = []
         if not force:
             try:
                 counts, _, _isin = _holding_counts()
-                # ⚠⚠ THE PAGE'S OWN TWO FILTERS, IN THE SAME ORDER — `list_accounts` drops an
+                #  The page's own two filters, in the same order — `list_accounts` drops an
                 # account that is hidden OR that AIRS did not list on the last discovery, and BOTH
                 # matter here. `airs_account_hidden` is currently empty; it is `_live_accounts` that
                 # removes `wts test 1-4 fx` and the retired `_L` books, which is why filtering on
@@ -1262,12 +1262,12 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         _log.info("[airs_vermogen] %d discovered — %d to scan, %d already current%s",
                   len(names), len(todo), len(current), " (forced)" if force else "")
         rendement_ok = vermogen_ok = holdings_total = mutaties_total = model_total = 0
-        # ⚠ THE DATA'S OWN DATE, TRACKED SO THE SUMMARY CAN STATE IT — see
+        #  The data's own date, tracked so the summary can state it — see
         # `format_run_message`. Only the accounts this run READ; a skipped one taught us
         # nothing new, and claiming its stored date as this run's finding would be a
         # sentence about work that did not happen.
         newest_as_of: str | None = None
-        # ⚠ EVERY SCANNED ACCOUNT GETS AN ENTRY, INCLUDING ONE THAT YIELDS NOTHING. An account
+        #  Every scanned account gets an entry, including one that yields nothing. An account
         # missing from this dict would keep whatever verdict a previous run left behind, so a
         # report that started failing today would go on reading as complete. A SKIPPED account is
         # deliberately absent — keeping its verdict is exactly what skipping it means.
@@ -1275,20 +1275,20 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         fleet_errors: list[dict] = []
         # ONE stamp for the whole run — see the note at the `_record_reports` call below.
         run_stamp = datetime.now(timezone.utc).isoformat()
-        # ⚠ THE COUNTER RUNS OVER THE ROSTER, NOT THE WORKLIST. It used to read `i/len(todo)`, so a
+        #  The counter runs over the roster, not the worklist. It used to read `i/len(todo)`, so a
         # pass that skipped 30 fresh accounts and scanned 14 counted "1/14…14/14" — and every one
         # of those 14 was a book with a failing report, which is precisely the population that can
         # never be skipped. The operator saw "3/14" against a list of 44 and had no way to tell
         # whether discovery had broken or the worklist was short on purpose. Walking all 44 and
         # SAYING which are skipped makes the two legible, and the number matches AIRS's own count.
-        # ⚠ THE LOOP WALKS THE ROSTER, SO IT NEEDS EVERY SKIP REASON — not just the freshness one.
+        #  The loop walks the roster, so it needs every skip reason — not just the freshness one.
         # `todo` is filtered above, but iterating `names` is what makes the counter read n/44, so a
         # book removed from `todo` would otherwise be scanned here anyway.
         skipped_set = set(current)
         todo_set = set(todo)
         cancelled_at: str | None = None
         for i, name in enumerate(names, 1):
-            # ⚠ BEFORE THE ACCOUNT, NOT INSIDE IT — see the docstring. `break`, not `return`, so the
+            #  Before the account, not inside it — see the docstring. `break`, not `return`, so the
             # run still falls through to `_finish` below and records what it DID store; abandoning
             # here would leave `_STATUS["running"]` true for ever and the next press would read
             # "busy" against a job nobody is running.
@@ -1298,7 +1298,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                       message=f"[{i}/{len(names)}] cancelled before {name} — "
                               f"{i - 1} account(s) already stored")
                 break
-            # ⚠ THROUGH `_say`, NOT `on_step` DIRECTLY — it records the position so the per-report
+            #  THROUGH `_say`, NOT `on_step` DIRECTLY — it records the position so the per-report
             # lines `scan_one` emits underneath ("Vermogensoverzicht: ok — 31 holdings…") keep the
             # bar at 12/44 instead of resetting it to the 0/0 the pre-loop phases ran at.
             _say(i, len(names), f"{i}/{len(names)}: {name}")
@@ -1314,7 +1314,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             _STATUS["message"] = f"{i}/{len(names)}: {name}…"
             _emit("account_start", i=i, n=len(names), account=name,
                   message=f"[{i}/{len(names)}] {name}")
-            # ⚠ THE SAME `scan_one` THE PER-ROW REFRESH CALLS. Refresh-all IS refresh-one, N times
+            #  The same `scan_one` THE PER-ROW REFRESH CALLS. Refresh-all IS refresh-one, N times
             # — see `scan_one` for why that had to stop being two implementations.
             res = scan_one(
                 name, van, tot,
@@ -1338,12 +1338,12 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                 f"{e['account']} ({e['report']}: {e['error_type']}: {e['message']})"
                 for e in fleet_errors]
             _STATUS["error_summary"] = summarise_errors(fleet_errors)
-            # ⚠ RECORDED AFTER EVERY ACCOUNT, NOT ONCE AT THE END — the list is reloaded while the
+            #  Recorded after every account, not once at the end — the list is reloaded while the
             # scan runs, so a verdict written only on completion would leave every row already
             # scanned wearing a stale badge, and a run that died halfway would record nothing at
             # all about the accounts it did reach.
             #
-            # ⚠ BUT WITH THE RUN'S STAMP, NOT `now()` PER ACCOUNT. `_missing_reports` and
+            #  But with the run's stamp, not `now()` PER ACCOUNT. `_missing_reports` and
             # `_complete_accounts` both read "this refresh's verdict" as `reports_at = max(...)`.
             # A fresh timestamp per account would make every account except the LAST look stale,
             # so 43 of 44 rows would silently drop out of the newest batch.
@@ -1357,28 +1357,28 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                               if res["errors"] else "")))
             _STATUS["message"] = f"{i}/{len(names)} done: {name}"
 
-        # ⚠ ONE JOB, ONE SUBJECT — and the lesson outlived the case that taught it. This used to
+        #  One job, one subject — and the lesson outlived the case that taught it. This used to
         # download the CRM "Alle relaties" export inline as well: a different report about
         # different objects (relations, not portfolios), so a CRM failure was appended to THIS
         # job'''s `errors` and counted in its "N report(s) failed" — a portfolio refresh reporting a
         # fault in a report nobody asked it to fetch. The CRM feature was retired entirely on
         # 2026-09-01; the rule against folding a second subject into this loop was not.
         total = len(todo)
-        # ⚠ NOTHING TO DO IS A SUCCESS, NOT AN EMPTY FAILURE. `any_stored` alone would call a
+        #  Nothing to do is a success, not an empty failure. `any_stored` alone would call a
         # fleet that is entirely up to date an "error" — the same vacuous-zero trap as a benchmark
         # reporting "0 of 0 constituents priced". A skip-everything run stored nothing precisely
         # because there was nothing to store.
         any_stored = bool(rendement_ok or vermogen_ok or not todo)
-        # ⚠ RECORDED ONLY WHEN THE DISCOVERY ITSELF WAS TRUSTED, on the same threshold the roster
+        #  Recorded only when the discovery itself was trusted, on the same threshold the roster
         # uses. A scrape that reached six accounts would otherwise mark the other thirty-eight
         # "no reports retrieved" and empty the portfolios page on the strength of a failed login.
         # Already written per account, under `run_stamp`, as each finished — nothing to flush here.
-        # ⚠ A SKIPPED ACCOUNT COUNTS AS COMPLETE — being complete is WHY it was skipped. Counting
+        #  A skipped account counts as complete — being complete is WHY it was skipped. Counting
         # only the scanned ones would report "2/44 accounts complete" after a healthy no-op run,
         # which reads as catastrophic and is the exact opposite of what happened.
         complete = len(current) + sum(1 for ok in outcomes.values() if len(ok) == len(REPORTS))
         counts = count_outcomes(current, known, outcomes, skipped_bogus)
-        # ⚠ EVERY REPORT THE JOB FETCHES IS NAMED — IN THE LOG. This string was the message, and it
+        #  Every report the job fetches is named — in the log. This string was the message, and it
         # said "Rendement 44/44, Vermogensoverzicht 31/44 … 27 report(s) failed", where 44−31=13
         # because `errors` also carried Mutaties and Model failures the message never mentioned:
         # two numbers nobody could reconcile, printed at everyone who pressed Refresh. It is a
@@ -1391,7 +1391,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                f"Vermogensoverzicht {vermogen_ok}/{total} ({holdings_total} holdings), "
                f"Mutaties {mutaties_total} rows, Model {model_total} rows" if total else "")
             + (f"; {len(_STATUS['errors'])} report(s) failed" if _STATUS["errors"] else "")
-            # ⚠ A CANCELLED RUN MUST NOT READ AS A COMPLETE ONE. It stored real rows, so it is not
+            #  A cancelled run must not read as a complete one. It stored real rows, so it is not
             # an error — but "38/44 accounts complete" with no other word implies the other six
             # failed, when in fact nobody ever asked for them.
             + (f"; CANCELLED before {cancelled_at} — the accounts after it were not read"
@@ -1415,7 +1415,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             # so the job summary can carry it too; a toast that ends on "44 accounts" and a row
             # that says "3 trading days old" otherwise look like they disagree.
             "newest_as_of": newest_as_of,
-            # ⚠ THE DEGRADED NOTE LEADS, because it changes what every count below it MEANS. "46
+            #  The degraded note leads, because it changes what every count below it MEANS. "46
             # accounts refreshed" off a stored roster is not the same claim as "46 accounts
             # refreshed" off a live discovery — the second says that is the whole population and
             # the first cannot. Appending it would put the caveat after the numbers it qualifies.
@@ -1428,7 +1428,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         return dict(_STATUS)
     finally:
         _STATUS["running"] = False
-        # ⚠ CLEARED WITH THE LOCK, IN THE SAME BLOCK. A sink left pointing at a finished job's
+        #  Cleared with the lock, in the same block. A sink left pointing at a finished job's
         # `ctx.progress` would have the NEXT run's `_emit` lines land on a card that is already
         # green — and the scheduler's ticks call this with no hook at all, which would leave the
         # last manual press's toast as the only thing they could reach.
@@ -1439,7 +1439,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
 def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     """The Vermogensoverzicht for the most recent AVAILABLE valuation date, and that date.
 
-    ⚠ AirSPMS VALUES END-OF-DAY. So `today` has no Vermogensoverzicht until its valuation runs, and
+     AirSPMS VALUES END-OF-DAY. So `today` has no Vermogensoverzicht until its valuation runs, and
     a weekend or holiday never gets one — a request for an unvalued `datum_tot` returns an empty
     ~49-byte body (`Response too small`). The Rendement (ATT) report does NOT share this: it returns
     MONTHLY rows regardless of the exact date, which is why a same-day refresh fails on VOLK alone.
@@ -1448,13 +1448,13 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     snapshot's as_of — the holdings are valued as of THEN, not today (matching what the AirSPMS UI
     shows, which also defaults to the last valued date, e.g. Friday's on a Monday).
 
-    ⚠ THE WALK IS SHARED ACROSS THE RUN, because a day AirSPMS never valued is a fact about the
+     THE WALK IS SHARED ACROSS THE RUN, because a day AirSPMS never valued is a fact about the
     day rather than about one book. Measured 2026-07-30: today's valuation had not run, so all ~25
     books with holdings paid one wasted request before landing on the 29th; on a Monday it is three
     (Mon, Sun, Sat) before Friday. `_UNVALUED_DATES` remembers the misses for the duration of a run,
     which removes 44-130 round trips from a full scan.
 
-    ⚠⚠ BUT A SINGLE FAILURE DOES NOT PROVE IT, AND TREATING IT AS PROOF BROKE 29 OF 46 BOOKS
+     BUT A SINGLE FAILURE DOES NOT PROVE IT, AND TREATING IT AS PROOF BROKE 29 OF 46 BOOKS
     (2026-08-21). The paragraph above used to end "so a date that has no valuation has none for ANY
     book" — true of a day the batch did not run, and NOT true of the case immediately below it: a
     book valued weekly fails on six good dates on its way back to its own, and every one of them was
@@ -1468,18 +1468,18 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     valued ahead of the newest batch AirSPMS has run, so that pair is sound where the quorum alone
     is not — see the constant for the measurement showing a quorum by itself changes nothing.
 
-    ⚠ ONLY MISSES ARE CACHED, NEVER HITS. A book valued monthly legitimately sits weeks behind a
+     ONLY MISSES ARE CACHED, NEVER HITS. A book valued monthly legitimately sits weeks behind a
     daily-valued one, so "this date worked for account A" says nothing about account B and caching
     it would hand B a stale snapshot.
 
-    ⚠ AND THE WALK IS ALWAYS NEWEST-FIRST. The memo may only SKIP a date, never reorder the walk:
+     AND THE WALK IS ALWAYS NEWEST-FIRST. The memo may only SKIP a date, never reorder the walk:
     the function's contract is the MOST RECENT valued snapshot, and trying an older date earlier
     because it happens to be uncached would return a stale one that looks entirely normal.
     """
     from airs_scanner import download_vermogensoverzicht_sync  # noqa: PLC0415
 
     global _NEWEST_VALUED
-    # ⚠⚠ BEFORE ANYTHING ELSE, AND ON EVERY CALL. The memo is process-global and only ONE of the
+    #  Before anything else, and on every call. The memo is process-global and only ONE of the
     # three entry points ever reset it, so a per-row Refresh ran against a previous run's ruled-out
     # dates — which are exactly the dates that have since been valued. See `_MEMO_STARTED_AT`.
     _expire_valuation_memo()
@@ -1487,7 +1487,7 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
     tried = 0
     for back in range(_WALK_BACK_DAYS):
         tot = (date.today() - timedelta(days=back)).isoformat()
-        # ⚠ BOTH CONDITIONS, AND THE SECOND IS THE LOAD-BEARING ONE — see `_UNVALUED_QUORUM`.
+        #  Both conditions, and the second is the load-bearing one — see `_UNVALUED_QUORUM`.
         if (_NEWEST_VALUED is not None and tot > _NEWEST_VALUED
                 and len(_UNVALUED_DATES.get(tot, ())) >= _UNVALUED_QUORUM):
             continue
@@ -1502,12 +1502,12 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
             _UNVALUED_DATES.setdefault(tot, set()).add(name)
             last_err = e
             continue
-        # ⚠ A SUCCESS IS THE ONLY PROOF THE BATCH RAN FOR A DATE, which is what licenses ruling out
+        #  A success is the only proof the batch ran for a date, which is what licenses ruling out
         # anything newer. Recorded before returning, so the next account benefits from it.
         if _NEWEST_VALUED is None or tot > _NEWEST_VALUED:
             _NEWEST_VALUED = tot
         return tot, blob
-    # ⚠ THE MESSAGE SAYS HOW HARD IT LOOKED. "no valued Vermogensoverzicht in the last 7 days" was
+    #  The message says how hard it looked. "no valued Vermogensoverzicht in the last 7 days" was
     # printed identically whether the walk made seven requests or zero — and zero is what it made
     # once the memo had ruled out the whole horizon, which is the failure that hid the bug above.
     raise RuntimeError(
@@ -1520,7 +1520,7 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
 def dependent_accounts(portefeuille: str) -> list[str]:
     """The accounts this one's figures are BUILT FROM — transitively, nearest first.
 
-    ⚠ A CERTIFICATE IS ANOTHER BOOK, AND REFRESHING ONLY THE PARENT LEAVES IT HALF FRESH. Some
+     A CERTIFICATE IS ANOTHER BOOK, AND REFRESHING ONLY THE PARENT LEAVES IT HALF FRESH. Some
     holdings are not instruments: they are Leonteq AMCs wrapping another strategy, and everything
     the modal shows through one — the looked-through positions, their returns, the attribution —
     is read from the WRAPPED book's own scan. Measured 2026-08-05: BUS_Offensief_Dyn is built on
@@ -1531,11 +1531,11 @@ def dependent_accounts(portefeuille: str) -> list[str]:
     The chain is holding -> linked model portfolio -> the ACCOUNT paired with that model. All three
     hops already exist; nothing here decides a link, it only follows them.
 
-    ⚠ READ FROM THE DB, NEVER FRESHENED (`freshen=False`). Working out WHAT to refresh must not
+     READ FROM THE DB, NEVER FRESHENED (`freshen=False`). Working out WHAT to refresh must not
     itself hit AIRS — that would put a scrape in front of every scrape, and it would need the very
     session the refresh is about to use.
 
-    ⚠ CYCLE-SAFE, AND THE CYCLE IS REAL. `_airs_portfolio_links` records it: TOPS_STS_L holds the
+     CYCLE-SAFE, AND THE CYCLE IS REAL. `_airs_portfolio_links` records it: TOPS_STS_L holds the
     certificate of the strategy it IS, so following links walks back to the row you started from.
     A `seen` set is what stops a refresh recursing until the session dies.
     """
@@ -1576,13 +1576,13 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     """Re-scan ONE portfolio's Rendement (ATT) + Vermogensoverzicht (VOLK) and store both — the
     per-row "Refresh" on the overview table.
 
-    ⚠ AND THE BOOKS IT IS BUILT FROM, unless `cascade=False`. A holding that is a certificate is
+     AND THE BOOKS IT IS BUILT FROM, unless `cascade=False`. A holding that is a certificate is
     another book, and the parent's own scan says nothing about what is inside it — see
     `dependent_accounts`. The cost is real and proportional: BUS_Offensief_Dyn pulls in one more
     account, TOPS_BEOFF_BEH_DYN nine, at four downloads each. It is reported per account rather
     than hidden in a single "done".
 
-    ⚠ THE TARGET IS SCANNED FIRST. It is the row the user clicked, so its answer should not be
+     THE TARGET IS SCANNED FIRST. It is the row the user clicked, so its answer should not be
     held hostage to nine dependencies — and if one of those fails, the primary result is already
     in hand and the failure is reported beside it rather than replacing it.
 
@@ -1591,14 +1591,14 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     other single refreshes) via `_LOCK` — they share ONE AirSPMS session, which must not be driven
     by two threads at once. A few seconds: two downloads (plus a login only if the session lapsed).
 
-    ⚠ `on_say(done, total, message)` IS OPTIONAL AND CHANGES NOTHING ELSE. It exists because the
+     `on_say(done, total, message)` IS OPTIONAL AND CHANGES NOTHING ELSE. It exists because the
     cascade makes this unbounded from the reader's side — TOPS_BEOFF_BEH_DYN is NINE accounts at
     five downloads each — and a button that sits disabled for a minute with no line moving is
     indistinguishable from a broken one. It is a hook rather than a second, streaming copy of this
-    function: two implementations of "refresh one portfolio" is exactly what the ⚠ above says this
+    function: two implementations of "refresh one portfolio" is exactly what the  above says this
     body exists to prevent.
 
-    ⚠⚠ `should_stop()` MAKES CANCEL REAL, AND IT REVERSES A PREVIOUS REFUSAL (2026-08-13). The job
+     `should_stop()` MAKES CANCEL REAL, AND IT REVERSES A PREVIOUS REFUSAL (2026-08-13). The job
     wrapper used to pass no such hook and documented why: stopping mid-cascade leaves the parent
     fresh against stale children, "the state this endpoint exists to avoid". The argument does not
     survive contact with the alternative — `cascade=False` is a supported mode that produces the
@@ -1613,7 +1613,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     clean one. Same hook, same shape and same `cancelled_at` key as `run_airs_vermogen_refresh_sync`
     — one vocabulary for cancellation, not two.
 
-    ⚠ `wait` IS FOR CALLERS THAT ARE PART OF A LARGER REFRESH, and `None` (refuse immediately) stays
+     `wait` IS FOR CALLERS THAT ARE PART OF A LARGER REFRESH, and `None` (refuse immediately) stays
     the default because a BUTTON must answer. A person who pressed Refresh and gets "another AIRS
     refresh is running" has learned something true and can press again; the same person watching a
     disabled button for the four minutes of a fleet scan has not. But `refresh_portfolio_fully` is
@@ -1624,13 +1624,13 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     if not _acquire_session(wait):
         return {"status": "busy", "message": "An AIRS refresh is already running", "portefeuille": portefeuille}
 
-    # ⚠⚠ THE SAME RELAY THE FLEET RUN USES — `_say` moves the bar, `_emit` narrates at the position
+    #  The same relay the fleet run uses — `_say` moves the bar, `_emit` narrates at the position
     # it left. This function used to own a private `_step` that only the four call sites below
     # reached, so everything INSIDE an account was silent: the toast read
     # "AITopSelectie OFF DYN — scanning AIRS reports" at 0% for the whole scan, which for a
     # nine-book cascade at five downloads apiece is minutes of one unchanging line.
     #
-    # ⚠ AND THE CAUSE WAS ONE MISSING ARGUMENT. `scan_one` already narrates every download the
+    #  And the cause was one missing argument. `scan_one` already narrates every download the
     # moment it lands (`on_report`, with per-report timings) and the fleet loop passes it; this
     # caller did not, so the work it shares with the fleet reported half as much.
     global _PROGRESS  # noqa: PLW0603 — see `_PROGRESS`: one run at a time, guarded by `_LOCK`
@@ -1640,7 +1640,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
     def _report(acct: str, report: str, status: str, detail: str = "") -> None:
         """One download's outcome, as it lands — the same shape the fleet emits.
 
-        ⚠ `report` IS ALREADY THE HUMAN LABEL ("Vermogensoverzicht"), not the `att`/`volk` code —
+         `report` IS ALREADY THE HUMAN LABEL ("Vermogensoverzicht"), not the `att`/`volk` code —
         `scan_one._step` passes `label` to its `_say`. Mapping it again would print the label
         unchanged for every report and look like it worked.
 
@@ -1651,18 +1651,18 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
               message=f"{acct} · {report}: {status}" + (f" — {detail}" if detail else ""))
 
     try:
-        # ⚠ BEFORE `dependent_accounts`, WHICH IS NOT FREE. It walks the certificate chain through
+        #  BEFORE `dependent_accounts`, WHICH IS NOT FREE. It walks the certificate chain through
         # `resolve_account_isins` per book — a lookup, but a lookup over up to nine accounts, and
         # it runs before the old first line was emitted.
         _say(0, 0, f"{portefeuille} — working out which books it is built from…")
         today = date.today()
         van, tot = f"{today.year}-01-01", today.isoformat()
 
-        # ⚠ THE SAME FUNCTION THE FLEET SCAN CALLS. This used to be a second, near-identical copy
+        #  The same function the fleet scan calls. This used to be a second, near-identical copy
         # of the four downloads — and the two had already drifted (only one recorded which reports
         # arrived). One body, so "refresh this row" and "refresh everything" cannot mean different
         # things.
-        # ⚠ THE TOTAL IS KNOWN BEFORE THE FIRST DOWNLOAD, so the bar is a real fraction from the
+        #  The total is known before the first download, so the bar is a real fraction from the
         # start rather than a spinner that suddenly acquires a denominator. `dependent_accounts`
         # is a lookup, not a scan.
         deps = list(dependent_accounts(portefeuille)) if cascade else []
@@ -1670,7 +1670,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
         _say(0, total, f"{portefeuille} — scanning AIRS reports"
                         + (f" (+{len(deps)} book{'s' if len(deps) != 1 else ''} it is built from)"
                            if deps else ""))
-        # ⚠ THE FIRST BOUNDARY, AND THE ONE THAT MATTERS MOST — it is where a misclick is undone.
+        #  The first boundary, and the one that matters most — it is where a misclick is undone.
         # Nothing has been downloaded or written yet, so stopping here is not a compromise at all:
         # the account is exactly as it was. `dependent_accounts` above is a lookup, not a scan.
         if should_stop is not None and should_stop():
@@ -1683,13 +1683,13 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
         _say(1, total, f"{portefeuille} — {res['holdings']} holdings, "
                         f"{', '.join(sorted(ok)) or 'no reports'}")
 
-        # ⚠ THE PER-ROW REFRESH RECORDS ITS VERDICT TOO — it is how an account short a report gets
+        #  The per-row refresh records its verdict too — it is how an account short a report gets
         # its badge cleared without waiting for the next full scan. `_MIN_ROSTER` does not apply:
         # this is a deliberate request for one named account, not a discovery whose size might mean
         # the scrape failed.
         _record_reports({portefeuille: ok}, datetime.now(timezone.utc).isoformat())
 
-        # ⚠ INSIDE THE SAME LOCK HOLD. `scan_one` deliberately does not take `_LOCK` (both callers
+        #  Inside the same lock hold. `scan_one` deliberately does not take `_LOCK` (both callers
         # already hold it), so the dependencies run on the session this call already owns. Taking
         # and releasing per account would let the fleet scan interleave halfway through a cascade
         # and leave the parent fresh against half-stale children.
@@ -1697,7 +1697,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
         cancelled_at: str | None = None
         stale_books: list[str] = []
         for i, dep in enumerate(deps, 1):
-            # ⚠ BEFORE THE ACCOUNT, NOT INSIDE IT, and `break` rather than `return` — the run still
+            #  Before the account, not inside it, and `break` rather than `return` — the run still
             # falls through to the result below and reports what it DID store. The same idiom the
             # fleet scan uses; abandoning here would lose the parent's own refresh, which is
             # already downloaded, stored, and the reason the button was pressed.
@@ -1714,7 +1714,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
                              dep, type(e).__name__, e)
                 cascaded.append({"portefeuille": dep, "status": "error",
                                  "errors": [f"{type(e).__name__}: {e}"]})
-                # ⚠ A FAILED CHILD IS NAMED ON THE BAR, not folded into the count. A parent
+                #  A failed child is named on the bar, not folded into the count. A parent
                 # refreshed against a book that did not scan is not fresh.
                 _say(i + 1, total, f"{dep} — FAILED ({type(e).__name__})")
                 continue
@@ -1738,7 +1738,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
                          ", ".join(c["portefeuille"] for c in cascaded))
 
         return {
-            # ⚠ CANCELLED OUTRANKS OK. The parent's own reports are stored and fresh, so `ok` would
+            #  Cancelled outranks ok. The parent's own reports are stored and fresh, so `ok` would
             # be defensible on its own terms and completely misleading: the books its look-through
             # figures are computed FROM were not re-read. One word for "we stopped", named the same
             # way the fleet scan names it.
@@ -1748,7 +1748,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
             # The books the cancel left behind — the reason the outcome cannot be read as clean.
             "stale_books": stale_books,
             "portefeuille": portefeuille,
-            # ⚠ The books BEHIND this one, each with its own outcome. A cascade that half-failed
+            #  The books BEHIND this one, each with its own outcome. A cascade that half-failed
             # must not read as a clean refresh — the parent's figures are only as fresh as the
             # child they are computed from.
             "cascaded": cascaded,
@@ -1767,7 +1767,7 @@ def refresh_one_portfolio(portefeuille: str, cascade: bool = True,
             "error_details": res["errors"],
         }
     finally:
-        # ⚠ CLEARED WITH THE LOCK — the same rule the fleet run follows. A sink left pointing
+        #  Cleared with the lock — the same rule the fleet run follows. A sink left pointing
         # at a finished job would put the NEXT refresh's lines on an already-green card.
         _PROGRESS = None
         _LOCK.release()

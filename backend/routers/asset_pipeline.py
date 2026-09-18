@@ -93,22 +93,22 @@ class AssetGridRow(BaseModel):
     # Benchmark universes this asset belongs to (SP500, ACWI, AEX, Leonteq …), from
     # `universe_asset_membership` via the `asset_grid` view.
     #
-    # ⚠ THESE ARE THE `universe` ROWS, NOT `asset_universe`. The latter is the saved liquidity
+    #  These are the `universe` ROWS, NOT `asset_universe`. The latter is the saved liquidity
     # screen this same page offers under "Universes" — a different table with a `universe_id`
     # column pointing at a different parent. Nothing here joins the two.
     #
-    # ⚠ DEFAULTS TO `[]`, NEVER None, matching the view's `COALESCE(..., '{}')`: "in no benchmark"
+    #  Defaults to `[]`, NEVER None, matching the view's `COALESCE(..., '{}')`: "in no benchmark"
     # is the normal case for most of the 16,613 rows and is an answer, not missing data.
     universes: list[str] = []
     # ── The company world, joined by ISIN in the view. All None for the ~14,000 asset rows with no
     #    `company` behind them (bonds, futures, most ETFs) — an answer, not a gap.
     #
-    # ⚠ `company_id` IS THE KEY `metric_data` HANGS OFF — every GuruFocus price, volume and
+    #  `company_id` IS THE KEY `metric_data` HANGS OFF — every GuruFocus price, volume and
     #    fundamental line. It is what lets a caller start from this grid and still reach the
     #    fundamentals, and it is the last dependency keeping the `company` table alive.
     company_id: int | None = None
     gf_company_name: str | None = None
-    # The EXCHANGE:TICKER halves of the GuruFocus symbol. ⚠ Not the same as `yahoo_symbol` —
+    # The EXCHANGE:TICKER halves of the GuruFocus symbol.  Not the same as `yahoo_symbol` —
     # separate id spaces joined only by ISIN, and GuruFocus may hold a different listing.
     gf_ticker: str | None = None
     gf_exchange: str | None = None
@@ -124,13 +124,13 @@ class AssetGridRow(BaseModel):
     # ── GuruFocus's OWN price/volume series (`metric_data`), aggregated in
     #    `company_price_coverage`. Refreshed by the price phase, which is the only writer.
     #
-    # ⚠⚠ THESE ARE A DIFFERENT VENDOR FROM `bars`/`price_from`/`price_to` ABOVE, WHICH ARE
+    #  These are a different vendor from `bars`/`price_from`/`price_to` ABOVE, WHICH ARE
     #    YAHOO'S. `/backtest` and `/schedule` price off GuruFocus; the AIRS portfolios and the
     #    asset benchmarks price off Yahoo. A row with 5,529 Yahoo bars says NOTHING about whether
     #    the momentum engine can price it — measured on SMIC, which had a full GuruFocus series
     #    throughout while its Yahoo row sat unresolved. Never merge the two into one "bars".
     #
-    # ⚠ `gf_price_to` IS A `target_date` (the trading day), not a write timestamp — `metric_data`
+    #  `gf_price_to` IS A `target_date` (the trading day), not a write timestamp — `metric_data`
     #    is append-only in `recorded_at` but NOT in `target_date`, since late-published closes are
     #    written under their true earlier date.
     gf_price_from: str | None = None
@@ -174,7 +174,7 @@ async def store_one(body: _StoreBody):
     """ADD one row by ISIN: resolve → upsert the analysis asset + execution → store the
     analysis series' close+volume.
 
-    ⚠ IT REFUSES TO TOUCH AN ISIN THAT IS ALREADY IN THE GRID, and that guard is not
+     IT REFUSES TO TOUCH AN ISIN THAT IS ALREADY IN THE GRID, and that guard is not
     politeness — it is the difference between adding a row and CORRUPTING one.
 
     `store_one` re-resolves from scratch, and resolution is not stable: it ranks Yahoo's
@@ -975,7 +975,7 @@ async def grid():
     from deps import supabase  # noqa: PLC0415
 
     def _q() -> dict:
-        # ⚠⚠ ONE STATEMENT FIRST, THE PAGER AS FALLBACK — and the reason is an outage, not a
+        #  One statement first, the pager as fallback — and the reason is an outage, not a
         # benchmark. Every page below re-materializes the whole view and then throws away the rows
         # before its offset, so each page's cost grows with the offset while the budget stays at
         # PostgREST's 8s role timeout: when `asset_grid` slowed down (migration `20260817010000`),
@@ -1124,14 +1124,14 @@ def _universe_members(supabase, p: UniverseParams) -> list[dict]:
 def ilike_pattern(term: str) -> str | None:
     """A safe PostgREST `ilike` pattern for a user's search term, or None if nothing is left.
 
-    ⚠⚠ IT IS A FILTER-INJECTION GUARD, NOT TIDYING. PostgREST's `or=` takes a COMMA-SEPARATED list
+     IT IS A FILTER-INJECTION GUARD, NOT TIDYING. PostgREST's `or=` takes a COMMA-SEPARATED list
     of filters wrapped in parentheses — `or=(isin.ilike.*x*,name.ilike.*x*)` — so a comma or a
     parenthesis inside the term does not search for that character, it ends one filter and starts
     another. A term like `a,bars.gt.0` would be read as a second condition. The characters are
     DROPPED rather than escaped: PostgREST has no escape for them inside `or=`, and a search box is
     not the place to invent one.
 
-    ⚠ `*` GOES TOO, for a different reason: it is PostgREST's own wildcard, so a term containing one
+     `*` GOES TOO, for a different reason: it is PostgREST's own wildcard, so a term containing one
     would quietly widen the search rather than look for an asterisk. Nobody searches for `*`.
 
     Pure, and tested — this is the one part of the endpoint where being wrong is a security
@@ -1166,18 +1166,18 @@ async def search_assets(
 ):
     """Type-ahead over the asset grid: a handful of PICKABLE instruments matching `q`.
 
-    ⚠⚠ IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every
+     IT EXISTS BECAUSE `/grid` IS 27.56 MB. That endpoint returns all 16,613 rows with every
     column — the right answer for a page whose whole job is that table, and an absurd one for a
     two-field picker that needs a name and an ISIN. Filtering 27 MB in the browser to show ten
     rows is the kind of thing that works on a laptop and not on a phone, and it would be paid on
     every visit to `/research-dashboard`.
 
-    ⚠ PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar
+     PICKABLE MEANS DRAWABLE. Only `status='ok'` rows with an `analysis_id` and at least one bar
     are offered: those are the ones a fundamentals view can actually render. Half the grid is
     bonds, unresolved ISINs and zero-bar rows — offering them would let someone pick a company and
     get an empty panel, which reads as a broken page rather than as an unpriceable instrument.
 
-    ⚠ THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than
+     THE LIMIT IS REPORTED, NOT SILENT. `truncated` tells the caller there are more matches than
     it is seeing, so a picker can say "keep typing" instead of implying the list is the answer.
     """
     from deps import supabase  # noqa: PLC0415
@@ -1194,7 +1194,7 @@ async def search_assets(
             .not_.is_("analysis_id", "null")
             .gt("bars", 0)
             .or_(f"isin.ilike.{pattern},name.ilike.{pattern},yahoo_symbol.ilike.{pattern}")
-            # ⚠ ORDERED BY BAR COUNT, NOT BY NAME. Searching "apple" should offer the Nasdaq line
+            #  Ordered by bar count, not by name. Searching "apple" should offer the Nasdaq line
             # before a thin foreign one, and history length is the same proxy the resolver already
             # ranks listings by — a name sort would put an obscure venue first as often as not.
             .order("bars", desc=True)

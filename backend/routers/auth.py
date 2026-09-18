@@ -14,7 +14,7 @@ The `_require_admin` helper checks app_metadata.role == 'admin' on the
 caller's JWT — set by the signup trigger (20260908090000_admin_signup_trigger.sql) or by
 PATCH /api/auth/users/{id}/role.
 
-⚠⚠ THERE IS NO `POST /api/auth/impersonate` ANY MORE, AND IT MUST NOT COME BACK (removed
+ THERE IS NO `POST /api/auth/impersonate` ANY MORE, AND IT MUST NOT COME BACK (removed
 2026-09-08, on request). It minted a REAL session for another user — `admin.generate_link`
 followed by `verify_otp` — which the frontend then installed with `setSession`. Three things made
 it worth deleting rather than guarding:
@@ -54,23 +54,23 @@ router = APIRouter(tags=["auth"])
 
 # SHA-256(lower(email)) hex of the hardcoded admin email.
 #
-# ⚠ TWO COPIES, CHANGED TOGETHER: this set and the LATEST migration that redefines
+#  Two copies, changed together: this set and the LATEST migration that redefines
 # `set_admin_role_on_signup()` — currently 20260908150000_single_hardcoded_admin.sql. Earlier
 # migrations still carry the OLD list and must not be edited: they record what already ran.
 # Pinned by tests/test_admin_email_hashes.py, which reads the newest definition.
 #
-# ⚠⚠ IT WENT FROM TWO ADDRESSES TO ONE (2026-09-08, on request): `5db5e759…` keeps the automatic
+#  It went from two addresses to one (2026-09-08, on request): `5db5e759…` keeps the automatic
 # grant, `9fe083c7…` was demoted to a plain user by that migration. Dropping the hash alone would
 # have done nothing — the row carried an EXPLICIT role, and `_resolve_role` prefers an explicit
-# role to this allowlist on purpose. ⚠ The cost is that there is now ONE admin, so the two-account
+# role to this allowlist on purpose.  The cost is that there is now ONE admin, so the two-account
 # 2FA recovery path (one admin resetting the other's authenticator) is gone.
 #
-# ⚠⚠ REFER TO THEM BY HASH PREFIX, NEVER BY ADDRESS. 20260527010000 moved to SHA-256 "so admin
+#  Refer to them by hash prefix, never by address. 20260527010000 moved to SHA-256 "so admin
 # emails no longer appear in source", and a comment naming the preimage hands that straight back —
 # which is what this one did until 2026-09-14. `tests/test_admin_email_hashes.py` now hashes every
 # email-shaped token under the source roots and fails if one lands in this set.
 #
-# ⚠⚠ THE FUNCTION WAS ATTACHED TO NOTHING UNTIL 20260908090000 — both earlier migrations
+#  The function was attached to nothing until 20260908090000 — both earlier migrations
 # create it and neither wrote CREATE TRIGGER, so a signup never set app_metadata.role and
 # only that migration's one-shot backfill had ever written it. The fallback below is what
 # kept the API answering correctly, which is also what hid it: the frontend reads
@@ -119,30 +119,30 @@ _TOKEN_CACHE_TTL = 60.0
 def _token_aal(token: str) -> str | None:
     """The session's Authenticator Assurance Level: 'aal2' once a second factor was used.
 
-    ⚠⚠ IT HAS TO COME OUT OF THE JWT, BECAUSE IT IS NOT ON THE USER. `supabase.auth.get_user()`
+     IT HAS TO COME OUT OF THE JWT, BECAUSE IT IS NOT ON THE USER. `supabase.auth.get_user()`
     returns the user record — id, email, app_metadata — and assurance is a property of the SESSION,
     not of the person: the same account is `aal1` in one browser and `aal2` in another. So the one
     call this module already makes cannot answer the question, and the claim has to be read.
 
-    ⚠ THE SIGNATURE IS DELIBERATELY NOT VERIFIED HERE, and that is safe for one specific reason:
+     THE SIGNATURE IS DELIBERATELY NOT VERIFIED HERE, and that is safe for one specific reason:
     `verify_token` has ALREADY handed this exact string to GoTrue and been told it is valid. This
     decode only asks what the token it just authenticated says about itself. Verifying again would
     need the project's JWT secret in this process — a second copy of a credential, to re-answer a
-    question already answered over the wire. ⚠ It is therefore only ever correct at THIS call site,
+    question already answered over the wire.  It is therefore only ever correct at THIS call site,
     after that check: decoding an unverified token anywhere else would trust its claims outright.
 
-    ⚠⚠ ON ITS OWN IT CANNOT TELL "SKIPPED THE FACTOR" FROM "HAS NO FACTOR" — measured on the live
+     ON ITS OWN IT CANNOT TELL "SKIPPED THE FACTOR" FROM "HAS NO FACTOR" — measured on the live
     stack, an account with no authenticator at all still gets `aal1`. See `_has_verified_factor`;
     the two are only a rule together.
 
-    ⚠ RETURNS None RATHER THAN A DEFAULT on anything unreadable. 'aal1' would be a guess that reads
+     RETURNS None RATHER THAN A DEFAULT on anything unreadable. 'aal1' would be a guess that reads
     as a fact, and the caller (`_auth_middleware`) decides what an unknown level means — which is
     where that decision belongs, since it is a policy about denial rather than about parsing.
     """
     try:
         claims = jwt.decode(token, options={"verify_signature": False})
     except Exception as e:
-        # ⚠ WARNING, NOT DEBUG. A token GoTrue accepted that we cannot parse means the two sides
+        #  Warning, not debug. A token GoTrue accepted that we cannot parse means the two sides
         # disagree about what a token is, which is worth seeing before it becomes a lockout.
         _log.warning("[auth] could not read aal from an accepted token: %s", e)
         return None
@@ -153,7 +153,7 @@ def _token_aal(token: str) -> str | None:
 def _has_verified_factor(user) -> bool:
     """Does this account have an authenticator it could have used?
 
-    ⚠⚠ THIS IS THE HALF `aal` DOES NOT CARRY, AND ASSUMING OTHERWISE WAS A LOCKOUT WAITING TO
+     THIS IS THE HALF `aal` DOES NOT CARRY, AND ASSUMING OTHERWISE WAS A LOCKOUT WAITING TO
     DEPLOY. The first cut of the gate refused any admin whose token said `aal1`, on the belief that
     an account with no factor would carry no `aal` claim at all. Measured against the live stack it
     does: a brand-new account with zero authenticators signs in and gets **`aal1`**. So that rule
@@ -163,18 +163,18 @@ def _has_verified_factor(user) -> bool:
     The honest test is `aal1` AND a verified factor exists, which is precisely what the browser's
     `getAuthenticatorAssuranceLevel().nextLevel === 'aal2'` means. Same rule, both sides.
 
-    ⚠ FREE. `verify_token` already holds the user object from the call it makes anyway; GoTrue puts
+     FREE. `verify_token` already holds the user object from the call it makes anyway; GoTrue puts
     the factors on it (absent → None, never an error). No extra round trip, and it is cached with
     the rest of the verdict.
 
-    ⚠ VERIFIED ONLY. An abandoned enrolment leaves an `unverified` factor behind (see
+     VERIFIED ONLY. An abandoned enrolment leaves an `unverified` factor behind (see
     `mfaFactors.unverifiedIds`), and counting one would lock somebody out with a half-set-up
     authenticator that can never produce a valid code.
     """
     try:
         return any(getattr(f, "status", None) == "verified" for f in (getattr(user, "factors", None) or []))
     except Exception as e:
-        # ⚠ FAIL OPEN, AND LOUDLY. Not knowing whether a factor exists is not evidence that one
+        #  Fail open, and loudly. Not knowing whether a factor exists is not evidence that one
         # was skipped — the same distinction `AuthBackendUnavailable` draws.
         _log.warning("[auth] could not read factors off the user object: %s", e)
         return False
@@ -252,7 +252,7 @@ def verify_token(authorization: str) -> dict | None:
         "email": email,
         "role": _resolve_role(role, email),
         "aal": _token_aal(token),
-        # ⚠ The other half of the MFA rule — see `_has_verified_factor`. Cached with the verdict
+        #  The other half of the MFA rule — see `_has_verified_factor`. Cached with the verdict
         # because it comes off the user object `get_user` already returned.
         "has_verified_factor": _has_verified_factor(user),
     }
@@ -326,11 +326,11 @@ class CreateUserRequest(BaseModel):
 def _user_detail() -> dict[str, dict]:
     """Per-user state the admin API does not return, keyed by user id. Best-effort.
 
-    ⚠⚠ ONE QUERY, NOT ONE CALL PER USER. `admin.mfa.list_factors` exists but is per-user, so the
+     ONE QUERY, NOT ONE CALL PER USER. `admin.mfa.list_factors` exists but is per-user, so the
     obvious version is N+1 round trips to GoTrue every time /users loads — fine at six users and
     quietly awful later. The `auth` schema answers all of it at once.
 
-    ⚠⚠ THE PASSWORD ITSELF IS NOT HERE AND MUST NOT BE, NOT EVEN AS A HASH. Asked for directly
+     THE PASSWORD ITSELF IS NOT HERE AND MUST NOT BE, NOT EVEN AS A HASH. Asked for directly
     (2026-09-08) and declined: a bcrypt hash is not a fact about a person, it is an OFFLINE
     CRACKING TARGET — put it on a screen and it lives in screenshots, browser history and the DOM
     of a page anyone shoulder-reading can see, and the only thing anybody can DO with it is attack
@@ -338,14 +338,14 @@ def _user_detail() -> dict[str, dict]:
     WHETHER a password is set — an invited user who never chose one still signs in by link, and
     that is the difference `has_password` reports.
 
-    ⚠ `banned_until` IS INCLUDED because Supabase's own dashboard can set it and nothing in this
+     `banned_until` IS INCLUDED because Supabase's own dashboard can set it and nothing in this
     app can, so an account locked there would otherwise look perfectly healthy here.
     """
     from common.pg import _db_url  # noqa: PLC0415
 
     url = _db_url()
     if not url:
-        # ⚠ NOT AN ERROR. The list still renders with everything the admin API knows; the extra
+        #  Not an error. The list still renders with everything the admin API knows; the extra
         # columns simply say "unknown" rather than taking the page down with them.
         return {}
     try:
@@ -376,7 +376,7 @@ def _user_detail() -> dict[str, dict]:
             "email_confirmed": bool(r[2]),
             "banned_until": str(r[3]) if r[3] else None,
             "mfa_verified": int(r[4]),
-            # ⚠ SURFACED SEPARATELY FROM `mfa_verified`. A pending factor protects NOTHING — it is
+            #  Surfaced separately from `mfa_verified`. A pending factor protects NOTHING — it is
             # an abandoned enrolment — so folding it into the count would report an unprotected
             # account as covered, which is the one direction this column must never be wrong in.
             "mfa_pending": int(r[5]),
@@ -409,7 +409,7 @@ async def list_users(authorization: str = Header(...)):
             "role": meta.get("role") or "user",
             "created_at": str(getattr(u, "created_at", "") or ""),
             "last_sign_in_at": str(getattr(u, "last_sign_in_at", "") or ""),
-            # ⚠ `None` WHERE UNKNOWN, NOT A ZERO. Without `SUPABASE_DB_URL` these cannot be read,
+            #  `None` WHERE UNKNOWN, NOT A ZERO. Without `SUPABASE_DB_URL` these cannot be read,
             # and "0 authenticators" is a claim about the account while `null` is a claim about
             # us — the client renders them differently on purpose.
             "mfa_verified": d.get("mfa_verified"),
@@ -493,13 +493,13 @@ async def set_user_password(user_id: str, req: SetPasswordRequest,
 async def reset_user_mfa(user_id: str, authorization: str = Header(...)):
     """Remove every authenticator on another user's account (admin only).
 
-    ⚠⚠ THIS IS THE ENTIRE RECOVERY STORY, BECAUSE SUPABASE TOTP HAS NO BACKUP CODES. A lost phone
+     THIS IS THE ENTIRE RECOVERY STORY, BECAUSE SUPABASE TOTP HAS NO BACKUP CODES. A lost phone
     is otherwise a permanent lockout: two-factor is mandatory (`_auth_middleware`), so the person
     cannot sign in to remove the factor, and the factor is what they cannot produce. Without this
     the fix was hand-written SQL against production auth tables, performed under pressure on the
     worst possible day.
 
-    ⚠⚠ IT REFUSES SELF-SERVICE, AND THAT IS NOT TIDINESS. `/account/security` makes removing your
+     IT REFUSES SELF-SERVICE, AND THAT IS NOT TIDINESS. `/account/security` makes removing your
     OWN authenticator require a current code — proof you still hold it — and an admin resetting
     themselves here would walk straight around that check. The result would be that a stolen
     `aal2` session could strip two-factor off the account and re-enrol on the thief's phone,
@@ -507,7 +507,7 @@ async def reset_user_mfa(user_id: str, authorization: str = Header(...)):
     is genuinely locked out cannot sign in to press this anyway. Their route back is a SECOND
     admin account, or `REQUIRE_MFA=0` on the host.
 
-    ⚠⚠ AND IT EVICTS THEIR SESSIONS, WHICH IS THE HALF THAT MAKES IT SAFE. Removing a factor does
+     AND IT EVICTS THEIR SESSIONS, WHICH IS THE HALF THAT MAKES IT SAFE. Removing a factor does
     not touch a session that already proved one: the `aal2` claim is in the issued token and the
     refresh keeps it. So a phone stolen WITH the app open would keep working after a "reset" — the
     exact scenario the button is pressed for. GoTrue exposes no admin logout (measured:
@@ -515,7 +515,7 @@ async def reset_user_mfa(user_id: str, authorization: str = Header(...)):
     which is what GoTrue itself does on sign-out. Verified: the refresh token then answers
     `refresh_token_not_found`.
 
-    ⚠ EVICTION IS BEST-EFFORT AND SAID SO IN THE RESPONSE. It needs `SUPABASE_DB_URL`; without it
+     EVICTION IS BEST-EFFORT AND SAID SO IN THE RESPONSE. It needs `SUPABASE_DB_URL`; without it
     the factors still go — which is the ask — and the caller is told the sessions did not. Failing
     the whole reset because the optional half is unavailable would leave somebody locked out to
     protect them from a stale session.
@@ -531,7 +531,7 @@ async def reset_user_mfa(user_id: str, authorization: str = Header(...)):
         listed = supabase.auth.admin.mfa.list_factors({"user_id": user_id})
     except Exception as e:
         raise HTTPException(500, f"Could not list factors: {e}")
-    # ⚠⚠ IT RETURNS A PLAIN LIST, NOT AN OBJECT WITH `.factors` (measured against supabase-py on
+    #  It returns a plain list, not an object with `.factors` (measured against supabase-py on
     # the live stack). The obvious `listed.factors` reads as None, the loop below never runs, and
     # the endpoint answers `{"ok": true, "factors_removed": 0}` — a SUCCESS that removed nothing,
     # for a person who has just been told their access is restored. It shipped that way for one
@@ -550,7 +550,7 @@ async def reset_user_mfa(user_id: str, authorization: str = Header(...)):
             raise HTTPException(500, f"Could not remove factor {fid}: {e}")
 
     sessions_cleared = _evict_sessions(user_id)
-    # ⚠ WARNING, NOT INFO. This is one admin removing another person's second factor — the single
+    #  Warning, not info. This is one admin removing another person's second factor — the single
     # most security-relevant thing this router does, and the line somebody will go looking for.
     _log.warning(
         "[auth] %s reset two-factor for user %s — %d factor(s) removed, sessions cleared: %s",
@@ -584,7 +584,7 @@ def _evict_sessions(user_id: str) -> bool:
             conn.commit()
         return True
     except Exception as e:
-        # ⚠ NOT FATAL. The factors are already gone, which is what was asked for; reporting
+        #  Not fatal. The factors are already gone, which is what was asked for; reporting
         # failure now would suggest nothing happened.
         _log.warning("[auth] could not evict sessions for %s: %s", user_id, e)
         return False

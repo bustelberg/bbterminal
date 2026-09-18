@@ -5,7 +5,7 @@
  * Single source of truth — previously each component (33+ files) declared its own copy of this
  * same line. Import from here so the fallback can ever be changed in exactly one place.
  *
- * ⚠ A DEPLOYED PAGE MUST NEVER FALL BACK TO LOCALHOST, AND IT USED TO. `NEXT_PUBLIC_*` is INLINED
+ *  A DEPLOYED PAGE MUST NEVER FALL BACK TO LOCALHOST, AND IT USED TO. `NEXT_PUBLIC_*` is INLINED
  * AT BUILD TIME, so a Vercel build with the variable unset baked `http://localhost:8000` into
  * every call — and the browser then asked the VISITOR'S OWN MACHINE for the data. Measured in
  * production 2026-07-30: Chrome showed real users "Access other apps and services on this device"

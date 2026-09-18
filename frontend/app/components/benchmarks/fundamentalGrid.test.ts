@@ -19,7 +19,7 @@ describe('periodAxes', () => {
     expect(a.quartersByYear['2024']).toEqual([1]);
   });
 
-  it('⚠ offers a quarter ONLY for the year that has it — the current year is partial', () => {
+  it(' offers a quarter ONLY for the year that has it — the current year is partial', () => {
     // A TTM point needs four quarters behind it, and the live year has only what has been filed.
     // A global [Q1..Q4] axis would offer positions resolving to no data, which reads as "the index
     // has nothing here" rather than "that quarter has not happened".
@@ -41,7 +41,7 @@ describe('periodKey / periodTitle', () => {
     expect(periodKey('2024', 3)).toBe('2024-Q3');
   });
 
-  it('⚠ NAMES A QUARTER POSITION AS TTM, because the figure under it is twelve months', () => {
+  it(' NAMES A QUARTER POSITION AS TTM, because the figure under it is twelve months', () => {
     // Labelled "Q3", a 12-month revenue reads as three months of it — ~4x what the label implies,
     // with nothing on screen to contradict it.
     expect(periodTitle('2024-Q3')).toBe('TTM → Q3 2024');
@@ -60,7 +60,7 @@ describe('aggregateRow', () => {
     expect(aggregateRow(rows, '2024', columns).revenue).toEqual({ value: 150, contributors: 2 });
   });
 
-  it('⚠ CAP-WEIGHTS A RATE INSTEAD OF SUMMING IT', () => {
+  it(' CAP-WEIGHTS A RATE INSTEAD OF SUMMING IT', () => {
     // Summed, ROIC would read 30% here and ~5,000% across a real index — and the cell would print
     // it with a % sign, looking like a number rather than a category error.
     const a = aggregateRow(rows, '2024', columns).roic;
@@ -68,7 +68,7 @@ describe('aggregateRow', () => {
     expect(a.value).toBeCloseTo(19, 10);
   });
 
-  it('⚠ a weighted mean renormalises over the rows that HAVE the metric, and counts them', () => {
+  it(' a weighted mean renormalises over the rows that HAVE the metric, and counts them', () => {
     const partial = [
       row('Big', { '2024': { market_cap: 900, roic: 20 } }),
       row('NoRoic', { '2024': { market_cap: 100 } }),
@@ -90,10 +90,10 @@ describe('aggregateRow', () => {
     expect(aggregateRow(rows, '2019', columns)).toEqual({});
   });
 
-  it('⚠ REFUSES `none` — a share count and a per-share amount have no index-level total', () => {
+  it(' REFUSES `none` — a share count and a per-share amount have no index-level total', () => {
     // "The S&P 500's share count" is not a quantity, and 500 companies' dividends-per-share summed
     // is a well-formed number with no referent. The per-company cells are true; the index cell is
-    // a dash. ⚠ The refusal lives in aggregateRow, not the renderer, so a later caller that reads
+    // a dash.  The refusal lives in aggregateRow, not the renderer, so a later caller that reads
     // only the values cannot total it by accident.
     const withNone = [
       ...columns,
@@ -133,7 +133,7 @@ describe('orderedIds — the row order must not move when the sliders do', () =>
     [3, 'Steady', { 2018: { market_cap: 100 }, 2024: { market_cap: 100 } }],
   ]);
 
-  it('⚠ THE ORDER IS THE SAME WHATEVER PERIOD IS ON SCREEN', () => {
+  it(' THE ORDER IS THE SAME WHATEVER PERIOD IS ON SCREEN', () => {
     // The anchor is fixed; the period the reader is looking at is not an input at all. Ranking by
     // the visible period would give [1,3,2] on 2024 and [2,3,1] on 2018 — a table that reshuffles
     // under the cursor, which makes tracking one company across periods impossible.
@@ -145,7 +145,7 @@ describe('orderedIds — the row order must not move when the sliders do', () =>
     expect(orderedIds(ids(world), world, { ...opts, anchor: '2018' })).toEqual([2, 3, 1]);
   });
 
-  it('⚠ KEEPS A ROW THE CURRENT BASIS CANNOT ANSWER FOR — identity and ranking are separate', () => {
+  it(' KEEPS A ROW THE CURRENT BASIS CANNOT ANSWER FOR — identity and ranking are separate', () => {
     // A company with fewer than four quarters has annual lines and no TTM point. Rendering only
     // the current payload's rows would drop it out of the middle of the table on the way to Q3 and
     // put it back on the way home; here it holds its place and renders as dashes.
@@ -189,7 +189,7 @@ describe('orderedIds — the row order must not move when the sliders do', () =>
 describe('gridWidths — the geometry must not depend on the data', () => {
   const labels = ['Revenue', 'Non-current liabilities', 'ROIC %'];
 
-  it('⚠ TAKES ONLY THE HEADINGS AND THE ROLE — the period and the rows are not inputs', () => {
+  it(' TAKES ONLY THE HEADINGS AND THE ROLE — the period and the rows are not inputs', () => {
     // This is the whole fix. An auto-layout table sized its columns from cell CONTENT, so 2018
     // (fewer, shorter figures than 2025) produced narrower columns and headings that wrapped to
     // two lines — the header bar rebuilding as the slider moved. Nothing here can see a value.
@@ -208,20 +208,20 @@ describe('gridWidths — the geometry must not depend on the data', () => {
       .toBeGreaterThan(measureWidthRem('Revenue'));
   });
 
-  it('⚠ floors short headings at the widest FIGURE a cell can hold', () => {
+  it(' floors short headings at the widest FIGURE a cell can hold', () => {
     // "€181.2bn", "24,514M" and "133.0%" are all inside ten characters, so a heading shorter than
     // that must still be given ten — otherwise `Capex` gets a column its own numbers overflow.
     expect(measureWidthRem('Capex')).toBe(measureWidthRem('ROIC %'));
     expect(measureWidthRem('Capex')).toBe(COL_CHAR_REM * COL_MIN_CHARS + COL_PAD_REM);
   });
 
-  it('⚠ EMITS ONE WIDTH PER RENDERED COLUMN, and the Fetch column is admin-only', () => {
+  it(' EMITS ONE WIDTH PER RENDERED COLUMN, and the Fetch column is admin-only', () => {
     // A `<col>` list out of step with the columns does not fail loudly — every column after the
     // gap silently takes its neighbour's width, which looks like a styling bug rather than an
     // off-by-one. Admin: # · Company · Fetch · Exch · Ticker · Ccy · Cap · Weight. User: the same
     // without Fetch, because the ingest it fires 403s for them.
     //
-    // ⚠ THESE COUNTS ARE 8/7 SINCE **Exch** WAS ADDED, and this test held 7/6 for a while after —
+    //  These counts are 8/7 SINCE **Exch** WAS ADDED, and this test held 7/6 for a while after —
     // failing in the one direction that is only annoying rather than dangerous. Exchange is the
     // other half of the identifier (GuruFocus addresses a stock as `EXCHANGE:TICKER`), so it is a
     // real column and the source is what is right here.
@@ -231,7 +231,7 @@ describe('gridWidths — the geometry must not depend on the data', () => {
     expect(fixedWidthsRem(false)).toHaveLength(7);
   });
 
-  it('⚠ Fetch is inserted AFTER Company, so the sticky pair keeps its widths', () => {
+  it(' Fetch is inserted AFTER Company, so the sticky pair keeps its widths', () => {
     // It sits between Company and Ticker. Inserting it before Company would move the `#`/Company
     // pair the sticky offsets are pinned to, and the name column would land on top of the row
     // numbers.
@@ -241,7 +241,7 @@ describe('gridWidths — the geometry must not depend on the data', () => {
     expect(admin.slice(3)).toEqual(user.slice(2));          // everything after Fetch unchanged
   });
 
-  it('⚠ the `#` width IS the sticky offset the name column is pinned at', () => {
+  it(' the `#` width IS the sticky offset the name column is pinned at', () => {
     // Both columns pin when the table scrolls sideways. `Company` carries `left-[3rem]`, so if
     // this width ever changes without that class changing with it, the name slides over the row
     // numbers and hides them — a silent overlap, not a broken layout.
@@ -273,7 +273,7 @@ describe('weightPct', () => {
     expect(weightPct(row('B', { '2024': {} }), '2024', 1000)).toBeNull();
   });
 
-  it('⚠ the priced rows sum to 100% — the denominator is the AVAILABLE caps, not the index', () => {
+  it(' the priced rows sum to 100% — the denominator is the AVAILABLE caps, not the index', () => {
     // The defining property of this column as specified: cap ÷ Σ available caps. A constituent we
     // cannot price does not dilute anyone, it inflates everybody else pro rata — which is exactly
     // why the header names it a share of the Total row rather than the index's weight.
@@ -288,11 +288,11 @@ describe('weightPct', () => {
       .reduce((s, r) => s + (weightPct(r, '2024', total) ?? 0), 0);
     expect(sum).toBeCloseTo(100, 10);
     expect(weightPct(priced[0], '2024', total)).toBeCloseTo(60, 10);
-    // ⚠ The unpriced row is NULL, never 0 — a 0% would read as a real but negligible holding.
+    //  The unpriced row is NULL, never 0 — a 0% would read as a real but negligible holding.
     expect(weightPct(unpriced, '2024', total)).toBeNull();
   });
 
-  it('⚠ reads the SELECTED period’s cap, never the latest one', () => {
+  it(' reads the SELECTED period’s cap, never the latest one', () => {
     // Weighting an old cross-section by today's cap is the look-ahead bias the whole grid exists
     // to avoid: a company that tripled would retroactively get three times the index share.
     const r = row('A', { '2018': { market_cap: 100 }, '2024': { market_cap: 300 } });
@@ -302,7 +302,7 @@ describe('weightPct', () => {
 });
 
 describe('fmtMillions / fmtCell', () => {
-  it('⚠ treats the input as MILLIONS — 181,171 is €181.2bn, not €181,171', () => {
+  it(' treats the input as MILLIONS — 181,171 is €181.2bn, not €181,171', () => {
     expect(fmtMillions(181_171)).toBe('€181.2bn');
     expect(fmtMillions(4_130_734)).toBe('€4.13tn');
     expect(fmtMillions(842)).toBe('€842M');
@@ -340,12 +340,12 @@ describe('cellState', () => {
   });
 
   it('says NO DATA when the row IS fetchable and simply has not been', () => {
-    // ⚠ The distinction that matters: this one a Fetch fixes, the one above it never will.
+    //  The distinction that matters: this one a Fetch fixes, the one above it never will.
     expect(cellState(null, 'percent', null)).toEqual({ kind: 'missing' });
     expect(cellState(undefined, 'percent', undefined)).toEqual({ kind: 'missing' });
   });
 
-  it('⚠ lets a REAL FIGURE win over the unavailable flag', () => {
+  it(' lets a REAL FIGURE win over the unavailable flag', () => {
     // A row can be flagged unavailable and still carry figures fetched before its exchange fell
     // out of coverage. Badging over a number we actually hold would hide real data behind a label
     // that is true of the row's FUTURE, not of this cell's contents.
@@ -376,13 +376,13 @@ describe('orderedIds — sorting the identity columns as text', () => {
   const opts = { anchor: '2025' as never, dir: 'asc' as const };
 
   it('sorts case-insensitively, not by code point', () => {
-    // ⚠ A raw `<` files every lower-case name after every upper-case one, so "adidas" would land
+    //  A raw `<` files every lower-case name after every upper-case one, so "adidas" would land
     // last — an alphabet nobody reading a European index would recognise.
     const ids = orderedIds(identity, order, { ...opts, sortKey: 'name' });
     expect(ids.slice(0, 3)).toEqual([1, 3, 2]);   // adidas, Aegon, ASML
   });
 
-  it('⚠ puts a MISSING name last in BOTH directions', () => {
+  it(' puts a MISSING name last in BOTH directions', () => {
     // Same rule the numeric sort already had: a company with no ticker on file is not
     // alphabetically first, and heading the list says it is.
     expect(orderedIds(identity, order, { ...opts, sortKey: 'name' }).at(-1)).toBe(4);
@@ -402,7 +402,7 @@ describe('orderedIds — sorting the identity columns as text', () => {
       .toEqual([2, 3, 1]);
   });
 
-  it('⚠ reads names from IDENTITY, not from the anchor period', () => {
+  it(' reads names from IDENTITY, not from the anchor period', () => {
     // `order` is the anchor period's payload; a name is not a property of a period. Reading it
     // there would drop every company absent from that period to the bottom of an alphabetical
     // sort — a company with a name, sorted as though it had none.
@@ -426,7 +426,7 @@ describe('orderedIds — sorting the identity columns as text', () => {
 
 describe('the sorted column is monotonic in the period on screen', () => {
   /**
-   * ⚠⚠ THE BUG THIS PINS, AS REPORTED: sorting ACWI by Weight on an early year gave NVIDIA 0.18%,
+   *  The bug this pins, as reported: sorting ACWI by Weight on an early year gave NVIDIA 0.18%,
    * then Microsoft 2.11%, then Walmart 0.57%. Those three ARE in descending order — of TODAY's cap,
    * which is what the sort ranked on, while the cells showed the selected year. A sort that ranks
    * on a period the reader is not looking at is indistinguishable from no sort at all.
@@ -451,7 +451,7 @@ describe('the sorted column is monotonic in the period on screen', () => {
     expect(on2025).toEqual([1, 2, 3]);            // NVIDIA, Microsoft, Walmart — 2025's order
   });
 
-  it('⚠ the values in the sorted column come out monotonic — the property that was broken', () => {
+  it(' the values in the sorted column come out monotonic — the property that was broken', () => {
     for (const period of ['2015', '2025'] as const) {
       const ids = orderedIds(rows, rows, { anchor: period as never, sortKey: 'market_cap', dir: 'desc' });
       const caps = ids.map((id) => capOf(rows.get(id)!, period as never)!);

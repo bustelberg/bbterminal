@@ -88,7 +88,7 @@ export default function SavedPortfoliosSection({
                           </td>
                           <td className="py-1.5 px-2 text-right font-mono text-fg-muted">{h.target_pct.toFixed(0)}%</td>
                           <td className={`py-1.5 px-2 text-right font-mono ${h.breached ? 'text-warn-400 font-medium' : 'text-fg-strong'}`}>
-                            {h.current_pct.toFixed(1)}%{h.breached ? ' ⚠' : ''}
+                            {h.current_pct.toFixed(1)}%{h.breached ? ' ' : ''}
                           </td>
                           <td className="py-1.5 px-2 text-right font-mono text-fg-subtle">±{h.band_pct.toFixed(0)}%</td>
                           <td className={`py-1.5 px-2 text-right font-mono ${toneOf(h.return_since_inception_pct)}`}>{pct(h.return_since_inception_pct)}</td>
@@ -97,7 +97,7 @@ export default function SavedPortfoliosSection({
                     </tbody>
                   </table>
                   <p className="text-xs text-fg-subtle mt-2">
-                    Weights drifted from the last rebalance through {state.as_of ?? 'the latest data'}; a holding is flagged ⚠ when outside its band.
+                    Weights drifted from the last rebalance through {state.as_of ?? 'the latest data'}; a holding is flagged  when outside its band.
                     <strong className="text-fg-soft"> Return ↗</strong>{' '}is each sleeve&apos;s own gain over the since-inception window — cross-check it against the strategy / ETF&apos;s actual price move to verify the prices used.
                   </p>
                 </div>

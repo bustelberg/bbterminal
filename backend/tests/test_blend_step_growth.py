@@ -1,6 +1,6 @@
 """WHAT `step_growth` STILL REFUSES, NOW THAT THE TWO MAGNITUDE HEURISTICS ARE GONE.
 
-⚠⚠⚠ BOTH WERE REMOVED ON 2026-09-04, ON REQUEST — `_MIN_STEP_BASE_FRACTION` (a member's anchor under
+ BOTH WERE REMOVED ON 2026-09-04, ON REQUEST — `_MIN_STEP_BASE_FRACTION` (a member's anchor under
 10% of its own median) and `_MAX_STEP_GROWTH` (a step over 100x). What is left is arithmetic: a
 ratio needs a positive divisor, and an index that is a product of (1 + g) cannot carry a term below
 −1. The evidence behind both constants is preserved in `_fundamental_blend`'s constant block and in
@@ -18,7 +18,7 @@ WHY THEY WENT, MEASURED THE DAY THEY DID (ACWI's five annual lines):
       disagreed on exactly the members sitting near it: ACWI FCF/share 18.85% against 18.90%, traced
       to Industrivärden's real 1.087 -> 16.18 recovery out of a one-year trough.
 
-⚠ THE ORIGINAL INCIDENT, KEPT BECAUSE THE FLOOR IS WHAT ACTUALLY ANSWERS IT. Measured 2026-08-13 on
+ THE ORIGINAL INCIDENT, KEPT BECAUSE THE FLOOR IS WHAT ACTUALLY ANSWERS IT. Measured 2026-08-13 on
 the AEX FCF/share index: Prosus's 0.0090 base (a holding company hovering around break-even) took
 its −0.24 next figure to −2,700% growth at a 26% index weight, and the level to −1,456 — invisible,
 because a LOG axis simply does not draw a negative point and `connectNulls` runs a confident line
@@ -54,19 +54,19 @@ class TestStepGrowthIsTheOneRule:
         assert step_growth(-3.0, 5.0) is None
 
     def test_it_is_floored_at_minus_one_hundred_percent(self):
-        """⚠ BELOW ZERO THERE IS NO SCALE. An index is a product of (1 + g): a term under −1 does
+        """ BELOW ZERO THERE IS NO SCALE. An index is a product of (1 + g): a term under −1 does
         not make it small, it makes it NEGATIVE — and a negative index is not a low reading."""
         assert step_growth(2.0, -1.0) == -1.0
         assert step_growth(2.0, -400.0) == -1.0
 
 
 class TestAOneHoldingBookIsItsCompany:
-    """⚠⚠ THE `Tables` TAB MUST SAY WHAT `Graphs` SAYS. The Fundamental modal opens one company as
+    """ THE `Tables` TAB MUST SAY WHAT `Graphs` SAYS. The Fundamental modal opens one company as
     `{holdings:[{isin, weight:1}]}` — `Graphs` plots the filed figures directly, `Tables` runs the
     same figures through this blend — so with one member the level has to come out at exactly
     `100 x v(p)/v(base)`, or one modal answers one question twice.
 
-    ⚠ THIS USED TO NEED A SPECIAL CASE AND NO LONGER DOES. The materiality bar compared each
+     THIS USED TO NEED A SPECIAL CASE AND NO LONGER DOES. The materiality bar compared each
     member's rebased base (100) against `0.10 x median|rebased|`, which fires on ANY member that
     grew more than ~10x from its first period to its median one — growth, not a corrupt divisor.
     Measured 2026-09-03 on NVIDIA as a one-holding book: `price_ps` 13 periods, bar 271 -> ONE point
@@ -86,7 +86,7 @@ class TestAOneHoldingBookIsItsCompany:
     PRICE_CODE = "annuals__Per Share Data__Month End Stock Price"
 
     def _nvda_line(self) -> dict[str, float]:
-        """⚠ KEYED BY THE FISCAL YEAR, which is what `year_bucket` hands back — NVIDIA files at the
+        """ KEYED BY THE FISCAL YEAR, which is what `year_bucket` hands back — NVIDIA files at the
         end of January, so `2015-01-31` is period `2015`."""
         pts = blend_series([_member(100.0, dict(self.NVDA_PRICE))], self.PRICE_CODE)["points"]
         return {p["period"]: p["value"] for p in pts}
@@ -97,7 +97,7 @@ class TestAOneHoldingBookIsItsCompany:
         assert len(line) == len(self.NVDA_PRICE), sorted(line)
 
     def test_and_the_line_IS_the_filed_series_so_the_two_tabs_agree(self):
-        """⚠ THE WHOLE POINT. With one member the chain has nothing to blend, so the level must be
+        """ THE WHOLE POINT. With one member the chain has nothing to blend, so the level must be
         exactly `100 x v(p)/v(base)` — the series the `Graphs` tab plots directly. Anything else is
         an artefact of running a one-company book through machinery built for an index."""
         line = self._nvda_line()
@@ -106,7 +106,7 @@ class TestAOneHoldingBookIsItsCompany:
             assert line[date[:4]] == pytest.approx(100.0 * filed / base, rel=1e-6), date
 
     def test_so_the_ten_year_cagr_is_the_companys_own(self):
-        """⚠ THE ROW THE READER SEES. A CAGR off this line and one off the filed figures are the
+        """ THE ROW THE READER SEES. A CAGR off this line and one off the filed figures are the
         same number, because the line IS the filed figures — which is what "the Tables tab uses the
         same underlying data as Graphs" has to mean to be checkable."""
         line = self._nvda_line()
@@ -120,7 +120,7 @@ class TestTheIndexCannotBeFlippedByOneHolding:
         """Nineteen steady names and one Prosus — the AEX's shape, minimised."""
         steady = {"2020-12-31": 1.00, "2021-12-31": 1.10, "2022-12-31": 1.21}
         members = [_member(4.0, dict(steady)) for _ in range(19)]
-        # ⚠ POSITIVE, TINY, THEN NEGATIVE. Every guard the old code had passes this.
+        #  Positive, tiny, then negative. Every guard the old code had passes this.
         members.append(_member(24.0, {"2020-12-31": 0.10, "2021-12-31": 0.009,
                                       "2022-12-31": -0.24}))
         return members
@@ -165,7 +165,7 @@ class TestNothingElseMoved:
 
 
 class TestAnImplausibleResultIsNoLongerRefused:
-    """⚠⚠⚠ THE CEILING WAS REMOVED ON 2026-09-04, ON REQUEST — this class is kept as the record of
+    """ THE CEILING WAS REMOVED ON 2026-09-04, ON REQUEST — this class is kept as the record of
     what it caught, so the evidence survives the rule. A vendor scale error — a per-share figure
     delivered in the wrong unit — now goes through as growth, and the chain multiplies it by the
     member's weight with no bound.
@@ -179,7 +179,7 @@ class TestAnImplausibleResultIsNoLongerRefused:
     """
 
     def test_mitsubishi_heavy_now_reaches_the_line(self):
-        """⚠⚠ IT IS REPORTED, NOT REFUSED — the ceiling was removed on 2026-09-04, on request, with
+        """ IT IS REPORTED, NOT REFUSED — the ceiling was removed on 2026-09-04, on request, with
         `_MIN_STEP_BASE_FRACTION`. Almost certainly a vendor scale error, and it now shows up as an
         absurd number on the chart rather than as a member that silently sat out one interval. That
         is the agreed trade: a figure is reported as filed, and catching THIS belongs in a
@@ -190,7 +190,7 @@ class TestAnImplausibleResultIsNoLongerRefused:
         assert step_growth(172.97, 108415.57) == pytest.approx(625.788, abs=0.01)
 
     def test_the_largest_REAL_step_survives(self):
-        """⚠ Bank of America 2008->2009, +3,818%, recovering from the crisis. A ceiling that deletes
+        """ Bank of America 2008->2009, +3,818%, recovering from the crisis. A ceiling that deletes
         this is deleting history, which is why the bar was read off the distribution rather than
         picked to fit the two bad cells."""
         assert step_growth(0.42, 16.50) == pytest.approx(38.286, abs=0.01)
@@ -208,17 +208,17 @@ class TestAnImplausibleResultIsNoLongerRefused:
         assert step_growth(1.0, 1e6) == pytest.approx(999999.0)
 
     def test_it_is_one_sided(self):
-        """⚠ There is no matching "too negative" case: the floor at −100% is already the most a
+        """ There is no matching "too negative" case: the floor at −100% is already the most a
         level can lose, so the downside was never unbounded.
 
-        ⚠ AND THE STEP BACK DOWN OFF A CORRUPT VALUE IS **NOT** CLAMPED — it is −99.74%, a real
+         AND THE STEP BACK DOWN OFF A CORRUPT VALUE IS **NOT** CLAMPED — it is −99.74%, a real
         number just short of the floor. That is the residual this ceiling does not fix: refusing the
         step INTO a bad value leaves the value usable as the next step's base. Small here (the
         weight is 0.07%), and named so nobody reads the floor as covering it."""
         assert step_growth(86214.52, 226.63) == pytest.approx(-0.99737, abs=1e-5)
 
     def test_the_upside_is_never_capped(self):
-        """⚠ IT WAS NEVER CAPPED, ONLY REFUSED, AND NOW IT IS NEITHER. A capped step would be a
+        """ IT WAS NEVER CAPPED, ONLY REFUSED, AND NOW IT IS NEITHER. A capped step would be a
         growth rate nobody reported — that principle survives the ceiling's removal, which is why
         an enormous filed step comes through at its filed size rather than clamped to some
         maximum."""

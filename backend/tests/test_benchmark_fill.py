@@ -10,7 +10,7 @@ Three different faults, one symptom ("0 —"), and three different remedies: ing
 constituents, backfill their caps, build the universe. The panel could not distinguish them, so
 the classifier does — and it is pure, which is what makes it testable without a database.
 
-⚠ THE BUCKET THAT MATTERS MOST IS `needs_cap`. Such a constituent is resolved, priced and looks
+ THE BUCKET THAT MATTERS MOST IS `needs_cap`. Such a constituent is resolved, priced and looks
 entirely healthy in the asset grid; it just weighs nothing, so it silently contributes zero to a
 cap-weighted index. Counting it as `usable` would report full coverage over an index missing that
 name — the same shape of lie as renormalising a portfolio over holdings it could not price.
@@ -45,7 +45,7 @@ class TestTheFourStates:
         assert out["needs_resolve"] == ["US1"]
 
     def test_zero_bars_needs_resolving(self):
-        """⚠ A ZERO-BAR RESOLUTION IS NOT A RESOLUTION — the ten Leonteq products that all mapped
+        """ A ZERO-BAR RESOLUTION IS NOT A RESOLUTION — the ten Leonteq products that all mapped
         to one empty German symbol. It cannot price an index either."""
         out = _classify([_co(1, "US1")], {"US1": _g("US1", bars=0)})
         assert out["needs_resolve"] == ["US1"]
@@ -89,7 +89,7 @@ class TestTheBucketsPartitionTheUniverse:
 
 
 class TestTheCapConversionIsNotReDerived:
-    """⚠ A MARKET CAP IS NOT A PRICE, AND THE MINOR-UNIT RULE IS THE OPPOSITE ONE.
+    """ A MARKET CAP IS NOT A PRICE, AND THE MINOR-UNIT RULE IS THE OPPOSITE ONE.
 
     Yahoo quotes a London listing in PENCE but reports its `marketCap` in POUNDS — same payload,
     same `currency: "GBp"`. Asking `fx_to_eur("GBp")` for a cap divides an already-major figure by
@@ -114,7 +114,7 @@ class TestTheCapConversionIsNotReDerived:
 
 
 class TestResolutionGoesThroughTheQueuesOwnSlice:
-    """⚠ ONE YAHOO CONSUMER. An overloaded caller gets an EMPTY result, not a 429, and an empty
+    """ ONE YAHOO CONSUMER. An overloaded caller gets an EMPTY result, not a 429, and an empty
     candidate set is how a constituent lands on a thin foreign listing. Step 1 may only hand work
     to the queue and run the queue's OWN slice (`_drain_now`) — never a resolver of its own."""
 
@@ -131,7 +131,7 @@ class TestResolutionGoesThroughTheQueuesOwnSlice:
 
 
 class TestResetIsOnlyOfferedWhereRefreshCanUndoIt:
-    """⚠ RESET EXISTS SO REFRESH CAN BE WATCHED REBUILDING — WHICH IS A PROMISE ABOUT THE LABEL.
+    """ RESET EXISTS SO REFRESH CAN BE WATCHED REBUILDING — WHICH IS A PROMISE ABOUT THE LABEL.
 
     Refresh's only route back is `_build_universe`. Offering Reset for a label it cannot
     rebuild is a one-way door behind a button whose whole point is reversibility, so the guard and
@@ -164,7 +164,7 @@ class TestResetIsOnlyOfferedWhereRefreshCanUndoIt:
         assert "SP500" in str(e.value)
 
     def test_sp500_is_rebuilt_without_being_registered_as_a_template(self):
-        """⚠ Registering it would stamp `template_key` on its universe row, and the /sp500 page's
+        """ Registering it would stamp `template_key` on its universe row, and the /sp500 page's
         own list excludes those — the index would vanish from its page as a side effect."""
         from index_universe.templates import TEMPLATES
         from routers._benchmark_fill import rebuildable
@@ -182,7 +182,7 @@ class TestResetIsOnlyOfferedWhereRefreshCanUndoIt:
         assert "rebuildable(" in inspect.getsource(m._build_universe)
 
     def test_the_sp500_rebuild_resolves_only_the_stored_month(self):
-        """⚠ The reconstruction walks back to 2000 — 852 tickers, 286 with no company row, each an
+        """ The reconstruction walks back to 2000 — 852 tickers, 286 with no company row, each an
         OpenFIGI lookup for a name delisted a decade ago. `store_index_membership` keeps only the
         newest month anyway, so resolving the history buys nothing and costs the slowest part."""
         import inspect
@@ -205,7 +205,7 @@ class TestResetUndoesAllThreeOfRefreshsSteps:
     """
 
     def test_the_grid_row_and_the_symbol_are_never_touched(self):
-        """⚠ THE PROPERTY THAT STOPS THIS BEING DESTRUCTIVE. Every instrument keeps `status='ok'`,
+        """ THE PROPERTY THAT STOPS THIS BEING DESTRUCTIVE. Every instrument keeps `status='ok'`,
         its `analysis_id` and its Yahoo symbol, so Refresh re-fetches prices for a KNOWN listing
         (`extend_series`). Deleting the grid row or zeroing `bars` would push it into
         `needs_resolve` instead — and a re-resolve is how Alphabet moved from GOOGL to a Vienna
@@ -219,7 +219,7 @@ class TestResetUndoesAllThreeOfRefreshsSteps:
             assert table not in src, f"reset must not touch {table}"
 
     def test_prices_are_deleted_as_a_TAIL_not_a_hole(self):
-        """⚠ WHY THIS IS SAFE TO OFFER AT ALL. Everything from the lookback forward goes, so each
+        """ WHY THIS IS SAFE TO OFFER AT ALL. Everything from the lookback forward goes, so each
         series simply ENDS earlier — a state the fleet already repairs (the last close falls behind
         the market anchor, `find_stale` sees it, `extend_series` fetches the gap). An interior
         slice would leave the newest close untouched, no staleness check would ever fire, and the
@@ -253,7 +253,7 @@ class TestRefreshIsExactlyThreeSteps:
     """The Refresh button does three things and only three: gather the constituents, get every
     one's market cap from Yahoo, then each one's start-of-year price and current price.
 
-    ⚠ THE PRICE STEP MUST NOT BECOME CLEVER AGAIN. It replaced two overlapping passes — a
+     THE PRICE STEP MUST NOT BECOME CLEVER AGAIN. It replaced two overlapping passes — a
     gap-filler that only touched constituents with NO mark in the window, and a staleness sweep
     for the ones that had marks but were weeks old — sharing a bounded budget between them. Two
     passes with a shared cap is three things to get right to answer one question ("what are this
@@ -293,7 +293,7 @@ class TestRefreshIsExactlyThreeSteps:
 
 
 class TestEveryConstituentIsCapped:
-    """⚠ ALL OF THEM, EVERY RUN — NOT ONLY THE UNCAPPED ONES.
+    """ ALL OF THEM, EVERY RUN — NOT ONLY THE UNCAPPED ONES.
 
     The cap IS the weight. An index re-weighted from caps quoted three weeks ago is a three-week-
     old index wearing today's prices, and the old path only quoted constituents whose cap was
@@ -362,7 +362,7 @@ class TestAbsencesAreNotFailures:
         from routers import _benchmark_refresh as r
 
         src = inspect.getsource(r._prices)
-        # ⚠ THE COUNTER WAS RENAMED, THE INVARIANT WAS NOT. `already_current` became `unchanged`
+        #  The counter was renamed, the invariant was not. `already_current` became `unchanged`
         # on 2026-08-03, split from `moved` — a better vocabulary for the same fact, and this test
         # went red naming a string rather than the behaviour it guards. What must stay true is that
         # a constituent needing no fetch is COUNTED and SAID, not silently skipped.
@@ -379,7 +379,7 @@ class TestAbsencesAreNotFailures:
         assert "no_start" in inspect.getsource(r._prices)
 
     def test_one_dead_symbol_does_not_end_the_run(self):
-        """⚠ THE KEYWORD CHANGED, THE INVARIANT DID NOT — the same correction this class already
+        """ THE KEYWORD CHANGED, THE INVARIANT DID NOT — the same correction this class already
         made once when `already_current` became `unchanged`. The loop became a thread pool on
         2026-08-11, so the failure path ends in `return` rather than `continue`; asserting the
         keyword made this red for a rewrite that kept the behaviour exactly.
@@ -399,7 +399,7 @@ class TestAbsencesAreNotFailures:
 
 
 class TestTheAnchorIsNeverTheCalendar:
-    """⚠ Anchoring "is this current?" on today flags every instrument every weekend, calls a bank
+    """ Anchoring "is this current?" on today flags every instrument every weekend, calls a bank
     holiday a fleet-wide failure and turns a Yahoo outage into "re-fetch all 1,684 constituents"
     at the one moment fetching cannot work. Both halves of the anchor come from `price_refresh`,
     which owns this definition; a copy here would be free to drift from the daily tick's."""

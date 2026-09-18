@@ -5,7 +5,7 @@ picks the momentum engine selected — and the admin sets the first two by hand.
 The stocks are not set: they take what is left, at the RELATIVE weights the
 underlying strategy chose.
 
-⚠ WHICH MEANS EVERY EDIT MUST START FROM THE STRATEGY'S OWN WEIGHTS, NOT FROM
+ WHICH MEANS EVERY EDIT MUST START FROM THE STRATEGY'S OWN WEIGHTS, NOT FROM
 THE LAST EDIT'S OUTPUT. What is stored is already scaled by whatever sleeves
 were applied last time (a 24-name book at 70% of the portfolio holds each name
 at 70% of its selected weight). Scaling THOSE by the new sleeve compounds:
@@ -114,7 +114,7 @@ class TestTheSleevesLandWhereTheyWereAsked:
 
 
 class TestTheAbsoluteToInvestedConversion:
-    """⚠ The input is a share of the WHOLE portfolio; the storage is a share of
+    """ The input is a share of the WHOLE portfolio; the storage is a share of
     the INVESTED book. Skip the conversion and 20% typed becomes 18% held."""
 
     def test_the_endpoint_converts(self):
@@ -170,7 +170,7 @@ class TestOneWriter:
         assert src.index("apply_sleeves_to_snapshot(") < src.index("compute_and_save_price_update(")
 
     def test_the_etf_entry_bar_is_the_stock_sleeves_own_anchor(self):
-        """⚠ The SPMO +277% incident: `as_of_date` is the nominal grid date and
+        """ The SPMO +277% incident: `as_of_date` is the nominal grid date and
         can be a FUTURE Monday when the tick fires early, which stamped an ETF
         entry against a bar that did not exist yet."""
         from routers import _schedule_snapshots as snaps

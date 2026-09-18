@@ -10,7 +10,7 @@ import type {
 } from './types';
 
 /**
- * ⚠ THE PAYLOAD TYPES LIVE WITH THE FETCH, NOT WITH THE CARDS THAT DRAW THEM — so the dependency
+ *  The payload types live with the fetch, not with the cards that draw them — so the dependency
  * runs one way (panels → hook) and there is no import cycle. They were declared inside the panels
  * file back when it also did the fetching.
  */
@@ -53,14 +53,14 @@ export type UniverseCoverageRow = {
 export type UniverseCoverage = { universes: UniverseCoverageRow[] };
 
 /**
- * EVERYTHING THE PIPELINE PANELS ARE DRAWN FROM — one stream, read once.
+ * Everything the pipeline panels are drawn from — one stream, read once.
  *
- * ⚠⚠ EXTRACTED SO THE PANELS CAN LIVE BEHIND THEIR OWN ROWS. Before, the data layer and the four
+ *  Extracted so the panels can live behind their own rows. Before, the data layer and the four
  * cards were one component, so a card could only be rendered where that component was — which is
  * why the jobs table had to link DOWN to them instead of containing them. Splitting the fetch from
  * the drawing is what makes a per-job panel registry possible at all.
  *
- * ⚠ CALL IT ONCE PER PAGE. It opens the multi-topic SSE stream and (on failure) six polls. It is a
+ *  Call it once per page. It opens the multi-topic SSE stream and (on failure) six polls. It is a
  * hook rather than a context because there is exactly one consumer — the jobs table — and a
  * provider would be ceremony around a single call.
  */
@@ -103,7 +103,7 @@ export function usePipelineActivity() {
   const nowMs = useNow(1000);
 
   useEffect(() => {
-    // ⚠ STATE, NOT A DERIVED VALUE, AND IT CANNOT BE ONE. `active` picks the polling intervals,
+    //  State, not a derived value, and it cannot be one. `active` picks the polling intervals,
     // and the polls are what produce `upcoming` — so deriving it would be circular on the fallback
     // path. One render's lag on switching cadence is the cost, and it is invisible.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -115,7 +115,7 @@ export function usePipelineActivity() {
   const lastRun = (job: string): IngestRun | null =>
     recentRuns?.find((r) => r.job_name === job) ?? null;
 
-  // ⚠ THE ONLY SCHEDULER LOOKUP LEFT, AND IT IS NOT A SCHEDULE. The Automatic jobs table is the
+  //  The only scheduler lookup left, and it is not a schedule. The Automatic jobs table is the
   // single reader of `list_scheduled_jobs()`, so no panel draws a second countdown to a fire time.
   // This one survives because it is a CONDITION: the backend schedules a one-shot +3h retry only
   // when held prices are still behind after a price_update, so its presence IS the finding.
@@ -123,7 +123,7 @@ export function usePipelineActivity() {
   const schedulerOff = upcoming?.scheduler_enabled === false;
   const loading = upcoming == null && held == null;
 
-  // Earliest upcoming rebalance across enabled strategies. ⚠ A STRATEGY fact, not a scheduler one —
+  // Earliest upcoming rebalance across enabled strategies.  A STRATEGY fact, not a scheduler one —
   // when a rebalance will next have something to DO, which no job table can know.
   const nextDue = (strategies ?? [])
     .filter((s) => s.enabled && s.next_due_at)

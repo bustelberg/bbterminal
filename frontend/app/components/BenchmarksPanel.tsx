@@ -26,7 +26,7 @@ const ALL = '*';
  * ACWI is still not FULLY priced (the published index has names we hold no series for), so its
  * coverage ratio is surfaced and it is called indicative rather than exact. AEX is fully covered
  * (25/25) and is the one index that CAPS: uncapped, ASML is 37.5% of it. */
-// ⚠ `rebuildable` = FILL CAN PUT IT BACK, mirroring the backend's `_benchmark_fill.rebuildable()`
+//  `rebuildable` = FILL CAN PUT IT BACK, mirroring the backend's `_benchmark_fill.rebuildable()`
 // — a registered `UniverseTemplate`, or SP500's Wikipedia reconstruction, which is deliberately
 // NOT in the template registry (registering it would stamp `template_key` on its universe row and
 // hide the index from the /sp500 page that owns it). All three are rebuildable today, so the flag
@@ -58,7 +58,7 @@ const tone = (v: number | null | undefined) =>
  * split-adjusted and cannot self-heal).
  */
 /**
- * ⚠ THE SSE FRAME TYPES AND `refreshSummary` ARE GONE — the job transport retired them, and the
+ *  The SSE frame types and `refreshSummary` ARE GONE — the job transport retired them, and the
  * receipt sentence they built now lives in `benchmark_refresh_job` on the server (reproduced there
  * clause for clause, including the two "never silent" ones about an uncapped constituent and about
  * "already at the vendor's latest"). Keeping a second copy here would be a second place for the
@@ -69,7 +69,7 @@ const tone = (v: number | null | undefined) =>
  */
 
 /**
- * ⚠ THE FUNDAMENTALS-FILL PROGRESS BOX IS GONE (2026-08-06) — it is a JOB now, and the toast
+ *  The fundamentals-fill progress box is gone (2026-08-06) — it is a JOB now, and the toast
  * stack reports it.
  *
  * It was a `FillRun` state here plus a bordered box with a bar and a six-line tail, and every part
@@ -85,7 +85,7 @@ const tone = (v: number | null | undefined) =>
  */
 
 export default function BenchmarksPanel() {
-  // ⚠ THE SHARED PREFERENCE, read through one hook so this panel and the sidebar switch that
+  //  The shared preference, read through one hook so this panel and the sidebar switch that
   // sets it cannot disagree. Missing Dutch is a compile error, not a fallback — see the file.
   const t = useMgmtCopy();
   const isAdmin = useIsAdmin();
@@ -94,9 +94,9 @@ export default function BenchmarksPanel() {
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   /**
-   * WHICH BUTTON OWNS THE RUN — a row's label, or `ALL` for the header button. `null` when idle.
+   * Which button owns the run — a row's label, or `ALL` for the header button. `null` when idle.
    *
-   * ⚠⚠ IT IS THE OWNER, NOT A SET OF WHAT IS RUNNING, AND THAT IS THE WHOLE POINT. Only the button
+   *  It is the owner, not a set of what is running, and that is the whole point. Only the button
    * that was PRESSED turns into Cancel; every other Refresh merely disables. A set of in-flight
    * labels cannot express that — during "Refresh all" all three labels are in it, so all three row
    * buttons would offer to cancel, and pressing one would raise the question of what exactly it
@@ -107,7 +107,7 @@ export default function BenchmarksPanel() {
    *  (prices then fundamentals, per index), so this changes several times within one press. */
   const [activeJob, setActiveJob] = useState<string | null>(null);
   /**
-   * ⚠ A REF, NOT STATE, AND IT MUST BE. The loop in `refresh` closes over its variables once; a
+   *  A ref, not state, and it must be. The loop in `refresh` closes over its variables once; a
    * `cancelled` state read inside it would be the value from the render that started the run and
    * would still be false after Cancel, so the sequence would carry on to the next index having
    * duly cancelled the current job. The ref is read through, so the loop sees the press.
@@ -115,18 +115,18 @@ export default function BenchmarksPanel() {
   const abort = useRef(false);
   const [runMsg, setRunMsg] = useState<{ text: string; kind: 'info' | 'warn' } | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  // ⚠ THE TABLE HAS TO RE-READ, OR THE WHOLE POINT IS LOST. Reset → Refresh is a loop you watch:
+  //  The table has to re-read, or the whole point is lost. Reset → Refresh is a loop you watch:
   // without a reload the row keeps showing the members it had before you deleted them, which reads
   // as the button having done nothing.
   const [reloadKey, setReloadKey] = useState(0);
   const reload = () => setReloadKey((k) => k + 1);
-  /** ⚠ A SECOND SIGNAL, NOT `reloadKey`. That one re-reads the INDEX payloads (prices, caps, YTD)
+  /**  A SECOND SIGNAL, NOT `reloadKey`. That one re-reads the INDEX payloads (prices, caps, YTD)
    *  and re-renders the whole table; the fundamentals grid holds its own two cadences and is
    *  expensive to refetch, so it is told separately and only when a fill actually wrote something.
    *  Reusing one key would refetch both halves on every press of either. */
   const [fundKey, setFundKey] = useState(0);
   /**
-   * ⚠ NEITHER BACKFILL IS OWNED HERE ANY MORE (2026-08-06). Both are jobs.
+   *  Neither backfill is owned here any more (2026-08-06). Both are jobs.
    *
    * The panel used to hold the fill's progress state precisely because the detail pane is
    * collapsible — a box inside it would unmount mid-run and leave a page that showed nothing
@@ -142,23 +142,23 @@ export default function BenchmarksPanel() {
   /**
    * The fundamentals half of a Refresh: the GuruFocus fill for one index.
    *
-   * ⚠⚠ THIS IS A SECOND VENDOR WITH A SEPARATE, MONTHLY QUOTA — which is exactly why it was split
+   *  This is a second vendor with a separate, monthly quota — which is exactly why it was split
    * OUT of this button on 2026-08-06, and why chaining it back on is a deliberate choice rather
    * than a tidy-up. What made the old arrangement wrong was not the pairing, it was that the count
    * beside it came from a third endpoint with a third denominator, so it offered to fetch
    * constituents the fill would then refuse. The fill now counts its own work (`needs`/`eligible`),
    * so the pairing is safe in a way it was not then.
    *
-   * ⚠ AWAITED, SO THE THREE INDICES FILL ONE AT A TIME. `startJob` returns as soon as the job is
+   *  Awaited, so the three indices fill one at a time. `startJob` returns as soon as the job is
    * running, so firing all three would put three concurrent fills on GuruFocus — eight companies
    * in flight each. The prices half is already sequential for the same reason on the Yahoo side;
    * this keeps the whole button to one external consumer at a time.
    *
-   * ⚠ IT RUNS EVEN WHEN THE PRICE HALF FAILED. Different vendor, different data: a Yahoo outage
+   *  It runs even when the price half failed. Different vendor, different data: a Yahoo outage
    * says nothing about whether GuruFocus can fill the grid, and skipping it would make a partial
    * failure quietly halve the button.
    *
-   * ⚠⚠ `force=true` — EVERY CONSTITUENT, NOT THE ONES WITH NOTHING. Without it the fill selects on
+   *  `force=true` — EVERY CONSTITUENT, NOT THE ONES WITH NOTHING. Without it the fill selects on
    * a sentinel row's EXISTENCE, so a constituent whose statements were loaded a year ago is never
    * missing and never refetched: the grid goes on showing last year's figures and looks full. That
    * is the same conclusion the price half reached (`_benchmark_refresh`: a press always fetches,
@@ -167,7 +167,7 @@ export default function BenchmarksPanel() {
    * carrying every column this grid draws, market cap included, so "all fundamentals" costs one
    * call, not nineteen.
    *
-   * ⚠ THE GRID'S OWN "All {n}" BUTTON IS DELIBERATELY *NOT* FORCED. It counts what is missing and
+   *  The grid's own "All {n}" BUTTON IS DELIBERATELY *NOT* FORCED. It counts what is missing and
    * fetches exactly that — the cheap, targeted press. This one is the rebuild.
    *
    * Returns the sentence for the receipt, or '' when there was nothing to say.
@@ -180,7 +180,7 @@ export default function BenchmarksPanel() {
         `${label} fundamentals`);
       setActiveJob(id);
       const job = await done;
-      // ⚠ RE-READ ON ANYTHING BUT A FAILURE, including a cancel: a cancelled bulk run has still
+      //  Re-read on anything but a failure, including a cancel: a cancelled bulk run has still
       // loaded every company it got through, and leaving the pre-fill grid on screen would hide
       // real work that was really done. Mirrors `fillAll` in the grid pane.
       if (job.status !== 'failed') setFundKey((k) => k + 1);
@@ -196,11 +196,11 @@ export default function BenchmarksPanel() {
   /** Refresh one index, or every index in sequence: constituents → market caps → the two prices,
    *  then that index's GuruFocus fundamentals fill (see `fill`).
    *
-   * ⚠ SEQUENTIALLY, NEVER `Promise.all`. Every step calls Yahoo; three indices at once is three
+   *  Sequentially, never `Promise.all`. Every step calls Yahoo; three indices at once is three
    * concurrent consumers on the throttle, which is the failure this whole pipeline is arranged
    * to avoid (an overloaded caller gets an EMPTY result, not a 429).
    *
-   * ⚠ THE DETAIL GOES TO THE CONSOLE, THE RECEIPT TO THE PANEL. Step 3 emits a line per
+   *  The detail goes to the console, the receipt to the panel. Step 3 emits a line per
    * constituent — 491 for the S&P — which is exactly what you want when checking a price and
    * exactly what you do not want in a status bar. The panel gets the latest line while it runs
    * and one sentence at the end. */
@@ -211,7 +211,7 @@ export default function BenchmarksPanel() {
     const lines: string[] = [];
     try {
       for (const label of labels) {
-        // ⚠ CHECKED BEFORE EACH LEG, NOT ONLY AT THE TOP. Cancel is asked for mid-run, and the
+        //  Checked before each leg, not only at the top. Cancel is asked for mid-run, and the
         // legs are minutes long — a press during ACWI's prices must not be followed by ACWI's
         // fundamentals and then two more indices. See `cancelRun`.
         if (abort.current) { lines.push(`${label}: not started — cancelled`); continue; }
@@ -230,7 +230,7 @@ export default function BenchmarksPanel() {
         if (abort.current) { lines.push(`${priced}  ·  fundamentals skipped — cancelled`); continue; }
         lines.push([priced, await fill(label)].filter(Boolean).join('  ·  '));
       }
-      // ⚠ A DIFFERENT SEPARATOR BETWEEN INDICES THAN WITHIN ONE. Each line is two halves joined by
+      //  A different separator between indices than within one. Each line is two halves joined by
       // '·' (prices · fundamentals); joining the three lines with '·' as well produced one
       // undifferentiated run in which you could not see where SP500 ended and ACWI began.
       setRunMsg({ text: lines.join('   |   '), kind: 'warn' });
@@ -249,13 +249,13 @@ export default function BenchmarksPanel() {
   /**
    * Stop the whole run this button started — not just the leg currently executing.
    *
-   * ⚠⚠ TWO ACTIONS, AND EITHER ALONE IS A CANCEL THAT DOES NOT CANCEL. `cancelJob` stops the job
+   *  Two actions, and either alone is a cancel that does not cancel. `cancelJob` stops the job
    * in flight; the `abort` ref stops the SEQUENCE. Without the ref, cancelling ACWI's prices would
    * be followed immediately by ACWI's fundamentals and then SP500 — five more legs, after the
    * reader asked it to stop. Without `cancelJob`, the current leg would run to completion first,
    * which on ACWI is eleven more minutes of Yahoo calls.
    *
-   * ⚠ THE TOAST'S OWN CANCEL IS A DIFFERENT SCOPE AND BOTH ARE CORRECT: it cancels THAT LEG and
+   *  The toast's own cancel is a different scope and both are correct: it cancels THAT LEG and
    * the sequence moves on to the next; this cancels the RUN. The tooltips say which is which.
    */
   const cancelRun = async () => {
@@ -267,7 +267,7 @@ export default function BenchmarksPanel() {
   /**
    * Delete the live universe behind one benchmark, so Refresh can be watched rebuilding it.
    *
-   * ⚠ THE CONFIRM NAMES WHAT SURVIVES, NOT JUST WHAT GOES. "Delete SP500?" invites the reading
+   *  The confirm names what survives, not just what goes. "Delete SP500?" invites the reading
    * that the prices and the market caps go with it; they do not, and knowing that is the
    * difference between trying this and not daring to.
    */
@@ -280,7 +280,7 @@ export default function BenchmarksPanel() {
       + '  • their closes from mid-November onward (the start-of-year mark and everything since)\n\n'
       + 'The asset grid, the Yahoo symbol and the older history stay — so Refresh re-fetches prices '
       + 'for a KNOWN listing and nothing is ever re-resolved.\n\n'
-      + '⚠ Prices are shared: some of these constituents are also held in AIRS books, and '
+      + ' Prices are shared: some of these constituents are also held in AIRS books, and '
       + 'those portfolio figures will read short until the prices are refilled. One press of Refresh '
       + 'refills 50; the 06:00 price tick finishes the rest overnight.',
     );
@@ -335,7 +335,7 @@ export default function BenchmarksPanel() {
         if (res.status === 'fulfilled') out[res.value[0]] = res.value[1];
         else errs.push(res.reason instanceof Error ? res.reason.message : String(res.reason));
       }
-      // ⚠ AN INDEX THAT LOADS WITH ZERO MEMBERS IS THE FRESH-DATABASE CASE AND IT IS NOT AN
+      //  An index that loads with zero members is the fresh-database case and it is not an
       // ERROR — the request succeeded, the universe simply has not been built or its
       // constituents are not in the asset grid. It renders as "0 —", which is identical to a
       // failure on screen, so the console has to tell them apart. The backend already sends the
@@ -376,7 +376,7 @@ export default function BenchmarksPanel() {
             Benchmarks
           </h3>
         </div>
-        {/* ⚠ OPEN TO EVERY USER SINCE 2026-08-19. The rebuild spends a GuruFocus quota, which is
+        {/*  OPEN TO EVERY USER SINCE 2026-08-19. The rebuild spends a GuruFocus quota, which is
             why it was admin work — but the index it rebuilds is what every portfolio on this page
             is measured against, so a reader who can see it is stale can now make it current.
             Deleting a universe, one row down, still cannot. */}
@@ -402,7 +402,7 @@ export default function BenchmarksPanel() {
           runMsg.kind === 'warn'
             ? 'text-warn-300 bg-warn-500/10 border-warn-500/20'
             : 'text-fg-subtle bg-overlay/[0.03] border-neutral-800/40'}`}>
-          {/* ⚠ THE LIVE `tick` LINE IS GONE, DELIBERATELY. It existed because the SSE run had
+          {/*  THE LIVE `tick` LINE IS GONE, DELIBERATELY. It existed because the SSE run had
               nowhere else to show motion; the run is a job now and the toast bottom-right carries
               the line, a progress bar, the quota spent and Cancel. Keeping both would give a
               minutes-long run two progress readouts that update at different moments and can
@@ -453,10 +453,10 @@ export default function BenchmarksPanel() {
                       </td>
                       <td className="px-3 py-1.5 font-mono text-fg-subtle whitespace-nowrap">{d.as_of ?? '—'}</td>
                       <td className="px-3 py-1.5 text-right">
-                        {/* ⚠ `stopPropagation` — the whole row is the expand toggle, and a Refresh
+                        {/*  `stopPropagation` — the whole row is the expand toggle, and a Refresh
                             that also opened the detail would look like it had rendered a result. */}
                         <div className="inline-flex items-center gap-1">
-                          {/* ⚠ ONLY THE PRESSED BUTTON BECOMES CANCEL. During "Refresh all" all
+                          {/*  ONLY THE PRESSED BUTTON BECOMES CANCEL. During "Refresh all" all
                               three rows are being worked on, but none of them owns the run, so
                               all three stay disabled — a Cancel on a row would otherwise have to
                               answer "cancel what, this index or the run?" and either answer is
@@ -476,7 +476,7 @@ export default function BenchmarksPanel() {
                               {t.common.refresh}
                             </button>
                           )}
-                          {/* ⚠ STILL ADMIN-ONLY, BESIDE A REFRESH THAT IS NOT — and that pairing
+                          {/*  STILL ADMIN-ONLY, BESIDE A REFRESH THAT IS NOT — and that pairing
                               IS the rule this page draws. Refresh makes the row current; Delete
                               throws the membership away and is a change to what the row SAYS.
                               Only where Refresh can put it back — see `rebuildable`. */}
@@ -510,27 +510,27 @@ export default function BenchmarksPanel() {
   );
 }
 
-/** ⚠ NO `fill` / `onFillAll` PROPS ANY MORE. They existed so the PANEL could own the stream and
+/**  NO `fill` / `onFillAll` PROPS ANY MORE. They existed so the PANEL could own the stream and
  *  keep a progress box alive while this collapsible pane unmounted. A job needs neither: the run
  *  has a handle, the toast lives in the root layout, and this pane can simply start it. */
 function IndexDetail({ d, fundKey = 0 }: { d: ReconstructedIndex; fundKey?: number }) {
-  // ⚠ ITS OWN CALL, NOT A PROP THREADED DOWN. `useMgmtCopy` reads an external store, so two
+  //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so two
   // components calling it in one render get the same value by construction — passing copy
   // down would add a prop to every nested piece for a value none of them can disagree about.
   const t = useMgmtCopy();
   return (
     <div className="space-y-2">
-      {/* ⚠ THE PANE CANNOT NOTICE A FILL ON ITS OWN — it caches both cadences precisely so that
+      {/*  THE PANE CANNOT NOTICE A FILL ON ITS OWN — it caches both cadences precisely so that
           scrubbing the slider never refetches, which also means nothing tells it the data
           underneath changed. `refreshKey` is that telling, bumped by Refresh's fundamentals half. */}
       <FundamentalGridPane label={d.label} refreshKey={fundKey} />
-      {/* ⚠ THE FILL BUTTON MOVED INTO THE GRID'S TOTAL ROW (2026-08-06). It sat here beside the
+      {/*  THE FILL BUTTON MOVED INTO THE GRID'S TOTAL ROW (2026-08-06). It sat here beside the
           price/constituent Refresh, which is a different vendor with a different quota — and its
           count came from a THIRD endpoint with a third denominator, so it could offer to fetch
           constituents the fill would then refuse. In the Total row's Fetch cell it is the
           all-companies form of the per-company button directly above it, and the grid counts what
           the fill will actually do. */}
-      {/* ⚠ THE PROVENANCE LINE AND THE FOOTNOTE PARAGRAPH WERE REMOVED HERE (2026-08-19), at the
+      {/*  THE PROVENANCE LINE AND THE FOOTNOTE PARAGRAPH WERE REMOVED HERE (2026-08-19), at the
           owner's request — it was a wall of prose under every index. What it said is NOT wrong and
           is not obsolete: the rebuild is cap-weighted on FULL market cap where the real index
           float-adjusts, it is a PRICE return with no dividends, membership is a snapshot, and ACWI

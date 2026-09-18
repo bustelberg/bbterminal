@@ -1,11 +1,11 @@
 """TE = √(Σ(aₜ−ā)²/(T−1)) · √f, and every test is a closed-form identity rather than a fixture.
 
-⚠⚠ THE TWO CASES THAT SEPARATE TE FROM THE THING IT IS CONSTANTLY CONFUSED WITH are the first two:
+ THE TWO CASES THAT SEPARATE TE FROM THE THING IT IS CONSTANTLY CONFUSED WITH are the first two:
 a book identical to its index has zero TE, and a book beating its index by exactly the same amount
 every single period ALSO has zero TE while having a large active return. Tracking error is the
 SPREAD of the active return, never the active return.
 
-⚠ AND THE DEFINITION IS PINNED, NOT ASSUMED. `ā` subtracted, divisor `T−1`. The other convention
+ AND THE DEFINITION IS PINNED, NOT ASSUMED. `ā` subtracted, divisor `T−1`. The other convention
 (√(Σaₜ²/T)) is also called tracking error and reads higher; the test asserts which one this is, so
 a future "simplification" to `np.std(a)` fails here rather than in somebody's risk report.
 """
@@ -66,7 +66,7 @@ class TestTheDefinition:
         assert got["tracking_error_pct"] == pytest.approx(0.0, abs=1e-9)
 
     def test_a_CONSTANT_excess_is_a_big_active_return_and_zero_tracking_error(self, wire):
-        """⚠⚠ THE CASE THAT DEFINES THE MEASURE. Beating the index by the same amount every period
+        """ THE CASE THAT DEFINES THE MEASURE. Beating the index by the same amount every period
         is not divergence — there is nothing to be volatile. A panel that showed only one of these
         two numbers would call this book either riskless or identical to its index."""
         dates = _weekdays(400)
@@ -86,7 +86,7 @@ class TestTheDefinition:
 
         want = float(np.std(p - b, ddof=1) * np.sqrt(252) * 100)
         assert got["tracking_error_pct"] == pytest.approx(want, abs=0.05)
-        # ⚠ ddof=1, NOT 0 — asserted against the population sd it must NOT equal.
+        #  ddof=1, NOT 0 — asserted against the population sd it must NOT equal.
         population = float(np.std(p - b, ddof=0) * np.sqrt(252) * 100)
         assert abs(got["tracking_error_pct"] - want) < abs(got["tracking_error_pct"] - population)
 
@@ -117,7 +117,7 @@ class TestWhatItRefuses:
         wire(list(rng.normal(0, 0.01, 39)), list(rng.normal(0, 0.01, 39)), dates)
         got = _run()
         assert got["available"] is False
-        # ⚠ THE FLOOR IS NAMED. "Not enough data" sends the reader to guess whether it is a bug.
+        #  The floor is named. "Not enough data" sends the reader to guess whether it is a bug.
         assert str(T.MIN_OBS["daily"]) in got["reason"]
 
     def test_a_benchmark_with_no_investable_tracker(self, wire):
@@ -127,7 +127,7 @@ class TestWhatItRefuses:
         got = T.compute_tracking_error(
             [{"isin": ONE, "name": "One", "weight_pct": 100.0, "is_fund": False}], "NASDAQ")
         assert got["available"] is False
-        # ⚠ AND IT NAMES THE ONES THAT DO WORK, so the reader can pick one rather than conclude
+        #  And it names the ones that do work, so the reader can pick one rather than conclude
         # the panel is broken.
         assert "ACWI" in got["reason"]
 
@@ -143,7 +143,7 @@ class TestWhatItRefuses:
 
 class TestTheCadenceCaveat:
     def test_daily_says_it_is_inflated_and_weekly_says_nothing(self, wire):
-        """⚠ THE BIAS RIDES WITH THE NUMBER. Non-synchronous closes (tracker 16:30 London, US
+        """ THE BIAS RIDES WITH THE NUMBER. Non-synchronous closes (tracker 16:30 London, US
         holding 21:00) lower the measured covariance, and `var(a) = var(p) + var(b) − 2cov(p,b)`,
         so a daily TE reads HIGH. The opposite direction from beta's bias, same cause."""
         dates = _weekdays(700)

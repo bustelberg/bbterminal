@@ -7,7 +7,7 @@ WHY THIS EXISTS
     the whole point). Measured, KLA-Tencor is +54.37% as an instrument and +56.67% on the money.
     The gap says trading helped, and says nothing about WHICH trade or by how much.
 
-    ⚠ `Instrument return` IS DELIBERATELY NOT CALLED A TIME-WEIGHTED RETURN. It erases timing with
+     `Instrument return` IS DELIBERATELY NOT CALLED A TIME-WEIGHTED RETURN. It erases timing with
     the same INTENT as a TWR, but it does not chain sub-period returns — it restates the opening
     quantity, which carries the bias the next warning describes. A true TWR does not have it.
 
@@ -35,7 +35,7 @@ THE DECOMPOSITION, AND IT IS EXACT
     Adobe is the case that shows why this is worth having: buy-and-hold LOST money, and two
     correctly-timed decisions turned it positive.
 
-⚠⚠ THE "ACTUAL" HERE IS THE ECONOMIC RESULT AND IT IS NOT THE `Result` COLUMN. That column is
+ THE "ACTUAL" HERE IS THE ECONOMIC RESULT AND IT IS NOT THE `Result` COLUMN. That column is
     AIRS's restated figure — `Huidige waarde - Beginwaarde`, where Beginwaarde prices TODAY's share
     count at the 1 January price. For a position bought into during the year that values the new
     shares at January's price rather than what you paid, so it overstates by
@@ -44,11 +44,11 @@ THE DECOMPOSITION, AND IT IS EXACT
     why the table still reconciles to `beleggingsresultaat`). At POSITION level they differ, and
     this module says so rather than letting a reader find two results for one holding.
 
-⚠ EVERYTHING IS IN EUR, so the currency leg is already inside every figure. A trade priced in USD
+ EVERYTHING IS IN EUR, so the currency leg is already inside every figure. A trade priced in USD
     and a value in EUR would decompose into nonsense; the Transacties sheet carries `Waarde EUR`
     for exactly this reason.
 
-⚠ A SPLIT IS RESCALED BEFORE ANY OF THIS, never during. Pre-split quantities and prices are in the
+ A SPLIT IS RESCALED BEFORE ANY OF THIS, never during. Pre-split quantities and prices are in the
     old basis, and `q x (price_now - p)` mixes bases silently if they are not converted first —
     the same defect that put 17 points on KLA's money-weighted return. `airs_capital.detect_split`
     proves the ratio; this module only consumes it.
@@ -67,7 +67,7 @@ class TradeEffect:
     quantity: float                # in TODAY's share basis
     price_eur: float               # per share, EUR, in today's basis
     amount_eur: float              # what changed hands, always positive
-    # ⚠ Against DOING NOTHING, not against a perfect decision. A buy gains if the price rose after
+    #  Against DOING NOTHING, not against a perfect decision. A buy gains if the price rose after
     # it; a sell gains if the price fell after it. There is no skill claim here — a lucky call and
     # a good one produce the same number, and this module does not pretend to tell them apart.
     effect_eur: float
@@ -77,11 +77,11 @@ class TradeEffect:
     # `move_pct` — the effect per euro that changed hands, which reduces exactly to the price move
     # since the decision: a BUY is `price_now/p - 1` (what it made since you bought), a SELL is
     # `1 - price_now/p` (what it avoided since you sold). Signed so favourable is positive in both
-    # directions. ⚠ It says how GOOD the decision was, and nothing about whether it mattered — a
+    # directions.  It says how GOOD the decision was, and nothing about whether it mattered — a
     # brilliant call on 3 shares scores the same as one on 3,000.
     move_pct: float | None = None
     # `effect_pp` — the effect over the value of the position on 1 January, so it says how MUCH the
-    # decision mattered. ⚠ Every line divided by that ONE denominator, which is what keeps the
+    # decision mattered.  Every line divided by that ONE denominator, which is what keeps the
     # decomposition exact in points as well as in euros:
     #     buy_hold_pct + SUM(effect_pp) = actual_pct
     # None where nothing was held at the open (`open_value_eur` is 0) — there is no base to be a
@@ -102,7 +102,7 @@ class TimingAnalysis:
     trades: list[TradeEffect] = field(default_factory=list)
     # The economic result — see the module warning: NOT the `Result` column.
     actual_eur: float = 0.0
-    # ⚠ ASSERTED EVERY TIME. Three lines that do not add up are not a decomposition of anything.
+    #  Asserted every time. Three lines that do not add up are not a decomposition of anything.
     residual_eur: float = 0.0
     reconciles: bool = False
     # AIRS's restated result, and the gap to the economic one, so the modal can name it rather
@@ -111,19 +111,19 @@ class TimingAnalysis:
     restatement_eur: float | None = None
     income_eur: float = 0.0
     # ── The one denominator every percentage here divides by: what the position you actually held
-    #    on 1 January was worth. ⚠ NOT `start_value_eur`, which is AIRS's figure restated to
+    #    on 1 January was worth.  NOT `start_value_eur`, which is AIRS's figure restated to
     #    TODAY's share count — dividing by that would give a "buy-and-hold return" for shares that
     #    were not held, which is the restatement bug wearing a percent sign.
     open_value_eur: float | None = None
     buy_hold_pct: float | None = None
     timing_pp: float | None = None
-    # ⚠ THE MONEY'S RETURN ON THE CAPITAL IT STARTED WITH — it is NOT the `Money-weighted`
+    #  The money's return on the capital it started with — it is NOT the `Money-weighted`
     # column, which is Modified Dietz over the TIME-WEIGHTED average capital. Same spirit, different
     # denominator, so they will differ where money went in mid-year; presenting either as the other
     # would put a third number on the screen claiming to be the second.
     actual_pct: float | None = None
     split_ratio: float | None = None
-    # ⚠ THE WINDOW, CARRIED, so a timeline can place each decision on it. Without the bounds the
+    #  The window, carried, so a timeline can place each decision on it. Without the bounds the
     # UI has to guess where "the start of the year" sits relative to the first trade, and a
     # timeline whose axis is inferred is a picture of an assumption.
     period_start: str | None = None
@@ -164,7 +164,7 @@ def analyse_timing(name: str, qty_now: float, start_value_eur: float, current_va
     for t in trades:
         if t.quantity <= 0 or t.eur <= 0:
             continue
-        # ⚠ CONVERT FIRST. A pre-split trade is in the old basis; `q x (price_now - p)` would
+        #  Convert first. A pre-split trade is in the old basis; `q x (price_now - p)` would
         # otherwise compare a price ten times too large against a quantity ten times too small.
         # The EUR amount is unaffected — money does not have a share basis.
         rescaled = bool(split_ratio and split_date and (t.datum or "") < split_date)
@@ -184,7 +184,7 @@ def analyse_timing(name: str, qty_now: float, start_value_eur: float, current_va
                                     effect_eur=round(effect, 2), rescaled=rescaled,
                                     move_pct=round(effect / t.eur * 100, 2)))
 
-    # ⚠ CLAMPED AT 0. Buys exceeding today's count plus sales would imply a negative holding on
+    #  Clamped at 0. Buys exceeding today's count plus sales would imply a negative holding on
     # 1 January, which is not a position — it is a data problem, and a negative counterfactual
     # would look like an answer.
     a.qty_open = max(qty_now - bought + sold, 0.0)
@@ -197,7 +197,7 @@ def analyse_timing(name: str, qty_now: float, start_value_eur: float, current_va
     # ── The same three lines as percentages, over ONE base. Because it is one base, the identity
     #    carries through the division: buy_hold_pct + SUM(effect_pp) = actual_pct. Giving each line
     #    its own denominator is how a "decomposition" stops adding up.
-    # ⚠ THE EUR IDENTITY IS EXACT; THE PERCENT ONE IS EXACT ONLY BEFORE ROUNDING. Three figures
+    #  The EUR identity is exact; the percent one is exact only before rounding. Three figures
     #    each rounded to 2dp can miss by a hundredth (Adobe: -8.43 + 9.77 = 1.34 against an actual
     #    of 1.33). `reconciles` is therefore asserted on the EUR line and never on this one — a
     #    tolerance loose enough to absorb rounding is loose enough to hide a real break.
@@ -211,7 +211,7 @@ def analyse_timing(name: str, qty_now: float, start_value_eur: float, current_va
         a.timing_pp = round(sum(tr.effect_pp or 0.0 for tr in a.trades), 2)
 
     if airs_result_eur is not None:
-        # ⚠ The restatement gap, named. AIRS prices the shares you bought later at JANUARY's price,
+        #  The restatement gap, named. AIRS prices the shares you bought later at JANUARY's price,
         # so its result exceeds the economic one by q_bought x (p_buy - price_open).
         a.restatement_eur = round((airs_result_eur - income_eur) - a.actual_eur, 2)
     return a

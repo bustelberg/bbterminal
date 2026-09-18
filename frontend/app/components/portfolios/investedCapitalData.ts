@@ -15,7 +15,7 @@ export function investedCapitalSeries(row: CashReturnRow): Map<number, number> {
   const out = new Map<number, number>();
   const years = new Set<string>([...Object.keys(row.noncurrent_liabilities), ...Object.keys(row.total_equity)]);
   for (const y of years) {
-    // ⚠ `periodToX`, NOT `Number` — a "2025-Q3" label is NaN to `Number`, and every quarterly
+    //  `periodToX`, NOT `Number` — a "2025-Q3" label is NaN to `Number`, and every quarterly
     // period would land on one NaN key. Compared as a STRING for the 2015 floor, because the
     // labels sort lexically either way and parsing to compare would reintroduce the same trap.
     if (y < '2015') continue;
@@ -30,7 +30,7 @@ export function investedCapitalSeries(row: CashReturnRow): Map<number, number> {
 /**
  * The same series with its period LABELS kept, ordered along the axis.
  *
- * ⚠ `weightAt` IS KEYED ON THE LABEL THE SERVER SENT, and `periodToX` does not invert — 2025.25 is
+ *  `weightAt` IS KEYED ON THE LABEL THE SERVER SENT, and `periodToX` does not invert — 2025.25 is
  * "2025-Q2" only if you already know the cadence. Rebuilding a label with `String(x)` (what this
  * function replaced) yields "2025.25", which no `market_cap_by_period` key matches, so every
  * quarterly cap lookup silently fell through to the as-of scan and resolved by STRING comparison
@@ -53,8 +53,8 @@ function labelledSeries(row: CashReturnRow): { label: string; value: number }[] 
 /**
  * A portfolio's or an index's invested capital as a GROWTH INDEX.
  *
- * ⚠⚠ IT GOES THROUGH `buildBlend` — THE ONE CHAINED RULE — AND USED TO AVERAGE REBASED LEVELS
- * INSTEAD, WHICH WAS WORTH 7.3 POINTS A YEAR (2026-08-21). Every other level line on this tab is
+ *  It goes through `buildBlend` — THE ONE CHAINED RULE — AND USED TO AVERAGE REBASED LEVELS
+ * Instead, which was worth 7.3 POINTS A YEAR (2026-08-21). Every other level line on this tab is
  * chained from weighted GROWTH between consecutive drawn periods; this one rebased each member to
  * 100 at its own base and took a cap-weighted average of those levels. Two defects came with that,
  * and they compound:
@@ -72,7 +72,7 @@ function labelledSeries(row: CashReturnRow): { label: string; value: number }[] 
  * (`backend/scripts/profile_price_index_weighting.py --metric invested_capital --rebased-avg`):
  * rebased-level average **+18.14%/yr** against the chain's **+10.81%/yr**.
  *
- * ⚠⚠ THE VERTIV GUARD DID NOT VANISH, IT MOVED SOMEWHERE STRICTER — and this is the part worth
+ *  The vertiv guard did not vanish, it moved somewhere stricter — and this is the part worth
  * reading before touching it. The old code chose each member's base as the first period it could be
  * WEIGHTED in, because Vertiv listed via SPAC in Feb 2020 and its pre-2020 fiscal years under `VRT`
  * are the blank-cheque SHELL: invested capital of **0.024M** (founder capital) in 2017, 696.1M in
@@ -84,16 +84,16 @@ function labelledSeries(row: CashReturnRow): { label: string; value: number }[] 
  * is a ratio against the member's own median, so both are scale-free. What catches Vertiv now is
  * `stepGrowth`, twice over: its 2018 figure is 29,000× its 2017 one (over `_MAX_STEP_GROWTH`, 100×)
  * AND that 0.024 base is 0.00002 of its own median (under `_MIN_STEP_BASE_FRACTION`, 0.10). It sits
- * out those steps and rejoins, rather than being re-based around. ⚠⚠ ON A ONE-HOLDING BOOK ONLY
+ * out those steps and rejoins, rather than being re-based around.  ON A ONE-HOLDING BOOK ONLY
  * THE **CEILING** IS LEFT: `baseBarScale` lifts the materiality bar where the member IS the line
  * (see it for the NVIDIA measurements), so a Vertiv-shaped shell year is caught by
  * `MAX_STEP_GROWTH` alone — 29,000x, still refused — and the line honestly STOPS instead of
- * printing a step nobody reported. ⚠ Those two guards are general —
+ * printing a step nobody reported.  Those two guards are general —
  * they catch every IPO, spin-off and redenomination of the same shape (VICI, Carvana, CrowdStrike)
  * — where the base rule only worked where a per-period cap happened to exist, and was explicitly
  * inert for a portfolio holding. The chain protects both.
  *
- * ⚠ `buildBlend` IS THE CLIENT TWIN OF `_fundamental_blend.blend_series`, so this line is now
+ *  `buildBlend` IS THE CLIENT TWIN OF `_fundamental_blend.blend_series`, so this line is now
  * computed by the same rule as the server computes Revenue, EPS and the share price — including the
  * anchor-weighted step, the carry-forward and both coverage floors. There is no invested-capital
  * blend left to drift.
@@ -101,14 +101,14 @@ function labelledSeries(row: CashReturnRow): { label: string; value: number }[] 
 /**
  * The blend itself, for callers that need more than a `{year: value}` map.
  *
- * ⚠ EXTRACTED SO THERE IS STILL ONE CONSTRUCTION. The `Tables` tab's invested-capital CAGR row
+ *  Extracted so there is still one construction. The `Tables` tab's invested-capital CAGR row
  * needs the `Blend` (its `level` keys are PERIODS — `lineCagr` reads `LTM` and `2026e`, which a
  * `Map<number, …>` has already thrown away), while the card wants the year map. Building a second
  * payload there "the same way" is exactly what this file's header warns about, so the map is now
  * derived from this rather than beside it.
  */
 export function investedCapitalBlend(rows: CashReturnRow[]): Blend {
-  // ⚠ `revenue` IS `buildBlend`'S FIELD NAME FOR "THE SERIES", not a claim about revenue — the
+  //  `revenue` IS `buildBlend`'S FIELD NAME FOR "THE SERIES", not a claim about revenue — the
   // payload shape it takes is the drill-down matrix's, whose metric column is named that whatever
   // the metric is (see `Row`). Mapping into it is what buys the one implementation.
   const asRows: Row[] = rows.map((r) => ({
@@ -119,13 +119,13 @@ export function investedCapitalBlend(rows: CashReturnRow[]): Blend {
     ticker: r.ticker,
     exchange: r.exchange,
     status: r.status,
-    // ⚠ THE PER-PERIOD CAPS MUST TRAVEL. Without them `wAt` falls back to one constant share across
+    //  The per-period caps must travel. Without them `wAt` falls back to one constant share across
     // a decade — the look-ahead bias every other card here avoids, and the reason a zero-cap shell
     // period is excluded from the average at all.
     market_cap_by_period: r.market_cap_by_period,
     revenue: Object.fromEntries(labelledSeries(r).map((p) => [p.label, p.value])),
   }));
-  // ⚠ EVERY row stays in the list, including the ones with no series — they are the denominator the
+  //  EVERY row stays in the list, including the ones with no series — they are the denominator the
   // coverage floor is measured against. Filtering them out first would make a year computed over
   // two of twelve holdings read as 100% covered.
   const years = [...new Set(asRows.flatMap((r) => Object.keys(r.revenue)))].sort(periodOrder);

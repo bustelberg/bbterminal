@@ -8,16 +8,16 @@
  * series, one function; two figures a click apart that disagreed would tell the reader that one of
  * them is wrong and nothing about which.
  *
- * ⚠⚠ NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. The usual hazard is
+ *  No cash-flow contamination, by construction rather than by chain-linking. The usual hazard is
  * measuring risk off an ACCOUNT VALUE: a deposit reads as a huge gain and a withdrawal as a crash,
  * so a book that merely received money looks turbulent. Time-weighted returns exist to strip that
  * out. This series never has flows in it — it is a weighted basket of instrument price returns, so
  * money moving in or out of the account changes nothing in it.
  *
- * ⚠ THE PRICE IS THE OTHER CAVEAT AND THE PANEL STATES IT: today's weights, carried backwards. So
+ *  The price is the other caveat and the panel states it: today's weights, carried backwards. So
  * this is the volatility of the portfolio AS IT STANDS, not the one the client lived through.
  *
- * ⚠ DOWNSIDE DEVIATION IS SORTINO'S, not the semi-deviation — divided by ALL n, against a target of
+ *  Downside deviation is sortino's, not the semi-deviation — divided by ALL n, against a target of
  * 0. Both are called "downside deviation"; this is the one the Sortino beside it is built on, so
  * the ratio equals its own parts.
  */
@@ -41,7 +41,7 @@ const signed2 = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 
 /**
- * EVERY SYMBOL THIS VIEW USES, DEFINED ONCE — same rule as the tracking-error and correlation
+ * Every symbol this view uses, defined once — same rule as the tracking-error and correlation
  * views. `Rₜ`, `T` and `f` appear on four of the seven cards between them.
  */
 const LEGEND = {
@@ -50,14 +50,14 @@ const LEGEND = {
   T: (n: number | null | undefined) => `the number of periods (${v(n)} here)`,
   f: (n: number | null | undefined) => `periods per year (${v(n)}), the annualisation factor`,
   sigma: 'the answer: one standard deviation of the return, per year',
-  // ⚠ THE min(·,0) IS THE WHOLE DIFFERENCE FROM σ. Every up period contributes exactly zero, so
+  //  THE min(·,0) IS THE WHOLE DIFFERENCE FROM σ. Every up period contributes exactly zero, so
   // this is a spread of losses only — and the divisor is still ALL periods, which is Sortino's
   // convention rather than the semi-deviation's.
   minR: 'every gain replaced by zero, so only the losing periods contribute anything',
   sigmaD: 'the answer: the spread of the losses alone, per year',
   prod: 'the periods CHAINED — what the sleeve actually compounded to, not the average of its steps',
   Rann: 'the annualised return from the tile beside this one',
-  rf: 'the risk-free rate the return is measured above — ⚠ stated because a Sharpe quoted without '
+  rf: 'the risk-free rate the return is measured above —  stated because a Sharpe quoted without '
     + "one is not comparable with anybody else's",
   sharpe: 'the answer: return per unit of TOTAL volatility, up and down alike',
   sortino: 'the answer: the same return per unit of DOWNSIDE only',
@@ -109,9 +109,9 @@ export default function VolatilityView({
   const period = 'month';
 
   /**
-   * WHAT EVERY CARD HERE IS MEASURED FROM, AND OVER WHAT WINDOW — built once, seven cards.
+   * What every card here is measured from, and over what window — built once, seven cards.
    *
-   * ⚠ THE SAME TWO STRINGS THE TRACKING-ERROR AND CORRELATION VIEWS BUILD. All three read one
+   *  The same two strings the tracking-error and correlation views build. All three read one
    * `build_paired_series`; three separately-worded Wheres would be three places for the sources
    * to drift apart while the numbers stayed identical.
    */
@@ -121,7 +121,7 @@ export default function VolatilityView({
       + `against ${v(data.benchmark)}'s tracker.`
     : '';
 
-  /** ⚠ TWO CLOCKS — a price window and a weights date. See the ⚠⚠ in `TrackingErrorView`. */
+  /**  TWO CLOCKS — a price window and a weights date. See the  in `TrackingErrorView`. */
   const when = data?.available
     ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
       + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
@@ -130,13 +130,13 @@ export default function VolatilityView({
         ? ` (read ${v(dayOf(portfolioFetchedAt))})` : ''}`
     : '';
 
-  /** A ratio, or a dash. ⚠ A dash is a MEASUREMENT here — see the Sortino note. */
+  /** A ratio, or a dash.  A dash is a MEASUREMENT here — see the Sortino note. */
   const num2 = (n: number | null | undefined) => (n == null ? '—' : n.toFixed(2));
 
   /**
-   * ONE ENTRY PER MEASURE, EACH CARRYING BOTH SIDES.
+   * One entry per measure, each carrying both sides.
    *
-   * ⚠⚠ THE PAIRING LIVES IN THE DATA, NOT IN THE LAYOUT. Built as twelve separate tiles, "which
+   *  The pairing lives in the data, not in the layout. Built as twelve separate tiles, "which
    * ACWI number goes with which of ours" was a question the reader answered by reading labels; here
    * a measure is one object with an `own` and a `bench`, so the two cannot be rendered apart or get
    * out of order. Adding a seventh measure is one entry, in one place, and it arrives in both rows.
@@ -199,7 +199,7 @@ export default function VolatilityView({
           + `${v(`${data.negative_periods_pct?.toFixed(2)}%`)} of ${period}s were negative against `
           + `${v(`${data.benchmark_negative_periods_pct?.toFixed(2)}%`)}.`}
         when={when}
-        how={'⚠ NOBODY HAS EVER EXPERIENCED "18% ANNUALISED VOLATILITY". They have experienced the '
+        how={' NOBODY HAS EVER EXPERIENCED "18% ANNUALISED VOLATILITY". They have experienced the '
           + `worst ${period}. For a fat-tailed book the two are far apart, which is exactly when σ `
           + 'on its own misleads — so this column is the reality check on the first one.'} />} />,
     },
@@ -224,7 +224,7 @@ export default function VolatilityView({
           { sym: 'f', is: LEGEND.f(data.periods_per_year) },
         ]}
         how={'Here so the two ratios beside it can be checked — a risk number without the return '
-          + 'it bought is half a sentence. ⚠ NOT the active return: that is this row minus the one '
+          + 'it bought is half a sentence.  NOT the active return: that is this row minus the one '
           + 'below it only in the loosest sense, and the Tracking error view computes it properly.'} />} />,
     },
     {
@@ -267,7 +267,7 @@ export default function VolatilityView({
           { sym: String.raw`\sigma_d`, is: LEGEND.sigmaD },
           { sym: String.raw`\text{Sortino}`, is: LEGEND.sortino },
         ]}
-        how={'⚠ A DASH MEANS NOTHING EVER FELL BELOW THE TARGET — there is no downside to divide '
+        how={' A DASH MEANS NOTHING EVER FELL BELOW THE TARGET — there is no downside to divide '
           + 'by. That is a measurement, not a missing number.'} />} />,
     },
   ] : [];
@@ -276,7 +276,7 @@ export default function VolatilityView({
     <div className="space-y-3">
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-[11px] text-fg-faint">Measured monthly</span>
-        {/* ⚠⚠ ANNUALISED IS MARKED ONCE, FOR THE WHOLE VIEW, and that is why the tiles no longer
+        {/*  ANNUALISED IS MARKED ONCE, FOR THE WHOLE VIEW, and that is why the tiles no longer
             carry "(ann.)". It applies to σ, downside deviation, the return and both ratios — but
             only ONE tile ever said so, which left the other four looking like raw-period numbers next
             to a "Weekly" control. A per-tile marker also could not survive naming the tiles after
@@ -292,18 +292,18 @@ export default function VolatilityView({
       {data?.available && (
         <>
           {/*
-            ⚠⚠ ONE ROW PER SIDE, ONE COLUMN PER MEASURE — not twelve tiles. Every figure here has a
+             ONE ROW PER SIDE, ONE COLUMN PER MEASURE — not twelve tiles. Every figure here has a
             benchmark twin, and as tiles the pairing had to be inferred from adjacency: "Bustelberg
             Offensief volatility" beside "ACWI volatility" worked, but the other five had no twin on
             screen at all and the reader had nothing to scale them against. A matrix states the
             pairing structurally, names each side ONCE instead of on every tile, and gives the two
             values of a measure the same column so they can be read as one comparison.
 
-            ⚠ THE ⓘ IS ON THE COLUMN, because a measure's definition is the same for both rows. Its
+             THE ⓘ IS ON THE COLUMN, because a measure's definition is the same for both rows. Its
             worked line substitutes the BOOK's numbers — the index row is the identical formula over
             the other series, which the `what` says rather than doubling every card.
 
-            ⚠ `table-fixed` IS WHAT MAKES THE COLUMNS EQUAL, and `overflow-x-auto` on the wrapper is
+             `table-fixed` IS WHAT MAKES THE COLUMNS EQUAL, and `overflow-x-auto` on the wrapper is
             the project rule for a dense table: it scrolls in its own box rather than squashing its
             columns or pushing the dialog sideways.
           */}
@@ -322,7 +322,7 @@ export default function VolatilityView({
                 </tr>
               </thead>
               <tbody>
-                {/* ⚠ THE BOOK FIRST AND IN THE STRONGER INK. Both rows are facts, but only one of
+                {/*  THE BOOK FIRST AND IN THE STRONGER INK. Both rows are facts, but only one of
                     them is the thing the reader opened this panel to look at. */}
                 <tr className="[&>td]:px-2.5 [&>td]:py-2 [&>td]:border-t
                   [&>td]:border-neutral-800/20">
@@ -353,9 +353,9 @@ export default function VolatilityView({
           {data.cadence_note && <p className="text-[11px] text-fg-faint">{data.cadence_note}</p>}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {/* ⚠ THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as `TrackingErrorView`'s own
+            {/*  THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as `TrackingErrorView`'s own
                 footnote. "Today's weights over 5 years" asserted a start date instead of reporting
-                one, and the paired grid rarely reaches the full five. ⚠ Not badged: a bare <p> is
+                one, and the paired grid rarely reaches the full five.  Not badged: a bare <p> is
                 outside the card system, and `v()` only renders inside one. */}
             {`${portfolioName}'s stock sleeve at its current weights, priced from `}
             {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} `}

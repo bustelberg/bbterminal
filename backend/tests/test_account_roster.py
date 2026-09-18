@@ -5,7 +5,7 @@ six extras (TOPS_AZTS_L, TOPS_MOTS_L, WTS test 1-4 DYN) had simply stopped being
 nothing in the data said so: `airs_performance` is append-only, so an account AIRS deactivated
 keeps every row it ever wrote and stays in the list for ever.
 
-⚠ AND IT DOES NOT LOOK LIKE A STALE ROW — IT LOOKS LIKE A BROKEN FEATURE. TOPS_NEU_BEH_DYN's
+ AND IT DOES NOT LOOK LIKE A STALE ROW — IT LOOKS LIKE A BROKEN FEATURE. TOPS_NEU_BEH_DYN's
 holdings were frozen at its last scan (2026-07-16, before ISIN capture), so its Class column was
 read-only and 9 of its 12 rows sat Unclassified. Three separate "bugs", one dead account.
 """
@@ -44,7 +44,7 @@ class TestTheLiveSetIsTheNEWESTDiscovery:
 
 
 class TestAnUnknownRosterMustNotBlankThePage:
-    """⚠ `None` MEANS "DO NOT FILTER" AND IS NOT AN EMPTY SET.
+    """ `None` MEANS "DO NOT FILTER" AND IS NOT AN EMPTY SET.
 
     Before the first discovery — a fresh database, or the moment this table was added — the
     roster is empty. Reading that as "no account exists" empties the portfolios page completely,
@@ -67,7 +67,7 @@ class TestAnUnknownRosterMustNotBlankThePage:
 
 
 class TestAFailedScrapeMustNotRetireEveryAccount:
-    """⚠ A LOGIN FAILURE RETURNS FEW ROWS, NOT AN ERROR.
+    """ A LOGIN FAILURE RETURNS FEW ROWS, NOT AN ERROR.
 
     A changed selector or an expired session yields a handful of rows and no exception. Writing
     that as the roster would retire the entire table in one pass — and the next page load would
@@ -109,7 +109,7 @@ class TestTheTwoFiltersAreIndependent:
 
 
 class TestRecordingReportsMustNotRedefineTheLiveSet:
-    """⚠ ROWS VANISHED FROM THE PORTFOLIOS PAGE MID-SCAN, AND THIS IS WHY.
+    """ ROWS VANISHED FROM THE PORTFOLIOS PAGE MID-SCAN, AND THIS IS WHY.
 
     `_live_accounts` means "the accounts AIRS listed on the most recent discovery", computed as
     `last_seen_at == max(last_seen_at)`. `_record_reports` runs PER ACCOUNT as the scan progresses,
@@ -135,7 +135,7 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
 
         airs_vermogen._record_reports({"LIVE_A": ["att", "volk"]}, NEW)
 
-        # ⚠ AN `update`, NOT AN `insert` — the write stopped being an upsert on 2026-08-13 because
+        #  AN `update`, NOT AN `insert` — the write stopped being an upsert on 2026-08-13 because
         # an upsert omitting the NOT NULL `last_seen_at` fails whether or not the row exists. See
         # `TestTheWriteIsAnUPDATEAndNeverAnUpsert`.
         written = [w for w in fake.writes if w[0] == "update"]
@@ -145,7 +145,7 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
         row = next(r for r in fake.tables["airs_account_roster"] if r["portefeuille"] == "LIVE_A")
         assert row["reports_ok"] == ["att", "volk"]
         assert row["reports_at"] == NEW
-        # ⚠ AND THE EXISTING VALUE SURVIVES UNTOUCHED. Under the old upsert the row was replaced,
+        #  And the existing value survives untouched. Under the old upsert the row was replaced,
         # so "absent" was the only way to express "not written"; an UPDATE leaves the discovery
         # stamp in place, which is the stronger and more literal form of the same rule.
         assert row["last_seen_at"] == NEW
@@ -160,7 +160,7 @@ class TestRecordingReportsMustNotRedefineTheLiveSet:
 
 
 class TestTheWriteIsAnUPDATEAndNeverAnUpsert:
-    """⚠⚠ THE 2026-08-03 DIAGNOSIS WAS WRONG AND THESE TESTS PASSED ANYWAY (corrected 2026-08-13).
+    """ THE 2026-08-03 DIAGNOSIS WAS WRONG AND THESE TESTS PASSED ANYWAY (corrected 2026-08-13).
 
     The symptom was real:
 
@@ -176,12 +176,12 @@ class TestTheWriteIsAnUPDATEAndNeverAnUpsert:
         select count(*) filter (where portefeuille='BUS_WTS_Dividend_Dyn')  ->  1   (it exists)
         insert ... on conflict (portefeuille) do update ...                 ->  23502
 
-    ⚠ AND EVERY TEST BELOW WENT ON PASSING, WHICH IS THE LESSON. `FakeSupabase` has no NOT NULL
+     AND EVERY TEST BELOW WENT ON PASSING, WHICH IS THE LESSON. `FakeSupabase` has no NOT NULL
     constraint, so it cannot reproduce this class of failure at all — the behavioural tests were
     asserting on a store that accepts anything. The only check that would have caught it is the
     structural one: this function must not call `upsert`.
 
-    ⚠ THE DAMAGE WAS NOT THE MISSING ROW. Every account failed, on every scan, silently — and this
+     THE DAMAGE WAS NOT THE MISSING ROW. Every account failed, on every scan, silently — and this
     table is what marks a row "att did not arrive", so the failure suppressed exactly the warning it
     should have raised. `AITopSelectie OFF DYN` went on showing +55.20% (June's
     `cumulatief_rendement`) while July's −11.96% sat unfetched, and the row looked perfectly
@@ -189,7 +189,7 @@ class TestTheWriteIsAnUPDATEAndNeverAnUpsert:
     """
 
     def test_it_never_calls_upsert(self):
-        """⚠ STRUCTURAL, BECAUSE THE FAKE CANNOT ENFORCE `NOT NULL`. `upsert` here is an INSERT
+        """ STRUCTURAL, BECAUSE THE FAKE CANNOT ENFORCE `NOT NULL`. `upsert` here is an INSERT
         whose tuple omits `last_seen_at`, and that is rejected before the ON CONFLICT clause is
         ever consulted. The only safe write is a plain UPDATE."""
         import inspect

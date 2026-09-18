@@ -18,24 +18,24 @@ WHAT IT CAN AND CANNOT CLOSE — MEASURED, NOT ESTIMATED
     them Indian, and both need `asset_execution.isin` (`text NOT NULL UNIQUE`) to stop being the
     table's premise before a row can exist for them. That is a schema decision, not a backfill.
 
-⚠⚠ OPENFIGI DOES NOT RETURN AN ISIN. Its `/v3/mapping` response carries figi, compositeFIGI,
+ OPENFIGI DOES NOT RETURN AN ISIN. Its `/v3/mapping` response carries figi, compositeFIGI,
     shareClassFIGI, ticker, name, exchCode — and no ISIN, at all. So the FIGI is only ever the
     MATCHING KEY here: OpenFIGI turns a ticker into a compositeFIGI, that FIGI finds the asset
     row, and the ISIN is read off THAT ROW. Anyone reading this expecting OpenFIGI to be the
     source of the identifier will look for a field that does not exist.
 
-⚠ THE COMPOSITE FIGI IS THE RIGHT KEY, THE LISTING FIGI IS NOT. A FIGI is per-listing, so CSL on
+ THE COMPOSITE FIGI IS THE RIGHT KEY, THE LISTING FIGI IS NOT. A FIGI is per-listing, so CSL on
     the ASX and the same company's Munich line have different ones — matching on `figi` would miss
     exactly the cross-listed rows this is for. `asset_execution.openfigi_figi` stores the COMPOSITE
     (verified: CSL's Munich row `CSJ.MU` carries `BBG000BKBN81`, which is what OpenFIGI returns as
     `compositeFIGI` for `CSL/AU`), and a composite is stable across venues.
 
-⚠ NAME MATCHING IS A GATE, NEVER A SOURCE. Every candidate passes `same_company` before it is
+ NAME MATCHING IS A GATE, NEVER A SOURCE. Every candidate passes `same_company` before it is
     used, and it is load-bearing: `company` holds "Ashtead Group" while the asset grid holds
     `AT.L` "Ashtead Technology" — a different business with a near-identical name. Nothing here
     accepts a match on name alone.
 
-⚠⚠ AND THE HARDEST GUARD: AN ISIN THAT ANOTHER COMPANY ALREADY HAS IS REFUSED. In this codebase
+ AND THE HARDEST GUARD: AN ISIN THAT ANOTHER COMPANY ALREADY HAS IS REFUSED. In this codebase
     two companies sharing an ISIN ARE the same security — `ingest/dedupe.py::dedupe_by_isin` MERGES
     them on the next ingest, moving memberships and dropping one row's prices. So a wrong ISIN
     written here does not show up as a wrong field; it shows up weeks later as a company that
@@ -68,8 +68,8 @@ _PAUSE_S = 2.6
 
 # GuruFocus exchange code -> OpenFIGI (Bloomberg) exchCode.
 #
-# ⚠ NSE/BOM ARE HERE AND THEY DO NOT WORK. `ASIANPAINT` returns "No identifier found" under IS,
-# IB, IN and under no exchCode at all — those tickers are not in OpenFIGI's free TICKER index.
+#  Nse/bom are here and they do not work. `ASIANPAINT` returns "No identifier found" under IS,
+# Ib, in and under no exchCode at all — those tickers are not in OpenFIGI's free TICKER index.
 # They are kept so the failure is attributable to the exchange rather than looking like a missing
 # mapping, and so a keyed account can retest them by changing nothing but the credentials.
 _EXCH = {
@@ -81,15 +81,15 @@ _EXCH = {
 def _page(table: str, select: str, order: str, **filters) -> list[dict]:
     """Every row, paged and ORDERED ON A UNIQUE KEY.
 
-    ⚠ PostgREST truncates SILENTLY at 1,000 rows on cloud, so the paging is mandatory.
+     PostgREST truncates SILENTLY at 1,000 rows on cloud, so the paging is mandatory.
 
-    ⚠⚠ AND `order` IS LOAD-BEARING — WITHOUT IT THE PAGING SILENTLY SKIPS AND REPEATS ROWS.
+     AND `order` IS LOAD-BEARING — WITHOUT IT THE PAGING SILENTLY SKIPS AND REPEATS ROWS.
     Postgres makes no promise about row order across separate LIMIT/OFFSET queries, so an unordered
     page boundary lands wherever it likes and lands somewhere different each run. This shipped
     without it: two runs of the (since-removed) membership backfill script minutes apart reported
     the S&P at 411 and 28 members against a truth of 503.
 
-    ⚠ HERE THE CONSEQUENCE WAS WORSE THAN A WRONG COUNT. `taken` — every ISIN already in use — is
+     HERE THE CONSEQUENCE WAS WORSE THAN A WRONG COUNT. `taken` — every ISIN already in use — is
     what stops this script handing one ISIN to two companies, and two companies sharing an ISIN
     ARE one security (`dedupe_by_isin` merges them). A short read makes that guard incomplete
     without making it look incomplete. Verified after the fact on the 27 rows already written:
@@ -134,7 +134,7 @@ def _home_country(exch_by_code: dict[str, str], c: dict) -> str | None:
 
 
 def _country_ok(home: str | None, isin: str) -> bool:
-    """⚠⚠ THE ADR GUARD, AND IT IS THE DIFFERENCE BETWEEN A BRIDGE AND A WRONG SECURITY.
+    """ THE ADR GUARD, AND IT IS THE DIFFERENCE BETWEEN A BRIDGE AND A WRONG SECURITY.
 
     A ticker+name match is not enough, because an ADR carries its issuer's name and often its
     ticker while being a DIFFERENT security with a DIFFERENT ISIN. Measured on the first dry run:
@@ -144,13 +144,13 @@ def _country_ok(home: str | None, isin: str) -> bool:
     sharing an ISIN ARE one security here, `dedupe_by_isin` would then merge it into whatever
     else holds that ADR.
 
-    ⚠ VENUE EQUALITY IS THE WRONG TEST — it refuses the cases that are fine. Canadian Pacific is
+     VENUE EQUALITY IS THE WRONG TEST — it refuses the cases that are fine. Canadian Pacific is
     `TSX` for us and `NYSE` in the asset grid, one interlisted security under one `CA…` ISIN; and
     EchoStar/Bio-Techne/News Corp are `NYSE` for us and `NasdaqGS` there, which is our exchange
     field being wrong rather than a different instrument. All five are correct matches. The test
     that separates them from the ADRs is the ISIN's COUNTRY against the company's home market.
 
-    ⚠ IT ERRS SAFE AND THAT IS DELIBERATE. A US-listed, foreign-domiciled issuer (Accenture, `IE…`
+     IT ERRS SAFE AND THAT IS DELIBERATE. A US-listed, foreign-domiciled issuer (Accenture, `IE…`
     on NYSE) is refused here even though the match is good. A false refusal costs nothing — the
     row stays exactly as it is today — while a false accept silently merges two companies weeks
     later. Unknown home country is refused for the same reason.
@@ -168,7 +168,7 @@ def _match_direct(todo: list[dict], assets: list[dict]) -> dict[int, tuple[dict,
     for c in todo:
         cands = [a for a in by_tick.get((c.get("gurufocus_ticker") or "").strip().upper(), [])
                  if same_company(c.get("company_name") or "", _asset_name(a))]
-        # ⚠ EXACTLY ONE, OR NONE. Two asset rows passing the name gate means the ticker is reused
+        #  Exactly one, or none. Two asset rows passing the name gate means the ticker is reused
         # across venues by related instruments; picking either is a guess.
         if len(cands) == 1:
             hits[c["company_id"]] = (cands[0], "ticker")
@@ -195,7 +195,7 @@ def _match_figi(todo: list[dict], assets: list[dict], *, verbose: bool) -> dict[
             resp.raise_for_status()
             items = resp.json()
         except Exception as e:  # noqa: BLE001
-            # ⚠ REPORTED, NOT SWALLOWED. A silent batch failure would look identical to "these
+            #  Reported, not swallowed. A silent batch failure would look identical to "these
             # companies are unresolvable", which is the wrong conclusion to draw from a 429.
             print(f"  ! OpenFIGI batch {i // _BATCH + 1} failed: {type(e).__name__}: {e}",
                   file=sys.stderr)
@@ -264,7 +264,7 @@ def main() -> int:
             refused.append((name, f"{isin} is not a {home or '?'} security — "
                                   f"likely an ADR or cross-listing, not this row"))
             continue
-        # ⚠⚠ THE GUARD THAT MATTERS. Two companies with one ISIN are ONE security here, and
+        #  The guard that matters. Two companies with one ISIN are ONE security here, and
         # `dedupe_by_isin` will merge them on the next ingest — the damage surfaces later, as a
         # disappeared company, not as a bad field.
         if isin in taken:
@@ -299,7 +299,7 @@ def main() -> int:
         try:
             (supabase.table("company").update({"isin": isin})
              .eq("company_id", c["company_id"])
-             # ⚠ ONLY IF IT IS STILL NULL. The read happened minutes ago; another ingest may have
+             #  Only if it is still null. The read happened minutes ago; another ingest may have
              # filled it since, and overwriting a fresher value with a stale proposal is the one
              # way this script could destroy information rather than add it.
              .is_("isin", "null").execute())

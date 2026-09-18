@@ -19,12 +19,12 @@ export type AssetPick = {
 /**
  * Type-ahead over the asset pipeline, for picking ONE company.
  *
- * ⚠⚠ IT SEARCHES SERVER-SIDE, AND THAT IS NOT A PREFERENCE. `/api/asset-pipeline/grid` — what the
+ *  It searches server-side, and that is not a preference. `/api/asset-pipeline/grid` — what the
  * Asset Pipeline page loads — is **27.56 MB** for its 16,613 rows. Pulling that down to filter it
  * in the browser for a ten-row dropdown would be the single heaviest thing on this page, paid on
  * every visit, to show a name and an ISIN. `/api/asset-pipeline/search` answers in ~50 ms.
  *
- * ⚠ IT OFFERS ONLY WHAT CAN BE DRAWN. The server restricts to `status='ok'` rows with an
+ *  It offers only what can be drawn. The server restricts to `status='ok'` rows with an
  * `analysis_id` and bars > 0 (~8,200 of 16,613). Half the grid is bonds, unresolved ISINs and
  * zero-bar rows; offering one of those would let someone pick a company and get an empty panel,
  * which reads as a broken page rather than as an instrument we cannot price.
@@ -41,7 +41,7 @@ export default function CompanyPicker({ label, value, onPick }: {
   const [busy, setBusy] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
-  // ⚠ DEBOUNCED, AND THE IN-FLIGHT REQUEST IS ABORTED. Typing "nvidia" is six keystrokes; without
+  //  Debounced, and the in-flight request is aborted. Typing "nvidia" is six keystrokes; without
   // both of these it is six requests whose replies can land out of order, and the list settles on
   // whichever answered last rather than on what is in the box.
   useEffect(() => {
@@ -80,9 +80,30 @@ export default function CompanyPicker({ label, value, onPick }: {
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
 
+  if (value) {
+    return (
+      <div>
+        <div className="mb-1.5 text-sm font-medium text-fg-soft">{label}</div>
+        <div className="flex min-h-10 items-center gap-3 rounded-lg border border-neutral-800/40 bg-card px-3 py-2">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm text-fg-strong">{value.name ?? value.isin}</div>
+            <div className="truncate font-mono text-[11px] text-fg-faint">{value.isin}</div>
+          </div>
+          <button
+            type="button"
+            onClick={() => { onPick(null); setQ(''); }}
+            className="shrink-0 text-xs text-fg-subtle transition-colors hover:text-fg"
+          >
+            Change
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={box} className="relative">
-      {/* ⚠ BIGGER, AND NO LONGER UPPERCASED — the two go together. At 10px small-caps this was
+      {/*  BIGGER, AND NO LONGER UPPERCASED — the two go together. At 10px small-caps this was
           furniture; at a readable size the same styling shouts "COMPANY A — THE SUBJECT" at a
           reader who is being asked a question, which is the reasoning `OwnerEarningsModal` already
           records about its own eyebrow: size and ink set a line apart, and small caps on top of
@@ -96,13 +117,6 @@ export default function CompanyPicker({ label, value, onPick }: {
           placeholder="Name, ISIN or ticker…"
           className="flex-1 min-w-0 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors"
         />
-        {value && (
-          <button type="button" onClick={() => { onPick(null); setQ(''); }}
-            title="Clear this side"
-            className="shrink-0 px-3 rounded-lg border border-neutral-800/40 text-fg-faint hover:text-fg text-sm transition-colors">
-            ✕
-          </button>
-        )}
       </div>
 
       {open && q.trim().length >= 2 && (
@@ -119,20 +133,11 @@ export default function CompanyPicker({ label, value, onPick }: {
               onClick={() => { onPick(r); setOpen(false); setQ(r.name ?? r.isin); }}
               className="w-full text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
               <div className="text-sm text-fg-strong truncate">{r.name ?? r.isin}</div>
-              <div className="text-[11px] text-fg-faint font-mono truncate">
-                {r.isin}
-                {r.yahoo_symbol && ` · ${r.yahoo_symbol}`}
-                {r.exchange && ` · ${r.exchange}`}
-                {r.currency && ` · ${r.currency}`}
-                {/* ⚠ THE BAR COUNT IS SHOWN because it is what the list is ORDERED by, and an
-                    order the reader cannot see reads as arbitrary. It is also the honest way to
-                    tell a company's main listing from a thin foreign one carrying the same name. */}
-                {typeof r.bars === 'number' && ` · ${r.bars.toLocaleString('en-US')} bars`}
-              </div>
+              <div className="text-[11px] text-fg-faint font-mono truncate">{r.isin}</div>
             </button>
           ))}
           {truncated && (
-            // ⚠ SAID, NOT SILENTLY DROPPED. A capped list that does not admit it invites the
+            //  Said, not silently dropped. A capped list that does not admit it invites the
             // reader to conclude their company is not in the pipeline.
             <p className="px-3 py-2 text-[11px] text-fg-faint border-t border-neutral-800/20">
               More matches than shown — keep typing to narrow it.

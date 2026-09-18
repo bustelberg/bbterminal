@@ -1,13 +1,13 @@
 """`routers/_airs_ref.py` must survive PostgREST's silent row cap.
 
-⚠ WHY THIS EXISTS AND WHY IT IS NOT PARANOIA: `airs_model_portfolio_position` held **982 rows**
+ WHY THIS EXISTS AND WHY IT IS NOT PARANOIA: `airs_model_portfolio_position` held **982 rows**
 when this module was written, and PostgREST's cap on Supabase cloud is **1,000**. Eighteen rows of
 headroom. The cap truncates SILENTLY, and the LOCAL cap is 10,000 — so the first symptom would be
 production quietly losing positions off the end of the table while every local check passed. That
 is the identical failure `common/fx_load.py` documents: a cut read makes a fully-priced holding
 vanish from its own portfolio and the weights renormalise over what survived, with no error.
 
-⚠ THE SORT KEY MUST BE THE PRIMARY KEY. `(portfolio_id, isin)` is NOT unique in this table — one
+ THE SORT KEY MUST BE THE PRIMARY KEY. `(portfolio_id, isin)` is NOT unique in this table — one
 model lists the same instrument at two weights (VTopSelectie OFF FX holds CapitaLand at 2% *and*
 3%). Postgres makes no promise about tied rows across separate LIMIT/OFFSET queries, so paging on
 that pair can serve a row twice or skip it. `_fake_supabase` sorts stably on the ordered key, so
@@ -41,7 +41,7 @@ def _models(n: int = 102) -> list[dict]:
 
 
 def _install(monkeypatch, *, max_rows: int | None):
-    """⚠ PATCHES `deps.supabase`, NOT `_airs_ref.supabase` — the module has no such attribute.
+    """ PATCHES `deps.supabase`, NOT `_airs_ref.supabase` — the module has no such attribute.
     `_airs_ref` resolves `deps.supabase` at CALL time precisely so that one patch point covers
     every module that ends up doing the read; binding it at import is what broke a dozen existing
     tests when these loaders moved out of the routers."""

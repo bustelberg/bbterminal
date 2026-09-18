@@ -3,13 +3,13 @@
 These are the numbers a reverse DCF is judged against: the model says the price implies 24%/yr, and
 the only useful next question is what anyone actually forecasts.
 
-⚠ A DIFFERENT ENDPOINT FROM EVERYTHING ELSE THE VALUATION TABS READ. `financials` and
+ A DIFFERENT ENDPOINT FROM EVERYTHING ELSE THE VALUATION TABS READ. `financials` and
 `analyst_estimate` are already ingested into `metric_data`; these are not, and cannot easily be —
 they are SCALARS with no date to sit on, the same reason `long_term_growth_rate_mean` never reaches
 the database (see `ingest/earnings/analyst_estimates.py`, which only stores list-valued fields).
 So this is a live fetch with its own Storage cache, not a metric read.
 
-⚠ THE LISTING DOES NOT MATTER HERE, AND THAT IS NOT TRUE OF ITS NEIGHBOURS. GuruFocus FX-converts
+ THE LISTING DOES NOT MATTER HERE, AND THAT IS NOT TRUE OF ITS NEIGHBOURS. GuruFocus FX-converts
 the LEVELS on this endpoint per listing — ASML's estimated FY1 EPS is 37.06 in Amsterdam and 42.83
 on Nasdaq — but a growth RATE is currency-free and comes back identical on both (30.08 / 36.66,
 measured 2026-07-28). No listing-choice hazard, unlike every other figure in this family.
@@ -21,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 # GuruFocus's own key -> the name we return it under. Only the forward growth rates; the endpoint
 # carries ~250 more fields that nothing here reads.
 #
-# ⚠ `EPS` AND `EPS without NRI` ARE DIFFERENT FORECASTS AND BOTH ARE PUBLISHED. Apple: 13.14 vs
+#  `EPS` AND `EPS without NRI` ARE DIFFERENT FORECASTS AND BOTH ARE PUBLISHED. Apple: 13.14 vs
 # 13.01, ASML: 36.66 vs 39.08 — the without-NRI figure is the one that equals the
 # `long_term_growth_rate_mean` the analyst-estimate feed reports (Apple 13.01, exactly), so the two
 # are the same consensus measured on a normalised earnings base. Returning both keeps the choice
@@ -40,7 +40,7 @@ _STAMP = "_bbterminal_fetched_at"
 
 
 def _is_fresh(blob: dict | None) -> bool:
-    """⚠ Freshness is read off OUR stamp, not off the payload. `keyratios` has no date axis at all —
+    """ Freshness is read off OUR stamp, not off the payload. `keyratios` has no date axis at all —
     no fiscal period, no as-of — so there is nothing in it to age against."""
     if not isinstance(blob, dict):
         return False
@@ -56,7 +56,7 @@ def _is_fresh(blob: dict | None) -> bool:
 def extract(data: dict | None) -> dict[str, float | None]:
     """The four rates, as PERCENTS exactly as GuruFocus files them (36.66 means 36.66%).
 
-    ⚠ NOT converted to decimals here. Every consumer so far wants to print them beside other
+     NOT converted to decimals here. Every consumer so far wants to print them beside other
     percentages; a silent /100 in the extractor is how a 36.66% forecast becomes 0.37% on a label
     that says "%". The one caller that needs a decimal divides at the point of use.
     """
@@ -105,7 +105,7 @@ def growth_estimates_for(company: dict, *, force: bool = False) -> dict:
     api = _api_request(url)
     track_api_call(supabase, exchange)
     if api.data is None:
-        # ⚠ Fall back to a STALE cache rather than to nothing: a week-old consensus beats a blank
+        #  Fall back to a STALE cache rather than to nothing: a week-old consensus beats a blank
         # column, and the alternative is that one flaky call empties the panel.
         stale = _fetch_from_storage(supabase, path)
         if isinstance(stale, dict):

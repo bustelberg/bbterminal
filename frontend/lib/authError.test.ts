@@ -26,10 +26,10 @@ describe('describeAuthError', () => {
       errorDescription: 'Email link is invalid or has expired',
     });
     expect(s).toMatch(/expired|already been used/i);
-    // ⚠ The scanner explanation earns its place: it is why a link "expires" seconds after being
+    //  The scanner explanation earns its place: it is why a link "expires" seconds after being
     // sent, which otherwise reads as a bug in this app.
     expect(s).toMatch(/automatically/i);
-    // ⚠⚠ AND IT MUST NOT BE THE VERIFIER SENTENCE. That description contains "invalid", and an
+    //  And it must not be the verifier sentence. That description contains "invalid", and an
     // ordering mistake in the matcher sends the person to open the link on another device — which
     // cannot work, and reads as advice.
     expect(s).not.toMatch(/same browser/i);
@@ -48,7 +48,7 @@ describe('describeAuthError', () => {
 
 describe('hasAuthError', () => {
   /**
-   * ⚠⚠ THIS IS THE CHECK WHOSE ABSENCE CAUSED THE BUG. A rejected token comes back with `error`
+   *  This is the check whose absence caused the bug. A rejected token comes back with `error`
    * set and NO `code` and NO `token_hash` — so a route that looks only for those two sees an empty
    * query, decides there is nothing to do, and carries on to the password form as though it had
    * signed the person in.
@@ -85,7 +85,7 @@ describe('describeSendError', () => {
     for (const m of ['email rate limit exceeded', 'over_email_send_rate_limit', 'Too Many Requests']) {
       const s = describeSendError(m);
       expect(s).toMatch(/hour/i);
-      // ⚠ "not per person" is the part that stops someone retrying with another address.
+      //  "not per person" is the part that stops someone retrying with another address.
       expect(s).toMatch(/project-wide|not per person/i);
       expect(s).not.toMatch(/rate limit exceeded/i);
     }
@@ -94,7 +94,7 @@ describe('describeSendError', () => {
   it('keeps the per-address throttle separate — that one is seconds, not an hour', () => {
     const s = describeSendError('For security purposes, you can only request this after 51 seconds.');
     expect(s).toMatch(/a minute/i);
-    // ⚠ Telling someone to wait an hour for a 51-second throttle is how a working app gets
+    //  Telling someone to wait an hour for a 51-second throttle is how a working app gets
     // abandoned; the two limits must not collapse into one sentence.
     expect(s).not.toMatch(/hour/i);
   });

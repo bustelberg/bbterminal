@@ -341,7 +341,7 @@ function TimelinePanel({
           </div>
           <div
             ref={setScrollArea}
-            className="overflow-x-auto flex-1 min-w-0 select-none"
+            className="overflow-x-auto flex-1 min-w-0"
           >
             <div style={{ width: innerWidth, position: 'relative' }}>
               {/* Year axis above the cell rows. */}

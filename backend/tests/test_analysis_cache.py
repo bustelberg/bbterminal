@@ -1,6 +1,6 @@
 """`routers/_analysis_cache.py` — the properties that make a cache safe on this page.
 
-⚠ THE RISK BEING GUARDED IS NOT A SLOW PAGE, IT IS A WRONG NUMBER. /management-dashboard's whole
+ THE RISK BEING GUARDED IS NOT A SLOW PAGE, IT IS A WRONG NUMBER. /management-dashboard's whole
 discipline is that a figure is either current or ABSENT (`n/a` when unpriceable, a refusal under
 `MIN_COVERAGE_PCT` rather than a renormalised guess). A cache that serves a stale payload breaks
 that silently and looks exactly like a real answer, so every test here is about *when it must
@@ -12,7 +12,7 @@ import routers._analysis_cache as ac
 
 
 class TestNoFingerprintMeansNoCache:
-    """⚠ THE MOST IMPORTANT PROPERTY. A fingerprint we could not read is NOT evidence that
+    """ THE MOST IMPORTANT PROPERTY. A fingerprint we could not read is NOT evidence that
     nothing changed — e.g. `SUPABASE_DB_URL` unset, or the catalog read failed. Treating that as
     "unchanged" would serve a payload of unknown age forever."""
 
@@ -85,7 +85,7 @@ class TestFingerprintFailsSafe:
 
 
 class TestWatchedTables:
-    """⚠ A TABLE MISSING FROM `_WATCHED` IS A TABLE WHOSE CHANGES THE CACHE CANNOT SEE. The list
+    """ A TABLE MISSING FROM `_WATCHED` IS A TABLE WHOSE CHANGES THE CACHE CANNOT SEE. The list
     was derived by instrumenting a real call, and these are the ones whose absence would produce a
     confidently wrong figure rather than a merely stale one — the UI-mutable overrides, which a
     user changes and then immediately re-opens the modal to check."""
@@ -111,7 +111,7 @@ class TestWatchedTables:
 class TestTheLegStore:
     """The cross-portfolio sub-result cache (2026-08-19).
 
-    ⚠ IT IS A SECOND STORE, NOT A BIGGER FIRST ONE. A leg is one benchmark window or one ISIN's
+     IT IS A SECOND STORE, NOT A BIGGER FIRST ONE. A leg is one benchmark window or one ISIN's
     three risk numbers; the payload store holds 137KB dicts. They need entry budgets three orders
     of magnitude apart, which is the whole reason for the split — and they share ONE fingerprint,
     so a leg can never outlive the payload cache's notion of "current".
@@ -145,7 +145,7 @@ class TestTheLegStore:
         assert ac.stats()["leg_entries"] == 0
 
     def test_the_two_stores_do_not_share_a_budget(self, monkeypatch):
-        """⚠ The payload store caps at 48 entries. If legs went in there, ONE portfolio's ~60
+        """ The payload store caps at 48 entries. If legs went in there, ONE portfolio's ~60
         holdings would evict every payload on the page."""
         monkeypatch.setattr(ac, "fingerprint", lambda: "fp")
         ac.invalidate()
@@ -161,7 +161,7 @@ class TestTheLegStore:
 
 
 class TestTheBatchedLegSplit:
-    """⚠ THE BATCHED FORM EXISTS BECAUSE THE MISS PATH IS BATCHED. `_holding_risk` loads five
+    """ THE BATCHED FORM EXISTS BECAUSE THE MISS PATH IS BATCHED. `_holding_risk` loads five
     years of daily closes for every holding in ONE `COPY`; a per-ISIN `leg()` loop would serve the
     hits and then run that COPY once per miss, turning the cheapest part of the function into ~60
     round trips. The caller asks "which of these must I still compute", computes exactly those
@@ -176,7 +176,7 @@ class TestTheBatchedLegSplit:
         assert misses == [("holding_risk", "B")]
 
     def test_an_empty_answer_is_still_an_answer(self, monkeypatch):
-        """⚠ A HOLDING WITH TOO LITTLE HISTORY YIELDS `{}` AND THAT IS A RESULT. Treating "no row"
+        """ A HOLDING WITH TOO LITTLE HISTORY YIELDS `{}` AND THAT IS A RESULT. Treating "no row"
         as "not computed" would make a book of young listings re-run the whole five-year load on
         every single open — the exact case the cache is for."""
         monkeypatch.setattr(ac, "fingerprint", lambda: "fp")

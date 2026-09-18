@@ -1,4 +1,4 @@
-"""⚠⚠ EVERY PATH INTO `_blend_rows` MUST EMIT THE LTM PERIOD, AND ONE OF THEM DID NOT.
+""" EVERY PATH INTO `_blend_rows` MUST EMIT THE LTM PERIOD, AND ONE OF THEM DID NOT.
 
 MEASURED 2026-08-14 on the Long Equity tab, `EPS (excl. non-recurring)`, ACWI benchmark, annual
 basis. `/fundamental-blend-metrics` has two reads:
@@ -12,7 +12,7 @@ trailing-twelve-month point and the book did not: the green line ran a quarter p
 and because an LTM sits on a QUARTER-END x while every annual point sits on a whole year, the tick
 fell through to `xToPeriod` and read **"2026 Q2"** — a fiscal quarter on an axis that has none.
 
-⚠ THE FAILURE IS THAT IT LOOKS LIKE A FINDING. "The index reported Q2 and we have not" is a
+ THE FAILURE IS THAT IT LOOKS LIKE A FINDING. "The index reported Q2 and we have not" is a
 perfectly ordinary thing for a chart to say, and it is not what was happening: both sides had the
 data, one read simply never asked for it.
 
@@ -40,7 +40,7 @@ def _stub(monkeypatch, answer=None, seen: dict | None = None):
 
 class TestTheRowShape:
     def test_one_row_per_company_per_metric_under_the_ANNUAL_code(self, monkeypatch):
-        """⚠ THE ANNUAL SPELLING, not `ltm__…` and not `quarterly__…`. These rows go INTO the blend,
+        """ THE ANNUAL SPELLING, not `ltm__…` and not `quarterly__…`. These rows go INTO the blend,
         which groups by `metric_code`; the `ltm__` rename happens on the way OUT (`_blend_rows`), so
         renaming them here would strand the LTM in a series of its own with no history to chain
         off."""
@@ -58,7 +58,7 @@ class TestTheRowShape:
         assert {r["target_date"] for r in E._ltm_blend_rows([1, 2], ["eps_nri"], "annual")} == {"LTM"}
 
     def test_ltm_date_rides_along_and_is_the_real_quarter_end(self, monkeypatch):
-        """⚠ WITHOUT IT `_blend_rows` STAMPS THE POINT WITH `period_end("LTM")` — i.e. TODAY — and
+        """ WITHOUT IT `_blend_rows` STAMPS THE POINT WITH `period_end("LTM")` — i.e. TODAY — and
         the two lines' LTM points land at different x on a chart that exists to compare them."""
         _stub(monkeypatch)
         got = {(r["company_id"], r["ltm_date"])
@@ -87,7 +87,7 @@ class TestTheFullReadAsksForEveryLine:
 
 class TestItRefusesWhereThereIsNothingToAdd:
     def test_quarterly_gets_no_LTM_row_and_costs_no_read(self, monkeypatch):
-        """⚠ EVERY quarterly point ALREADY IS a trailing twelve months, so the newest one needs no
+        """ EVERY quarterly point ALREADY IS a trailing twelve months, so the newest one needs no
         separate name — appending one would duplicate the last column under a second label. The
         stub would raise if it were called with the wrong cadence; it must not be called at all."""
         called: dict = {}
@@ -102,7 +102,7 @@ class TestItRefusesWhereThereIsNothingToAdd:
         assert not called
 
     def test_a_company_with_no_LTM_simply_has_no_row(self, monkeypatch):
-        """⚠ A HOLE, NOT A FABRICATED YEAR. A member whose newest filing does not reach past its
+        """ A HOLE, NOT A FABRICATED YEAR. A member whose newest filing does not reach past its
         last fiscal year has no trailing year to add; the blend CARRIES its last figure into the
         period instead, and — because a carried value counts for nothing in the coverage floor — a
         period where too few members really reported is refused rather than drawn."""

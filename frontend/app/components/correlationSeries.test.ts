@@ -16,7 +16,7 @@ const BLOCK: SeriesBlock = {
 
 describe('seriesPoints', () => {
   it('drops a gap rather than reading it as zero', () => {
-    // ⚠ THE BUG THIS EXISTS TO PREVENT. `col[i] ?? 0` turns a Japanese holiday into a 100% crash
+    //  The bug this exists to prevent. `col[i] ?? 0` turns a Japanese holiday into a 100% crash
     // and back, on a chart nobody would think to distrust.
     const pts = seriesPoints(BLOCK, 'a:1');
     expect(pts.map((p) => p.value)).toEqual([10, 12, 14]);
@@ -72,7 +72,7 @@ describe('windowReturnPct', () => {
   });
 
   it('is null on a single observation, never 0', () => {
-    // ⚠ A quiet 0% is how a thin listing passes for a stable one.
+    //  A quiet 0% is how a thin listing passes for a stable one.
     expect(windowReturnPct([{ date: 'a', value: 100 }])).toBeNull();
     expect(windowReturnPct([])).toBeNull();
   });
@@ -96,7 +96,7 @@ describe('compareInstruments', () => {
   });
 
   it('puts an absent liquidity at the bottom in BOTH directions', () => {
-    // ⚠ THE ASSERTION THAT MATTERS. A missing ADV is not "the least liquid" — sorted ascending it
+    //  The assertion that matters. A missing ADV is not "the least liquid" — sorted ascending it
     // would take the top of the table and read as the thinnest listing in the book.
     const asc = [...rows].sort((a, b) => compareInstruments(a, b, 'liquidity', false, none));
     const desc = [...rows].sort((a, b) => compareInstruments(a, b, 'liquidity', true, none));
@@ -124,7 +124,7 @@ describe('compareInstruments', () => {
 
 describe('sourceLabel', () => {
   it('names BOTH vendors when a conversion happened', () => {
-    // ⚠ A EUR level for a USD holding is a yfinance close TIMES an ECB rate. Reporting only the
+    //  A EUR level for a USD holding is a yfinance close TIMES an ECB rate. Reporting only the
     // price vendor answers "which source?" with half the truth.
     const { short, title } = sourceLabel({ price_source: 'yfinance', fx_source: 'ECB' });
     expect(short).toBe('yfinance + ECB');

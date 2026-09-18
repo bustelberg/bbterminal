@@ -5,7 +5,7 @@
 import { weightedByYear, type Weighted } from './marginData';
 import { correctedFcf } from './sbcCorrection';
 
-/** ⚠ `Weighted`, NOT a bare `weight_pct` — the server sends `market_cap_by_period` on an INDEX
+/**  `Weighted`, NOT a bare `weight_pct` — the server sends `market_cap_by_period` on an INDEX
  *  request and the invested-capital blend now needs it in the type, not merely at runtime (see
  *  `investedCapitalIndexByYear`: a period the row cannot be weighted in cannot be its base). */
 export type CashReturnRow = Weighted & {
@@ -17,7 +17,7 @@ export type CashReturnRow = Weighted & {
   total_equity: Record<string, number | null>;   // Total Equity (incl. minority interest)
   /** Carried for the tab-level SBC correction; see `sbcCorrection`. */
   sbc: Record<string, number | null>;
-  /** ⚠ ALREADY A PERCENTAGE — GuruFocus's own `Ratios__ROIC %`, not a line to divide. */
+  /**  ALREADY A PERCENTAGE — GuruFocus's own `Ratios__ROIC %`, not a line to divide. */
   roic: Record<string, number | null>;
 };
 export type CashReturnInputs = { years: string[]; rows: CashReturnRow[] };
@@ -27,7 +27,7 @@ export type CapitalMode = 'croic' | 'roic';
 /**
  * The two ways to ask "what does this capital earn", and they are NOT variants of one number.
  *
- * ⚠ THEY DISAGREE, OFTEN BY A LOT, AND NEITHER IS WRONG. Measured on ASML: FCF per share went
+ *  They disagree, often by a lot, and neither is wrong. Measured on ASML: FCF per share went
  * 24.14 → 8.24 → 23.08 across 2021-2023 on capex and working-capital swings, while its reported
  * ROIC sat at 23.53 → 27.90 → 24.67. The cash measure is reading the capex cycle; the ROIC is
  * reading the business. Showing either alone answers a different question than the reader thinks.
@@ -62,7 +62,7 @@ export const MODES: Record<CapitalMode, {
     derived: true,
     what: 'the free cash flow thrown off per unit of long-term capital employed',
     where: 'Derived here from three reported lines — Free Cash Flow ÷ (Total Long-Term Liabilities + Total Equity). The drill-down shows all three, so the number can be checked rather than believed.',
-    caveat: '⚠ AFTER CAPEX AND AFTER INTEREST, so it swings with the investment cycle and charges leverage twice (interest depresses the numerator while the debt sits in the base). Blank where an issuer does not split current from non-current liabilities — a bank, or Berkshire — because the capital base is then undefined, NOT equity alone.',
+    caveat: ' AFTER CAPEX AND AFTER INTEREST, so it swings with the investment cycle and charges leverage twice (interest depresses the numerator while the debt sits in the base). Blank where an issuer does not split current from non-current liabilities — a bank, or Berkshire — because the capital base is then undefined, NOT equity alone.',
   },
   roic: {
     tab: 'ROIC',
@@ -71,7 +71,7 @@ export const MODES: Record<CapitalMode, {
     derived: false,
     what: 'the after-tax operating profit earned per unit of invested capital',
     where: "GuruFocus's own `Ratios__ROIC %`, read through unchanged — 28 fiscal years for ASML.",
-    caveat: "⚠ NOT OUR ARITHMETIC, AND DELIBERATELY SO. Deriving it would mean picking a NOPAT numerator (GuruFocus's EBIT and Operating Income are different lines — Mitsui 85,035 vs 56,602) and an invested-capital base, i.e. publishing a bespoke ratio under a name every reader already has a definition for. The cost is that the drill-down can show no workings: there is one number per company per year, not three lines to check it against.",
+    caveat: " NOT OUR ARITHMETIC, AND DELIBERATELY SO. Deriving it would mean picking a NOPAT numerator (GuruFocus's EBIT and Operating Income are different lines — Mitsui 85,035 vs 56,602) and an invested-capital base, i.e. publishing a bespoke ratio under a name every reader already has a definition for. The cost is that the drill-down can show no workings: there is one number per company per year, not three lines to check it against.",
   },
 };
 
@@ -107,7 +107,7 @@ export function cashReturnByYear(rows: CashReturnRow[], correct = false): Map<nu
 /**
  * One company's ROIC for a year — GuruFocus's figure, passed through.
  *
- * ⚠ NO ARITHMETIC HERE ON PURPOSE. The only thing this adds over reading the field is refusing a
+ *  No arithmetic here on purpose. The only thing this adds over reading the field is refusing a
  * non-finite value, so a malformed row cannot enter the weighted average as a NaN and blank the
  * whole book's line.
  */
@@ -126,7 +126,7 @@ export function roicByYear(rows: CashReturnRow[]): Map<number, number> {
 export function seriesByYear(
   rows: CashReturnRow[], mode: CapitalMode, correct = false,
 ): Map<number, number> {
-  // ⚠ THE SBC CORRECTION CANNOT REACH ROIC, AND SILENTLY IGNORING IT WOULD BE A LIE. ROIC is
+  //  The sbc correction cannot reach roic, and silently ignoring it would be a lie. ROIC is
   // GuruFocus's own published percentage — there is no numerator of ours to adjust. So the flag is
   // simply not passed here, and the card states that the checkbox does not apply in this mode
   // rather than leaving a ticked box implying a correction that never happened.

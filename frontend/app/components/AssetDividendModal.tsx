@@ -31,7 +31,7 @@ const UNRESOLVED: Record<string, string> = {
  * payment feed shows it the day it's declared. The endpoints still exist on the API
  * surface; nothing here calls them.
  *
- * TWO BRIDGES to reach that one series, because the grid holds two kinds of instrument:
+ * Two bridges to reach that one series, because the grid holds two kinds of instrument:
  *   company-backed — ISIN → `company` → GuruFocus. Equities we ingest.
  *   listing-backed — ISIN → GuruFocus `isin/{ISIN}`. ETFs, which have no `company` row.
  * An unresolved ISIN is resolved on open (one API call, cached forever, misses included).

@@ -1,6 +1,6 @@
 """GuruFocus `keyratios` endpoint — the CONSENSUS FREE CASH FLOW the other endpoint does not carry.
 
-⚠⚠ THIS ENDPOINT IS UNDOCUMENTED AND WAS SITTING IN THE CATALOGUE ALL ALONG. `scripts/gurufocus_
+ THIS ENDPOINT IS UNDOCUMENTED AND WAS SITTING IN THE CATALOGUE ALL ALONG. `scripts/gurufocus_
 catalog.py` recorded `stock/{sym}/keyratios` as **real** with seven sections; nobody opened the
 `Fundamental` one, which holds 264 keys including:
 
@@ -11,16 +11,16 @@ The conclusion "GuruFocus publishes a forward FCF only in its Excel add-in" was 
 `analyst_estimate` (whose annual block genuinely has no FCF key) and from the stored metric codes.
 Both were true and the conclusion did not follow: the field was one endpoint over.
 
-⚠ IT IS THE SAME CONSENSUS AS `analyst_estimate`, VERIFIED RATHER THAN ASSUMED. On AAPL the
+ IT IS THE SAME CONSENSUS AS `analyst_estimate`, VERIFIED RATHER THAN ASSUMED. On AAPL the
 operating-cash-flow estimate reads 148323.41 there and 148323.411 here, and EBIT/EBITDA match to
 the same precision — `keyratios` simply carries more decimals. That is what makes the pairing below
 sound, and what makes `OCF_est − FCF_est` a real consensus capex (Meta FY2026: 134,330.10 −
 5,412.45 = 128,917.65, inside the company's own guided range).
 
-⚠⚠ THE PAYLOAD CARRIES NO DATES. "Next FY1 End" is an ORDINAL, and `Basic` holds two keys, neither
+ THE PAYLOAD CARRIES NO DATES. "Next FY1 End" is an ORDINAL, and `Basic` holds two keys, neither
 a fiscal year end — so a row cannot be dated from this endpoint alone. The dates come from the
 `annual_*_estimate` rows `analyst_estimates` has already stored, whose `target_date`s are FY1, FY2,
-FY3 in order and from the same consensus. ⚠ NO STORED ESTIMATE DATES ⇒ NO ROWS, deliberately: a
+FY3 in order and from the same consensus.  NO STORED ESTIMATE DATES ⇒ NO ROWS, deliberately: a
 guessed fiscal year end would date a forecast to the wrong year, and the frontend already falls
 back to deriving the base from the operating-cash-flow estimate.
 """
@@ -49,11 +49,11 @@ from ._common import (
 
 #: The `Fundamental` keys worth storing, and the metric code each becomes.
 #:
-#: ⚠ ONLY WHAT IS NOT ALREADY INGESTED. `analyst_estimate` already yields revenue, EBIT, EBITDA,
+#:  ONLY WHAT IS NOT ALREADY INGESTED. `analyst_estimate` already yields revenue, EBIT, EBITDA,
 #: net income, EPS, book value and operating cash flow as `annual_*_estimate`; storing them again
 #: from here would be two writers for one code, disagreeing in the last decimal for ever.
 #:
-#: ⚠ AND NOT THE DERIVED ONES. Consensus capex is `OCF_est − FCF_est` and forward D&A is
+#:  AND NOT THE DERIVED ONES. Consensus capex is `OCF_est − FCF_est` and forward D&A is
 #: `EBITDA_est − EBIT_est`; both are arithmetic over figures already stored, and storing a
 #: derivation is how the copy and its inputs come to disagree.
 _ESTIMATE_KEYS = {
@@ -71,7 +71,7 @@ def _parse_key_ratios(data: dict, company_id: int,
     Pure: the dates are handed in rather than looked up, so the ordinal→date pairing — the one
     thing here that can silently be wrong — is testable without a database.
 
-    ⚠ A MISSING DATE SKIPS THAT ORDINAL rather than shifting the rest up. `fy_dates` shorter than
+     A MISSING DATE SKIPS THAT ORDINAL rather than shifting the rest up. `fy_dates` shorter than
     the ordinals published is the ordinary case (the endpoint carries FY3, the estimate block may
     not), and quietly assigning FY3's figure to FY2's date would be a forecast filed against a
     year it was never made for.
@@ -93,7 +93,7 @@ def _parse_key_ratios(data: dict, company_id: int,
                 "source_code": "gurufocus",
                 "target_date": fy_dates[n - 1].isoformat(),
                 "numeric_value": val,
-                # ⚠ LIKE EVERY OTHER ESTIMATE. `load_company_metric_rows` reads forward rows with
+                #  Like every other estimate. `load_company_metric_rows` reads forward rows with
                 # `is_prediction=True AND metric_code LIKE 'annual_%'`, so both halves are what put
                 # this figure in the payload the Deep Valuation tab already loads.
                 "is_prediction": True,
@@ -104,12 +104,12 @@ def _parse_key_ratios(data: dict, company_id: int,
 def _stored_estimate_dates(supabase: Client, company_id: int) -> list[date]:
     """FY1, FY2, FY3 — the `target_date`s of the consensus rows already stored, ascending.
 
-    ⚠ FROM THE **FUTURE** ROWS ONLY, and that is the same rule the frontend's `nextFyEstimate`
+     FROM THE **FUTURE** ROWS ONLY, and that is the same rule the frontend's `nextFyEstimate`
     applies: the estimate block is stored as fetched, so its early periods can already be in the
     past, and pairing "Next FY1" with a year the company has since reported would file a forecast
     against a closed year.
 
-    ⚠ ANY `annual_*_estimate` CODE WILL DO — they share one date axis (it is one consensus, one
+     ANY `annual_*_estimate` CODE WILL DO — they share one date axis (it is one consensus, one
     `date` array) — so this reads the operating-cash-flow line and does not care which company
     happens to lack which metric.
     """
@@ -134,7 +134,7 @@ def fetch_key_ratios(
 ) -> EarningsResult:
     """Fetch `keyratios`, cache it, and load the consensus FCF into `metric_data`.
 
-    ⚠ RUN IT AFTER `fetch_analyst_estimates`, not before: the dates come from what that stored. Out
+     RUN IT AFTER `fetch_analyst_estimates`, not before: the dates come from what that stored. Out
     of order it is not an error — it stores nothing and says so — but the figure will be missing
     until the next pass.
     """
@@ -145,7 +145,7 @@ def fetch_key_ratios(
 
     result = EarningsResult(source="key_ratios")
 
-    # ⚠ BEFORE ANYTHING ELSE, INCLUDING THE CACHE READ. An unsubscribed exchange must not
+    #  Before anything else, including the cache read. An unsubscribed exchange must not
     # reach the vendor, and must not resurrect a payload an earlier unguarded run cached.
     refusal = refuse_unsubscribed(exchange, "key_ratios")
     if refusal is not None:
@@ -156,7 +156,7 @@ def fetch_key_ratios(
     path = _storage_path(ticker, exchange, "keyratios")
     symbol = _build_symbol(ticker, exchange)
 
-    # ⚠ THE DATES DECIDE WHETHER THIS CALL IS WORTH MAKING, so they are read BEFORE the API call
+    #  The dates decide whether this call is worth making, so they are read BEFORE the API call
     # rather than after it. A company with no stored consensus can store nothing from this payload,
     # and spending a metered GuruFocus call to parse it into zero rows is the kind of waste the
     # per-region quota guards exist to prevent.
@@ -172,7 +172,7 @@ def fetch_key_ratios(
     if not force_refresh:
         cached = _fetch_from_storage(supabase, path)
         if cached is not None:
-            # ⚠ THE CACHE IS DATED BY THE ESTIMATE AXIS, NOT BY ANYTHING IN THE PAYLOAD — see the
+            #  The cache is dated by the estimate axis, not by anything in the payload — see the
             # module docstring: `keyratios` carries no period of its own. The consensus is refreshed
             # on the same cadence, so its dates are the honest freshness signal available.
             fresh, reason = is_cache_fresh(fy_dates)
@@ -215,10 +215,10 @@ def fetch_key_ratios(
     result.rows_loaded, result.rows_unchanged = _upsert_metric_rows(supabase, rows)
     _log(f"Loaded {result.rows_loaded} rows into DB"
          + (f", {result.rows_unchanged} already identical" if result.rows_unchanged else ""))
-    # ⚠ NO `_stamp_fetched` HERE, AND THAT IS A DECISION RATHER THAN AN OMISSION. The stamp exists
+    #  NO `_stamp_fetched` HERE, AND THAT IS A DECISION RATHER THAN AN OMISSION. The stamp exists
     # to stop the SMART REFRESH re-asking a company GuruFocus publishes nothing for; this feed is
     # on-demand (one company, from the panel that wants it) and is in no such loop, so there is no
-    # decision for a stamp to improve. ⚠ Calling it with an unregistered source would have been a
+    # decision for a stamp to improve.  Calling it with an unregistered source would have been a
     # SILENT no-op — `FETCHED_AT_COLUMN.get` returns None and it returns — which is worse than not
     # calling it: the line would read as though the feed were stamped. Add a
     # `keyratios_fetched_at` column WITH a migration on the day this joins a bulk pass.

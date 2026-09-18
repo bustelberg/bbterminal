@@ -349,7 +349,7 @@ export default function MonthlyReturnsHeatmap({
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
             </svg>
           ) : (
-            <span aria-hidden className="shrink-0">{benchStatus.tone === 'ok' ? '✓' : '⚠'}</span>
+            <span aria-hidden className="shrink-0">{benchStatus.tone === 'ok' ? '' : ''}</span>
           )}
           <span>{benchStatus.msg}</span>
         </div>
@@ -391,9 +391,9 @@ export default function MonthlyReturnsHeatmap({
                   // Incomplete-data cell: some holdings are carried forward at a
                   // stale close, so the return is PARTIAL — but still the best
                   // number we can compute from the prices we have. Show it (so
-                  // the month is never blank) on a warning-tinted cell with a ⚠
+                  // the month is never blank) on a warning-tinted cell with a
                   // info icon listing the lagging holdings. Falls back to just
-                  // the ⚠ if there's no computable value yet.
+                  // the  if there's no computable value yet.
                   if (isStale) {
                     return (
                       <td
@@ -405,7 +405,7 @@ export default function MonthlyReturnsHeatmap({
                       >
                         <span className="inline-flex items-center justify-center gap-0.5">
                           {v != null && <span>{fmt(v)}</span>}
-                          <CellInfoTip trigger={<span aria-hidden className="text-warn-400 text-[12px] leading-none">⚠</span>}>
+                          <CellInfoTip trigger={<span aria-hidden className="text-warn-400 text-[12px] leading-none"></span>}>
                             {staleTip}
                           </CellInfoTip>
                         </span>
@@ -445,7 +445,7 @@ export default function MonthlyReturnsHeatmap({
           <div className="mt-3 pt-3 border-t border-neutral-800/40 px-2">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-fg-soft">{monthLabel(selected)} · daily returns</span>
-              <button type="button" onClick={() => setSelected(null)} className="text-[12px] text-fg-faint hover:text-fg-soft">✕ close</button>
+              <button type="button" onClick={() => setSelected(null)} className="text-[12px] text-fg-faint hover:text-fg-soft"> close</button>
             </div>
             <div className="flex flex-wrap gap-1">
               {days.map((d) => (

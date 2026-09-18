@@ -168,7 +168,7 @@ def fetch_indicators(
     keys = indicator_keys or INDICATOR_KEYS
     result = EarningsResult(source="indicators")
 
-    # ⚠ BEFORE ANYTHING ELSE, INCLUDING THE CACHE READ. An unsubscribed exchange must not
+    #  Before anything else, including the cache read. An unsubscribed exchange must not
     # reach the vendor, and must not resurrect a payload an earlier unguarded run cached.
     refusal = refuse_unsubscribed(exchange, "indicators")
     if refusal is not None:
@@ -179,18 +179,18 @@ def fetch_indicators(
     symbol = _build_symbol(ticker, exchange)
 
     all_rows: list[dict] = []
-    # ⚠⚠ DID EVERY KEY ACTUALLY GET AN ANSWER? This decides whether we may stamp, and the
+    #  Did every key actually get an ANSWER? This decides whether we may stamp, and the
     # distinction became load-bearing the moment the stamp started SUPPRESSING future calls for 30
     # days (`SMART_RETRY_EMPTY_AFTER_DAYS`).
     #
-    # ⚠ THE THROTTLE SIGNATURE HERE IS AN EMPTY BODY, NOT A 429 — `_api_request_cf` turns one into
+    #  The throttle signature here is an empty body, not a 429 — `_api_request_cf` turns one into
     # `data=None`. Zero rows from a throttled call and zero rows from a company GuruFocus genuinely
     # has no forward P/E for are indistinguishable by CONTENT, so they have to be told apart by
     # whether the REQUEST succeeded. Stamping the first would record "asked, nothing there" as a
     # fact and stop us re-asking for a month — a silent, self-inflicted data gap that looks exactly
     # like coverage.
     #
-    # ⚠ `financials` AND `analyst_estimates` ALREADY DO THIS, by returning early on the same
+    #  `financials` AND `analyst_estimates` ALREADY DO THIS, by returning early on the same
     # condition. This loop `continue`s instead — correct for gathering what it can, and it fell
     # through to the stamp.
     answered = True
@@ -231,7 +231,7 @@ def fetch_indicators(
                 if cached is not None:
                     _log(f"{key}: API failed, using stale cache")
                 else:
-                    # ⚠ NOT AN ANSWER — see `answered`. Empty body, non-JSON or a 5xx; the next
+                    #  Not an answer — see `answered`. Empty body, non-JSON or a 5xx; the next
                     # press must ask again rather than inherit a stamp saying we already did.
                     answered = False
                     _log(f"{key}: no answer — this fetch will NOT be stamped")
@@ -251,11 +251,11 @@ def fetch_indicators(
     result.rows_loaded, result.rows_unchanged = _upsert_metric_rows(supabase, all_rows)
     _log(f"Loaded {result.rows_loaded} rows into DB"
          + (f", {result.rows_unchanged} already identical" if result.rows_unchanged else ""))
-    # ⚠ EVEN WHEN `all_rows` IS EMPTY — see `_stamp_fetched`. 82% of the indicator calls in an ACWI
+    #  Even when `all_rows` IS EMPTY — see `_stamp_fetched`. 82% of the indicator calls in an ACWI
     # press were for companies we hold nothing for, re-asked every time because nothing records the
     # asking. An empty ANSWER is the fact worth recording.
     #
-    # ⚠⚠ BUT ONLY IF WE GOT ONE. `answered` is False when a request failed or came back empty, and
+    #  But only if we got one. `answered` is False when a request failed or came back empty, and
     # stamping there would convert a transient vendor problem into a 30-day silence that is
     # indistinguishable from real coverage.
     if answered:

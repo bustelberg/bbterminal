@@ -7,7 +7,7 @@ probe and cooldown on a ban). So it held ONE of the four permitted slots and pac
 on the S&P, ~3 minutes of pure sleep before counting a single round trip. It now runs
 `_PRICE_WORKERS` at a time and leaves the rate to the governor.
 
-⚠ THAT IS ONLY SAFE BECAUSE THIS IS NOT RESOLUTION. The hazard that makes this repo a single Yahoo
+ THAT IS ONLY SAFE BECAUSE THIS IS NOT RESOLUTION. The hazard that makes this repo a single Yahoo
 consumer is `resolve()` — an overloaded caller gets an EMPTY search rather than a 429, and an empty
 candidate set hands the win to a thin foreign listing. `extend_series` asks about a symbol we have
 already identified; an empty answer there means "no new bars".
@@ -60,7 +60,7 @@ def _fixture(n: int = _TOTAL):
 def rig(monkeypatch):
     """Replace the three things `_prices` reaches outside itself, and record every call.
 
-    ⚠ `extend_series` AND `latest_close_by_analysis` ARE PATCHED ON THEIR OWN MODULES, not on
+     `extend_series` AND `latest_close_by_analysis` ARE PATCHED ON THEIR OWN MODULES, not on
     `_benchmark_refresh` — it imports both INSIDE the function body (a deliberate lazy import), so
     there is no module-level name here to replace.
     """
@@ -119,7 +119,7 @@ class TestEveryConstituentExactlyOnce:
         companies, isins, grid = _fixture()
         br._prices(companies, isins, grid, "2026-08-10", rig["emit"])
         steps = _steps(rig["lines"])
-        # ⚠ THE BAR ONLY MOVES FORWARD. Each n is handed out once, and the sequence as EMITTED is
+        #  The bar only moves forward. Each n is handed out once, and the sequence as EMITTED is
         # ascending — which is the property the toast's progress bar depends on, and the one a
         # positional index would break the moment two threads finish out of order.
         assert sorted(steps) == list(range(1, _TOTAL + 1))
@@ -136,7 +136,7 @@ class TestMovedVersusUnchanged:
         out = br._prices(companies, isins, grid, "2026-08-10", rig["emit"])
         assert out["unchanged"] == 10
         assert out["moved"] == _TOTAL - 10
-        # ⚠ "unchanged" IS AN ANSWER AND SAYS SO — the vendor has no closed bar after the one we
+        #  "unchanged" IS AN ANSWER AND SAYS SO — the vendor has no closed bar after the one we
         # hold. Silence here is how a working button gets reported as broken.
         assert sum("unchanged, Yahoo has no closed bar" in ln for ln in rig["lines"]) == 10
 
@@ -176,13 +176,13 @@ class TestCancelIsACountNotAPrefix:
 
         out = br._prices(companies, isins, grid, "2026-08-10", rig["emit"], should_stop=_stop)
         assert "stopped_at" in out
-        # ⚠ THE COUNT IS WHAT RAN, NOT AN INDEX INTO THE LIST. Both halves are kept: a cancelled
+        #  The count is what ran, not an index into the list. Both halves are kept: a cancelled
         # run that fetched 140 of 491 has 140 constituents freshly priced, and reporting that as
         # nothing invites pressing the button again from scratch.
         assert out["stopped_at"] == out["fetched"] + out["failed"]
         assert 0 < out["fetched"] < _TOTAL
         assert len(rig["fetched"]) == out["fetched"] + out["failed"]
-        # ⚠ SAID ONCE. Every queued constituent passes the check after a Cancel; a line each would
+        #  Said once. Every queued constituent passes the check after a Cancel; a line each would
         # be hundreds of them.
         assert sum("cancelling —" in ln for ln in rig["lines"]) == 1
         assert sum("cancelled —" in ln for ln in rig["lines"]) == 1

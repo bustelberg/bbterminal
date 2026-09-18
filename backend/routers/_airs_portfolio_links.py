@@ -39,7 +39,7 @@ from rapidfuzz import fuzz
 # the one word that matters. Strip it and what remains is the strategy stem: star, merken, ai,
 # vastgoed, europa, azie, momentum, dividend, familie.
 #
-# ⚠ THESE MUST COME OFF AS SUBSTRINGS, NOT TOKENS. "Familietopselectie" and "Merkentopselectie"
+#  These must come off as substrings, not tokens. "Familietopselectie" and "Merkentopselectie"
 # are written as ONE word, so a tokenizer sees an opaque token and removes nothing — the noise
 # survives inside it and then dominates the comparison. Longest-first so "topselectie" is taken
 # before "selectie" can carve it in half.
@@ -59,7 +59,7 @@ def _norm(s: str | None) -> str:
     """Fold case, accents and punctuation. `Azië` and `Azie` are the same word — AirSPMS serves
     ISO-8859-1 and we have already been bitten once by treating them as different.
 
-    ⚠ CACHED, AND IT IS THE DIFFERENCE BETWEEN A 5-SECOND MODAL AND A 1-SECOND ONE. The guesser
+     CACHED, AND IT IS THE DIFFERENCE BETWEEN A 5-SECOND MODAL AND A 1-SECOND ONE. The guesser
     compares every holding against every portfolio, so this ran **306,241 times** on one Analyse
     open — over a set of roughly 120 DISTINCT strings (95 portfolio names plus a book's holdings).
     Unicode normalisation and a regex, six million generator steps deep, to re-derive the same
@@ -93,7 +93,7 @@ def is_topselectie(*fields: str | None) -> bool:
     """Is this a *TopSelectie product? (In any of the fields given — a portfolio's code and its
     description disagree constantly, e.g. `TOPS_ETS_L` / 'EuropaTopSelectie'.)
 
-    ⚠ THE STEMMER DELETES EXACTLY THE WORD THAT SEPARATES TWO PRODUCT LINES, so it has to be
+     THE STEMMER DELETES EXACTLY THE WORD THAT SEPARATES TWO PRODUCT LINES, so it has to be
     asked for separately BEFORE it is stripped. Both of these stem to 'europa':
 
         'EuropaTopSelectie Index'   (the certificate)     -> europa
@@ -105,7 +105,7 @@ def is_topselectie(*fields: str | None) -> bool:
     (The genuine `EuropaTopSelect OFF FX` stores NO composition at all, so the honest output for
     that certificate is no guess.)
     """
-    # ⚠ ONE `_norm` PER FIELD, NOT ONE PER MARKER. Written as a single comprehension over
+    #  ONE `_norm` PER FIELD, NOT ONE PER MARKER. Written as a single comprehension over
     # `fields × markers` it normalised the same string five times over — 285,958 generator steps
     # on one modal open, for five substring tests. Same answer, a fifth of the work.
     return any(_has_marker(f) for f in fields)
@@ -120,7 +120,7 @@ def _has_marker(field: str | None) -> bool:
 def _score(fonds: str, name: str, omschrijving: str | None) -> float:
     """0-100, over the stems.
 
-    ⚠ `token_sort_ratio`, NEVER `token_set_ratio`. token_set scores a SUBSET as a perfect
+     `token_sort_ratio`, NEVER `token_set_ratio`. token_set scores a SUBSET as a perfect
     match, and the portfolio codes are short: stem('BUS_EUR_OFF_FX') is 'eur', which is a
     subset of stem('Shell PLC EUR') — so token_set called it 100 and quietly linked *every*
     EUR-quoted holding (Shell, iShares ACWI, Vanguard Japan...) to the Europa portfolio at 0.89
@@ -307,7 +307,7 @@ def linkable_context(supabase, owner_id: int) -> dict:
                 excluded.setdefault(r["isin"], []).append(pid)
     return {
         "options": [
-            # ⚠ `display_name` FIRST — that is the name we gave the portfolio, and it is what a
+            #  `display_name` FIRST — that is the name we gave the portfolio, and it is what a
             # reader recognises. `name` is AIRS's own `Portefeuille` code, capped at 24 chars
             # (`BUS_MTS_BEPOFF_AFS`), which is the right thing to search AirSPMS for and the wrong
             # thing to choose from. Only 42 of 95 have one, so the code remains the fallback.
@@ -315,7 +315,7 @@ def linkable_context(supabase, owner_id: int) -> dict:
              "code": p["name"], "omschrijving": p.get("omschrijving"),
              "positions": len(comp.get(p["id"], []))}
             for p in sorted(portfolios, key=lambda p: ((p.get("display_name") or p["name"] or "").lower()))
-            # ⚠ SAME >1 RULE THE GUESSER USES (gate 3). A portfolio with no composition is a
+            #  SAME >1 RULE THE GUESSER USES (gate 3). A portfolio with no composition is a
             # link to nothing, and a SINGLE-position one is another wrapper — `TOPS_STS_L` holds
             # only the certificate, so linking there walks back to the row you started from. The
             # offer and the guess must agree: a dropdown that lets a human pick what the guesser
@@ -357,12 +357,12 @@ def expand_members(
                          guess — the SAME resolution the Link column shows). Returns None for "not
                          a portfolio", including a stored NULL ("explicitly not a portfolio").
 
-    ⚠ CYCLE-GUARDED, AND THAT IS LOAD-BEARING. A wrapper like TOPS_STS_L holds the very
+     CYCLE-GUARDED, AND THAT IS LOAD-BEARING. A wrapper like TOPS_STS_L holds the very
     certificate it would be linked from, so a naive walk loops for ever. A portfolio already on
     the path is NOT re-expanded — its weight stays on the certificate row, uncovered, which is the
     honest outcome (same circularity the guesser's gate 2 refuses).
 
-    ⚠ WEIGHTS COMBINE MULTIPLICATIVELY AND THE TOTAL IS CONSERVED: a 4.70% certificate over a
+     WEIGHTS COMBINE MULTIPLICATIVELY AND THE TOTAL IS CONSERVED: a 4.70% certificate over a
     model whose stocks sum to 100% contributes 4.70% spread across them, so a look-through never
     changes the coverage denominator — it only moves weight off an unreachable row onto reachable
     ones. `via` is fixed at the FIRST hop so a two-level look-through still reads "via Star

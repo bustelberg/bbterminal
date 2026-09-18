@@ -6,7 +6,7 @@ Same construction as the tracking error, on `Rₜᵖ` instead of `Rₜᵖ − R�
 so σ_p here, σ_p in the correlation view's identity, and the vol column on every holding row are one
 function — not three.
 
-⚠⚠ CASH FLOWS CANNOT CONTAMINATE THIS, AND NOT FOR THE REASON YOU MIGHT EXPECT. The usual hazard is
+ CASH FLOWS CANNOT CONTAMINATE THIS, AND NOT FOR THE REASON YOU MIGHT EXPECT. The usual hazard is
 computing risk off an ACCOUNT VALUE series: a deposit looks like a huge positive return and a
 withdrawal like a crash, so the volatility of a book that merely received money reads as turbulence.
 The standard fix is time-weighted (chain-linked) returns, which strip the flows out.
@@ -16,14 +16,14 @@ of INSTRUMENT price returns (`build_paired_series`), so a period's return is `Σ
 holdings, and money moving into or out of the account changes nothing in it. That is the property
 TWR exists to produce, arrived at by never introducing the problem.
 
-⚠ THE PRICE OF THAT IS THE OTHER CAVEAT, AND IT IS REAL: the weights are TODAY'S, carried backwards.
+ THE PRICE OF THAT IS THE OTHER CAVEAT, AND IT IS REAL: the weights are TODAY'S, carried backwards.
 So this is the volatility of the portfolio AS IT STANDS, not the volatility the client actually
 experienced — a name bought in March contributes its January return. The book's realised, chain-
 linked TWR exists (`_airs_portfolio_perf`) but describes the WHOLE book including funds and cash,
 which is a different portfolio from the stock sleeve every other view in this panel measures. One
 portfolio per panel beats one more number.
 
-⚠⚠ DOWNSIDE DEVIATION IS SORTINO'S, NOT THE SEMI-DEVIATION. It divides by ALL n observations and
+ DOWNSIDE DEVIATION IS SORTINO'S, NOT THE SEMI-DEVIATION. It divides by ALL n observations and
 measures shortfall against the risk-free target (0 here), which is what `annualized_stats.sortino`
 is already built on. The other convention — only the below-MEAN observations, divided by how many
 there are, measured against the mean — is also called downside deviation and reads higher. Picking
@@ -54,13 +54,13 @@ def compute_volatility(holdings: list[dict], benchmark: str,
     sp = annualized_stats(p.tolist(), periods_per_year=ppy)
     sb = annualized_stats(b.tolist(), periods_per_year=ppy)
 
-    # ⚠ THE WORST AND BEST SINGLE PERIOD, because "18% annualised volatility" is not a thing anybody
+    #  The worst and best single period, because "18% annualised volatility" is not a thing anybody
     # has felt. A client experiences the worst week, not the second moment of the distribution —
     # and the two can be far apart for a book with fat tails, which is exactly when σ misleads.
     worst = float(p.min()) if p.size else None
     best = float(p.max()) if p.size else None
     negative = float(np.mean(p < 0)) if p.size else None
-    # ⚠ THE SAME THREE FOR THE INDEX, so the panel can put the two side by side. Every other
+    #  The same three for the index, so the panel can put the two side by side. Every other
     # figure here already had its benchmark twin; these did not, which meant the one tile a
     # reader most wants a reference for — the worst period actually lived through — was the one
     # with nothing to compare it against.
@@ -75,14 +75,14 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         "periods_per_year": ppy,
         "observations": int(p.size),
         "years": years,
-        # ⚠ THE WINDOW THE PAIRED GRID REACHED — the SAME two dates the tracking-error and
+        #  The window the paired grid reached — the SAME two dates the tracking-error and
         # correlation responses carry, because all three read one `build_paired_series`. Three
         # panels quoting three windows for one series is exactly what sharing it prevents.
         "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
         "window_to": (dates[-1] if dates else None),
 
         "volatility_pct": None if sp.ann_vol is None else sp.ann_vol * 100.0,
-        # ⚠ THE SAME FUNCTION AND THE SAME SERIES AS THE BOOK'S — printed for scale, never as a
+        #  The same function and the same series as the book's — printed for scale, never as a
         # verdict. A sleeve more volatile than its index is not by itself worse; it is what the
         # active share and tracking error views are about.
         "benchmark_volatility_pct": None if sb.ann_vol is None else sb.ann_vol * 100.0,
@@ -91,7 +91,7 @@ def compute_volatility(holdings: list[dict], benchmark: str,
                                        else sb.downside_dev * 100.0),
         "return_ann_pct": None if sp.ann_return is None else sp.ann_return * 100.0,
         "benchmark_return_ann_pct": None if sb.ann_return is None else sb.ann_return * 100.0,
-        # ⚠ AT rf = 0, STATED. A Sharpe quoted without its risk-free rate is not comparable with
+        #  AT rf = 0, STATED. A Sharpe quoted without its risk-free rate is not comparable with
         # anybody else's, and at today's rates the difference is not cosmetic.
         "sharpe": sp.sharpe,
         "sortino": sp.sortino,
@@ -101,7 +101,7 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         "benchmark_worst_period_pct": None if b_worst is None else b_worst * 100.0,
         "benchmark_best_period_pct": None if b_best is None else b_best * 100.0,
         "benchmark_negative_periods_pct": None if b_negative is None else b_negative * 100.0,
-        # ⚠ `sb` WAS ALREADY COMPUTED AND ITS RATIOS THROWN AWAY. Same function, same rf = 0,
+        #  `sb` WAS ALREADY COMPUTED AND ITS RATIOS THROWN AWAY. Same function, same rf = 0,
         # so the pair is comparable by construction rather than by coincidence.
         "benchmark_sharpe": sb.sharpe,
         "benchmark_sortino": sb.sortino,

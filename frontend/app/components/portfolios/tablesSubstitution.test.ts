@@ -1,11 +1,11 @@
 /**
- * ⚠⚠ THESE TESTS READ THE STRING AND REDO THE ARITHMETIC, WHICH IS THE ONLY THING WORTH ASSERTING
+ *  These tests read the string and redo the arithmetic, which is the only thing worth asserting
  * HERE. Comparing the output to a hard-coded expected string would pin the wording and prove
  * nothing about the claim — and the claim is the entire feature: a reader who does the printed
  * division must land on the printed answer. So every case parses the operands back OUT of the
  * rendered text and checks them, exactly as somebody with a calculator would.
  *
- * ⚠ THE BUG THIS WAS WRITTEN AFTER: at one decimal the coverage row rendered
+ *  The bug this was written after: at one decimal the coverage row rendered
  * `100 ÷ 1.2% = 84.7×`, and 100 ÷ 1.2 is 83.3. Nothing about that output looked wrong; it was only
  * wrong if you checked it, which is precisely what a worked example invites the reader to do.
  */
@@ -16,10 +16,10 @@ import { subDigits, subNum } from './workedFormula';
 /**
  * The addends and the divisor out of `\dfrac{a + b + c}{n} = m\%`.
  *
- * ⚠ LaTeX, NOT UNICODE (the builders were typeset 2026-08-22). `workedMean` emits a real `\dfrac`
+ *  LaTeX, NOT UNICODE (the builders were typeset 2026-08-22). `workedMean` emits a real `\dfrac`
  * with an escaped `\%`; it used to emit `(a + b + c) ÷ n = m%`. Only the SPELLING moved — every
  * assertion below still reads the operands back out and redoes the arithmetic, which is the whole
- * point of the file. ⚠ The backslashes are DOUBLED: `\d` in a regex is a digit class, so matching
+ * point of the file.  The backslashes are DOUBLED: `\d` in a regex is a digit class, so matching
  * a literal `\dfrac` needs `\\dfrac`. Written singly the regex quietly matches `dfrac` — a pattern
  * that compiles, never matches, and reports as "not a mean line".
  */
@@ -36,7 +36,7 @@ function parseMean(line: string) {
 }
 
 /**
- * ⚠⚠ THE LINES ARE JOINED BY A **LaTeX** BREAK, NOT A NEWLINE (2026-08-31). These builders emit one
+ *  The lines are joined by a **LaTeX** BREAK, NOT A NEWLINE (2026-08-31). These builders emit one
  * typeset expression that the ⓘ hands to KaTeX whole; a newline-separated string was what made the
  * Tables tooltips print `\\left(\\dfrac{...}` at the reader, backslashes and all, once the
  * expressions themselves were typeset. Splitting on it here is how these tests still read one line
@@ -51,7 +51,7 @@ const seriesOf = (from: number, vals: (number | null)[]) =>
 describe('meanSub', () => {
   it('prints operands that average to the printed mean', () => {
     const m = seriesOf(2021, [55.4, 54.1, 53.3, 56.6, 57.5]);
-    // ⚠ NO CAPTION LINE (2026-08-31): the worked half sits inside ONE display expression with the
+    //  No caption line (2026-08-31): the worked half sits inside ONE display expression with the
     // symbolic formula, and a name or a year range between the two reads as a term in it.
     const { addends, n, printed } = parseMean(meanSub(m, 2025, 5));
     expect(addends).toEqual([55.4, 54.1, 53.3, 56.6, 57.5]);
@@ -66,7 +66,7 @@ describe('meanSub', () => {
   });
 
   it('reconciles the coverage inversion at the printed precision', () => {
-    // ⚠ REAL SHAPE: a burden near 1% is where one decimal loses the digit the division needs.
+    //  Real shape: a burden near 1% is where one decimal loses the digit the division needs.
     const burdens = [0, 2.15, 1.84, 1.12, 0.93, 1.41, 0.88, 0.76, 1.05, 1.66];
     const m = seriesOf(2016, burdens);
     const [meanLine, coverLine] = meanSub(m, 2025, 10, COVER).split(LINE);
@@ -75,7 +75,7 @@ describe('meanSub', () => {
     expect(n).toBe(10);
     expect(Number((addends.reduce((a, b) => a + b, 0) / n).toFixed(2))).toBe(printed);
 
-    // ⚠ `\\div`, `\\%` and `\\times` — the same line, typeset. The arithmetic asserted
+    //  `\\div`, `\\%` and `\\times` — the same line, typeset. The arithmetic asserted
     // below is unchanged; only the spelling of the operators moved.
     const cov = /^100 \\div (-?[\d.]+)\\% = (-?[\d.]+)\\times$/.exec(coverLine);
     expect(cov).not.toBeNull();
@@ -96,7 +96,7 @@ describe('meanSub', () => {
   });
 
   it('does not hand the array index to the digits parameter', () => {
-    // ⚠ REGRESSION. `vals.map(subNum)` passes (value, index) — so the first addend rendered at 0
+    //  REGRESSION. `vals.map(subNum)` passes (value, index) — so the first addend rendered at 0
     // decimals, the second at 1, and a reader adding them up got a different mean than the one
     // printed beside them. The list must be uniform whatever its length.
     const m = seriesOf(2016, [1.11, 2.22, 3.33, 4.44, 5.55, 6.66, 7.77, 8.88, 9.99, 1.01]);
@@ -106,7 +106,7 @@ describe('meanSub', () => {
   });
 
   it('lists only the years it actually had, and names that span', () => {
-    // ⚠ A SHORT WINDOW MUST NOT PAD. The `n of 10` badge already says the window is short; a list
+    //  A short window must not pad. The `n of 10` badge already says the window is short; a list
     // of ten addends under it would contradict the badge in the same tooltip.
     const m = seriesOf(2016, [null, null, 12, 14, null, 16, 18, 20, 22, 24]);
     const { addends, n } = parseMean(meanSub(m, 2025, 10));
@@ -133,7 +133,7 @@ describe('rateSub', () => {
     const got = rate(100, 606.34, '2015', '2025', 10);
     const expr = rateSub(got);
 
-    // ⚠ LaTeX, NOT UNICODE (2026-08-22). `workedCagr` is typeset by KaTeX now — the endpoints ride
+    //  LaTeX, NOT UNICODE (2026-08-22). `workedCagr` is typeset by KaTeX now — the endpoints ride
     // as SUBSCRIPTS on the values they belong to rather than in `[brackets]`, and the division is
     // a real `\dfrac` rather than a `÷` glyph given the advance width of a comma. This regex is
     // the same assertion in the new spelling; the RULE it pins (the later period is the numerator,
@@ -142,7 +142,7 @@ describe('rateSub', () => {
       .exec(expr);
     expect(m).not.toBeNull();
     const [, to, toP, from, fromP, years, shown] = m!;
-    // ⚠ THE ENDPOINTS ARE LABELLED WITH THEIR PERIODS, which is what makes this line readable
+    //  The endpoints are labelled with their periods, which is what makes this line readable
     // without a caption — and the later one has to be the numerator.
     expect([toP, fromP]).toEqual(['2025', '2015']);
     const reader = ((Number(to) / Number(from)) ** (1 / Number(years)) - 1) * 100;
@@ -160,7 +160,7 @@ describe('rateSub', () => {
   it('refuses a rate it cannot show the endpoints of', () => {
     expect(rateSub(null)).toBe('');
     expect(rateSub({ pct: null, reason: 'no line' })).toBe('');
-    // ⚠ A NON-POSITIVE BASE. Every producer refuses one, so this cannot arrive from the app — but
+    //  A non-positive base. Every producer refuses one, so this cannot arrive from the app — but
     // `(606 ÷ -3) ^ …` printed beside a positive rate would be a worked example of something
     // impossible, so the guard is asserted rather than assumed.
     expect(rateSub({ pct: 10, from: '2015', to: '2025', years: 10,
@@ -170,7 +170,7 @@ describe('rateSub', () => {
 
 describe('subNum', () => {
   it('scales precision to magnitude', () => {
-    // ⚠ TWO IS THE FLOOR since 2026-08-22 — every figure on the risk views prints two decimals, so
+    //  Two is the floor since 2026-08-22 — every figure on the risk views prints two decimals, so
     // a worked line showing `55.4` beside a tile reading `55.40` invites the reader to check
     // whether they are the same number. See `workedFormula.subDigits`.
     expect(subDigits(55.4)).toBe(2);

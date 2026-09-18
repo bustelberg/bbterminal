@@ -23,7 +23,7 @@ describe('weightedByYear', () => {
     expect(out.get(2024)).toBeCloseTo(15);
   });
 
-  it('⚠ omits a year the charted set has mostly not reported yet', () => {
+  it(' omits a year the charted set has mostly not reported yet', () => {
     // The 2026 case: two of five holdings have filed. 40% is not the book.
     const out = weightedByYear(
       rows(w(40, { 2025: 8, 2026: 20 }), w(60, { 2025: 8 })), YEARS, VALUE);
@@ -36,10 +36,10 @@ describe('weightedByYear', () => {
     expect(out.get(2026)).toBeCloseTo(20);
   });
 
-  it('⚠ measures coverage against the CHARTED SET, not the whole book', () => {
+  it(' measures coverage against the CHARTED SET, not the whole book', () => {
     // Weights are shares of the WHOLE book, so they need not sum to 100 — cash, bonds and anything
     // unpriceable make up the rest. Both of these reported, so the charted set is 100% covered and
-    // the year draws. ⚠ The weights sum to 40 on purpose: against a denominator of 100 this would
+    // the year draws.  The weights sum to 40 on purpose: against a denominator of 100 this would
     // read 40% and be refused, so the case still separates the two bases now the floor is 50 (at
     // the old 80 any book under 80% invested made the point, which is why it read 70 before).
     const out = weightedByYear(rows(w(20, { 2024: 10 }), w(20, { 2024: 10 })), YEARS, VALUE);
@@ -52,12 +52,12 @@ describe('weightedByYear', () => {
 
   it('the floor is the documented one, shared with the backend blend', () => {
     // 60 → 80 (2026-07-28) → 50 (2026-08-12, on request: half the constituents should draw).
-    // ⚠ Must equal `_fundamental_blend.MIN_BLEND_COVERAGE_PCT` — two floors that disagree put two
+    //  Must equal `_fundamental_blend.MIN_BLEND_COVERAGE_PCT` — two floors that disagree put two
     // cards on one screen spanning different fractions of the same book.
     expect(MIN_YEAR_COVERAGE_PCT).toBe(50);
   });
 
-  it('⚠ an EVEN SPLIT draws — that is what the floor was lowered for', () => {
+  it(' an EVEN SPLIT draws — that is what the floor was lowered for', () => {
     // `<` is the comparison, so exactly 50% covered clears. Half the book reporting is a data
     // point about half the book, labelled as such by `coverageByYear`, rather than a blank.
     const out = weightedByYear(
@@ -87,7 +87,7 @@ describe('weightedByYear with per-period caps', () => {
     expect(out.get(2024)).not.toBeCloseTo(20);
   });
 
-  it('⚠ drops a row with no cap that period from the average entirely', () => {
+  it(' drops a row with no cap that period from the average entirely', () => {
     // C has a figure and no cap: it cannot be weighted on the same basis as the others, so it is
     // out of both numerator and denominator. Its 999 must not reach the average.
     const out = weightedByYear([
@@ -98,7 +98,7 @@ describe('weightedByYear with per-period caps', () => {
     expect(out.get(2024)).toBeCloseTo(10);
   });
 
-  it('⚠⚠ measures COVERAGE on the stable weight — the bug that silently disabled the floor', () => {
+  it(' measures COVERAGE on the stable weight — the bug that silently disabled the floor', () => {
     // The per-period cap comes out of the same GuruFocus blob as the figure, so a company that has
     // not filed FY2026 has no FY2026 cap either. Measuring coverage with it divides the filers by
     // the filers and reads 100% — which is how FY2026 came to draw a full-height point built

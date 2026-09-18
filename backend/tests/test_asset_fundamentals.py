@@ -14,7 +14,7 @@ from routers._asset_financials import _SECTION_ALIASES
 
 
 class TestTheCachedSectionNamesWereMeasuredNotGuessed:
-    """⚠ THE OLD NAME IS NOT THE NEW ONE TITLE-CASED, AND GUESSING GAVE AN EMPTY CHART.
+    """ THE OLD NAME IS NOT THE NEW ONE TITLE-CASED, AND GUESSING GAVE AN EMPTY CHART.
 
     GuruFocus renamed these sections; Storage holds blobs from before and after. Mechanically
     title-casing the snake_case name is right for three of five and WRONG for two:
@@ -41,7 +41,7 @@ class TestTheCachedSectionNamesWereMeasuredNotGuessed:
 
 
 class TestDroppedIsCountedAfterTheConversion:
-    """⚠ `dropped` LIED, IN THE FIELD WHOSE ONLY JOB IS NOT LYING.
+    """ `dropped` LIED, IN THE FIELD WHOSE ONLY JOB IS NOT LYING.
 
     `_to_eur` drops any period with no FX rate on or before it, and `fx_rate`'s history is thin —
     Apple's fair values go 40 periods -> 27, losing 1986-1998 outright. Counting drops BEFORE the
@@ -71,7 +71,7 @@ class TestThePriceIsYfinanceAndNeverGuruFocus:
         src = inspect.getsource(f._eur_price)
         assert "_airs_portfolio_perf" in src
         assert "_closes" in src and "_eur_series" in src
-        # ⚠ The BODY, not the source. `_eur_price`'s docstring says "Nothing here may reach
+        #  The BODY, not the source. `_eur_price`'s docstring says "Nothing here may reach
         # `metric_data`" — a naive grep for that string fails on the sentence forbidding it, and
         # a guard that fires on its own documentation teaches people to delete the documentation.
         # (Second time this session; the earlier one was `portfolioVariants.ts`.)
@@ -88,7 +88,7 @@ class TestThePriceIsYfinanceAndNeverGuruFocus:
 
 
 class TestBothLegsOfChartOneAreEUR:
-    """⚠ GuruFocus FX-converts financials into ITS listing's currency, and its listing comes from
+    """ GuruFocus FX-converts financials into ITS listing's currency, and its listing comes from
     `pick_listing` — a different id space from `yahoo_symbol`. A USD price line through EUR fair
     values reads the exchange rate as mispricing."""
 
@@ -111,7 +111,7 @@ class TestBothLegsOfChartOneAreEUR:
 
 
 class TestTheBandIsTheFiveSeries:
-    """⚠ NOT the eleven in `summary.chart` — those are SCALARS (today's number, no history) and its
+    """ NOT the eleven in `summary.chart` — those are SCALARS (today's number, no history) and its
     two DCFs read 0.00, i.e. not computed. A band needs series."""
 
     def test_the_five(self):
@@ -140,7 +140,7 @@ class TestChartsTwoToFourAreNeverConverted:
 
 
 class TestTheQualityVerdictIsFourNumbersNotOne:
-    """⚠ NO COMPOSITE SCORE, EVER. The disagreement between the four IS the finding: Intel reads a
+    """ NO COMPOSITE SCORE, EVER. The disagreement between the four IS the finding: Intel reads a
     passable +3.1pp spread while its ROIC fell SEVENTEEN points across the decade. Any single
     0-100 averages the melting moat away — which is exactly what GuruFocus's GF Score does, and
     why it is not used here.
@@ -182,7 +182,7 @@ class TestTheTwoVerdictBugsThatShipped:
     confidently wrong about NVIDIA is a card nobody uses twice."""
 
     def test_a_rising_gross_margin_is_not_a_loss_of_pricing_power(self):
-        """⚠ σ CANNOT TELL A COLLAPSE FROM AN IMPROVEMENT. NVIDIA's gross-margin σ is 5.9 —
+        """ σ CANNOT TELL A COLLAPSE FROM AN IMPROVEMENT. NVIDIA's gross-margin σ is 5.9 —
         because it went from ~35% to ~75%. The first version flagged that as "the market sets the
         price", failing the one company in the sample with the most pricing power in it. σ now
         fails only when the margin is high-variance AND NOT improving."""

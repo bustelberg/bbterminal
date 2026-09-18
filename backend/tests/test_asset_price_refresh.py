@@ -22,7 +22,7 @@ from asset_pipeline import price_refresh
 
 
 class TestStalenessIsRelativeToTheData:
-    """⚠ NEVER to the calendar."""
+    """ NEVER to the calendar."""
 
     def test_the_anchor_is_the_freshest_close_we_hold(self):
         src = inspect.getsource(price_refresh.find_stale)
@@ -74,7 +74,7 @@ class TestItFetchesTheGapNotTheHistory:
 
 class TestTheSchedulerJob:
     def test_it_stands_down_while_the_resolver_is_using_yahoo(self):
-        """⚠ The ingest queue is THE single Yahoo consumer by design. Yahoo answers an overloaded
+        """ The ingest queue is THE single Yahoo consumer by design. Yahoo answers an overloaded
         caller with an EMPTY result rather than a 429, and an empty candidate set is how a
         resolution silently lands on a thin foreign listing (NVDA-on-Stuttgart, Alphabet-on-
         Vienna). Our own traffic is only chart fetches for symbols we already hold, so it cannot
@@ -107,7 +107,7 @@ class TestTheSchedulerJob:
         assert 'in_("status", ["done", "failed"])' in inspect.getsource(queue.last_activity)
 
     def test_it_is_registered_daily_and_cannot_overlap_itself(self):
-        """⚠ READ FROM THE DECLARATION, NOT FROM `scheduler`'s SOURCE (2026-08-13). The schedule
+        """ READ FROM THE DECLARATION, NOT FROM `scheduler`'s SOURCE (2026-08-13). The schedule
         moved into `scheduled_jobs.SCHEDULED_JOBS` so the admin overview and the cron cannot drift;
         `scheduler.py` now calls `_register("asset_price_refresh", …)` and holds no `hour=` at all.
         Grepping the source for `id="asset_price_refresh"` was asserting on the shape of the
@@ -182,7 +182,7 @@ class TestTheStartupCatchUp:
 
 
 class TestTheAnchorQueryMustNotSCAN:
-    """⚠ THE ANCHOR ITSELF TOOK THE WHOLE JOB DOWN.
+    """ THE ANCHOR ITSELF TOOK THE WHOLE JOB DOWN.
 
         postgrest.exceptions.APIError: {'message': 'canceling statement due to statement
         timeout', 'code': '57014'}    <- global_latest_close(), in production
@@ -239,7 +239,7 @@ class TestTheAnchorQueryMustNotSCAN:
 
 
 class TestTheBootRace:
-    """⚠ THE STARTUP CATCH-UP RACES THE DATABASE IT READS, AND THE LOSS LOOKS LIKE A BUG.
+    """ THE STARTUP CATCH-UP RACES THE DATABASE IT READS, AND THE LOSS LOOKS LIKE A BUG.
 
         postgrest.exceptions.APIError: {'message': 'Could not query the database for the schema
                    cache. Retrying.', 'code': 'PGRST002'}      <- _run_asset_price_refresh, on boot

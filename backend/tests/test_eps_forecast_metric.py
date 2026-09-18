@@ -1,6 +1,6 @@
 """The analysts' EPS consensus, as a metric the EPS card can draw a dotted continuation from.
 
-⚠⚠ IT IS A FORECAST SHARING A CHART WITH MEASUREMENTS, which is the whole reason it needs pinning:
+ IT IS A FORECAST SHARING A CHART WITH MEASUREMENTS, which is the whole reason it needs pinning:
 every safeguard here exists to stop it being read, blended or rolled as though someone had reported
 it.
 """
@@ -15,14 +15,14 @@ EST = "eps_nri_estimate"
 
 class TestItContinuesTheLineItForecasts:
     def test_it_is_anchored_on_this_cards_actual_series(self):
-        """⚠⚠ THE ANCHOR IS WHAT STOPS A ~94% PHANTOM COLLAPSE. A level blend rebases each member to
+        """ THE ANCHOR IS WHAT STOPS A ~94% PHANTOM COLLAPSE. A level blend rebases each member to
         100 at its own first period; rebased independently, a forecast restarts at 100 beside an
         actual that has run to 1,800 and the chart shows an earnings collapse that exists only in
         the arithmetic. `_FORECAST_BASE` is what makes it a continuation."""
         assert _FORECAST_BASE[_metric_codes(EST)[0]] == _metric_codes("eps_nri")[0]
 
     def test_it_forecasts_the_WITHOUT_NRI_line_specifically(self):
-        """⚠ GuruFocus publishes `annual_per_share_eps_estimate` beside it and the two agree to a
+        """ GuruFocus publishes `annual_per_share_eps_estimate` beside it and the two agree to a
         cent on almost every company (Apple 8.76 vs 8.77) — so this cannot be checked by eye on one
         name. The card's actual is `EPS without NRI`; continuing it with an including-NRI consensus
         would put a one-off impairment on the wrong side of the join."""
@@ -37,7 +37,7 @@ class TestItIsRefusedWhereAForecastHasNoMeaning:
         assert _codes_and_rule(EST, "quarterly") == (None, None)
 
     def test_it_has_no_TTM_rule_which_is_WHY_it_is_refused(self):
-        """⚠ THE REFUSAL IS DATA, NOT A SPECIAL CASE. Adding a rule here would silently start rolling
+        """ THE REFUSAL IS DATA, NOT A SPECIAL CASE. Adding a rule here would silently start rolling
         forecasts into trailing years on the quarterly toggle."""
         assert EST not in _TTM_RULE
 
@@ -49,7 +49,7 @@ class TestItIsRefusedWhereAForecastHasNoMeaning:
 
 class TestItCannotCollideWithAReportedLine:
     def test_no_metric_code_belongs_to_two_metrics(self):
-        """⚠ `rows_by_metric` SPLITS ONE BULK READ BACK OUT BY CODE, so a code appearing under two
+        """ `rows_by_metric` SPLITS ONE BULK READ BACK OUT BY CODE, so a code appearing under two
         keys would land in both buckets — the forecast would be read as an actual by whichever card
         asked second. It would also mean two lines are the same line."""
         seen: dict[str, str] = {}

@@ -1,6 +1,6 @@
 """The loader behind the Analyse modal's per-holding "why did the trading matter" popup.
 
-⚠ IT READS THE CACHED TRANSACTIONS AND NEVER FETCHES. This opens on a click inside a modal; a
+ IT READS THE CACHED TRANSACTIONS AND NEVER FETCHES. This opens on a click inside a modal; a
 headless AIRS scrape behind it would cost seconds and could collide with a fleet scan holding the
 session lock. Same rule as every other read in this modal.
 """
@@ -30,7 +30,7 @@ def holding_timing(portfolio_id: int, holding_name: str) -> dict:
     portefeuille = link["portefeuille"]
 
     detail = account_holdings(portefeuille)
-    # ⚠ MATCHED ON AIRS'S OWN STRING, EXACTLY. Both sides are AIRS names truncated at the same
+    #  Matched on AIRS's own string, exactly. Both sides are AIRS names truncated at the same
     # width; nothing fuzzy belongs here (see `_airs_holding_isin` for what fuzzy matching costs).
     row = next((r for r in (detail.get("rows") or [])
                 if r.get("holding_name") == holding_name), None)
@@ -53,7 +53,7 @@ def holding_timing(portfolio_id: int, holding_name: str) -> dict:
     start_val = float(row.get("start_value_eur") or 0)
     cur_val = row.get("current_value_eur")
 
-    # ⚠ THE SPLIT IS PROVEN HERE, NOT ASSUMED — same two gates as the ledger, from the same
+    #  The split is proven here, not assumed — same two gates as the ledger, from the same
     # function, so this popup and the table's own figures cannot disagree about the basis.
     events = [r for r in sheet.rows
               if r.get("Fonds") == holding_name and r.get("Tt") not in ("A", "V")]
@@ -89,7 +89,7 @@ def holding_timing(portfolio_id: int, holding_name: str) -> dict:
                 "note": "This position has no opening value to measure against — it was not held "
                         "when the year opened."}
     if not a.reconciles:
-        # ⚠ LOUD. The three lines are presented as a decomposition; if they do not add up they are
+        #  LOUD. The three lines are presented as a decomposition; if they do not add up they are
         # three numbers beside each other and the UI must not imply otherwise.
         _log.warning("[timing] %s / %s does NOT reconcile: residual EUR %.2f",
                      portefeuille, holding_name, a.residual_eur)

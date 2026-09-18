@@ -1,5 +1,5 @@
 /**
- * ⚠ THE ICON HAD FORKED FOUR WAYS, AND NOTHING COULD HAVE CAUGHT IT.
+ *  The icon had forked four ways, and nothing could have caught it.
  *
  * `InfoTip`, a second `InfoTip` under `universe/`, `ApiUsageBadge` and `Provenance` each carried
  * their own copy of the class string. They drifted into two visibly different icons — a grey
@@ -20,7 +20,7 @@ import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 const ROOTS = ['app', 'lib'];
 
 /** The modules that DEFINE the shared icon and card. Everything else must only import them.
- *  ⚠ Named exactly, never by prefix: a future `infoIconLegacy.tsx` would exempt itself from the
+ *   Named exactly, never by prefix: a future `infoIconLegacy.tsx` would exempt itself from the
  *  very check it needs to fail. */
 const DEFINERS = new Set(['infoIcon.ts', 'infoIcon.test.ts', 'tipCard.tsx', 'tipCard.test.ts']);
 
@@ -50,7 +50,7 @@ const offendersWhere = (hit: (text: string) => boolean): string[] =>
 
 describe('there is exactly one info icon', () => {
   it('finds source files to scan at all', () => {
-    // ⚠ Without this, a broken path makes every assertion below pass over an EMPTY list — a
+    //  Without this, a broken path makes every assertion below pass over an EMPTY list — a
     // green suite that checks nothing, which is worse than a red one.
     expect(FILES.length).toBeGreaterThan(50);
   });
@@ -63,10 +63,10 @@ describe('there is exactly one info icon', () => {
   });
 
   it('no file hand-rolls the tooltip CARD shell either', () => {
-    // ⚠ The icon forked four ways; the card it opens forked twice — a designed provenance card
+    //  The icon forked four ways; the card it opens forked twice — a designed provenance card
     // beside bare paragraphs. Same gesture, two objects. `lib/tipCard` is the only shell.
     //
-    // ⚠ A SUBSTRING, NOT A REGEX. `/min-w-[13rem]/` reads as a CHARACTER CLASS — it matches a
+    //  A substring, not a regex. `/min-w-[13rem]/` reads as a CHARACTER CLASS — it matches a
     // single one of 1,3,r,e,m and never the literal token, so the check passed over every file
     // while finding nothing. A vacuous green guard is worse than no guard: it is a claim that
     // something is checked.
@@ -82,7 +82,7 @@ describe('there is exactly one info icon', () => {
   });
 
   it('the two variants share their geometry, differing only in hue', () => {
-    // ⚠ A warning state must read as the SAME control in a different state. If the sizes drift,
+    //  A warning state must read as the SAME control in a different state. If the sizes drift,
     // a stale badge becomes a different-looking button.
     const geometry = (s: string) => s.match(/w-3\.5 h-3\.5|text-\[9px\]|rounded-full/g)?.sort();
     expect(geometry(INFO_ICON_WARN)).toEqual(geometry(INFO_ICON));
@@ -90,7 +90,7 @@ describe('there is exactly one info icon', () => {
   });
 
   it.each([
-    // ⚠ THE FORK THAT ARRIVES THROUGH INHERITANCE. The icon's content is the literal character
+    //  The fork that arrives through inheritance. The icon's content is the literal character
     // `i` — it is TEXT, and text inherits. Each property left unset here was picked by whatever
     // container the icon happened to sit in, and each one produced the same bug in a different
     // place on the SAME page:

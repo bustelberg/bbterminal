@@ -10,7 +10,7 @@ WHY WIKIPEDIA, AND NOT THE TWO ROUTES THAT LOOK EASIER
         let us drop our cap approximation entirely) but we have established no open endpoint.
     Wikipedia's AEX article carries the whole 25-name table and is edited within days of a review.
 
-⚠ THE PAGE CARRIES ITS OWN AS-OF DATE, AND IT IS NOT TODAY.
+ THE PAGE CARRIES ITS OWN AS-OF DATE, AND IT IS NOT TODAY.
     The composition table is introduced by "...as of 31 December 2024" — measured 2026-07-16, i.e.
     ~18 months stale. "Self-updating" means "as fresh as Wikipedia's editors", NOT "current". So
     the as-of date is PARSED and becomes the snapshot's `target_month`, which `universe.as_of_date`
@@ -20,7 +20,7 @@ WHY WIKIPEDIA, AND NOT THE TWO ROUTES THAT LOOK EASIER
     date we do not know is not a dated snapshot, and this universe model is built on dated
     snapshots.
 
-⚠ THE TABLE IS FOUND BY ITS HEADERS, NOT ITS POSITION.
+ THE TABLE IS FOUND BY ITS HEADERS, NOT ITS POSITION.
     The page has THREE wikitables (annual returns, contract specs, composition) and the
     composition is index 2 today. `scrape_sp500` addresses its tables positionally; here a single
     page edit that adds or reorders a table would silently hand us the wrong one — and an "AEX"
@@ -33,7 +33,7 @@ RESOLUTION IS TWO TIERS, AND THE SECOND ONE IS STRUCTURAL
              Unilever): our pipeline resolved each to its LONDON listing, so both the ticker and
              the exchange differ (`SHELL`->`SHEL`/LSE, `REN`->`REL`/LSE, `UNA`->`ULVR`/LSE).
 
-    ⚠ A NAME MATCH CANNOT DO TIER 2. `same_company("Unilever", "HINDUSTAN UNILEVER LTD")` is
+     A NAME MATCH CANNOT DO TIER 2. `same_company("Unilever", "HINDUSTAN UNILEVER LTD")` is
       **True** — `token_set_ratio` scores a subset at 100, the same false friend that put 20 bad
       links in the portfolio-links module. Name-matching the AEX would enlist an Indian company.
       Worse, "Unilever" also matches our NYSE ADR row (`UL`, US9047678035), which is a different
@@ -111,7 +111,7 @@ def scrape_aex() -> tuple[date, list[dict]]:
     parser = _WikiTableParser()
     parser.feed(resp.text)
 
-    # BY HEADERS, NOT POSITION — see the module docstring.
+    # By headers, not position — see the module docstring.
     table = next((t for t in parser.tables
                   if "Ticker" in t["headers"] and "Company" in t["headers"]), None)
     if not table:

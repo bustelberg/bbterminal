@@ -13,7 +13,7 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))
 }
 
-// ⚠ THERE IS NO AUTH BYPASS, AND THERE MUST NOT BE ONE AGAIN. `E2E_BYPASS_AUTH` used to
+//  There is no auth bypass, and there must not be one again. `E2E_BYPASS_AUTH` used to
 // short-circuit this function so Playwright could reach any route without a login. The e2e suite
 // is gone (unit tests only — see CLAUDE.md), and with it the only reason this file ever held an
 // env-var-controlled way to switch authentication off. Anything that needs to test around auth
@@ -61,21 +61,21 @@ export async function proxy(request: NextRequest) {
   }
 
   /**
-   * ⚠⚠ THE SECOND-FACTOR GATE, AND IT RUNS BEFORE THE ROLE GATE ON PURPOSE. A session that has
+   *  The second-factor gate, and it runs before the role gate on purpose. A session that has
    * not proved its factor should be sent to the challenge, not told it lacks permission — the
    * other order answers "you may not see this" to somebody who may, and hides the one action that
    * would let them through.
    *
-   * ⚠ `getAuthenticatorAssuranceLevel()` DECODES THE SESSION LOCALLY — no round trip. It reads the
+   *  `getAuthenticatorAssuranceLevel()` DECODES THE SESSION LOCALLY — no round trip. It reads the
    * `aal` claim out of the JWT already in the cookies, which `getUser()` above has just validated
    * against the auth server, so this adds nothing to the latency of every request.
    *
-   * ⚠⚠ TWO-FACTOR IS MANDATORY, NOT OFFERED (2026-09-08, on request; it was opt-in for one
+   *  Two-factor is mandatory, not offered (2026-09-08, on request; it was opt-in for one
    * afternoon). Two rules, in this order — no authenticator at all sends you to SET ONE UP, and
    * an unproved one sends you to the CHALLENGE. Getting them the other way round strands a new
    * account at a code box with nothing that can produce a code.
    */
-  // ⚠ `mfaEnforced()` IS A COMPILE-TIME CONSTANT IN PRODUCTION — see its docstring. This whole
+  //  `mfaEnforced()` IS A COMPILE-TIME CONSTANT IN PRODUCTION — see its docstring. This whole
   // block is dev-only escapable; on Vercel no environment variable can reach it.
   if (user && mfaEnforced()) {
     const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
@@ -87,12 +87,12 @@ export async function proxy(request: NextRequest) {
     }
 
     /**
-     * ⚠⚠ ENROLMENT IS CHECKED FIRST, AND THE ORDER IS THE WHOLE DIFFERENCE BETWEEN "REQUIRED" AND
+     *  Enrolment is checked first, and the order is the whole difference between "REQUIRED" AND
      * "AVAILABLE". Somebody with no authenticator cannot satisfy a challenge, so sending them to
      * `/mfa` would be a dead end; they need the SET-UP page. Two-factor is mandatory here — a new
      * account is stopped at enrolment before it can reach anything else.
      *
-     * ⚠ NO `?next=`. Enrolling is not a detour on the way somewhere — it is a thing to finish, and
+     *  NO `?next=`. Enrolling is not a detour on the way somewhere — it is a thing to finish, and
      * a redirect firing the moment the factor verifies would snatch the page away mid-sentence,
      * before the reader has seen that it worked or read the recovery warning.
      */

@@ -17,17 +17,17 @@ describe('benchmarkProvenance', () => {
     expect(c.sourceKey).toBe('benchmark_etf');
     const [rule, blank, worked] = c.how.split('\n');
     expect(rule).toContain('FX is USD per EUR');
-    // ⚠ THE BLANK LINE. It is what makes the two read as one thing said twice rather than one long
+    //  The blank line. It is what makes the two read as one thing said twice rather than one long
     // sentence, and it survives only because the card renders `how` with `whitespace-pre-wrap`.
     expect(blank).toBe('');
-    // ⚠ The OPENING MARK, not the 1-Jan anchor — they differ by a trading day, and a reader
+    //  The OPENING MARK, not the 1-Jan anchor — they differ by a trading day, and a reader
     // checking this by hand against 1 January would pull the wrong bar.
     expect(worked).toBe('2025-12-31 → 2026-08-18');
     expect(c.how).toContain('(160.08 ÷ 1.1593) ÷ (141.49 ÷ 1.1750) − 1 = +14.67%');
   });
 
   it('reproduces the tile: the worked line actually evaluates to the figure it claims', () => {
-    // ⚠⚠ THE ONE ASSERTION THAT MATTERS. A worked example the reader cannot reproduce is worse
+    //  The one assertion that matters. A worked example the reader cannot reproduce is worse
     // than no worked example — it looks like proof. Four decimals on FX because the rate moves in
     // the fourth and rounding it to two changes the answer.
     const c = benchmarkProvenance(etf);
@@ -55,7 +55,7 @@ describe('benchmarkProvenance', () => {
 
   it('uses the rebuild source key — never the ETF one — when it falls back', () => {
     const c = benchmarkProvenance({ source: 'rebuild', label: 'AEX' });
-    // ⚠⚠ THE KEY IS THE VENDOR NAME ON SCREEN. `benchmark_etf` renders "GuruFocus daily close";
+    //  The key is the vendor name on screen. `benchmark_etf` renders "GuruFocus daily close";
     // printing that over a yfinance reconstruction is the one mislabel the badge exists to stop.
     expect(c.sourceKey).toBe('benchmark');
     expect(c.how).toMatch(/constituents/);

@@ -1,7 +1,7 @@
 /**
  * WHICH tiles the home page has, and in what order. No copy, no hooks, NO `'use client'`.
  *
- * ⚠⚠ THE MISSING DIRECTIVE IS THE WHOLE REASON THIS FILE EXISTS, AND THE BUG IT FIXES IS A RUNTIME
+ *  The missing directive is the whole reason this file exists, and the bug it fixes is a runtime
  * ONE. `HOME_TILE_ORDER` lived in `homeCopy.ts`, which is `'use client'` because it exports a hook.
  * `app/page.tsx` is a SERVER component — it reads the session and the `view_as` cookie — and when a
  * server module imports from a client one, the bundler hands back a CLIENT REFERENCE PROXY rather
@@ -14,7 +14,7 @@
  * this. The rule it enforces: a server component may import DATA only from a module with no
  * `'use client'` directive.
  *
- * ⚠ `homeCopy.ts` IMPORTS THE KEY FROM HERE, so the copy map and the render order still cannot
+ *  `homeCopy.ts` IMPORTS THE KEY FROM HERE, so the copy map and the render order still cannot
  * drift — `Record<HomeTileKey, …>` is what makes a missing translation a compile error, and that is
  * unchanged by the split.
  */
@@ -36,7 +36,7 @@ export type HomeTileKey =
 /**
  * Display order, and the ONE list of what exists.
  *
- * ⚠ SEPARATE FROM THE COPY MAP ON PURPOSE: the order is a layout decision and belongs to neither
+ *  Separate from the copy map on purpose: the order is a layout decision and belongs to neither
  * language, and the server filters this array by role before any copy is read. Every entry must
  * appear in `HomeCopy['tiles']` — `HomeTileKey` is what enforces that in both directions.
  */

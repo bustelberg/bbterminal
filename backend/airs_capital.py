@@ -6,7 +6,7 @@ THE PROBLEM THIS SOLVES
     name sold in March is absent, so the list cannot add up to the year. Measured, that is not a
     rounding hole — 22.5% of BUS_Offensief_Dyn's year happened in positions it no longer holds.
 
-⚠⚠ A 1-JANUARY WEIGHT IS THE WRONG FIX, AND AITopSelectie IS THE PROOF. Its equity positions were
+ A 1-JANUARY WEIGHT IS THE WRONG FIX, AND AITopSelectie IS THE PROOF. Its equity positions were
     worth EUR 40,319 on 1 January against a EUR 1,000,000 opening capital, because the book opened
     the year in CASH and deployed it on 5 January. A start-weighted table would report it as 96%
     cash — true, and useless for "what drove the year", since the money was invested for 51 of 52
@@ -24,12 +24,12 @@ THE WEIGHT THAT WORKS: AVERAGE INVESTED CAPITAL (Modified Dietz)
         BUS_Offensief_Dyn      SUM avg capital 1,195,470   beginvermogen 1,197,811   ratio 0.998
         AITopSelectie OFF DYN  SUM avg capital 1,022,695   beginvermogen 1,000,000   ratio 1.023
 
-    ⚠ THE RATIO IS REPORTED, NOT ASSUMED TO BE 1. Modified Dietz ignores the price path within a
+     THE RATIO IS REPORTED, NOT ASSUMED TO BE 1. Modified Dietz ignores the price path within a
     position (a flow is weighted by time, not by what the position did between flows), and the
     de-restatement below is its own approximation. `capital_coverage_ratio` is how a reader sees
     that rather than discovering it.
 
-⚠ `Beginwaarde` IS RESTATED TO THE CURRENT QUANTITY, SO IT IS NOT THE 1-JANUARY VALUE. AIRS
+ `Beginwaarde` IS RESTATED TO THE CURRENT QUANTITY, SO IT IS NOT THE 1-JANUARY VALUE. AIRS
     restates it so a purchase does not read as a gain: own 100 shares on 1 Jan, buy 50 in March,
     and Beginwaarde is 150 x the 1-Jan price. Measured, that is why AITopSelectie's rows claim
     EUR 1,006,881 of opening value against a book that opened at EUR 1,000,000. The 1-Jan price is
@@ -37,16 +37,16 @@ THE WEIGHT THAT WORKS: AVERAGE INVESTED CAPITAL (Modified Dietz)
 
         opening = Beginwaarde x (quantity - bought + sold) / quantity
 
-⚠ A SOLD-OUT POSITION'S OPENING VALUE IS `proceeds - Res. YtD`, WHICH IS `Kostprijs +
+ A SOLD-OUT POSITION'S OPENING VALUE IS `proceeds - Res. YtD`, WHICH IS `Kostprijs +
     Res. voorg. jr.` — cost plus everything earned in EARLIER years, i.e. last year's closing
-    value. ⚠ BUT ONLY FOR SHARES HELD ON 1 JANUARY. For a parcel bought in February that same
+    value.  BUT ONLY FOR SHARES HELD ON 1 JANUARY. For a parcel bought in February that same
     expression is simply its purchase cost, and counting it invents opening capital that did not
     exist: doing so naively moved BUS_Offensief_Dyn's gap from EUR 55,427 to EUR 377,776. The
     shares held at the open are `sold - bought`, so the value is scaled by that share — an
     APPROXIMATION (AIRS's own parcel matching is not published), and the aggregate ratio above is
     what keeps it honest.
 
-⚠ CONTRIBUTION, NOT WEIGHT, IS WHAT ADDS UP. Every position's contribution is its EUR result over
+ CONTRIBUTION, NOT WEIGHT, IS WHAT ADDS UP. Every position's contribution is its EUR result over
     the book's own `beginvermogen`, and those sum to the book's year exactly. The weight is
     DESCRIPTIVE — how much of the year's capital a position occupied — and is normalised over the
     positions, so `contribution ~= weight x return` holds only approximately. The identity the
@@ -66,7 +66,7 @@ class Position:
     held: bool = False
     # Value at the period's open, de-restated (held) or scaled from the sales (sold out).
     opening_eur: float = 0.0
-    # Modified Dietz average capital. ⚠ Can come out slightly negative on odd data (a sale
+    # Modified Dietz average capital.  Can come out slightly negative on odd data (a sale
     # recorded before its buy); clamped to 0 for the weight so a nonsense negative share cannot
     # appear, and the raw value is kept so it is inspectable.
     avg_capital_eur: float = 0.0
@@ -84,17 +84,17 @@ class Position:
     income_eur: float = 0.0
     # ── AIRS's OWN SPLIT of the held result into price and currency, both in EUR.
     #
-    # ⚠⚠ THEY DECOMPOSE `held_result_eur` AND NOTHING ELSE, EXACTLY. `Fondsresultaat` +
+    #  They decompose `held_result_eur` AND NOTHING ELSE, EXACTLY. `Fondsresultaat` +
     # `Valutaresultaat` = `current_value_eur - start_value_eur` on the Vermogensoverzicht, which is
     # the same subtraction `held_result_eur` is (measured 2026-08-31: the identity holds on 494 of
     # 518 holdings of the newest fleet snapshot, and the 24 exceptions are the `Effectenrekening`
     # cash rows, where AIRS reports both legs as 0 and the delta is deposits and withdrawals).
     #
-    # ⚠ SO THE REALISED AND INCOME LEGS HAVE NO SPLIT AND NEVER WILL FROM HERE. The transacties
+    #  So the realised and income legs have no split and never will from here. The transacties
     # sheet has no currency column, and a dividend is booked in EUR. Anything reading these must
     # report the remainder rather than fold it into either leg — see `unsplit_result_eur`.
     #
-    # ⚠ NONE, NOT 0.0. AIRS only began publishing the two columns on 2026-07-18 (the last snapshot
+    #  None, not 0.0. AIRS only began publishing the two columns on 2026-07-18 (the last snapshot
     # without them is 2026-07-16), so an older book has no split at all — and a 0 there would say
     # "the currency did nothing", which is a claim about a position rather than about our data.
     fund_result_eur: float | None = None
@@ -106,7 +106,7 @@ class Position:
     first_sale: str | None = None
     last_sale: str | None = None
     prior_year_eur: float = 0.0
-    # ⚠ Its share count moved for a reason we do not interpret, so no quantity arithmetic on it is
+    #  Its share count moved for a reason we do not interpret, so no quantity arithmetic on it is
     # trustworthy. Its EUR result stays valid — a corporate action of this kind carries no money.
     capital_unknown: bool = False
 
@@ -128,12 +128,12 @@ class Position:
         """The part of `result_eur` AIRS's price/currency split does NOT cover — in practice the
         realised leg and the dividends.
 
-        ⚠ IT IS DERIVED BY SUBTRACTION, not by adding the two legs it names, so it also absorbs any
+         IT IS DERIVED BY SUBTRACTION, not by adding the two legs it names, so it also absorbs any
         gap between AIRS's own split and our held result. A table showing `koers + valuta` beside a
         larger `Result` invites the reader to conclude one of them is wrong; showing what is left
         over answers it, and the three columns then sum to the figure beside them.
 
-        ⚠ None WHEN THERE IS NO SPLIT AT ALL — a remainder is only meaningful against something.
+         None WHEN THERE IS NO SPLIT AT ALL — a remainder is only meaningful against something.
         """
         if self.fund_result_eur is None and self.fx_result_eur is None:
             return None
@@ -142,7 +142,7 @@ class Position:
 
     @property
     def closed_out(self) -> bool:
-        """⚠ DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY HAVING SOLD. A sale is a realisation —
+        """ DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY HAVING SOLD. A sale is a realisation —
         most sold names are trims and are still held."""
         return not self.held and self.sales > 0
 
@@ -153,18 +153,18 @@ class Ledger:
     basis_eur: float | None = None          # the book's own `beginvermogen`
     total_result_eur: float = 0.0
     avg_capital_eur: float = 0.0
-    # ⚠ SUM avg capital / beginvermogen. Reported, never assumed to be 1 — see the module note.
+    #  SUM avg capital / beginvermogen. Reported, never assumed to be 1 — see the module note.
     capital_coverage_ratio: float | None = None
     days: int = 0
 
 
-# ⚠ REAL SPLIT RATIOS ONLY, exactly as `_benchmark_index._split_adjust` does it. "Any small
+#  Real split ratios only, exactly as `_benchmark_index._split_adjust` does it. "Any small
 # rational n/d" is dense enough to sit within a few percent of anything and would "correct" a
 # genuine event into nothing; a whitelist cannot.
 SPLIT_RATIOS = (2, 3, 4, 5, 6, 8, 10, 15, 20)
 _RATIO_TOLERANCE = 0.01
 # How far a pre-event trade's price may sit from the 1-Jan price once the ratio is divided out.
-# ⚠ THIS IS THE TEST THAT SEPARATES A SPLIT FROM A TRANSFER, and it is not a fudge factor. On a
+#  This is the test that separates a split from a transfer, and it is not a fudge factor. On a
 # split, both prices are the same economic price in different unit bases, so the quotient is
 # 1 + whatever the stock did in between. On a TRANSFER-IN the prices share one basis while the
 # quantity ratio is 10, so the quotient is ~0.1 — the stock would have had to fall 90%.
@@ -175,7 +175,7 @@ def detect_split(qty_now: float, deposited_qty: float, opening_price: float,
                  pre_event_prices: list[float]) -> float | None:
     """The ratio a `Tt = D` row represents, or None if it cannot be shown to be a split.
 
-    ⚠ TWO INDEPENDENT COLUMNS MUST AGREE, WHICH IS WHY THIS IS A MEASUREMENT AND NOT A GUESS.
+     TWO INDEPENDENT COLUMNS MUST AGREE, WHICH IS WHY THIS IS A MEASUREMENT AND NOT A GUESS.
     `D` is *Deponering* — a DEPOSIT of securities (AIRS's own page says so). A split produces one;
     so does a transfer in from another custodian, and those need opposite handling: a split
     rescales every earlier quantity, a transfer leaves them alone. So:
@@ -193,7 +193,7 @@ def detect_split(qty_now: float, deposited_qty: float, opening_price: float,
     A stock does not move 0.00% in four days and independently happen to be 10× — that is one
     price written in two unit bases, and the quantity column reached 10.0000 on its own.
 
-    ⚠ RETURNS None RATHER THAN A BEST GUESS. Both gates must pass; a deposit that is not
+     RETURNS None RATHER THAN A BEST GUESS. Both gates must pass; a deposit that is not
     demonstrably a split leaves the position refused, which is what it was before this existed.
     """
     before = qty_now - deposited_qty
@@ -212,7 +212,7 @@ def detect_split(qty_now: float, deposited_qty: float, opening_price: float,
 def _flow_weight(datum: str | None, start: date, end: date, days: int) -> float:
     """The fraction of the period a flow on `datum` was invested.
 
-    ⚠ CLAMPED TO [0, 1]. A transaction dated outside the window (AIRS occasionally books a trade
+     CLAMPED TO [0, 1]. A transaction dated outside the window (AIRS occasionally books a trade
     to a settlement date past the report's end) would otherwise contribute a weight above 1 or
     below 0, i.e. more capital than was ever invested, or negative capital.
     """
@@ -243,7 +243,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     bought_qty: dict[str, float] = {}
     sold_qty: dict[str, float] = {}
     by_name: dict[str, Position] = {}
-    # ⚠⚠ NAMES WHOSE SHARE COUNT MOVED FOR A REASON WE DO NOT INTERPRET — a corporate action, in
+    #  Names whose share count moved for a reason we do not interpret — a corporate action, in
     # practice a split. Their quantity arithmetic CANNOT be trusted, because the trade quantities
     # and the holdings quantity are then on different bases and subtracting one from the other is
     # meaningless. Measured on KLA-Tencor, 2026: the book holds 310 shares POST-split, bought 14
@@ -252,13 +252,13 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     # 170, so the opening value came out EUR 32,605 instead of EUR 18,725 and the money-weighted
     # return read +39.81% instead of +56.67%. Plausible, and wrong by seventeen points.
     #
-    # ⚠ THE FIX IS TO REFUSE, NOT TO INFER. The ratio IS recoverable from the `D` row (310/31 = 10)
+    #  The fix is to refuse, not to infer. The ratio IS recoverable from the `D` row (310/31 = 10)
     # — and inferring it would mean deciding that `D` means "split", which is precisely what this
     # codebase has declined to do until somebody measures one (see `airs_transacties`). A figure
     # withheld with a reason costs one cell; a figure quietly rescaled by a guessed ratio is the
     # kind nobody re-checks.
     unknown_action: set[str] = set(unknown_names or ())
-    # ⚠ A PROVEN ratio per name — see `detect_split`. Only names in here are rescaled; a deposit
+    #  A PROVEN ratio per name — see `detect_split`. Only names in here are rescaled; a deposit
     # that could not be shown to be a split stays in `unknown_action` and stays refused.
     splits = dict(splits or {})
 
@@ -274,7 +274,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     # ── Pass 1: the trades, so quantities are known before the holdings are de-restated.
     for t in trades:
         p = pos(t.fonds)
-        # ⚠ `trades()` emits only buys and sells, so an uninterpreted type never reaches here —
+        #  `trades()` emits only buys and sells, so an uninterpreted type never reaches here —
         # which is exactly why it has to be flagged from the sheet instead. See `unknown_names`.
         w = _flow_weight(t.datum, period_start, period_end, days)
         if t.kind == "buy":
@@ -310,13 +310,13 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
         cur = _f(r.get("current_value_eur"))
         if start and cur is not None:
             p.held_result_eur = round(cur - start, 2)
-        # ⚠ CARRIED, NOT COMPUTED. This is AIRS's own arithmetic on its own figures; deriving a
+        #  Carried, not computed. This is AIRS's own arithmetic on its own figures; deriving a
         # currency leg from a price series and an FX series would be a second answer to a question
         # the source already answers, and the two would differ on the day a holding traded.
         if r.get("fund_result_eur") is not None or r.get("fx_result_eur") is not None:
             p.fund_result_eur = _f(r.get("fund_result_eur"))
             p.fx_result_eur = _f(r.get("fx_result_eur"))
-        # ⚠ RESCALE, THEN DE-RESTATE. A proven split means every quantity traded BEFORE it is in
+        #  Rescale, then de-restate. A proven split means every quantity traded BEFORE it is in
         # the old basis; multiplying those by the ratio puts the whole position on today's basis,
         # after which the ordinary de-restatement below is valid again. The EUR flows are untouched
         # — money is unit-invariant, and only the share counts were ever ambiguous.
@@ -325,13 +325,13 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
             bought_qty[name] = bought_qty.get(name, 0.0) * split
             sold_qty[name] = sold_qty.get(name, 0.0) * split
         if name in unknown_action and not split:
-            # ⚠ REFUSED, NOT ESTIMATED. Its share count moved for a reason we do not interpret, so
+            #  Refused, not estimated. Its share count moved for a reason we do not interpret, so
             # `qty_now − bought` subtracts quantities on two different bases. `None` propagates to
             # the UI as a blank cell with a reason; the euro columns beside it are unaffected,
             # because a corporate action of this kind carries no money.
             p.capital_unknown = True
         elif qty > 0 and start:
-            # ⚠ THE DE-RESTATEMENT. Beginwaarde is qty_now x the 1-Jan price, so the 1-Jan price is
+            #  The de-restatement. Beginwaarde is qty_now x the 1-Jan price, so the 1-Jan price is
             # Beginwaarde/qty_now and the true opening value is that price x the qty actually held
             # on 1 January. Clamped at 0: a position whose buys exceed its current quantity plus
             # sales cannot have held a negative number of shares.
@@ -344,7 +344,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
         if p.held or not p.sales:
             continue
         sq, bq = sold_qty.get(name, 0.0), bought_qty.get(name, 0.0)
-        # `proceeds − Res. YtD` is the parcel's value at LAST YEAR'S CLOSE. ⚠ Only the shares held
+        # `proceeds − Res. YtD` is the parcel's value at LAST YEAR'S CLOSE.  Only the shares held
         # on 1 January count; anything bought this year contributes a purchase cost, not opening
         # capital. AIRS does not publish its parcel matching, so the split is proportional to
         # quantity — an approximation, and `capital_coverage_ratio` is where it shows.
@@ -383,10 +383,10 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     led.total_result_eur = round(sum(p.result_eur for p in led.positions), 2)
     for p in led.positions:
         p.avg_capital_eur = round(p.avg_capital_eur, 2)
-    # ⚠ The denominator is the POSITIVE average capital. A position with a negative one is a data
+    #  The denominator is the POSITIVE average capital. A position with a negative one is a data
     # oddity (a sale weighted more heavily than the buy that supplied it); letting it shrink the
     # denominator would inflate every other row's weight.
-    # ⚠ A REFUSED POSITION LEAVES BOTH SIDES. Keeping its (untrustworthy) capital in the
+    #  A refused position leaves both sides. Keeping its (untrustworthy) capital in the
     # denominator would spread its error across every other row's weight.
     led.avg_capital_eur = round(sum(max(p.avg_capital_eur, 0.0)
                                     for p in led.positions if not p.capital_unknown), 2)
@@ -403,7 +403,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
 def contribution_pct(p: Position, basis_eur: float | None) -> float | None:
     """This position's share of the book's YEAR, in points on the book's opening capital.
 
-    ⚠ THE ONE COLUMN THAT ADDS UP. Weights are descriptive; contributions sum to the book's own
+     THE ONE COLUMN THAT ADDS UP. Weights are descriptive; contributions sum to the book's own
     return. None where there is no basis — a book with no `beginvermogen` has no denominator, and
     a 0 there would read as "this position did nothing".
     """

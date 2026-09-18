@@ -149,7 +149,7 @@ export default function SignalLab() {
               <option value="">Select a universe…</option>
               {universes.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.ticker_count.toLocaleString()})</option>)}
             </select>
-            <label className="flex items-center gap-1.5 text-[12px] text-fg-muted cursor-pointer select-none"
+            <label className="flex items-center gap-1.5 text-[12px] text-fg-muted cursor-pointer"
               title="Also score the daily as-of signals the live /schedule strategy trades. Much slower — it loops per instrument.">
               <input type="checkbox" checked={includeDaily} onChange={(e) => setIncludeDaily(e.target.checked)}
                 className="accent-accent-600" />

@@ -7,13 +7,13 @@ import { runSSE } from '../../../lib/stream';
 /**
  * Loading the blended metric suite for a PORTFOLIO, with per-company progress.
  *
- * ⚠ ONE LOADER. It had TWO callers — the Old-charts tab's `FundamentalCharts` and `LongEquityTab`
+ *  One loader. It had TWO callers — the Old-charts tab's `FundamentalCharts` and `LongEquityTab`
  * — each with its own copy of the fetch, which had already begun to differ (one mapped 404 to an
  * empty suite, the other to a friendly note). The Old-charts tab was removed 2026-08-21, so only
  * `LongEquityTab` calls this now; it stays a module because the reason it exists is that
  * "load the portfolio's metrics" must have exactly one definition, not because it had two users.
  *
- * ⚠ THE STREAM IS AN IMPROVEMENT, NEVER A DEPENDENCY. Any failure of the SSE path — an old backend
+ *  The stream is an improvement, never a dependency. Any failure of the SSE path — an old backend
  * with no `/stream` route, a proxy that buffers, a malformed frame — falls back to the plain POST,
  * which is the endpoint that was always there and which has real status codes. So the worst case
  * is the spinner we had before, not a broken modal; and 404 handling lives in exactly one place
@@ -33,7 +33,7 @@ export type BlendTarget = {
    */
   metrics?: string[];
   /** 'quarterly' rolls every metric to TRAILING TWELVE MONTHS server-side. Omitted = annual.
-   *  ⚠ The PORTFOLIO path needs this explicitly: the derived cards carry the cadence in the body
+   *   The PORTFOLIO path needs this explicitly: the derived cards carry the cadence in the body
    *  they already POST, but the blend has its own builder — leave it out and a book's growth cards
    *  quietly stay on fiscal years while the nine cards beside them switch. */
   cadence?: 'annual' | 'quarterly';
@@ -110,7 +110,7 @@ export async function loadBlendMetrics<T>(
       } else if (e.type === 'result' && e.payload) {
         result = { kind: 'ready', data: e.payload };
       } else if (e.type === 'error') {
-        // ⚠ An error INSIDE the stream, after the headers went out. It cannot be a status code,
+        //  An error INSIDE the stream, after the headers went out. It cannot be a status code,
         // so it arrives as a frame — and it is a real answer, not a reason to retry the whole
         // blend over the slower path.
         result = { kind: 'error', message: e.detail ?? 'blend failed' };
@@ -121,7 +121,7 @@ export async function loadBlendMetrics<T>(
     result = null;                       // the stream itself failed — fall back below
   }
   if (result) return remember<T>(body, result as BlendResult<T>);
-  // ⚠ ALSO REACHED WHEN THE STREAM ENDED WITHOUT A RESULT — a truncated body reads as a clean
+  //  Also reached when the stream ended without a result — a truncated body reads as a clean
   // close, and treating "no frames" as success would render an empty suite as though the book had
   // no fundamentals.
   return remember(body, await viaPost<T>(body, signal));
@@ -130,18 +130,18 @@ export async function loadBlendMetrics<T>(
 /**
  * The blend, remembered for as long as the read cache is.
  *
- * ⚠ IT CANNOT LIVE IN `readCache` LIKE EVERY OTHER READ ON THIS SCREEN, and that is not an
+ *  It cannot live in `readCache` LIKE EVERY OTHER READ ON THIS SCREEN, and that is not an
  * oversight: the fast path here is an SSE STREAM, whose body is consumed frame by frame and cannot
  * be replayed as a `Response`. So the RESULT is memoised instead, keyed by the same request body —
  * and tied to the cache's generation, so the one rule that keeps the rest of the modal honest ("any
  * successful write drops everything") governs this too. Without that tie, an ingest would refresh
  * twelve cards and leave the blend they sit under showing the pre-ingest book.
  *
- * ⚠ ONLY A RESOLVED ANSWER IS KEPT, never the in-flight promise. A blend is a read per holding and
+ *  Only a resolved answer is kept, never the in-flight promise. A blend is a read per holding and
  * a caller can abort it half way (`LongEquityTab` does, on unmount); sharing the promise would
  * hand the next caller a request that a component it never heard of had already cancelled.
  *
- * ⚠ AND NEVER AN ERROR. `none` — nothing in this book has fundamentals — is a stable fact about the
+ *  And never an error. `none` — nothing in this book has fundamentals — is a stable fact about the
  * data and an ingest invalidates it; a failure is a fact about the last minute and must be retried.
  */
 const memo = new Map<string, BlendResult<unknown>>();

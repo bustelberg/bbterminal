@@ -15,7 +15,7 @@ WHAT WENT WRONG
 
     The read is paged now, so new rebalances are correct. This repairs what is already stored.
 
-⚠ IT FIXES `entry_price_local` AND NOTHING ELSE, ON PURPOSE.
+ IT FIXES `entry_price_local` AND NOTHING ELSE, ON PURPOSE.
     Every other field on an ETF holding is DERIVED from it, and the pipeline's own re-pricer
     owns that arithmetic: `compute_and_save_price_update` re-derives `entry_price_eur` from the
     local price and the entry-date FX on every run (unconditionally, for ETFs), and recomputes
@@ -27,12 +27,12 @@ WHAT WENT WRONG
     tick away: press "Run now" on the /schedule price_update card, or wait for the 05:00 UTC
     daily. The script says so when it finishes.
 
-⚠ IT ONLY TOUCHES ROWS THAT ARE ACTUALLY WRONG. Every candidate is re-derived from
+ IT ONLY TOUCHES ROWS THAT ARE ACTUALLY WRONG. Every candidate is re-derived from
     `benchmark_price` as of the holding's OWN stored `entry_date` — which is exactly what the
     fixed code would have written — and a row already matching is left completely alone. A
     repair that rewrites everything cannot be told apart from a repair that broke something.
 
-⚠ AND IT PAGES ITS OWN READS. Repairing a truncation bug with a truncated read would write the
+ AND IT PAGES ITS OWN READS. Repairing a truncation bug with a truncated read would write the
     same wrong number back, with more confidence.
 
 USAGE — RUN IT FROM `backend/`, AND IT TARGETS PRODUCTION BY DEFAULT
@@ -60,14 +60,14 @@ from pathlib import Path
 _BACKEND = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_BACKEND))
 
-# ⚠ THIS SCRIPT TARGETS **PRODUCTION** BY DEFAULT, WHICH IS THE OPPOSITE OF EVERY OTHER ENTRY
-#     POINT HERE — AND IT IS DELIBERATE. The corruption it repairs is caused by PostgREST's
+#  This script targets **PRODUCTION** BY DEFAULT, WHICH IS THE OPPOSITE OF EVERY OTHER ENTRY
+#     Point here — and it is deliberate. The corruption it repairs is caused by PostgREST's
 #     1,000-row cap, which is a CLOUD setting: local runs at 10,000 and is therefore never
 #     affected. A local-by-default run of this script is guaranteed to find nothing, every time,
 #     which is worse than useless — it reads as "there is nothing wrong".
 #
-# ⚠ SO THE PROD CREDENTIALS ARE RE-APPLIED **AFTER** IMPORTING `deps`, AND THAT ORDER IS THE
-#     WHOLE TRICK. `deps` does its own `load_dotenv(".env")` then
+#  So the prod credentials are re-applied **AFTER** IMPORTING `deps`, AND THAT ORDER IS THE
+#     Whole trick. `deps` does its own `load_dotenv(".env")` then
 #     `load_dotenv(".env.local", override=True)` at import time, so anything set beforehand —
 #     an exported variable, a `.env` we loaded ourselves — is clobbered by the local file. (I
 #     wrote it the obvious way first and it silently ran against local; the target banner is what
@@ -145,14 +145,14 @@ def main() -> int:
                          "this is for rehearsal only and will normally find nothing.")
     args = ap.parse_args()
 
-    # ⚠ NAME THE TARGET BEFORE DOING ANYTHING. This is the only script here that writes to
+    #  Name the target before doing anything. This is the only script here that writes to
     # production by default, so the one thing a reader must not have to infer is which database
     # is about to change. Printed for a dry run too — that is when you check it.
     url = os.environ.get("SUPABASE_URL", "<UNSET>")
     host = url.split("//", 1)[-1].split("/", 1)[0] or url
     is_local = "127.0.0.1" in url or "localhost" in url
     where = "LOCAL" if is_local else "PRODUCTION"
-    # ⚠ `deps` ALREADY PRINTED A DIFFERENT URL ABOVE AND IT IS NOT THE ONE WE WILL USE. It logs
+    #  `deps` ALREADY PRINTED A DIFFERENT URL ABOVE AND IT IS NOT THE ONE WE WILL USE. It logs
     # `[deps] SUPABASE_URL = …` at import, which is `.env.local` (local) — we overwrite it
     # immediately afterwards. Two contradicting lines in a terminal, the wrong one first, is how
     # someone concludes they ran against local and moves on; this names which one is real.
@@ -168,7 +168,7 @@ def main() -> int:
     if is_local and not args.local:
         # The env has been overridden from outside; say so rather than silently doing nothing
         # useful, because "nothing to repair" against local is a foregone conclusion.
-        print("        ⚠ SUPABASE_URL points at local although --local was not passed. This bug "
+        print("         SUPABASE_URL points at local although --local was not passed. This bug "
               "cannot occur locally, so expect no findings.")
     print()
 
@@ -240,7 +240,7 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001 — one bad row must not abandon the rest
             print(f"  ! snapshot {sid} ({label}) FAILED: {type(e).__name__}: {e}")
     print(f"\nWrote {written} of {len(fixes)} snapshot(s).")
-    # ⚠ THE DERIVED FIELDS ARE STILL STALE UNTIL THE PIPELINE RECOMPUTES THEM — by design; see
+    #  The derived fields are still stale until the pipeline recomputes them — by design; see
     # the module docstring. Saying so is the difference between "the fix did not work" and "the
     # fix is one tick from visible".
     print("The Return / EUR / drifted-weight columns still show their OLD values: they are "

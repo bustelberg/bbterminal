@@ -28,7 +28,7 @@ from tests._fake_supabase import FakeSupabase
 def index(monkeypatch):
     """A three-company index of which TWO cross the bridge into the asset world.
 
-    ⚠ THE THIRD COMPANY IS THE POINT OF THE FIXTURE, not padding. `universe_membership` (the
+     THE THIRD COMPANY IS THE POINT OF THE FIXTURE, not padding. `universe_membership` (the
     company world, where membership is authored) holds three; `universe_asset_membership` (the
     bridge view) holds two. That gap IS the India/UK loss in miniature, and it is the only reason
     `covered_pct` can be checked against something other than 100%.
@@ -57,7 +57,7 @@ def _add_share_classes(fake, *classes) -> None:
     """Add N share classes of ONE company — different assets, different ISINs, SAME company, and
     each carrying the FULL company cap, which is what Yahoo actually reports.
 
-    ⚠ A HELPER BECAUSE A ONE-ROW VERSION OF THIS TEST PASSES WITHOUT THE DEDUPE. Asserting "exactly
+     A HELPER BECAUSE A ONE-ROW VERSION OF THIS TEST PASSES WITHOUT THE DEDUPE. Asserting "exactly
     one Alphabet survives" against a fixture holding one Alphabet is true whatever the code does;
     the fixture has to contain the collision for the assertion to mean anything.
     """
@@ -82,7 +82,7 @@ class TestTheBridgeIsAJoinNotAColumn:
     """
 
     def test_membership_is_resolved_through_the_isin(self, index):
-        """⚠ REWRITTEN FROM A SOURCE GREP TO A BEHAVIOURAL TEST (2026-08-10). It asserted
+        """ REWRITTEN FROM A SOURCE GREP TO A BEHAVIOURAL TEST (2026-08-10). It asserted
         `'table("company")' in inspect.getsource(members)`, and went red when the three-hop join
         moved INTO the database as the `universe_asset_membership` view (migration 20260806060000)
         — i.e. it failed at the exact moment the rule it names got stronger, because a view cannot
@@ -97,12 +97,12 @@ class TestTheBridgeIsAJoinNotAColumn:
         out, coverage = ab_mod.members("SP500")
 
         assert {m["isin"] for m in out} == {"US-A", "US-B"}
-        # ⚠ THE DENOMINATOR IS THE COMPANY-WORLD COUNT, NOT THE BRIDGE'S. Three companies are in
+        #  The denominator is the company-world count, not the bridge's. Three companies are in
         # the index; only two cross into the asset world. Taking the denominator from the bridge
         # would report 100% coverage while a third of the index was missing — the loss would
         # vanish into the number that exists to report it.
         #
-        # ⚠ THE THREE COVERAGE KEYS THIS TEST IS ABOUT, NOT THE WHOLE DICT. `coverage` also carries
+        #  The three coverage keys this test is about, not the whole dict. `coverage` also carries
         # the cap-stamp range (`caps_from`/`caps_to`/`caps_unstamped`), which is a different report
         # about a different thing; an exact-dict assertion here went red the day those were added
         # and said "the bridge is broken", which is the one thing that had not changed. A test
@@ -126,7 +126,7 @@ class TestTheBridgeIsAJoinNotAColumn:
 
 
 class TestTheWeightingIsREUSEDNotCopied:
-    """⚠ START-OF-WINDOW CAP WEIGHTS. Weighting by TODAY's cap is look-ahead bias — it turned
+    """ START-OF-WINDOW CAP WEIGHTS. Weighting by TODAY's cap is look-ahead bias — it turned
     +9.10% into +21.70%. A second copy of that loop is a second place for the bias to grow back,
     so this module supplies `members` + `closes` from a different source and calls the SAME
     `_benchmark_index._window_rows` that /benchmarks uses."""
@@ -137,7 +137,7 @@ class TestTheWeightingIsREUSEDNotCopied:
             assert "_window_rows(" in inspect.getsource(fn), fn.__name__
 
     def test_the_narrow_loader_selects_marks_and_does_not_price_them(self):
-        """⚠ `window_marks` may fetch less, never compute differently. The moment it grows a
+        """ `window_marks` may fetch less, never compute differently. The moment it grows a
         return, a weight or an FX conversion there are two definitions of an index return and the
         cheap one is the one nobody cross-checks."""
         # The docstring EXPLAINS the weighting it must not do, so scan the code only.
@@ -158,7 +158,7 @@ class TestOneCompanyOneRow:
         GOOGL *and* GOOG, each carrying the whole cap — a naive sum counts it twice (11.3% of the
         S&P's weight, fictional).
 
-        ⚠ AND THE ASSET WORLD DOES NOT MAKE THIS MOOT, which is the trap worth pinning: keying on
+         AND THE ASSET WORLD DOES NOT MAKE THIS MOOT, which is the trap worth pinning: keying on
         `analysis_id` collapses a company's LISTINGS, not its SHARE CLASSES. Those carry different
         ISINs, so they are different assets — two rows, each with the full cap, exactly as before
         the repoint. (Formerly a grep for `'c.get("company_name") or ""'`, which went red when the
@@ -179,7 +179,7 @@ class TestOneCompanyOneRow:
         ASSET names differ ("Alphabet Inc A" / "Alphabet Inc C") still collapse. Keying on the
         asset name would let them both through, which is the bug in its original form."""
         fake, ab_mod = index
-        # ⚠ THE TWO ASSET NAMES DIFFER — "Alphabet Inc A" vs "Alphabet Inc C" — so a key built from
+        #  The two asset names differ — "Alphabet Inc A" vs "Alphabet Inc C" — so a key built from
         # `name` would let both through. Only the company-world name collapses them.
         _add_share_classes(fake, ("GOOGL", 3.9e12), ("GOOG", 4.1e12))
 
@@ -226,7 +226,7 @@ class TestCoverageIsNeverAssumed:
 
 
 class TestThePortfolioAndTheBenchmarkSharePriceUniverse:
-    """⚠ The portfolio's return comes from `asset_price` (yfinance). Pricing the index off
+    """ The portfolio's return comes from `asset_price` (yfinance). Pricing the index off
     GuruFocus would compare two price universes — different adjustment conventions, different FX
     — and call the difference alpha."""
 

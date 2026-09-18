@@ -1,6 +1,6 @@
 """`_page_metrics` must page on a UNIQUE sort key, or it silently drops rows.
 
-⚠⚠ THE MEASURED BUG, 2026-08-17. It paged with `.order("target_date")` and nothing else. A company
+ THE MEASURED BUG, 2026-08-17. It paged with `.order("target_date")` and nothing else. A company
 files ~110 metric codes on the SAME `target_date`, so with `_PAGE = 1000` every page boundary falls
 inside a tie group — and Postgres makes no promise about the order of tied rows across separate
 LIMIT/OFFSET queries. Some rows come back twice, others never.
@@ -17,7 +17,7 @@ The damage was invisible in every way that matters:
 It moved the book's 10-year FCF/share CAGR by 0.14pp. Small here; unbounded in principle, since
 which row is lost is arbitrary.
 
-⚠ THE PRIMARY KEY IS `(company_id, metric_code, source_code, target_date)`. `company_id` is pinned
+ THE PRIMARY KEY IS `(company_id, metric_code, source_code, target_date)`. `company_id` is pinned
 by the filter, so ordering by the other three is total. Same failure and same fix as the FX pager
 (`tests/test_fx_paging.py`) — this is the second time, which is why the fake now models it.
 """
@@ -71,7 +71,7 @@ class TestEveryRowComesBackExactlyOnce:
         assert len(_page(monkeypatch, rows, unstable=True)) == len(rows)
 
     def test_it_still_works_when_ties_happen_to_be_stable(self, monkeypatch):
-        """⚠ THE REASON THIS WENT UNNOTICED. With a stable server-side order the broken pager is
+        """ THE REASON THIS WENT UNNOTICED. With a stable server-side order the broken pager is
         indistinguishable from the fixed one — which is exactly what a local Postgres, a small
         table or a warm cache will hand you."""
         rows = _rows(codes=110, years=12)
@@ -79,7 +79,7 @@ class TestEveryRowComesBackExactlyOnce:
 
 
 class TestTheFakeActuallyReproducesIt:
-    """⚠ A REGRESSION TEST THAT CANNOT FAIL PROVES NOTHING. If `unstable_ties` were a no-op the
+    """ A REGRESSION TEST THAT CANNOT FAIL PROVES NOTHING. If `unstable_ties` were a no-op the
     four tests above would pass against the ORIGINAL bug. This one pins that the harness bites:
     paging the same rows on a NON-unique key must lose some."""
 

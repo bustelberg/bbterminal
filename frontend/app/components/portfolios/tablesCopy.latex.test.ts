@@ -1,14 +1,14 @@
 /**
  * Every expression the Tables tab typesets must PARSE AS LaTeX — in strict mode.
  *
- * ⚠⚠ THIS FILE EXISTS BECAUSE THE TAB SHIPPED THE OPPOSITE FAILURE. `workedCagr` and `workedMean`
+ *  This file exists because the tab shipped the opposite failure. `workedCagr` and `workedMean`
  * became LaTeX on 2026-08-22, and Tables kept handing their output to `InfoTip text=`, which
  * renders a string as prose — so the tooltips printed `\left(\dfrac{606.30_{\,2025}}…` at the
  * reader, backslashes and braces, for nine days. Reported 2026-08-31 as "the latex in the info
  * icons in Tables is not rendering properly". The ⓘ now typesets it, and the moment it does, every
  * one of these strings has to be valid.
  *
- * ⚠⚠ AND PARSING IS NOT ENOUGH — THE WORST FAILURE IS VALID LaTeX. An unescaped `%` starts a
+ *  And parsing is not enough — the worst failure is valid LaTeX. An unescaped `%` starts a
  * COMMENT: the rest of the line vanishes and KaTeX paints a shorter formula that looks finished.
  * The app renders with `throwOnError: false`, so nothing reports it. Hence STRICT mode here, and
  * the visible-text assertion below — the same protection `workedFormula.latex.test.ts` gives the
@@ -27,7 +27,7 @@ const render = (tex: string) =>
   katex.renderToString(tex, { displayMode: true, throwOnError: true, strict: 'error' });
 
 /** The text a READER sees — the `katex-html` half only.
- *  ⚠ NOT the whole output: `katex-mathml` carries the ORIGINAL source verbatim, so stripping tags
+ *   NOT the whole output: `katex-mathml` carries the ORIGINAL source verbatim, so stripping tags
  *  from all of it finds a truncated tail in the annotation and concludes nothing was lost. */
 const shown = (tex: string) => {
   const html = katex.renderToString(tex, { displayMode: true, throwOnError: false });
@@ -53,7 +53,7 @@ describe('the worked line renders, joined to the formula the way the card joins 
     const c = COPY[lang];
     const tex = withWorked(c.rowFormula.revCagr(false), rateSub(CAGR));
     expect(() => render(tex)).not.toThrow();
-    // ⚠ FORMULA THEN NUMBERS, AND NOTHING BETWEEN THEM (2026-08-31). The book's name used to head
+    //  Formula then numbers, and nothing between them (2026-08-31). The book's name used to head
     // the worked line and landed in the middle of one display expression, reading as a term in it.
     expect(shown(tex)).toContain('606.34');
     expect(shown(tex)).not.toContain('Offensief');
@@ -65,7 +65,7 @@ describe('the worked line renders, joined to the formula the way the card joins 
     const tex = withWorked(c.rowFormula.intCover(false),
       meanSub(SERIES, 2025, 5, cover));
     expect(() => render(tex)).not.toThrow();
-    // ⚠⚠ THE TAIL IS THE ASSERTION, not the parse. Every one of these lines carries a `%`, and an
+    //  The tail is the assertion, not the parse. Every one of these lines carries a `%`, and an
     // unescaped one would comment out everything after it while still rendering — so the check is
     // that the LAST thing in the expression is still on screen.
     expect(shown(tex)).toContain('55.38');           // the mean of the five printed years
@@ -73,7 +73,7 @@ describe('the worked line renders, joined to the formula the way the card joins 
   });
 
   it('a percentage inside the line does not comment out the rest of it', () => {
-    // ⚠⚠ THE SILENT FAILURE. An unescaped `%` starts a LaTeX comment: the rest of the line
+    //  The silent failure. An unescaped `%` starts a LaTeX comment: the rest of the line
     // vanishes and KaTeX paints a shorter formula that looks finished.
     const tex = withWorked(COPY.en.rowFormula.fcfMargin(true), meanSub(SERIES, 2025, 5));
     expect(() => render(tex)).not.toThrow();

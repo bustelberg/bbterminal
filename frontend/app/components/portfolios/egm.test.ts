@@ -25,7 +25,7 @@ describe('calculateEGM — the known-good case', () => {
   });
 
   it('expectedReturn at forwardPE 25 is 7.90%, NOT the sheet\'s 8.09%', () => {
-    // ⚠ THE ONLY FIGURE IN THE SPEC THAT DOES NOT RECONCILE, AND IT IS THE INPUT'S FAULT, NOT THE
+    //  The only figure in the spec that does not reconcile, and it is the input's fault, not the
     // FORMULA'S. `forwardPE = 25` is a back-solve (the sheet's P/E cells read #LOGIN!), while the
     // 8.09% came off the sheet with the real multiple. maxPE / fairValue / upside are unaffected —
     // none of them touch forwardPE — which is why those three match to the digit and this one does
@@ -43,7 +43,7 @@ describe('calculateEGM — the known-good case', () => {
 });
 
 describe('calculateEGM — a missing input blanks only what it touches', () => {
-  it('⚠ a loss-making company keeps its fair value', () => {
+  it(' a loss-making company keeps its fair value', () => {
     // expectedReturn and peRatio divide by the forward P/E; the other three never touch it. A
     // panel that blanked entirely here would hide three answers it still has.
     for (const forwardPE of [null, 0, -25]) {
@@ -92,7 +92,7 @@ describe('calculateEGM — a missing input blanks only what it touches', () => {
 
 describe('calculateEGM — assumptions that cannot produce a valuation', () => {
   it('returns all nulls rather than a plausible-looking number', () => {
-    // ⚠ A NEGATIVE COMPOUNDER RAISED TO AN EVEN NUMBER OF YEARS COMES BACK POSITIVE. Left
+    //  A negative compounder raised to an even number of years comes back positive. Left
     // unguarded, growthRate = −2 renders an entirely ordinary maxPE built on arithmetic that
     // stopped meaning anything ten years ago.
     const bad = [
@@ -105,7 +105,7 @@ describe('calculateEGM — assumptions that cannot produce a valuation', () => {
     ];
     for (const a of bad) {
       const r = calculateEGM(CASE, a);
-      // ⚠ AN EXHAUSTIVE `toEqual`, DELIBERATELY — it fails when a new output is added and not
+      //  An exhaustive `toEqual`, DELIBERATELY — it fails when a new output is added and not
       // given a null here, which is how `bridge` was caught the day it landed. A per-key check
       // would have let a new field arrive already broken in every refusal case.
       expect(r).toEqual({
@@ -143,7 +143,7 @@ describe('calculateEGM — the reading of it', () => {
 });
 
 /**
- * ⚠⚠ THE BRIDGE EXISTS BECAUSE THE PANEL'S OWN SUBTITLE IS AN ADDITION AND THE MODEL IS A PRODUCT.
+ *  The bridge exists because the panel's own subtitle is an addition and the model is a product.
  * "earnings growth + dividend yield + change in the multiple" is the right intuition and the wrong
  * arithmetic: a reader who takes it literally and adds the three drivers gets a number that is not
  * the one in the tile beside them, and both look entirely reasonable.
@@ -156,14 +156,14 @@ describe('calculateEGM — the return bridge', () => {
   const r = calculateEGM(CASE, A);
   const bridge = r.bridge!;
 
-  it('⚠⚠ THE FACTORS MULTIPLY TO THE TOTAL EXACTLY — a breakdown must tie to what it breaks down', () => {
+  it(' THE FACTORS MULTIPLY TO THE TOTAL EXACTLY — a breakdown must tie to what it breaks down', () => {
     const product = bridge.legs.reduce((p, l) => p * l.factor, 1);
     expect(product).toBeCloseTo(bridge.factor, 12);
     expect(bridge.factor - 1).toBeCloseTo(r.expectedReturn as number, 12);
     expect(bridge.rate).toBe(r.expectedReturn);
   });
 
-  it('⚠⚠ THE RATES DO **NOT** ADD TO IT, AND THAT IS NOT A BUG TO FIX', () => {
+  it(' THE RATES DO **NOT** ADD TO IT, AND THAT IS NOT A BUG TO FIX', () => {
     // Drivers compound. If this assertion ever starts passing as an equality, someone has changed
     // the model into one that adds — which is a different, wrong model.
     expect(bridge.sumOfRates).not.toBeCloseTo(bridge.rate, 4);
@@ -183,7 +183,7 @@ describe('calculateEGM — the return bridge', () => {
     expect(bridge.legs[1].rate).toBe(A.dividendYield);
   });
 
-  it('⚠ THE MULTIPLE LEG CARRIES ITS OWN ENDPOINTS, so a label cannot name a different pair', () => {
+  it(' THE MULTIPLE LEG CARRIES ITS OWN ENDPOINTS, so a label cannot name a different pair', () => {
     const m = bridge.legs[2];
     expect(m.from).toBe(CASE.forwardPE);
     expect(m.to).toBe(A.exitPE);
@@ -202,7 +202,7 @@ describe('calculateEGM — the return bridge', () => {
     expect(m.rate).toBeCloseTo(0, 12);
   });
 
-  it('⚠ NULL IN EXACTLY THE CASES expectedReturn IS NULL — they are one computation', () => {
+  it(' NULL IN EXACTLY THE CASES expectedReturn IS NULL — they are one computation', () => {
     for (const fwd of [null, 0, -25]) {
       const x = calculateEGM({ ...CASE, forwardPE: fwd }, A);
       expect(x.expectedReturn).toBeNull();
@@ -215,7 +215,7 @@ describe('calculateEGM — the return bridge', () => {
   });
 
   it('a non-payer contributes a leg of exactly zero rather than no leg at all', () => {
-    // ⚠ THE ROW STAYS. Dropping it would make two companies' bridges different SHAPES, and the
+    //  The row stays. Dropping it would make two companies' bridges different SHAPES, and the
     // reader comparing them has to notice a missing row rather than read a 0.0%.
     const b = calculateEGM(CASE, { ...A, dividendYield: null }).bridge!;
     expect(b.legs).toHaveLength(3);
@@ -228,7 +228,7 @@ describe('calculateEGM — the return bridge', () => {
  * The panel's conclusion: what you pay now, what the assumptions say you sell at, and the return
  * between the two.
  *
- * ⚠⚠ THE PRICE LEG AND THE TOTAL RETURN ARE DIFFERENT NUMBERS ON A DIVIDEND PAYER, and drawing
+ *  The price leg and the total return are different numbers on a dividend payer, and drawing
  * them as one is the trap here. `expectedReturn` includes the dividends — cash you were paid, not
  * price you can sell at — so an "implied share price" derived from it would be a figure no screen
  * will ever quote. They tie EXACTLY on a non-payer, which is most of the names this tab is opened
@@ -243,7 +243,7 @@ describe('calculateEGM — implied price and whole-period return', () => {
     expect(r.priceReturn as number).toBeCloseTo(expected / (CASE.price as number) - 1, 10);
   });
 
-  it('⚠⚠ ON A NON-PAYER THE TWO RETURNS ARE IDENTICAL — nothing separates them', () => {
+  it(' ON A NON-PAYER THE TWO RETURNS ARE IDENTICAL — nothing separates them', () => {
     const r = calculateEGM(CASE, { ...A, dividendYield: 0 });
     expect(r.priceReturn as number).toBeCloseTo(r.totalReturn as number, 10);
     // ...and the implied price is then exactly the compounded expected return.
@@ -251,7 +251,7 @@ describe('calculateEGM — implied price and whole-period return', () => {
       (CASE.price as number) * Math.pow(1 + (r.expectedReturn as number), A.years), 6);
   });
 
-  it('⚠⚠ ON A PAYER THEY SEPARATE, AND THE TOTAL IS THE BIGGER ONE', () => {
+  it(' ON A PAYER THEY SEPARATE, AND THE TOTAL IS THE BIGGER ONE', () => {
     const r = calculateEGM(CASE, { ...A, dividendYield: 0.03 });
     expect(r.totalReturn as number).toBeGreaterThan(r.priceReturn as number);
     // The gap IS the dividend compounding, exactly.
@@ -265,7 +265,7 @@ describe('calculateEGM — implied price and whole-period return', () => {
       .toBeCloseTo(Math.pow(1 + (r.expectedReturn as number), A.years) - 1, 10);
   });
 
-  it('⚠ THE MEASURED PANEL CASE — a 78.5x name rerating to 20x loses a third of its price', () => {
+  it(' THE MEASURED PANEL CASE — a 78.5x name rerating to 20x loses a third of its price', () => {
     // The company the layout was designed against: forward P/E 78.5, no dividend, 10% growth.
     const r = calculateEGM({ price: 331.83, forwardPE: 78.5, epsNextFY: 4.23 },
       { ...A, dividendYield: 0 });
@@ -275,7 +275,7 @@ describe('calculateEGM — implied price and whole-period return', () => {
   });
 
   it('no price means no implied price — but the RETURN still stands', () => {
-    // ⚠ They are independently nullable: the return is a ratio of multiples and a growth rate,
+    //  They are independently nullable: the return is a ratio of multiples and a growth rate,
     // none of which needs a price. Blanking it because one input is missing hides an answer we have.
     const r = calculateEGM({ ...CASE, price: null }, A);
     expect(r.impliedPrice).toBeNull();
@@ -298,7 +298,7 @@ describe('calculateEGM — the price CAGR', () => {
       .toBeCloseTo(r.priceReturn as number, 10);
   });
 
-  it('⚠⚠ IS NOT `expectedReturn` ON A PAYER — that one is the TOTAL per year', () => {
+  it(' IS NOT `expectedReturn` ON A PAYER — that one is the TOTAL per year', () => {
     // The two are both honestly called "the CAGR"; which is right depends on the row it sits in.
     // Beside two PRICES, only the price leg can be derived from what is on screen.
     const r = calculateEGM(CASE, { ...A, dividendYield: 0.03 });
@@ -313,14 +313,14 @@ describe('calculateEGM — the price CAGR', () => {
     expect(r.priceCagr as number).toBeCloseTo(r.expectedReturn as number, 12);
   });
 
-  it('⚠ THE MEASURED PANEL CASE — 78.5x → 20x at 10% growth compounds the price at −4.1%/yr', () => {
+  it(' THE MEASURED PANEL CASE — 78.5x → 20x at 10% growth compounds the price at −4.1%/yr', () => {
     const r = calculateEGM({ price: 331.83, forwardPE: 78.5, epsNextFY: 4.23 },
       { ...A, dividendYield: 0 });
     expect(r.priceCagr as number).toBeCloseTo(-0.0406, 4);
   });
 
   it('exists wherever the whole-period figure does, and is null wherever it is not', () => {
-    // ⚠ It is derived from the same factor, so "one present and the other absent" is a state that
+    //  It is derived from the same factor, so "one present and the other absent" is a state that
     // must not be reachable — the panel prints them in one row.
     for (const fwd of [null, 0, -25]) {
       const x = calculateEGM({ ...CASE, forwardPE: fwd }, A);

@@ -1,13 +1,13 @@
 /**
  * The `Tables` tab's two languages.
  *
- * ⚠⚠ THE TYPE ALREADY GUARANTEES THE DUTCH KEYS EXIST — IT GUARANTEES NOTHING ABOUT THE DUTCH. A
+ *  The type already guarantees the dutch keys exist — it guarantees nothing about the dutch. A
  * `TablesCopy` whose every field is the English string satisfies `tsc` completely, and that is the
  * realistic failure here: copy is added to `en`, pasted into `nl` to make the build pass, and the
  * intent to translate it later is lost the moment it compiles. Nothing on screen distinguishes an
  * untranslated string from one that is the same in both languages, so it has to be asserted.
  *
- * ⚠ WHICH IS WHY `SHARED` IS AN EXPLICIT ALLOW-LIST, AND WHY IT IS CURRENTLY EMPTY. It held
+ *  Which is why `SHARED` IS AN EXPLICIT ALLOW-LIST, AND WHY IT IS CURRENTLY EMPTY. It held
  * "ROIC" while the Dutch chip kept the English acronym; that label is now spelled out, so no string
  * survives untranslated. Keeping the mechanism with nothing in it is the point — the next genuine
  * overlap has to be added deliberately rather than slipping through as an oversight.
@@ -37,7 +37,7 @@ describe('both languages are complete', () => {
   });
 
   /**
-   * ⚠⚠ EVERY FORMULA IS **LaTeX**, BECAUSE THE ⓘ TYPESETS IT (2026-08-31).
+   *  Every formula is **LaTeX**, BECAUSE THE ⓘ TYPESETS IT (2026-08-31).
    *
    * This replaces a guard that no longer applies: while the tooltip was PROSE, `AboutCard` promoted
    * whatever preceded the first ' — ' to a bold heading, so a formula could be split mid-expression
@@ -46,7 +46,7 @@ describe('both languages are complete', () => {
    * means anything, and where the LENGTH RULE FOUGHT THE BRIEF: these tooltips are meant to be the
    * bare minimum.
    *
-   * ⚠ WHAT REPLACES IT IS THE STRONGER CHECK — that the string really is an expression rather than
+   *  What replaces it is the stronger check — that the string really is an expression rather than
    * prose that would be set as a row of italic variables. `tablesCopy.latex.test.ts` renders every
    * one of them in STRICT mode, which is the half that catches a silent `%` truncation.
    */
@@ -56,7 +56,7 @@ describe('both languages are complete', () => {
       for (const sbc of [false, true]) {
         const f = c.rowFormula[k](sbc);
         expect(f, `rowFormula.${k}(${sbc}) is LaTeX`).toMatch(/\\[a-z]+/);
-        // ⚠ AND NOT THE UNICODE LOOKALIKES IT REPLACED. `Σ(w × x) ÷ Σw` in the UI font is a
+        //  And not the unicode lookalikes it replaced. `Σ(w × x) ÷ Σw` in the UI font is a
         // row of glyphs that resembles an expression: a summation with no limits, and `Σ`
         // given the advance width of a comma. Same rule as `lib/tipCard`'s `Worked`.
         for (const glyph of ['÷', '×', 'Σ', '^ (']) {
@@ -68,7 +68,7 @@ describe('both languages are complete', () => {
   });
 
   /**
-   * ⚠ AND THE NOTE IS ONE SHORT SENTENCE. It is the card's TITLE (`AspectCard`'s `what`), read
+   *  And the note is one short sentence. It is the card's TITLE (`AspectCard`'s `what`), read
    * beside a typeset formula; the essays that used to sit here were the reason nobody read either.
    * Asked for 2026-08-31: "the info icon text should be very short with bare minimum info".
    */
@@ -105,7 +105,7 @@ describe('both languages are complete', () => {
       check(`chip.${k}`, en.chip[k], nl.chip[k]);
       check(`rowLabel.${k}`, en.rowLabel[k], nl.rowLabel[k]);
       check(`rowNote.${k}`, en.rowNote[k](true), nl.rowNote[k](true));
-      // ⚠ A FORMULA IS MOSTLY SYMBOLS, which makes it the easiest thing in this file to leave in
+      //  A formula is mostly symbols, which makes it the easiest thing in this file to leave in
       // English by accident — the ÷ and the Σ look translated. The words around them are not.
       check(`rowFormula.${k}`, en.rowFormula[k](true), nl.rowFormula[k](true));
     }
@@ -129,7 +129,7 @@ describe('the interpolated strings actually interpolate', () => {
     const mean = c.meanTip(4, 'FY2021', 'FY2025', 5);
     expect(mean).toContain('FY2021');
     expect(mean).toContain('FY2025');
-    // ⚠ AN INCOMPLETE WINDOW NAMES BOTH NUMBERS — "4" alone under a "5y" heading is the claim the
+    //  An incomplete window names both numbers — "4" alone under a "5y" heading is the claim the
     // `(4/5)` badge exists to refuse, and the tooltip must not quietly drop the denominator.
     expect(mean).toContain('4');
     expect(mean).toContain('5');
@@ -149,7 +149,7 @@ describe('the interpolated strings actually interpolate', () => {
 
 describe('the rate rows', () => {
   /**
-   * ⚠ ONE RATE ROW PER LEVEL CHART ON THE LONG EQUITY TAB. The table exists so a reader does not
+   *  One rate row per level chart on the long equity tab. The table exists so a reader does not
    * have to eyeball a compounding rate off a log axis, and it summarised three of the six level
    * charts until 2026-08-25. This pins the set rather than the count, so adding a seventh level
    * chart without a row is a visible omission rather than a silent one.
@@ -164,7 +164,7 @@ describe('the rate rows', () => {
   });
 
   /**
-   * ⚠⚠ `epsFwd` IS A RATE AND IS DELIBERATELY NOT IN `RATE_KEYS`, which is exactly the kind of
+   *  `epsFwd` IS A RATE AND IS DELIBERATELY NOT IN `RATE_KEYS`, which is exactly the kind of
    * omission somebody "fixes". The list gates the footnote clause about point-to-point rates
    * disagreeing with the Long Equity growth cards — a statement about measuring HISTORY. A forecast
    * has no card to disagree with, and pulling it in would print a caveat about a divergence that

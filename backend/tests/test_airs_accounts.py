@@ -1,6 +1,6 @@
 """The AIRS accounts view — what the books actually made, on AIRS's own numbers.
 
-⚠⚠ THE ONE THING THIS MODULE EXISTS TO PREVENT: A VALUE RATIO PRESENTED AS A RETURN.
+ THE ONE THING THIS MODULE EXISTS TO PREVENT: A VALUE RATIO PRESENTED AS A RETURN.
 
 "Take the portfolio's worth on 31 December and its worth today, divide" is the obvious way to
 build this, it is what was asked for, and it is wrong. It is a return ONLY if nothing was paid in
@@ -28,7 +28,7 @@ from routers import _airs_accounts as acc
 def code(obj) -> str:
     """The CODE, with the docstring and the `#` comments stripped out.
 
-    ⚠ WHY THIS EXISTS. A guard that greps raw source fires on the prose EXPLAINING the guard —
+     WHY THIS EXISTS. A guard that greps raw source fires on the prose EXPLAINING the guard —
     this module's own docstring says "NEVER `eindvermogen / beginvermogen`", so a search for that
     string finds the warning and fails. That happened four separate times in one session
     (`portfolioVariants.ts`, `_eur_price`, `_quality`, here), and each time the tempting fix is to
@@ -45,7 +45,7 @@ def code(obj) -> str:
 
 
 class TestTheReturnIsAIRSsOwnNeverAValueRatio:
-    """⚠ Read the module docstring before touching `ytd_pct`."""
+    """ Read the module docstring before touching `ytd_pct`."""
 
     def test_ytd_is_cumulatief_rendement(self):
         src = code(acc.list_accounts)
@@ -140,7 +140,7 @@ class TestTheSnapshotIsTheFreshestOnly:
             "airs_mutatie": [], "airs_model_weight": [], "airs_performance": [],
         })
         monkeypatch.setattr(acc, "supabase", fake)
-        # ⚠ AND `deps.supabase`: the mutatie/model-weight reads moved into the shared
+        #  AND `deps.supabase`: the mutatie/model-weight reads moved into the shared
         # `routers._airs_ref`, which resolves through `deps` at call time. Patching only the
         # router leaves those pointing at the real client.
         monkeypatch.setattr("deps.supabase", fake)

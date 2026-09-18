@@ -6,7 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { debtRatioOf, type DebtRatioInputs, type DebtRatioRow } from './debtRatioData';
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
-import { type BenchTarget } from './benchSeries';
+import { inputsBody, type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
 import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
 
@@ -15,28 +15,28 @@ import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
  * (millions). Same columns / Unsubscribed / Fetch behaviour as the other drill-downs. Self-fetches
  * (so Fetch can reload). Mirrors {@link ./MarginInputsModal}.
  *
- * ⚠ NO REBASED/YoY SWITCH HERE, AND THAT IS NOT AN OMISSION. The growth charts plot a LEVEL, which
+ *  NO REBASED/YoY SWITCH HERE, AND THAT IS NOT AN OMISSION. The growth charts plot a LEVEL, which
  * has to be rebased to 100 per member before it can be averaged — so their drill-down offers that
  * basis. A ratio is already normalised per company: the chart is a plain weighted average of the
  * ratios, and the ratio is printed per company per year on its own row. There is no second basis
  * to switch to; rebasing a percentage would produce a number that means nothing.
  *
- * ⚠ THE BENCHMARK GETS THE SAME TABLE, FROM THE SAME ENDPOINT. `{holdings|portfolio_id}` swapped
+ *  The benchmark gets the same table, from the same endpoint. `{holdings|portfolio_id}` swapped
  * for `{universe}` — one component renders both, so the book's rows and the index's cannot come to
  * format a figure or hide a status differently on the one screen built for comparing them.
  */
 
 /**
- * ⚠ THE TABLE IS `RatioInputsTable`, SHARED BY EVERY RATIO CARD. What is left in this file is the
+ *  The table is `RatioInputsTable`, SHARED BY EVERY RATIO CARD. What is left in this file is the
  * fetch, the prose, and the card's own two constants — the lines it lists and the figure it
  * derives. Eleven near-identical copies of that table used to exist, which is why the benchmark
  * only ever got built into one of them, and why adding the cap/weight lines was a ten-file edit.
  *
- * ⚠ THE BENCHMARK IS THE SAME ENDPOINT AND THE SAME TABLE — `{holdings|portfolio_id}` swapped for
+ *  The benchmark is the same endpoint and the same table — `{holdings|portfolio_id}` swapped for
  * `{universe}`. One component renders both, so the book's rows and the index's cannot come to
  * format a figure or hide a status differently on the one screen built for comparing them.
  *
- * ⚠ THE DERIVED LINE CALLS THE CARD'S OWN FUNCTION, and `RatioInputsTable` feeds that same function
+ *  The derived line calls the card's own function, and `RatioInputsTable` feeds that same function
  * to `periodDenoms` — which is what makes the `weight` line under each company sum to exactly 100%
  * of the line the chart drew.
  */
@@ -60,7 +60,7 @@ export default function DebtRatioInputsModal({ target, portfolioName, benchTarge
   const load = async (body: Target | BenchTarget): Promise<DebtRatioInputs> => {
     const r = await apiFetch(`${API_URL}/api/earnings/debt-ratio-inputs`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: inputsBody(body),
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
@@ -79,7 +79,7 @@ export default function DebtRatioInputsModal({ target, portfolioName, benchTarge
       }
     })();
     return () => { alive = false; };
-     
+
   }, [target, reloadKey]);
 
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
@@ -130,7 +130,7 @@ export default function DebtRatioInputsModal({ target, portfolioName, benchTarge
           {portfolioName && <span className="text-sm text-fg-soft truncate max-w-[24ch]" title={portfolioName}>{portfolioName}</span>}
           {data && <span className="text-[12px] text-fg-faint">{data.rows.length} companies</span>}
           {benchLabel && <span className="text-[12px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
-          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
@@ -157,7 +157,7 @@ export default function DebtRatioInputsModal({ target, portfolioName, benchTarge
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}
               {bench && (
                 <>
-                  {/* ⚠ THE COVERAGE GAP IS STATED. Only constituents with these lines ingested feed
+                  {/*  THE COVERAGE GAP IS STATED. Only constituents with these lines ingested feed
                       the benchmark line, so a table longer than the contributing set is not a
                       mismatch — it IS the gap, and the `weight` line renormalises over what is
                       left, period by period. */}

@@ -1,10 +1,10 @@
 """WHICH MEMBERS A BLENDED LINE LEFT OUT, AND WHY — the "n of m" on a Long Equity card, explained.
 
-⚠⚠ THE COUNT IS DELIBERATELY MUTE ABOUT INDIVIDUALS. `member_counts` says 1,509 of 1,511 and
+ THE COUNT IS DELIBERATELY MUTE ABOUT INDIVIDUALS. `member_counts` says 1,509 of 1,511 and
 nothing about which two, because a card cannot list names for a 1,900-name index without becoming a
 table. This is the other half: run it when somebody asks.
 
-⚠ IT CALLS THE ENDPOINT'S OWN FUNCTIONS (`_blend_inputs`, `_totals_for`, `blend_series`) rather
+ IT CALLS THE ENDPOINT'S OWN FUNCTIONS (`_blend_inputs`, `_totals_for`, `blend_series`) rather
 than re-deriving "the same way". A diagnostic that computes independently answers a question about
 itself.
 
@@ -62,12 +62,12 @@ def _not_in_line(covered: list[dict], caps: dict | None, totals: dict, code: str
                  metric: str) -> list[dict]:
     """The covered members `blend_series` does NOT count in `fund_members`, each with its reason.
 
-    ⚠⚠ IT BUILDS THE MEMBER DICTS EXACTLY AS `_blend_rows` DOES — points, per-period caps and euros
+     IT BUILDS THE MEMBER DICTS EXACTLY AS `_blend_rows` DOES — points, per-period caps and euros
     — and then asks `blend_series` ITSELF, one member at a time, whether that member carries euros
     at a period it also has a weight for. Re-deriving the rule here would answer a question about
     this script.
 
-    ⚠ THE CAPS ARE THE HALF THAT IS EASY TO FORGET: an index member is weighted by the market cap it
+     THE CAPS ARE THE HALF THAT IS EASY TO FORGET: an index member is weighted by the market cap it
     had IN THAT PERIOD, so one with no cap history is out of every period — it has euros, it clears
     `_prepare`, and it is still not in the line. That is exactly the gap this script was written to
     name.
@@ -110,7 +110,7 @@ def _not_in_line(covered: list[dict], caps: dict | None, totals: dict, code: str
 def _no_cap_reason(cid: int) -> str:
     """WHY this member has no per-period cap — and the two answers are not the same problem.
 
-    ⚠⚠ "NO MARKET CAP" IS THE ANSWER A READER CANNOT ACT ON, AND IT WAS THE WRONG ONE. Measured on
+     "NO MARKET CAP" IS THE ANSWER A READER CANNOT ACT ON, AND IT WAS THE WRONG ONE. Measured on
     ACWI 2026-08-31: CSG NV and Alpha Bank SA both HAVE `Valuation and Quality__Market Cap` rows for
     every period they report — every value is **0**. GuruFocus zero-fills, and `period_caps_eur`
     refuses a non-positive cap (absent, never 0, so the company is not put in a denominator as
@@ -129,7 +129,7 @@ def _no_cap_reason(cid: int) -> str:
 
 
 def _sibling(name: str, ids: list[int], cid: int) -> bool:
-    """Does another company anywhere share this normalised name? ⚠ The dedupe runs over the WHOLE
+    """Does another company anywhere share this normalised name?  The dedupe runs over the WHOLE
     member list, so the winner is usually NOT in the missing set — looking only there would report
     the wrong reason for every deduped share class."""
     if not name:

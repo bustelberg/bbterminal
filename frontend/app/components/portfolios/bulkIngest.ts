@@ -3,14 +3,14 @@
  * Long-Equity card. Pure, so the decisions that matter are unit-tested rather than discovered on a
  * 2-minute run against GuruFocus.
  *
- * ⚠ THE WORK-LIST IS THE COVERAGE TABLE, NOT THE METRIC MATRIX. `portfolio-revenue-matrix` skips
+ *  The work-list is the coverage table, not the metric matrix. `portfolio-revenue-matrix` skips
  * every holding with no `company` row (`if not c: continue`) — and a `no_company` holding is
  * exactly the one that most needs an ingest. Driving the queue off the matrix would silently
  * leave out the rows the button exists for. The matrix is used only to answer "does this holding
  * ALREADY have this metric", which is the one question coverage cannot answer (its sentinel is
  * Free Cash Flow, not the card's metric).
  *
- * ⚠ `ingested` IS NOT "THIS CARD NOW HAS DATA". A company that pays no dividend ingests perfectly
+ *  `ingested` IS NOT "THIS CARD NOW HAS DATA". A company that pays no dividend ingests perfectly
  * and still has no dividend/share line; a fetch reported as a success beside a chart that stayed
  * empty is how a report becomes worthless. So the badge is taken from a RE-PROBE of the metric
  * after the run — the ingest status only survives as the tooltip explaining an absence.

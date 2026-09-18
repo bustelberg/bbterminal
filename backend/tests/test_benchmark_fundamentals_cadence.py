@@ -7,11 +7,11 @@ and 263 carry the quarterly line. One row. There was no way to see that short of
 
 Two failure modes are worth pinning, because neither shows up as an error:
 
-⚠ THE WRONG SPELLING READS AS AN EMPTY TABLE. The quarterly rows live under `quarterly__…` codes;
+ THE WRONG SPELLING READS AS AN EMPTY TABLE. The quarterly rows live under `quarterly__…` codes;
     ask for the annual spelling and every cell is a dash, which is indistinguishable from a
     company nobody has fetched.
 
-⚠ A PERIOD LABEL FROM ONE BASIS UNDER THE OTHER'S HEADING IS A SILENT LIE. "2025" and "2025-Q3"
+ A PERIOD LABEL FROM ONE BASIS UNDER THE OTHER'S HEADING IS A SILENT LIE. "2025" and "2025-Q3"
     are different claims about what we hold, so the response echoes the cadence it answered, and
     an unrecognised value resolves to a real basis rather than to nothing.
 """
@@ -59,7 +59,7 @@ class TestTheCadenceReachesTheRead:
 
     def test_quarterly_reports_TTM_periods_not_fiscal_years(self, fund):
         got = fund.constituent_fundamentals([1, 2], "quarterly")
-        # ⚠ EIGHT QUARTERS IS FIVE TTM POINTS, NOT EIGHT. A trailing year needs four quarters, so
+        #  Eight quarters is five ttm points, not eight. A trailing year needs four quarters, so
         # the first three produce nothing — the span starts three quarters in, by construction.
         assert got[1]["fcf"] == {"from": "2024-Q4", "to": "2025-Q4", "n": 5}
 

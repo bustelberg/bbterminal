@@ -8,7 +8,7 @@ It sweeps two kinds of bad rows:
   * identified-but-unmapped  — OpenFIGI knows the security but yfinance came back empty (usually
     just Yahoo throttling during an earlier batch). Skips OpenFIGI bond/right/warrant types.
 
-⚠⚠ THE MISMAP SWEEP IS NOW REPORT-ONLY UNLESS YOU NAME THE ROWS, AND THAT IS THE POINT OF THIS
+ THE MISMAP SWEEP IS NOW REPORT-ONLY UNLESS YOU NAME THE ROWS, AND THAT IS THE POINT OF THIS
     FILE (2026-09-04). It used to re-queue every row that failed `same_company`, which on the live
     grid is 110 rows of which only ~15 are genuinely wrong. The other ~95 are OpenFIGI's own
     spelling — `MUENCHENER RUECKVER AG-REG`, `IND & COMM BK OF CHINA-H`, `SAMSUNG ELECTRO-REGS GDR
@@ -18,7 +18,7 @@ It sweeps two kinds of bad rows:
     set missing the real listing and the row lands on a thin foreign line (Alphabet -> GOOA.VI,
     75,000x thinner). Blanket re-queueing 110 rows to fix 15 is that bet, taken 95 times.
 
-⚠ AND NO THRESHOLD REPLACES THE HUMAN — measured against 15 hand-checked errors: the OpenFIGI-type
+ AND NO THRESHOLD REPLACES THE HUMAN — measured against 15 hand-checked errors: the OpenFIGI-type
     allowlist catches all 15 and would re-resolve 38 correct rows; type AND a country mismatch
     leaves 11 false positives and misses 3 real ones; "a bare US ticker for a non-US ISIN" is
     structural and clean but catches only 4 of 15. So this prints the list, worst-liquidity-first,
@@ -58,7 +58,7 @@ def main() -> None:
               f"  row can only move it to a thinner listing. Review, then pass --isin for the ones\n"
               f"  that are really wrong (or --all-suspects to take the old blanket behaviour).\n",
               flush=True)
-        # ⚠ WORST LIQUIDITY LAST: a genuinely wrong mapping on a liquid name is the expensive one,
+        #  Worst liquidity last: a genuinely wrong mapping on a liquid name is the expensive one,
         # so it ends up next to the prompt where it will actually be read.
         for r in sorted(s["rows"], key=lambda x: float(x.get("med_adv_eur") or 0)):
             print(f"    {r['isin']:<14} {str(r.get('yahoo_symbol')):<12} "
@@ -69,7 +69,7 @@ def main() -> None:
         print(f"wrong-company mismaps   : {s['suspects']:>5} selected -> {s['queued']} re-queued",
               flush=True)
         if s["unknown"]:
-            print(f"  ⚠ not flagged as a mismatch, so NOT queued: {', '.join(s['unknown'])}",
+            print(f"   not flagged as a mismatch, so NOT queued: {', '.join(s['unknown'])}",
                   flush=True)
 
     if not a.skip_unmapped:
@@ -80,7 +80,7 @@ def main() -> None:
     st = queue.status()
     print(f"queue now: {st['pending']} pending · {st['done']} done · {st['failed']} failed",
           flush=True)
-    # ⚠ ONLY WHERE SOMETHING WAS ACTUALLY QUEUED. Printed unconditionally it tells a reader who
+    #  Only where something was actually queued. Printed unconditionally it tells a reader who
     # just ran the report that a re-resolution is under way — the exact impression this file was
     # rewritten to remove.
     if s["applied"] or not a.skip_unmapped:

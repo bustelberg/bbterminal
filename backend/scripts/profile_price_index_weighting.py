@@ -1,6 +1,6 @@
 """Is the benchmark's share-price CAGR overstated by the step weighting?
 
-⚠⚠ THE QUESTION. `blend_series`' LEVEL path chains the line from weighted growth:
+ THE QUESTION. `blend_series`' LEVEL path chains the line from weighted growth:
 
     index[p] = index[anchor] x (1 + Sum w_i*g_i / Sum w_i),   g_i = v_i(p)/v_i(anchor) - 1
 
@@ -38,7 +38,7 @@ from routers._fundamental_blend import (  # noqa: E402
 def _members(label: str, cadence: str, metric: str = "price_ps") -> list[dict]:
     """The index's constituents in `blend_series`' member shape, carrying `price_ps` + period caps.
 
-    ⚠ THE SAME TWO READS THE ENDPOINT MAKES, through the same helpers -- a bespoke query here would
+     THE SAME TWO READS THE ENDPOINT MAKES, through the same helpers -- a bespoke query here would
     measure a panel the chart never sees.
     """
     from routers import earnings as E
@@ -57,10 +57,10 @@ def _members(label: str, cadence: str, metric: str = "price_ps") -> list[dict]:
     print(f"  {len(cids)} resolve to a company row")
 
     caps = E.period_caps_eur(cids, cadence)
-    # ⚠ RAW-DATED POINTS, NOT PERIOD-KEYED ONES. `blend_series` takes `{target_date: value}` and
+    #  Raw-dated points, not period-keyed ones. `blend_series` takes `{target_date: value}` and
     # buckets them itself (`carry_forward` measures staleness in DAYS, so a key of "2025" raises).
     # This is the same read `_bulk_blend_rows` makes, in the same shape.
-    # ⚠ `invested_capital` IS SYNTHETIC — the Invested-capital card has no single GuruFocus code;
+    #  `invested_capital` IS SYNTHETIC — the Invested-capital card has no single GuruFocus code;
     # it is non-current liabilities + total equity, summed per company per period, which is what
     # `investedCapitalData.investedCapitalSeries` does on the client.
     parts = (("noncurrent_liabilities", "total_equity") if metric == "invested_capital"
@@ -69,7 +69,7 @@ def _members(label: str, cadence: str, metric: str = "price_ps") -> list[dict]:
     raw = E._rows_by_company(cids, codes)
     prices: dict[int, dict[str, float]] = {}
     want = {c: m for m in parts for c in E._metric_codes(m)}
-    for cid, mrows in raw.items():          # ⚠ NOT `rows` — that is the member list, still needed
+    for cid, mrows in raw.items():          #  NOT `rows` — that is the member list, still needed
         legs: dict[str, dict[str, float]] = {}
         for r in mrows:
             if r.get("numeric_value") is None:
@@ -81,7 +81,7 @@ def _members(label: str, cadence: str, metric: str = "price_ps") -> list[dict]:
         if len(parts) == 1:
             prices[cid] = legs.get(parts[0], {})
             continue
-        # ⚠ BOTH LEGS OR NEITHER, PER DATE. A period with only one of them is not a capital base;
+        #  Both legs or neither, per date. A period with only one of them is not a capital base;
         # summing what is there would report a company with no liabilities as smaller than it is.
         a, b = (legs.get(p, {}) for p in parts)
         prices[cid] = {d: a[d] + b[d] for d in a if d in b}
@@ -164,11 +164,11 @@ def rebased_average(members: list[dict]) -> list[tuple[str, float]]:
     """`investedCapitalIndexByYear`'s construction, FAITHFULLY: rebase each member to 100 at the
     first period it can be WEIGHTED in, then take the period-cap-weighted average of those levels.
 
-    ⚠⚠ THE "FIRST WEIGHTABLE PERIOD" BASE IS NOT AN OPTIONAL DETAIL AND MODELLING IT WRONG COSTS AN
+     THE "FIRST WEIGHTABLE PERIOD" BASE IS NOT AN OPTIONAL DETAIL AND MODELLING IT WRONG COSTS AN
     ORDER OF MAGNITUDE. Rebasing to the first period with a POSITIVE figure instead (what
     `_prepare` does) reads +73%/yr on ACWI against ~+13% with the real rule — because Vertiv's 2017
     blank-cheque shell (invested capital 0.024M) is positive and becomes a base of 100 for a series
-    that reaches 3,332M. That guard is the whole subject of the ⚠⚠ on the client function; a
+    that reaches 3,332M. That guard is the whole subject of the  on the client function; a
     reproduction without it measures a bug that was already fixed and blames the wrong thing.
 
     What this DOES still carry, and what is being sized here:
@@ -188,7 +188,7 @@ def rebased_average(members: list[dict]) -> list[tuple[str, float]]:
     cover_n: dict[str, int] = {}
     for m in members:
         bucketed = _latest_per_bucket(m["points"], year_bucket)
-        # ⚠ THE CLIENT'S `.filter(p => weightAt(r, p.label) != null)`, before the base is chosen.
+        #  The client's `.filter(p => weightAt(r, p.label) != null)`, before the base is chosen.
         pts = [(p, v) for p, (_d, v) in sorted(bucketed.items()) if _weight_at(m, p) is not None]
         if not pts:
             continue

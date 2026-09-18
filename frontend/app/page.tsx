@@ -7,13 +7,13 @@ import { HOME_TILE_ORDER } from './components/home/homeTileKeys';
 /**
  * The home page.
  *
- * ⚠⚠ SERVER COMPONENT FOR THE ROLE, CLIENT COMPONENT FOR THE WORDS. The session and the `view_as`
+ *  Server component for the role, client component for the words. The session and the `view_as`
  * cookie are server facts and decide WHICH tiles exist; the language is a client fact
  * (`localStorage`, via `useLang`) and decides what they SAY. Rendering the copy here would leave
  * the page in English whatever the sidebar switch is set to — which is exactly the failure
  * `i18n.ts` warns about, a control that moves nothing reading as broken rather than as unfinished.
  *
- * ⚠ THE TILE LIST AND ITS COPY LIVE IN `homeCopy.ts`, not here. They used to be one array in this
+ *  The tile list and its copy live in `homeCopy.ts`, not here. They used to be one array in this
  * file, so adding a page put its English copy in one place and its Dutch copy nowhere; keyed by
  * href in a `Record<HomeTileKey, …>`, a missing translation is now a compile error.
  */

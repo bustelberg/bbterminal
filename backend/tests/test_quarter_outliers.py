@@ -1,6 +1,6 @@
 """A corrupt quarter must not be laundered into a confident annual figure by the TTM sum.
 
-⚠⚠ MEASURED 2026-08-13 ON THE ACWI EPS LINE. GuruFocus's quarterly `EPS without NRI` feed carries
+ MEASURED 2026-08-13 ON THE ACWI EPS LINE. GuruFocus's quarterly `EPS without NRI` feed carries
 occasional garbage, five orders of magnitude out:
 
     IAG      0.038  0.174  10,987.996  0.265  0.022  0.089  8,748.852  0.184   (annual: ~0.7-1.2)
@@ -12,7 +12,7 @@ REBASED members, so that one 0.03%-weight constituent contributed **+390pp of th
 step**: the blended ACWI EPS went 1,015 → **5,186** in a single quarter, with no error anywhere.
 After the guard it reads 1,180.7 — a +16.3% trailing year, which is what a TTM should look like.
 
-⚠ THE DAMAGE IS THE LAUNDERING, NOT THE CELL. One absurd value in a chart of raw quarters is
+ THE DAMAGE IS THE LAUNDERING, NOT THE CELL. One absurd value in a chart of raw quarters is
 obvious; the same value summed into a "trailing twelve months" and then indexed is a plausible
 number on a log axis, and it moves an index built from 1,500 companies.
 """
@@ -43,7 +43,7 @@ class TestTheMeasuredCorruptions:
         assert set(wday) - set(_drop_quarter_outliers(wday)) == {"2026-04-30"}
 
     def test_the_ttm_no_longer_carries_it(self):
-        """⚠ THE POINT DISAPPEARS RATHER THAN BEING PATCHED. A dropped quarter leaves the windows
+        """ THE POINT DISAPPEARS RATHER THAN BEING PATCHED. A dropped quarter leaves the windows
         containing it without `k` consecutive filings, so they produce no TTM at all — a hole, not
         a fabricated year. 10,988 was the number that reached the chart."""
         ttm = _ttm_by_period([{"target_date": d, "numeric_value": v} for d, v in IAG.items()],
@@ -52,7 +52,7 @@ class TestTheMeasuredCorruptions:
 
 
 class TestItMustNotCLIPREALVOLATILITY:
-    """⚠ A GUARD THAT FIRES ON GENUINE DATA WOULD BE WORSE THAN THE BUG — it would quietly smooth
+    """ A GUARD THAT FIRES ON GENUINE DATA WOULD BE WORSE THAN THE BUG — it would quietly smooth
     the volatility the chart exists to show, and nobody would ever see what was removed. The factor
     is deliberately enormous (50x) because the measured corruptions are 300x and 63,000x, while a
     business swinging hard lands an order of magnitude below that."""
@@ -66,7 +66,7 @@ class TestItMustNotCLIPREALVOLATILITY:
         assert _drop_quarter_outliers(s) == s
 
     def test_a_series_legitimately_in_the_thousands_survives(self):
-        """⚠ "10,988 is too big" is not a fact about a number. A KRW or JPY per-share figure is
+        """ "10,988 is too big" is not a fact about a number. A KRW or JPY per-share figure is
         genuinely in the thousands, which is why the bar is the company's OWN median."""
         s = {"a": 4200.0, "b": 5100.0, "c": 3800.0, "d": 6000.0}
         assert _drop_quarter_outliers(s) == s
@@ -101,7 +101,7 @@ class TestItRefusesToJudgeWhatItCannotMeasure:
 
 
 class TestSizeAloneCannotTellABadCellFromABusinessThatChangedSize:
-    """⚠⚠ THE SECOND VERSION OF THIS GUARD WAS DELETING REAL LEVEL SHIFTS — measured 2026-08-14 on
+    """ THE SECOND VERSION OF THIS GUARD WAS DELETING REAL LEVEL SHIFTS — measured 2026-08-14 on
     a local run, on a series with a median of 19.15:
 
         960.171   1,099.847   1,122.77
@@ -130,13 +130,13 @@ class TestSizeAloneCannotTellABadCellFromABusinessThatChangedSize:
         assert _drop_quarter_outliers(s) == s
 
     def test_but_a_lone_cell_inside_the_SAME_series_is_still_dropped(self):
-        """⚠ THE RULE IS NOT "THIS SERIES IS EXEMPT". A shift and a bad cell can coexist, and the
+        """ THE RULE IS NOT "THIS SERIES IS EXEMPT". A shift and a bad cell can coexist, and the
         one that is alone still goes."""
         s = {**self.SHIFT, "2024-12-31": 90_000.0}
         assert set(self.SHIFT) - set(_drop_quarter_outliers(s)) == {"2024-12-31"}
 
     def test_a_mid_series_run_that_returns_to_normal_is_DROPPED(self):
-        """⚠⚠ "ADJACENT" ALONE KEPT THIS, AND IT WAS WRONG. An excursion that ENDED is the opposite
+        """ "ADJACENT" ALONE KEPT THIS, AND IT WAS WRONG. An excursion that ENDED is the opposite
         of a level shift, however many quarters it spanned — measured 2026-08-14, six of eight kept
         runs were exactly this, all of them finishing in 2015-2017 with normal quarters after."""
         s = {"a": 19.0, "b": 19.4, "c": 2000.0, "d": 2100.0, "e": 19.2, "f": 18.8}
@@ -161,7 +161,7 @@ class TestSizeAloneCannotTellABadCellFromABusinessThatChangedSize:
 class TestWhatCountsAsALevelShift:
     """A run of flagged quarters reaching the NEWEST filing, and nothing else.
 
-    ⚠ THE SECOND CONDITION FOLLOWS FROM THE MEDIAN, it is not a fitted heuristic: a shift that
+     THE SECOND CONDITION FOLLOWS FROM THE MEDIAN, it is not a fitted heuristic: a shift that
     happened and persisted becomes the majority of the series and stops being flagged at all. So a
     run that is STILL flagged can only be recent, and a recent one necessarily reaches the end.
     """
@@ -176,7 +176,7 @@ class TestWhatCountsAsALevelShift:
         assert _level_shift({"2024-06-30", "2024-09-30"}, self.AXIS) == set()
 
     def test_a_run_of_ONE_is_not_a_run_even_at_the_end(self):
-        """⚠ WORKDAY'S CONFIRMED BAD CELL WAS THE NEWEST FILING (676 against a median of 2.2), so
+        """ WORKDAY'S CONFIRMED BAD CELL WAS THE NEWEST FILING (676 against a median of 2.2), so
         "reaches the end" alone would have kept it. Two points is the minimum at which "it stayed
         there" means anything."""
         assert _level_shift({"2026-03-31"}, self.AXIS) == set()

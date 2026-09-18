@@ -357,7 +357,7 @@ async def list_held_companies(request: Request):
         # Step 5 — freshness + latest price lookup. Latest `close_price`
         # target_date AND native-currency value per held company. The held
         # set is tiny (~24 names), so query just those ids via a fast indexed
-        # DISTINCT ON (direct-Postgres COPY) instead of the full-table
+        # Distinct on (direct-Postgres COPY) instead of the full-table
         # `company_latest_close_price_dates` RPC, which aggregates ALL of
         # metric_data and times out.
         latest_close_by_cid: dict[int, str | None] = {}
@@ -613,7 +613,7 @@ class SetCashRequest(BaseModel):
 
 class SleeveEtf(BaseModel):
     benchmark_id: int
-    # ⚠ ABSOLUTE — this ETF's share of the WHOLE portfolio, in percent, the
+    #  ABSOLUTE — this ETF's share of the WHOLE portfolio, in percent, the
     # number the user typed. Stored invested-relative (see `set_strategy_sleeves`).
     weight_pct: float
     band_pct: float = 0.0
@@ -651,7 +651,7 @@ def _write_sleeves(strategy_id: int, cash: float, overlay: list[dict]) -> dict:
     # Restate the open period + re-price so the new weighting shows at once (no
     # wait for the daily tick).
     #
-    # ⚠⚠ THE OUTCOME IS REPORTED, NEVER SWALLOWED — and it used to be. This block caught
+    #  The outcome is reported, never swallowed — and it used to be. This block caught
     # `Exception`, logged a warning nobody reads and returned 200 with the strategy row, so a
     # restate that FAILED was indistinguishable from one that worked: the editor closed, the
     # config had genuinely changed, and the card beside it went on showing the old weights —
@@ -660,7 +660,7 @@ def _write_sleeves(strategy_id: int, cash: float, overlay: list[dict]) -> dict:
     # this step has real data to fail on (a truncated read, a statement timeout, a vendor gap)
     # and local dev is where it always succeeds.
     #
-    # ⚠ The two non-success cases are NOT the same and must not print the same sentence. A
+    #  The two non-success cases are NOT the same and must not print the same sentence. A
     # strategy with no rebalance yet has nothing to restate and will pick the sleeves up on its
     # first one (`note` — not a failure). A raised exception left the held book disagreeing with
     # the config it was just told to follow (`error`), and that is the one the editor must
@@ -753,7 +753,7 @@ async def set_strategy_cash(strategy_id: int, body: SetCashRequest):
 async def set_strategy_sleeves(strategy_id: int, body: SetSleevesRequest):
     """Set a strategy's CASH and ETF sleeves by hand; the stock picks take the rest.
 
-    ⚠ THE INPUT IS ABSOLUTE, THE STORAGE IS INVESTED-RELATIVE, AND THE DIFFERENCE
+     THE INPUT IS ABSOLUTE, THE STORAGE IS INVESTED-RELATIVE, AND THE DIFFERENCE
     IS NOT COSMETIC. What you type is each sleeve's share of the whole portfolio
     (10% cash + 20% ETF ⇒ 70% stocks). What `config.etf_overlay[].weight_pct`
     means — set by the diversifier, consumed by the blended backtest — is a share
@@ -767,7 +767,7 @@ async def set_strategy_sleeves(strategy_id: int, body: SetSleevesRequest):
     sleeves are applied (`momentum.portfolio_math.apply_sleeves`), so repeated
     edits can't compound the shrink.
 
-    ⚠ IT RESTATES THE OPEN PERIOD, it does not open a new one: the ETF sleeves are
+     IT RESTATES THE OPEN PERIOD, it does not open a new one: the ETF sleeves are
     priced from the same entry bar the stock sleeve entered on, so the period's
     return stays measured over one window. The next rebalance re-selects normally.
 
@@ -886,7 +886,7 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
     `current_picks_snapshot.scheduled_strategy_id` FK so it stays clean
     even after schema-evolution churn on adjacent tables.
 
-    ⚠⚠ IT RE-PRICES THE OPEN PERIOD FIRST WHEN THE STORED MARKS LAG THE CLOSES WE ALREADY HOLD.
+     IT RE-PRICES THE OPEN PERIOD FIRST WHEN THE STORED MARKS LAG THE CLOSES WE ALREADY HOLD.
     This endpoint is what the /schedule detail panel opens on, and every price the "Current
     portfolio" card shows is a value COPIED into a snapshot by whichever pass last ran — so the
     card could sit days behind `metric_data` with nothing wrong on screen and no job in an error
@@ -912,9 +912,9 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
         if not admin and not sched.get("user_visible"):
             raise HTTPException(403, "Not available")
 
-        # ⚠ AFTER the authorization checks and BEFORE the snapshots are read, so the history
+        #  AFTER the authorization checks and BEFORE the snapshots are read, so the history
         # below already contains the repair rather than reporting the state it just replaced.
-        # ⚠ A read-only user gets it too: re-marking a book makes this page's figures CURRENT,
+        #  A read-only user gets it too: re-marking a book makes this page's figures CURRENT,
         # it never changes what they say — the refresh/mutate line the auth gate already draws.
         try:
             from routers._schedule_snapshots import ensure_snapshot_fresh  # noqa: PLC0415
@@ -1111,7 +1111,7 @@ class RepricedHolding(BaseModel):
     exit_price_local: float | None = None
     exit_price_eur: float | None = None
     forward_return_pct: float | None = None
-    # ⚠ WHAT ACTUALLY CHANGED, per field. A reload that reports only the new numbers cannot be
+    #  What actually changed, per field. A reload that reports only the new numbers cannot be
     # told apart from one that did nothing — and "did it fix it?" is the entire reason the button
     # exists. Field names, e.g. ["entry_price_local", "forward_return_pct"]; empty = untouched.
     changed: list[str] = []
@@ -1132,14 +1132,14 @@ class RepriceResult(BaseModel):
 async def reprice_scheduled_strategy(strategy_id: int):
     """Reload one strategy's PRICES. It does not re-select, and that distinction is the point.
 
-    ⚠ IT NEVER RE-DECIDES WHAT IS HELD. Re-running the selection for a past date is "Force
+     IT NEVER RE-DECIDES WHAT IS HELD. Re-running the selection for a past date is "Force
     re-rebalance", and it is not a repair: `metric_data` is NOT append-only in `target_date` —
     GuruFocus publishes late closes stamped with their true earlier date — so a past basket
     cannot be reproduced from the live database and re-selecting would silently rewrite what the
     strategy held. (That is the failure the golden-master test exists to catch.) This reloads the
     marks on the holdings that ARE there: start and end, local and converted.
 
-    ⚠ IT IS THE SAME FUNCTION THE NIGHTLY TICK RUNS — `compute_and_save_price_update` — not a
+     IT IS THE SAME FUNCTION THE NIGHTLY TICK RUNS — `compute_and_save_price_update` — not a
     second implementation of it. A button that priced a book its own way would be a new source of
     truth that agrees with the pipeline right up until it doesn't. What the button buys is the
     timing: the fix lands now instead of at 05:00 UTC.

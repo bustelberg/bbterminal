@@ -6,10 +6,10 @@ needs its answer to stamp `in_line` on every row. `TablesTab` fires that endpoin
 (five for the book, five for the benchmark), so uncached this is the classifier run TEN TIMES per
 page load for an answer that is identical every time.
 
-⚠ THE KEY IS THE MEMBER LIST ITSELF, not a universe label: an ad-hoc `holdings` basket has no
+ THE KEY IS THE MEMBER LIST ITSELF, not a universe label: an ad-hoc `holdings` basket has no
 label, and two callers passing the same ISINs must collide.
 
-⚠ AND `invalidate()` HAS TO CLEAR IT — a company classed `no_metrics` becomes `covered` the moment
+ AND `invalidate()` HAS TO CLEAR IT — a company classed `no_metrics` becomes `covered` the moment
 its financials land, which is exactly what the ingest that calls `invalidate()` just did. Stale
 here means the drill-down keeps a row out of the line the chart has already put back in.
 """
@@ -53,7 +53,7 @@ class TestItComputesOncePerMemberList:
         assert len(calls) == 1
 
     def test_order_does_not_matter_because_a_member_list_is_a_SET(self):
-        """⚠ THE FIVE MATRIX REQUESTS ARE BUILT FROM THE SAME MEMBERS AND NEED NOT ORDER THEM THE
+        """ THE FIVE MATRIX REQUESTS ARE BUILT FROM THE SAME MEMBERS AND NEED NOT ORDER THEM THE
         SAME WAY. Keyed on the sequence, four of the five would miss and the cache would look like
         it was working while paying for itself four times over."""
         calls, compute = _counter()

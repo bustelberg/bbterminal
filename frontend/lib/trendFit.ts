@@ -4,7 +4,7 @@
  * regress ln(value) on the year: the slope is the growth rate, and R² is how tightly the points
  * hug that line (1.0 = perfectly steady compounding, low = lumpy/cyclical).
  *
- * ⚠ FIT IN LOG SPACE, NOT ON THE RAW VALUES. A linear fit to revenue would be dominated by the
+ *  Fit in log space, not on the raw values. A linear fit to revenue would be dominated by the
  * largest (latest) years and would call any exponential "not linear" — the opposite of the point.
  * Non-positive values have no log and are dropped (a loss year can't sit on an exponential trend);
  * the caller is told how many.
@@ -30,7 +30,7 @@ export type TrendFit = {
 /**
  * The trend's value at any year, including years beyond the data.
  *
- * ⚠ EXTRAPOLATION IS NOT A FORECAST AND MUST NOT BE DRAWN AS ONE. This continues the fitted
+ *  Extrapolation is not a forecast and must not be drawn as one. This continues the fitted
  * exponential; whether the business does is a different question entirely, and the caller is
  * responsible for making the projected stretch look different from the fitted one.
  */

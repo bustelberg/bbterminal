@@ -2,7 +2,7 @@
 
     Eᵢ = qᵢ · Pᵢ · Xᵢ        (quantity × price × FX to EUR)
 
-⚠⚠ WE DO NOT COMPUTE THAT PRODUCT, AND SAYING SO MATTERS MORE THAN COMPUTING IT WOULD. `airs_holding`
+ WE DO NOT COMPUTE THAT PRODUCT, AND SAYING SO MATTERS MORE THAN COMPUTING IT WOULD. `airs_holding`
 carries `quantity` and `currency`, but it also carries `current_value_eur` — AIRS's OWN valuation of
 the position, already in euros. That is the custodian's number: it is what the client's statement
 says, it is struck on AIRS's own valuation date, and it already embeds whatever conventions AIRS
@@ -14,15 +14,15 @@ So `Eᵢ` here IS `current_value_eur`, folded per issuer. The formula above is h
 if the valuation were not given; it is documented because the four caveats attached to it still
 apply, and two of them land differently once the number is somebody else's:
 
-  * ISSUER AGGREGATION — ours, and shared: `_active_share.build_issuer_weights`.
-  * TRADE DATE vs SETTLEMENT DATE — ⚠ AIRS'S CONVENTION, NOT OURS, AND WE CANNOT VERIFY IT FROM
+  * Issuer aggregation — ours, and shared: `_active_share.build_issuer_weights`.
+  * Trade date vs SETTLEMENT DATE —  AIRS'S CONVENTION, NOT OURS, AND WE CANNOT VERIFY IT FROM
     HERE. The Vermogensoverzicht is a valuation report; it exposes no flag saying which basis it
     used. A book with a trade in the last few days can therefore differ from a trade-date view by
     that trade's value, and nothing in our data would show it. Stated rather than assumed away.
-  * CASH IN THE DENOMINATOR — ours, and both answers are returned.
-  * CURRENCY EXPOSURE — ours, and tracked separately below.
+  * Cash in the denominator — ours, and both answers are returned.
+  * Currency exposure — ours, and tracked separately below.
 
-⚠⚠ THE CURRENCY IS THE LISTING'S, WHICH IS THE EXPOSURE YOU ACTUALLY BEAR, and it is deliberately
+ THE CURRENCY IS THE LISTING'S, WHICH IS THE EXPOSURE YOU ACTUALLY BEAR, and it is deliberately
 NOT the company's reporting currency. If the book holds Nestlé on SIX in CHF, its euro value moves
 with CHF/EUR — that is a fact about the position. The economic argument (Nestlé earns worldwide, so
 the "real" exposure is diversified) is true and is a DIFFERENT claim, softer and unmeasurable from
@@ -32,7 +32,7 @@ was right because the question was about the issuers. Here the question is about
 """
 from __future__ import annotations
 
-# ⚠ THE MODULE, NOT ITS NAMES, FOR `_grid_by_isin`. A `from … import _grid_by_isin` binds this
+#  The module, not its names, for `_grid_by_isin`. A `from … import _grid_by_isin` binds this
 # module's own reference at import time, so patching it on `_active_share` — which is how every
 # sibling here is exercised — silently misses this caller and it goes to the real database instead.
 # The symptom was quiet and plausible: an empty grid means no company name, so the issuer key falls
@@ -59,7 +59,7 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
     isins = sorted({(h["isin"] or "").strip().upper() for h in stocks})
     grid = _as._grid_by_isin(isins)
 
-    # ⚠ THE VALUATION IS OPTIONAL. An ad-hoc basket has weights and no euros — it is not a book —
+    #  The valuation is optional. An ad-hoc basket has weights and no euros — it is not a book —
     # so every euro figure below is None there and the view falls back to the percentages. Zero
     # would be a claim that the position is worthless.
     have_values = any(h.get("value_eur") is not None for h in stocks)
@@ -86,7 +86,7 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
         if val is not None and slot["value_eur"] is not None:
             slot["value_eur"] += val
 
-        # ⚠ THE HOLDING'S OWN CURRENCY FIRST, the grid's only as a fallback. The payload's value is
+        #  The holding's own currency first, the grid's only as a fallback. The payload's value is
         # what the modal is showing; the grid is our mapping of the ISIN, and where the two differ
         # the one the reader can see wins.
         ccy = (h.get("currency") or g.get("currency") or "").strip().upper()
@@ -103,7 +103,7 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
 
     rows = sorted(by_issuer.values(), key=lambda r: -r["weight_pct"])
     for r in rows:
-        # ⚠ NAMED WHEN A SINGLE ISSUER SPANS CURRENCIES — two listings of one company in two
+        #  Named when a single issuer spans currencies — two listings of one company in two
         # currencies is one position and two FX exposures, and the issuer fold hides that by design.
         r["currencies"] = sorted(r["currencies"])
 
@@ -122,7 +122,7 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
         "has_values": have_values,
         "issuers": len(rows),
         "lines": len(stocks),
-        # ⚠ LINES MINUS ISSUERS IS THE FOLD, made visible. "49 lines, 47 issuers" is the one-line
+        #  Lines minus issuers is the fold, made visible. "49 lines, 47 issuers" is the one-line
         # explanation for why this panel counts differently from the Holdings table.
         "folded_lines": len(stocks) - len(rows),
         "sleeve_eur": sleeve_eur,
@@ -132,7 +132,7 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
         "other_eur": (None if sleeve_eur is None or book_eur is None else book_eur - sleeve_eur),
         "positions": rows,
         "currencies": ccys,
-        # ⚠ WEIGHT WE COULD NOT ASSIGN A CURRENCY TO. Folding it into EUR would be the flattering
+        #  Weight we could not assign a currency to. Folding it into EUR would be the flattering
         # default — it makes a book look more domestic than it is.
         "currency_unknown_pct": missing_ccy,
         "unresolved": len(built["unresolved"]),

@@ -1,6 +1,6 @@
 """Which of an account's four AIRS reports the last refresh retrieved — and what that is FOR.
 
-⚠ IT WAS BRIEFLY A FILTER, AND THAT WAS THE WRONG SHAPE. Accounts short a report were withheld
+ IT WAS BRIEFLY A FILTER, AND THAT WAS THE WRONG SHAPE. Accounts short a report were withheld
 from the portfolios list entirely, so a scan that reached all 44 portfolios displayed 22: the work
 was done and invisible, and nobody could see which report was missing or for whom. It is now a
 per-row marker (`_missing_reports`), and the row is shown with a badge naming the gap.
@@ -9,7 +9,7 @@ per-row marker (`_missing_reports`), and the row is shown with a badge naming th
 on it any more, but an alert or a health check should reuse it rather than re-derive it.
 
 
-⚠ A MISSING REPORT IS NOT A SLIGHTLY-WORSE ROW, IT IS A MIXTURE OF DATES. Measured 2026-07-29:
+ A MISSING REPORT IS NOT A SLIGHTLY-WORSE ROW, IT IS A MIXTURE OF DATES. Measured 2026-07-29:
 Rendement 44/44, Vermogensoverzicht 31/44 — so thirteen accounts rendered this week's return
 beside last week's holdings, and nothing on screen said which figure came from when. Every number
 was real; only their combination was fiction, which is precisely the failure that survives a
@@ -77,7 +77,7 @@ class TestOnlyWholeAccountsAreListed:
         assert A._complete_accounts() == {"bus_a"}
 
     def test_a_stale_verdict_does_not_count_as_complete(self, monkeypatch):
-        """⚠ Only the NEWEST batch stamp counts. An account the latest refresh never reached keeps
+        """ Only the NEWEST batch stamp counts. An account the latest refresh never reached keeps
         an older `reports_at` — it must not coast on last week's clean bill."""
         _wire(monkeypatch, [
             {"portefeuille": "BUS_A", "reports_ok": ALL, "reports_at": self.NOW},
@@ -88,7 +88,7 @@ class TestOnlyWholeAccountsAreListed:
 
 class TestAbsenceIsNeverAnAssertion:
     def test_no_verdict_at_all_means_do_not_filter(self, monkeypatch):
-        """⚠ `None`, NOT an empty set. On the deploy that adds the columns nothing has been
+        """ `None`, NOT an empty set. On the deploy that adds the columns nothing has been
         measured, and treating that as "no account is whole" empties the portfolios page over a
         question never asked."""
         _wire(monkeypatch, [{"portefeuille": "BUS_A", "reports_ok": None, "reports_at": None}])
@@ -117,7 +117,7 @@ class TestTheReportSetIsNotDuplicated:
         """Two copies would drift the moment a fifth report is added — and the drift would show up
         as accounts silently missing from the page, not as an error.
 
-        ⚠ THIS TEST USED TO END `assert set(REPORTS) == {"att", "volk", "mut", "model"}` — i.e. IT
+         THIS TEST USED TO END `assert set(REPORTS) == {"att", "volk", "mut", "model"}` — i.e. IT
         WAS THE SECOND COPY IT WARNS ABOUT, and it drifted exactly as predicted the day `trans` (a
         fifth report) was added. A literal here does not pin the gate to the list; it pins the list
         to a date. What is actually worth asserting is that there is ONE definition and the gate
@@ -139,7 +139,7 @@ class TestTheReportSetIsNotDuplicated:
 
 
 class TestRetrievedIsNotTheSameAsNonEmpty:
-    """⚠ THE REASON THE OUTCOME IS RECORDED RATHER THAN DERIVED.
+    """ THE REASON THE OUTCOME IS RECORDED RATHER THAN DERIVED.
 
     `_save_mutaties` returns a ROW COUNT, and a book with no transactions this year legitimately
     stores zero. Inferring "the report worked" from `rows > 0` would hide exactly the quiet,
@@ -149,18 +149,18 @@ class TestRetrievedIsNotTheSameAsNonEmpty:
     def _wire(self, monkeypatch, *, mut_rows=0, model_rows=0, trans_rows=0, volk_raises=False):
         """Drive `scan_one` with every download stubbed — no network, no database.
 
-        ⚠⚠ "EVERY" HAS TO MEAN EVERY, AND FOR A WHILE IT DID NOT. `REPORTS` gained a fifth leg
+         "EVERY" HAS TO MEAN EVERY, AND FOR A WHILE IT DID NOT. `REPORTS` gained a fifth leg
         (`trans`) when Transacties shipped on 2026-08-05 and this stub was never extended — so
         `_trans` ran for real, launching Playwright against live AirSPMS. It passed on a dev
         machine (browser installed, BROKER_* in .env.local) and failed on CI with
         `BrowserType.launch: Executable doesn't exist`, which is the worst possible split: the
         suite is green exactly where nobody is watching it.
 
-        ⚠ AND THE FAILURE WAS NOT "TRANSACTIES IS MISSING". It cost `trans` from `reports_ok` AND
+         AND THE FAILURE WAS NOT "TRANSACTIES IS MISSING". It cost `trans` from `reports_ok` AND
         added a second entry to `errors`, so the two assertions that broke were about the OTHER
         four reports — a missing stub reading as a bug in unrelated behaviour.
 
-        ⚠ THE LAZY IMPORT IN `_trans` IS WHY PATCHING THE MODULE WORKS. It does
+         THE LAZY IMPORT IN `_trans` IS WHY PATCHING THE MODULE WORKS. It does
         `from routers._airs_transacties import _fetch_live, _store, ytd_window` INSIDE the
         function, so the attributes resolve at call time and a `setattr` here is seen. Patching
         `airs_vermogen` instead would do nothing.
@@ -211,7 +211,7 @@ class TestRetrievedIsNotTheSameAsNonEmpty:
         assert "volk" not in res["reports_ok"]
         assert {"att", "mut", "model"} <= set(res["reports_ok"])
         assert res["mutaties"] == 7
-        # ⚠ STRUCTURED, so the fleet run can group 27 failures by CAUSE rather than regex-ing a
+        #  STRUCTURED, so the fleet run can group 27 failures by CAUSE rather than regex-ing a
         # message it formatted itself one line earlier — see `summarise_errors`.
         assert len(res["errors"]) == 1
         assert res["errors"][0]["report"] == "Vermogensoverzicht"
@@ -220,7 +220,7 @@ class TestRetrievedIsNotTheSameAsNonEmpty:
 
 
 class TestOneImplementation:
-    """⚠ "Refresh all" AND the per-row "Refresh" MUST BE THE SAME CODE. They were two copies of the
+    """ "Refresh all" AND the per-row "Refresh" MUST BE THE SAME CODE. They were two copies of the
     same four downloads and had already drifted — only one recorded which reports arrived, so a
     per-row retry could not clear the badge a fleet scan had set."""
 
@@ -247,7 +247,7 @@ class TestOneImplementation:
         assert "_LOCK.acquire" not in inspect.getsource(V.scan_one)
         assert "_acquire_session" not in inspect.getsource(V.scan_one)
         # ...and both callers genuinely do take it, or nothing serialises the AirSPMS session.
-        # ⚠ EITHER SPELLING COUNTS. `refresh_one_portfolio` now goes through `_acquire_session`
+        #  Either spelling counts. `refresh_one_portfolio` now goes through `_acquire_session`
         # (which is `_LOCK.acquire` with an optional wait, added so a full refresh can QUEUE for
         # the session instead of abandoning a portfolio half-done). The property under test is
         # "this caller takes the session", not which of the two names it typed.
@@ -256,7 +256,7 @@ class TestOneImplementation:
             assert "_LOCK.acquire" in src or "_acquire_session(" in src, fn.__name__
 
     def test_the_session_helper_is_the_only_way_in(self):
-        """⚠ EVERY AirSPMS SCRAPE PASSES THROUGH ONE GATE, because there is one session and two
+        """ EVERY AirSPMS SCRAPE PASSES THROUGH ONE GATE, because there is one session and two
         threads driving it do not error — they interleave into each other's downloads.
 
         `_composition` (the model half, in `routers/_airs_portfolio_refresh`) took NO lock until
@@ -302,7 +302,7 @@ class TestTheMarkerNamesTheGap:
     def test_it_names_exactly_what_did_not_arrive(self, monkeypatch):
         """The 13 accounts from the measurement: Rendement fine, Vermogensoverzicht absent.
 
-        ⚠ THE MISSING REPORT IS REMOVED FROM `REPORTS`, NOT SPELLED OUT BESIDE IT. Listing the
+         THE MISSING REPORT IS REMOVED FROM `REPORTS`, NOT SPELLED OUT BESIDE IT. Listing the
         three that DID arrive is a second copy of the report set: when `trans` was added this read
         `{"bus_b": ["volk"]}` against an answer of `["volk", "trans"]` — a red test for a correct
         change, because the fixture claimed an account had every report but one and no longer did.
@@ -314,13 +314,13 @@ class TestTheMarkerNamesTheGap:
     def test_several_missing_come_back_in_report_order(self, monkeypatch):
         """Display order, so two rows short of the same pair read identically.
 
-        ⚠ `REPORTS`'s ORDER IS THE ASSERTION — `sorted()` here would pass while the page rendered
+         `REPORTS`'s ORDER IS THE ASSERTION — `sorted()` here would pass while the page rendered
         them alphabetically, which is the one thing this test exists to prevent."""
         _wire(monkeypatch, [{"portefeuille": "BUS_C", "reports_ok": ["att"], "reports_at": self.NOW}])
         assert A._missing_reports()["bus_c"] == [r for r in REPORTS if r != "att"]
 
     def test_a_never_measured_account_is_not_reported_as_missing(self, monkeypatch):
-        """⚠ Absence of evidence is not evidence of a gap — the same rule the filter had. A row
+        """ Absence of evidence is not evidence of a gap — the same rule the filter had. A row
         with no verdict would otherwise wear a warning badge on the deploy that added the column."""
         _wire(monkeypatch, [{"portefeuille": "BUS_A", "reports_ok": None, "reports_at": None}])
         assert A._missing_reports() == {}
@@ -331,7 +331,7 @@ class TestTheMarkerNamesTheGap:
         assert A._missing_reports() == {}
 
     def test_an_older_scan_still_reports_what_it_found(self, monkeypatch):
-        """⚠⚠ THIS ASSERTION WAS REVERSED (2026-08-19), so both sides are on the record.
+        """ THIS ASSERTION WAS REVERSED (2026-08-19), so both sides are on the record.
 
         It used to demand `== {}` — "only the newest batch counts; an account the last scan never
         reached must not carry last week's badge". The intent was sound: a verdict from a stale
@@ -360,7 +360,7 @@ def test_every_single_missing_report_disqualifies(monkeypatch, missing):
 
 
 class TestEachAccountIsJudgedOnItsOwnScan:
-    """⚠⚠ THE BUG THIS PINS, AS REPORTED: "⚠ Vermogensoverzicht is behind almost every portfolio,
+    """ THE BUG THIS PINS, AS REPORTED: " Vermogensoverzicht is behind almost every portfolio,
     and when I refresh a single one nothing really gets fetched but all those warnings disappear."
 
     `_missing_reports` took the newest `reports_at` in the WHOLE table and skipped every row that
@@ -397,11 +397,11 @@ class TestEachAccountIsJudgedOnItsOwnScan:
         # Now BUS_C is refreshed on its own — a newer stamp, and it retrieved everything.
         after = [{"portefeuille": "BUS_C", "reports_ok": ALL, "reports_at": self.NEW}, *before]
         _wire(monkeypatch, after)
-        # ⚠ A and B are untouched by C's refresh, so their badges must be untouched too.
+        #  A and B are untouched by C's refresh, so their badges must be untouched too.
         assert set(A._missing_reports()) == {"bus_a", "bus_b"}
 
     def test_a_complete_account_gets_no_entry_at_all(self, monkeypatch):
-        # ⚠ Absent, not an empty list: the UI renders on truthiness, and `[]` would badge a row
+        #  Absent, not an empty list: the UI renders on truthiness, and `[]` would badge a row
         # with an empty gap list.
         _wire(monkeypatch, [{"portefeuille": "BUS_A", "reports_ok": ALL, "reports_at": self.NEW}])
         assert "bus_a" not in A._missing_reports()

@@ -9,13 +9,13 @@ import { MANAGEMENT_COPY, type ManagementCopy } from './managementCopy';
 /**
  * The /management-dashboard copy, in both languages.
  *
- * ⚠⚠ THE TYPE ALREADY CATCHES A MISSING KEY — `nl` is declared as `ManagementCopy`, so a string
+ *  The type already catches a missing key — `nl` is declared as `ManagementCopy`, so a string
  * added to `en` and forgotten fails `tsc`. What the compiler CANNOT catch is the two failures that
  * actually ship: a key that exists in Dutch and is still the English word, and a key that exists
  * and is empty. Both render as a screen that looks translated and is not, which is the state a
  * reader has no way to report except as "it did not work".
  *
- * ⚠ WALKED RECURSIVELY, NOT LISTED. A hand-written list of paths is a second declaration of the
+ *  Walked recursively, not listed. A hand-written list of paths is a second declaration of the
  * shape, and the one thing certain about it is that it will fall behind the first — the copy tree
  * is nested precisely so it can grow a section at a time.
  *
@@ -51,9 +51,9 @@ describe('both languages are complete', () => {
   });
 });
 
-describe('⚠ the Dutch is actually Dutch', () => {
+describe(' the Dutch is actually Dutch', () => {
   /**
-   * ⚠ THE EXCEPTIONS ARE NAMED, NOT INFERRED. These read identically in both languages ON PURPOSE
+   *  The exceptions are named, not inferred. These read identically in both languages ON PURPOSE
    * and a check that flagged them would be turned off within a week:
    *
    *   · `Benchmark`, `Sector`, `ISIN` — the Dutch words too. A reader of Dutch financial copy
@@ -82,14 +82,14 @@ describe('⚠ the Dutch is actually Dutch', () => {
   });
 });
 
-describe("⚠ AIRS's own field names are not in the copy tree", () => {
+describe(" AIRS's own field names are not in the copy tree", () => {
   it('carries no AirSPMS column name', () => {
     // `Beginwaarde`, `Huidige waarde`, `Werkelijk`, `Asset allocatie` are the SOURCE system's
     // labels. They are already Dutch, they appear identically in the English UI, and that is
     // correct — a reader reconciling this screen against AIRS matches them by eye. Pulling one in
     // here would invite "translating" it in English (breaking the link) or renaming it in Dutch
     // (implying we renamed a field AIRS owns).
-    // ⚠⚠ IT GUARDS THE KEYS THAT LABEL AIRS **COLUMNS**, not every string that coincides with
+    //  It guards the keys that label AIRS **COLUMNS**, not every string that coincides with
     // one. `overview.allocationBands` is OUR name for the bands policy — the button opens our own
     // min/default/max table per risk profile — and its Dutch is legitimately "Asset allocatie",
     // the same two words AIRS uses for a different thing. Checked over every value, that
@@ -115,15 +115,15 @@ describe('the type is the contract', () => {
   });
 });
 
-describe('⚠⚠ the dashboard renders no bare Refresh/Cancel literal', () => {
+describe(' the dashboard renders no bare Refresh/Cancel literal', () => {
   /**
-   * THE COPY EXISTED IN BOTH LANGUAGES AND THREE BUTTONS IGNORED IT. `common.refresh` /
+   * The copy existed in both languages and three buttons ignored it. `common.refresh` /
    * `common.refreshAll` / `common.cancel` have been translated since the switch shipped, but the
    * Benchmarks panel's two buttons and the Overview table's per-row control rendered the English
    * word inline, so a Dutch reader saw `Refresh` beside `Vernieuwen` on one screen. Reported as
    * "Refresh should be translated in management dashboard too".
    *
-   * ⚠ IT SCANS THE JSX ONLY. A `title=` or `aria-label=` may still hold English prose (those are
+   *  It scans the jsx only. A `title=` or `aria-label=` may still hold English prose (those are
    * a separate, larger surface); what this forbids is the WORD ON THE BUTTON — `>Refresh<`,
    * `{'Refresh'}`, `? 'Cancel' : 'Refresh'`.
    */

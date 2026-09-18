@@ -7,7 +7,7 @@ import { yieldOf, type BASIS, type Rebased, type YearPoint } from './quickValuat
  * indexed lines the chart actually draws. Same shape as the Long Equity drill-downs — raw inputs
  * first, derived rows under them.
  *
- * ⚠ IT IS HANDED THE COMPUTED SERIES, NOT AN ISIN. The tab already built these points and this
+ *  It is handed the computed series, not an ISIN. The tab already built these points and this
  * index; refetching and re-deriving them here would be a second computation that can disagree with
  * the line it claims to explain — the failure every other drill-down in this folder is written to
  * avoid. `basis` comes down the same way and for the same reason: the table must name whichever of
@@ -37,7 +37,7 @@ export default function QuickValuationInputsModal({
           <h2 className="text-fg-strong font-medium">Price vs {b.perShare} — by fiscal year</h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
           <span className="text-xs font-mono text-fg-faint">{isin}</span>
-          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-3">

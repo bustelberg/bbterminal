@@ -78,7 +78,7 @@ app.middleware("http")(_enforce_api_auth)
 # Unhandled-exception → 500 RESPONSE, so the layer above can put CORS headers on it. Registered
 # AFTER the auth gate and BEFORE CORS, i.e. it wraps the gate as well as every route.
 #
-# ⚠ ORDERING ALONE CANNOT SOLVE THIS ONE, which is why it is a separate layer from the note below.
+#  Ordering alone cannot solve this one, which is why it is a separate layer from the note below.
 # `CORSMiddleware` decorates a response; an exception is the absence of one, so it sails past CORS
 # to Starlette's outermost `ServerErrorMiddleware` and the 500 ships with no
 # `Access-Control-Allow-Origin`. The browser then reports a CORS block for an allow-listed origin
@@ -95,11 +95,11 @@ app.middleware("http")(_cors_safe_errors)
 # instead of the real status. `:3001` is kept for the parallel-worktree dev
 # server.
 #
-# ⚠⚠ `localhost` AND `127.0.0.1` ARE TWO DIFFERENT ORIGINS TO A BROWSER, AND ONLY ONE WAS LISTED
+#  `localhost` AND `127.0.0.1` ARE TWO DIFFERENT ORIGINS TO A BROWSER, AND ONLY ONE WAS LISTED
 # (2026-09-08). Starlette compares the `Origin` header verbatim, so a tab opened at
 # `http://127.0.0.1:3000` — which is what `npm run dev` prints beside the localhost line, and what
-# a bookmark keeps — had every preflight answered `400 Disallowed CORS origin`. ⚠ THE SYMPTOM IS
-# IN THE WRONG PLACE ENTIRELY: the browser reports `TypeError: Failed to fetch` with no response to
+# a bookmark keeps — had every preflight answered `400 Disallowed CORS origin`.  THE SYMPTOM IS
+# In the wrong place entirely: the browser reports `TypeError: Failed to fetch` with no response to
 # inspect, which is byte-identical to the backend being down, so the investigation starts at the
 # process and the server log is the only place the truth appears (`OPTIONS … 400`). Measured: the
 # same preflight 200 from `http://localhost:3000` and 400 from `http://127.0.0.1:3000`.
@@ -111,7 +111,7 @@ _cors_origins = [
     "https://bbterminal.vercel.app",
     "https://bbterminal-api.vercel.app",
 ]
-# ⚠ `RAILWAY_PUBLIC_DOMAIN` IS THIS BACKEND'S OWN DOMAIN, NOT A FRONTEND'S. It does nothing for a
+#  `RAILWAY_PUBLIC_DOMAIN` IS THIS BACKEND'S OWN DOMAIN, NOT A FRONTEND'S. It does nothing for a
 # browser calling us from Vercel; it is here for same-origin tooling only. Do not mistake it for
 # "the deployment's frontend is allowed".
 if os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
@@ -122,11 +122,11 @@ if os.environ.get("RAILWAY_PUBLIC_DOMAIN"):
 # environment — and the failure mode if you forget is a browser-side CORS block that never reaches
 # a handler, so nothing is logged server-side and it reads like the backend is down.
 #
-# ⚠ ORIGINS ONLY — scheme + host, no path, no trailing slash. Starlette compares the `Origin`
+#  Origins only — scheme + host, no path, no trailing slash. Starlette compares the `Origin`
 # header verbatim, so "https://x.vercel.app/" matches nothing and fails exactly like a missing
 # entry. A blank segment is dropped rather than becoming "", which would match nothing either.
 #
-# ⚠ A BARE HOSTNAME IS ASSUMED https. Typing `CORS_ORIGINS=bbterminal-dev.vercel.app` is the
+#  A bare hostname is assumed https. Typing `CORS_ORIGINS=bbterminal-dev.vercel.app` is the
 # obvious thing to do and was silently useless: a browser always sends a full origin, so a
 # scheme-less entry can never match anything, and the symptom is identical to not having set the
 # variable at all. `localhost`/`127.0.0.1` keep http, since that is what a dev server serves.
@@ -140,7 +140,7 @@ def _origin(raw: str) -> str:
 
 _cors_origins += [_origin(o) for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
 
-# ⚠ `print`, NOT `logging.info`. uvicorn leaves the ROOT logger at WARNING in production, so an
+#  `print`, NOT `logging.info`. uvicorn leaves the ROOT logger at WARNING in production, so an
 # info line is invisible exactly where this matters. The allow-list is the one piece of CORS
 # config with no way to read it back from outside — a rejected origin and an unset variable
 # produce the byte-identical "no Access-Control-Allow-Origin" in the browser — so it is printed at

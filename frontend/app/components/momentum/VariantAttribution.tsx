@@ -311,10 +311,10 @@ function VariantAttributionInner() {
       rightSlot={
         <span className="flex items-center gap-1.5">
           <span>
-            Mean (±sample std) across {totalOk} successful variants — ★ marks the value whose mean tops each metric column.
+            Mean (±sample std) across {totalOk} successful variants —  marks the value whose mean tops each metric column.
           </span>
           <CellInfoTip>
-            For each axis the sweep varied, this groups variants by axis value and shows the mean of every metric within the group. The parenthetical is the sample standard deviation (Bessel-corrected, N−1) — a tight std means the axis-value alone explains a lot of the metric&apos;s variance; a wide std means other axes are pulling the metric around. A consistent ★ across columns on one row = a value that helps across the board; mixed ★s = different values shine on different metrics. Caveat: marginal averages collapse 2-way interactions — &quot;monthly works on ACWI but kills LEONTEQ&quot; is invisible here.
+            For each axis the sweep varied, this groups variants by axis value and shows the mean of every metric within the group. The parenthetical is the sample standard deviation (Bessel-corrected, N−1) — a tight std means the axis-value alone explains a lot of the metric&apos;s variance; a wide std means other axes are pulling the metric around. A consistent  across columns on one row = a value that helps across the board; mixed s = different values shine on different metrics. Caveat: marginal averages collapse 2-way interactions — &quot;monthly works on ACWI but kills LEONTEQ&quot; is invisible here.
           </CellInfoTip>
         </span>
       }
@@ -372,7 +372,7 @@ function VariantAttributionInner() {
                             </span>
                           )}
                           {isWinner && stat != null && (
-                            <span className="ml-1 text-warn-400">★</span>
+                            <span className="ml-1 text-warn-400"></span>
                           )}
                         </td>
                       );

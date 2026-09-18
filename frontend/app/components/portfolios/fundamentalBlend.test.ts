@@ -4,10 +4,10 @@ import {
 } from './fundamentalBlend';
 
 /**
- * THE PER-MEMBER DECOMPOSITION OF THE BLENDED LINE'S MOVE — the `Contribution` view of the
+ * The per-member decomposition of the blended line's move — the `Contribution` view of the
  * drill-down matrix, in percentage points.
  *
- * ⚠⚠ THE ONLY PROPERTY THAT MATTERS IS THAT THE COLUMN **ADDS UP TO THE FOOTER**. A pp figure that
+ *  The only property that matters is that the column **ADDS UP TO THE FOOTER**. A pp figure that
  * is merely plausible is worse than no figure at all here, because the whole point of the view is
  * that you can sort it and believe the ranking: the top row is supposed to be the company that moved
  * the line most, and nothing on screen would look wrong if the shares were taken over the wrong
@@ -45,7 +45,7 @@ describe('buildBlend contributions', () => {
     expect(b.contrib.get(rows[2])!['2024'].pp).toBeCloseTo(10, 10);
     // The identity, asserted rather than assumed — the same check the footer makes on screen.
     expect(sumPp(b, rows, '2024')).toBeCloseTo(b.step['2024'].growthPct, 10);
-    // ⚠ B is the SECOND largest holding and the only detractor: signed order puts it last, which is
+    //  B is the SECOND largest holding and the only detractor: signed order puts it last, which is
     // the finding. Ranking on magnitude would hide it between the two +10pp drivers.
     expect(b.contrib.get(rows[1])!['2024'].pp).toBeLessThan(0);
   });
@@ -60,7 +60,7 @@ describe('buildBlend contributions', () => {
       const c = b.contrib.get(r)!['2024'];
       // What the cell's tooltip prints: `share × growth = pp`. If this drifts, the tooltip is
       // showing arithmetic that does not reach the number above it.
-      // ⚠ Both factors are non-null on the growth path; on the euro-sum path a member with a
+      //  Both factors are non-null on the growth path; on the euro-sum path a member with a
       // non-positive base has an exact pp and no factors at all. See `fund_by_period`.
       expect(c.sharePct! * c.growthPct! / 100).toBeCloseTo(c.pp, 10);
     }
@@ -81,7 +81,7 @@ describe('buildBlend contributions', () => {
 
     // The line moved +20%: A is the only member that could be measured over the interval.
     expect(b.step['2024'].growthPct).toBeCloseTo(20, 10);
-    // ⚠ THE REGRESSION. Over `denom[y]` (100) A's share would read 50% and its contribution
+    //  The regression. Over `denom[y]` (100) A's share would read 50% and its contribution
     // +10.00pp — a column summing to half the move it sits under, with nothing on screen wrong.
     expect(b.contrib.get(rows[0])!['2024'].pp).toBeCloseTo(20, 10);
     expect(sumPp(b, rows, '2024')).toBeCloseTo(b.step['2024'].growthPct, 10);
@@ -98,7 +98,7 @@ describe('buildBlend contributions', () => {
 
     expect(b.from.D['2025']).toBe('2024');               // it really is carried
     const d = b.contrib.get(rows[3])!['2025'];
-    // ⚠ 0, NOT MISSING. D was in the average and did not move; a missing key means "not in this
+    //  0, NOT MISSING. D was in the average and did not move; a missing key means "not in this
     // step at all", which the cell renders as a dash. The two must not collapse: three quarters of
     // the basket rose 10% and the fourth stood still, which is why the line moved 7.5% and not 10%.
     expect(d.pp).toBe(0);
@@ -131,9 +131,9 @@ describe('buildBlend contributions', () => {
     expect(b.contrib.get(rows[0])!['2024'].pp).toBeCloseTo(b.step['2024'].growthPct, 10);
   });
 
-  it('⚠ KEEPS a member whose FIRST period is negative but which recovers (the AMD case)', () => {
+  it(' KEEPS a member whose FIRST period is negative but which recovers (the AMD case)', () => {
     /**
-     * ⚠⚠ THIS PINNED THE OPPOSITE UNTIL 2026-08-25, AND THE OLD ASSERTION WAS THE BUG. The client
+     *  This pinned the opposite until 2026-08-25, AND THE OLD ASSERTION WAS THE BUG. The client
      * dropped any row whose first REPORTED period was ≤ 0, under a comment claiming it matched
      * `_prepare` — which skips to the first POSITIVE period and keeps the member. So a company
      * whose earliest year happened to be negative was in the CHART (server) and missing from the
@@ -157,9 +157,9 @@ describe('buildBlend contributions', () => {
 });
 
 /**
- * AN INDEX'S STEP IS WEIGHTED BY THE CAP IT HAD AT THE START OF THAT STEP.
+ * An index's step is weighted by the cap it had at the start of that step.
  *
- * ⚠⚠ THE BUG THIS PINS READ +20.21%/yr WHERE THE ANSWER IS +11.14%/yr (2026-08-21). `buildBlend`
+ *  The bug this pins read +20.21%/yr WHERE THE ANSWER IS +11.14%/yr (2026-08-21). `buildBlend`
  * chains from weighted growth, `g = value(y)/value(anchor) − 1`, and took each member's weight at
  * `y` — the END of the interval. For revenue that is a mild inconsistency; for a PRICE series it is
  * nearly circular, because market cap = price × shares. A constituent that tripled carried ~3× the
@@ -171,13 +171,13 @@ describe('buildBlend contributions', () => {
  * index ran 100 → 630.2 (+20.21%/yr), anchor-weighted 100 → 287.6 (+11.14%/yr). ACWI really did
  * ~10-11%/yr on price.
  *
- * ⚠ THIS FILE IS THE CLIENT TWIN OF `_fundamental_blend.blend_series` AND EXISTS TO REPRODUCE THE
- * PLOTTED LINE — the `Tables` tab's rates and the drill-down's `Rebased` footer both come from here.
+ *  This file is the client twin of `_fundamental_blend.blend_series` AND EXISTS TO REPRODUCE THE
+ * Plotted line — the `Tables` tab's rates and the drill-down's `Rebased` footer both come from here.
  * Weighted differently from the server it would print figures that disagree with the chart they
  * explain, and both would look entirely reasonable. Pinned on both sides: see
  * `backend/tests/test_blend_step_weight.py`, which asserts the same 100 → 175 panel.
  *
- * ⚠ A PORTFOLIO CANNOT HIT THIS. Without `market_cap_by_period`, `wAt` returns the holding weight
+ *  A portfolio cannot hit this. Without `market_cap_by_period`, `wAt` returns the holding weight
  * for every period, so anchor and end are the same number — which is why the book's own line was
  * right all along and only the benchmark beside it was inflated.
  */
@@ -199,7 +199,7 @@ describe('the step is weighted at the anchor, not at the period', () => {
     expect(b.step['2021'].growthPct).toBeCloseTo(75, 10);
   });
 
-  it('⚠ the end-weighted answer is the one that was shipped', () => {
+  it(' the end-weighted answer is the one that was shipped', () => {
     // (300·(+2.00) + 50·(−0.50)) ÷ 350 = +164.3% → level 264.3, against a true 175. Written out so
     // the size of the error lives in the test and not only in a commit message.
     const endWeighted = (300 * 2.0 + 50 * -0.5) / 350;
@@ -215,13 +215,13 @@ describe('the step is weighted at the anchor, not at the period', () => {
     expect(sumPp(b, [WINNER, LOSER], '2021')).toBeCloseTo(b.step['2021'].growthPct, 10);
   });
 
-  it('⚠ a portfolio is unaffected — no per-period caps, so anchor and end are one number', () => {
+  it(' a portfolio is unaffected — no per-period caps, so anchor and end are one number', () => {
     const book = [row('A', 50, { 2020: 100, 2021: 300 }), row('B', 50, { 2020: 100, 2021: 50 })];
     expect(buildBlend(resp(['2020', '2021'], book)).level['2021'].value).toBeCloseTo(175, 10);
   });
 
-  it('⚠ `spanPct` is coverage of THIS period’s weight, in one basis, so it stays a share', () => {
-    // ⚠⚠ THE MOVE AND THE COVERAGE ANSWER DIFFERENT QUESTIONS AND NEED DIFFERENT BASES, which is
+  it(' `spanPct` is coverage of THIS period’s weight, in one basis, so it stays a share', () => {
+    //  The move and the coverage answer different questions and need different bases, which is
     // the mistake the anchor-weighting fix originally made here: it divided the anchor-weighted
     // `den` by the anchor's weight sum, giving "how much of the ANCHOR's weight survived" under a
     // tooltip that says "of this period's weight". Both sides are period-`y` weights now, so this
@@ -233,16 +233,16 @@ describe('the step is weighted at the anchor, not at the period', () => {
 });
 
 /**
- * THE EURO-SUM CONSTRUCTION — the client twin of `blend_series`'s aggregate branch and
+ * The euro-sum construction — the client twin of `blend_series`'s aggregate branch and
  * `_level_breakdown`'s aggregate decomposition.
  *
- * ⚠⚠ THE TWO CONSTRUCTIONS DISAGREE BY MORE THAN 5pp/yr ON ACWI AND NEITHER LOOKS WRONG ON SCREEN.
+ *  The two constructions disagree by more than 5pp/yr ON ACWI AND NEITHER LOOKS WRONG ON SCREEN.
  * Averaging per-member growth rates weighted by MARKET CAP gives a company with a big valuation and
  * small cash flow a big vote on cash-flow growth. Growth of a sum weights each member by its share
  * of the total being grown, which is the only weight the question admits. Measured: ACWI revenue
  * ~9.95%/yr averaged against +4.60%/yr summed; FCF/share +19.1% against +7.56%.
  *
- * ⚠ IT IS NOT ABOUT NEGATIVES. Revenue is never negative, so every zero-crossing rule is a no-op on
+ *  It is not about negatives. Revenue is never negative, so every zero-crossing rule is a no-op on
  * it, and the gap above is entirely the weight.
  */
 const fundRow = (isin: string, weight: number, revenue: Record<string, number | null>,
@@ -274,7 +274,7 @@ describe('buildBlend — the euro sum', () => {
   });
 
   it('falls back to the growth chain when no row carries euros', () => {
-    // ⚠ THE ASSERTION THAT CATCHES A SILENT NON-FIRING. Same rows minus `fund_by_period`: if the
+    //  The assertion that catches a silent non-firing. Same rows minus `fund_by_period`: if the
     // aggregate ever stopped running, this and the test above would print the same number and
     // nothing would say which construction had produced it.
     const rows = mk().map(({ fund_by_period: _drop, ...r }) => r as Row);
@@ -286,7 +286,7 @@ describe('buildBlend — the euro sum', () => {
     const rows = mk();
     const b = buildBlend(resp(['2023', '2024'], rows));
     const big = b.contrib.get(rows[0])!['2024'];
-    // ⚠ THE ENTIRE FINDING IN ONE ASSERTION: BIG holds 90% of the cap and 10% of the euros, and
+    //  The entire finding in one assertion: big holds 90% of the cap and 10% of the euros, and
     // its share of the move is the second.
     expect(big.sharePct).toBeCloseTo(10, 10);
     expect(big.growthPct).toBeCloseTo(100, 10);
@@ -295,7 +295,7 @@ describe('buildBlend — the euro sum', () => {
   });
 
   it('keeps a sign-crosser in the sum, with an exact pp and no factors', () => {
-    // ⚠⚠ NOBODY IS DROPPED, WHICH THE GROWTH PATH CANNOT MANAGE. `share × growth` needs a positive
+    //  Nobody is dropped, which the growth path cannot manage. `share × growth` needs a positive
     // base; the difference form does not. Factors go null, the pp stays exact, the column sums.
     const rows = [
       fundRow('CRS', 50, { 2023: 12, 2024: 3 }, { 2023: -200, 2024: 300 }),
@@ -332,10 +332,10 @@ describe('buildBlend — the euro sum', () => {
 });
 
 /**
- * THE POSITIVES-ONLY MEMBER RULE, WHICH THE FOOTER MUST APPLY OR IT EXPLAINS A LINE IT CANNOT
+ * The positives-only member rule, which the footer must apply or it explains a line it cannot
  * REACH.
  *
- * ⚠⚠ AND FOR `eps_nri` IT SPANS THE FORECAST COLUMNS. Eligibility is "positive in every period,
+ *  And for `eps_nri` IT SPANS THE FORECAST COLUMNS. Eligibility is "positive in every period,
  * actuals AND consensus" (the server's `_positive_only_groups`), because a chart whose solid line
  * continues into a dotted one is ONE line: a company in the first half and out of the second steps
  * the composition exactly at the join, where neither half can show it. The drill-down carries the
@@ -343,13 +343,13 @@ describe('buildBlend — the euro sum', () => {
  */
 describe('buildBlend positives-only members', () => {
   /**
-   * ⚠⚠ THE LIVE SET IS EMPTY SINCE 2026-09-04, SO THE RULE IS DRIVEN THROUGH A PATCHED ONE — the
+   *  The live set is empty since 2026-09-04, SO THE RULE IS DRIVEN THROUGH A PATCHED ONE — the
    * mirror of the backend's autouse fixture, and for the same reason. `fcf_ps` and `eps_nri` both
    * went back onto the euro aggregate, where a filter that protects a year-on-year RATIO buys
    * nothing (a sum never divides a member by itself). Measured on ACWI 2015→2025: FCF +33.93%/yr
    * as a rate average against +7.52% summed, EPS +26.50% against +8.31%.
    *
-   * ⚠ THE RULE, ITS BADGE AND ITS COPY ARE ALL STILL LIVE CODE. An untested mechanism is one that
+   *  The rule, its badge and its copy are all still live code. An untested mechanism is one that
    * will be wrong the day a growth-chain metric joins it.
    */
   beforeEach(() => POSITIVE_ONLY_METRICS.add('eps_nri'));
@@ -369,23 +369,23 @@ describe('buildBlend positives-only members', () => {
     const r = rows();
     const b = buildBlend(resp(['2023', '2024', '2026e'], r), 'eps_nri');
     expect(b.contrib.get(r[1])).toBeUndefined();
-    // ⚠ WITH A REASON. A row the footer drops without one is a blank the reader cannot account
+    //  With a reason. A row the footer drops without one is a blank the reader cannot account
     // for, and every cell on this row looks perfectly fine.
     expect(b.excluded.get(r[1])).toMatch(/negative figure in at least one period/);
-    // ⚠ AND THE SURVIVOR CARRIES THE WHOLE LINE — if B were still in the denominator the step
+    //  And the survivor carries the whole line — if B were still in the denominator the step
     // would be right by luck here (both grew +100%) and wrong the moment they differ.
     expect(b.contrib.get(r[0])!['2024'].pp).toBeCloseTo(b.step['2024'].growthPct, 10);
   });
 
   it('names it as withheld BY THE RULE, apart from the rebase’s own drops', () => {
     /**
-     * ⚠⚠ THE DISTINCTION THE DRILL-DOWN'S BADGE DEPENDS ON. The `NOT IN LINE` badge was removed on
+     *  The distinction the drill-down's badge depends on. The `NOT IN LINE` badge was removed on
      * request (2026-08-12) because it announced `_prepare`'s non-positive-BASE drop — mechanical,
      * unactionable, true of a quarter of a book. A member the METRIC'S RULE withheld is a stated
      * policy the reader asked to see. One set for each, or marking the first re-announces the
      * second and undoes that request.
      */
-    // ⚠ C IS THE CASE THAT SEPARATES THEM, and it has to be built deliberately: zero clears the
+    //  C is the case that separates them, and it has to be built deliberately: zero clears the
     // rule (only a NEGATIVE fails it) while a series with no positive period at all has no base to
     // rebase on, so C is excluded by the rebase and by nothing else.
     const r = [...rows(), row('C', 50, { 2023: 0, 2024: 0, '2026e': 0 })];
@@ -398,7 +398,7 @@ describe('buildBlend positives-only members', () => {
   });
 
   it('drops it from the FILED periods too, not only from the forecast ones', () => {
-    // ⚠ THE POINT OF THE JOINT RULE: one member set for the whole line, not one per leg.
+    //  The point of the joint rule: one member set for the whole line, not one per leg.
     const r = rows();
     const b = buildBlend(resp(['2023', '2024', '2026e'], r), 'eps_nri');
     expect(b.contrib.get(r[1])?.['2024']).toBeUndefined();
@@ -411,13 +411,13 @@ describe('buildBlend positives-only members', () => {
     expect(b.contrib.get(r[1])!['2024'].growthPct).toBeCloseTo(100, 10);
   });
 
-  it('⚠⚠ NO LONGER applies to fcf_ps — it went back onto the euro aggregate', () => {
+  it(' NO LONGER applies to fcf_ps — it went back onto the euro aggregate', () => {
     // 2026-09-04. The filter exists because a year-on-year chain DIVIDES A MEMBER BY ITSELF; a SUM
     // never does, so a negative year is just a smaller number in the total and excluding the
     // cash-burners only adds survivorship. Measured on ACWI 2015→2025, the rate average read
     // +33.93%/yr against the aggregate's +7.52% — with the median constituent at +8.90%.
     //
-    // ⚠ B still contributes nothing HERE, but for the arithmetic reason rather than the member
+    //  B still contributes nothing HERE, but for the arithmetic reason rather than the member
     // rule: its 2023 base is positive and its 2024 is −2, so `stepGrowth` floors it at −100%
     // (a member that has gone to or below zero can lose no more than everything). It is IN the
     // line — which is the whole difference — and the assertion is on the growth, not on absence.
@@ -442,10 +442,10 @@ describe('in_line is the server’s own member list', () => {
     expect(b.step['2016'].growthPct).toBeCloseTo(10, 6);   // not (100 + 10 + 10) ÷ 3
   });
 
-  it('⚠ falls back to the cap test when the field is absent, never to “not in the line”', () => {
+  it(' falls back to the cap test when the field is absent, never to “not in the line”', () => {
     // An older payload — or any response that predates the flag — must behave exactly as before.
     const rows = [
-      // ⚠ EQUAL CAPS, because the cap IS the weight here — `wAt` reads `market_cap_eur` on an
+      //  Equal caps, because the cap IS the weight here — `wAt` reads `market_cap_eur` on an
       // index row, so unequal ones would make the expected figure a weighted average and hide
       // which half of this test failed.
       { ...row('A', 1, { 2015: 100, 2016: 200 }), market_cap_eur: 10e9 },
@@ -457,7 +457,7 @@ describe('in_line is the server’s own member list', () => {
     expect(b.step['2016'].growthPct).toBeCloseTo(55, 6);   // (100 + 10) ÷ 2
   });
 
-  it('⚠ `false` is a value, so it must not fall through the way `||` would', () => {
+  it(' `false` is a value, so it must not fall through the way `||` would', () => {
     // A portfolio row ships no `market_cap_eur` at all, so the fallback would say "in the line".
     const rows = [
       { ...row('A', 50, { 2015: 100, 2016: 200 }), in_line: false },

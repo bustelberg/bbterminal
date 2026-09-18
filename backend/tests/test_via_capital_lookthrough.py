@@ -13,13 +13,13 @@ THREE ANSWERS, IN ORDER OF HOW TRUE THEY ARE
      shipped under a separate key so it is never mistaken for the leg's.
   3. NOTHING.
 
-⚠ THE SHORTCUT THAT LOOKS LIKE (1) AND IS ACTUALLY WORSE THAN (3): split the certificate's capital
+ THE SHORTCUT THAT LOOKS LIKE (1) AND IS ACTUALLY WORSE THAN (3): split the certificate's capital
 across its legs by today's weights. Both the result and the capital get the SAME share, so the rate
 cancels and all 21 legs report the identical number — measured, -3.86% on every one. That is one
 measurement copied 21 times wearing 21 different names, and it is indistinguishable on screen from
 21 real ones. Never do it.
 
-⚠ IT IS THE STRATEGY'S RETURN, NOT THIS BOOK'S. Bustelberg's own experience depends on when IT
+ IT IS THE STRATEGY'S RETURN, NOT THIS BOOK'S. Bustelberg's own experience depends on when IT
 bought the certificate; the strategy's depends on when IT bought Shopify. Only the second is
 answerable from stored flows. `own_return_pct` (the Return column) already makes exactly this
 compromise, so the two columns agree with each other rather than each being wrong differently.
@@ -60,7 +60,7 @@ class TestTheLookThrough:
         assert got["money_weighted_return_pct"] == 11.54
 
     def test_the_rate_transfers_and_the_euros_are_scaled_to_this_books_slice(self):
-        """⚠ THE CHILD'S BALANCE SHEET IS NOT THIS BOOK'S. It put EUR 10,000 into Shopify; this
+        """ THE CHILD'S BALANCE SHEET IS NOT THIS BOOK'S. It put EUR 10,000 into Shopify; this
         book owns EUR 509 of an EUR 11,243 position — 4.53% of it. Reporting the unscaled figure
         would put the strategy's capital inside someone else's portfolio, and it would not tie to
         anything else in the row."""
@@ -83,7 +83,7 @@ class TestTheLookThrough:
         assert _via_capital(h, WRAPPER, led)["money_weighted_return_pct"] == 12.9
 
     def test_two_legs_of_one_certificate_get_DIFFERENT_numbers(self):
-        """⚠ THE WHOLE TEST OF WHETHER THIS IS A MEASUREMENT. The weight-split shortcut gives every
+        """ THE WHOLE TEST OF WHETHER THIS IS A MEASUREMENT. The weight-split shortcut gives every
         leg the same figure; a real look-through cannot, because the child bought them on different
         days at different sizes."""
         led = {CHILD: {"Shopify": {"return_pct": 11.54, "avg_capital_eur": 10_000.0},
@@ -100,7 +100,7 @@ class TestTheFallback:
         got = _via_capital(_leg(), WRAPPER, {CHILD: {}})
         assert got["via_money_weighted_return_pct"] == -3.86
         assert got["via_avg_capital_eur"] == 52_974.24
-        # ⚠ AND NEVER IN THE LEG'S OWN COLUMN. Shopify did not return -3.86% on the money.
+        #  And never in the leg's own column. Shopify did not return -3.86% on the money.
         assert "money_weighted_return_pct" not in got
         assert "capital_source" not in got
 
@@ -133,7 +133,7 @@ class TestWhenThereIsNoSingleAnswer:
             (10.0 * first_cap - 5.0 * second_cap) / (first_cap + second_cap))
 
     def test_also_held_directly_means_the_row_is_only_partly_the_certificates(self):
-        """⚠ `label: None` is the book's OWN shares. The row is then part its own position and part
+        """ `label: None` is the book's OWN shares. The row is then part its own position and part
         the wrapper's, and a single figure would describe only some of it."""
         h = _leg(extra_sources=({"label": None, "model_id": None, "value_eur": 50_489.0},))
         assert _via_capital(h, WRAPPER, CHILD_LEDGER) == {}

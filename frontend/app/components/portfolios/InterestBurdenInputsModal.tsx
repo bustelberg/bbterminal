@@ -1,14 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { interestBurdenOf, type InterestBurdenInputs, type InterestBurdenRow } from './interestBurdenData';
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
-import { type BenchTarget } from './benchSeries';
+import { inputsBody, type BenchTarget } from './benchSeries';
 import { type Target } from './HoldingsRevenueModal';
 import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
+import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
 
 /** The base inputs behind the interest-burden ratio — TWO rows per company (Interest expense,
  * Operating income), each in the company's own reporting currency (millions). Interest expense is
@@ -16,16 +17,16 @@ import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
  * other drill-downs. Self-fetches (so Fetch can reload). Mirrors {@link ./DebtRatioInputsModal}. */
 
 /**
- * ⚠ THE TABLE IS `RatioInputsTable`, SHARED BY EVERY RATIO CARD. What is left in this file is the
+ *  The table is `RatioInputsTable`, SHARED BY EVERY RATIO CARD. What is left in this file is the
  * fetch, the prose, and the card's own two constants — the lines it lists and the figure it
  * derives. Eleven near-identical copies of that table used to exist, which is why the benchmark
  * only ever got built into one of them, and why adding the cap/weight lines was a ten-file edit.
  *
- * ⚠ THE BENCHMARK IS THE SAME ENDPOINT AND THE SAME TABLE — `{holdings|portfolio_id}` swapped for
+ *  The benchmark is the same endpoint and the same table — `{holdings|portfolio_id}` swapped for
  * `{universe}`. One component renders both, so the book's rows and the index's cannot come to
  * format a figure or hide a status differently on the one screen built for comparing them.
  *
- * ⚠ THE DERIVED LINE CALLS THE CARD'S OWN FUNCTION, and `RatioInputsTable` feeds that same function
+ *  The derived line calls the card's own function, and `RatioInputsTable` feeds that same function
  * to `periodDenoms` — which is what makes the `weight` line under each company sum to exactly 100%
  * of the line the chart drew.
  */
@@ -44,11 +45,27 @@ export default function InterestBurdenInputsModal({ target, portfolioName, bench
   const [data, setData] = useState<InterestBurdenInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const scope = useMemo<RefreshScope | null>(() => {
+    if (target.portfolio_id != null) {
+      return { kind: 'portfolio', id: target.portfolio_id, name: portfolioName || 'this portfolio' };
+    }
+    if (target.universe) {
+      return { kind: 'universe', label: target.universe, name: target.universe };
+    }
+    const holdings = target.holdings ?? [];
+    if (!holdings.length) return null;
+    if (holdings.length === 1) {
+      return { kind: 'company', isin: holdings[0].isin,
+        name: holdings[0].name || portfolioName || holdings[0].isin };
+    }
+    return { kind: 'basket', holdings: holdings.map((holding) => ({ isin: holding.isin })),
+      name: portfolioName || 'this portfolio' };
+  }, [target, portfolioName]);
 
   const load = async (body: Target | BenchTarget): Promise<InterestBurdenInputs> => {
     const r = await apiFetch(`${API_URL}/api/earnings/interest-burden-inputs`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: inputsBody(body),
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
@@ -67,7 +84,7 @@ export default function InterestBurdenInputsModal({ target, portfolioName, bench
       }
     })();
     return () => { alive = false; };
-     
+
   }, [target, reloadKey]);
 
   /** The index's constituents. Silent on failure: it is an addition to a modal that works. */
@@ -118,14 +135,26 @@ export default function InterestBurdenInputsModal({ target, portfolioName, bench
           {portfolioName && <span className="text-sm text-fg-soft truncate max-w-[24ch]" title={portfolioName}>{portfolioName}</span>}
           {data && <span className="text-[12px] text-fg-faint">{data.rows.length} companies</span>}
           {benchLabel && <span className="text-[12px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
-          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
           <p className="text-[12px] text-fg-faint">Interest expense (as reported — negative = outflow) and operating income (millions, native currency). Ratio = |Interest expense| ÷ Operating income.</p>
 
           <div className="space-y-1.5">
+            <div className="flex items-baseline gap-3">
             <h3 className={section}>{portfolioName ? `${portfolioName} — ` : ''}inputs by year</h3>
+            <span className="ml-auto shrink-0">
+              {scope && (
+                <PortfolioFundamentalsRefresh
+                    scope={scope}
+                    label={scope.kind === 'company' ? 'Refresh company' : 'Refresh holdings'}
+                    allPeriods
+                    broadcast={false}
+                    onDone={() => setReloadKey((key) => key + 1)} />
+              )}
+            </span>
+            </div>
             {err && <p className="text-xs text-neg-300">{err}</p>}
             {!data && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
             {data && data.rows.length === 0 && !err && <p className="text-xs text-fg-subtle">No held company has these figures ingested.</p>}
@@ -145,7 +174,7 @@ export default function InterestBurdenInputsModal({ target, portfolioName, bench
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}
               {bench && (
                 <>
-                  {/* ⚠ THE COVERAGE GAP IS STATED. Only constituents with these lines ingested feed
+                  {/*  THE COVERAGE GAP IS STATED. Only constituents with these lines ingested feed
                       the benchmark line, so a table longer than the contributing set is not a
                       mismatch — it IS the gap, and the `weight` line renormalises over what is
                       left, period by period. */}

@@ -10,19 +10,19 @@ result, and is safe to run twice — a decision already in force is skipped, not
     uv run python scripts/fix_mismapped_assets.py --url https://<ref>.supabase.co \
         --key <service_role key> --apply                                # prod
 
-⚠⚠ `--url` / `--key` EXIST BECAUSE ENV VARS CANNOT REACH PROD FROM HERE. `deps` loads `.env` and
+ `--url` / `--key` EXIST BECAUSE ENV VARS CANNOT REACH PROD FROM HERE. `deps` loads `.env` and
     then `.env.local` with `override=True`, so a prod URL exported in the shell is overwritten by
     the local one and a "prod" run silently rewrites the LOCAL database — the same contamination
     recorded for the CI repros. Passing them as arguments is the only form that cannot be
     overridden, and the script prints the host it is about to write to before doing anything.
 
-⚠ DEPLOY THE CODE FIRST. `NBK.KW` quotes in Kuwaiti FILS (`KWF`), 1/1000 of a dinar, and the
+ DEPLOY THE CODE FIRST. `NBK.KW` quotes in Kuwaiti FILS (`KWF`), 1/1000 of a dinar, and the
     divisor lives in `asset_pipeline.fx.SUBUNIT`. Until that ships, a backend reading this repoint
     finds no `fx_rate` row for `KWF`, treats the holding as unpriceable, and drops it from every
     portfolio and index silently. This script refuses to repoint it if the running code lacks the
     entry, so the order cannot be got wrong by accident.
 
-⚠ NO MIGRATION IS NEEDED. Nothing here changes the schema; `asset_symbol_override` already exists.
+ NO MIGRATION IS NEEDED. Nothing here changes the schema; `asset_symbol_override` already exists.
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true", help="write; otherwise report only")
     a = ap.parse_args()
 
-    # ⚠⚠ AFTER THE IMPORT, NOT BEFORE, AND THE ORDER IS THE WHOLE TRICK. Importing `deps` runs
+    #  After the import, not before, and the order is the whole trick. Importing `deps` runs
     # `load_dotenv(.env)` then `load_dotenv(.env.local, override=True)`, which OVERWRITES anything
     # already in the environment — so values exported by the shell, or set here before the import,
     # lose to the local file and the run silently rewrites the LOCAL database. The client is LAZY
@@ -132,8 +132,8 @@ def main() -> int:
         return 0
 
     if todo_pin:
-        # ⚠ THE PIN IS WRITTEN FIRST AND THE REPOINT IS DONE BY `apply_symbol_overrides`, WHICH IS
-        # THE ONE IMPLEMENTATION OF "POINT AN ISIN AT A SYMBOL" — it probes, refuses a zero-bar
+        #  The pin is written first and the repoint is done by `apply_symbol_overrides`, WHICH IS
+        # The one implementation of "POINT AN ISIN AT A SYMBOL" — it probes, refuses a zero-bar
         # target (the GODE.DE guard) and stores the series. A second copy here is a second place
         # for that guard to be forgotten.
         sb.table("asset_symbol_override").upsert(

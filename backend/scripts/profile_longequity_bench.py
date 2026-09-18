@@ -5,7 +5,7 @@ the tab fires them — CONCURRENTLY — and reports, per endpoint:
 
     server seconds · rows returned · decoded JSON bytes · bytes on the wire
 
-⚠ THE TRANSFER IS THE MEASUREMENT THAT MATTERS HERE, not the seconds. `_blend_cache` caches every
+ THE TRANSFER IS THE MEASUREMENT THAT MATTERS HERE, not the seconds. `_blend_cache` caches every
 one of these responses in-process, so on a warm process the server work is a memcpy and the ONLY
 remaining cost is shipping the payload to the browser and parsing it there. Each response carries
 one row PER CONSTITUENT (1,514 for ACWI, 22 for AEX), each row holding two or three full metric
@@ -18,7 +18,7 @@ Measured on ACWI/annual, in the order the two changes landed (2026-08-19):
     + gzip the cached responses         13.21 MB decoded,  4.85 MB on the wire
     + lift out `market_cap_by_period`    9.34 MB decoded,  3.16 MB on the wire
 
-⚠ IT ASKS FOR GZIP, AS A BROWSER DOES. `cached_blend` honours `Accept-Encoding` and caches the
+ IT ASKS FOR GZIP, AS A BROWSER DOES. `cached_blend` honours `Accept-Encoding` and caches the
 COMPRESSED bytes, so `wire` below is what actually crosses the network and `raw` is what the client
 sees after the browser decodes it. Measuring only `raw` is how the 2.9x looks like nothing.
 
@@ -64,7 +64,7 @@ from routers.earnings import (  # noqa: E402
 # growth cards) plus one `*-inputs` per derived card.
 ENDPOINTS = [
     ("fundamental-blend-metrics", fundamental_blend_metrics),
-    # ⚠ ONE REQUEST FOR ALL TEN CARDS. `market_cap_by_period` used to ride on every row of every
+    #  One request for all ten cards. `market_cap_by_period` used to ride on every row of every
     # `*-inputs` response — the same cap table ten times, 29.9% of each ACWI payload. The client
     # splices it back in `useBenchInputs`, so this line should be ~0.19 MB and the ten below should
     # each be a third smaller than they were.

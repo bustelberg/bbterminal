@@ -6,16 +6,16 @@ import { API_URL } from '../../../lib/apiUrl';
 import { guruFocusUrl } from '../../../lib/gurufocusUrl';
 import { runSSE } from '../../../lib/stream';
 import CollapsibleCard from '../momentum/CollapsibleCard';
-// ⚠ ONE MODAL, SHARED WITH THE 'Current portfolio' TABLE. It used to live in this file;
+//  One modal, shared with the 'Current portfolio' TABLE. It used to live in this file;
 // a second copy beside the other table would be a second explanation of the same number.
 import BreakdownModal, { type BreakdownTarget } from '../momentum/BreakdownModal';
 import { computeMarks, pickedSectors } from './dailyHoldingsMarks';
 import SectorRankChart from './SectorRankChart';
-// ⚠ THE SHARED PALETTE, NOT A NEW ONE. The same mapping colours /backtest's sector timeline and
+//  The shared palette, not a new one. The same mapping colours /backtest's sector timeline and
 // the /schedule run-row sector chips, so a sector is one colour everywhere in the app — which is
 // the only thing that makes a bare square legible after you have seen it elsewhere.
 import { colorForSector } from '../../../lib/sectorColors';
-// ⚠ THE CODE IS THE IDENTITY; THE COLOUR IS THE FAST SCAN. 14 sectors is roughly double what
+//  The code is the identity; the colour is the fast scan. 14 sectors is roughly double what
 // categorical colour can carry, and the validator FAILS two pairs on the NORMAL-vision floor
 // (Services/Energy dE 3.5, Industrials/Technology dE 0.9 deutan) — see `lib/sectorCodes.ts`.
 import { inkForBackground, sectorCode } from '../../../lib/sectorCodes';
@@ -25,9 +25,9 @@ import type { ScheduledStrategy } from './types';
  *  monthly-rebalanced strategy's chain-linked return has to open on a rebalance,
  *  not partway through a holding period.
  *
- *  ⚠ YTD IS DERIVED, NOT A CONSTANT. `month - 1` months back lands on 1 January of the current
+ *   YTD Is derived, not a constant. `month - 1` months back lands on 1 January of the current
  *  year, so the window follows the calendar instead of drifting a month out every January. */
-/** ⚠ `months` IS "START OF THE MONTH N MONTHS AGO", SO IT SPANS N+1 CALENDAR MONTHS. On 31 July,
+/**  `months` IS "START OF THE MONTH N MONTHS AGO", SO IT SPANS N+1 CALENDAR MONTHS. On 31 July,
  *  `months: 2` opens 1 MAY — three months of trading days, not two. The label says "from the start
  *  of" rather than "last 2 months" because the honest description is the anchor, not the span, and
  *  the actual first day is printed beside the results either way. */
@@ -87,14 +87,14 @@ const pctTone = (v?: number | null) =>
   (v == null ? 'text-fg-faint' : v >= 0 ? 'text-pos-400' : 'text-neg-400');
 const fmtPct = (v?: number | null, d = 2) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(d)}%`);
-/** A 0-100 pillar score. ⚠ `—` for null, never 0 — a company excluded from a pillar
+/** A 0-100 pillar score.  `—` for null, never 0 — a company excluded from a pillar
  *  (no volume history, say) scored nothing; printing 0 says it scored worst. */
 const fmtScore = (v?: number | null) => (v == null ? '—' : v.toFixed(1));
 
 /**
  * The floor the table never goes below — roughly 20 rows.
  *
- * ⚠ IT IS ALLOWED TO PUSH THE PAGE PAST THE VIEWPORT, DELIBERATELY. This card sits under three
+ *  It is allowed to push the page past the viewport, deliberately. This card sits under three
  * other pipeline sections, so by the time it renders there is often very little viewport left, and
  * fitting into whatever remains produced a 240px window onto a 145-row table — a scroll container
  * so short that finding a date meant scrolling inside a box that was itself barely on screen. A
@@ -108,11 +108,11 @@ const BOTTOM_GUTTER_PX = 24;
 /**
  * Max height for a scroll container that should claim the rest of the viewport below itself.
  *
- * ⚠ MEASURED, NOT A `calc(100vh - Xrem)` GUESS. This card sits under three other pipeline
+ *  Measured, not a `calc(100vh - Xrem)` GUESS. This card sits under three other pipeline
  * sections whose heights change with pipeline state (a running job adds a progress bar, a failed
  * one adds an error block), so any hardcoded offset is right for one state and wrong for the rest.
  *
- * ⚠ IT CLAIMS THE REMAINING VIEWPORT *OR* `MIN_TABLE_PX`, WHICHEVER IS LARGER — so when the card
+ *  It claims the remaining viewport *OR* `MIN_TABLE_PX`, WHICHEVER IS LARGER — so when the card
  * starts near the bottom of the screen the table keeps a usable height and the PAGE scrolls
  * instead. Growing into free space is the nice-to-have; the floor is the requirement.
  *
@@ -141,12 +141,12 @@ function useAvailableHeight(deps: unknown[]): [React.RefObject<HTMLDivElement | 
 /**
  * One sector, as a coloured chip carrying its two-letter code.
  *
- * ⚠ THE CODE IS NOT DECORATION ON TOP OF THE COLOUR — IT IS THE IDENTITY. Two pairs in this
+ *  The code is not decoration on top of the colour — it is the identity. Two pairs in this
  * palette fail the NORMAL-vision separation floor, so for those the colour is genuinely not
  * readable by anyone; the code is what distinguishes them. It also survives greyscale printing and
  * forced-colors mode, and it means the legend is a convenience rather than a requirement.
  *
- * ⚠ THE INK IS COMPUTED PER CHIP. White text is unreadable on the light half of this palette
+ *  The ink is computed per chip. White text is unreadable on the light half of this palette
  * (Utilities and Materials sit at 1.63 and 1.92 contrast against white) — see `inkForBackground`.
  */
 function SectorChip({ sector, rank, showName = false }: {
@@ -177,14 +177,14 @@ const heldSectors = (d: DailyPick) => new Set(d.holdings.map((h) => h.sector).fi
 /**
  * Per-sector price / volume / momentum score for one day.
  *
- * ⚠ EVERY SECTOR IN THE POOL, NOT JUST THE ONES PICKED — that is the point of showing it. The
+ *  Every sector in the pool, not just the ones picked — that is the point of showing it. The
  * sector that ranked one place below the cut is the row that explains the day's selection; a table
  * of only the chosen sectors just restates the holdings above it. The picked ones are marked, so
  * the boundary is visible without hiding what sits on the other side of it.
  */
 function SectorScores({ rows, held }: { rows: SectorScore[]; held: Set<string | null | undefined> }) {
   if (!rows.length) {
-    // ⚠ Explained, not blank: a day cached before sector scores existed has none, and an empty
+    //  Explained, not blank: a day cached before sector scores existed has none, and an empty
     // area under an expanded row otherwise reads as "this day had no sectors".
     return (
       <p className="text-[11px] text-fg-faint">
@@ -244,7 +244,7 @@ function SectorScores({ rows, held }: { rows: SectorScore[]; held: Set<string | 
 /**
  * "Daily holdings" — what this strategy WOULD have held on each trading day of the last two months.
  *
- * ⚠ IT IS A CALCULATION, NOT A RECORD, AND THE DIFFERENCE IS THE WHOLE VALUE OF IT. The pipeline
+ *  It is a calculation, not a record, and the difference is the whole value of it. The pipeline
  * stores one decision per trading day in `current_picks_day`, made on the data available AT THE
  * TIME. This recomputes the same days on the data we hold NOW. Where the two disagree, the cause is
  * a price that arrived late or was revised — GuruFocus publishes some closes days after the fact and
@@ -252,7 +252,7 @@ function SectorScores({ rows, held }: { rows: SectorScore[]; held: Set<string | 
  * append-only in `recorded_at` but NOT in `target_date`. That is a real finding about the data, and
  * it is only visible if both numbers are on screen.
  *
- * ⚠ SO IT SAVES NOTHING. The backend refuses to persist a retrospective walk: the upsert is keyed
+ *  So it saves nothing. The backend refuses to persist a retrospective walk: the upsert is keyed
  * `(strategy_hash, target_date)`, so writing a recomputed past would REPLACE the original decision
  * rather than sit beside it, and the original would be gone. The card says so where the reader is
  * looking, not in a tooltip.
@@ -265,7 +265,7 @@ export default function DailyHoldingsSection({ strategies }: {
     [strategies],
   );
   const [strategyId, setStrategyId] = useState<number | null>(null);
-  // ⚠ DEFAULTS TO THE CHEAP WINDOW. YTD is ~145 trading days against 2 months' ~42 — on a
+  //  Defaults to the cheap window. YTD is ~145 trading days against 2 months' ~42 — on a
   // few-thousand-name universe the first YTD run is minutes, not seconds (the cache makes every
   // later one cheap). Making it the default would turn a quick look into a long wait by surprise.
   const [win, setWin] = useState<WindowKey>('2m');
@@ -331,7 +331,7 @@ export default function DailyHoldingsSection({ strategies }: {
       setMessage(e instanceof Error ? e.message : String(e));
       setStatus('error');
     }
-    // ⚠ `win` IS A DEPENDENCY. Without it the callback keeps the window it was created with, so
+    //  `win` IS A DEPENDENCY. Without it the callback keeps the window it was created with, so
     // switching to YTD and hitting Calculate would quietly recompute the 2-month window and label
     // the result "YTD" — a wrong answer with no error anywhere.
   }, [selected, status, win]);
@@ -395,7 +395,7 @@ export default function DailyHoldingsSection({ strategies }: {
           recalculation actually visibly differs from the pipeline's own decision), and the cache
           line below. */}
 
-      {/* ⚠ SAID OUT LOUD, because "42 days" reads the same whether it cost four minutes or four
+      {/*  SAID OUT LOUD, because "42 days" reads the same whether it cost four minutes or four
           seconds — and because a reader who cannot see that a day was REUSED cannot tell a stale
           answer from a fresh one. The most recent days are always recomputed (a late close still
           moves them), so a full-reuse run is not possible and the counts show it. */}
@@ -408,7 +408,7 @@ export default function DailyHoldingsSection({ strategies }: {
             : <>Computed all <span className="font-mono text-fg-soft">{result.cache_stats.computed}</span> days
               — nothing was cached for this strategy and window yet</>}
           {result.cache_stats.stored > 0 && <> · stored {result.cache_stats.stored} for next time</>}
-          {/* ⚠ THE ACTUAL FIRST AND LAST DAY, not the window's name. "2 months back" opens on the
+          {/*  THE ACTUAL FIRST AND LAST DAY, not the window's name. "2 months back" opens on the
               1st of the month two months ago — three months of days — and only the dates say so. */}
           {days.length > 0 && (
             <> · <span className="font-mono text-fg-soft">
@@ -476,7 +476,7 @@ export default function DailyHoldingsSection({ strategies }: {
           Recalculate all
         </button>
         {status === 'running' && <span className="text-fg-subtle truncate">{message}</span>}
-        {status === 'error' && <span className="text-neg-300">✗ {message}</span>}
+        {status === 'error' && <span className="text-neg-300"> {message}</span>}
       </div>
 
       {status === 'running' && (
@@ -492,7 +492,7 @@ export default function DailyHoldingsSection({ strategies }: {
         </div>
       )}
 
-      {/* ⚠ THE LEGEND IS NOT DECORATION — the squares are unreadable without it. It lists every
+      {/*  THE LEGEND IS NOT DECORATION — the squares are unreadable without it. It lists every
           sector that appears anywhere in the window, in the order it was most often ranked, so a
           colour seen on a row can be named without hovering each one. */}
       {sectorLegend.length > 0 && (
@@ -520,7 +520,7 @@ export default function DailyHoldingsSection({ strategies }: {
           <span className="flex items-center gap-1.5">
             <span className="inline-block w-3 h-2 rounded-sm bg-warn-500/25" />held for one day only
           </span>
-          {/* ⚠ Stated, not silently absent: the two edge days genuinely cannot be marked. */}
+          {/*  Stated, not silently absent: the two edge days genuinely cannot be marked. */}
           <span title="The oldest day has no previous day to compare against, and the newest has no next day. Marking them would report the window's edges as portfolio activity.">
             · the oldest and newest days carry no marks
           </span>
@@ -549,7 +549,7 @@ export default function DailyHoldingsSection({ strategies }: {
               {days.map((d) => {
                 const stored = storedByDate.get(d.date);
                 const open = openDay === d.date;
-                // ⚠ COMPARED BY THE NAMES HELD, NOT BY THE RETURN. Two baskets can post the
+                //  Compared by the names held, not by the return. Two baskets can post the
                 // same return and be different portfolios; the holdings are the decision.
                 const ids = (p?: DailyPick) => (p?.holdings ?? []).map((h) => h.company_id).sort().join(',');
                 const same = stored ? ids(stored) === ids(d) : null;
@@ -623,7 +623,7 @@ export default function DailyHoldingsSection({ strategies }: {
                                 const m = marks.get(d.date);
                                 const isNew = m?.entered.has(h.company_id) ?? false;
                                 const isSold = m?.sold.has(h.company_id) ?? false;
-                                // ⚠ BOTH AT ONCE IS A REAL CASE — bought and gone the next day.
+                                //  Both at once is a real case — bought and gone the next day.
                                 // Tinting it either green or red would report half of what
                                 // happened, so a one-day holding gets its own colour and says so.
                                 const tint = isNew && isSold ? 'bg-warn-500/10'

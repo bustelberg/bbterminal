@@ -16,12 +16,12 @@ export type GrossMarginInputs = { years: string[]; rows: GrossMarginRow[] };
 /**
  * One company's gross margin for a year (as a %), or null when it cannot be computed.
  *
- * ⚠ A MISSING GROSS PROFIT IS NOT ZERO, AND FOR A BANK IT NEVER WILL BE. GuruFocus's 'B' industry
+ *  A MISSING GROSS PROFIT IS NOT ZERO, AND FOR A BANK IT NEVER WILL BE. GuruFocus's 'B' industry
  * template has no cost of goods sold, so the line is simply absent (JPMorgan) — the concept does
  * not apply. Returning 0 there would draw a company selling at cost, which is a claim; returning
  * null leaves a hole, which is the truth.
  *
- * ⚠ A NEGATIVE GROSS PROFIT IS KEPT. Selling below cost is real (a bad year for a manufacturer, a
+ *  A NEGATIVE GROSS PROFIT IS KEPT. Selling below cost is real (a bad year for a manufacturer, a
  * miner under water) and it is exactly the observation a margin chart exists to surface. Only the
  * denominator is gated: revenue must be positive, or the ratio is meaningless.
  */

@@ -1,6 +1,6 @@
 """What the per-portfolio refresh JOB says it did — and the cancel it used to call a failure.
 
-⚠⚠ THE REPORTED SYMPTOM (2026-09-03): "I tried to cancel a refresh but this happened —
+ THE REPORTED SYMPTOM (2026-09-03): "I tried to cancel a refresh but this happened —
 `RuntimeError: BUS_Offensief_Dyn: AIRS scan failed — no reports returned`". Nothing had failed and
 AIRS had not been asked anything. `refresh_portfolio_fully` stops at THREE boundaries and only one
 of them can put a flag on the book result:
@@ -14,11 +14,11 @@ no `status == "ok"`, and raised — with an empty `errors` list, which is exactl
 could only reach its "no reports returned" fallback. A cancel rendered as a red vendor fault is
 the worst of both: it hides that the button worked, and it invents an outage that did not happen.
 
-⚠ WHY THESE TESTS CAN EXIST AT ALL. The wording was a closure inside the route, so covering it
+ WHY THESE TESTS CAN EXIST AT ALL. The wording was a closure inside the route, so covering it
 meant standing up a job registry, an AirSPMS session and a database — which is to say it was not
 covered. `job_verdict` is a pure function of one dict; these are plain dicts and no fake.
 
-⚠ WHAT IS NOT PINNED HERE: WHERE the cancel is honoured. An account's four reports are downloaded
+ WHAT IS NOT PINNED HERE: WHERE the cancel is honoured. An account's four reports are downloaded
 and stored as a unit and a press mid-scan waits for that unit — a deliberate constraint, argued in
 `test_airs_refresh_cancel.py`. These tests are about what the card SAYS, not when it stops.
 """
@@ -40,7 +40,7 @@ def _ok_book(**over) -> dict:
 
 class TestACancelIsReportedAsACancel:
     def test_stopped_before_the_book_half_is_not_a_scan_failure(self):
-        """⚠⚠ THE REPORTED BUG. Nothing was read, so there is no book result to carry the flag."""
+        """ THE REPORTED BUG. Nothing was read, so there is no book result to carry the flag."""
         full = {"status": "cancelled", "cancelled_at": BOOK, "book": None,
                 "book_status": "absent", "model_status": "absent"}
         with pytest.raises(JobCancelled) as e:
@@ -69,7 +69,7 @@ class TestACancelIsReportedAsACancel:
         assert "KID2, KID3" in str(e.value)
 
     def test_stopped_before_the_model_half_still_says_the_book_was_stored(self):
-        """⚠ It used to return the ordinary success summary, so a reader who pressed Stop got a
+        """ It used to return the ordinary success summary, so a reader who pressed Stop got a
         GREEN card and no statement that the model portfolio had been skipped."""
         full = {"status": "cancelled", "cancelled_at": "model 2015", "book": _ok_book(),
                 "book_status": "ok", "model_status": "skipped"}
@@ -97,7 +97,7 @@ class TestAFailureSaysWhichLayerFailed:
         assert "Response too small" in str(e.value)
 
     def test_no_errors_at_all_is_its_own_finding(self):
-        """⚠ Every report `scan_one` runs records a reason when it fails, so an EMPTY list means
+        """ Every report `scan_one` runs records a reason when it fails, so an EMPTY list means
         the scan did not run. "no reports returned" read as AIRS answering with nothing, which is
         a different fault in a different system from the one that actually occurred."""
         with pytest.raises(RuntimeError) as e:

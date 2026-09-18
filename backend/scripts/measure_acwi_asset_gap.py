@@ -1,6 +1,6 @@
 """HOW MANY ACWI CONSTITUENTS DO WE ALREADY PRICE BUT NOT KNOW ARE IN ACWI?
 
-⚠⚠ THE QUESTION THIS ANSWERS, AND WHY IT IS NOT THE ONE THE UNIVERSE PAGE ANSWERS. ACWI asset
+ THE QUESTION THIS ANSWERS, AND WHY IT IS NOT THE ONE THE UNIVERSE PAGE ANSWERS. ACWI asset
 membership is built FROM company membership — `universe_asset_membership`'s own migration says the
 backfill "resolves `company.isin -> asset_execution.isin -> analysis_id`". So an iShares constituent
 that GuruFocus does not sell us never becomes a `company`, and therefore never becomes an ASSET
@@ -17,7 +17,7 @@ MEASURED 2026-09-01 (file as-of 15-Apr-2026, 2,270 equities):
   and it is concentrated exactly where GuruFocus does not sell to us:
   Canada 65 | Australia 37 | United Kingdom 25 | South Africa 18 | United States 8.
 
-⚠⚠ THE 189 IS AN UPPER BOUND AND THIS SCRIPT PROVES WHY, IN ITS OWN OUTPUT. Three of the
+ THE 189 IS AN UPPER BOUND AND THIS SCRIPT PROVES WHY, IN ITS OWN OUTPUT. Three of the
 first twelve matches are WRONG: `BERKSHIRE HATHAWAY INC CLASS B` matched Berkshire **A**
 (US0846701086 / BRK-A); `NEWMONT`, located United States, matched the Australian CDI line
 (AU0000297962 / NEM.AX); and `MIZUHO FINANCIAL GROUP`, located Japan, matched MAGELLAN FINANCIAL
@@ -26,7 +26,7 @@ WisdomTree Coffee -> Luckin Coffee failure reproduced exactly, on this data, tod
 the answer is certain and the NUMBER is not, which is the strongest available argument for joining
 on ISIN: the alternative is demonstrably unsafe.
 
-⚠ THE NAME MATCH HERE IS FOR MEASUREMENT ONLY AND MUST NOT BE SHIPPED AS THE JOIN. This codebase has
+ THE NAME MATCH HERE IS FOR MEASUREMENT ONLY AND MUST NOT BE SHIPPED AS THE JOIN. This codebase has
 paid for name matching twice (`NVIDIA Corporation` vs `NVIDIA CORP` scoring 75.9; WisdomTree Coffee
 resolving to Luckin Coffee). It is used here because the bundled iShares export carries NO ISIN
 column, so it is the only way to SIZE the gap before deciding whether an ISIN-bearing export is

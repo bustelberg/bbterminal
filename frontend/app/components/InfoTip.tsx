@@ -34,13 +34,13 @@ export default function InfoTip({ text, content, children, className = "" }: {
    */
   children?: React.ReactNode;
   /**
-   * Extra classes for the TRIGGER wrapper. ⚠ Its default is an inline span, so it shrinks to the
+   * Extra classes for the TRIGGER wrapper.  Its default is an inline span, so it shrinks to the
    * thing inside it — for a 10px badge in a table cell that is a target the reader has to aim at,
    * and missing it by a pixel reads as "the tooltip doesn't work". `className="block"` makes the
    * whole line the trigger. Appended, never replacing `relative`, which is what the tooltip
    * positions against.
    *
-   * ⚠ NAMING A `cursor-*` HERE REPLACES THE DEFAULT `cursor-help`. The help cursor is right for an
+   *  NAMING A `cursor-*` HERE REPLACES THE DEFAULT `cursor-help`. The help cursor is right for an
    * "i" icon you must find; it is noise over a badge that already reads as an explanation, and on
    * Windows it renders as a large white question mark stuck to the pointer.
    */
@@ -130,7 +130,7 @@ export default function InfoTip({ text, content, children, className = "" }: {
     return () => document.removeEventListener('mousedown', onDown);
   }, [pinned]);
 
-  // ⚠ THE CALLER'S OWN `cursor-*` WINS, AND IT IS DECIDED HERE RATHER THAN BY CSS ORDER. Emitting
+  //  The caller's own `cursor-*` WINS, AND IT IS DECIDED HERE RATHER THAN BY CSS ORDER. Emitting
   // `cursor-help cursor-default` and hoping the second one applies is a coin flip on the order
   // Tailwind happens to write the two rules — same specificity, no guarantee. So the default is
   // DROPPED when the caller names a cursor of its own.
@@ -162,16 +162,16 @@ export default function InfoTip({ text, content, children, className = "" }: {
           // `max-h-[80vh]` keeps the tooltip inside the viewport. It is
           // `pointer-events-none` on HOVER (so it can't eat the pointer over the value) and
           // interactive + `select-text` when PINNED (so the source/formula can be selected & copied).
-          // ⚠ `normal-case` + `text-left` + `tracking-normal` + `font-normal` are RESETS, not
+          //  `normal-case` + `text-left` + `tracking-normal` + `font-normal` are RESETS, not
           // styling. The tooltip renders inside its trigger, so it inherits whatever the trigger
           // sits in — a table header carries `uppercase tracking-wide text-right`, which once
           // rendered the whole explanation SHOUTED IN CAPS, right-aligned. Inheritance did it.
-          // ⚠ `w-[22rem]`, WIDENED FROM `w-72` (2026-08-22) BECAUSE THESE CARDS NOW CARRY FORMULAS.
+          //  `w-[22rem]`, WIDENED FROM `w-72` (2026-08-22) BECAUSE THESE CARDS NOW CARRY FORMULAS.
           // At 288px `σ = √( Σ(Rₜ − R̄)² ÷ (T − 1) ) × √f` wraps mid-expression, and a formula
           // broken across a line at an arbitrary operator is harder to read than no formula.
-          // ⚠ `max-w-[calc(100vw-1rem)]` IS THE GUARD THE CLAMP CANNOT PROVIDE: the positioner
+          //  `max-w-[calc(100vw-1rem)]` IS THE GUARD THE CLAMP CANNOT PROVIDE: the positioner
           // clamps the LEFT edge, so a box wider than the viewport would still run off the right.
-          // ⚠⚠ `overflow-y-auto`, NOT `overflow-hidden` (2026-08-25). The cards now carry a
+          //  `overflow-y-auto`, NOT `overflow-hidden` (2026-08-25). The cards now carry a
           // formula AND a legend defining each of its symbols, which on a laptop can pass 80vh —
           // and `hidden` cuts the overflow off with nothing on screen to say anything was cut.
           // The last legend row simply would not exist. Scrolling only helps once PINNED (on hover
@@ -193,7 +193,7 @@ export default function InfoTip({ text, content, children, className = "" }: {
               ×
             </button>
           )}
-          {/* ⚠ Plain text goes through the SAME card shell the provenance tooltip uses — one edit
+          {/*  Plain text goes through the SAME card shell the provenance tooltip uses — one edit
               here instead of 44 call sites, and no tooltip can drift back to a bare paragraph. */}
           {content ?? (text ? <AboutCard text={text} /> : null)}
         </span>

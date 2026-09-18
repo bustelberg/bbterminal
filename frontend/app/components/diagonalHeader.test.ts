@@ -58,7 +58,7 @@ describe('diagonalExtentPx', () => {
 /**
  * The header stacking order.
  *
- * ⚠ WHY THIS IS A TEST AND NOT JUST A CONSTANT. Each header cell is an OPAQUE background (it has
+ *  WHY THIS IS A TEST AND NOT JUST A CONSTANT. Each header cell is an OPAQUE background (it has
  * to be — body rows scroll under it), but a 45° label ascends OUT of its own cell and across every
  * header to its right. At a shared z-index the paint order is DOM order, so each header's white
  * background covers its LEFT neighbour's label and the whole axis reads blank. That is exactly

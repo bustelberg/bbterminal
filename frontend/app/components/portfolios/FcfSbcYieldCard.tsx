@@ -30,18 +30,18 @@ import CardHeading from './CardHeading';
  * a buyer earns at that year's price, net of non-cash stock comp. Higher = cheaper for the cash it
  * throws off. Click through to the three base lines per company.
  *
- * ⚠ THE RATIO IS DERIVED HERE from the raw lines (`fcfSbcYieldByYear`), so the line, the tiles and
+ *  The ratio is derived here from the raw lines (`fcfSbcYieldByYear`), so the line, the tiles and
  * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * yields — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./MarginCard}.
  */
 
-/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+/**  `String.raw`, or every backslash in the expressions below is eaten before KaTeX
  *  sees it. */
 const R = String.raw;
 
 export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget }: {
   holdingsTarget: Target; holdingsName?: string | null;
-  /** Tab-level toggle. ⚠ This card USED to subtract SBC unconditionally. */
+  /** Tab-level toggle.  This card USED to subtract SBC unconditionally. */
   sbcCorrection?: boolean;
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
@@ -110,7 +110,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
   const own = holdingsName ?? `${fcfLabel(sbcCorrection)} yield`;
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(yieldByYr, benchByYr), [yieldByYr, benchByYr]);
@@ -158,7 +158,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
                   formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(1) : '—'}%`, n === 'bench' ? (benchTarget?.label ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
-                {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
+                {/*  NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
                 <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={daily ? false : { r: 2.5 }} connectNulls />
                 {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>

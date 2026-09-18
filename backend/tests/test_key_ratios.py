@@ -1,17 +1,17 @@
 """The consensus FREE cash flow, out of GuruFocus's undocumented `keyratios` endpoint.
 
-⚠⚠ THE FIELD WAS RULED OUT AND IT EXISTS. `analyst_estimate`'s annual block genuinely has no
+ THE FIELD WAS RULED OUT AND IT EXISTS. `analyst_estimate`'s annual block genuinely has no
 free-cash-flow key, and every stored spelling of one came back with zero rows — so this app
 concluded GuruFocus published it only through its Excel add-in. Both observations were true and the
 conclusion did not follow: `stock/{sym}/keyratios` → `Fundamental` carries
 `Estimated Free Cash Flow for Next FY1/FY2 End (M)`, and `gurufocus_api.json` had listed that
 endpoint as **real** the whole time. Nobody had opened its 264-key section.
 
-⚠ IT MATTERS BECAUSE THE DERIVATION IT REPLACES NETS THE WRONG CAPEX. `OCF_est − trailing capex`
+ IT MATTERS BECAUSE THE DERIVATION IT REPLACES NETS THE WRONG CAPEX. `OCF_est − trailing capex`
 reads 45,005 for Meta FY2026 where the vendor's own forecast is 5,412 — the 39.6bn gap is capex the
 company has guided to and not yet spent.
 
-⚠⚠ AND THE PAYLOAD CARRIES NO DATES: "Next FY1 End" is an ORDINAL. The pairing with real fiscal
+ AND THE PAYLOAD CARRIES NO DATES: "Next FY1 End" is an ORDINAL. The pairing with real fiscal
 year-ends is the one thing here that can be silently wrong, so it is what these tests are about.
 
 Unit-only: `_parse_key_ratios` is pure and the dates are handed in.
@@ -46,27 +46,27 @@ class TestTheOrdinalIsPairedWithARealFiscalYearEnd:
         assert _by_date(rows) == {"2026-09-30": 137187.366, "2027-09-30": 145707.389}
 
     def test_a_missing_date_skips_that_ordinal_rather_than_shifting_the_rest_up(self):
-        """⚠ THE SILENT FAILURE. `fy_dates` shorter than the ordinals published is ordinary — the
+        """ THE SILENT FAILURE. `fy_dates` shorter than the ordinals published is ordinary — the
         endpoint carries FY3, the estimate block may not — and sliding FY2's figure onto FY1's date
         files a forecast against a year it was never made for."""
         rows = _parse_key_ratios(PAYLOAD, 1, FY[:1])
         assert _by_date(rows) == {"2026-09-30": 137187.366}
 
     def test_no_dates_at_all_stores_nothing(self):
-        # ⚠ NOT A GUESSED FISCAL YEAR END. The panel falls back to deriving the base instead.
+        #  Not a guessed fiscal year end. The panel falls back to deriving the base instead.
         assert _parse_key_ratios(PAYLOAD, 1, []) == []
 
 
 class TestItStoresOnlyWhatIsNotAlreadyIngested:
     def test_the_operating_cash_flow_and_eps_estimates_are_left_alone(self):
-        """⚠ `analyst_estimate` ALREADY WRITES THOSE as `annual_*_estimate`. Storing them from here
+        """ `analyst_estimate` ALREADY WRITES THOSE as `annual_*_estimate`. Storing them from here
         too would be two writers for one code, disagreeing in the last decimal for ever — the
         payloads carry different precision (148323.41 there, 148323.411 here)."""
         codes = {r["metric_code"] for r in _parse_key_ratios(PAYLOAD, 1, FY)}
         assert codes == {FCF}
 
     def test_every_row_is_flagged_as_a_prediction(self):
-        # ⚠ BOTH HALVES ARE WHAT PUT IT IN THE PANEL'S PAYLOAD: `load_company_metric_rows` reads
+        #  Both halves are what put it in the panel's payload: `load_company_metric_rows` reads
         # forward rows with `is_prediction=True AND metric_code LIKE 'annual_%'`.
         rows = _parse_key_ratios(PAYLOAD, 7, FY)
         assert rows and all(r["is_prediction"] and r["company_id"] == 7 for r in rows)

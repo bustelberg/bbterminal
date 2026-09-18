@@ -212,7 +212,7 @@ def rebuild_longequity_universe(
     )
     if u_resp.data:
         universe_id = u_resp.data[0]['universe_id']
-        # ⚠ THE FLAG IS NO LONGER FORCED TRUE HERE (2026-08-06). It used to be, so a multi-month
+        #  The flag is no longer forced true here (2026-08-06). It used to be, so a multi-month
         # write could never hit the single-month trigger — and that is precisely why a data-only
         # collapse would not have stuck: the next ingest would have flipped it back and rewritten
         # nine months. The writer now produces one month, so the flag is cleared below instead,
@@ -251,7 +251,7 @@ def rebuild_longequity_universe(
     sectors = _latest_sector_per_company(supabase, all_cids)
     months = sorted(by_month.keys())
 
-    # ── ⚠⚠ THE UNION, NOT ONE ROW PER MONTH (2026-08-06).
+    # ──  THE UNION, NOT ONE ROW PER MONTH (2026-08-06).
     #
     # This wrote true point-in-time membership: 3,219 rows over 9 months for 400 distinct
     # companies. Every one of those rows was a MATERIALISED COPY of something derivable — the
@@ -266,11 +266,11 @@ def rebuild_longequity_universe(
     # carve-out all exist. Membership is now yes/no everywhere, which is what lets the asset-side
     # membership table be a plain join with no time dimension.
     #
-    # ⚠ THE FLAG MUST FOLLOW THE DATA, NEVER LEAD IT. `enforce_universe_monthly_flag` refuses
+    #  The flag must follow the data, never lead it. `enforce_universe_monthly_flag` refuses
     # `is_monthly=false` while >1 distinct month exists — its own message says "Collapse
     # membership to a single snapshot first" — so the write below has to land before the update.
     #
-    # ⚠ AND THE SET IS WIDER THAN ANY SINGLE MONTH. 400 companies against 254–498 per month, so
+    #  And the set is wider than any single month. 400 companies against 254–498 per month, so
     # "ever in LongEquity" carries survivorship: a name that appeared once in 2025-08 is a
     # permanent yes. That is right for a radar flag and wrong for a backtest universe — which is
     # why `/backtest` selects a FROZEN snapshot (see `freeze_longequity_union`) and never this row.
@@ -321,7 +321,7 @@ def rebuild_longequity_universe(
 
     # Stamp as_of_date = latest captured report month so it tracks the newest report, not a stale
     # value from an earlier migration — and clear `is_monthly` now that the rows are a single
-    # snapshot. ⚠ AFTER THE INSERT, NECESSARILY: `enforce_universe_monthly_flag` counts the
+    # snapshot.  AFTER THE INSERT, NECESSARILY: `enforce_universe_monthly_flag` counts the
     # DISTINCT months already present and refuses the flag change while more than one exists.
     supabase.table('universe').update(
         {'as_of_date': f'{months[-1]}-01', 'is_monthly': False}

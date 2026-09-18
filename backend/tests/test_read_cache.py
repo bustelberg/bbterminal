@@ -6,7 +6,7 @@ SP500 universe id x6). No module was at fault — a dozen collaborating loaders 
 fetched what it needed, and the duplication existed only in their composition. Measured after:
 **109 round trips**, 0 identical repeats, and every payload equal to the uncached one within 1e-9.
 
-⚠ THE THREE TESTS THAT MATTER ARE THE ONES WHERE A BUG WOULD PRODUCE WRONG DATA RATHER THAN SLOW
+ THE THREE TESTS THAT MATTER ARE THE ONES WHERE A BUG WOULD PRODUCE WRONG DATA RATHER THAN SLOW
 DATA, because slow is visible and wrong is not:
 
   1. THE KEY MUST INCLUDE `prefer` AND `range`. PostgREST pages with a `Range` header and asks for
@@ -81,7 +81,7 @@ class TestIdenticalReadsAreServedOnce:
             a = s.request("GET", "/rest/v1/company", params="select=id")
             b = s.request("GET", "/rest/v1/company", params="select=id")
         assert len(stub.calls) == 1
-        # ⚠ THE SAME RESPONSE OBJECT, DELIBERATELY. postgrest re-parses the bytes into FRESH rows
+        #  The same response object, deliberately. postgrest re-parses the bytes into FRESH rows
         # per caller, so sharing the response cannot let one caller's mutation reach another —
         # which is what makes this safe without a deep copy of the payload.
         assert a is b
@@ -96,7 +96,7 @@ class TestIdenticalReadsAreServedOnce:
 
 
 class TestTheKeyIncludesTheHeadersPostgrestPagesWith:
-    """⚠ THE TRAP THAT WOULD CORRUPT DATA. Same URL, different `Range` = a different page."""
+    """ THE TRAP THAT WOULD CORRUPT DATA. Same URL, different `Range` = a different page."""
 
     def test_two_pages_of_one_url_are_two_reads(self):
         s, stub = _session()
@@ -154,7 +154,7 @@ class TestTheCopyTransport:
             first = a.read()                       # drain it, as a real caller would
             b = copy_bytes(("COPY", "sql", "()"), _run, "sql", ())
         assert len(runs) == 1
-        # ⚠ A FRESH BUFFER AT POSITION 0. The cached stream would already be at EOF here, and an
+        #  A fresh buffer at position 0. The cached stream would already be at EOF here, and an
         # empty read is indistinguishable from "no rows in the database".
         assert b.read() == first == b"1,2,3\n4,5,6\n"
         assert st["hits"] == 1

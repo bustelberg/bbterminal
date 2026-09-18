@@ -2,7 +2,7 @@
 
     Wₜ = ∏(1 + Rₛ)        Mₜ = max_{s≤t} Wₛ        DDₜ = Wₜ/Mₜ − 1        MDD = min DDₜ
 
-⚠⚠ THIS IS THE YFINANCE RECONSTRUCTION OF TODAY'S HOLDINGS, AND IT IS NOT THE CLIENT'S DRAWDOWN.
+ THIS IS THE YFINANCE RECONSTRUCTION OF TODAY'S HOLDINGS, AND IT IS NOT THE CLIENT'S DRAWDOWN.
 Two different numbers, not interchangeable, and the panel says which one it is showing:
 
   * AIRS returns give the drawdown the client ACTUALLY LIVED THROUGH — real trades, real costs, real
@@ -14,18 +14,18 @@ Two different numbers, not interchangeable, and the panel says which one it is s
 
 Chosen deliberately, on request, and labelled rather than implied.
 
-⚠⚠ DAILY BY DEFAULT — THE OPPOSITE OF THE OTHER RISK VIEWS, AND FOR A REASON THAT ONLY APPLIES HERE.
+ DAILY BY DEFAULT — THE OPPOSITE OF THE OTHER RISK VIEWS, AND FOR A REASON THAT ONLY APPLIES HERE.
 Tracking error, correlation and beta default to weekly because they compare TWO series whose closes
 are hours apart (the tracker closes 16:30 London, a US holding 21:00), and the mismatch biases every
 one of them. A drawdown compares a series with ITSELF, so that bias does not exist — and coarsening
 the cadence does real damage in the other direction: a dip that recovers inside the period is
 invisible. Monthly MDD is therefore STRUCTURALLY SHALLOWER, by percentage points, not noise.
 
-⚠ SO ALL THREE CADENCES ARE MEASURED IN ONE REQUEST and returned together. The difference between
+ SO ALL THREE CADENCES ARE MEASURED IN ONE REQUEST and returned together. The difference between
 them is the thing this view has to be honest about, and a reader cannot compare numbers they have to
 re-request one at a time. One price load, three bucketings — `build_paired_series(preloaded=…)`.
 
-⚠ AND THE PERCENTAGE IS THE LEAST USEFUL PART. "−31.4%" is one number; "peaked 19 Feb 2025, bottomed
+ AND THE PERCENTAGE IS THE LEAST USEFUL PART. "−31.4%" is one number; "peaked 19 Feb 2025, bottomed
 7 Apr 2025 after 33 trading days, recovered 12 Aug 2025 after another 91" is a conversation. Peak,
 trough, recovery and both durations are returned for every drawdown reported.
 """
@@ -35,19 +35,19 @@ from routers._tracking_error import PERIODS, SeriesError, build_paired_series
 
 #: How many of the deepest drawdowns to describe, not just the worst.
 #:
-#: ⚠ ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. A book with one −30% and nothing else is
+#:  ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. A book with one −30% and nothing else is
 #: a different risk from one with four −25%s, and the max is identical.
 _TOP_N = 5
 
 #: How deep a fall has to be to be COUNTED as an episode on the panel.
 #:
-#: ⚠⚠ `drawdown_episodes` FILTERS NOTHING — it returns every peak→trough→recovery cycle, and on
+#:  `drawdown_episodes` FILTERS NOTHING — it returns every peak→trough→recovery cycle, and on
 #: a daily series most of those are a bad afternoon that recovered the next session. Counting
 #: them answers no question anybody has: a book is not risky for having dipped 0.4% and come
 #: back. The tile has always been labelled "Falls over 5%"; until now it reported the unfiltered
 #: total under that label, so the number contradicted its own heading.
 #:
-#: ⚠ THE FULL COUNT IS STILL RETURNED beside it. The point of this tile is whether the maximum
+#:  THE FULL COUNT IS STILL RETURNED beside it. The point of this tile is whether the maximum
 #: was an event or a pattern, and "6 falls over 5%, 68 in all" answers that better than either
 #: number alone.
 _EPISODE_MIN_DEPTH_PCT = -5.0
@@ -56,12 +56,12 @@ _EPISODE_MIN_DEPTH_PCT = -5.0
 def drawdown_episodes(returns: list[float], dates: list[str | None]) -> list[dict]:
     """Every peak→trough→recovery episode in the series, deepest first.
 
-    ⚠⚠ AN EPISODE ENDS WHEN THE WEALTH INDEX REGAINS ITS OLD PEAK, NOT WHEN IT TURNS UP. A 40% fall
+     AN EPISODE ENDS WHEN THE WEALTH INDEX REGAINS ITS OLD PEAK, NOT WHEN IT TURNS UP. A 40% fall
     that bounces 5% and then falls further is ONE drawdown, not two — splitting on direction would
     report a set of shallow dips and no crash. So the peak only advances once the previous high is
     exceeded, which is exactly what `Mₜ = max_{s≤t} Wₛ` says.
 
-    ⚠ THE LAST EPISODE MAY BE OPEN. A book below its high water mark right now has a drawdown with
+     THE LAST EPISODE MAY BE OPEN. A book below its high water mark right now has a drawdown with
     no recovery date, and inventing one (today, or the last observation) would report a recovery
     that has not happened. `recovered` is False and `recovery_date` is None there.
     """
@@ -78,7 +78,7 @@ def drawdown_episodes(returns: list[float], dates: list[str | None]) -> list[dic
     for i, r in enumerate(returns):
         w *= 1.0 + r
         if w >= peak:
-            # ⚠ `>=`, so a flat return at the peak closes an episode rather than leaving it open
+            #  `>=`, so a flat return at the peak closes an episode rather than leaving it open
             # for ever on a series that recovers to exactly its old high.
             if cur is not None:
                 cur["recovered"] = True
@@ -136,7 +136,7 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
 
     freq = frequency if frequency in PERIODS else "daily"
 
-    # ⚠ ONE LOAD, THREE BUCKETINGS. The first `build_paired_series` call would do the load itself;
+    #  One load, three bucketings. The first `build_paired_series` call would do the load itself;
     # doing it here and handing it over means the cadence comparison costs no extra round trips.
     bench_isin = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
     preloaded = None
@@ -157,7 +157,7 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
     episodes = drawdown_episodes(built["portfolio"], built["obs_dates"])
     worst = episodes[0] if episodes else None
 
-    # ⚠ THE SAME MEASUREMENT AT EVERY CADENCE, so the understatement is visible rather than
+    #  The same measurement at every cadence, so the understatement is visible rather than
     # asserted. A `None` entry means that cadence had too little overlap to measure — reported as
     # absent, never silently omitted from the comparison.
     by_freq: dict[str, float | None] = {}
@@ -179,7 +179,7 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
         "periods_per_year": built["periods_per_year"],
         "observations": len(built["portfolio"]),
         "years": years,
-        # ⚠ THE WINDOW THE PAIRED GRID REACHED — the same two dates the tracking-error,
+        #  The window the paired grid reached — the same two dates the tracking-error,
         # correlation and volatility responses carry. Four views, one `build_paired_series`,
         # one window; four different answers to "over what period" would be four bugs waiting.
         "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
@@ -187,7 +187,7 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
 
         "max_drawdown_pct": _mdd(built["portfolio"]),
         "benchmark_max_drawdown_pct": _mdd(built["benchmark"]),
-        # ⚠ CURRENT STATE, because "worst ever −31%" and "down 28% right now" are very different
+        #  Current state, because "worst ever −31%" and "down 28% right now" are very different
         # conversations and the second is the one the client is having.
         "current_drawdown_pct": (None if not built["portfolio"]
                                  else _current_dd(built["portfolio"])),
@@ -200,7 +200,7 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
                                        if e["depth_pct"] <= _EPISODE_MIN_DEPTH_PCT),
         "episode_threshold_pct": _EPISODE_MIN_DEPTH_PCT,
 
-        # ⚠ THE HONESTY REQUIREMENT: the same number at all three cadences, measured not claimed.
+        #  The honesty requirement: the same number at all three cadences, measured not claimed.
         "by_frequency": by_freq,
 
         "priced_holdings": built["priced"],

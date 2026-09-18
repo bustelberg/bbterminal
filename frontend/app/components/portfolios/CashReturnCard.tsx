@@ -26,14 +26,14 @@ import CardHeading from './CardHeading';
  * equity) per fiscal year, on a LINEAR % axis (a ratio, not a compounding series — no log /
  * exponential trend). Click through to the three base lines per company.
  *
- * ⚠ THE RATIO IS DERIVED HERE from the raw lines (`cashReturnByYear`), so the line, the tiles and
+ *  The ratio is derived here from the raw lines (`cashReturnByYear`), so the line, the tiles and
  * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
  */
 
 export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget, onRefreshed }: {
   holdingsTarget: Target; holdingsName?: string | null;
-  /** Tab-level toggle — see `sbcCorrection`. ⚠ Has NO effect in ROIC mode. */
+  /** Tab-level toggle — see `sbcCorrection`.  Has NO effect in ROIC mode. */
   sbcCorrection?: boolean;
   /** The index drawn beside the book — same endpoint, same helper. See `benchSeries`. */
   benchTarget?: BenchTarget | null;
@@ -43,7 +43,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
   const [data, setData] = useState<CashReturnInputs | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showInputs, setShowInputs] = useState(false);
-  /** ⚠ ONE PAYLOAD, TWO MODES — the switch does NOT refetch. Both series come from the same
+  /**  ONE PAYLOAD, TWO MODES — the switch does NOT refetch. Both series come from the same
    *  response, so flipping cannot land you on a different vintage of the same company's accounts. */
   const [mode, setMode] = useState<CapitalMode>('croic');
   const M = MODES[mode];
@@ -83,7 +83,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
   const own = holdingsName ?? M.title;
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(ratioByYr, benchByYr), [ratioByYr, benchByYr]);
@@ -92,7 +92,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
 
   return (
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
-      {/* ⚠ EXACTLY ONE LINE TALL, LIKE EVERY SIBLING CARD'S BARE <h4>. These cards sit in a grid
+      {/*  EXACTLY ONE LINE TALL, LIKE EVERY SIBLING CARD'S BARE <h4>. These cards sit in a grid
           and the eye reads their stat tiles as a row; a header that wraps to two lines pushes this
           card's tiles down and breaks that alignment for a decoration. Hence `flex-nowrap`, no
           subtitle, and a switch shorter than the heading's own line box — the provenance line that
@@ -153,7 +153,7 @@ export default function CashReturnCard({ holdingsTarget, holdingsName, sbcCorrec
               </ComposedChart>
             </ResponsiveContainer>
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-              {/* ⚠ ONE LEGEND ROW, LIKE THE SIBLINGS. The drill-down note is a `title`, not a
+              {/*  ONE LEGEND ROW, LIKE THE SIBLINGS. The drill-down note is a `title`, not a
                   second line — the same alignment argument as the header. It still has to be said
                   somewhere: a published ratio has no three lines to check it against, so the chart
                   is not clickable in ROIC mode and a modal must not imply workings it cannot show. */}

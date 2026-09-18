@@ -187,7 +187,7 @@ def _looks_like_html(body: bytes) -> bool:
     Covers a document (`<!doctype html>`, a bare `<html>`, a leading `<?xml`/BOM-then-tag that some
     PHP error pages emit) AND a bare fragment.
 
-    ⚠ THE FRAGMENT CASE IS NOT AN EDGE CASE — IT IS AIRS SAYING "NO DATA". A report the book has
+     THE FRAGMENT CASE IS NOT AN EDGE CASE — IT IS AIRS SAYING "NO DATA". A report the book has
     nothing for comes back as ~170 bytes beginning `<br>`, which matched no document marker, so it
     fell through to the raw-bytes branch and every one of them was reported as
     `RuntimeError: … 177 bytes starting b'<br>\\n30-07-2026 '`. Measured in production 2026-07-30:
@@ -361,7 +361,7 @@ _session = _AirsSession()
 class AirsNoData(RuntimeError):
     """AirSPMS answered the report request with "there is nothing here".
 
-    ⚠ AN ANSWER, NOT A FAULT — AND TELLING THEM APART NEEDED EVIDENCE, NOT A GUESS. AIRS replies
+     AN ANSWER, NOT A FAULT — AND TELLING THEM APART NEEDED EVIDENCE, NOT A GUESS. AIRS replies
     with a ~170-byte HTML fragment (`<br>\\n30-07-2026 …`) where a spreadsheet would be. That is
     roughly what an expired session or an IP block also looks like, which is why it was reported as
     a hard error and 14 of 44 accounts failed their MODEL report on every single run.
@@ -373,7 +373,7 @@ class AirsNoData(RuntimeError):
     no fixed model. The failure was per-REPORT, which makes it a fact about the report.
 
     Raised distinctly so a caller can record "nothing to store" rather than "the scan broke". The
-    account then counts as COMPLETE, stops wearing a permanent ⚠ — and, the part that actually cost
+    account then counts as COMPLETE, stops wearing a permanent  — and, the part that actually cost
     something, stops being re-scanned every run: an account that can never be complete is never
     skipped as fresh, so those 14 were the ONLY accounts the incremental scan ever visited
     ("1/14: BUS_WTS_SterkeMerken_Fx…" while the 30 real books were correctly skipped).
@@ -384,7 +384,7 @@ class AirsNoData(RuntimeError):
 # that merely FAILS to be a spreadsheet is still an error — only one that positively looks like
 # this message is an answer.
 #
-# ⚠ THESE ARE AIRS'S ACTUAL WORDS, COPIED FROM A REAL REPLY — NOT A GUESS AT THEM. The first
+#  These are AIRS's actual words, copied from a real reply — not a guess at them. The first
 # version of this list guessed "geen gegevens" and matched nothing, because what AIRS really sends
 # for a book with no model is (measured 2026-07-30, 177 bytes, HTTP 200):
 #
@@ -404,7 +404,7 @@ _NO_DATA_MARKERS = (
 def _is_no_data(body: bytes) -> bool:
     """Is this AIRS saying the report is empty, rather than failing to produce it?
 
-    ⚠ IT MUST NOT MATCH A LOGIN PAGE. `_classify_html_page` already recognises those, and an
+     IT MUST NOT MATCH A LOGIN PAGE. `_classify_html_page` already recognises those, and an
     expired session returns a full document with a form in it — this requires a SHORT fragment
     (no doctype, no <html>) that contains one of AIRS's own no-data phrases. Anything longer or
     less specific stays an error, because reporting a broken session as "no model" would hide the
@@ -436,7 +436,7 @@ def _download_report_sync(
     if len(content) < 100:
         raise RuntimeError(f"Response too small ({len(content)} bytes)")
 
-    # ⚠ THE SAME STRAY BYTE THE LIST EXPORT HAS. AirSPMS prepends an APOSTROPHE before the zip
+    #  The same stray byte the list export has. AirSPMS prepends an APOSTROPHE before the zip
     # magic on some responses, and pandas rejects the whole file with "Excel file format cannot be
     # determined, you must specify an engine manually" — which reads as a broken download rather
     # than one junk byte. Measured 2026-07-29: 14 Model and 13 Vermogensoverzicht downloads failed
@@ -444,13 +444,13 @@ def _download_report_sync(
     # `_strip_spreadsheet_preamble` is a no-op on a clean file, so this is safe for all four.
     content = _strip_spreadsheet_preamble(content)
 
-    # ⚠ AND IF IT IS STILL NOT A SPREADSHEET, SAY WHAT IT IS. The old check only caught a body
+    #  And if it is still not a spreadsheet, say what it is. The old check only caught a body
     # beginning exactly `<!doctype`; an error page with leading whitespace, a bare `<html>` or a
     # BOM sailed through into pandas, where every cause — expired session, "no data for this
     # period", an IP block — arrived as the same opaque engine error. `_describe_non_excel` prints
     # the status, content-type, page title and an excerpt, so the next failure is a diagnosis.
     if not content.startswith((_XLSX_MAGIC, _XLS_MAGIC)):
-        # ⚠ ASKED BEFORE THE ERROR PATHS: "there is nothing here" is an ANSWER. See `AirsNoData`.
+        #  Asked before the error paths: "there is nothing here" is an ANSWER. See `AirsNoData`.
         if _is_no_data(content):
             raise AirsNoData(
                 f"{rapport_types} for {portfolio_name!r} ({datum_van}..{datum_tot}): AIRS reports "
@@ -492,7 +492,7 @@ def download_vermogensoverzicht_sync(
 def download_mutaties_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
     """Download the Mutaties (journal) Excel report — the book's dividend + withholding-tax lines.
 
-    ⚠ AN UNKNOWN `rapport_types` RETURNS ZERO BYTES, NOT AN ERROR. Probed 2026-07-23: `MUT` and
+     AN UNKNOWN `rapport_types` RETURNS ZERO BYTES, NOT AN ERROR. Probed 2026-07-23: `MUT` and
     `TRANS` return an XLS; `MUTA`, `MUTATIES`, `MUTATIE`, `GRB`, `BOEK`, `JOURNAAL` all return an
     EMPTY body. `_download_report_sync`'s length check is what turns that into a real failure
     instead of a zero-row parse that reads as "this book earned no income".
@@ -506,7 +506,7 @@ def download_mutaties_sync(portfolio_name: str, datum_van: str, datum_tot: str) 
 def download_transacties_sync(portfolio_name: str, datum_van: str, datum_tot: str) -> bytes:
     """Download the Transacties report — what the book BOUGHT and SOLD over [van, tot].
 
-    ⚠ `TRANS` IS A PROBED CODE, NOT A READ SHEET. The probe above recorded that it returns an XLS
+     `TRANS` IS A PROBED CODE, NOT A READ SHEET. The probe above recorded that it returns an XLS
     (unlike `MUTA`/`MUTATIES`/`GRB`/…, which return an empty body), and that is ALL that is known
     about it — no column has ever been measured. `airs_transacties.parse_transacties` therefore
     imposes no schema; see its docstring for why guessing one is the failure to avoid.
@@ -570,7 +570,7 @@ def _describe_non_excel(resp: "AirsHttpResponse") -> str:
 # ── The Front-Office client selection, and the three filters that define WHICH portfolios ──────
 FRONT_OFFICE_SELECTIE_PATH = "rapportFrontofficeClientSelectie.php"
 
-# ⚠ ALL THREE, EXPLICITLY. Only `portefeuilleIntern` used to be sent; the other two happened to
+#  All three, explicitly. Only `portefeuilleIntern` used to be sent; the other two happened to
 # match the page's defaults, so the scan returned the right 44 by luck rather than by instruction.
 # A default is not a guarantee — one AIRS UI change and this silently starts scraping a different
 # population, with no error and no obvious symptom beyond a row count nobody is watching.
@@ -589,7 +589,7 @@ _SELECTIE_RE = re.compile(r"(\d[\d.]*)\s*Items?\s+in\s+selectie", re.I)
 def _open_front_office(page, send_event) -> None:
     """Drive Rapportage → Front-office, and DO NOT FAIL THE SCAN IF IT CANNOT.
 
-    ⚠⚠ THE CLICK IS CEREMONY, AND IT TOOK THE WHOLE FLEET RUN DOWN (2026-08-22). Its only effect is
+     THE CLICK IS CEREMONY, AND IT TOOK THE WHOLE FLEET RUN DOWN (2026-08-22). Its only effect is
     to load `rapportFrontofficeClientSelectie.php` into the `content` frame — which the caller does
     itself on the very next statement, explicitly, and with `FRONT_OFFICE_FILTERS` attached. The
     menu route cannot even express those filters. So the click contributed nothing but a 30-second
@@ -599,14 +599,14 @@ def _open_front_office(page, send_event) -> None:
         <a class="mainMenuLinkItem" data-field="Front-Office" …>Front-office</a>
         from <div class="top_menu">…</div> subtree intercepts pointer events
 
-    ⚠ READ THAT MESSAGE CAREFULLY — THE INTERCEPTOR MATCHES OUR OWN SELECTOR. Playwright names the
+     READ THAT MESSAGE CAREFULLY — THE INTERCEPTOR MATCHES OUR OWN SELECTOR. Playwright names the
     element that would actually receive the click, and it is `a[data-field="Front-Office"]`, which
     is what we asked for. An element cannot intercept itself, so there are TWO of them: the visible
     bar item, and the one `page.click` resolved (first in DOM order) sitting under it. Whether the
     dropdown reopens, or is repainted between the hover and the click, is AIRS's business and
     changes month to month — this is a menu in somebody else's web app.
 
-    ⚠ EVERY OTHER PAGE IN THIS FILE IS REACHED BY `goto`, never by driving the UI. `_login`,
+     EVERY OTHER PAGE IN THIS FILE IS REACHED BY `goto`, never by driving the UI. `_login`,
     `download_via_form` and the report downloads all address the PHP page directly. This was the
     one exception, and the exception is what broke.
 
@@ -617,7 +617,7 @@ def _open_front_office(page, send_event) -> None:
     try:
         page.hover('a[data-field="Rapportage"]', timeout=5000)
         page.wait_for_timeout(500)
-        # ⚠ `.last`, NOT the selector's first match. The interceptor in the log IS the bar item;
+        #  `.last`, NOT the selector's first match. The interceptor in the log IS the bar item;
         # taking the last of the matches is what puts the click on the one painted on top.
         page.locator('a[data-field="Front-Office"]').last.click(timeout=5000)
         page.wait_for_timeout(1000)
@@ -631,7 +631,7 @@ def _open_front_office(page, send_event) -> None:
 def _wait_for_content_frame(page, timeout_ms: int = 15000):
     """The `content` frame, once it exists — or None.
 
-    ⚠ A FIXED `wait_for_timeout(3000)` WAS DOING THIS JOB AND COULD ONLY GET IT WRONG IN BOTH
+     A FIXED `wait_for_timeout(3000)` WAS DOING THIS JOB AND COULD ONLY GET IT WRONG IN BOTH
     DIRECTIONS: three seconds wasted on every healthy run, and a hard "Could not find content
     iframe" on a slow one. The frame belongs to the frameset AIRS serves after login, so it does
     not depend on the menu click above — which is the other half of why that click is expendable.
@@ -648,7 +648,7 @@ def _wait_for_content_frame(page, timeout_ms: int = 15000):
 def _selectie_count(frame) -> int | None:
     """AIRS's OWN count of the current selection, or None if the page does not state one.
 
-    ⚠ THIS IS THE ONLY INDEPENDENT CHECK ON THE THREE FILTERS. `actief` / `portefeuilleIntern` /
+     THIS IS THE ONLY INDEPENDENT CHECK ON THE THREE FILTERS. `actief` / `portefeuilleIntern` /
     `metConsolidatie` are sent as query parameters and nothing in the response confirms they were
     honoured — a changed default, a dropped parameter or a pager that walks a different selection
     all produce a perfectly normal-looking table with the wrong number of rows in it. The page
@@ -681,7 +681,7 @@ def scan_portfolios_sync(send_event):
             _login(page)
             send_event("progress", step="login", status="done", message="Logged in successfully")
 
-            # Rapportage > Front-Office. ⚠ BEST EFFORT — see `_open_front_office` for why a menu
+            # Rapportage > Front-Office.  BEST EFFORT — see `_open_front_office` for why a menu
             # click must never be able to fail a 46-account scan.
             send_event("progress", step="navigate", status="in_progress", message="Opening Rapportage menu...")
             _open_front_office(page, send_event)
@@ -696,7 +696,7 @@ def scan_portfolios_sync(send_event):
             page.wait_for_timeout(3000)
             send_event("progress", step="navigate", status="done", message="Navigated to internal portfolio selection")
 
-            # ⚠ AIRS STATES ITS OWN COUNT, AND WE NEVER READ IT. The selection page prints
+            #  AIRS States its own count, and we never read it. The selection page prints
             # "44 Items in selectie" — the number the three filters produced, straight from the
             # server. Scraping rows without ever comparing against it means a filter that silently
             # stops applying, or a paging bug that picks up rows from another selection, shows up
@@ -725,7 +725,7 @@ def scan_portfolios_sync(send_event):
                     cells = row.query_selector_all('td.listTableData')
                     if len(cells) >= 4:
                         name = cells[0].inner_text().strip()
-                        # ⚠ DEDUPED, AND THE DUPLICATES ARE NAMED. AirSPMS CLAMPS an out-of-range
+                        #  Deduped, and the duplicates are named. AirSPMS CLAMPS an out-of-range
                         # page instead of returning nothing (the trap the model-portfolio list
                         # already documents), so a paging loop can re-read the last page and count
                         # the same books twice. Silently appending made that arithmetic, not an
@@ -749,7 +749,7 @@ def scan_portfolios_sync(send_event):
                 next_link = nav.query_selector('a:has(img[src*="navigate_right"].simbisIcon)') if nav else None
                 if not next_link:
                     break
-                # ⚠ NO NEW NAMES MEANS THE LIST HAS ENDED, whatever the pager says. AirSPMS clamps,
+                #  No new names means the list has ended, whatever the pager says. AirSPMS clamps,
                 # so a "next" arrow can stay active on the final page and the loop would re-read it
                 # for ever (or until the clamp repeats enough rows to matter).
                 if len(portfolios) == before:
@@ -763,13 +763,13 @@ def scan_portfolios_sync(send_event):
 
             if dupes:
                 send_event("progress", step="scrape", status="in_progress",
-                           message=f"  ⚠ {len(dupes)} duplicate row(s) skipped: {sorted(set(dupes))}")
-            # ⚠ THE COMPARISON IS THE POINT. Equal means the three filters produced what we read;
+                           message=f"   {len(dupes)} duplicate row(s) skipped: {sorted(set(dupes))}")
+            #  The comparison is the point. Equal means the three filters produced what we read;
             # different means one of them is not applying, or the pager is walking another
             # selection — and either way the roster is wrong in a way no row count reveals.
             if declared is not None and declared != len(portfolios):
                 send_event("progress", step="scrape", status="in_progress",
-                           message=(f"  ⚠ MISMATCH: AIRS says {declared} items in selectie, we read "
+                           message=(f"   MISMATCH: AIRS says {declared} items in selectie, we read "
                                     f"{len(portfolios)}. Check the Actieve/Interne/Zonder-consolidatie "
                                     f"filters and the pager."))
             send_event("progress", step="scrape", status="done", message=f"Read {len(portfolios)} portfolios across {page_num} page(s)")
@@ -1075,7 +1075,7 @@ def count_model_portfolio_holdings_sync(
     Slow by nature: one edit-page GET + one XLS download per fixed portfolio. It streams a
     `count` event per row so the caller can fill a column in as it goes rather than block.
 
-    ⚠ `should_stop()` STOPS BETWEEN PORTFOLIOS, NEVER INSIDE ONE — the same boundary the fleet
+     `should_stop()` STOPS BETWEEN PORTFOLIOS, NEVER INSIDE ONE — the same boundary the fleet
     account scan uses, for the same reason. A portfolio's XLS is downloaded, counted and persisted
     as a unit; stopping midway would leave a row with positions stored and no count, or a count
     against positions that were never written. Between rows every portfolio is either fully done or
@@ -1093,7 +1093,7 @@ def count_model_portfolio_holdings_sync(
 
     for i, p in enumerate(todo, 1):
         if should_stop is not None and should_stop():
-            # ⚠ NAMED, AND IT NAMES WHAT IS LEFT. "Cancelled" with no count is indistinguishable
+            #  Named, and it names what is left. "Cancelled" with no count is indistinguishable
             # from "cancelled before it started"; the rows already counted are real work that was
             # really stored, and the ones after it still wear whatever count a previous scan left.
             emit("cancelled", step="holdings", i=i - 1, n=len(todo), account=p["name"],
@@ -1122,7 +1122,7 @@ def count_model_portfolio_holdings_sync(
             p["holdings_error"] = f"{type(e).__name__}: {e}"
             if on_error:
                 on_error(p["id"], p["holdings_error"])
-        # ⚠ `i`/`n` RIDE ALONG AS FIELDS, not only inside the message. The job wrapper turns these
+        #  `i`/`n` RIDE ALONG AS FIELDS, not only inside the message. The job wrapper turns these
         # into the toast's progress bar, and parsing "3/58 …" back out of a string we formatted one
         # line earlier is the same mistake `summarise_errors` exists to avoid.
         emit("count", id=p["id"], holdings=p.get("holdings"), i=i, n=len(todo),
@@ -1147,7 +1147,7 @@ def count_model_portfolio_holdings_sync(
 #     id · Portefeuille · Fonds · Percentage · ISINCode · valuta ·
 #     Beleggingscategorie · Beleggingssector · regio · afmCategorie · fondsimportcode
 #
-# THE DATE IS THE WHOLE PROBLEM. `FixedDatum` is a <select>, and its FIRST option is always
+# The date is the whole problem. `FixedDatum` is a <select>, and its FIRST option is always
 # TODAY — an empty "new snapshot" placeholder that yields ZERO rows. The real snapshots
 # follow (BUS_WTS_Dividend_Fx has 13, newest 2024-12-10). Ask for today and you get an
 # empty table that looks exactly like "this portfolio has no holdings". So we try the

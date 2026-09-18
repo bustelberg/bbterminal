@@ -27,13 +27,13 @@ def signal_defs_for_mode(selection_mode: str) -> list[dict]:
 SelectionDirection = Literal["top", "bottom"]
 
 
-# ⚠⚠ THE NORMALIZATION IS A STRATEGY PARAMETER, NOT AN IMPLEMENTATION DETAIL, AND `minmax` IS THE
-#    DEFAULT ONLY BECAUSE CHANGING IT SILENTLY WOULD REWRITE THREE LIVE STRATEGIES. See
+#  The normalization is a strategy parameter, not an implementation detail, and `minmax` IS THE
+#    Default only because changing it silently would rewrite three live strategies. See
 #    `_normalize` for what each one does and why `minmax` is the wrong one for a blend.
 SCORE_NORMALIZATIONS = ("minmax", "rank", "robust_z")
 DEFAULT_SCORE_NORMALIZATION = "minmax"
 
-# ⚠ Robust z is clipped at ±2 MADs BEFORE the 0-1 mapping. Uncapped, one name at +1638% is ~10 MADs
+#  Robust z is clipped at ±2 MADs BEFORE the 0-1 mapping. Uncapped, one name at +1638% is ~10 MADs
 #   out and re-flattens everyone else — the exact defect this mode exists to remove, reintroduced
 #   one step later. ±2 keeps ~95% of a normal-ish cross-section un-clipped.
 _ROBUST_Z_CAP = 2.0
@@ -44,7 +44,7 @@ _MAD_TO_SIGMA = 1.4826
 def _normalize(series: pd.Series, method: str) -> pd.Series:
     """One signal → [0, 1], so a weighted sum of signals means what its weights say.
 
-    ⚠⚠ `minmax` DOES NOT, AND THAT IS THE DEFECT THIS EXISTS FOR. Min-max is monotonic, so on a
+     `minmax` DOES NOT, AND THAT IS THE DEFECT THIS EXISTS FOR. Min-max is monotonic, so on a
     SINGLE signal it ranks identically to `rank` and nothing is wrong. The damage is in the BLEND:
     the divisor is `max - min`, so one extreme name collapses everyone else into a sliver of the
     0-1 range, and a signal that occupies a sliver contributes almost nothing to a weighted sum
@@ -61,7 +61,7 @@ def _normalize(series: pd.Series, method: str) -> pd.Series:
     overlap against `rank` on the same weights: **6 of 20**. So this is not cosmetic; it changes
     which companies are bought.
 
-    ⚠ AND IT DOES NOT NEED A DATA BUG. The extremes here are Kioxia (+1638%), SK Hynix, Micron,
+     AND IT DOES NOT NEED A DATA BUG. The extremes here are Kioxia (+1638%), SK Hynix, Micron,
     Western Digital, SK Square — a real memory/AI supercycle, and a whole correlated CLUSTER rather
     than one rogue tick. Winsorizing a single outlier would not have fixed it.
 
@@ -79,17 +79,17 @@ def _normalize(series: pd.Series, method: str) -> pd.Series:
                   is genuinely far ahead. Spread is only approximately equal across signals, so
                   weights are near-exact rather than exact.
 
-    ⚠⚠ THE 0-100 SCORE MEANS SOMETHING DIFFERENT UNDER EACH, AND `min_price_score` IS READ AGAINST
+     THE 0-100 SCORE MEANS SOMETHING DIFFERENT UNDER EACH, AND `min_price_score` IS READ AGAINST
     IT. On ACWI the median stock scores **5.0/100** under `minmax` and **50/100** under `rank`, so
     the floor of 30 that all three live strategies carry goes from "roughly the top few percent" to
     "the top 70%". That is why this is a per-strategy parameter that defaults to the old value and
     is folded into `_strategy_hash`, rather than a correction applied everywhere at once.
 
-    ⚠ NaN IS LEFT AS NaN here and neutralized by the caller (`fillna(0.5)`), so the three modes
+     NaN IS LEFT AS NaN here and neutralized by the caller (`fillna(0.5)`), so the three modes
     agree about missing data rather than each inventing a convention.
     """
     s = pd.to_numeric(series, errors="coerce").astype(float)
-    # ⚠ Fewer than two distinct observations is not a cross-section: there is no "relative to the
+    #  Fewer than two distinct observations is not a cross-section: there is no "relative to the
     #   others" to express, so every mode returns neutral rather than 0, 1, or a rank of 1.0.
     if s.notna().sum() < 2 or s.nunique(dropna=True) < 2:
         return pd.Series(np.nan, index=s.index).where(s.isna(), 0.5)
@@ -101,7 +101,7 @@ def _normalize(series: pd.Series, method: str) -> pd.Series:
         med = s.median()
         mad = (s - med).abs().median()
         if not mad or pd.isna(mad):
-            # ⚠ A ZERO MAD MEANS THE MIDDLE HALF IS IDENTICAL, NOT THAT THE SIGNAL IS FLAT — the
+            #  A zero mad means the middle half is identical, not that the signal is flat — the
             #   tails can still differ. Dividing would be ±inf, so fall back to `rank`, which is
             #   defined for any distribution, rather than to neutral (which would silently delete
             #   a signal that does carry information in its tails).
@@ -279,7 +279,7 @@ def score_universe(
     and `category_weights` come from the base request and don't vary
     per variant).
 
-    ⚠ `normalization` IS PART OF THAT CACHE KEY WHEREVER THIS RESULT IS MEMOIZED. Two runs that
+     `normalization` IS PART OF THAT CACHE KEY WHEREVER THIS RESULT IS MEMOIZED. Two runs that
     differ only in it produce different scores from identical signals, so a key blind to it would
     serve one strategy's scores to another.
 
@@ -304,7 +304,7 @@ def selection_pool(
     """The rows the sector ranking is computed over — `scored` after the
     `min_price_score` hard floor, when that floor applies.
 
-    ⚠ EXTRACTED SO THE SECTOR SCORES SHOWN TO A READER ARE AGGREGATED OVER THE
+     EXTRACTED SO THE SECTOR SCORES SHOWN TO A READER ARE AGGREGATED OVER THE
     SAME ROWS THE SELECTION RANKED. Recomputing "the pool" beside the selector
     is a second definition of it: the floor is skipped for `direction="bottom"`
     and softened to a preference under `backfill_below_min_score`, so a copy
@@ -324,13 +324,13 @@ def selection_pool(
 def sector_pool_scores(pool: pd.DataFrame) -> list[dict]:
     """Per-sector momentum / price / volume score over `pool`, best momentum first.
 
-    ⚠ EVERY PILLAR GOES THROUGH `aggregate_to_sector`, THE FUNCTION THE SELECTION
+     EVERY PILLAR GOES THROUGH `aggregate_to_sector`, THE FUNCTION THE SELECTION
     RANKS WITH. It averages (a `mean()`), and that choice is load-bearing — the
     golden-master test exists partly because switching it to `median()` changes
     which sectors get picked and nothing else fails. A second aggregation here
     would let the table disagree with the ranking it is meant to explain.
 
-    ⚠ EVERY SECTOR IN THE POOL, NOT ONLY THE CHOSEN ONES. The sector that just
+     EVERY SECTOR IN THE POOL, NOT ONLY THE CHOSEN ONES. The sector that just
     missed the cut is the most informative row on the table; showing only the
     picked ones answers "what did we hold" a second time instead of "why".
     """
@@ -405,7 +405,7 @@ def select_from_scored(
         backfill_below_min_score=backfill_below_min_score,
     )
 
-    # ⚠ SECTORS ARE RANKED OVER EVERY SCORED COMPANY, NOT OVER THE FLOOR-FILTERED POOL
+    #  Sectors are ranked over every scored company, not over the floor-filtered pool
     # (2026-07-31, deliberate change). `min_price_score` is a rule about which COMPANIES are worth
     # buying; ranking sectors on the survivors made it a rule about which SECTORS exist. The
     # difference is not subtle: a sector whose names all sit below the floor did not rank badly, it
@@ -415,7 +415,7 @@ def select_from_scored(
     #
     # The floor still decides every company that gets bought, three lines down.
     #
-    # ⚠ CONSEQUENCE, ACCEPTED AND NOT PAPERED OVER: a sector can now be chosen and then contribute
+    #  Consequence, accepted and not papered over: a sector can now be chosen and then contribute
     # NOTHING, because none of its companies clear the floor. The portfolio is smaller that period
     # rather than silently sliding to the next-best sector — substituting one would be a different
     # strategy, chosen here by accident.

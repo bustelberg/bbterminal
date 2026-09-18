@@ -1,15 +1,15 @@
 /**
  * Compound annual growth of a BLENDED LINE, over a fixed number of years.
  *
- * ⚠⚠ IT IS COMPUTED ON THE LINE, NOT ON THE UNDERLYING FIGURES, AND THAT IS WHAT MAKES IT DEFINED
- * AT ALL. `(end/start)^(1/n) − 1` needs a positive start, and FCF per share is negative for real
+ *  It is computed on the line, not on the underlying figures, and that is what makes it defined
+ * At all. `(end/start)^(1/n) − 1` needs a positive start, and FCF per share is negative for real
  * companies in real years — a growth rate out of a negative base is not a large number, it is a
  * meaningless one (and its SIGN flips, so it reads as a triumph). `buildBlend` rebases every member
  * to 100 at its own first positive period and drops the ones with a non-positive base
  * (`non_positive_base`), so `level` is positive by construction. Asking it for a CAGR is therefore
  * always answerable or honestly absent — never quietly wrong.
  *
- * ⚠ AND IT IS THE SAME SERIES THE CHART DRAWS AND THE `Rebased` FOOTER PRINTS. A second derivation
+ *  And it is the same series the chart draws and the `Rebased` FOOTER PRINTS. A second derivation
  * "the same way" from the raw cells is how a summary comes to disagree with the table under it.
  */
 import { isEstimatePeriod, periodOrder } from './fundamentalBlend';
@@ -18,9 +18,9 @@ export type Cagr =
   | {
     pct: number; from: string; to: string; years: number;
     /**
-     * THE TWO VALUES THE RATE WAS COMPUTED FROM — what `workedCagr` prints so a reader can redo it.
+     * The two values the rate was computed from — what `workedCagr` prints so a reader can redo it.
      *
-     * ⚠⚠ CARRIED ON THE RESULT RATHER THAN LOOKED UP AGAIN BY THE CALLER, and that is the point.
+     *  Carried on the result rather than looked up again by the caller, and that is the point.
      * Three functions here produce a `Cagr` from three different sources (a blended line by period,
      * the same line's forward leg, a raw point series), and every one of them already HAS the two
      * endpoints in hand. A tooltip that re-reads them from "the same" series is a second lookup
@@ -28,17 +28,17 @@ export type Cagr =
      * one a fresh `level[from]` returns, because `from`/`to` are chosen here, under rules
      * (`endPeriod` pinning, quarter matching, the estimate suffix) the caller does not repeat.
      *
-     * ⚠ SO A WORKED LINE CANNOT DISAGREE WITH ITS OWN RATE. That is the whole reason to print one.
+     *  So a worked line cannot disagree with its own rate. That is the whole reason to print one.
      */
     fromValue: number; toValue: number;
   }
-  /** ⚠ A REASON, NOT A NULL. Every absence here has a different fix — fetch more history, wait for
+  /**  A REASON, NOT A NULL. Every absence here has a different fix — fetch more history, wait for
    *  a filing, lower the coverage floor — and a bare dash sends the reader to guess which. */
   | { pct: null; reason: string };
 
 /**
- * ⚠⚠ HOW MANY DECIMALS A RATE IS PRINTED AT, IN ONE PLACE, BECAUSE THE TWO SURFACES QUOTING ONE
- * ARE IN THE SAME MODAL AND GET COMPARED (2026-09-03, two decimals on request).
+ *  How many decimals a rate is printed at, in one place, because the two surfaces quoting one
+ * Are in the same modal and get compared (2026-09-03, two decimals on request).
  *
  * The `Graphs` cards' `CAGR` / `CAGR · <index>` tiles and the `Tables` rate rows are the same
  * measure over the same series, so a reader who opens both tabs is running a comparison whether or
@@ -47,24 +47,24 @@ export type Cagr =
  * disagreement long before anyone suspects formatting, and at one decimal a genuine 0.04pp gap and
  * an identical pair are indistinguishable.
  *
- * ⚠ THE EXCESS COLUMN HAS TO FOLLOW IT. `Tables` prints book, index and `book − index` side by
+ *  The excess column has to follow it. `Tables` prints book, index and `book − index` side by
  * side, and the whole point of the third is that a reader can check it against the first two:
  * 39.53 − 4.55 rounded to one decimal is 35.0, which is not what subtracting the printed figures
  * gives. Same digits on all three, or the row stops adding up on screen.
  *
- * ⚠ KEEP IN STEP WITH `workedFormula.subPct2`, which prints the SAME rate inside the ⓘ under these
+ *  Keep in step with `workedFormula.subPct2`, which prints the SAME rate inside the ⓘ under these
  * tiles — pinned by `endpointCagr.test.ts` rather than left to a comment.
  */
 export const CAGR_DECIMALS = 2;
 
-/** A rate as every CAGR tile and cell prints it. ⚠ SIGNED — an unsigned `4.55%` beside a negative
+/** A rate as every CAGR tile and cell prints it.  SIGNED — an unsigned `4.55%` beside a negative
  *  one reads as a magnitude, and these sit in columns next to each other. */
 export const cagrPct = (pct: number) => `${pct >= 0 ? '+' : ''}${pct.toFixed(CAGR_DECIMALS)}%`;
 
 /**
  * The fiscal YEAR a period label belongs to, or null when it is not a reported one.
  *
- * ⚠⚠ `LTM` AND `2026e` ARE BOTH REFUSED, FOR DIFFERENT REASONS, AND BOTH WOULD LOOK FINE.
+ *  `LTM` AND `2026e` ARE BOTH REFUSED, FOR DIFFERENT REASONS, AND BOTH WOULD LOOK FINE.
  *
  *   * an ESTIMATE endpoint makes the answer a forecast wearing the clothes of a track record — "5y
  *     CAGR 8.4%" where a third of the span has not happened yet;
@@ -87,15 +87,15 @@ export const periodQuarter = (p: string): string => (/-Q(\d)$/.exec(p)?.[1] ?? '
 /**
  * `years`-year CAGR of `level`, ending at the latest reported period.
  *
- * ⚠ THE START MUST BE THE PERIOD EXACTLY `years` BACK — never "the earliest we have". Falling back
+ *  The start must be the period exactly `years` BACK — never "the earliest we have". Falling back
  * to whatever exists is the failure that matters here: it returns a 6-year growth rate in a column
  * headed 10y, which is not a missing number but a wrong one, and it is wrong in the flattering
  * direction for any line that has been rising.
  *
- * ⚠ AND ON A QUARTERLY AXIS IT IS THE SAME QUARTER, `years` EARLIER. Comparing Q3 against Q1 five
+ *  And on a quarterly axis it is the same quarter, `years` EARLIER. Comparing Q3 against Q1 five
  * years back reads a seasonal swing as compound growth — for a retailer that is most of the answer.
  *
- * ⚠ THE SERIES IS ALREADY FILTERED TO PERIODS THE CHART DRAWS. `buildBlend` only writes `level[y]`
+ *  The series is already filtered to periods the chart draws. `buildBlend` only writes `level[y]`
  * for a period over `MIN_YEAR_COVERAGE_PCT`, so a year where too few constituents had reported is
  * ABSENT rather than thin — and this reports it as absent instead of silently spanning across it.
  */
@@ -106,8 +106,8 @@ export function lineCagr(
   if (!reported.length) return { pct: null, reason: 'the line has no reported periods' };
 
   /**
-   * ⚠⚠ `endPeriod` PINS BOTH SIDES TO THE SAME WINDOW, AND WITHOUT IT THE COMPARISON QUIETLY STOPS
-   * BEING ONE. Each line ends at its own latest DRAWN period, and the two need not agree: the
+   *  `endPeriod` PINS BOTH SIDES TO THE SAME WINDOW, AND WITHOUT IT THE COMPARISON QUIETLY STOPS
+   * Being one. Each line ends at its own latest DRAWN period, and the two need not agree: the
    * coverage floor drops a period until enough constituents have filed, and a twenty-holding book
    * crosses that threshold weeks before a 1,900-name index does. So the book's line routinely ends
    * a year ahead of the benchmark's — and a 2020→2025 rate set beside a 2019→2024 one, in a column
@@ -130,7 +130,7 @@ export function lineCagr(
   const from = reported.find((p) => periodYear(p) === wantYear && periodQuarter(p) === q);
   if (!from) {
     /**
-     * ⚠⚠ IT NAMES THE END OF THE WINDOW, NOT JUST THE START IT COULD NOT FIND (2026-09-03,
+     *  It names the end of the window, not just the start it could not find (2026-09-03,
      * reported: "no 2010 point on the line, which is complete nonsense for a 5y lookback from
      * 2026"). It was — and the nonsense was the message, not the arithmetic: `wantYear` is
      * `endYear - years`, so a 5-year window asking for 2010 means the window ENDS at 2015. That
@@ -156,33 +156,33 @@ export function lineCagr(
 /**
  * Portfolio minus benchmark, in PERCENTAGE POINTS.
  *
- * ⚠ pp, NOT `%`. The difference between two rates is not itself a rate, and writing "3.2%" for a
+ *  pp, NOT `%`. The difference between two rates is not itself a rate, and writing "3.2%" for a
  * gap between 8.4% and 5.2% invites it being read as a relative one (which would be 62%).
  *
- * ⚠ AND IT REFUSES UNLESS BOTH SIDES SPAN THE SAME WINDOW. A portfolio measured 2019→2024 against
+ *  And it refuses unless both sides span the same window. A portfolio measured 2019→2024 against
  * an index measured 2015→2025 is two different questions subtracted from each other; the gap would
  * be a number with no meaning that nothing on screen would contradict.
  */
 /**
  * EXPECTED growth: from the latest reported period to the analyst consensus `years` out.
  *
- * ⚠⚠ IT IS A SEPARATE FUNCTION FROM `lineCagr` ON PURPOSE, AND THE ASYMMETRY IS THE SAFETY. That
+ *  It is a separate function from `lineCagr` ON PURPOSE, AND THE ASYMMETRY IS THE SAFETY. That
  * one REFUSES an estimate endpoint — a forecast wearing the clothes of a track record is the single
  * easiest way to publish a number nobody meant. Here the forecast IS the question, so it has to be
  * asked for by name. Adding a flag to `lineCagr` instead would put both behaviours one boolean
  * apart, and the wrong default would be indistinguishable from the right one on screen.
  *
- * ⚠⚠ AND WHAT COMES BACK IS A CONSENSUS, NOT A MEASUREMENT. It is what analysts currently expect —
+ *  And what comes back is a consensus, not a measurement. It is what analysts currently expect —
  * revised whenever they like, systematically optimistic, and available for only some constituents.
  * Every surface showing it has to say so; `MetricGrowthCard`'s own config carries the same warning
  * about the dotted forecast leg it draws.
  *
- * ⚠ THE BASE IS THE LATEST REPORTED PERIOD, NOT THE NEAREST ESTIMATE. Measuring 2026e → 2029e would
+ *  The base is the latest reported period, not the nearest estimate. Measuring 2026e → 2029e would
  * be the consensus's own internal slope — three forecasts compared with each other, with no contact
  * with anything that happened. The number worth having is where the business IS against where it is
  * expected to be, so one end must be real.
  *
- * ⚠ THE TARGET IS MATCHED BY FISCAL YEAR, NOT BY POSITION. `reported[last] + years` with an `e`
+ *  The target is matched by fiscal year, not by position. `reported[last] + years` with an `e`
  * suffix — so a three-year expectation always spans three years even when the estimate columns are
  * ragged (the AEX has 2026e-2030e, ACWI 2026e-2031e), and a missing year is a refusal rather than
  * "whatever estimate is third in the list".
@@ -219,25 +219,25 @@ export function forwardCagr(
 /**
  * Point-to-point CAGR of a series of `{x, value}` points — first to last, `(b/a)^(1/span) − 1`.
  *
- * ⚠⚠ THE **ONE** DEFINITION OF "CAGR" IN THIS APP, AND THE REASON IT EXISTS IS THAT THERE WERE TWO.
+ *  THE **ONE** DEFINITION OF "CAGR" IN THIS APP, AND THE REASON IT EXISTS IS THAT THERE WERE TWO.
  * The Long Equity growth card used to report the SLOPE OF A FITTED EXPONENTIAL (`logLinearFit`)
  * while the Tables tab measured endpoints, so the same book's FCF/share read **29.7%** on one
  * screen and **30.1%** two tabs away. Both were defensible and neither was checkable against the
  * other; a reader comparing them has no way to know the difference is a modelling choice rather
  * than a data problem. One definition, both surfaces, so the numbers are equal by construction.
  *
- * ⚠ THE FIT DID NOT GO AWAY — R² AND THE DRAWN TREND LINE ARE STILL IT, and that is the right split.
+ *  The fit did not go away — R² AND THE DRAWN TREND LINE ARE STILL IT, and that is the right split.
  * The fit answers "how STEADY is the growth" (which is all R² ever meant); this answers "what WAS
  * the growth". A CAGR is a fact about two numbers the company reported; a fitted slope is a fact
  * about a model of them, and it silently smooths away exactly the endpoint that a reader checking
  * the chart against the table would look at first.
  *
- * ⚠ THE SPAN IS FRACTIONAL ON PURPOSE. The card's x is the fiscal period as a NUMBER — `2015` on
+ *  The span is fractional on purpose. The card's x is the fiscal period as a NUMBER — `2015` on
  * an annual axis, `2015.25` on a quarterly one — so `last.x − first.x` is already the elapsed span
  * in years and the rate is per annum on either cadence. Rounding it to whole years would report a
  * quarterly series' rate over the wrong denominator.
  *
- * ⚠ IT REFUSES A NON-POSITIVE ENDPOINT rather than reaching inward for a positive one. Trimming to
+ *  It refuses a non-positive endpoint rather than reaching inward for a positive one. Trimming to
  * the first positive point would answer over a window nobody chose and label it as the whole chart
  * — the trap `logLinearFit` fell into by DROPPING those points (it even returned `dropped`, which
  * nothing read). See the header of this file: a rate out of a negative base is not a large number,
@@ -266,7 +266,7 @@ export function endpointCagr(
 /**
  * The latest reported period BOTH lines carry — the window a comparison can honestly use.
  *
- * ⚠ `null` WHEN THEY SHARE NONE, which is a real state (a book of 2020-onwards listings against an
+ *  `null` WHEN THEY SHARE NONE, which is a real state (a book of 2020-onwards listings against an
  * index whose drawn periods stop in 2019) and not something to paper over with the newer of the two.
  */
 export function commonEndPeriod(

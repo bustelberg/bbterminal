@@ -33,7 +33,7 @@ from asset_pipeline.fx import SUBUNIT  # noqa: E402
 def _cap_currency(quote_ccy: str | None) -> str | None:
     """The currency a MARKET CAP is denominated in, given the quote's `currency` field.
 
-    ⚠ YAHOO REPORTS ONE `currency` FOR TWO DIFFERENT UNITS. It quotes a London listing's PRICE in
+     YAHOO REPORTS ONE `currency` FOR TWO DIFFERENT UNITS. It quotes a London listing's PRICE in
     pence and that same payload's `marketCap` in POUNDS — both labelled `"GBp"`. A market cap is
     always in the MAJOR unit, so the quote currency must be normalised before it is stored or
     converted; taking it at face value applies the pence divisor to a figure that never had it.

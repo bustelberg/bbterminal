@@ -1,7 +1,7 @@
 /**
  * The Fundamental modal's A/B valuation switch — /research-dashboard's two companies.
  *
- * ⚠⚠ WHAT THIS GUARDS IS A HEAD THAT NAMES THE WRONG COMPANY. Quick and Deep Valuation are the two
+ *  What this guards is a head that names the wrong company. Quick and Deep Valuation are the two
  * tabs that cannot draw a pair, so the switch points them at B — and neither tab prints the company
  * anywhere a reader looks first, which makes the modal's 2xl heading the only thing on screen
  * saying whose cash flows are being valued. `valued` and `shown` are deliberately different
@@ -31,7 +31,7 @@ describe('with only company A', () => {
     }
   });
 
-  it('⚠ and a side left on `b` collapses to A rather than valuing nobody', () => {
+  it(' and a side left on `b` collapses to A rather than valuing nobody', () => {
     // The side lives in `useState`, so it survives company B being cleared. Without the guard the
     // tabs would read `compare` after it had gone — or need an effect to reset the side, which is
     // one render too late.
@@ -52,7 +52,7 @@ describe('with both companies', () => {
   it.each(['quickval', 'deepval'])('switches BOTH the tab and the head on %s', (tab) => {
     const r = at(tab, 'b');
     expect(r.valued).toEqual({ isin: B.isin, name: B.name });
-    // ⚠⚠ THE HALF THAT IS EASY TO MISS. A head still reading "ASML Holding NV" over NVIDIA's
+    //  The half that is easy to miss. A head still reading "ASML Holding NV" over NVIDIA's
     // reverse DCF attributes every figure under it to the wrong company, in the one line that
     // attributes anything — and it is also what `scope` is built from, so the Refresh button
     // would refetch A while the reader watched B.
@@ -61,7 +61,7 @@ describe('with both companies', () => {
   });
 
   it.each(['longequity', 'tables'])(
-    '⚠⚠ keeps the tabs on B but puts the head back on A on %s', (tab) => {
+    ' keeps the tabs on B but puts the head back on A on %s', (tab) => {
       const r = at(tab, 'b');
       // The two valuation tabs stay MOUNTED once visited. Reverting `valued` off-tab would
       // silently re-point a hidden panel at the other company, so the reader returns to a
@@ -75,7 +75,7 @@ describe('with both companies', () => {
     });
 });
 
-describe('⚠ absent fields come back as the empty string and null, never undefined', () => {
+describe(' absent fields come back as the empty string and null, never undefined', () => {
   // Every caller writes `name || isin` for a display label, and `undefined` there is the string
   // "undefined" one optional chain away.
   it('fills a missing isin and name', () => {
@@ -88,7 +88,7 @@ describe('⚠ absent fields come back as the empty string and null, never undefi
 describe('the modal carries the two answers to the right places', () => {
   const src = readFileSync(join(__dirname, 'OwnerEarningsModal.tsx'), 'utf8');
 
-  it('⚠⚠ keys Deep Valuation on the picked ISIN and does NOT key Quick Valuation', () => {
+  it(' keys Deep Valuation on the picked ISIN and does NOT key Quick Valuation', () => {
     // Deep Valuation reads that company's saved assumptions in a state INITIALISER (localStorage,
     // per ISIN), so it has to remount — carrying A's growth rate and exit multiple into B's
     // reverse DCF is a complete, confident valuation of the wrong assumptions. Quick Valuation's
@@ -100,11 +100,11 @@ describe('the modal carries the two answers to the right places', () => {
     expect(src).not.toContain('<QuickValuationTab key=');
   });
 
-  it('⚠ scopes the fundamentals refresh to the company on screen', () => {
+  it(' scopes the fundamentals refresh to the company on screen', () => {
     expect(src).toContain("? { kind: 'company', isin: shownIsin, name: shownName || shownIsin }");
   });
 
-  it('⚠ and neither valuation tab is handed the modal\'s own isin any more', () => {
+  it(' and neither valuation tab is handed the modal\'s own isin any more', () => {
     for (const bad of ['<QuickValuationTab isin={isin}', '<DeepValuationTab key={isin}']) {
       expect(src, `${bad} bypasses the switch`).not.toContain(bad);
     }

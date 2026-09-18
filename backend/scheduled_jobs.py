@@ -1,6 +1,6 @@
 """WHAT IS SUPPOSED TO RUN BY ITSELF, AND HOW WE WOULD KNOW IF IT STOPPED.
 
-⚠⚠ THE FAILURE THIS EXISTS FOR IS A JOB THAT IS NOT THERE AT ALL, AND IT IS INVISIBLE IN EVERY
+ THE FAILURE THIS EXISTS FOR IS A JOB THAT IS NOT THERE AT ALL, AND IT IS INVISIBLE IN EVERY
     SURFACE WE HAD. `scheduler.list_scheduled_jobs()` reports what APScheduler is currently holding
     — which is exactly nothing under `DISABLE_SCHEDULER=1`, nothing before startup finishes, and
     nothing for a job whose `add_job` threw inside the startup handler. An empty list and a healthy
@@ -8,18 +8,18 @@
     it has to be DECLARED, and the page's job is to show the declaration beside reality and point at
     the disagreement.
 
-⚠⚠ AND THE TRIGGERS LIVE HERE, NOT IN `scheduler.py`, WHICH IS THE WHOLE POINT OF THE MODULE.
+ AND THE TRIGGERS LIVE HERE, NOT IN `scheduler.py`, WHICH IS THE WHOLE POINT OF THE MODULE.
     A declaration that merely *describes* the cron is a second copy of it, and the copy is what
     drifts — within a month the page is confidently reporting a cadence nothing runs at, which is
     worse than no page. `scheduler.py` builds its triggers FROM `SCHEDULED_JOBS`, so the schedule on
     screen IS the schedule that fires. There is one number and it is in this file.
 
-⚠ THIS FILE IS DECLARATION ONLY — no imports from `scheduler`, no APScheduler, no `deps`. Both the
+ THIS FILE IS DECLARATION ONLY — no imports from `scheduler`, no APScheduler, no `deps`. Both the
     scheduler and the admin router import it, and anything heavier here becomes an import cycle
     (`scheduler` → `ingest.phases` → `deps`) or drags the DB into a module the router reads at
     request time.
 
-⚠ `evidence` IS THE HONEST PART. It names the `ingest_run.job_name` rows a job leaves behind, and
+ `evidence` IS THE HONEST PART. It names the `ingest_run.job_name` rows a job leaves behind, and
     for six of the eight it is EMPTY — those jobs currently write nothing but a log line that
     scrolls away in Railway. An empty tuple therefore means "we cannot tell whether this ran", which
     the API must report as UNKNOWN and never as ok and never as a failure. Filling those in is the
@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 
 #: How `scheduler._reap_orphan_runs` marks a run whose process died mid-flight.
 #:
-#: ⚠⚠ ONE STRING, WRITTEN IN ONE PLACE AND READ IN ANOTHER, SO IT LIVES HERE. The reaper stamps a
+#:  ONE STRING, WRITTEN IN ONE PLACE AND READ IN ANOTHER, SO IT LIVES HERE. The reaper stamps a
 #: killed run `status='error'` — correct, because it certainly did not finish — but "the process was
 #: restarted" and "the job is broken" are different facts with different fixes, and the overview has
 #: to tell them apart. Matching on a literal copied into the reader is how that quietly stops
@@ -59,7 +59,7 @@ class JobSpec:
     #: The cadence in words, for the page. Derived from `trigger` by eye, never parsed from it —
     #: see `test_scheduled_jobs.py`, which asserts the two agree so this cannot become a lie.
     cadence: str
-    #: `CronTrigger(**trigger)` kwargs. ⚠ THE REAL SCHEDULE — `scheduler.py` reads this.
+    #: `CronTrigger(**trigger)` kwargs.  THE REAL SCHEDULE — `scheduler.py` reads this.
     trigger: dict | None = None
     #: `IntervalTrigger(seconds=…)` instead, for the queue worker.
     interval_seconds: int | None = None
@@ -67,11 +67,11 @@ class JobSpec:
     options: dict = field(default_factory=dict)
     #: How long may pass between successful runs before this is OVERDUE.
     #:
-    #: ⚠ IT IS NOT THE CADENCE. A Mon–Fri job is 3 days idle over every weekend and that is healthy,
+    #:  IT IS NOT THE CADENCE. A Mon–Fri job is 3 days idle over every weekend and that is healthy,
     #: so a "daily" threshold would cry wolf every Monday and be ignored by Tuesday. Each of these
     #: is the longest HEALTHY gap plus one period of slack.
     #:
-    #: ⚠ AND FOR THE MONTH-END REFRESH IT DESCRIBES THE WORK, NOT THE TICK. That job wakes every day
+    #:  AND FOR THE MONTH-END REFRESH IT DESCRIBES THE WORK, NOT THE TICK. That job wakes every day
     #: and does nothing on 28 of them by design; an operator who sees "last run 20 days ago" wants
     #: to know whether the REFRESH is late, not whether the tick fired.
     max_age_hours: float | None = None
@@ -80,11 +80,11 @@ class JobSpec:
     evidence: tuple[str, ...] = ()
     #: Whether this job writes a `scheduled_job_run` row (`job_runlog.record_run`).
     #:
-    #: ⚠ IT IS NOT "IS THIS JOB OBSERVABLE" — `evidence` is the other half of that. A job with
+    #:  IT IS NOT "IS THIS JOB OBSERVABLE" — `evidence` is the other half of that. A job with
     #: NEITHER leaves no durable trace at all, and the API must then say `unknown`: never `ok`,
     #: which would be a fabrication, and never `error`, which would cry wolf.
     #:
-    #: ⚠ THE TWO PIPELINE JOBS SET IT FALSE ON PURPOSE. They already write a far richer `ingest_run`
+    #:  THE TWO PIPELINE JOBS SET IT FALSE ON PURPOSE. They already write a far richer `ingest_run`
     #: row per operation, which `/schedule` renders as their history; a second, thinner row beside
     #: it would be two records of one event, free to disagree. They are observable through
     #: `evidence`. The queue worker sets it false for the opposite reason — it is unobservable and
@@ -116,23 +116,23 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         label="Watchdog — re-run broken jobs",
         fills="nothing directly; it re-runs the jobs the automatic-jobs page reports as broken",
         cadence="Every day, 11:00 UTC",
-        # ⚠⚠ 11:00 UTC, WHICH IS SIX HOURS AFTER THE PIPELINE IT MOSTLY EXISTS FOR. Late enough
+        #  11:00 UTC, WHICH IS SIX HOURS AFTER THE PIPELINE IT MOSTLY EXISTS FOR. Late enough
         # that a 05:00 run has certainly either finished or died, and late enough that a re-run of
         # it is still on the right side of the European EOD publication the 05:00 time was itself
         # chosen for — a watchdog firing the pipeline at 01:00 would "heal" it into reading
         # yesterday's closes.
         #
-        # ⚠ ONCE A DAY, NOT HOURLY. Every job it can heal has a `max_age_hours` measured in days,
+        #  Once a day, not hourly. Every job it can heal has a `max_age_hours` measured in days,
         # so hourly buys a few hours of latency and costs a re-run attempt every hour on anything
         # genuinely broken. The per-day cap (`_WATCHDOG_MAX_PER_DAY`) is the real bound; this is
         # the cheap one.
         trigger={"hour": 11, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "misfire_grace_time": 3600},
-        # ⚠ A DAY AND A HALF. It runs daily and must itself be visible when it stops — a watchdog
+        #  A day and a half. It runs daily and must itself be visible when it stops — a watchdog
         # nobody watches is the failure it was built to end, one level up.
         max_age_hours=36,
         note="Re-runs jobs reporting `overdue` or `interrupted`, at most twice per job per day. "
-             "⚠ It deliberately does NOT touch `missing` (the job is not registered — healing that "
+             " It deliberately does NOT touch `missing` (the job is not registered — healing that "
              "would hide a broken schedule), `error` (it has a reason; read it) or `unknown`.",
     ),
     JobSpec(
@@ -142,22 +142,22 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         cadence="Every day, 12:00 UTC",
         trigger={"hour": 12, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "misfire_grace_time": 3600},
-        # ⚠ THE WORK IS DAILY NOW, so the threshold is a day plus slack — unlike the month-end pass
+        #  The work is daily now, so the threshold is a day plus slack — unlike the month-end pass
         # this replaced, which wanted 35 days because it was idle on 28 of every 30 by design.
         max_age_hours=30,
         evidence=("price_slice",),
         records=False,          # already writes ingest_run — see `records`
-        note="⚠⚠ REPLACED `month_end_price_refresh` (2026-09-02). One pass a month and the signal "
+        note=" REPLACED `month_end_price_refresh` (2026-09-02). One pass a month and the signal "
              "engine's 30-day staleness guard are THE SAME PERIOD, so the system was always a few "
              "days from a cliff and spent them there: measured 2026-09-02, ACWI coverage held at "
              "1,743 of 1,758 on 09-27 and collapsed to 16 on 09-30, because every name whose close "
              "was 30 days old is dropped from every signal at once. Amortising the identical work "
              "over the month bounds the oldest price at ~19 days and removes the cliff, for "
              "essentially the same monthly quota spent evenly instead of in one month-end spike. "
-             "⚠ Most-stale-first, so a missed day self-repairs: the database's own staleness is "
-             "the cursor and there is no state to get out of sync. ⚠ Still bounded by the "
-             "per-region GuruFocus budget. ⚠ Size via `DAILY_PRICE_SLICE` (default 150); the run "
-             "logs its own cycle length and errors above 25 days. ⚠ The FULL pass survives as "
+             " Most-stale-first, so a missed day self-repairs: the database's own staleness is "
+             "the cursor and there is no state to get out of sync.  Still bounded by the "
+             "per-region GuruFocus budget.  Size via `DAILY_PRICE_SLICE` (default 150); the run "
+             "logs its own cycle length and errors above 25 days.  The FULL pass survives as "
              "`full_price_refresh` behind its Run-now button, for a bulk import or a vendor "
              "correction — it is the wrong tool for staying current, which is what this is.",
     ),
@@ -186,13 +186,13 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     JobSpec(
         id="benchmark_fundamentals_fill",
         label="Benchmark fundamentals",
-        fills="metric_data statements for every constituent of ACWI · SP500 · AEX",
+        fills="due metric_data financials, analyst estimates, and indicators for ACWI · SP500 · AEX",
         cadence="Every Monday, 08:00 UTC",
         trigger={"day_of_week": "mon", "hour": 8, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 21600},
         max_age_hours=24 * 10,
-        note="Checks every constituent weekly, but only fetches companies with a newly due filing. "
-             "The regional quota reserve still applies.",
+        note="Checks every constituent weekly. Filings refresh when due; analyst estimates and "
+             "indicators refresh on their own staleness schedule. The regional quota reserve still applies.",
     ),
     JobSpec(
         id="history_drift_check",
@@ -234,7 +234,7 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         id="table_size_sample",
         label="Database size snapshot",
         fills="table_size_sample — one row per public table",
-        # ⚠ LATE IN THE DAY, AFTER EVERY OTHER JOB HAS WRITTEN. A snapshot is only attributable to a
+        #  Late in the day, after every other job has written. A snapshot is only attributable to a
         # day if it is taken once that day's work is done; sampled at 04:00 it would credit each
         # day's growth to the day before. 22:00 UTC sits after the 16:30 FX sync, which is the last
         # scheduled writer.
@@ -244,7 +244,7 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         max_age_hours=30,
         note="Bytes on disk per table, read from the Postgres catalog — NOT rows written. Several "
              "jobs overwrite or upsert, so rows written and growth are different questions, and a "
-             "row count cannot see indexes or bloat. ⚠ Supabase Storage is not in the database and "
+             "row count cannot see indexes or bloat.  Supabase Storage is not in the database and "
              "is not counted.",
     ),
     JobSpec(
@@ -254,11 +254,11 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         cadence="Every 20 seconds",
         interval_seconds=20,
         options={"max_instances": 1, "coalesce": True, "misfire_grace_time": 30},
-        # ⚠ NO OVERDUE THRESHOLD. It fires three times a minute and no-ops on an empty queue, so
+        #  No overdue threshold. It fires three times a minute and no-ops on an empty queue, so
         # "when did it last run" is not a health question. It is registered by default: the backend
         # must consume ISINs queued by Analyse in a normal deployment.
         max_age_hours=None,
-        # ⚠ THE ONE JOB THAT DOES NOT RECORD — see `records`. Three rows a minute is a write loop,
+        #  The one job that does not record — see `records`. Three rows a minute is a write loop,
         # not a history, and its liveness already has a better answer in the queue heartbeat.
         records=False,
         note="Runs in the backend scheduler. Deployments that use the standalone "
@@ -273,7 +273,7 @@ BY_ID: dict[str, JobSpec] = {j.id: j for j in SCHEDULED_JOBS}
 def registrable(env: dict[str, str]) -> list[JobSpec]:
     """The specs that SHOULD be registered given this process's environment.
 
-    ⚠ AN OPT-IN JOB THAT IS OFF IS NOT MISSING, and the difference has to survive all the way to
+     AN OPT-IN JOB THAT IS OFF IS NOT MISSING, and the difference has to survive all the way to
     the page — otherwise the default deployment shows a permanent red row for a worker that is
     correctly running as a separate process.
     """

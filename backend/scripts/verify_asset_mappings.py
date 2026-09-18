@@ -11,7 +11,7 @@ THREE CHECKS, EACH FOR A FAILURE THAT HAS HAPPENED
   2. every deliberately unmapped row is still unmapped — `requeue_unmapped()` re-queues identified
      `not_found` rows, so before `store.MANUAL_UNMAP_PREFIX` was honoured a sweep could hand one
      back to the resolver and it could land on the same wrong ticker.
-  3. ⚠⚠ EVERY QUOTE CURRENCY IN USE IS PRICEABLE — the check that would have caught `KWF` before
+  3.  EVERY QUOTE CURRENCY IN USE IS PRICEABLE — the check that would have caught `KWF` before
      it shipped. A currency that is neither in `fx_rate` nor in `fx.SUBUNIT` prices at nothing
      (the holding silently leaves its portfolio) or, worse, a minor unit missing its divisor
      prices 100x or 1000x high and still looks like a number. Kuwaiti fils are 1/1000 of a dinar,
@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import deps  # noqa: E402
 
-# ⚠⚠ AFTER `import deps`, WHICH IS THE ONLY WINDOW THEY WIN IN. The import runs
+#  AFTER `import deps`, WHICH IS THE ONLY WINDOW THEY WIN IN. The import runs
 # `load_dotenv(.env.local, override=True)`, overwriting anything the shell exported — so a prod URL
 # in the environment loses to the local file and a "prod" check silently reads the LOCAL database.
 # The client is lazy, so setting these between the import and the first call is what sticks.
@@ -49,7 +49,7 @@ from asset_pipeline.store import MANUAL_UNMAP_PREFIX  # noqa: E402
 
 
 def _page(table: str, cols: str, *, eq: tuple[str, object] | None = None) -> list[dict]:
-    """⚠ PAGED. PostgREST truncates SILENTLY at 1,000 rows on cloud and 10,000 locally, so an
+    """ PAGED. PostgREST truncates SILENTLY at 1,000 rows on cloud and 10,000 locally, so an
     unpaged read of `asset_execution` gives a DIFFERENT answer per environment — which is exactly
     the kind of check this file is supposed to be immune to."""
     out: list[dict] = []
@@ -81,10 +81,10 @@ def main() -> int:
         got = (row or {}).get("yahoo_symbol")
         if got != want:
             bad += 1
-            print(f"   ✗ {isin} pinned to {want!r} but the row names {got!r} "
+            print(f"    {isin} pinned to {want!r} but the row names {got!r} "
                   f"— run scripts/apply_symbol_overrides.py")
         else:
-            print(f"   ✓ {isin} -> {want}")
+            print(f"    {isin} -> {want}")
 
     # ── 2. deliberate unmaps are still unmapped ───────────────────────────────
     manual = [r for r in ex.values()
@@ -92,10 +92,10 @@ def main() -> int:
     print(f"\nhand-unmapped rows: {len(manual)}")
     for r in sorted(manual, key=lambda x: x["isin"]):
         if r.get("status") == "not_found" and not r.get("yahoo_symbol"):
-            print(f"   ✓ {r['isin']} {str(r.get('name'))[:40]}")
+            print(f"    {r['isin']} {str(r.get('name'))[:40]}")
         else:
             bad += 1
-            print(f"   ✗ {r['isin']} was unmapped by hand and now reads "
+            print(f"    {r['isin']} was unmapped by hand and now reads "
                   f"status={r.get('status')!r} symbol={r.get('yahoo_symbol')!r} "
                   f"— something re-resolved it")
 
@@ -109,15 +109,15 @@ def main() -> int:
     print(f"\nquote currencies in use: {len(used)}")
     for c, n in sorted(used.items(), key=lambda kv: -kv[1]):
         base, div = SUBUNIT.get(c, (c, 1.0))
-        # ⚠ EUR IS THE BASE, SO IT HAS NO `fx_rate` ROW AND NEVER WILL. Without this the check
+        #  EUR Is the base, so it has no `fx_rate` ROW AND NEVER WILL. Without this the check
         # reports the second-largest currency in the book as unpriceable — a false alarm on 1,481
         # rows, which is how a check stops being read.
         if base == "EUR" or base in have:
             note = f"(minor unit -> {base} / {div:g})" if div != 1.0 else ""
-            print(f"   ✓ {c:<5} {n:>5} row(s) {note}")
+            print(f"    {c:<5} {n:>5} row(s) {note}")
         else:
             bad += 1
-            print(f"   ✗ {c:<5} {n:>5} row(s) — no `fx_rate` row for {base!r} and no SUBUNIT "
+            print(f"    {c:<5} {n:>5} row(s) — no `fx_rate` row for {base!r} and no SUBUNIT "
                   f"entry. Every one of these prices at NOTHING, or at the wrong scale.")
 
     print(f"\n{'OK — every mapping decision is in force' if not bad else f'{bad} problem(s)'}")

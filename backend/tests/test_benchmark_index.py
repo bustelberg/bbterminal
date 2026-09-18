@@ -120,7 +120,7 @@ class TestSplitFactorFromJumpsAlone:
     split evidence has to travel with the marks, because our stored closes are not split-adjusted
     and two bare prices cannot tell KLA's 9:1 from an -89% year.
 
-    ⚠ IT TAKES CONSECUTIVE BARS ONLY, AND THAT IS THE ENTIRE SAFETY PROPERTY — see the docstring.
+     IT TAKES CONSECUTIVE BARS ONLY, AND THAT IS THE ENTIRE SAFETY PROPERTY — see the docstring.
     """
 
     def test_a_real_split_is_recognised(self):
@@ -148,7 +148,7 @@ class TestSplitFactorFromJumpsAlone:
         assert f is not None and abs(f - 0.125) < 1e-12
 
     def test_a_stock_that_doubles_over_a_WINDOW_is_not_a_split(self):
-        """⚠ THE FAILURE THIS FUNCTION'S CONTRACT EXISTS TO PREVENT. Handing it the window's two
+        """ THE FAILURE THIS FUNCTION'S CONTRACT EXISTS TO PREVENT. Handing it the window's two
         ENDPOINTS instead of consecutive bars turns the test into a test of the RETURN: a name up
         100% gives exactly 2.0, matches the 1:2 whitelist to 0%, and its gain is 'corrected' away.
         The value below IS a match — which is why only consecutive bars may ever be passed in, and
@@ -168,7 +168,7 @@ class TestSplitFactorFromJumpsAlone:
 
 
 class TestTheCapColumnCarriesItsOwnProvenance:
-    """⚠ THE Mkt cap COLUMN DOES NOT EXPLAIN THE Weight COLUMN, AND THE ROW HAS TO SAY SO.
+    """ THE Mkt cap COLUMN DOES NOT EXPLAIN THE Weight COLUMN, AND THE ROW HAS TO SAY SO.
 
     Every other cell on a constituent row is arithmetic a reader can follow — Start and Now give
     YTD (local), the two FX legs give YTD (€) — so the obvious next step is `cap ÷ Σcap = Weight`.

@@ -14,7 +14,7 @@ import LangSwitch from './LangSwitch';
 import { claimLangFor, useLang } from '../../lib/i18n';
 import { purgeLegacySessions } from '../../lib/purgeLegacySessions';
 
-// ⚠⚠ NO `label` HERE — the name of a page is COPY and lives in `sidebarCopy.ts`, keyed by href.
+//  NO `label` HERE — the name of a page is COPY and lives in `sidebarCopy.ts`, keyed by href.
 // This file owns the ORDER, the sections and the visibility rules, none of which is a language.
 // `NavKey` is what ties the two together: a nav entry whose href has no label will not compile.
 type NavItem = { href: NavKey };
@@ -32,11 +32,11 @@ const navItems: NavEntry[] = [
   { href: '/' },
   // The AIRS books, their models and the analysis built on them.
   { href: '/management-dashboard' },
-  // ⚠ BESIDE THE DASHBOARD. It is a reading tool rather than a pipeline tool: two companies'
+  //  Beside the dashboard. It is a reading tool rather than a pipeline tool: two companies'
   // fundamentals side by side, off the same view the Fundamental button opens. Filed with the
   // one-off admin tools near the bottom it would read as one of them.
   { href: '/research-dashboard' },
-  // ⚠ NEAR THE TOP, NOT NEAR THE BOTTOM (moved up 2026-08-13; Research Dashboard came in above it
+  //  Near the top, not near the bottom (moved up 2026-08-13; Research Dashboard came in above it
   // on 2026-08-19, so it is no longer literally second). It is the page that answers "is the data
   // behind everything else current" — the scheduled strategies, the pipeline, and now every
   // automatic job — so it is checked FIRST when a number looks wrong. Fifteen entries down, beside
@@ -69,7 +69,7 @@ const navItems: NavEntry[] = [
 ];
 
 
-// ⚠ `/auth/confirm` BELONGS HERE AND WAS MISSING. It is a signed-out page like the other two —
+//  `/auth/confirm` BELONGS HERE AND WAS MISSING. It is a signed-out page like the other two —
 // the whole point is that nobody is authenticated on it yet — so the rail rendered beside it,
 // which on a phone meant the mobile top bar sat above a card whose only control is one button.
 const AUTH_PAGES = ['/login', '/set-password', '/auth/confirm', '/mfa'];
@@ -99,7 +99,7 @@ type Props = {
 };
 
 export default function Sidebar({ initialUser }: Props) {
-  // ⚠ THE SHARED PREFERENCE, NOT A LOCAL ONE — `useLang` is an external store, so this switch
+  //  The shared preference, not a local one — `useLang` is an external store, so this switch
   // and any open modal read the same value and move together. See `lib/i18n`.
   const [lang, setLang] = useLang();
   // The sidebar's own chrome — the account block at the foot and this switch's own label. Reads
@@ -117,7 +117,7 @@ export default function Sidebar({ initialUser }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [viewAsUser, setViewAsUser] = useState(false);
   // Which collapsible nav sections are expanded. Universe Overview starts open.
-  // ⚠ KEYED BY HREF, NOT BY LABEL. The label is now translated, so a language flip would change
+  //  Keyed by href, not by label. The label is now translated, so a language flip would change
   // the key and silently collapse (or re-open) whatever the reader had set. An href does not move.
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set(['/universe']));
   // Mobile nav: off-canvas drawer on < lg, static rail on lg+.
@@ -125,7 +125,7 @@ export default function Sidebar({ initialUser }: Props) {
 
 
   /**
-   * ⚠⚠ THE LANGUAGE IS CLAIMED FROM THE SERVER-RESOLVED IDENTITY, BEFORE ANY NETWORK CALL. The
+   *  The language is claimed from the server-resolved identity, before any network call. The
    * claim below in `refresh()` sits behind `await supabase.auth.getUser()`, and on the first load
    * after this rule shipped that meant: paint the whole app in the previous reader's language,
    * wait out a Supabase round trip (100 ms to a couple of SECONDS locally), then repaint every
@@ -136,7 +136,7 @@ export default function Sidebar({ initialUser }: Props) {
    * it is known at FIRST RENDER. Claiming here collapses the repaint into hydration, which is the
    * corrected paint `lib/i18n.ts` already documents and accepts.
    *
-   * ⚠ NON-NULL ONLY. A null `initialUser` is not proof of being signed out — it is also the
+   *  Non-null only. A null `initialUser` is not proof of being signed out — it is also the
    * transient race `refresh()` exists to absorb — and claiming for `null` here would wipe a live
    * reader's choice on any load where the server cookie read lost that race. The signed-out claim
    * stays in the two branches below that actually know.
@@ -146,12 +146,12 @@ export default function Sidebar({ initialUser }: Props) {
   }, [initialUser]);
 
   /**
-   * ⚠ THE RETIRED SWITCHER'S REFRESH TOKENS, CLEARED ON EVERY LOAD. Deleting the feature left
+   *  The retired switcher's refresh tokens, cleared on every load. Deleting the feature left
    * them sitting in `localStorage` in every browser that had used it — valid, invisible, and
    * reachable by anything on the origin. The Sidebar mounts in the root layout, so this is the
    * one place that runs on every authenticated page. See `lib/purgeLegacySessions`.
    *
-   * ⚠ NOT GATED ON THE USER. It has nothing to do with who is signed in, and the browsers most
+   *  Not gated on the user. It has nothing to do with who is signed in, and the browsers most
    * likely to be carrying stale tokens are the ones where nobody is.
    */
   useEffect(() => { purgeLegacySessions(); }, []);
@@ -164,7 +164,7 @@ export default function Sidebar({ initialUser }: Props) {
     // We use it to decide whether a null `getUser()` should clear the
     // sidebar or be ignored as a transient race.
     async function refresh(event: string | null = null) {
-      // ⚠ `getUser()` ALONE NOW. The parallel `getSession()` existed only to hand raw tokens to
+      //  `getUser()` ALONE NOW. The parallel `getSession()` existed only to hand raw tokens to
       // the account switcher's store; with that gone, the sidebar needs an identity and never the
       // credentials behind it — so this no longer reads them at all.
       const { data: { user } } = await supabase.auth.getUser();
@@ -172,10 +172,10 @@ export default function Sidebar({ initialUser }: Props) {
       if (user?.email) {
         // Got a real user — adopt it as the live state.
         setEmail(user.email);
-        // ⚠⚠ THE LANGUAGE FOLLOWS THE ACCOUNT, NOT THE BROWSER PROFILE. `bb:lang` defaults to `nl`
+        //  The language follows the account, not the browser profile. `bb:lang` defaults to `nl`
         // only when NOTHING is stored, and the only thing that ever stores it is somebody pressing
         // the switch — so a new user signing up on a machine where an earlier account pressed EN
-        // read English, having chosen nothing. ⚠ CALLED ONLY IN THE THREE BRANCHES THAT KNOW THE
+        // read English, having chosen nothing.  CALLED ONLY IN THE THREE BRANCHES THAT KNOW THE
         // ANSWER, never on the transient-null fall-through below: claiming for `null` there would
         // wipe a live reader's choice on every duplicate-tab token refresh.
         claimLangFor(user.email);
@@ -236,7 +236,7 @@ export default function Sidebar({ initialUser }: Props) {
   async function handleSignOut() {
     const supabase = createClient();
     await supabase.auth.signOut();
-    // ⚠ Belt and braces with the mount-time purge: signing out is the one moment somebody is
+    //  Belt and braces with the mount-time purge: signing out is the one moment somebody is
     // deliberately leaving the browser, so it is the last chance to take the retired switcher's
     // refresh tokens with them.
     purgeLegacySessions();
@@ -475,7 +475,7 @@ export default function Sidebar({ initialUser }: Props) {
         </div>
       )}
       <div className="p-3 border-t border-neutral-800/60 space-y-1">
-        {/* ⚠ THE ACCOUNT SWITCHER IS GONE (2026-09-08, on request) — the whole impersonation
+        {/*  THE ACCOUNT SWITCHER IS GONE (2026-09-08, on request) — the whole impersonation
             feature went with `POST /api/auth/impersonate`, and this menu was its only entry point.
             What is left is the one thing it also did: say who you are signed in as. Promotion and
             demotion live on /users; previewing the non-admin UI is the "View as regular user"
@@ -492,7 +492,7 @@ export default function Sidebar({ initialUser }: Props) {
             )}
           </div>
         )}
-        {/* ⚠ IN THE ACCOUNT BLOCK, NOT IN `navItems`. It is a property of the READER rather than
+        {/*  IN THE ACCOUNT BLOCK, NOT IN `navItems`. It is a property of the READER rather than
             a page of the app — same argument as the language switch below it — and the main nav is
             ordered by what the terminal DOES. It also keeps `NavKey` for pages that appear there. */}
         {email && (
@@ -504,7 +504,7 @@ export default function Sidebar({ initialUser }: Props) {
             {t.security}
           </Link>
         )}
-        {/* ⚠⚠ GLOBAL, AND THAT IS A DELIBERATE TRADE (2026-08-21, on request). It sets ONE
+        {/*  GLOBAL, AND THAT IS A DELIBERATE TRADE (2026-08-21, on request). It sets ONE
             stored preference (`lib/i18n`), so flipping it here also changes the Fundamental modal
             opened from anywhere — which is the point: a language is a property of the reader, not
             of a screen. The cost is that it sits above pages that are NOT translated yet, where

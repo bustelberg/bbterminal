@@ -7,7 +7,7 @@ WHY THIS EXISTS
     (and one read 0%) purely because nobody had fetched them. This closes that gap for the
     companies that matter: the ones held by a live book.
 
-⚠ THREE INGESTS, AND RUNNING ONLY SOME IS WHAT MAKES A CHART LOOK BROKEN. Financials (the
+ THREE INGESTS, AND RUNNING ONLY SOME IS WHAT MAKES A CHART LOOK BROKEN. Financials (the
     statements), analyst estimates (forward EPS, the owner-earnings estimate) and indicators
     (per-key series such as forward P/E) are THREE separate GuruFocus calls, and a company can
     have any one without the others. Measured 2026-07-23: fetching financials alone for 156
@@ -16,7 +16,7 @@ WHY THIS EXISTS
     `indicator_q_forward_pe_ratio`. The suite fills in AROUND the panels that cannot, which reads
     as a bug in the charts rather than as data nobody fetched.
 
-⚠ A NAMED SET, NEVER THE WHOLE TABLE. 2,776 companies at ~3 calls each would spend a large slice
+ A NAMED SET, NEVER THE WHOLE TABLE. 2,776 companies at ~3 calls each would spend a large slice
     of the monthly quota on names nothing looks at. Two sets are worth it, and both are opt-in:
       * the HELD set (default) — ~177 companies, every one of them on a screen;
       * `--universe SP500` — the index's members, so the Long Equity BENCHMARK line describes the
@@ -24,16 +24,16 @@ WHY THIS EXISTS
         fundamentals, so the benchmark's cap-weighted margin was an average over 18% of the index,
         drawn in the same ink as the portfolio's own line beside it.
 
-⚠ IT IS THE QUOTA THAT DECIDES WHETHER A UNIVERSE IS AFFORDABLE, SO CHECK THE DRY RUN FIRST. An
+ IT IS THE QUOTA THAT DECIDES WHETHER A UNIVERSE IS AFFORDABLE, SO CHECK THE DRY RUN FIRST. An
     index backfill is ~3 calls x the missing members (SP500: ~411 x 3 ≈ 1,233), which is a real
     fraction of a month. `--limit` exists to spend it in tranches across days rather than
     discovering the ceiling halfway through.
 
-⚠ IT SKIPS EXCHANGES OUTSIDE THE SUBSCRIPTION RATHER THAN 403-ing THROUGH THEM. LSE, ASX and the
+ IT SKIPS EXCHANGES OUTSIDE THE SUBSCRIPTION RATHER THAN 403-ing THROUGH THEM. LSE, ASX and the
     rest return "unsubscribed" — the call is spent and nothing comes back. `is_gf_subscribed_exchange`
     is the same gate the rest of the pipeline uses.
 
-⚠ AND IT CHECKS THE BUDGET BEFORE IT STARTS. `remaining_budget` is per region; a region at zero
+ AND IT CHECKS THE BUDGET BEFORE IT STARTS. `remaining_budget` is per region; a region at zero
     means the month's quota is gone and every further call is wasted.
 
     cd backend && uv run python scripts/ingest_held_financials.py            # dry run, held set
@@ -54,7 +54,7 @@ import deps  # noqa: E402, F401
 from deps import supabase  # noqa: E402
 from ingest.api_usage import remaining_budget  # noqa: E402
 
-# ⚠ THE SENTINELS, THE SUBSCRIPTION GATE AND THE THREE-CALL SEQUENCE LIVE IN ONE PLACE, shared with
+#  The sentinels, the subscription gate and the three-call sequence live in one place, shared with
 # the /benchmarks table's per-row and fill-all buttons. They were inline here first; a second copy
 # is how one caller quietly goes back to fetching two feeds.
 from routers._fundamental_backfill import (  # noqa: E402
@@ -67,7 +67,7 @@ from routers._fundamental_backfill import (  # noqa: E402
 def _universe_company_ids(label: str) -> list[int]:
     """Every company in a universe, by label ("SP500", "ACWI", …).
 
-    ⚠ A SECOND SOURCE FOR THE SAME WORK, NOT A SECOND SCRIPT. The held set and an index are two
+     A SECOND SOURCE FOR THE SAME WORK, NOT A SECOND SCRIPT. The held set and an index are two
     answers to "which companies matter"; everything after this point — the three sentinels, the
     subscription gate, the budget check, the per-row log — is identical, and a forked copy would
     be one more place for the three-ingests trap to be got wrong.
@@ -78,7 +78,7 @@ def _universe_company_ids(label: str) -> list[int]:
         raise SystemExit(f"  no universe labelled {label!r}")
     uid = uni[0]["universe_id"]
     rows, off = [], 0
-    while True:                       # ⚠ paged: 500+ members is past PostgREST's silent 1,000 cap
+    while True:                       #  paged: 500+ members is past PostgREST's silent 1,000 cap
         page = (supabase.table("universe_membership").select("company_id")
                 .eq("universe_id", uid).order("company_id")
                 .range(off, off + 999).execute().data or [])
@@ -132,7 +132,7 @@ def main() -> int:
     for n, c in enumerate(work, 1):
         ex = ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code")
         label = f"{ex}:{c['gurufocus_ticker']}"
-        # ⚠ THE SAME FUNCTION THE /benchmarks BUTTON CALLS. It never raises — a failure comes back
+        #  The same function the /benchmarks BUTTON CALLS. It never raises — a failure comes back
         # on the row — so this loop keeps the per-company reporting it always had while the
         # three-call sequence lives in one place.
         r = ingest_company(c)

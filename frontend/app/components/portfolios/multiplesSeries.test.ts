@@ -10,7 +10,7 @@ const m = (metric_code: string, target_date: string, numeric_value: number | nul
 const d = (iso: string) => new Date(`${iso}T00:00:00Z`).getTime();
 
 describe('ttm — the rolling four quarters', () => {
-  // ASML's real 2024 quarters. ⚠ Verified against the annual row BEFORE this was written: the
+  // ASML's real 2024 quarters.  Verified against the annual row BEFORE this was written: the
   // four sum to 23.08, which is exactly `annuals__…__Free Cash Flow per Share` for 2024. Had the
   // vendor been publishing year-to-date cumulatives, summing would have counted Q1 four times.
   const q2024 = [
@@ -32,7 +32,7 @@ describe('ttm — the rolling four quarters', () => {
     expect(ttm(q2024)[0].value).toBeLessThan(q2024.reduce((s, q) => s + Math.max(q.value, 0), 0));
   });
 
-  it('⚠ refuses to sum across a missing quarter', () => {
+  it(' refuses to sum across a missing quarter', () => {
     // Four consecutive ROWS are not four consecutive QUARTERS. Spanning the hole would report
     // nine months as a year — low, and indistinguishable from a bad year.
     const gapped = [
@@ -57,7 +57,7 @@ describe('ttm — the rolling four quarters', () => {
 describe('reportedAt — no look-ahead', () => {
   const fy = [{ date: '2015-12-31', value: 10 }, { date: '2016-12-31', value: 12 }];
 
-  it('⚠ a fiscal year is NOT usable on the day it ends', () => {
+  it(' a fiscal year is NOT usable on the day it ends', () => {
     // GuruFocus stamps the row 2015-12-31; ASML published it in late January. Priced on 5 Jan the
     // multiple would use a number the market did not have, and the whole series would look
     // cleverer than anything anyone could have traded.
@@ -94,7 +94,7 @@ describe('trailingMultiples', () => {
     expect(out.map((p) => p.value)).toEqual([10, 12]);
   });
 
-  it('⚠ a non-positive denominator produces NO POINT, never a negative multiple', () => {
+  it(' a non-positive denominator produces NO POINT, never a negative multiple', () => {
     // −20x sorts below every cheap year on any axis and reads as the bargain of the decade.
     expect(trailingMultiples(closes, [{ date: '2015-12-31', value: -4 }])).toEqual([]);
     expect(trailingMultiples(closes, [{ date: '2015-12-31', value: 0 }])).toEqual([]);
@@ -111,7 +111,7 @@ describe('trailingMultiples', () => {
     expect(out.map((p) => [p.price, p.perShare])).toEqual([[100, 10], [120, 10]]);
   });
 
-  it('⚠ the carried per-share is the LAGGED one, not the row stamped at that date', () => {
+  it(' the carried per-share is the LAGGED one, not the row stamped at that date', () => {
     // FY2016 closes 2016-12-31 but is not public until ~75 days later, so a close on 2017-01-05
     // must still divide by — and REPORT — the FY2015 figure. A drill-down that showed the newer
     // number beside the older multiple would look like an arithmetic bug in the chart.
@@ -179,7 +179,7 @@ describe('thin', () => {
     expect(out.length).toBeLessThan(daily.length / 4);
   });
 
-  it('⚠ always keeps the LAST point', () => {
+  it(' always keeps the LAST point', () => {
     // Ending the line days short of today reads, on a valuation chart, as the multiple having
     // stopped moving.
     expect(thin(daily, 7).at(-1)).toEqual(daily.at(-1));
@@ -197,7 +197,7 @@ describe('since', () => {
   });
 });
 
-// ⚠ THE BUG THIS PREVENTS RENDERED AS "disconnected lines and dots". Two independently-sampled
+//  The bug this prevents rendered as "disconnected lines and dots". Two independently-sampled
 // series merged by timestamp share almost no timestamps, so every row holds one value and a null
 // for the other — and `connectNulls={false}`, which is correct for real holes, then joins nothing.
 describe('align — two series, one timeline', () => {
@@ -222,7 +222,7 @@ describe('align — two series, one timeline', () => {
     expect(rows[0].fwd).toBeNull();          // no back-fill — we did not know it yet
   });
 
-  it('⚠ still breaks the line across a REAL gap', () => {
+  it(' still breaks the line across a REAL gap', () => {
     // Weekly sampling, then a two-year hole: the carry must stop, or the chart draws a confident
     // straight line through a period with no observation at all.
     const weekly = Array.from({ length: 8 }, (_, i) => ({ t: d('2024-01-01') + i * 7 * 864e5, value: 20 }));
@@ -235,7 +235,7 @@ describe('align — two series, one timeline', () => {
   });
 
   it('adapts the tolerance to each series\' own sampling rate', () => {
-    // ⚠ The same vendor feed is weekly for one company and quarterly for another. A hardcoded
+    //  The same vendor feed is weekly for one company and quarterly for another. A hardcoded
     // threshold would turn the quarterly one back into dots.
     const quarterly = [0, 91, 182, 273].map((k) => ({ t: d('2024-01-01') + k * 864e5, value: 20 }));
     const rows = align({

@@ -250,7 +250,7 @@ def verify_companies_openfigi(
 
         if idx % 25 == 0 or idx == total:
             emit(f"Verified {idx}/{total} "
-                 f"(✓{result.verified} ⚠{result.mismatch} ?{result.not_found})",
+                 f"({result.verified} {result.mismatch} ?{result.not_found})",
                  idx, total)
 
     emit(f"Done — {result.verified} verified, {result.mismatch} mismatch, "
