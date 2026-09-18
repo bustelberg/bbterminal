@@ -295,6 +295,7 @@ def _is_user_refresh(path: str) -> bool:
 _USER_GET_RESOURCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/momentum/current-picks/\d+$"),
     re.compile(r"^/api/momentum/backtests/\d+$"),
+    re.compile(r"^/api/asset-pipeline/search$"),
 )
 
 

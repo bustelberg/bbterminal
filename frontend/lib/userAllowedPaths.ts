@@ -45,7 +45,7 @@
 // `/account/profile` needs no edit here — and there is nothing under `/account` that could ever be
 // admin-only: it is by definition the reader's own account.
 export const USER_ALLOWED_PATHS: readonly string[] = [
-  '/', '/schedule', '/management-dashboard', '/account', '/mfa', '/forbidden',
+  '/', '/schedule', '/management-dashboard', '/research-dashboard', '/account', '/mfa', '/forbidden',
 ];
 
 /**

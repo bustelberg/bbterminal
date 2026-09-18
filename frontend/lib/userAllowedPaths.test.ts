@@ -11,6 +11,7 @@ describe('isUserAllowedPath', () => {
     expect(isUserAllowedPath('/')).toBe(true)
     expect(isUserAllowedPath('/schedule')).toBe(true)
     expect(isUserAllowedPath('/management-dashboard')).toBe(true)
+    expect(isUserAllowedPath('/research-dashboard')).toBe(true)
     expect(isUserAllowedPath('/account/security')).toBe(true)
     expect(isUserAllowedPath('/forbidden')).toBe(true)
   })
@@ -22,7 +23,7 @@ describe('isUserAllowedPath', () => {
     //  And the removal half is pinned by the cases below. Taking a page away leaves any API path
     // it alone needed open — a permission nobody can see, because it grants no reachable screen.
     expect([...USER_ALLOWED_PATHS].sort()).toEqual([
-      '/', '/account', '/forbidden', '/management-dashboard', '/mfa', '/schedule',
+      '/', '/account', '/forbidden', '/management-dashboard', '/mfa', '/research-dashboard', '/schedule',
     ])
   })
 
@@ -59,7 +60,6 @@ describe('isUserAllowedPath', () => {
     // permissions and only one of them was revoked.
     expect(isUserAllowedPath('/earnings')).toBe(false)
     expect(isUserAllowedPath('/earnings/123')).toBe(false)
-    expect(isUserAllowedPath('/research-dashboard')).toBe(false)
   })
 
   it('blocks admin-only pages', () => {
