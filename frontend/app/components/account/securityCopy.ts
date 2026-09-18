@@ -5,13 +5,13 @@ import { useLang, type Lang } from '../../../lib/i18n';
 /**
  * `/account/security` — every string on the two-factor page.
  *
- * ⚠⚠ TRANSLATED RATHER THAN LEFT ON THE UNTRANSLATED PILE, and that is a deliberate exception to
+ *  Translated rather than left on the untranslated pile, and that is a deliberate exception to
  * "new surfaces catch up later". This is the one screen where a reader is asked to do something
  * irreversible to their own access, following instructions, while holding a phone. A half-English
  * security flow is where people give up half way — and an abandoned enrolment is not a neutral
  * outcome here: it leaves an unverified factor against the cap (see `mfaFactors.unverifiedIds`).
  *
- * ⚠ ENGLISH IS THE SOURCE, Dutch is translated from it — same rule as every other copy module,
+ *  English is the source, Dutch is translated from it — same rule as every other copy module,
  * and `SecurityCopy` makes a forgotten Dutch string a compile error rather than a blank line.
  */
 export type SecurityCopy = {
@@ -45,7 +45,7 @@ export type SecurityCopy = {
   removeConfirm: string;
   removing: string;
   removed: string;
-  /** ⚠ Shown BEFORE anyone scans, when this machine's clock is out. See `clockWarning`. */
+  /**  Shown BEFORE anyone scans, when this machine's clock is out. See `clockWarning`. */
   clockWarning: (seconds: number, ahead: boolean) => string;
   /** The `/mfa` gate — a different screen, same feature, so one copy module. */
   challenge: {
@@ -106,7 +106,7 @@ const EN: SecurityCopy = {
   },
 };
 
-/** ⚠ TRANSLATED FROM THE ENGLISH ABOVE, never authored here. */
+/**  TRANSLATED FROM THE ENGLISH ABOVE, never authored here. */
 const NL: SecurityCopy = {
   title: 'Tweestapsverificatie',
   intro: 'Voeg een authenticator-app toe, zodat inloggen je wachtwoord én een code van je telefoon '

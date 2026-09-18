@@ -6,7 +6,7 @@ portfolio's name. Filtering the correlation matrix to ONE profile is what makes 
 comparable: "how correlated are my Neutraal products with each other" is a question about the
 line, not about the risk level, and it can only be asked once the risk level is held constant.
 
-⚠ THE ORDER OF THE RULES IS THE WHOLE THING. "bep offensief" CONTAINS "offensief".
+ THE ORDER OF THE RULES IS THE WHOLE THING. "bep offensief" CONTAINS "offensief".
 
     BUS_Bep_offensief_FX   normalises to  "bus bep offensief fx"
 
@@ -14,7 +14,7 @@ line, not about the risk level, and it can only be asked once the risk level is 
     that portfolio is classified Offensief — it lands in the wrong filter, correlates against the
     wrong peers, and nothing anywhere says so.
 
-    ⚠⚠ AND IT IS THE KIND OF BUG A REASONABLE TEST MISSES. Measured 2026-07-16 across the five
+     AND IT IS THE KIND OF BUG A REASONABLE TEST MISSES. Measured 2026-07-16 across the five
     Beperkt-Offensief models, the wrong order misclassifies exactly ONE:
 
         BUS_Bep_offensief_FX   -> Offensief          *** wrong ***
@@ -27,7 +27,7 @@ line, not about the risk level, and it can only be asked once the risk level is 
     would conclude the ordering does not matter. Same shape as EBIT-vs-Operating-Income, where
     Apple's two figures are identical and Mitsui's are not.
 
-⚠ THE NAME IS READ BEFORE THE DESCRIPTION, AND THAT IS NOT A STYLE CHOICE.
+ THE NAME IS READ BEFORE THE DESCRIPTION, AND THAT IS NOT A STYLE CHOICE.
     The description spells the profile out in Dutch and looks like the friendlier source — but it
     is prose, and prose has typos. `TOPS_OFF_BEH`'s description reads "Toppenberg beheer
     **offenisef**". Description-first loses that portfolio to `None`; the name's `OFF` token
@@ -36,7 +36,7 @@ line, not about the risk level, and it can only be asked once the risk level is 
     The description is still worth reading second: it is what rescues a name with no profile token
     at all, if one ever appears.
 
-⚠ `None` IS AN ANSWER, NOT A FAILURE. 8 of the 42 have no risk profile because they ARE not
+ `None` IS AN ANSWER, NOT A FAILURE. 8 of the 42 have no risk profile because they ARE not
     offered at one — the themed TopSelectie funds (Azië, Momentum, Alternatives), the WTS
     thematics (Dividend, Duurzaam, Familie), and Risicodragend/Risicomijdend, which are a
     DIFFERENT axis entirely (risk-bearing vs risk-avoiding is not one of the four profiles, and
@@ -52,7 +52,7 @@ VARIANTS: tuple[str, ...] = ("Offensief", "Beperkt Offensief", "Neutraal", "Defe
 
 _SEP = re.compile(r"[^a-z0-9]+")
 
-# ⚠ ORDERED. Beperkt Offensief MUST be tested before Offensief — see the module docstring.
+#  ORDERED. Beperkt Offensief MUST be tested before Offensief — see the module docstring.
 _RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Every spelling AIRS actually uses, measured: `Bep_offensief` (two tokens), `BEPOF`,
     # `Bepoff`, `BEPOFF` and — alone among them — `BEOFF` (TOPS_BEOFF_BEH, no `p`).

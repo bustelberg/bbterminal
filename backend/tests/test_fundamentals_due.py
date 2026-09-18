@@ -3,11 +3,11 @@
 The detector behind the "Refresh fundamentals" prompt. It is pure — no database, no clock — so
 every case below is a statement about the arithmetic rather than about a fixture.
 
-⚠ THE ANCHOR CASE IS REAL, NOT INVENTED. On 2026-08-11 our `metric_data` held ASML through
+ THE ANCHOR CASE IS REAL, NOT INVENTED. On 2026-08-11 our `metric_data` held ASML through
 2026-03-31 while GuruFocus had 2026-06 (verified against the live API: Revenue 9,326.5, EPS 7.58).
 The detector must flag exactly that, and say it has been expected since 25 July.
 
-⚠ AND THE FLEET-WIDE SHAPE IS REAL TOO: 1,423 companies sat at 2026-03-31 with 23 already at
+ AND THE FLEET-WIDE SHAPE IS REAL TOO: 1,423 companies sat at 2026-03-31 with 23 already at
 2026-06-30. A detector that flagged everything, or nothing, would be indistinguishable from those
 numbers at a glance — which is why the boundary cases below are pinned individually.
 """
@@ -36,7 +36,7 @@ class TestTheAnchorCase:
         assert period_due(QUARTERLY, date(2026, 7, 24)) is None
 
     def test_the_boundary_day_IS_due(self):
-        # ⚠ `>=`, NOT `>`. An off-by-one here costs a day of staleness on every company, every
+        #  `>=`, NOT `>`. An off-by-one here costs a day of staleness on every company, every
         # quarter — invisible individually and a day late fleet-wide.
         assert period_due(QUARTERLY, date(2026, 7, 25)) is not None
 
@@ -49,7 +49,7 @@ class TestAPeriodStillRunningIsNotLate:
         assert period_due(QUARTERLY, date(2026, 5, 1)) is None
 
     def test_an_annual_filer_is_not_chased_all_year(self):
-        # ⚠ THE CASE THE `nxt > today` GUARD EXISTS FOR. FY2026 ends 31 Dec; without the guard,
+        #  The case the `nxt > today` GUARD EXISTS FOR. FY2026 ends 31 Dec; without the guard,
         # `due_since` (31 Dec + 25) is also in the future and the None comes out for the right
         # reason by luck. Pinned so a refactor cannot drop the check and still pass.
         annual = ["2022-12-31", "2023-12-31", "2024-12-31", "2025-12-31"]
@@ -60,7 +60,7 @@ class TestAPeriodStillRunningIsNotLate:
 
 
 class TestMonthArithmeticNotDayArithmetic:
-    """⚠ A 91-DAY "QUARTER" ADDED TO 2025-12-31 GIVES 2026-04-01 — not a fiscal period end, and
+    """ A 91-DAY "QUARTER" ADDED TO 2025-12-31 GIVES 2026-04-01 — not a fiscal period end, and
     one day of drift compounding through the year. Periods end at month ends; advance by months."""
 
     def test_december_to_march(self):
@@ -93,7 +93,7 @@ class TestTheCadenceIsTheCompanySOwn:
                                      date(2025, 12, 31)]) == 12
 
     def test_a_semi_annual_filer_is_not_chased_every_quarter(self):
-        """⚠ HARDCODING 3 WOULD MARK EVERY NON-US FILER PERMANENTLY OVERDUE. Semi-annual reporting
+        """ HARDCODING 3 WOULD MARK EVERY NON-US FILER PERMANENTLY OVERDUE. Semi-annual reporting
         is normal outside the US; the prompt would never clear and would teach the reader to
         ignore it."""
         semi = ["2024-06-30", "2024-12-31", "2025-06-30", "2025-12-31"]
@@ -126,7 +126,7 @@ class TestItRefusesRatherThanGuesses:
         assert period_due([], date(2026, 8, 11)) is None
 
     def test_duplicate_dates_are_not_a_zero_gap(self):
-        """⚠ metric_data has one row per (metric, period), so a caller passing raw target_dates
+        """ metric_data has one row per (metric, period), so a caller passing raw target_dates
         hands this the same date dozens of times. Deduping is what stops the median gap collapsing
         to 0 and the cadence snapping to 3 for everyone."""
         noisy = ["2025-12-31"] * 40 + ["2025-06-30"] * 40 + ["2024-12-31"] * 40

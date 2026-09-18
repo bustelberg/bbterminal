@@ -68,7 +68,7 @@ router = APIRouter(tags=["asset-pipeline"])
 # Apple and CSX (cached, old shape) charted nothing while Mitsui (fresh, new shape) was
 # fine. Try both; the field name inside is `Revenue` either way.
 #
-# ⚠ The same schema change is a LATENT BUG in `ingest/earnings/financials.py`, which
+#  The same schema change is a LATENT BUG in `ingest/earnings/financials.py`, which
 # derives its `metric_code`s from these section names: a re-fetched company now writes
 # `annuals__income_statement__Revenue` where the constants (and the /earnings dashboard)
 # expect `annuals__Income Statement__Revenue`. Not this module's to fix — see TODO.md.
@@ -83,11 +83,11 @@ _SECTIONS = ("income_statement", "Income Statement")
 # "Cash Flow Depreciation, Depletion and Amortization", identical in value to the income
 # statement's D&A. With sections explicit, a line can no longer be picked up from the
 # wrong statement by accident.
-# A SECOND SOURCE. Everything above comes from the `financials` blob (reported history);
+# A second source. Everything above comes from the `financials` blob (reported history);
 # forward estimates come from `stock/{sym}/analyst_estimate` — a different endpoint, a
 # different shape, and FUTURE dates.
 #
-# ⚠ SINGULAR. `stock/{sym}/analyst_estimates` (plural) is one of the endpoints that LOOKS
+#  SINGULAR. `stock/{sym}/analyst_estimates` (plural) is one of the endpoints that LOOKS
 # real — GuruFocus 200s on it and returns the router-fallback payload — exactly like
 # `dividend` vs `dividends`. `gurufocus_api.json` pins both verdicts.
 #
@@ -109,7 +109,7 @@ _SECTION_ALIASES: dict[str, tuple[str, ...]] = {
     # is FX-converted, which is why that registry bans ratios ("13.3% in EUR"). `_series` is
     # unit-agnostic — it reads numbers off an axis — so the two concerns stay apart.
     #
-    # ⚠ BOTH SPELLINGS, ALWAYS, AND THE OLD ONE IS NOT THE NEW ONE TITLE-CASED.
+    #  Both spellings, always, and the old one is not the new one title-cased.
     # GuruFocus renamed these sections and Storage holds blobs from before and after. Every name
     # on the right was READ OFF A REAL CACHED BLOB — two of them are not what mechanical
     # title-casing predicts, and guessing produced a chart that was silently EMPTY rather than an
@@ -172,7 +172,7 @@ _ITEMS: dict[str, dict[str, str]] = {
     # to be identical (133,050 both), which is precisely how you talk yourself into the
     # wrong field.
     "ebit": {"label": "EBIT", "field": "EBIT", "phrase": "EBIT"},
-    # REPORTED NEGATIVE — it is an outflow. Apple -3,933; JPMorgan -101,350; Mitsui
+    # Reported negative — it is an outflow. Apple -3,933; JPMorgan -101,350; Mitsui
     # Chemicals -14,702. We chart it as GuruFocus reports it and do NOT flip the sign:
     # a silent sign-flip is exactly the kind of "helpful" transform that makes a number
     # disagree with the source it claims to come from. The UI says which way it points.
@@ -188,7 +188,7 @@ _ITEMS: dict[str, dict[str, str]] = {
     },
     # Present in EVERY industry template, including the bank one — JPMorgan reports
     # Pretax Income 75,081 while having no EBIT and no gross profit at all. It is also
-    # NOT EBIT: EBIT is before interest, pretax is after it (Mitsui Chemicals FY2026:
+    # Not ebit: ebit is before interest, pretax is after it (Mitsui Chemicals FY2026:
     # EBIT 85,035 vs Pretax 68,608 — the gap is the interest bill).
     "pretax_income": {
         "label": "Pretax income", "field": "Pretax Income",
@@ -202,7 +202,7 @@ _ITEMS: dict[str, dict[str, str]] = {
         "label": "Income tax", "field": "Tax Provision",
         "phrase": "income tax",
     },
-    # THE BOTTOM LINE ATTRIBUTABLE TO SHAREHOLDERS. GuruFocus carries several "Net
+    # The bottom line attributable to shareholders. GuruFocus carries several "Net
     # Income" lines and they are NOT interchangeable:
     #
     #     Mitsui Chemicals FY2025:  pretax 68,608 + tax -21,698 = 46,910
@@ -232,7 +232,7 @@ _ITEMS: dict[str, dict[str, str]] = {
         "label": "D&A", "field": "Depreciation, Depletion and Amortization",
         "phrase": "depreciation & amortization",
     },
-    # PER SHARE, not millions — the first item that isn't. Apple 7.46 USD/share; JPMorgan
+    # Per share, not millions — the first item that isn't. Apple 7.46 USD/share; JPMorgan
     # 20.02; Mitsui Chemicals 91.62 JPY/share. It ties out: Apple's net income 112,010M ÷
     # 15,004.697M diluted shares = 7.46. Still a CURRENCY amount, so the EUR conversion is
     # correct; only the scale and the axis label change. Present in every template, banks
@@ -241,11 +241,11 @@ _ITEMS: dict[str, dict[str, str]] = {
         "label": "EPS (diluted)", "field": "EPS (Diluted)",
         "phrase": "diluted EPS", "unit": _UNIT_PER_SHARE,
     },
-    # THE FIRST LINE FROM A DIFFERENT STATEMENT — it lives in the CASHFLOW section, not
+    # The first line from a different statement — it lives in the CASHFLOW section, not
     # the income statement, hence `section`. Every item before this one was implicitly
     # income-statement.
     #
-    # ITS SIGN IS NOT A CONVENTION, IT IS THE ANSWER. Apple +111,482; JPMorgan -147,782.
+    # Its sign is not a convention, it is the answer. Apple +111,482; JPMorgan -147,782.
     # A bank's operating cash flow routinely goes NEGATIVE as loans and trading assets
     # grow — that is what a bank looks like, not a bug and not an outflow-convention like
     # interest expense. So it is NOT in the frontend's NEGATIVE_BY_CONVENTION set: we
@@ -305,7 +305,7 @@ _ITEMS: dict[str, dict[str, str]] = {
     # bank. And summing them (the total_debt mode) would double-count anyone carrying both
     # — which is exactly why `combine` is explicit rather than implied by `fields`.
     #
-    # ⚠ NOT "Cash, Cash Equivalents, Marketable Securities", which is a DIFFERENT and much
+    #  NOT "Cash, Cash Equivalents, Marketable Securities", which is a DIFFERENT and much
     # larger number (Apple: 54,697 against cash-only 35,934). "Cash and equivalents" means
     # the narrow line; the broad one is a separate concept and deserves its own column if
     # anyone wants it.
@@ -317,7 +317,7 @@ _ITEMS: dict[str, dict[str, str]] = {
         ],
         "phrase": "cash and equivalents", "section": "balance", "combine": "first",
     },
-    # THE SHAREHOLDERS' line — the exact same trap as `net_income`, one statement over.
+    # The shareholders' line — the exact same trap as `net_income`, one statement over.
     # GuruFocus carries BOTH, and they are not interchangeable:
     #
     #     Mitsui Chemicals:  Total Stockholders Equity   864,727   <- the SHAREHOLDERS'
@@ -337,14 +337,14 @@ _ITEMS: dict[str, dict[str, str]] = {
     # the EUR conversion: "15,004.697 million shares ÷ 1.17 EUR/USD" is not a quantity.
     # The modal renders ONE chart for it, not the usual native+EUR pair.
     #
-    # DILUTED AVERAGE — the same basis as `eps_diluted`, which is what makes the two tie:
+    # Diluted average — the same basis as `eps_diluted`, which is what makes the two tie:
     # Apple 7.46 x 15,004.697 = 111,935 ≈ net income 112,010 (the gap is diluted-vs-basic
     # rounding). GuruFocus publishes no other share count in the financials blob.
     "shares_outstanding": {
         "label": "Shares out.", "field": "Shares Outstanding (Diluted Average)",
         "phrase": "shares outstanding", "unit": _UNIT_SHARES,
     },
-    # THE FIRST FORECAST, and the first line from a SOURCE other than `financials`:
+    # The first forecast, and the first line from a SOURCE other than `financials`:
     # `stock/{sym}/analyst_estimate` (SINGULAR — the plural is the router fallback).
     #
     # These are analyst CONSENSUS estimates, not reported results. Apple: FY2026-09 8.76,
@@ -405,7 +405,7 @@ _ITEMS: dict[str, dict[str, str]] = {
                  "series, so there is nothing to chart. It is a forecast of the growth "
                  "RATE, not of earnings."),
     },
-    # ⚠ DO NOT add "Tax Rate %", "Gross Margin %", "Debt-to-Equity" or any other RATIO to
+    #  Do not add "Tax Rate %", "Gross Margin %", "Debt-to-Equity" or any other RATIO to
     # this registry.
     # A `unit` fixes a SCALE mismatch (per-share vs millions), but a percentage is not a
     # currency at all: `_convert_to_eur` divides every value by an FX rate, so
@@ -1016,7 +1016,7 @@ async def financial_line_by_isin(isin: str, item: str, refresh: bool = False):
     return await asyncio.to_thread(_line_item_for_isin, isin, item, force=refresh)
 
 
-# OWNER EARNINGS — Buffett's proxy for the cash a business actually throws off to its owners,
+# Owner earnings — Buffett's proxy for the cash a business actually throws off to its owners,
 # and the one fundamental the /portfolios "Fundamental" panel charts. It is NOT a line GuruFocus
 # reports; it is COMPUTED from three that it does, and — unlike `total_debt` — its components span
 # TWO statements, so it cannot ride the single-section `_summed_series` path in `_ITEMS`:
@@ -1102,7 +1102,7 @@ async def owner_earnings_by_isin(isin: str, refresh: bool = False):
     return await asyncio.to_thread(_owner_earnings_for_isin, isin, force=refresh)
 
 
-# PRICE STEADINESS — the market's version of the owner-earnings compounding test. yfinance
+# Price steadiness — the market's version of the owner-earnings compounding test. yfinance
 # (`asset_price`) ONLY, split-adjusted and EUR-converted through EXACTLY the helpers /portfolios
 # prices its models with, so the price on this chart is the price everything else on the page uses
 # (never GuruFocus — a second vendor's adjustment + FX conventions would be a different number).
@@ -1138,7 +1138,7 @@ def _price_series_for_isin(isin: str, years: int = 15) -> PriceSeriesResponse:
     if not raw:
         raise HTTPException(404, f"No stored price series for {isin} ({ex.get('yahoo_symbol')}).")
 
-    # ⚠ `_norm_ccy`, NOT `.upper()` — upper-casing `GBp` gives `GBP`, a code `fx_rate` HAS, so the
+    #  `_norm_ccy`, NOT `.upper()` — upper-casing `GBp` gives `GBP`, a code `fx_rate` HAS, so the
     # lookup succeeds with divisor 1.0 and every EUR point on this chart came out 100× too high for
     # a London pence listing. The native line was right, which is what made it survive.
     ccy = _norm_ccy(ex.get("currency")) or ""
@@ -1173,21 +1173,21 @@ async def price_series_by_isin(isin: str, years: int = 15):
     return await asyncio.to_thread(_price_series_for_isin, isin, years)
 
 
-# LATEST CLOSE — the one live quote the fiscal-year world does not have. The Quick Valuation tab
+# Latest close — the one live quote the fiscal-year world does not have. The Quick Valuation tab
 # reads its whole picture off GuruFocus's `Month End Stock Price`, which is the close at the last
-# FISCAL YEAR END and can be a year old; a panel that prints that under the label "Current share
+# Fiscal year end and can be a year old; a panel that prints that under the label "Current share
 # price" is telling the reader something false, and the FCF yield and CAGR hanging off it inherit
 # the lie. This is the yfinance (`asset_price`) close, the same series /portfolios prices its
 # models with.
 class LatestCloseResponse(BaseModel):
     isin: str
     symbol: str | None = None
-    # ⚠ THE CLOSE'S OWN DATE, NEVER "today". A market is shut at the weekend and a vendor
+    #  The close's own date, never "today". A market is shut at the weekend and a vendor
     # publishes late; stamping the request date on a Friday close is how a stale price gets
     # trusted. `stale_days` is the distance the caller must be able to show.
     date: str
     stale_days: int = 0
-    close: float                   # as the listing quotes it (⚠ may be a minor unit — GBp)
+    close: float                   # as the listing quotes it ( may be a minor unit — GBp)
     currency: str                  # that listing's quoting currency
     close_eur: float | None = None
     # Converted into the currency the CALLER works in — for Quick Valuation, the reporting
@@ -1199,7 +1199,7 @@ class LatestCloseResponse(BaseModel):
 def _norm_ccy(code: str | None) -> str | None:
     """Tidy a currency code WITHOUT destroying a minor unit.
 
-    ⚠ `.upper()` IS NOT NORMALISATION HERE. `SUBUNIT` is keyed on the exact strings Yahoo quotes —
+     `.upper()` IS NOT NORMALISATION HERE. `SUBUNIT` is keyed on the exact strings Yahoo quotes —
     `GBp`, `GBX`, `ZAc`, `ILA` — and upper-casing `GBp` yields `GBP`, a currency we DO have a rate
     for. So the lookup succeeds, the ÷100 never happens, and a 1,424p share converts to €1,661
     instead of €16.61: a hundredfold error that raises nothing and still looks like a price. (I
@@ -1217,14 +1217,14 @@ def _latest_close_for_isin(isin: str, in_currency: str | None = None) -> LatestC
     """The newest stored yfinance close for one ISIN, in its own currency, in EUR, and in
     `in_currency`.
 
-    ⚠ IT IS A CURRENCY CONVERSION, NOT A RELABEL. The ISIN fixes the share class, so our Yahoo
+     IT IS A CURRENCY CONVERSION, NOT A RELABEL. The ISIN fixes the share class, so our Yahoo
     listing and GuruFocus's differ by FX and nothing else — but they DO differ by FX: a company
     filing in USD whose priced listing is Xetra quotes euros, and dividing a dollar cash flow by
     a euro price is a yield that is wrong by the exchange rate and looks entirely plausible. So
     the caller names the currency it needs and gets `null` if we cannot get there, rather than a
     number in the wrong one.
 
-    ⚠ AND `GBp` IS PENCE. `_rate` carries the minor-unit divisor, so both legs go through it and
+     AND `GBp` IS PENCE. `_rate` carries the minor-unit divisor, so both legs go through it and
     neither side can half-apply the ÷100 (a £46.75 share priced at £4,675 still reads as a
     number). Same-code conversion short-circuits: it needs no rate at all, and requiring one
     would blank a holding we can price exactly.
@@ -1289,18 +1289,18 @@ async def latest_close_by_isin(isin: str, currency: str | None = None):
 def _pull_latest_close(isin: str) -> dict:
     """Ask Yahoo for the bars we are MISSING for one ISIN, store them, and say what moved.
 
-    ⚠⚠ THE GAP, NEVER THE SERIES. `store.extend_series` opens its window five days before our
+     THE GAP, NEVER THE SERIES. `store.extend_series` opens its window five days before our
     newest stored close (`yahoo.chart_window(symbol, start, now, "1d")`), so a refresh of a
     two-day-old price downloads a handful of bars. The obvious alternative — `store_series`, the
     function the ingest uses — re-downloads and re-upserts DECADES of history to add eight days,
     which is the difference between a button and a page that hangs.
 
-    ⚠ AND IT REFUSES WHEN WE HOLD NOTHING. With no stored bar there is no gap to compute, and the
+     AND IT REFUSES WHEN WE HOLD NOTHING. With no stored bar there is no gap to compute, and the
     only remaining path IS the full history download this exists to avoid. That is an ingest, not
     a price refresh, and it belongs on the asset-pipeline page where it can report itself — so
     this 404s and says so rather than quietly pulling twenty years because a button was pressed.
 
-    ⚠ A `None` FROM `extend_series` IS NOT A FAILURE HERE. It means the COPY path was unavailable
+     A `None` FROM `extend_series` IS NOT A FAILURE HERE. It means the COPY path was unavailable
     so the denormalized `asset_analysis` coverage stats could not be recomputed exactly — but the
     bars are already upserted by then, which is the entire point of this call. The grid's stats lag
     until the next full pass; the close is current, which is what was asked for.
@@ -1339,12 +1339,12 @@ def _pull_latest_close(isin: str) -> dict:
 async def refresh_latest_close_by_isin(isin: str, currency: str | None = None):
     """Go to Yahoo for this ISIN's missing bars, then answer exactly as the GET above does.
 
-    ⚠ THE GET READS WHAT WE STORE; THIS ONE MAKES WHAT WE STORE CURRENT FIRST. Two endpoints
+     THE GET READS WHAT WE STORE; THIS ONE MAKES WHAT WE STORE CURRENT FIRST. Two endpoints
     rather than a `?refresh=true` flag on one, because they are not the same kind of thing: the GET
     is a cheap read every card can fire on mount, and this spends an external request and writes.
     A flag on a GET is how the cheap one ends up being called with it set.
 
-    ⚠ IT RETURNS THE SAME SHAPE, THROUGH THE SAME FUNCTION. The caller re-reads its own panel from
+     IT RETURNS THE SAME SHAPE, THROUGH THE SAME FUNCTION. The caller re-reads its own panel from
     the response, so a second formatter here is a second place for the currency conversion — the
     one with the `GBp`-is-pence trap in it — to be got subtly differently.
 
@@ -1500,7 +1500,7 @@ def _performance_for_isin(isin: str, windows: tuple[int, ...] = _PERF_WINDOWS) -
     since = (date.today() - timedelta(days=365 * (max_years + 1) + 45)).isoformat()
     today = date.today().isoformat()
     raw = (_closes([aid], since, today) or {}).get(aid) or []
-    # ⚠ `_norm_ccy` — see `_price_series_for_isin`. Here a 100× scale would cancel out of every
+    #  `_norm_ccy` — see `_price_series_for_isin`. Here a 100× scale would cancel out of every
     # RETURN, so the metrics are unharmed; the `currency` we report back would still be a lie.
     ccy = _norm_ccy(ex.get("currency")) or ""
     fx = _fx({ccy}, since, today) if ccy and ccy != "EUR" else {}
@@ -1518,10 +1518,10 @@ def _performance_for_isin(isin: str, windows: tuple[int, ...] = _PERF_WINDOWS) -
 # The investable ETF that stands in for each analysis benchmark on the RISK table — ONE real daily
 # series (fast, and it's what you'd actually hold), rather than a 490–2,000-name daily rebuild. The
 # tiny tracking gap vs the cap-weighted rebuild is immaterial for vol / Sharpe / drawdown.
-# ⚠ THE INVESTABLE TRACKER PER BENCHMARK LABEL — a real fund with a real daily EUR series, not
+#  The investable tracker per benchmark label — a real fund with a real daily EUR series, not
 # the reconstructed index. It is what lets a sleeve, a holding's beta and the benchmark itself all
 # be priced the same way; the reconstructed index has no tradeable series to regress against.
-# ⚠ AEX ADDED 2026-08-18 for the per-holding beta column: the Analyse modal's picker offers
+#  Aex added 2026-08-18 for the per-holding beta column: the Analyse modal's picker offers
 # SP500 | ACWI | AEX, and a label with no entry here silently produced an empty column rather than
 # a stated refusal.
 _BENCHMARK_RISK_ETF = {
@@ -1816,7 +1816,7 @@ class FundamentalSeries(BaseModel):
     field: str
     label: str
     points: list[FundamentalPoint] = []
-    # ⚠ `dropped` IS THE HONEST PART. GuruFocus writes "" / "N/A" / "-" for a period it has no
+    #  `dropped` IS THE HONEST PART. GuruFocus writes "" / "N/A" / "-" for a period it has no
     # value for, and those are far commoner in the ratio sections than in the statements: on a
     # real blob Piotroski has 17 points where Revenue has 24, Interest Coverage 20, GF Value 11.
     # A loss year HAS no PE. Read a 17-point line as a 24-year history and you are reading only
@@ -1833,7 +1833,7 @@ class FundamentalSeries(BaseModel):
 class QualityMetric(BaseModel):
     """One of the four quality numbers, and its verdict.
 
-    ⚠ FOUR STATES, AND ONLY ONE OF THEM IS "BAD".
+     FOUR STATES, AND ONLY ONE OF THEM IS "BAD".
         ok       measured, and it passes
         fail     measured, and it does not
         n_a      the LINE DOES NOT EXIST for this company. A bank has no ROIC and no gross margin
@@ -1900,7 +1900,7 @@ async def fundamentals_by_isin(isin: str, cadence: str = "annuals"):
     Price vs fair value · yield · ROIC vs WACC · safety. Free for any company that already has a
     financials column (the blob carries 262 line items; the charts are reads).
 
-    ⚠ The price line is yfinance daily, in EUR, and never GuruFocus's — /portfolios prices
+     The price line is yfinance daily, in EUR, and never GuruFocus's — /portfolios prices
     everything from `asset_price`, and a second vendor on that page would compare two price
     universes. Both legs of chart 1 are therefore EUR; see `_asset_fundamentals`.
     """

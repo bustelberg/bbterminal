@@ -1,12 +1,12 @@
 /**
- * ONE HOUSE STYLE FOR EVERY ⓘ ON /management-dashboard.
+ * One house style for every ⓘ ON /management-dashboard.
  *
- * ⚠⚠ THE MODEL IS THE ACTIVE SHARE CARD, named as such on 2026-08-31: a one-line `what`, a `where`
+ *  The model is the active share card, named as such on 2026-08-31: a one-line `what`, a `where`
  * whose live figures are BADGED (`v()`), a `when` that dates both sides, the maths TYPESET through
  * `worked` + `legend`, and nothing else. Four short fields and an equation. The rules below are
  * that card, written down:
  *
- *   1. NO `⚠` IN A TOOLTIP. The warning blocks are how this codebase talks to itself; a reader
+ *   1. NO `` IN A TOOLTIP. The warning blocks are how this codebase talks to itself; a reader
  *      hovering a figure wants the figure explained, not the incident that shaped the code. The
  *      reasoning belongs in the source, where it already is.
  *   2. NO UNICODE MATHS. `Σ(w × x) ÷ Σw` in the UI font is a row of glyphs that resembles an
@@ -15,7 +15,7 @@
  *   3. SHORT. A field is a sentence, not a paragraph. Past `MAX_FIELD` it stops being read, which
  *      makes the caveat inside it worse than useless.
  *
- * ⚠⚠ `UNCONVERTED` IS A RATCHET, NOT A LIST OF EXCEPTIONS. Every file in it is one nobody has
+ *  `UNCONVERTED` IS A RATCHET, NOT A LIST OF EXCEPTIONS. Every file in it is one nobody has
  * rewritten yet; the rule is that the list only ever gets shorter. A new file is covered the moment
  * it exists, which is the half that stops this being a one-off tidy-up that decays.
  *
@@ -30,22 +30,22 @@ import { describe, expect, it } from 'vitest';
 /** The tooltip fields. `text` is `InfoTip`'s plain-prose prop; the rest are `AspectCard`'s. */
 const FIELDS = ['what', 'where', 'when', 'how', 'hint', 'note', 'text'];
 
-/** Longest a single field may be. ⚠ Two lines of a 22rem card, which is what a reader takes in
+/** Longest a single field may be.  Two lines of a 22rem card, which is what a reader takes in
  *  before deciding to stop reading. */
 const MAX_FIELD = 240;
 
-/** Glyphs that mean somebody wrote maths as text. ⚠ `−` (minus) and `→` are punctuation in a
+/** Glyphs that mean somebody wrote maths as text.  `−` (minus) and `→` are punctuation in a
  *  sentence and are deliberately absent; these four only ever appear in a pseudo-formula. */
 const UNICODE_MATHS = ['÷', '×', 'Σ', '√'];
 
 /**
- * Files whose ⓘ copy predates the rule. ⚠ THE LIST SHRINKS AND NEVER GROWS — adding a name here to
+ * Files whose ⓘ copy predates the rule.  THE LIST SHRINKS AND NEVER GROWS — adding a name here to
  * make a new tooltip pass is the one edit this file exists to prevent.
  */
 const UNCONVERTED = new Set([
-  // ⚠ THREE FILES CAME OFF THIS LIST AT ONCE — `AccountTotalReturn.tsx`, `CorrelationView.tsx`
+  //  Three files came off this list at once — `AccountTotalReturn.tsx`, `CorrelationView.tsx`
   // and `DeepValuationTab.tsx` — the moment `withoutComments` stopped reading comments as copy.
-  // Their only `⚠`s sat in `/* */` blocks between the branches of a field expression, and their
+  // Their only ``s sat in `/* */` blocks between the branches of a field expression, and their
   // real tooltips were inside the rules all along. They were never unconverted; the scanner just
   // could not tell, which had the ratchet accusing files that had done the work. Anything left on
   // this list is here on its own merits.
@@ -59,7 +59,7 @@ const UNCONVERTED = new Set([
   // source-only scanner cannot delimit them before the next JSX attribute and
   // would otherwise join an unrelated request literal onto the field.
   'TablesTab.tsx',
-  // ⚠ `TablesTab.tsx` came off 2026-09-07. Every one of its nine ⓘ fields is now an expression
+  //  `TablesTab.tsx` came off 2026-09-07. Every one of its nine ⓘ fields is now an expression
   // into `tablesCopy`, so nothing quoted is left in the component for this scanner to read — and
   // that copy carries its own guards: `tablesCopy.test.tsx` caps the row notes at 150 chars and
   // `tablesCopy.latex.test.ts` renders every formula in strict mode.
@@ -78,14 +78,14 @@ function componentFiles(): string[] {
 /**
  * The source with its comments removed.
  *
- * ⚠⚠ A COMMENT IS NOT COPY, AND WITHOUT THIS THE SCANNER READS ONE AS IF IT WERE. `CardHeading.tsx`
+ *  A comment is not copy, and without this the scanner reads one as if it were. `CardHeading.tsx`
  * documents why its tip is an `AspectCard` "NOT `InfoTip text=`" — prose ABOUT a tooltip prop, in a
- * JSDoc block that also carries a `⚠` and runs well past `MAX_FIELD`. The `text=` inside it matched,
+ * JSDoc block that also carries a `` and runs well past `MAX_FIELD`. The `text=` inside it matched,
  * the slice that followed was the rest of the comment, and the file failed two of the three rules
- * on copy that reaches no screen at all. ⚠ The failure mode is the bad one: it accuses a file that
+ * on copy that reaches no screen at all.  The failure mode is the bad one: it accuses a file that
  * is doing the right thing, and the fix it invites is to stop the source explaining itself.
  *
- * ⚠ BLOCK COMMENTS ONLY, and the `//` rule is guarded on the character before it — `https://` is
+ *  Block comments only, and the `//` rule is guarded on the character before it — `https://` is
  * the one that would otherwise truncate a legitimate literal, and this test's job is to read
  * literals.
  */
@@ -96,7 +96,7 @@ function withoutComments(src: string): string {
 /**
  * The STRING LITERALS a tooltip field is built from, one entry per field occurrence.
  *
- * ⚠ IT READS THE LITERALS, NOT THE EXPRESSION. A field is routinely a concatenation, a ternary or a
+ *  It reads the literals, not the expression. A field is routinely a concatenation, a ternary or a
  * call into a copy module; what matters is the prose that reaches the card, so every quoted chunk
  * between the field and the next attribute is joined. A field whose text lives in a copy module
  * contributes nothing here — that module is covered by its own tests.
@@ -123,12 +123,12 @@ describe('every ⓘ on the dashboard follows the Active Share card', () => {
   const converted = componentFiles().filter((f) => !UNCONVERTED.has(f));
 
   it('covers a real set of files, so a green run means something', () => {
-    // ⚠ THE GUARD ON THE GUARD. A scanner that silently matched nothing would pass every rule
+    //  The guard on the guard. A scanner that silently matched nothing would pass every rule
     // below; this is what says it is actually reading tooltips.
     const total = converted.reduce(
       (n, f) => n + fields(readFileSync(join(DIR, f), 'utf8')).length, 0);
     expect(converted.length).toBeGreaterThan(20);
-    // ⚠ A FLOOR, NOT A TARGET — 117 fields sit in the converted files today (65 before the three
+    //  A floor, not a target — 117 fields sit in the converted files today (65 before the three
     // comment-only false positives came off the list), and the number only grows as the ratchet
     // turns. It exists to fail loudly if the scanner ever stops
     // matching, which would make every rule below vacuously true.
@@ -136,7 +136,7 @@ describe('every ⓘ on the dashboard follows the Active Share card', () => {
   });
 
   it.each([
-    ['carries no ⚠ — the reasoning belongs in the source', (b: string) => b.includes('⚠')],
+    ['carries no  — the reasoning belongs in the source', (b: string) => b.includes('')],
     ['writes no maths as text — that is what `worked` is for',
       (b: string) => UNICODE_MATHS.some((g) => b.includes(g))],
     ['stays short enough to be read', (b: string) => b.length > MAX_FIELD],
@@ -150,7 +150,7 @@ describe('every ⓘ on the dashboard follows the Active Share card', () => {
     expect(bad, 'see the rules at the top of this file').toEqual([]);
   });
 
-  it('⚠ the ratchet only turns one way', () => {
+  it(' the ratchet only turns one way', () => {
     // Every name in `UNCONVERTED` must still exist and must still need converting — a file that
     // has been cleaned up and left in the list makes the list a lie, and a file that has been
     // renamed or deleted makes it dead weight nobody will read.
@@ -158,7 +158,7 @@ describe('every ⓘ on the dashboard follows the Active Share card', () => {
     for (const f of UNCONVERTED) {
       expect(present.has(f), `${f} is in UNCONVERTED but no longer exists`).toBe(true);
       const bodies = fields(readFileSync(join(DIR, f), 'utf8')).map((x) => x.body);
-      const stillBad = bodies.some((b) => b.includes('⚠')
+      const stillBad = bodies.some((b) => b.includes('')
         || UNICODE_MATHS.some((g) => b.includes(g)) || b.length > MAX_FIELD);
       expect(stillBad, `${f} is clean — take it out of UNCONVERTED`).toBe(true);
     }

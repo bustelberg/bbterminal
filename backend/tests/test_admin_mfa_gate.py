@@ -1,6 +1,6 @@
 """The second-factor gate on the API, and why it is shaped the way it is.
 
-⚠⚠ THE FIRST VERSION OF THIS GATE WOULD HAVE LOCKED OUT EVERY ADMIN, AND THESE TESTS AGREED WITH
+ THE FIRST VERSION OF THIS GATE WOULD HAVE LOCKED OUT EVERY ADMIN, AND THESE TESTS AGREED WITH
 IT. It refused any admin whose token said `aal1`, on the assumption that an account with no
 authenticator carries no `aal` claim. Measured end to end against the live stack, it carries
 `aal1` anyway:
@@ -45,14 +45,14 @@ class TestWhoIsRefused:
             {"role": "admin", "aal": "aal2", "has_verified_factor": True}) is None
 
     def test_someone_who_never_enrolled_is_also_refused(self, monkeypatch):
-        """⚠⚠ THE RULE CHANGED HERE (2026-09-08, on request): two-factor is REQUIRED, so this is a
+        """ THE RULE CHANGED HERE (2026-09-08, on request): two-factor is REQUIRED, so this is a
         refusal rather than an exemption. It was an exemption while enrolment was optional."""
         m = _mod(monkeypatch)
         denied = m._mfa_denial({"role": "user", "aal": "aal1", "has_verified_factor": False})
         assert denied is not None and denied.status_code == 403
 
     def test_the_two_refusals_name_DIFFERENT_actions(self, monkeypatch):
-        """⚠ Somebody with no authenticator cannot "enter their code", and somebody who has one
+        """ Somebody with no authenticator cannot "enter their code", and somebody who has one
         does not need to set it up. One message for both would be wrong for half the readers."""
         m = _mod(monkeypatch)
         no_factor = bytes(m._mfa_denial(
@@ -64,7 +64,7 @@ class TestWhoIsRefused:
         assert no_factor != has_factor
 
     def test_a_read_only_user_is_held_to_it_too(self, monkeypatch):
-        """⚠ It sits BEFORE the role split. Inside the admin branch — where it started — every
+        """ It sits BEFORE the role split. Inside the admin branch — where it started — every
         non-admin would be exempt, which is the soft way in the rule exists to remove."""
         m = _mod(monkeypatch)
         assert m._mfa_denial({"role": "user", "aal": "aal1", "has_verified_factor": True}) is not None
@@ -91,7 +91,7 @@ class TestWhoIsRefused:
 
 class TestTheKillSwitch:
     def test_it_can_be_switched_off_for_an_incident(self, monkeypatch):
-        """⚠ `REQUIRE_MFA=0` is the way back in when the factor itself is the problem —
+        """ `REQUIRE_MFA=0` is the way back in when the factor itself is the problem —
         a lost device, a broken clock, GoTrue rejecting valid codes. Without it the recovery path
         for a locked-out sole admin runs through SQL against production."""
         m = _mod(monkeypatch, "0")
@@ -99,14 +99,14 @@ class TestTheKillSwitch:
             {"role": "admin", "aal": "aal1", "has_verified_factor": True}) is None
 
     def test_it_is_ON_by_default(self, monkeypatch):
-        """⚠ A security control that defaults to off is a control nobody has. Absent env ⇒ on."""
+        """ A security control that defaults to off is a control nobody has. Absent env ⇒ on."""
         m = _mod(monkeypatch)
         assert m._REQUIRE_MFA is True
         assert m._mfa_denial(
             {"role": "admin", "aal": "aal1", "has_verified_factor": True}) is not None
 
     def test_only_an_explicit_zero_disables_it(self, monkeypatch):
-        # ⚠ Not truthiness: "false", "no" and "" are the spellings people reach for, and a control
+        #  Not truthiness: "false", "no" and "" are the spellings people reach for, and a control
         # that silently accepts them turns a typo into an unprotected API.
         for value in ("1", "true", "yes", "false", ""):
             m = _mod(monkeypatch, value)
@@ -123,7 +123,7 @@ class TestScope:
 
         m = _mod(monkeypatch)
         src = inspect.getsource(m.enforce_api_auth)
-        # ⚠ BEFORE the role split, so it covers every authenticated caller rather than admins.
+        #  BEFORE the role split, so it covers every authenticated caller rather than admins.
         before_roles, after_roles = src.split('if info.get("role") == "admin":', 1)
         assert "_mfa_denial" in before_roles
         assert "_mfa_denial" not in after_roles

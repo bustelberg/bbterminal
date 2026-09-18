@@ -164,10 +164,10 @@ function YearMiniChart({
     markerX = hit ? hit.date : (subplot.points[subplot.points.length - 1]?.date ?? null);
   }
 
-  // Year-end headline: the last point that has data drives a ✓ + the figure.
+  // Year-end headline: the last point that has data drives a  + the figure.
   // Cumulative mode shows the strategy's return for the year (rebased to 0%
-  // at year-start) with a ✓ when it finished above the universe; alpha mode
-  // shows the final outperformance with a ✓ when it's positive.
+  // at year-start) with a  when it finished above the universe; alpha mode
+  // shows the final outperformance with a  when it's positive.
   const lastValid = [...subplot.points].reverse().find((p) =>
     mode === 'cumulative'
       ? p.strategyCum != null && p.universeCum != null
@@ -201,7 +201,7 @@ function YearMiniChart({
                 className="text-pos-400"
                 title={mode === 'cumulative' ? 'Strategy beat the universe this year' : 'Positive alpha this year'}
               >
-                ✓
+
               </span>
             )}
             <span className={headline >= 0 ? 'text-pos-400' : 'text-neg-400'}>

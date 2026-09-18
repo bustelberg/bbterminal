@@ -1,13 +1,13 @@
 /**
  * The Reverse DCF's FCF normalisation.
  *
- * ⚠⚠ THE TWO CORRECTIONS HAVE OPPOSITE SIGNS AND THAT IS THE WHOLE THING TO GET RIGHT. SBC comes
+ *  The two corrections have opposite signs and that is the whole thing to get right. SBC comes
  * off (a real cost that never leaves the cash flow statement); growth capex goes back ON, because
  * reported `Free Cash Flow` is operating cash flow minus TOTAL capex and has already taken it out.
  * Subtracting it a second time would charge the same euros twice — not a conservative choice, an
  * arithmetic error — so the sign is pinned here rather than left to a reviewer's eye.
  *
- * ⚠ CAPEX IS FILED NEGATIVE. Verified on ASML: FCF = OCF + capex to the decimal across three
+ *  Capex is filed negative. Verified on ASML: FCF = OCF + capex to the decimal across three
  * years. A `capex − dep` written without the magnitude is always negative, always clamps to zero,
  * and the add-back then silently never happens on any company in the book — the failure mode this
  * file exists to make impossible.
@@ -27,12 +27,12 @@ describe('growth capex', () => {
   });
 
   it('reads a positively-typed override the same way', () => {
-    // ⚠ A reader overriding capex types it POSITIVE. Both spellings must mean one outflow.
+    //  A reader overriding capex types it POSITIVE. Both spellings must mean one outflow.
     expect(growthCapex(1631.2, 1025.9)).toBeCloseTo(growthCapex(-1631.2, 1025.9)!, 6);
   });
 
   it('floors at zero when capex is below depreciation', () => {
-    // ⚠ NOT A NEGATIVE ADD-BACK. A company spending under depreciation is under-investing;
+    //  Not a negative add-back. A company spending under depreciation is under-investing;
     // treating the shortfall as a windfall would reward exactly what hollows a business out.
     expect(growthCapex(-500, 900)).toBe(0);
   });
@@ -59,13 +59,13 @@ describe('normalised FCF', () => {
   });
 
   it('leaves the reported figure untouched beside the corrected one', () => {
-    // ⚠ The panel shows both. Folding the correction into `reported` would make an adjusted
+    //  The panel shows both. Folding the correction into `reported` would make an adjusted
     // number indistinguishable from the vendor's.
     expect(normalisedFcf(ASML).reported).toBe(ASML.fcf);
   });
 
   it('an unreported correction does not run, and says it did not', () => {
-    // ⚠⚠ ABSENT IS NOT ZERO. A company with no SBC line is not a company that pays none, and a
+    //  Absent is not zero. A company with no SBC line is not a company that pays none, and a
     // card that prints "− 0 stock comp" claims a correction nobody could make.
     const noSbc = normalisedFcf({ ...ASML, sbc: null });
     expect(noSbc.applied.sbc).toBe(false);
@@ -93,7 +93,7 @@ describe('normalised FCF', () => {
 
   it('a heavy build-out reclassifies most of capex as growth — the case to be careful with', () => {
     /**
-     * ⚠⚠ MEASURED ON MICROSOFT'S LATEST FILED YEAR: FCF 66,987, SBC 12,405, capex 90,000-odd
+     *  Measured on microsoft's latest filed year: FCF 66,987, SBC 12,405, capex 90,000-odd
      * against depreciation of ~13,000, so the add-back is 77,414 and normalised FCF is 131,996 —
      * very nearly DOUBLE. That is what the definition asks for, and it is also where the
      * depreciation-as-maintenance-capex proxy is weakest: an asset base being built out for the
@@ -108,7 +108,7 @@ describe('normalised FCF', () => {
 });
 
 /**
- * ⚠⚠ THE FORWARD BASE, DERIVED — the fallback for a company whose consensus free cash flow we do
+ *  The forward base, derived — the fallback for a company whose consensus free cash flow we do
  * not hold. GuruFocus does publish one (`keyratios` → `Fundamental`, undocumented) but the fetch is
  * on demand, so most companies arrive without it and this is what they get.
  *
@@ -119,21 +119,21 @@ describe('forward FCF', () => {
     expect(forwardFcf(17000, -1631.2)).toBeCloseTo(15368.8, 6);
   });
 
-  it('⚠ reads a positively-typed capex the same way', () => {
+  it(' reads a positively-typed capex the same way', () => {
     // Without the magnitude a negatively-filed capex would be ADDED — a company's capital
     // spending counted as cash generated, on the one figure the whole panel solves against.
     expect(forwardFcf(17000, 1631.2)).toBeCloseTo(forwardFcf(17000, -1631.2)!, 6);
   });
 
   it('refuses rather than guessing when either leg is missing', () => {
-    // ⚠ OCF alone is not free cash flow for any company that owns anything: a base missing its
+    //  OCF alone is not free cash flow for any company that owns anything: a base missing its
     // capex leg reads as a business with no capital needs at all.
     expect(forwardFcf(null, -1631.2)).toBeNull();
     expect(forwardFcf(17000, null)).toBeNull();
     expect(forwardFcf(NaN, -1631.2)).toBeNull();
   });
 
-  it('⚠⚠ the trailing capex CANCELS out of the figure the model values', () => {
+  it(' the trailing capex CANCELS out of the figure the model values', () => {
     // (OCF − capex) − sbc + (capex − dep) = OCF − dep − sbc.
     //
     // This is why a trailing capex leg on a forward base is sound: it leaves the answer entirely.
@@ -145,7 +145,7 @@ describe('forward FCF', () => {
     expect(n.used).toBeCloseTo(ocfEst - ASML.dep - ASML.sbc, 6);
   });
 
-  it('⚠ and it does NOT cancel below depreciation, which is the intended behaviour', () => {
+  it(' and it does NOT cancel below depreciation, which is the intended behaviour', () => {
     // An under-investing company is charged its ACTUAL spend: the add-back clamps to zero, so the
     // capex leg stays in. Treating the shortfall as a windfall would reward hollowing a business
     // out — the same rule `growthCapex` floors for.
@@ -156,7 +156,7 @@ describe('forward FCF', () => {
     expect(n.used).not.toBeCloseTo(17000 - 1025.9 - 202.3, 6);
   });
 
-  it('⚠ a missing consensus leaves NO forward base — it does not fall back to the filing', () => {
+  it(' a missing consensus leaves NO forward base — it does not fall back to the filing', () => {
     // The fallback is the panel's, and it is a visible one: the Base control names which of the
     // two is in use and shows the other beside it. A silent fallback here would put a filed figure
     // under a label reading "next fiscal year".
@@ -166,7 +166,7 @@ describe('forward FCF', () => {
 });
 
 /**
- * ⚠⚠ THE ADD-BACK MUST USE THE SAME CAPEX THE BASE NETTED — the one rule `forwardLegs` exists for,
+ *  The add-back must use the same capex the base netted — the one rule `forwardLegs` exists for,
  * and the defect in the spreadsheet this panel ports.
  *
  * `=@GURUF(…"Estimated Free Cash Flow for Next FY1")` nets a FORWARD capex; the `MAX(−capex − D&A,
@@ -196,10 +196,10 @@ describe('forward legs', () => {
     expect(valued(l)).toBeCloseTo(57250.10, 2);
   });
 
-  it('⚠⚠ the vendor base with a TRAILING add-back is short, by an amount nobody would guess', () => {
+  it(' the vendor base with a TRAILING add-back is short, by an amount nobody would guess', () => {
     // 46,872 against 57,250 — the split basis, stated as the number it produces.
     //
-    // ⚠ THE SHORTFALL IS THE CAPEX STEP-UP **NET OF** THE D&A STEP-UP, because the mixed version
+    //  The shortfall is the capex step-up **NET OF** THE D&A STEP-UP, because the mixed version
     // takes BOTH legs trailing:
     //     correct − split = (C_fwd − C_ttm) − (D_fwd − D_ttm)
     //                     = (128,917.65 − 89,325) − (51,944 − 22,729) = 10,377.65
@@ -212,7 +212,7 @@ describe('forward legs', () => {
     expect(57250.10 - split!).toBeCloseTo(10377.65, 2);
   });
 
-  it('⚠ refuses the vendor base when the correction cannot follow it', () => {
+  it(' refuses the vendor base when the correction cannot follow it', () => {
     // No EBITDA/EBIT ⇒ no forward D&A ⇒ taking the vendor figure would FORCE the split above. The
     // derivation is used instead, where the trailing capex cancels.
     const l = forwardLegs({ ...META, ebitdaEstimate: null, ebitEstimate: null, normalise: true });
@@ -222,7 +222,7 @@ describe('forward legs', () => {
     expect(valued(l)).toBeCloseTo(META.ocfEstimate - META.dep - SBC, 4);
   });
 
-  it('⚠ but takes it with Normalise OFF, where there is no add-back to be inconsistent with', () => {
+  it(' but takes it with Normalise OFF, where there is no add-back to be inconsistent with', () => {
     const l = forwardLegs({ ...META, ebitdaEstimate: null, ebitEstimate: null, normalise: false });
     expect(l.vendor).toBe(true);
     expect(l.fcf).toBeCloseTo(5412.45, 6);
@@ -238,14 +238,14 @@ describe('forward legs', () => {
     expect(forwardLegs({
       ocfEstimate: null, fcfEstimate: null, ebitdaEstimate: null, ebitEstimate: null,
       capex: null, dep: null, normalise: true,
-      // ⚠ `no-estimate` EVEN WITH NOTHING AT ALL, and that is right: there is genuinely no stored
+      //  `no-estimate` EVEN WITH NOTHING AT ALL, and that is right: there is genuinely no stored
       // consensus FCF. The card only shows this sentence in the forward mode, which this state
       // cannot reach — `base` falls back to `reported` when `fwd.fcf` is null.
     })).toEqual({ fcf: null, capex: null, dep: null, vendor: false, reason: 'no-estimate' });
   });
 });
 
-describe('⚠⚠ forwardLegs says WHY it refused the vendor figure', () => {
+describe(' forwardLegs says WHY it refused the vendor figure', () => {
   /**
    * `vendor === false` has TWO causes and the ⓘ used to print one sentence for both:
    * "no consensus free cash flow is stored for this company". On the second cause that is simply
@@ -260,7 +260,7 @@ describe('⚠⚠ forwardLegs says WHY it refused the vendor figure', () => {
     expect(r.reason).toBe('no-estimate');
   });
 
-  it('⚠ a stored consensus FCF with no EBITDA/EBIT → `no-forward-da`, NOT `no-estimate`', () => {
+  it(' a stored consensus FCF with no EBITDA/EBIT → `no-forward-da`, NOT `no-estimate`', () => {
     // The vendor base nets a FORWARD capex, so its add-back needs a FORWARD D&A
     // (`EBITDA_est − EBIT_est`). Without those the correction would fall back to the trailing
     // lines and the two halves would sit on different bases.
@@ -276,7 +276,7 @@ describe('⚠⚠ forwardLegs says WHY it refused the vendor figure', () => {
     expect(r.reason).toBeUndefined();
   });
 
-  it('⚠ with `normalise` off the vendor figure is taken even with no pair', () => {
+  it(' with `normalise` off the vendor figure is taken even with no pair', () => {
     // There is no add-back to be inconsistent with, so the forecast is simply the better number.
     const r = forwardLegs({ ...base, normalise: false, fcfEstimate: 203255,
       ebitdaEstimate: null, ebitEstimate: null });

@@ -14,7 +14,7 @@ const m = (metric_code: string, target_date: string, numeric_value: number | nul
 const EPS_EST = 'annual_per_share_eps_estimate';
 
 describe('nextFyEps', () => {
-  it('⚠ takes the next FUTURE period, not the first row of the series', () => {
+  it(' takes the next FUTURE period, not the first row of the series', () => {
     // The estimate block is stored from whenever it was fetched, so its early periods can already
     // be in the past — [0] would value the company on a year it has since reported.
     const rows = [m(EPS_EST, '2025-09-30', 9.1), m(EPS_EST, '2026-09-30', 11.46),
@@ -53,7 +53,7 @@ describe('medianPE', () => {
     expect(medianPE(rows)).toBeCloseTo(24, 6);
   });
 
-  it('⚠ skips a loss year rather than counting a negative multiple', () => {
+  it(' skips a loss year rather than counting a negative multiple', () => {
     // A negative P/E would drag the median down and read as "historically cheap".
     const rows = [
       m(PRICE, '2022-12-31', 100), m(EPS, '2022-12-31', -5),
@@ -104,7 +104,7 @@ describe('egmSource', () => {
     expect(s.forwardPEOrigin).toBe('vendor');
   });
 
-  it('⚠ converts the percent-unit dividend yield into the decimal the model wants', () => {
+  it(' converts the percent-unit dividend yield into the decimal the model wants', () => {
     // The field is named `… %` and holds 0.30 for 0.30%, exactly as `ROE %` does. Passing it
     // through unscaled applies a 0.3% payer as a 30% one — on a ten-year compounder, a ~3.4x
     // fair value.
@@ -129,7 +129,7 @@ describe('the working behind each hint', () => {
   const PRICE = 'annuals__Per Share Data__Month End Stock Price';
   const EPS = 'annuals__Per Share Data__EPS without NRI';
 
-  it('⚠ the CAGR working and the scalar are ONE computation', () => {
+  it(' the CAGR working and the scalar are ONE computation', () => {
     const rows = [m(EPS_EST, '2026-09-30', 10), m(EPS_EST, '2029-09-30', 13.31)];
     const w = estimateCagrWorking(rows, TODAY);
     expect(w.points.map((p) => p.eps)).toEqual([10, 13.31]);
@@ -177,12 +177,12 @@ describe('reverseDcfSource', () => {
     m(FCF, '2025-12-31', 10000),
   ];
 
-  it('⚠ `fcf` is the REPORTED free cash flow — no forecast, nothing folded in', () => {
+  it(' `fcf` is the REPORTED free cash flow — no forecast, nothing folded in', () => {
     // It was once consensus OCF less trailing capex, then that minus stock comp plus a
     // growth-capex add-back, all BAKED INTO THIS FIGURE — which is why it was removed: the one
     // number on screen silently disagreed with the company's filing and nothing said so.
     //
-    // ⚠⚠ THE NORMALISATION CAME BACK 2026-08-18 AND THIS ASSERTION IS WHY IT IS STILL SAFE. The
+    //  The normalisation came back 2026-08-18 AND THIS ASSERTION IS WHY IT IS STILL SAFE. The
     // legs ride ALONGSIDE `fcf`, never inside it: `normalisedFcf` combines them and the panel
     // shows reported, −SBC, +growth capex and the total as four separate rows. If this test ever
     // has to change because `fcf` moved, the adjustment has been folded back in and the whole
@@ -197,7 +197,7 @@ describe('reverseDcfSource', () => {
   });
 
   it('carries the three normalisation legs in the signs the vendor filed them in', () => {
-    // ⚠ CAPEX STAYS NEGATIVE. `growthCapex` takes the magnitude itself; normalising the sign here
+    //  Capex stays negative. `growthCapex` takes the magnitude itself; normalising the sign here
     // would leave the drill-down showing a positive number under "as filed".
     const full = [...rows,
       m('annuals__Cashflow Statement__Stock Based Compensation', '2025-12-31', 202.3),
@@ -205,14 +205,14 @@ describe('reverseDcfSource', () => {
       m('annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization',
         '2025-12-31', 1025.9)];
     expect(reverseDcfSource(full, TODAY)).toMatchObject({ sbc: 202.3, capex: -1631.2, dep: 1025.9 });
-    // ⚠ THE CASH-FLOW DEPRECIATION LINE, NOT THE INCOME STATEMENT'S — capex is a cash figure, so
+    //  The cash-flow depreciation line, not the income statement's — capex is a cash figure, so
     // its maintenance proxy has to be one too.
     const wrongDep = [...rows,
       m('annuals__Income Statement__Depreciation, Depletion and Amortization', '2025-12-31', 999)];
     expect(reverseDcfSource(wrongDep, TODAY).dep).toBeNull();
   });
 
-  it('⚠ converts the percent-unit WACC into the decimal the discount rate wants', () => {
+  it(' converts the percent-unit WACC into the decimal the discount rate wants', () => {
     // Filed as 8.2 for 8.2%, like every other `… %` line. Passed through unscaled it is an 820%
     // discount rate, and every company on earth reads as worthless.
     const withWacc = [...rows, m('annuals__Ratios__WACC %', '2025-12-31', 8.2)];
@@ -244,7 +244,7 @@ describe('reverseDcfSource', () => {
   });
 
   /**
-   * ⚠⚠ THE WIRING THE PANEL DEPENDS ON, WITH META'S REAL STORED ROWS. `forwardLegs` was already
+   *  The wiring the panel depends on, with meta's real stored rows. `forwardLegs` was already
    * pinned on these numbers, but nothing asserted that `reverseDcfSource` EXTRACTS them — which is
    * exactly where a wiring bug hides: every unit correct, the panel still drawing the derivation.
    */
@@ -266,11 +266,11 @@ describe('reverseDcfSource', () => {
       expect(s.ebitEstimate).toBeCloseTo(88857.90, 6);
     });
 
-    it('⚠ FY1, NOT THE NEGATIVE FY2 — the earliest FUTURE period, same rule as every other leg', () => {
+    it(' FY1, NOT THE NEGATIVE FY2 — the earliest FUTURE period, same rule as every other leg', () => {
       expect(reverseDcfSource(meta, TODAY).fcfEstimate).not.toBeCloseTo(-6211.87, 6);
     });
 
-    it('⚠⚠ and the panel then values the VENDOR base, not the derivation', () => {
+    it(' and the panel then values the VENDOR base, not the derivation', () => {
       // The end-to-end assertion: source -> forwardLegs -> the figure on the card.
       const s = reverseDcfSource(meta, TODAY);
       const legs = forwardLegs({
@@ -286,7 +286,7 @@ describe('reverseDcfSource', () => {
   });
 
   /**
-   * ⚠⚠ THE FOUR CASH-FLOW LEGS ARE TRAILING TWELVE MONTHS, AND THE GAP IS NOT SMALL. Measured on
+   *  The four cash-flow legs are trailing twelve months, and the gap is not small. Measured on
    * Meta (2026-08-26, the figures below are the real ones): the last filed fiscal year has capex
    * −69,691 and D&A 18,616, while the four newest quarters sum to **−89,325** and 22,729 — so the
    * growth-capex correction reads 51,075 on the annual basis against 66,596 on the trailing one.
@@ -322,7 +322,7 @@ describe('reverseDcfSource', () => {
       expect(s.flowBasis).toEqual({ ttm: true, date: '2026-06-30' });
     });
 
-    it('⚠ EXACTLY FOUR OR NOTHING — three quarters is a nine-month figure under an annual label', () => {
+    it(' EXACTLY FOUR OR NOTHING — three quarters is a nine-month figure under an annual label', () => {
       // Smaller than the year it claims to be, in the same direction for every company, invisible.
       const three = meta.filter((r) => r.target_date !== '2025-09-30');
       const s = reverseDcfSource(three, TODAY);
@@ -330,7 +330,7 @@ describe('reverseDcfSource', () => {
       expect(s.flowBasis).toEqual({ ttm: false, date: '2025-12-31' });
     });
 
-    it('⚠⚠ ONE BASIS FOR ALL FOUR LEGS, decided once', () => {
+    it(' ONE BASIS FOR ALL FOUR LEGS, decided once', () => {
       // `normalisedFcf` subtracts one leg from another: a TTM capex against an annual free cash
       // flow is a split basis, appearing only on companies that filed four quarters of one line
       // and three of another — rarely, unpredictably, and with no way to see it.
@@ -342,14 +342,14 @@ describe('reverseDcfSource', () => {
       expect(s.dep).toBe(18616);
     });
 
-    it('⚠ but a missing stock-comp line does NOT drag the other three back', () => {
+    it(' but a missing stock-comp line does NOT drag the other three back', () => {
       // Plenty of companies report none at all; requiring four quarters of it would put every
       // other leg on the annual basis over a line that is legitimately absent.
       expect(reverseDcfSource(meta, TODAY).flowBasis.ttm).toBe(true);
       expect(reverseDcfSource(meta, TODAY).sbc).toBeNull();
     });
 
-    it('⚠ a quarter filed under BOTH section spellings is counted once', () => {
+    it(' a quarter filed under BOTH section spellings is counted once', () => {
       // Summing one quarter twice inflates the window by exactly one quarter — again in one
       // direction, again invisibly.
       const dupes = [...meta, ...QUARTERS.map(([d, capex]) =>
@@ -363,7 +363,7 @@ describe('reverseDcfSource', () => {
   });
 
   /**
-   * ⚠⚠ THE ONE ROW WHOSE PERIOD IS IN THE FUTURE, and the ONLY one not taken with `latestObs`.
+   *  The one row whose period is in the future, and the ONLY one not taken with `latestObs`.
    * The estimate block runs five years out and can also reach into the past (it is stored as
    * fetched), so "latest" would value the company on a 2030 consensus and "first" on a year it has
    * already reported. Both mistakes produce a perfectly plausible number.
@@ -383,7 +383,7 @@ describe('reverseDcfSource', () => {
       expect(s.ocfEstimateDate).toBe('2026-12-31');
     });
 
-    it('⚠ is null when every estimate is stale — not the newest stale one', () => {
+    it(' is null when every estimate is stale — not the newest stale one', () => {
       // A company that stopped being covered has no forward base. Falling back to the last
       // estimate anybody made would date the panel's "next fiscal year" to a year in the past.
       expect(reverseDcfSource([...rows, m(OCF_EST, '2025-12-31', 14000)], TODAY).ocfEstimate)
@@ -393,11 +393,11 @@ describe('reverseDcfSource', () => {
     it('carries its provenance, and its date is the FUTURE period', () => {
       const w = reverseDcfWorking([...rows, ...est], TODAY);
       expect(w.ocfEst).toMatchObject({ used: 17000, date: '2026-12-31', code: OCF_EST });
-      // ⚠ And it has NOT displaced the filed figure — the reported line is still reported.
+      //  And it has NOT displaced the filed figure — the reported line is still reported.
       expect(w.fcf).toMatchObject({ used: 10000, date: '2025-12-31' });
     });
 
-    it('⚠ does not read the PER-SHARE estimate, which is a different quantity', () => {
+    it(' does not read the PER-SHARE estimate, which is a different quantity', () => {
       // `annual_operating_cash_flow_per_share_estimate` sits in the same block under a name one
       // word longer. Read by mistake it is off by the share count — ~1,000x here — and the panel
       // would solve a mega-cap against a base of seventeen.
@@ -418,11 +418,11 @@ describe('vendorName', () => {
     expect(vendorName('quarterly__Valuation Ratios__Dividend Yield %')).toBe('Dividend Yield %');
     expect(vendorName('annuals__Cashflow Statement__Free Cash Flow')).toBe('Free Cash Flow');
     expect(vendorName('annuals__Ratios__WACC %')).toBe('WACC %');
-    // ⚠ BOTH SECTION SPELLINGS resolve to the same name — the rename is ours to absorb.
+    //  Both section spellings resolve to the same name — the rename is ours to absorb.
     expect(vendorName('annuals__cashflow_statement__Free Cash Flow')).toBe('Free Cash Flow');
   });
 
-  it('⚠ drops the CADENCE too — the card’s `When` already answers that', () => {
+  it(' drops the CADENCE too — the card’s `When` already answers that', () => {
     expect(vendorName('annuals__Cashflow Statement__Capital Expenditure'))
       .toBe(vendorName('quarterly__Cashflow Statement__Capital Expenditure'));
   });
@@ -432,13 +432,13 @@ describe('vendorName', () => {
     expect(vendorName('indicator_q_forward_pe_ratio')).toBe('Forward PE Ratio');
   });
 
-  it('⚠ returns an unknown code UNCHANGED — ugly beats wrong', () => {
+  it(' returns an unknown code UNCHANGED — ugly beats wrong', () => {
     // A card naming the raw key is a bug report; one naming a guessed pretty label is a bug
     // nobody can see.
     expect(vendorName('some_new_code')).toBe('some_new_code');
   });
 
-  it('⚠ every code the cards name resolves to something readable', () => {
+  it(' every code the cards name resolves to something readable', () => {
     // The guard that matters: `SOURCE_CODES` is what the reads use, so a code added there without
     // a vendor name shows up here rather than on a tooltip.
     for (const code of Object.values(SOURCE_CODES)) {

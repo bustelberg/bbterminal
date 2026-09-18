@@ -16,12 +16,12 @@ WHY THIS EXISTS
     series accumulates on a row no universe can see. Nothing errors. The constituent simply
     goes stale, and past the 30-day signal staleness guard it drops out of selection.
 
-    ⚠ THE ISIN-BEARING ROW IS USUALLY THE ONE TO KEEP, EVEN THOUGH ITS DATA IS STALER. It holds
+     THE ISIN-BEARING ROW IS USUALLY THE ONE TO KEEP, EVEN THOUGH ITS DATA IS STALER. It holds
     the identity every bridge joins on and — decisively — the FROZEN universe snapshots, which
     record what was true at freeze time and must not be rewritten. Keep it and repoint its
     ticker; do not migrate a frozen membership onto a different company_id.
 
-⚠⚠ THE SAFETY GATE IS THE PRICE SERIES, NOT THE NAME. Two rows having similar names proves
+ THE SAFETY GATE IS THE PRICE SERIES, NOT THE NAME. Two rows having similar names proves
     nothing (`Siemens Ltd` India vs `Siemens AG`), and this tool moves universe memberships —
     getting it wrong silently reassigns an index constituent. So the gate is that the two
     series AGREE ON THEIR OVERLAP: same company, same shares, same closes. Measured on
@@ -40,7 +40,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # backend/ on path
 
-# WARNING: THE WINDOWS CONSOLE IS cp1252, AND AN UNENCODABLE CHARACTER IS A CRASH, NOT A GLYPH.
+# Warning: the windows console is cp1252, AND AN UNENCODABLE CHARACTER IS A CRASH, NOT A GLYPH.
 #   One non-ASCII arrow in a print() raised UnicodeEncodeError *after* the safety gate had passed
 #   and printed its verdict - i.e. the tool died at its most misleading possible moment, looking
 #   for all the world like the check had failed. Printed output below is therefore kept ASCII;
@@ -54,7 +54,7 @@ from deps import supabase  # noqa: E402
 
 # Every table with a FK onto company.company_id, paired with THE REST OF ITS PRIMARY KEY.
 #
-# WARNING: THIS IS THE COLLISION KEY, AND GETTING IT WRONG IS A 23505 MID-MERGE. Most of these
+# Warning: this is the collision key, and getting it wrong is a 23505 MID-MERGE. Most of these
 #   tables key on (company_id, <something>), so if BOTH rows already have an entry for the same
 #   <something>, re-pointing company_id lands on the keeper's existing row. That is not
 #   hypothetical: EchoStar's dropped row had `company_source` (company_id, source_code) =
@@ -207,7 +207,7 @@ def main() -> None:
 
     # -- apply ------------------------------------------------------------------------------
     #
-    # ORDER IS A CONSTRAINT, NOT A PREFERENCE. `company` has a UNIQUE (gurufocus_ticker,
+    # Order is a constraint, not a preference. `company` has a UNIQUE (gurufocus_ticker,
     # exchange_id), and in the case this tool exists for the DROPPED row is precisely the one
     # holding the listing the keeper needs to move to - the duplicate was created BY that
     # listing. Repointing first therefore dies on 23505 every time. So: copy the data across,

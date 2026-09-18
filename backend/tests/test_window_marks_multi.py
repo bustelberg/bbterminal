@@ -1,6 +1,6 @@
 """`window_marks_multi` must be `{a: window_marks(a)}` — same bars, per-anchor selection.
 
-⚠ THIS PRICES A BENCHMARK INDEX, so a difference here is not a slow page, it is a wrong index.
+ THIS PRICES A BENCHMARK INDEX, so a difference here is not a slow page, it is a wrong index.
 The two failure modes this codebase has already paid for both live in exactly these three fields:
 
   * the OPENING MARK decides the start-of-window cap weight, and weighting by the wrong one is the
@@ -9,7 +9,7 @@ The two failure modes this codebase has already paid for both live in exactly th
     self-heal — a missed 9:1 hits the index TWICE, because the start weight is backed out through
     the same broken price.
 
-⚠ THE JUMP SET IS PER-ANCHOR. Jumps are those at or after that anchor's OWN opening mark; a split
+ THE JUMP SET IS PER-ANCHOR. Jumps are those at or after that anchor's OWN opening mark; a split
 before the mark is already absorbed into it and re-applying it rescales a price that was never on
 the old basis. A shared jump set would be wrong for whichever anchor is later — which is why these
 tests use two anchors with DIFFERENT jump sets rather than one.
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-# ⚠ NO FAKE DATABASE HERE, DELIBERATELY. The SQL-level equivalence of `window_marks_multi` and
+#  No fake database here, deliberately. The SQL-level equivalence of `window_marks_multi` and
 # `window_marks` cannot be shown against a fake — the whole claim is about what POSTGRES does with
 # `DISTINCT ON (analysis_id, anchor)` and the per-anchor jump join, and a Python stand-in would
 # only re-assert my own reading of it. That equivalence was verified against the real database
@@ -35,7 +35,7 @@ def _no_copy(monkeypatch):
 
 
 class TestShapeParityWithoutCopy:
-    """⚠ THE FALLBACK SHAPES MUST MATCH OR THE CALLER KeyErrors. `index_returns` indexes
+    """ THE FALLBACK SHAPES MUST MATCH OR THE CALLER KeyErrors. `index_returns` indexes
     `marks[s]` directly, so the multi version must yield `{anchor: {}}` — never a bare `{}` —
     when COPY is unavailable. The single-anchor loader returns `{}` per anchor, and the dict
     comprehension it replaced therefore produced a key per anchor."""

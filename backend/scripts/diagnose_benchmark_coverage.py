@@ -8,7 +8,7 @@ does this environment genuinely hold less data?
 
     uv run python scripts/diagnose_benchmark_coverage.py --prod ACWI   # read-only, production
 
-⚠⚠ `--prod` READS `backend/.env` DIRECTLY, WHICH IS THE ONLY WAY TO REACH PRODUCTION FROM HERE.
+ `--prod` READS `backend/.env` DIRECTLY, WHICH IS THE ONLY WAY TO REACH PRODUCTION FROM HERE.
 `deps` loads `.env` and then `.env.local` with **override=True**, so by the time any script runs,
 `SUPABASE_URL` is the LOCAL one — and setting it on the command line does not help, because the
 same override wins again. A script that "targeted prod" that way would cheerfully report on local
@@ -16,14 +16,14 @@ while printing prod in its header; that contamination has already cost a debuggi
 So `--prod` parses `.env` into a dict WITHOUT touching `os.environ` and builds the client from it.
 (`PROD_SUPABASE_URL` / `PROD_SUPABASE_SERVICE_KEY` still work if you want to point somewhere else.)
 
-⚠ NOTHING IS WRITTEN. Every statement below is a SELECT or a count.
+ NOTHING IS WRITTEN. Every statement below is a SELECT or a count.
 
-⚠⚠ THE TWO CAUSES LOOK IDENTICAL ON SCREEN AND HAVE OPPOSITE FIXES. "994 of 1,998 priced" is what
+ THE TWO CAUSES LOOK IDENTICAL ON SCREEN AND HAVE OPPOSITE FIXES. "994 of 1,998 priced" is what
 you see whether PostgREST cut a read at its 1,000-row cap or whether the asset pipeline in that
 environment has only ever resolved 994 of them. The first is a bug to fix in code; the second is a
 resolve/price run to schedule. Guessing wrong costs a day.
 
-⚠ SO EVERY COUNT IS TAKEN TWICE — once PAGED and once deliberately UNPAGED. PostgREST caps a
+ SO EVERY COUNT IS TAKEN TWICE — once PAGED and once deliberately UNPAGED. PostgREST caps a
 response at 1,000 rows on Supabase cloud and 10,000 locally, and truncates SILENTLY, so:
 
     paged == unpaged                  -> no truncation anywhere; the data really is this size
@@ -47,12 +47,12 @@ import deps  # noqa: E402  (loads .env / .env.local before anything reads a key)
 def _client():
     """This environment's client, or production's when `PROD_*` is set.
 
-    ⚠ REBUILT EXPLICITLY RATHER THAN VIA ENV. See the module docstring: `.env.local` is loaded with
+     REBUILT EXPLICITLY RATHER THAN VIA ENV. See the module docstring: `.env.local` is loaded with
     `override=True`, so setting `SUPABASE_URL` on the command line cannot reach `deps`.
     """
     url, key = os.environ.get("PROD_SUPABASE_URL"), os.environ.get("PROD_SUPABASE_SERVICE_KEY")
     if "--prod" in sys.argv and not (url and key):
-        # ⚠ `dotenv_values`, NOT `load_dotenv` — it returns a dict and leaves `os.environ` alone.
+        #  `dotenv_values`, NOT `load_dotenv` — it returns a dict and leaves `os.environ` alone.
         # Loading it would put prod's URL where `.env.local` has already put local's, and which one
         # won would depend on the order two libraries happened to run in.
         from dotenv import dotenv_values  # noqa: PLC0415
@@ -62,7 +62,7 @@ def _client():
         if not (url and key):
             sys.exit("--prod: backend/.env has no SUPABASE_URL + SUPABASE_SERVICE_KEY to use.")
         if "127.0.0.1" in url or "localhost" in url:
-            # ⚠ REFUSED RATHER THAN RUN. A `--prod` that silently reports on local is the exact
+            #  Refused rather than run. A `--prod` that silently reports on local is the exact
             # failure this flag exists to prevent.
             sys.exit(f"--prod: backend/.env points at {url}, which is not production.")
     if not (url and key):
@@ -76,7 +76,7 @@ def _client():
     import routers._asset_benchmark as ab  # noqa: PLC0415
 
     ab.supabase = client
-    # ⚠⚠ AND DISARM THE COPY TRANSPORT, WHICH WOULD OTHERWISE STILL BE POINTED AT LOCAL.
+    #  And disarm the copy transport, which would otherwise still be pointed at local.
     # `common/pg.py` builds its own direct-Postgres connection from `SUPABASE_DB_URL` /
     # `DATABASE_URL` — env this script cannot repoint with a service key. Left alone, `members()`
     # would read PROD's membership and LOCAL's `asset_grid`, and print the mixture as one number:
@@ -135,7 +135,7 @@ def report(label: str) -> None:
             flag = "   (no truncation — same both ways)"
         print(f"  {title:<46} paged {p:>6}   unpaged {u:>6}{flag}")
 
-    # ⚠ THE BRIDGE LOSS IS NOT A BUG. A company with no ISIN — 189 ACWI members, mostly Indian and
+    #  The bridge loss is not a bug. A company with no ISIN — 189 ACWI members, mostly Indian and
     # British — cannot reach the asset world at all, and GuruFocus cannot supply one either. It is
     # reported so it is not mistaken for the truncation this script is looking for.
     company_ids = _paged("universe_membership", "company_id", uid, "company_id")
@@ -150,16 +150,16 @@ def report(label: str) -> None:
     print(f"  {'priced by the app (members())':<46} {len(mem):>6}   "
           f"of {cov['universe_members']} members "
           f"({cov['covered_pct']:.1f}%)" if cov.get("covered_pct") is not None else "")
-    # ⚠ A ROUND ~1000 HERE, WITH THE PAGED COUNTS ABOVE ALL HEALTHY, IS THE SIGNATURE TO CHASE.
+    #  A ROUND ~1000 HERE, WITH THE PAGED COUNTS ABOVE ALL HEALTHY, IS THE SIGNATURE TO CHASE.
     if 990 <= len(mem) <= 1010:
-        print("  ⚠ that is suspiciously close to PostgREST's 1,000-row cloud cap — if the paged "
+        print("   that is suspiciously close to PostgREST's 1,000-row cloud cap — if the paged "
               "counts above are larger, something between them is not paging.")
 
 
 def _reachable(url: str) -> None:
     """Fail with a sentence instead of a stack trace when the host does not exist.
 
-    ⚠⚠ A DEAD PROJECT REF LOOKS LIKE A NETWORK OUTAGE AND IS NOT ONE. `backend/.env` can outlive the
+     A DEAD PROJECT REF LOOKS LIKE A NETWORK OUTAGE AND IS NOT ONE. `backend/.env` can outlive the
     project it names — the old hosted dev project was deleted and the file was never updated — and
     the only symptom is `getaddrinfo failed` forty frames deep in httpx. That reads as "my internet
     is broken", which sends you to the wrong place entirely.

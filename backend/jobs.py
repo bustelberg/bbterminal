@@ -15,7 +15,7 @@ WHY THIS EXISTS
       * two tabs can watch the same run;
       * several runs can be in flight at once, each reporting separately.
 
-⚠⚠ CANCELLATION IS COOPERATIVE, AND THAT IS WHAT MAKES IT *SAFE*.
+ CANCELLATION IS COOPERATIVE, AND THAT IS WHAT MAKES IT *SAFE*.
     Nothing here kills a thread. `ctx.check()` raises `JobCancelled` at a point the WORKER chose,
     which is always a boundary where the database is already consistent — between two GuruFocus
     feeds, between two companies. A thread killed mid-write would leave exactly the half-loaded
@@ -23,12 +23,12 @@ WHY THIS EXISTS
     during a feed stops the job after that feed, not instantly. That is the right trade and the UI
     says "cancelling…" rather than pretending otherwise.
 
-⚠ A DISCONNECT IS NOT A CANCEL. Closing the stream leaves the job running, deliberately: the
+ A DISCONNECT IS NOT A CANCEL. Closing the stream leaves the job running, deliberately: the
     reader may just be navigating away, and silently abandoning a half-finished ingest because
     someone clicked a different page is how you get a company with statements and no estimates.
     Cancel is an explicit POST and nothing else.
 
-⚠ IN-PROCESS, NOT A TABLE, and that is a considered limit rather than an oversight. It matches the
+ IN-PROCESS, NOT A TABLE, and that is a considered limit rather than an oversight. It matches the
     assumption `ingest/phases/pipeline.py::_PIPELINE_LOCK` already makes — one instance, with
     `DISABLE_SCHEDULER=1` on any replica — so there is no migration and no second source of truth.
     A deploy mid-job loses the job, but the work dies with the process anyway, so nothing is
@@ -53,7 +53,7 @@ RETAIN_SECONDS = 15 * 60
 
 #: How long a RUNNING job may go without emitting anything before it is written off.
 #:
-#: ⚠⚠ WITHOUT THIS A HUNG WORKER POISONS THE APP UNTIL THE NEXT DEPLOY, and it did (2026-08-31,
+#:  WITHOUT THIS A HUNG WORKER POISONS THE APP UNTIL THE NEXT DEPLOY, and it did (2026-08-31,
 #: production). `Refresh all portfolios` blocked inside a Playwright call, so it never reached a
 #: `ctx.check()` — Cancel could only ever SET the flag, leaving the card reading "cancelling…" with
 #: "starting…" as its last line. Nothing could clear it:
@@ -65,11 +65,11 @@ RETAIN_SECONDS = 15 * 60
 #:   * `find_running` matched it, so pressing the button again ATTACHED TO THE CORPSE instead of
 #:     starting a run. That is why the card never got past "starting…": there was no new run.
 #:
-#: ⚠ THIRTY MINUTES, AND THE UNIT IS SILENCE, NOT AGE. A long job is fine — the fleet scan takes
+#:  THIRTY MINUTES, AND THE UNIT IS SILENCE, NOT AGE. A long job is fine — the fleet scan takes
 #: many minutes — but every one of them narrates: the AIRS refresh emits per account, a fill emits
 #: per company. Half an hour with nothing at all is a worker that is not coming back.
 #:
-#: ⚠⚠ IT CANNOT KILL THE THREAD, AND THE SUMMARY SAYS SO. Cancellation here is cooperative by
+#:  IT CANNOT KILL THE THREAD, AND THE SUMMARY SAYS SO. Cancellation here is cooperative by
 #: design (see the module note); a thread blocked in a vendor call cannot be interrupted from
 #: outside. What this reclaims is the REGISTRY — the card can finish, and the next press starts a
 #: real run instead of adopting a dead one. The thread, if it ever wakes, finds `_cancel` set.
@@ -82,7 +82,7 @@ class JobCancelled(Exception):
     """Raised by `JobCtx.check()` when cancellation was requested. The runner catches it and marks
     the job `cancelled` — a worker should let it propagate rather than swallowing it.
 
-    ⚠ ITS MESSAGE, IF IT HAS ONE, BECOMES THE SUMMARY. A worker that stops part-way usually knows
+     ITS MESSAGE, IF IT HAS ONE, BECOMES THE SUMMARY. A worker that stops part-way usually knows
     something the registry cannot — which account it stopped before, what it had already stored,
     what is now stale — and that is the whole reason a reader looks at a cancelled card. Raised
     bare (as `check()` does) it still reads "cancelled", so nothing had to change to keep working.
@@ -99,17 +99,17 @@ class Job:
     ended_at: float | None = None
     done: int = 0
     total: int = 0
-    #: When this job last said anything. ⚠ THE HEARTBEAT, and it starts at creation rather than at
+    #: When this job last said anything.  THE HEARTBEAT, and it starts at creation rather than at
     #: 0 so a job that dies before its first `emit` still ages out instead of living forever.
     last_event_at: float = field(default_factory=time.time)
     summary: str | None = None
-    # ⚠ EXTERNAL, METERED CALLS — NOT A REQUEST COUNT. Our own database reads are free and
+    #  External, metered calls — not a request count. Our own database reads are free and
     # unlimited; a GuruFocus call comes out of a finite monthly quota, and a reader deciding
     # whether to press a button again deserves to know which kind they just spent. Jobs that spend
     # nothing metered leave this at 0 and the UI shows nothing, which is why it is worth
     # distinguishing "spent none" from "does not apply" only in the sense that both render blank.
     api_calls: int = 0
-    # ⚠ AN APPEND-ONLY LIST, NOT A QUEUE, AND THE DIFFERENCE IS THE WHOLE FEATURE. A Queue can be
+    #  An append-only list, not a queue, and the difference is the whole feature. A Queue can be
     # drained by exactly one consumer, once — so a reader who reloads has missed everything, and a
     # second tab steals events from the first. A list plus a per-subscriber cursor gives replay and
     # any number of watchers for free.
@@ -151,7 +151,7 @@ class JobCtx:
         return self.job.cancel_requested
 
     def check(self) -> None:
-        """⚠ CALL THIS AT EVERY BOUNDARY WHERE STOPPING IS SAFE, and nowhere else. It is the only
+        """ CALL THIS AT EVERY BOUNDARY WHERE STOPPING IS SAFE, and nowhere else. It is the only
         thing that makes Cancel real: a worker that never checks simply runs to completion and the
         button is a lie."""
         if self.job.cancel_requested:
@@ -168,7 +168,7 @@ class JobCtx:
             if "total" in data:
                 j.total = int(data["total"] or 0)
             j.events.append({"seq": seq, "kind": kind, "message": message, **data})
-            # ⚠ THE HEARTBEAT IS EVERY LINE, not a separate call a worker must remember to make.
+            #  The heartbeat is every line, not a separate call a worker must remember to make.
             # Every job on this registry already narrates; asking for a second signal would mean
             # the ones that forgot it get reaped while running.
             j.last_event_at = time.time()
@@ -179,7 +179,7 @@ class JobCtx:
     def spent(self, calls: int) -> None:
         """Record metered external calls. Additive, so a worker can report per unit of work.
 
-        ⚠ REPORT IT EVEN WHEN THE JOB THEN FAILS. The quota is gone either way, and a failed run
+         REPORT IT EVEN WHEN THE JOB THEN FAILS. The quota is gone either way, and a failed run
         that says it cost nothing is the one that gets retried until the month's budget is.
         """
         if calls:
@@ -194,17 +194,17 @@ _REGISTRY_LOCK = threading.Lock()
 def reap_stalled() -> None:
     """Write off a running job that has gone silent for `STALE_SECONDS` — see that constant.
 
-    ⚠ IT IS A STATUS CHANGE, NOT A KILL. The thread may still be blocked in a vendor call; nothing
+     IT IS A STATUS CHANGE, NOT A KILL. The thread may still be blocked in a vendor call; nothing
     here can interrupt it and the summary does not pretend otherwise. What is reclaimed is the
     registry entry, so the card can reach a terminal state and the next press starts a real run.
 
-    ⚠ `failed`, NOT `cancelled`. Nobody asked for this to stop; it stopped answering. Filing it as
+     `failed`, NOT `cancelled`. Nobody asked for this to stop; it stopped answering. Filing it as
     a cancellation would put a worker's crash in the same column as a reader's decision.
 
-    ⚠ AND `_cancel` IS SET ON THE WAY OUT, so a worker that does eventually wake up unwinds at its
+     AND `_cancel` IS SET ON THE WAY OUT, so a worker that does eventually wake up unwinds at its
     next `ctx.check()` rather than carrying on writing under a job the registry has written off.
 
-    ⚠ PUBLIC BECAUSE THE SSE STREAM CALLS IT TOO. `_prune` runs on start and on list — neither of
+     PUBLIC BECAUSE THE SSE STREAM CALLS IT TOO. `_prune` runs on start and on list — neither of
     which a tab that is already WATCHING a hung job will do — so without a tick-level call that
     reader keeps their card forever while everyone else's is reaped. It is a timestamp compare over
     a handful of jobs.
@@ -223,7 +223,7 @@ def reap_stalled() -> None:
                      "running; nothing here can stop a thread that is not asking to be stopped.")
         j.ended_at = time.time()
         _log.warning("[job] %s (%s) abandoned after %s minutes of silence", j.label, j.kind, quiet)
-        # ⚠ AN EVENT, SO A WATCHING TAB LEARNS WHY. A card that flips to `failed` with no line
+        #  An event, so a watching tab learns why. A card that flips to `failed` with no line
         # explaining it is the same dead end from the reader's side.
         JobCtx(j).emit("error", j.summary)
 
@@ -232,7 +232,7 @@ def _prune() -> None:
     """Reap the stalled, then drop finished jobs past `RETAIN_SECONDS`. Called on every start and
     list, so the registry is tidied by use rather than by a timer nobody would remember exists.
 
-    ⚠ THE ORDER MATTERS: reaping makes a job terminal, and the drop below only ever removes
+     THE ORDER MATTERS: reaping makes a job terminal, and the drop below only ever removes
     terminal ones — so a stalled job leaves in two steps rather than being stuck for another
     `RETAIN_SECONDS`. It stays readable for the retention window like any other outcome, which is
     what puts one explaining card in front of the reader instead of silence.
@@ -248,7 +248,7 @@ def _prune() -> None:
 def find_running(kind: str, label: str) -> Job | None:
     """The live job for this exact piece of work, if there is one.
 
-    ⚠⚠ IT REAPS FIRST, AND WITHOUT THAT THE IDEMPOTENCE BELOW BECOMES A TRAP. `start` attaches to
+     IT REAPS FIRST, AND WITHOUT THAT THE IDEMPOTENCE BELOW BECOMES A TRAP. `start` attaches to
     whatever this returns instead of launching — right for a run in flight, and fatal for a hung
     one: every press adopts the corpse and nothing new ever starts. Measured in production on
     `Refresh all portfolios`, whose card sat on "starting…" through press after press.
@@ -267,7 +267,7 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Jo
     `fn` returns the summary line, or None. It should call `ctx.check()` wherever stopping is safe
     and let `JobCancelled` propagate.
 
-    ⚠⚠ STARTING IS IDEMPOTENT PER (kind, label), AND WITHOUT THAT CANCEL CANNOT WORK. Nothing used
+     STARTING IS IDEMPOTENT PER (kind, label), AND WITHOUT THAT CANCEL CANNOT WORK. Nothing used
     to stop a second press launching a second identical job: two fills over the same 1,712
     constituents, sharing one global rate limiter so both crawl, and a Cancel that stops exactly one
     of them. From the outside that is a Cancel button that does nothing — the run "keeps going",
@@ -278,11 +278,11 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Jo
     back reading "Refresh benchmark" while the work is still running. Pressing it again is the
     obvious thing to do and was the wrong thing to do.
 
-    ⚠ ATTACH, DO NOT REFUSE. Returning an error would be correct and useless: the reader wants the
+     ATTACH, DO NOT REFUSE. Returning an error would be correct and useless: the reader wants the
     thing they asked for, and it is already happening. Handing back the running job means the second
     press adopts it, the button flips to Cancel, and the UI heals itself.
 
-    ⚠ THE KEY IS (kind, label) BECAUSE THAT IS WHAT "THE SAME WORK" MEANS HERE — two different
+     THE KEY IS (kind, label) BECAUSE THAT IS WHAT "THE SAME WORK" MEANS HERE — two different
     companies, baskets or indices differ in `label`; the same one twice is a duplicate. A caller that
     genuinely needs concurrent same-label runs would need a distinguishing label, which is the honest
     way to express it.
@@ -307,7 +307,7 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Jo
             job.status = "cancelled"
             # The worker's own account of where it stopped when it gave one — see `JobCancelled`.
             job.summary = str(e) or "cancelled — stopped at a safe point"
-            # ⚠ NAMED AS AN OUTCOME, NOT AN ERROR. A cancelled job did what it was told; rendering
+            #  Named as an outcome, not an error. A cancelled job did what it was told; rendering
             # it in red beside a genuine failure teaches the reader to ignore both.
             ctx.emit("cancelled", job.summary)
         except Exception as e:  # noqa: BLE001
@@ -330,7 +330,7 @@ def get(job_id: str) -> Job | None:
 def cancel(job_id: str) -> Job | None:
     """Request cancellation. Idempotent; returns None for an unknown id.
 
-    ⚠ IT ONLY *REQUESTS*. The job stops when its worker next reaches a `ctx.check()`, which is why
+     IT ONLY *REQUESTS*. The job stops when its worker next reaches a `ctx.check()`, which is why
     the response reports `cancel_requested` rather than a status of `cancelled`."""
     job = get(job_id)
     if job is None:

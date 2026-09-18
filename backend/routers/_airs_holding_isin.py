@@ -1,6 +1,6 @@
 """One AIRS account's holdings, each with its instrument identity and a check on our price for it.
 
-⚠ THE FIXED↔DYNAMIC PAIRING IS GONE (2026-07-23), AND SO IS EVERYTHING IT NEEDED.
+ THE FIXED↔DYNAMIC PAIRING IS GONE (2026-07-23), AND SO IS EVERYTHING IT NEEDED.
     This module used to recover each holding's ISIN by fuzzy-matching its fund name against a
     PAIRED model portfolio's positions, assigning 1:1 globally, and gating on the price. All of
     that is deleted: ~200 lines of scoring, assignment and refusal logic, plus the pairing itself.
@@ -31,18 +31,18 @@ WHERE EACH FIELD COMES FROM NOW
     drift       the book's OWN `MODEL` report (`airs_model_weight`) — lines the strategy names
                 and the book does not hold
 
-⚠ THE PRICE CHECK IS WHAT SURVIVES, AND IT IS NOW WORTH MORE. It never tested the name; it tested
+ THE PRICE CHECK IS WHAT SURVIVES, AND IT IS NOW WORTH MORE. It never tested the name; it tested
     the instrument. With the ISIN a guess, a mismatch was ambiguous — bad pairing, or bad ISIN?
     With the ISIN stated by the custodian, a mismatch can only mean OUR price series is wrong for
     that instrument (the Stuttgart/Vienna wrong-listing trap). That is a finding we could not
     make at all before.
 
-⚠ AND IT MUST FX-CONVERT OR IT IS NOISE. The account's implied price is EUR; `asset_price.close`
+ AND IT MUST FX-CONVERT OR IT IS NOISE. The account's implied price is EUR; `asset_price.close`
     is the listing's own currency. Without conversion `Investor AB` reads a ratio of 0.09 — which
     is just 1/11, EUR/SEK — while Linde and Berkshire pass at 0.86 only by luck. `_rate` is shared
     with the benchmark, so the pence trap (GBp is not a currency) is handled in one place.
 
-⚠ DEDUPE THE ACCOUNT FIRST. AIRS bills one instrument on several lines — `6,5% Rabobank
+ DEDUPE THE ACCOUNT FIRST. AIRS bills one instrument on several lines — `6,5% Rabobank
     Certificaten 14-perp.` appears at 2.60% AND 0.01%. This mattered enormously to the assignment
     and still matters to the table: two rows for one instrument is two rows a reader must reconcile.
 """
@@ -73,7 +73,7 @@ _HOLDING_GRID_COLS = ("isin,name,openfigi_name,leonteq_name,leonteq_product_type
 def _phase(store: dict, name: str):
     """Time one step of the expand and record it in milliseconds.
 
-    ⚠ EXPANDING A ROW FIRES THREE ENDPOINTS AND USED TO TAKE SECONDS FOR NO STATED REASON. This one
+     EXPANDING A ROW FIRES THREE ENDPOINTS AND USED TO TAKE SECONDS FOR NO STATED REASON. This one
     does a dozen distinct things — several DB reads, an FX load, a link resolution, and (since the
     price check started refreshing stale series) potentially a run of YAHOO calls. "It takes a
     while" is unactionable; "freshen 4,100ms, closes 90ms, everything else 200ms" names the step to
@@ -91,13 +91,13 @@ def _phase(store: dict, name: str):
 # would put an equity in the cash bucket.
 _CASH_NAMES = {"effectenrekening", "liquiditeiten"}
 
-# ⚠ `ETF` MUST BE A WORD, NOT A SUBSTRING. `name ILIKE '%ETF%'` matches **Netflix** — n-ETF-lix —
+#  `ETF` MUST BE A WORD, NOT A SUBSTRING. `name ILIKE '%ETF%'` matches **Netflix** — n-ETF-lix —
 # and files it as a fund. Measured: of the model's ISINs, that test flags exactly one EQUITY, and
 # it is Netflix.
 _ETF_WORD = re.compile(r"\bETF\b", re.I)
 #: A fund wrapper that is NOT an ETF — a SICAV, an ICAV, a plain mutual fund.
 #:
-#: ⚠ WORD-BOUNDED, WHICH IS WHAT MAKES IT SAFE. `Fundsmith` and `Fundamental` are companies and
+#:  WORD-BOUNDED, WHICH IS WHAT MAKES IT SAFE. `Fundsmith` and `Fundamental` are companies and
 #: neither matches `\bFUND\b`; the boundary is doing real work here, not decoration.
 _FUND_WORD = re.compile(r"\b(FUND|FONDS|SICAV|ICAV)\b", re.I)
 
@@ -109,10 +109,10 @@ def _is_etf(grid_row: dict | None, holding_name: str = "") -> bool:
     ETF and leaves 40 with no type at all, among which 11 are plainly ETFs (iShares, Vanguard,
     VanEck…). So the type is trusted first and the rest fill its gaps.
 
-    ⚠ 'UCITS' alone does not cover the gap either: `iShares J.P. Morgan EM Corporate Bond ETF`
+     'UCITS' alone does not cover the gap either: `iShares J.P. Morgan EM Corporate Bond ETF`
     carries no UCITS in its name. Both tests are needed, and the ETF one must be word-bounded.
 
-    ⚠⚠ IT READ ONLY THE GRID'S NAME, AND THE GRID'S NAME IS THE VENDOR'S ABBREVIATION. That is why
+     IT READ ONLY THE GRID'S NAME, AND THE GRID'S NAME IS THE VENDOR'S ABBREVIATION. That is why
     two funds sat in `Individual stocks` on /management-dashboard (reported 2026-08-21):
 
         AIRS: Invesco World Equal Weight ETF Acc    grid: INVESCO MARKETS II PLC IVZ MSCI
@@ -122,11 +122,11 @@ def _is_etf(grid_row: dict | None, holding_name: str = "") -> bool:
     So `holding_name` is now a name source too — the reader's name for a thing is evidence about
     what it is, and the grid's truncation is not evidence against.
 
-    ⚠⚠ AND `sector == 'etf'` IS OUR OWN CLASSIFICATION, WHICH IT WAS IGNORING. The asset-pipeline's
+     AND `sector == 'etf'` IS OUR OWN CLASSIFICATION, WHICH IT WAS IGNORING. The asset-pipeline's
     sector tool files ETFs under that literal sector; a row we have already decided is an ETF must
     not be re-decided as a company by a name test. That signal alone catches the Invesco line.
 
-    ⚠ AND A FUND IS NOT ONLY AN ETF. `Letko Bross … Fund` is a mutual fund: no earnings of its own,
+     AND A FUND IS NOT ONLY AN ETF. `Letko Bross … Fund` is a mutual fund: no earnings of its own,
     which is the ONLY thing the flag's consumers care about (the owner-earnings gate, and the
     `Individual stocks` / `Stock ETFs` division). `_FUND_WORD` covers SICAV/ICAV/mutual too.
 
@@ -136,7 +136,7 @@ def _is_etf(grid_row: dict | None, holding_name: str = "") -> bool:
     Fund`, `Mint Tower Arbitrage Fund I`, `Fresh Fixed Income Fund`. Every one of the six is
     genuinely a fund; there were no false positives at any step.
 
-    ⚠ A BOND FUND CAUGHT HERE STILL LANDS IN **Bonds** — this flag says "wrapper", never "asset
+     A BOND FUND CAUGHT HERE STILL LANDS IN **Bonds** — this flag says "wrapper", never "asset
     class". `classify_bucket` decides the class, so `Fresh Fixed Income Fund` does not appear under
     `Stock ETFs`; only the funds inside the Equity bucket do.
     """
@@ -144,7 +144,7 @@ def _is_etf(grid_row: dict | None, holding_name: str = "") -> bool:
     if grid_row:
         if (grid_row.get("leonteq_product_type") or "").strip().upper() == "ETF":
             return True
-        # ⚠ OUR OWN CLASSIFICATION OUTRANKS ANY NAME TEST — see the ⚠⚠ above.
+        #  Our own classification outranks any name test — see the  above.
         if (grid_row.get("sector") or "").strip().lower() == "etf":
             return True
     for candidate in (name, holding_name or ""):
@@ -159,13 +159,13 @@ def _is_etf(grid_row: dict | None, holding_name: str = "") -> bool:
 # FIVE buckets, one per thing a holding INVESTS IN. A bond ETF is Bonds and an equity ETF is
 # Equity: the wrapper is not the asset class.
 #
-# ⚠⚠ `Equity ETF` WAS A SIXTH BUCKET AND WAS RETIRED 2026-08-18. It split the equity sleeve on the
+#  `Equity ETF` WAS A SIXTH BUCKET AND WAS RETIRED 2026-08-18. It split the equity sleeve on the
 # WRAPPER while every other bucket split on the underlying, so the bar answered two different
 # questions at once — and a book's equity exposure could not be read off it without adding two
 # slices together. Bonds never had the split (a bond ETF has always been Bonds), which is what made
 # the equity one inconsistent rather than merely redundant.
 #
-# ⚠⚠ AND RETIRING IT COST SOMETHING THAT HAD TO BE REPLACED, NOT JUST DELETED. `Equity` was
+#  And retiring it cost something that had to be replaced, not just deleted. `Equity` was
 # implicitly the "operating companies only" bucket — the Analyse modal gates owner-earnings
 # blending on `bucket === 'Equity'` precisely because a fund has no earnings to blend and this app
 # does not look through funds. With ETFs now inside Equity that guarantee is gone from the bucket,
@@ -198,7 +198,7 @@ def _display_sector(raw: str | None) -> str | None:
 
 # Fixed-income tells for the FALLBACK only (when AIRS gave no categorie). A coupon rate in the name
 # ("6,5% Rabobank Certificaten 14-perp.") is the strongest; the rest are bond/fund name fragments.
-# ⚠ `ibond` AND `bd` ARE NOT PADDING. With AIRS's `categorie` gone the name is the ONLY bond tell
+#  `ibond` AND `bd` ARE NOT PADDING. With AIRS's `categorie` gone the name is the ONLY bond tell
 # left for a fund whose grid row is wrong or missing, and both of these were measured failing:
 #   `iShares iBonds 2032 Term Corp UCITS ETF USD` — not in asset_grid at all, and `\bbond` does
 #      NOT match "iBonds" (no word boundary before the b), so it classified as an equity ETF.
@@ -237,8 +237,8 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
     Returns 'Unclassified' ONLY when nothing above decides — an honest "unsure", never a guess
     dressed as a fact.
 
-    ⚠ NO BUCKET SPLITS ON THE WRAPPER. Every one of them names what the holding invests in, which
-    is why an equity ETF and a share of Apple land in the same place — see the ⚠⚠ on
+     NO BUCKET SPLITS ON THE WRAPPER. Every one of them names what the holding invests in, which
+    is why an equity ETF and a share of Apple land in the same place — see the  on
     `BUCKET_EQUITY`. `is_etf` survives as a parameter only for the fallback, where "a fund" is the
     difference between Equity and Unclassified.
     """
@@ -256,7 +256,7 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
     if asset_class in (BUCKET_ALTS, "Real estate"):
         return BUCKET_ALTS
     if asset_class == BUCKET_EQUITY:
-        # ⚠ `is_etf` NO LONGER CHANGES THE ANSWER HERE — an equity ETF invests in equity. It is
+        #  `is_etf` NO LONGER CHANGES THE ANSWER HERE — an equity ETF invests in equity. It is
         # still a parameter because the fallback below needs it to tell a fund from an unknown.
         return BUCKET_EQUITY
     # 2/3. No AIRS class — the grid, then the name. Since `categorie` was dropped (2026-07-23)
@@ -266,7 +266,7 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
         return BUCKET_BONDS
     if gac in ("crypto", "commodity"):
         return BUCKET_ALTS
-    # ⚠ BEFORE the equity test, or every REIT is an ordinary equity. yfinance's own sector, the
+    #  BEFORE the equity test, or every REIT is an ordinary equity. yfinance's own sector, the
     # same field the Sector column shows — this replaces AIRS's `VAS` exactly.
     if (g.get("sector") or "").strip().lower() == _REAL_ESTATE_SECTOR:
         return BUCKET_ALTS
@@ -316,7 +316,7 @@ _ONDEMAND_REFRESH_LIMIT = 5
 # about an instrument it asked about a minute ago — see `_freshen`.
 _FRESHENED: dict[str, str] = {}
 
-# ⚠ ONE DAY BEHIND THE MARKET IS STALE **FOR THIS CALLER**, and the fleet default is not.
+#  One day behind the market is stale **FOR THIS CALLER**, and the fleet default is not.
 # `DEFAULT_STALE_DAYS = 3` answers "is it worth a Yahoo call to top this series up", where clearing
 # a weekend cheaply matters over 6,000 instruments. It is the wrong question here. This check makes
 # an ACCUSATION — "our listing is wrong" — inside a 15% band calibrated for a same-day comparison,
@@ -339,7 +339,7 @@ _MAX_CLOSE_LAG_DAYS = 4
 def _freshen(isins: list[str]) -> None:
     """Fetch the GAP for any of this account's instruments whose close lags the market.
 
-    ⚠ THE CHECK IS ONLY AS GOOD AS THE PRICE UNDER IT, AND A STALE PRICE FAILS IT SILENTLY. The
+     THE CHECK IS ONLY AS GOOD AS THE PRICE UNDER IT, AND A STALE PRICE FAILS IT SILENTLY. The
     comparison is AIRS's implied price against our own close, with a 15% tolerance meant to catch
     share-class errors of 19x and 20x. A series that simply stopped updating drifts past 15% on any
     ordinary mover and is then reported as `price_mismatch` — "our listing is wrong" about a listing
@@ -347,16 +347,16 @@ def _freshen(isins: list[str]) -> None:
     anywhere sat six days back, and the row read as a wrong listing with every stored bar matching
     Yahoo to the cent.
 
-    ⚠ IT STANDS DOWN WHILE THE INGEST WORKER IS LIVE, exactly as the 06:00 tick does. Yahoo answers
+     IT STANDS DOWN WHILE THE INGEST WORKER IS LIVE, exactly as the 06:00 tick does. Yahoo answers
     an overloaded caller with an EMPTY result rather than a 429, and an empty candidate set is how a
     resolution lands on a thin foreign listing. A price check is never worth risking that.
 
-    ⚠ DETECTS BEFORE IT FETCHES. `refresh_stale` runs `find_stale` first — a few queries, one
+     DETECTS BEFORE IT FETCHES. `refresh_stale` runs `find_stale` first — a few queries, one
     grouped COPY and one canary probe — so the usual case, everything current, costs no per-symbol
     Yahoo calls at all. Best effort throughout: a failed refresh leaves the old close in place, and
     `_MAX_CLOSE_LAG_DAYS` then stops the check drawing a conclusion from it.
 
-    ⚠ IT IS A SAFETY NET, NOT THE REFRESH — AND FORGETTING THAT COST 12 SECONDS A CLICK. The first
+     IT IS A SAFETY NET, NOT THE REFRESH — AND FORGETTING THAT COST 12 SECONDS A CLICK. The first
     version asked Yahoo about EVERY holding on EVERY expand: `stale_days=1` means anything a day
     behind the market anchor qualifies, which overnight is the whole book, and `extend_series` is a
     round trip apiece. Measured 2026-07-30 with per-phase timing: 11,537 ms of an 11,793 ms expand
@@ -382,12 +382,12 @@ def _freshen(isins: list[str]) -> None:
         if _q.is_worker_active():
             _log.info("[airs price check] refresh SKIPPED — the ingest queue worker is live")
             return
-        # ⚠ `stale_days=_CHECK_STALE_DAYS`, NOT the fleet default — see the constant. One detection
+        #  `stale_days=_CHECK_STALE_DAYS`, NOT the fleet default — see the constant. One detection
         # pass, not two: `refresh_stale` finds them itself, so calling `find_stale` here as well
         # would cost a second canary probe on every expand.
         r = price_refresh.refresh_stale(isins=set(want), stale_days=_CHECK_STALE_DAYS,
                                         limit=_ONDEMAND_REFRESH_LIMIT)
-        # ⚠ MARKED WHATEVER THE OUTCOME. "Yahoo has nothing newer" is as final an answer as a
+        #  Marked whatever the outcome. "Yahoo has nothing newer" is as final an answer as a
         # successful fetch — re-asking about a dormant listing on every click is the exact cost
         # this memo exists to remove.
         for i in want:
@@ -480,7 +480,7 @@ def _link_fields(lk, pf_names: dict[int, str]) -> dict:
         "linked_portfolio_id": lk.linked_portfolio_id,
         "linked_portfolio_name": pf_names.get(lk.linked_portfolio_id) if lk.linked_portfolio_id else None,
         "link_source": lk.source,
-        # ⚠ NULL for a manual link. A human choice is not a guess, and rendering it at "100%
+        #  NULL for a manual link. A human choice is not a guess, and rendering it at "100%
         # confidence" would put a decision and an estimate in the same visual language.
         "link_confidence": lk.confidence,
         "link_reason": lk.reason,
@@ -514,7 +514,7 @@ def _load_bucket_overrides(isins: list[str]) -> dict[str, str]:
 def _segments(rows: list[dict]) -> list[dict]:
     """One row per asset class: exposure, and what that exposure returned.
 
-    ⚠ THE RETURN AND THE WEIGHT DO NOT COVER THE SAME HOLDINGS, ON PURPOSE.
+     THE RETURN AND THE WEIGHT DO NOT COVER THE SAME HOLDINGS, ON PURPOSE.
         A holding with no opening value has an UNDEFINED return — it was not held when the year
         opened. It is real exposure, so it counts in `value_eur` and `weight_pct`; but putting it
         in `sum(current)/sum(start)` would report its entire value as gain. Measured: cash is
@@ -523,7 +523,7 @@ def _segments(rows: list[dict]) -> list[dict]:
         with no opening value. `return_pct` therefore spans only the priced part, and
         `priced_value_eur` states how much that is. A segment where they differ is saying so.
 
-    ⚠ IT IS THE START-WEIGHTED VALUE CHANGE — `Σnow / Σstart − 1`, the basket's actual price return,
+     IT IS THE START-WEIGHTED VALUE CHANGE — `Σnow / Σstart − 1`, the basket's actual price return,
         equivalently each holding's return weighted by its OPENING value (beginwaarde). NOT weighted
         by the CURRENT value: a holding up +148% has tripled its share of the book, so current-value
         weighting lets that one winner dominate and inflates the figure (measured: AITopSelectie read
@@ -554,7 +554,7 @@ def _segments(rows: list[dict]) -> list[dict]:
             "asset_class": name,
             "holdings": len(rs),
             "value_eur": round(value, 2),
-            # ⚠ EVERY MONEY CELL IN THE HEADER IS THE SUM OF THE COLUMN BENEATH IT — that is the
+            #  Every money cell in the header is the sum of the column beneath it — that is the
             # invariant a reader checks, so `start_value_eur` sums ALL the rows (an unpriced one
             # contributes its 0), not just the priced ones. It follows that
             # `value_eur - start_value_eur != gain_eur` wherever a segment holds something with
@@ -574,7 +574,7 @@ def _segments(rows: list[dict]) -> list[dict]:
                        if any(r.get("fx_result_eur") is not None for r in rs) else None),
             "return_pct": round(100 * (now / start - 1), 2) if start else None,
             "priced_value_eur": round(now, 2),
-            # ⚠ ETFs are counted, never bucketed: an equity ETF is Equity. Stated as a share of
+            #  ETFs are counted, never bucketed: an equity ETF is Equity. Stated as a share of
             # the segment so "Bonds 48.65%, of which 43.20% via ETFs" is one row, not two.
             "etf_value_eur": round(sum((r.get("current_value_eur") or 0)
                                        for r in rs if r.get("is_etf")), 2),
@@ -587,7 +587,7 @@ def _segments(rows: list[dict]) -> list[dict]:
 def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     """One account's holdings, each with its own ISIN and what we know about that instrument.
 
-    ⚠ NO PAIRING, NO SCORING, NO ASSIGNMENT — all three were deleted 2026-07-23. Everything they
+     NO PAIRING, NO SCORING, NO ASSIGNMENT — all three were deleted 2026-07-23. Everything they
     existed to recover now comes directly from the book:
 
         the ISIN        the Vermogensoverzicht's own `ISIN-code` column (live 2026-07-23)
@@ -630,7 +630,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
 
     with _phase(t, "grid"):
         grid: dict[str, dict] = {}
-        # ONE COPY instead of ceil(len/100) round trips; the chunked loop is the fallback.
+        # One copy instead of ceil(len/100) round trips; the chunked loop is the fallback.
         _rows = load_rows_via_copy("asset_grid", _HOLDING_GRID_COLS, "isin", isins)
         if _rows is None:
             _rows = []
@@ -640,7 +640,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         for g in _rows:
             grid[g["isin"]] = g
 
-    # ⚠ AN EXECUTION ROW IS PRICED FROM ITS *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
+    #  An execution row is priced from its *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
     # LISTING — that is the design, not a fault. An ADR's execution row is deliberately served by
     # the main company's instrument (`asset_isin_alias`), and the two do not trade at the same
     # number: TSMC is 1 ADR = 5 ordinary shares, plus an ADR premium. The price check below would
@@ -651,10 +651,10 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     with _phase(t, "aliases_overrides"):
         aliased = load_aliases()
         overrides = _load_bucket_overrides(isins)   # manual Class pins, keyed by ISIN — they win
-    # ⚠ BEFORE the closes are read, never after: the check below is a comparison, and half of it
+    #  BEFORE the closes are read, never after: the check below is a comparison, and half of it
     # comes from here. See `_freshen` — a series that merely stopped updating reads as a wrong
     # listing, which is the loudest finding this table can make.
-    # ⚠ SKIPPABLE, AND ONLY THE PRICE CHECK DEPENDS ON IT. `_freshen` exists so the implied-vs-our
+    #  Skippable, and only the price check depends on it. `_freshen` exists so the implied-vs-our
     # price comparison below is not drawn against a series that merely stopped updating — it
     # protects `verdict` / `price_ratio` / `implied_price_eur`, which the /portfolios expand shows.
     # The ANALYSIS path reads none of those: it takes the ISIN, the two AIRS valuations, the class
@@ -662,7 +662,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     # per book for a check it does not display — twice, since the wrapped book is resolved too, so
     # 6.4s of a 9.7s modal open.
     #
-    # ⚠ THE PRICES STILL GET FRESHENED, JUST NOT HERE: the 06:00 tick covers account holdings
+    #  The prices still get freshened, just not here: the 06:00 tick covers account holdings
     # (`price_refresh.held_isins` unions `airs_holding`), and any /portfolios expand runs the full
     # path. This only declines to do the vendor's work on a read that will not show the result.
     with _phase(t, "freshen_prices"):
@@ -679,7 +679,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     # is keyed on the HOLDING, not on (parent, holding), so a link decided on either screen is the
     # same decision and neither can disagree with the other.
     #
-    # ⚠ THE SELF-EXCLUSION GATE NEEDS AN OWNER, AND AN ACCOUNT IS NOT A MODEL. `resolve_links`
+    #  The self-exclusion gate needs an owner, and an account is not a model. `resolve_links`
     # takes the id of the portfolio whose rows these are, so it can refuse a self-reference. Here
     # the rows belong to an ACCOUNT, whose analogue is the model that account RUNS: a certificate
     # of its own strategy is precisely the wrapper cycle the gate exists to stop (TOPS_STS_L holds
@@ -691,7 +691,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
                       "fonds": h.get("holding_name") or ""}
                      for i, h in enumerate(holdings)]
         links = resolve_links(supabase, owner_id, link_rows)
-        # ⚠ The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
+        #  The PRETTY name, falling back to AIRS's `Portefeuille` code — see `linkable_context`.
         from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
         pf_names = {p["id"]: (nickname_for(p.get("name")) or p.get("display_name") or p["name"])
                     for p in ref_models()}
@@ -703,7 +703,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         qty, val = h.get("quantity"), h.get("current_value_eur")
         implied = (float(val) / float(qty)) if qty and val else None
 
-        # ⚠ Convert OUR close into EUR — never compare it raw to an EUR-implied price.
+        #  Convert OUR close into EUR — never compare it raw to an EUR-implied price.
         native_eur = None
         c = closes.get(isin or "")
         if c:
@@ -712,8 +712,8 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
                 native_eur = c["close"] / r
 
         ratio = (implied / native_eur) if (implied and native_eur) else None
-        # How far our close sits from the day AIRS valued the book. ⚠ MEASURED AGAINST `as_of`, NOT
-        # AGAINST TODAY: the two sides of this comparison must describe the same day, and an account
+        # How far our close sits from the day AIRS valued the book.  MEASURED AGAINST `as_of`, NOT
+        # Against today: the two sides of this comparison must describe the same day, and an account
         # whose snapshot is a fortnight old is correctly compared with a fortnight-old close.
         lag = _close_lag_days(c, as_of)
         if ratio is None:
@@ -721,14 +721,14 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         elif abs(ratio - 1.0) <= _PRICE_TOL:
             verdict = "ok"
         elif lag is not None and lag > _MAX_CLOSE_LAG_DAYS:
-            # ⚠ A DISAGREEMENT BETWEEN TWO DIFFERENT DAYS IS NOT A DISAGREEMENT. `_freshen` has
+            #  A disagreement between two different days is not a disagreement. `_freshen` has
             # already tried to close the gap, so reaching here means Yahoo has nothing newer for
             # this line — a delisted or dormant listing. Our price cannot answer the question, and
             # saying `price_mismatch` would answer it wrongly: the gap is time, not identity.
             verdict = "stale_price"
         else:
             verdict = "price_mismatch"
-        # ⚠ NOT A MISMATCH, AND NOT 'ok' EITHER. This ISIN is served by another instrument on
+        #  Not a mismatch, and not 'ok' EITHER. This ISIN is served by another instrument on
         # purpose, so a price difference is EXPECTED and proves nothing about the identity —
         # calling it `ok` would claim the price confirmed something it never tested.
         served_by = aliased.get(isin or "")
@@ -736,13 +736,13 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
             verdict = "cross_listed"
 
         g = grid.get(isin or "") or {}
-        # ⚠ THE BOOK'S OWN NAME TOO — the grid carries the vendor's abbreviation, which drops the
+        #  The book's own name too — the grid carries the vendor's abbreviation, which drops the
         # word "ETF" often enough to matter. See `_is_etf`.
         # AIRS strategies are certificate/fund wrappers when another portfolio holds them.  The
         # reviewed strategy map recognises them even before an asset-grid row exists.
         from routers._airs_strategy_map import is_strategy_holding  # noqa: PLC0415
         is_etf = is_strategy_holding(h["holding_name"]) or _is_etf(g, h["holding_name"])
-        # ⚠ `asset_class=None` ALWAYS now: AIRS's `categorie` came from the paired model position
+        #  `asset_class=None` ALWAYS now: AIRS's `categorie` came from the paired model position
         # and there is no pairing. The grid and the name carry it (see `classify_bucket`).
         override = overrides.get(isin or "")
         bucket = override or classify_bucket(None, is_etf, isin, h["holding_name"], g)

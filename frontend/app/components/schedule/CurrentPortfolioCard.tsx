@@ -11,7 +11,7 @@ import { fmtSleevePct, parsePct, stockSleevePct, validateSleeves, type SleeveEtf
 import { displayExchange, EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from '../momentum/utils';
 import TableDownloadButton from '../TableDownloadButton';
 import { holdingsExportName } from './exportName';
-// ⚠ THE SAME MODAL THE DAILY-HOLDINGS TABLE OPENS, not a second one. It reads
+//  The same modal the daily-holdings table opens, not a second one. It reads
 // `POST /api/momentum/signal-breakdown` — one endpoint, one renderer, so "why
 // this was picked" cannot have two answers.
 import BreakdownModal, { type BreakdownTarget } from '../momentum/BreakdownModal';
@@ -27,7 +27,7 @@ type ReloadResult = components['schemas']['RepriceResult'];
  * What `PATCH …/sleeves` reports about the half of the work that happens AFTER the config is
  * written: restating the open period's book and re-pricing it.
  *
- * ⚠ Hand-written rather than generated: neither sleeve endpoint declares a `response_model`, so
+ *  Hand-written rather than generated: neither sleeve endpoint declares a `response_model`, so
  * `api-types.ts` has nothing to say about this key. `note` is not a failure (a strategy with no
  * rebalance yet), `error` is.
  */
@@ -48,7 +48,7 @@ type SnapshotResponse = {
   period_return_pct: number | null;
   holdings: Holding[];
   // The config the picks were MADE with (universe, signal + category weights).
-  // ⚠ The snapshot's own, not the strategy's current one: the strategy config is
+  //  The snapshot's own, not the strategy's current one: the strategy config is
   // editable (cash %, ETF sleeves) and the "why was this picked" screen has to
   // explain the decision as it was taken, not as the settings look today.
   config?: Record<string, unknown> | null;
@@ -69,14 +69,14 @@ function AsOfTip({ date }: { date: string | null }) {
 /**
  * Reload this strategy's PRICES — start and end, local and converted.
  *
- * ⚠ IT DOES NOT RE-SELECT, AND THAT IS THE WHOLE DISTINCTION. Re-running the selection for a
+ *  It does not re-select, and that is the whole distinction. Re-running the selection for a
  * past date is "Force re-rebalance" on the pipeline card, and it is not a repair: `metric_data`
  * is not append-only in `target_date` (vendors publish late closes stamped with their true
  * earlier date), so a past basket cannot be reproduced from the live database and re-deciding it
  * would silently rewrite what the strategy held. This reloads the marks on the holdings that are
  * already there.
  *
- * ⚠ AND IT RUNS THE NIGHTLY TICK'S OWN FUNCTION, not a second implementation. What the button
+ *  And it runs the nightly tick's own function, not a second implementation. What the button
  * buys is timing — the correction lands now rather than at 05:00 UTC.
  *
  * The detail goes to the console (which holdings moved, and in which fields); the chip says only
@@ -200,7 +200,7 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
         setErr(typeof body?.detail === 'string' ? body.detail : `Save failed (HTTP ${r.status})`);
         return;
       }
-      // ⚠⚠ A 200 IS NOT "IT WORKED". The endpoint saves the config first and then restates the
+      //  A 200 IS NOT "IT WORKED". The endpoint saves the config first and then restates the
       // open period; the restate is the half that puts the new weights in the SNAPSHOT this
       // card renders, and it can fail on its own (it used to fail silently — see
       // `_write_sleeves`). Reporting only the HTTP status is what made a failed edit look like
@@ -291,7 +291,7 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
                 type="button" onClick={() => setEtfs(etfs.filter((_, j) => j !== i))} disabled={saving}
                 title="Remove this ETF" className="text-fg-faint hover:text-neg-400 px-1"
               >
-                ✕
+
               </button>
             </div>
           ))}
@@ -363,7 +363,7 @@ export default function CurrentPortfolioCard({
    * persisted snapshot's frozen dates don't yet mark them stale. */
   staleCompanyIds?: number[];
   /** Called after a successful cash change so the parent reloads the detail (`/runs`, which is
-   * what hands this card its `snapshotId`). ⚠ It is HALF of the refresh — see `refetchAll`:
+   * what hands this card its `snapshotId`).  It is HALF of the refresh — see `refetchAll`:
    * the card must also re-read its own snapshot, because a restate can land in the existing
    * snapshot in place and leave the id unchanged. */
   onCashChanged?: () => void | Promise<void>;
@@ -375,8 +375,8 @@ export default function CurrentPortfolioCard({
   /**
    * Re-read everything after a mutation (sleeve edit, re-price, per-stock refresh).
    *
-   * ⚠⚠ RELOADING THE PARENT IS NOT ENOUGH, AND THAT IS WHY A SLEEVE EDIT COULD LEAVE THE OLD
-   * WEIGHTS ON SCREEN. `onCashChanged` refetches `/runs`, and this card's own fetch is keyed on
+   *  Reloading the parent is not enough, and that is why a sleeve edit could leave the old
+   * Weights on screen. `onCashChanged` refetches `/runs`, and this card's own fetch is keyed on
    * `/api/momentum/current-picks/{snapshotId}` — so it re-reads ONLY IF the newest snapshot id
    * changed. A successful re-price inserts a new snapshot and it does; but when the re-price
    * fails or is skipped, the edit landed in the rebalance snapshot IN PLACE (same id), the path
@@ -417,7 +417,7 @@ export default function CurrentPortfolioCard({
     [ccyByBenchmark],
   );
 
-  // PURE DISPLAY — the card recomputes NOTHING. Every return is the engine's
+  // Pure display — the card recomputes NOTHING. Every return is the engine's
   // single source of truth: per-row Return = `forward_return_pct`, the Total =
   // the snapshot's `period_return_pct` (= Σ weight·forward, computed once by the
   // re-pricer in EUR at each date's FX). Start/End (€) just SHOW the stored EUR
@@ -562,7 +562,7 @@ export default function CurrentPortfolioCard({
             rows={rows}
             columns={exportColumns}
             filename={holdingsExportName(strategyName, snap.as_of_date)}
-            // ⚠ NO DATE STAMP — the name already carries the month this portfolio is FOR, and
+            //  No date stamp — the name already carries the month this portfolio is FOR, and
             // the stamp is TODAY. The two disagree for most of the month (September's picks
             // are decided in the first week and downloaded whenever), so a file would claim
             // two different periods at once.
@@ -684,7 +684,7 @@ export default function CurrentPortfolioCard({
                     )}
                   </td>
                   <td className="py-2 px-2 font-mono text-fg-muted whitespace-nowrap">{isin || '—'}</td>
-                  {/* The name opens the arithmetic behind the pick. ⚠ ONLY for a
+                  {/* The name opens the arithmetic behind the pick.  ONLY for a
                       real company: an ETF sleeve and the cash row were never
                       SELECTED by the engine — they were set by hand — so there is
                       no signal breakdown to show and a clickable name there would

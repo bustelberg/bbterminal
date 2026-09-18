@@ -1,6 +1,6 @@
 """THE NAME-MISMATCH SWEEP DOES NOT RE-RESOLVE ANYTHING UNLESS A PERSON NAMES IT.
 
-⚠⚠ IT USED TO RE-QUEUE EVERY ROW THAT FAILED `same_company`, AND THAT IS THE DESTRUCTIVE
+ IT USED TO RE-QUEUE EVERY ROW THAT FAILED `same_company`, AND THAT IS THE DESTRUCTIVE
 RE-RESOLVE THE WHOLE ASSET PIPELINE IS BUILT AROUND AVOIDING. Measured 2026-09-04 on the live
 grid: 110 rows fail the test and only ~15 are genuinely the wrong company. The other ~95 are
 OpenFIGI's own spelling of a CORRECT mapping — `MUENCHENER RUECKVER AG-REG` for Münchener
@@ -10,7 +10,7 @@ answers an overloaded caller with an EMPTY list rather than a 429, so re-resolvi
 already right can only move it to a thinner listing (Alphabet -> GOOA.VI, 75,000x thinner). The
 old default made that bet 95 times to fix 15.
 
-⚠ AND NO AUTOMATIC RULE REPLACES THE PERSON — three were scored against 15 hand-checked errors:
+ AND NO AUTOMATIC RULE REPLACES THE PERSON — three were scored against 15 hand-checked errors:
 the OpenFIGI-type allowlist catches all 15 and would re-resolve 38 correct rows; type AND a
 country mismatch leaves 11 false positives and misses 3 real ones; "a bare US ticker for a non-US
 ISIN" is structural and clean but catches only 4 of 15. Hence: list by default, act on names.
@@ -71,7 +71,7 @@ class TestItActsOnNamedRows:
         assert [r["isin"] for r in fake.tables["asset_ingest_queue"]] == ["FR0004180537"]
 
     def test_an_isin_that_is_not_flagged_is_reported_not_queued(self, q):
-        """⚠ A TYPO MUST NOT SILENTLY RE-RESOLVE NOTHING AND SAY IT WORKED — nor should naming a
+        """ A TYPO MUST NOT SILENTLY RE-RESOLVE NOTHING AND SAY IT WORKED — nor should naming a
         healthy row be a way to re-resolve it through this door."""
         q_mod, fake = q
         res = q_mod.requeue_suspects(only=["US0378331005", "XX0000000000"])
@@ -88,7 +88,7 @@ class TestItActsOnNamedRows:
 
 class TestTheVerdictIsReadNotReDerived:
     def test_a_verified_row_is_never_a_suspect_however_its_names_read(self, q):
-        """⚠⚠ THE DETECTOR EXISTED TWICE. This function re-ran `same_company` inline while
+        """ THE DETECTOR EXISTED TWICE. This function re-ran `same_company` inline while
         `resolve.identity_status` stamped the row at resolve time, so the sweep and the grid's
         Match badge were free to disagree — two answers to one question, and the sweep's was the
         one that re-resolved things. Apple's stored name here would fail any name test; the stored
@@ -107,7 +107,7 @@ class TestTheVerdictIsReadNotReDerived:
 
 
 class TestADeliberateUnmapSurvivesTheRetrySweep:
-    """⚠⚠ THE OTHER DOOR, AND THE ONE THAT WOULD HAVE UNDONE THE FIX QUIETLY.
+    """ THE OTHER DOOR, AND THE ONE THAT WOULD HAVE UNDONE THE FIX QUIETLY.
 
     `requeue_unmapped()` re-queues every `not_found` row OpenFIGI identified, because almost all of
     them failed only while Yahoo was throttled. That premise is false for a row a person unmapped
@@ -146,7 +146,7 @@ class TestADeliberateUnmapSurvivesTheRetrySweep:
         assert res["retryable"] == 1
 
     def test_the_marker_is_one_declaration_both_sides_read(self):
-        """⚠ THE SCRIPT WRITES IT AND THE QUEUE READS IT — a second copy of the string is a fix
+        """ THE SCRIPT WRITES IT AND THE QUEUE READS IT — a second copy of the string is a fix
         that stops working the day somebody rewords one of them."""
         import importlib.util
         from pathlib import Path

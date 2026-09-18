@@ -75,7 +75,7 @@ _PRICE_EPS = 0.005
 def _benchmark_asof(benchmark_id: int, day: str) -> float | None:
     """A benchmark's close ON OR BEFORE `day` — ONE indexed row, never a series scan.
 
-    ⚠ DELIBERATELY NOT A FULL-SERIES READ. Loading the whole series to pick one price is what
+     DELIBERATELY NOT A FULL-SERIES READ. Loading the whole series to pick one price is what
     caused the bug this repairs: unpaged and ascending, PostgREST cut it to the oldest thousand
     bars and the lookup answered every recent date with a 2019 close. `order desc + limit 1`
     cannot be truncated into a wrong answer — there is only ever one row to return, and the
@@ -156,7 +156,7 @@ def compute_and_save_price_update(
     # Fetch the latest close-price observation for every holding's
     # company_id in one batched query. We `order desc` and pick the
     # first hit per cid in-process — Postgres has no efficient
-    # DISTINCT ON via PostgREST. ETF/benchmark holdings carry a NEGATIVE
+    # Distinct on via PostgREST. ETF/benchmark holdings carry a NEGATIVE
     # company_id (= -benchmark_id; the engine-wide convention) and are
     # priced from `benchmark_price` instead of `metric_data`.
     cids = [
@@ -168,7 +168,7 @@ def compute_and_save_price_update(
         if h.get("company_id") is not None and h["company_id"] < 0
     ]
     latest_by_cid: dict[int, dict] = {}
-    # ⚠⚠ COPY FIRST, AND THE POSTGREST FORM BELOW IS THE FALLBACK, NOT THE PLAN. The
+    #  Copy first, and the postgrest form below is the fallback, not the plan. The
     # PostgREST read is `metric_code=close_price AND company_id IN (…) ORDER BY target_date
     # DESC` with NO row bound, so the server caps it — 1,000 rows on Supabase cloud, 10,000
     # locally — and truncates SILENTLY. Sorted newest-first, 1,000 rows over ~25 held names is
@@ -180,7 +180,7 @@ def compute_and_save_price_update(
     #
     # `load_latest_close_prices_via_copy` is the purpose-built answer to exactly this question
     # ("the latest close for a strategy's ~24 held names"): one lateral `ORDER BY target_date
-    # DESC LIMIT 1` per company, one round trip, no row cap. It narrows on `source_code =
+    # Desc limit 1` per company, one round trip, no row cap. It narrows on `source_code =
     # 'gurufocus'`, which is a no-op filter (close_price is 100% GuruFocus) that unlocks the
     # single-seek index path. Returns None when there is no direct-Postgres URL — hence the
     # fallback.
@@ -293,7 +293,7 @@ def compute_and_save_price_update(
         ccy = _hold_ccy(h)
         entry_date_iso = str(h.get("entry_date") or rebal.get("as_of_date") or "")[:10]
 
-        # ⚠ AN ETF'S ENTRY PRICE IS RE-DERIVED EVERY RUN, LIKE ITS ENTRY EUR ALREADY IS.
+        #  An ETF's entry price is re-derived every run, like its entry EUR already is.
         #
         # For an overlay sleeve there is exactly one right answer — `benchmark_price` as of the
         # holding's own `entry_date` — and it is a pure function of data we hold. A STORED value
@@ -312,7 +312,7 @@ def compute_and_save_price_update(
         # making it here means a corrupted entry heals on the next tick instead of needing a
         # script or a button.
         #
-        # ⚠ ETFs ONLY, AND THAT LIMIT IS THE POINT. A company's entry comes from `metric_data`,
+        #  ETFs ONLY, AND THAT LIMIT IS THE POINT. A company's entry comes from `metric_data`,
         # which is NOT append-only in `target_date` — GuruFocus publishes late closes with their
         # true earlier date, so re-deriving a company's entry could legitimately CHANGE a price
         # the strategy actually traded at, rewriting history to match today's data. That is the
@@ -407,7 +407,7 @@ def compute_and_save_price_update(
         # the run-history row.
         "period_return_pct": portfolio_return,
     }
-    # ⚠ A DUPLICATE `snapshot_id` HERE IS A DRIFTED SEQUENCE, NOT A RACE — measured in production
+    #  A DUPLICATE `snapshot_id` HERE IS A DRIFTED SEQUENCE, NOT A RACE — measured in production
     # 2026-09-07, where the 05:00 pipeline failed one strategy of three on
     # `Key (snapshot_id)=(3408) already exists`. `common.sequences` repairs it and retries once,
     # or raises an error that names the cause and the file that fixes it.
@@ -430,7 +430,7 @@ def compute_and_save_price_update(
 # Lazy freshness repair for the /schedule "Current portfolio" card
 # ---------------------------------------------------------------------------
 
-#: One repair per strategy per process per UTC day. ⚠ THE COST BEING BOUNDED IS HISTORY, NOT A
+#: One repair per strategy per process per UTC day.  THE COST BEING BOUNDED IS HISTORY, NOT A
 #: VENDOR CALL — this path makes no external request, so the usual reason for a day guard does not
 #: apply. What it bounds is `current_picks_snapshot` GROWTH: the staleness test is self-limiting
 #: while a repair succeeds in advancing the marks, and stops being self-limiting the moment one
@@ -443,14 +443,14 @@ _LAZY_REPRICED: dict[tuple[int, str], bool] = {}
 def held_latest_close(holdings: list[dict] | None) -> str | None:
     """The freshest close WE ALREADY HOLD for this book's own instruments, 'YYYY-MM-DD'.
 
-    ⚠ THE BOOK'S OWN INSTRUMENTS, NOT THE GLOBAL ANCHOR. `_benchmark_etf._behind_the_market` asks
+     THE BOOK'S OWN INSTRUMENTS, NOT THE GLOBAL ANCHOR. `_benchmark_etf._behind_the_market` asks
     the global question because a world index proxy really is behind the market whenever anything
     is fresher. A strategy is not: a book of European names is a day behind New York every single
     evening, and measuring it against the global freshest close would declare it stale, re-price
     it to marks that cannot move, and do that again tomorrow. Its own holdings are the only set
     whose freshest close it could possibly reach.
 
-    ⚠ `order desc + limit 1` per chunk, so this CANNOT be truncated into a wrong answer — there
+     `order desc + limit 1` per chunk, so this CANNOT be truncated into a wrong answer — there
     is only ever one row to return, and it is the same argument `_benchmark_asof` makes. A `max()`
     taken over an unbounded `.in_()` read would be exactly the 1,000-row trap that froze the exit
     prices this function exists to detect.
@@ -506,29 +506,29 @@ def ensure_snapshot_fresh(strategy_id: int) -> int | None:
     strategy-detail read, so opening a strategy shows the book as of the newest data in the
     database rather than as of whenever a job last happened to write a snapshot.
 
-    ⚠⚠ THE CARD RENDERS A SNAPSHOT, NOT THE DATABASE, AND THAT IS THE WHOLE COMPLAINT. Every
+     THE CARD RENDERS A SNAPSHOT, NOT THE DATABASE, AND THAT IS THE WHOLE COMPLAINT. Every
     price on the "Current portfolio" card is a value COPIED into `current_picks_snapshot` by
     whichever pass last ran. So the marks can be days behind the closes sitting in `metric_data`
     with nothing on screen wrong, nothing failing, and no job in an error state — the figures are
     simply an old photograph of data we hold a newer version of.
 
-    ⚠⚠ AND A DISABLED STRATEGY IS NEVER PHOTOGRAPHED AT ALL. `_run_momentum_phase` selects
+     AND A DISABLED STRATEGY IS NEVER PHOTOGRAPHED AT ALL. `_run_momentum_phase` selects
     `enabled = True`, so a strategy switched off keeps the snapshot it had on the day it was
     switched off — for ever, with an `as of` date that quietly recedes. This lazy path is the only
     thing that keeps such a book current, and it is also what repairs a hand sleeve edit whose own
     re-price failed (see `scheduled_strategies._write_sleeves`).
 
-    ⚠ IT IS THE SAME FUNCTION THE NIGHTLY TICK AND THE "Reload prices" BUTTON RUN — a third way
+     IT IS THE SAME FUNCTION THE NIGHTLY TICK AND THE "Reload prices" BUTTON RUN — a third way
     to price a book would be a third answer. What this adds is only the DECISION to run it.
 
-    ⚠ IT NEVER RE-SELECTS. `compute_and_save_price_update` re-marks the holdings that are there;
+     IT NEVER RE-SELECTS. `compute_and_save_price_update` re-marks the holdings that are there;
     re-deciding them is "Force re-rebalance", and `metric_data` is not append-only in
     `target_date`, so a past basket cannot be reproduced from the live database anyway.
 
-    ⚠ CASH COMES FROM THE LIVE CONFIG, not from the rebalance snapshot's copy of it — the same
+     CASH COMES FROM THE LIVE CONFIG, not from the rebalance snapshot's copy of it — the same
     choice the tick makes, so an admin's sleeve change applies here too instead of being undone.
 
-    ⚠ Best-effort throughout: this sits on a read path, and a book with stale marks is still a
+     Best-effort throughout: this sits on a read path, and a book with stale marks is still a
     readable book. Any failure logs and leaves the stored snapshot alone.
     """
     import os  # noqa: PLC0415
@@ -621,7 +621,7 @@ def apply_sleeves_to_snapshot(
     as_of = str(snap.get("as_of_date") or "")[:10]
     latest = str(snap.get("latest_price_date") or as_of)[:10]
 
-    # ⚠ ETF ENTRY MUST ANCHOR TO THE SAME BAR THE STOCK SLEEVE ENTERED ON — the
+    #  ETF Entry must anchor to the same bar the stock sleeve entered on — the
     # prior trading day's close the picks are anchored to
     # (`run_current_portfolio` enters stocks at
     # `_price_on_or_before(rebalance_date − 1)`), NOT the raw `as_of`. `as_of` is
@@ -653,7 +653,7 @@ def apply_sleeves_to_snapshot(
         # Daily benchmark closes per id, for as-of (last-on-or-before) lookups.
         px: dict[int, tuple[list[str], list[float]]] = {}
         for bid in bids:
-            # ⚠⚠ PAGED, AND THE BUG IT FIXES PRINTED A SEVEN-YEAR-OLD PRICE AS TODAY'S ENTRY.
+            #  Paged, and the bug it fixes printed a seven-year-old price as today's entry.
             #
             # This read is ASCENDING and was unpaged. PostgREST caps a response at 1,000 rows on
             # Supabase cloud (10,000 locally) and truncates SILENTLY, so in production the series
@@ -667,7 +667,7 @@ def apply_sleeves_to_snapshot(
             # days earlier, which then drifted the Current weight to 74.5% against a 45.0% target.
             # Every figure downstream of that entry was wrong, and nothing raised.
             #
-            # ⚠ THE EXIT WAS RIGHT, WHICH IS WHY IT LOOKED LIKE A DISPLAY BUG. The daily
+            #  The exit was right, which is why it looked like a display bug. The daily
             # price-update re-prices the exit through a different path, so the row carried one
             # correct price and one seven-year-old one, both stamped with today's date.
             #

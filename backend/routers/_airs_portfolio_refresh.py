@@ -11,7 +11,7 @@ WHY THIS EXISTS
         FX            fx_rate                         EUR conversion         <- ECB / Yahoo
         links         airs_portfolio_link             certificates           <- our own choices
 
-    ⚠ SO "REFRESH FROM AIRS" CANNOT FIX A WRONG RETURN ON ITS OWN, AND THAT IS THE WHOLE POINT
+     SO "REFRESH FROM AIRS" CANNOT FIX A WRONG RETURN ON ITS OWN, AND THAT IS THE WHOLE POINT
     OF THIS MODULE. The existing per-row button re-scrapes the composition and nothing else. If
     production's disagreement comes from a missing price series or a short FX history — and
     those are the two that have actually bitten — re-reading AIRS all day changes nothing. This
@@ -25,12 +25,12 @@ WHY THIS EXISTS
     silently leaves the basket, and the return is renormalised over what is left — which reads
     as a higher number, not as an error. That is exactly the shape of +55.20% against +36.64%.
 
-⚠ IDENTITY IS DECIDED IN ONE PLACE, AND IT IS NOT THE PRICE STEP. Step 2 resolves unmapped ISINs
+ IDENTITY IS DECIDED IN ONE PLACE, AND IT IS NOT THE PRICE STEP. Step 2 resolves unmapped ISINs
     through the ingest queue's own paced slice; step 4 fetches by the symbol we already hold.
     Yahoo answers an overloaded caller with an EMPTY search rather than a 429, so a second
     concurrent resolver is how Alphabet moved from GOOGL to a Vienna line 75,000x thinner.
 
-⚠ IT STREAMS. An AIRS scrape plus one paced Yahoo call per holding is tens of seconds, and the
+ IT STREAMS. An AIRS scrape plus one paced Yahoo call per holding is tens of seconds, and the
     point is to WATCH which input moves. Every step emits a line.
 """
 from __future__ import annotations
@@ -71,12 +71,12 @@ def _composition(portfolio_id: int, emit, wait: float | None = None) -> dict:
     (`max(1 Jan, inception)`). Two deployments holding compositions dated differently are not
     computing the same window, and their numbers were never comparable.
 
-    ⚠⚠ AND IT IS THE ONLY STEP THAT TOUCHES THE SHARED AirSPMS SESSION, SO IT TAKES THE LOCK —
+     AND IT IS THE ONLY STEP THAT TOUCHES THE SHARED AirSPMS SESSION, SO IT TAKES THE LOCK —
     steps 2-5 (Yahoo, OpenFIGI, the ECB, our own database) deliberately run outside it. That split
     is what lets several `refresh_portfolio_fully` calls run at once: the AIRS legs queue on one
     session, everything expensive overlaps.
 
-    ⚠ THIS CLOSES A GAP THAT WAS DOCUMENTED AS KNOWN AND LEFT OPEN (`routers/airs.py`: "the
+     THIS CLOSES A GAP THAT WAS DOCUMENTED AS KNOWN AND LEFT OPEN (`routers/airs.py`: "the
     scheduler's own model-scan ticks do not take it, and neither does the SSE endpoint above, so
     those two can still overlap this"). It was survivable while exactly one human pressed one
     button; a fan-out over this function would have made two threads drive one cookie jar, whose
@@ -99,14 +99,14 @@ def _composition(portfolio_id: int, emit, wait: float | None = None) -> dict:
         f"{prev.get('positions_datum') or 'none'}, scanned "
         f"{str(prev.get('positions_scanned_at') or 'never')[:19]}"))
 
-    # ⚠ THE LOCK SPANS THE AIRS READ AND NOTHING ELSE — the DB write inside `_live_positions` is
+    #  The lock spans the AIRS read and nothing else — the DB write inside `_live_positions` is
     # part of that read (it persists what came back, so a live read cannot leave the stored copy
     # disagreeing with it) and belongs inside; the parsing below does not.
     if not _acquire_session(wait):
-        # ⚠ REPORTED, NOT SWALLOWED. Returning the stored composition here would be the worst
+        #  Reported, not swallowed. Returning the stored composition here would be the worst
         # outcome available: the step's own line would say "read AirSPMS" over a date nobody
         # re-read, and steps 2-5 would then rebuild a YTD on it and call the result a refresh.
-        emit("progress", message="  ⚠ AIRS session busy — the composition was NOT re-read")
+        emit("progress", message="   AIRS session busy — the composition was NOT re-read")
         raise RuntimeError(
             "the AirSPMS session is held by another scan; the composition was not re-read")
     try:
@@ -120,7 +120,7 @@ def _composition(portfolio_id: int, emit, wait: float | None = None) -> dict:
              "percentage": r.get("Percentage")} for r in rows]
     emit("progress", message=(
         f"  AIRS: composition dated {raw.get('datum') or 'none'}, {len(norm)} line(s)"
-        + ("  ⚠ THE DATE MOVED — the YTD window opens somewhere else now"
+        + ("   THE DATE MOVED — the YTD window opens somewhere else now"
            if raw.get("datum") and raw["datum"] != prev.get("positions_datum") else "")))
     _emit_holdings(norm, emit)
     return {"datum": raw.get("datum"), "rows": norm,
@@ -130,7 +130,7 @@ def _composition(portfolio_id: int, emit, wait: float | None = None) -> dict:
 def _instruments(isins: list[str], emit) -> dict[str, dict]:
     """Step 2 — ISIN → the asset row that can be priced. Resolve whatever is missing.
 
-    ⚠ THROUGH THE QUEUE'S OWN SLICE (`_drain_now`), never a resolver of our own. It also stands
+     THROUGH THE QUEUE'S OWN SLICE (`_drain_now`), never a resolver of our own. It also stands
     down when something else is already draining: two Yahoo consumers is how a resolution lands
     on a thin foreign listing.
     """
@@ -159,7 +159,7 @@ def _instruments(isins: list[str], emit) -> dict[str, dict]:
                if e and e.get("analysis_id")
                else f"NOT RESOLVED ({(e or {}).get('status') or 'not in the grid'})")))
     if missing:
-        # ⚠ THE COUNT AND THE PACE, BOTH. Each ISIN is a paced Yahoo resolve — search, quote and
+        #  The count and the pace, both. Each ISIN is a paced Yahoo resolve — search, quote and
         # profile, with 10-30s timeouts — run a few wide, so sixteen of them legitimately take
         # minutes. Emitting only this line and then going quiet until all sixteen finish is what
         # made a working refresh read as "stuck at 50%"; `on_each` relays one line per ISIN, so the
@@ -184,7 +184,7 @@ def _instruments(isins: list[str], emit) -> dict[str, dict]:
 def _fx(currencies: set[str], anchor: str, emit) -> dict:
     """Step 3 — make sure `fx_rate` actually covers this portfolio's window, BOTH WAYS.
 
-    ⚠ THE BACKWARDS HALF IS THE ONE NOTHING ELSE DOES. `sync_fx_rates_to_db` reads the stored
+     THE BACKWARDS HALF IS THE ONE NOTHING ELSE DOES. `sync_fx_rates_to_db` reads the stored
     max and fetches from max+1, so it can only ever extend forward. A currency whose history
     STARTS after the YTD anchor is therefore never repaired — not by the daily tick, not by a
     rescan, not by anything — and it fails silently in the worst possible direction:
@@ -223,7 +223,7 @@ def _fx(currencies: set[str], anchor: str, emit) -> dict:
             continue
         emit("progress", message=(
             f"    {code}  {have_lo or 'nothing'} → {have_hi or 'nothing'}  "
-            + ("⚠ HISTORY STARTS AFTER THE WINDOW — every close before it converts to nothing, "
+            + (" HISTORY STARTS AFTER THE WINDOW — every close before it converts to nothing, "
                "so the holding silently leaves the basket. Backfilling…" if gap_back
                else "extending forward…")))
         try:
@@ -247,7 +247,7 @@ def _fx(currencies: set[str], anchor: str, emit) -> dict:
                                        "rows": len(rows)}
             emit("progress", message=(
                 f"    {code}  → {new_lo} → {new_hi}  ({len(rows)} rate(s) written)"
-                + ("  ⚠ STILL SHORT — this currency has no published history that far back"
+                + ("   STILL SHORT — this currency has no published history that far back"
                    if new_lo and new_lo > need_from else "")))
         except Exception as e:  # noqa: BLE001 — one dead currency must not end the run
             out["failed"] += 1
@@ -260,7 +260,7 @@ def _fx(currencies: set[str], anchor: str, emit) -> dict:
 def _prices(ex: dict[str, dict], isins: list[str], anchor: str, emit) -> dict:
     """Step 4 — each holding's price series brought up to date from Yahoo.
 
-    ⚠ BY SYMBOL, NEVER BY RE-RESOLVING (step 2 is the only place identity is decided), and via
+     BY SYMBOL, NEVER BY RE-RESOLVING (step 2 is the only place identity is decided), and via
     `extend_series`, which fetches the GAP and recomputes the grid's coverage stats FROM THE
     DATABASE — `store_series` would re-download a 16,000-bar history to add eight days and would
     record `bars`/`price_from` from the slice it fetched.
@@ -337,7 +337,7 @@ def _recompute(portfolio_id: int, emit) -> dict:
     p = t.get("portfolio") or {}
     load = t.get("load") or {}
     if not p:
-        emit("progress", message=f"  ⚠ {t.get('error') or 'no derivation available'}")
+        emit("progress", message=f"   {t.get('error') or 'no derivation available'}")
         return t
 
     emit("progress", message=(
@@ -365,7 +365,7 @@ def _recompute(portfolio_id: int, emit) -> dict:
     emit("progress", message=(
         f"  YTD {p['ytd_pct']:+.4f}%  "
         f"(contributions sum to {p['sum_of_contributions_pp']:+.4f}pp — "
-        f"{'reconciles' if p['reconciles'] else '⚠ DOES NOT RECONCILE'})"
+        f"{'reconciles' if p['reconciles'] else ' DOES NOT RECONCILE'})"
         if p.get("ytd_pct") is not None else
         f"  no YTD — coverage {p['covered_pct']:.1f}% is under the floor"))
     return t
@@ -379,7 +379,7 @@ def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None) -> dic
     can the prices be fetched and converted. Running FX before the composition would sync the
     currencies of the composition we USED to hold.
 
-    ⚠⚠ THIS IS THE MODEL HALF OF A PORTFOLIO, NOT A PORTFOLIO. The other half is the AIRS BOOK
+     THIS IS THE MODEL HALF OF A PORTFOLIO, NOT A PORTFOLIO. The other half is the AIRS BOOK
     (`airs_vermogen.refresh_one_portfolio`) and for months WHICH HALF A PRESS REFRESHED DEPENDED
     ON WHICH PAGE THE BUTTON WAS ON — /portfolios refreshed the model, /management-dashboard the
     book, and the Analyse modal inherited whichever one opened it. `refresh_portfolio_fully` is

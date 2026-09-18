@@ -3,7 +3,7 @@
 /**
  * The per-card Daily switch — used by the two YIELD cards and nothing else.
  *
- * ⚠ WHY IT IS NOT A THIRD OPTION ON THE TAB'S CADENCE CONTROL. A yield is the only shape on the
+ *  Why it is not a third option on the tab's cadence control. A yield is the only shape on the
  * Long Equity tab with a daily input: its denominator is a price (or a price × share count), which
  * moves every trading day. The other ten cards are pure accounting — revenue, margins, debt
  * ratios, cash conversion — and have no daily figure at all, so a tab-wide "Daily" would leave ten

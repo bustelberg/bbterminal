@@ -32,7 +32,7 @@ class TestParsingTheAggregate:
         assert newest["BUS_FTS_DEF_DYN"] == "2026-07-29"
 
     def test_the_isin_count_is_lower_than_the_holdings_count(self):
-        """⚠ NOT A DISCREPANCY. The cash line is a holding and has no ISIN, so a real book reads
+        """ NOT A DISCREPANCY. The cash line is a holding and has no ISIN, so a real book reads
         24 holdings / 23 ISINs. Collapsing them into one number would either invent an ISIN for
         cash or drop cash from the book."""
         counts, _, isins = parse_holding_counts_csv("BUS_Ris_bepOff,2026-07-29,24,23\n")
@@ -44,7 +44,7 @@ class TestParsingTheAggregate:
         assert counts == {"WTS test 1 FX": 0}
 
     def test_a_name_containing_a_COMMA_survives(self):
-        """⚠ WHY THIS IS PARSED AS CSV AND NOT `line.split(',')`. Postgres quotes a field holding
+        """ WHY THIS IS PARSED AS CSV AND NOT `line.split(',')`. Postgres quotes a field holding
         the delimiter; a naive split shifts every column on that row, and the account silently gets
         another account's count — a wrong number, not a missing one."""
         counts, newest, isins = parse_holding_counts_csv('"Smith, J. Beheer",2026-07-29,17,16\n')
@@ -66,7 +66,7 @@ class TestParsingTheAggregate:
 
 class TestTheReadHasNoSilentCap:
     def test_neither_path_uses_a_bare_limit(self):
-        """⚠ THE REGRESSION THIS FILE EXISTS FOR. A `.limit(N)` over `airs_holding` is a cliff that
+        """ THE REGRESSION THIS FILE EXISTS FOR. A `.limit(N)` over `airs_holding` is a cliff that
         arrives with no error whatever N is; the fallback must PAGE."""
         import inspect
 

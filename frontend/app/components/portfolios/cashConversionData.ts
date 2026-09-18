@@ -21,13 +21,13 @@ export type CashConversionInputs = { years: string[]; rows: CashConversionRow[] 
  * The question it answers is whether the earnings are real — profit you cannot bank is an opinion
  * about revenue recognition.
  *
- * ⚠ ABOVE 100% IS NORMAL AND GOOD. Depreciation running ahead of capex converts more cash than the
+ *  ABOVE 100% IS NORMAL AND GOOD. Depreciation running ahead of capex converts more cash than the
  * accounts book as profit (ASML 2025: 11,027.3 / 9,609.4 = 114.8%). It is not an error to clamp.
  *
- * ⚠ A NEGATIVE FCF IS KEPT — earnings with no cash behind them is precisely what this exists to
+ *  A NEGATIVE FCF IS KEPT — earnings with no cash behind them is precisely what this exists to
  * catch, and it belongs on the chart below zero.
  *
- * ⚠ BUT A NON-POSITIVE DENOMINATOR RETURNS NULL. A loss-making company with POSITIVE free cash
+ *  BUT A NON-POSITIVE DENOMINATOR RETURNS NULL. A loss-making company with POSITIVE free cash
  * flow would otherwise print a negative conversion — reading as "burning cash" when the opposite
  * is happening — and two companies could show the same −80% for opposite reasons. The ratio simply
  * does not apply to a loss, so the year is a hole.

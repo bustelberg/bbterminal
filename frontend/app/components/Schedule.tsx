@@ -66,13 +66,13 @@ export default function Schedule() {
         {isAdmin && (
           <>
             <DiversifiedPortfoliosCard />
-            {/* ⚠⚠ ONE SECTION FOR EVERY AUTOMATIC JOB — the "Smart pipeline activity" card is gone
+            {/*  ONE SECTION FOR EVERY AUTOMATIC JOB — the "Smart pipeline activity" card is gone
                 (2026-08-13). It was a second list of jobs with its own countdowns, read from the
                 same `list_scheduled_jobs()` this table reads, so the page ran two clocks for one
                 fire time. Its four panels now live behind the rows they belong to
                 (`JOB_PANELS`), and this is the only reader of the scheduler on the page. */}
             <AutomaticJobsCard />
-            {/* ⚠ NOT A JOB, WHICH IS WHY IT IS STILL A CARD OF ITS OWN. It has no schedule, no run
+            {/*  NOT A JOB, WHICH IS WHY IT IS STILL A CARD OF ITS OWN. It has no schedule, no run
                 row and writes nothing — an on-demand question ABOUT the pipeline — so it has no
                 row to hide behind and would have been lost with the card that used to host it. It
                 takes `strategies` from the page's existing hook rather than opening the activity

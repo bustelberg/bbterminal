@@ -1,6 +1,6 @@
 """The trailing-twelve-month roll-up must span twelve months — for the company in front of it.
 
-⚠ THIS IS A CONFIDENT-WRONG-NUMBER TEST, NOT A CRASH TEST. `_ttm_by_period` used to take the last
+ THIS IS A CONFIDENT-WRONG-NUMBER TEST, NOT A CRASH TEST. `_ttm_by_period` used to take the last
 FOUR ROWS whatever their spacing, on the assumption that a `quarterly__…` code holds quarters. For
 a SEMI-ANNUAL filer that is four half-years, so the "TTM" line reported two years of revenue:
 measured on Prosus NV (2026-08-12) the tab showed **13,983.9** against an FY2026 annual figure of
@@ -40,7 +40,7 @@ class TestCadenceDetection:
         assert filings_per_year(ANNUAL) == 1
 
     def test_one_filing_carries_no_spacing_and_is_refused(self):
-        # ⚠ NOT ASSUMED QUARTERLY. Guessing 4 here is what turns three months into "a year".
+        #  Not assumed quarterly. Guessing 4 here is what turns three months into "a year".
         assert filings_per_year(["2024-12-31"]) == 0
         assert filings_per_year([]) == 0
 
@@ -56,7 +56,7 @@ class TestTheWindowIsAYearOfFilings:
         assert out == {"2024-Q4": 10.0, "2025-Q1": 14.0}
 
     def test_semi_annual_sums_TWO_halves_not_four(self):
-        # ⚠ THE BUG THIS FILE EXISTS FOR. Four rows here is 24 months.
+        #  The bug this file exists for. Four rows here is 24 months.
         out = _ttm_by_period(rows(zip(SEMI, [10, 20, 30, 40], strict=False)), "sum")
         assert out == {"2024-Q3": 30.0, "2025-Q1": 50.0, "2025-Q3": 70.0}
 
@@ -96,7 +96,7 @@ class TestTheWindowIsAYearOfFilings:
 
 class TestTheOtherTwoRules:
     def test_mean_divides_by_the_window_it_used(self):
-        # ⚠ A HARDCODED 4 HALVED A SEMI-ANNUAL FILER'S ALREADY-ANNUALISED RATE — the quieter twin
+        #  A HARDCODED 4 HALVED A SEMI-ANNUAL FILER'S ALREADY-ANNUALISED RATE — the quieter twin
         # of the sum's doubling, because 6% instead of 12% is still a believable margin.
         out = _ttm_by_period(rows([("2024-03-31", 10), ("2024-09-30", 20),
                                    ("2025-03-31", 30)]), "mean")

@@ -1,12 +1,12 @@
 """A 200 carrying NO PERIODS is an outage, not an answer.
 
-⚠⚠ MEASURED 2026-08-31, LIVE. GuruFocus's `financials` endpoint returned the full 15.7 KB template
+ MEASURED 2026-08-31, LIVE. GuruFocus's `financials` endpoint returned the full 15.7 KB template
 for EVERY symbol — every section and every key present, every array empty — for AAPL and ASML as
 much as for the two ACWI constituents under investigation. `summary`, `keyratios` and `price` were
 healthy at the same moment and the monthly quota was barely half spent, so nothing upstream said
 anything was wrong.
 
-⚠ THE PARSER WAS ALREADY SAFE: no `Fiscal Year` means no periods means no rows, so this never wrote
+ THE PARSER WAS ALREADY SAFE: no `Fiscal Year` means no periods means no rows, so this never wrote
 zeros into `metric_data`. The damage was one step earlier — the empty payload replacing a good
 cached raw JSON, and `financials_fetched_at` stamped as though the company had been refreshed. A
 company that then looks current, reads as having no financials, and has lost the copy that proved
@@ -66,7 +66,7 @@ class TestAnEmptyTemplateIsRefused:
         assert res.cache_status == "api_empty"
 
     def test_it_does_not_stamp_the_company_as_freshly_fetched(self, fin, monkeypatch):
-        """⚠ THE HALF THAT OUTLIVES THE OUTAGE. A stamp says "we asked, this is what there is" —
+        """ THE HALF THAT OUTLIVES THE OUTAGE. A stamp says "we asked, this is what there is" —
         so a company whose data the vendor lost for an afternoon would look deliberately empty."""
         _res, wrote = _run(fin, monkeypatch, EMPTY)
         assert wrote["stamped"] is False
@@ -76,7 +76,7 @@ class TestAnEmptyTemplateIsRefused:
         assert "did not provide financial statements" in (res.error or "")
 
     def test_a_payload_WITH_periods_is_cached_and_stamped_as_before(self, fin, monkeypatch):
-        # ⚠ THE CONTROL. The guard must key on "carries a period", not on size or key count —
+        #  The control. The guard must key on "carries a period", not on size or key count —
         # the empty template passes both of those comfortably (15.7 KB, 263 leaf keys).
         res, wrote = _run(fin, monkeypatch, GOOD)
         assert (wrote["uploaded"], wrote["stamped"]) == (True, True)
@@ -84,13 +84,13 @@ class TestAnEmptyTemplateIsRefused:
 
 
 class TestTheFillStopsInsteadOfWalkingTheWholeIndex:
-    """⚠⚠ THE GUARD ABOVE PROTECTS THE CACHE; IT DOES NOT PROTECT THE BUDGET. A quarterly benchmark
+    """ THE GUARD ABOVE PROTECTS THE CACHE; IT DOES NOT PROTECT THE BUDGET. A quarterly benchmark
     fill would still visit all 2,526 constituents to collect 2,526 identical refusals — a call each,
     roughly half a region's monthly quota, spent to learn one fact that the tenth company already
     proved."""
 
     def test_the_marker_the_breaker_matches_is_the_one_the_fetcher_emits(self):
-        """⚠ THE SEAM, ASSERTED FROM BOTH ENDS. The breaker matches on a substring of the error
+        """ THE SEAM, ASSERTED FROM BOTH ENDS. The breaker matches on a substring of the error
         because threading a status code through `ingest_company` would teach three layers about a
         vendor state they have no other reason to know. That is only safe while the two strings
         cannot drift apart, which is what this pins."""
@@ -118,6 +118,6 @@ class TestTheFillStopsInsteadOfWalkingTheWholeIndex:
             mp.undo()
 
         assert VENDOR_EMPTY_MARKER in (res.error or "")
-        # ⚠ AND THE LIMIT IS A HANDFUL, NOT A HUNDRED: a few genuinely empty companies are ordinary,
+        #  And the limit is a handful, not a hundred: a few genuinely empty companies are ordinary,
         # ten in a row across regions are not.
         assert 3 <= VENDOR_EMPTY_LIMIT <= 25

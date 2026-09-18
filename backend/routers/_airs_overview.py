@@ -14,13 +14,13 @@ WHAT IT JOINS, AND WHY EACH SIDE IS THERE
     EVERY NUMBER comes from the Dynamic side, because AIRS is the system of record for what a
     book made and we are not.
 
-⚠ THE PAIRING IS MOSTLY UNCONFIRMED, AND THE ROW SAYS SO. 27 of the 28 links are `guess` — an
+ THE PAIRING IS MOSTLY UNCONFIRMED, AND THE ROW SAYS SO. 27 of the 28 links are `guess` — an
     exact stem match nobody has approved (`_airs_account_links`). A guess is not a small doubt
     here: the risk variants of a strategy hold the SAME instruments (BUS_FTS_Bepoff/DEF/NEU_AFS
     share 27 of 27 ISINs), so a mis-pairing shows a book's real money under another strategy's
     name and nothing on the row would look wrong. `link_source` rides along for that reason.
 
-⚠ AN UNLINKED DYNAMIC PORTFOLIO IS NOT DROPPED. It has AIRS numbers and no nickname — 23 of the
+ AN UNLINKED DYNAMIC PORTFOLIO IS NOT DROPPED. It has AIRS numbers and no nickname — 23 of the
     51, the benchmarks among them. Hiding them would make this table quietly disagree with the
     Dynamic table it summarises; they appear with the AIRS name and no ISINs behind them.
 """
@@ -76,7 +76,7 @@ def _management_name(name: str | None, group: str, account_name: str | None) -> 
 def _nicknames() -> dict[str, str]:
     """The human-chosen name per account (lower-cased key) — `{}` when we cannot read them.
 
-    ⚠ A NICKNAME IS A DECORATION; A MISSING ONE MUST NOT COST THE WHOLE PAGE. `airs_account_display_name`
+     A NICKNAME IS A DECORATION; A MISSING ONE MUST NOT COST THE WHOLE PAGE. `airs_account_display_name`
     is the NEWEST table this endpoint touches, and the hosted databases are migrated by hand
     (`npx supabase db push`), so there is always a window where deployed code is ahead of the
     schema it reads. Unguarded, that window turned the entire portfolios overview into a 500 —
@@ -134,7 +134,7 @@ def list_overview() -> list[dict]:
     from ._management_topselecties import topselectie_for_account  # noqa: PLC0415
 
     links = {a["portefeuille"]: a for a in list_account_links()["accounts"]}
-    # ⚠ THE ACCOUNT'S OWN NICKNAME BEATS THE MODEL'S. A human typed it for THIS book; the model's
+    #  The account's own nickname beats the model's. A human typed it for THIS book; the model's
     # `display_name` names a different object and is only borrowed when nothing better exists —
     # which is also why a book paired with no model could not be named at all before.
     nicknames = _nicknames()
@@ -148,7 +148,7 @@ def list_overview() -> list[dict]:
         (m.get("name") or "").strip().lower(): m["display_name"]
         for m in models.values() if (m.get("name") or "").strip() and m.get("display_name")
     }
-    # ⚠ THE `airs_model_portfolio_position` READ THAT USED TO SIT HERE IS GONE (2026-08-11). It
+    #  THE `airs_model_portfolio_position` READ THAT USED TO SIT HERE IS GONE (2026-08-11). It
     # counted positions per model into a dict that NOTHING READ — the `isins` column moved to the
     # account's own count (see below) and only the *use* was deleted, leaving the query behind. It
     # cost one round trip and 982 rows on every single page load, invisibly, because a read whose
@@ -181,7 +181,7 @@ def list_overview() -> list[dict]:
             "fixed_name": (m or {}).get("name"),
             "fixed_portfolio_id": (m or {}).get("id"),
             "fixed_type": (m or {}).get("portfolio_type"),
-            # ⚠ THE ACCOUNT'S OWN ISIN COUNT — see `list_accounts`. It was the paired MODEL's
+            #  The account's own ISIN count — see `list_accounts`. It was the paired MODEL's
             # position count, which is a different object and absent entirely for an unpaired book:
             # BUS_WTS_StMerken_Dyn showed "—" while holding 22 ISINs. `positions` is still read for
             # nothing else, so it goes with it.
@@ -206,7 +206,7 @@ def list_overview() -> list[dict]:
             # Carried straight through from `list_accounts` — the overview is a composition of that
             # row with its Fixed pairing, so a caveat about the row's freshness belongs on it.
             "missing_reports": a.get("missing_reports") or [],
-            # ⚠ THE PAIR IS THE POINT — see `_airs_accounts._fetched_at`. `as_of` is when AIRS
+            #  The pair is the point — see `_airs_accounts._fetched_at`. `as_of` is when AIRS
             # VALUED the book; this is when WE last read it. Without both, an old valuation reads
             # as our staleness and the badge sends the reader to a button that cannot help.
             "fetched_at": a.get("fetched_at"),

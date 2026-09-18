@@ -7,7 +7,7 @@
  * The question it answers: has the price followed what the business earns per share, or has the
  * multiple done the work? Those are different reasons to be up 200%.
  *
- * ⚠ TWO BASES, ONE SET OF MATHS. The series is either FREE CASH FLOW PER SHARE or EPS (`BASIS`),
+ *  Two bases, one set of maths. The series is either FREE CASH FLOW PER SHARE or EPS (`BASIS`),
  * picked by a switch in the tab. Everything below is deliberately basis-agnostic — `value`, not
  * `fcf` — because the arithmetic genuinely is the same and a second copy of it, forked per basis,
  * is a second place for the index anchor and the yield sign convention to drift. What is NOT the
@@ -15,14 +15,14 @@
  * cash the business threw off vs accounting profit after non-cash charges. They diverge for real
  * companies and by a lot; a reader must be told which one is on screen.
  *
- * ⚠ SINGLE COMPANY ONLY. There is no portfolio share and no portfolio FCF/EPS per share; the
+ *  Single company only. There is no portfolio share and no portfolio FCF/EPS per share; the
  * amounts sit in different currencies and cannot be summed. The portfolio-level version of this
  * question is the FCF-SBC yield card, which is currency-free by construction.
  */
 
 export type MetricRow = { metric_code: string; target_date: string; numeric_value: number | null };
 
-// ⚠ THREE SECTION SPELLINGS, AS EVERYWHERE ELSE. GuruFocus renamed its statement sections and
+//  Three section spellings, as everywhere else. GuruFocus renamed its statement sections and
 // `metric_data` holds whichever was current when a company was last fetched — capitalised
 // `Per Share Data`, lowercase `per_share_data`, and `per_share_data_array` for part of the
 // lowercase cohort. Match one and a whole cohort of companies reads as having no data.
@@ -36,7 +36,7 @@ export const FCF_PS_CODES = [
   'annuals__per_share_data__Free Cash Flow per Share',
   'annuals__per_share_data_array__Free Cash Flow per Share',
 ];
-// ⚠ `EPS without NRI`, NOT `EPS (Diluted)`. GuruFocus carries both, and they differ by exactly the
+//  `EPS without NRI`, NOT `EPS (Diluted)`. GuruFocus carries both, and they differ by exactly the
 // one-offs — an impairment, a disposal gain, a restructuring charge. The stripped series is the one
 // the REST OF THIS APP already values on (`egmInputs.ts`, `earnings/types.ts`), so reading raw
 // diluted EPS here would make this tab quietly disagree with the EGM and Deep Valuation tabs about
@@ -51,19 +51,19 @@ export const EPS_PS_CODES = [
 
 // The analyst consensus behind the FORWARD multiple, in priority order.
 //
-// ⚠ `eps_nri_estimate` FIRST, BECAUSE THE HISTORY IS NRI-STRIPPED. GuruFocus publishes both, and
+//  `eps_nri_estimate` FIRST, BECAUSE THE HISTORY IS NRI-STRIPPED. GuruFocus publishes both, and
 // they are not the same number — AB Sagax's 2026 consensus is 12.09 on the NRI line and 13.30 on
 // the other, 10% apart. Dividing today's price by the wrong one steps the multiple at the exact
 // point where history hands over to forecast, and that step reads as a re-rating when it is pure
 // bookkeeping. (`_asset_financials` deliberately prefers the OTHER one — it charts forward EPS
 // standalone, with no NRI-stripped history for it to line up against.)
 //
-// ⚠ AND IT IS A PRIORITY LIST, NOT A UNION: `forwardEstimates` takes the first code that returns
+//  And it is a priority list, not a union: `forwardEstimates` takes the first code that returns
 // anything and stops. Filling 2027 from one series and 2028 from the other would put that same
 // convention step INSIDE the forecast, where nothing marks it at all.
 export const EPS_EST_CODES = ['annual_eps_nri_estimate', 'annual_per_share_eps_estimate'];
 
-/** ⚠ `value`, NOT `fcf` — it holds EPS half the time. See the module note. */
+/**  `value`, NOT `fcf` — it holds EPS half the time. See the module note. */
 export type YearPoint = { year: number; price: number | null; value: number | null };
 export type DailyYieldPoint = { date: string; value: number | null; price: number | null; yld: number | null };
 
@@ -73,7 +73,7 @@ export type Basis = 'fcf' | 'eps';
  * What the switch actually switches: the metric codes, and the copy that keeps the panel honest
  * about which measure is on screen.
  *
- * ⚠ THE CAVEATS ARE NOT DECORATION AND THEY ARE NOT INTERCHANGEABLE. An FCF yield and an earnings
+ *  The caveats are not decoration and they are not interchangeable. An FCF yield and an earnings
  * yield answer different questions and disagree loudly for capital-intensive businesses, for
  * companies with heavy stock compensation, and for anyone mid-acquisition. Rendering one under the
  * other's label would not look broken — it would look like a valuation.
@@ -108,7 +108,7 @@ export const BASIS: Record<Basis, {
 }> = {
   fcf: {
     tab: 'FCF',
-    // ⚠ THE SAME WORDS AS THE LONG EQUITY CARD AND THE TABLES ROW — renamed together
+    //  The same words as the long equity card and the tables row — renamed together
     // 2026-08-21. This label reaches the calculator's row names ("Current FCF per share"),
     // so a slash here and the word two tabs away would be one metric under two names inside
     // one modal.
@@ -121,7 +121,7 @@ export const BASIS: Record<Basis, {
     caveat: 'Uses reported free cash flow before stock compensation.',
     negativeYear: 'cash-burn',
     multiple: 'P/FCF',
-    // ⚠ NO ANALYST FCF CONSENSUS EXISTS, AND THE ANSWER IS TO SHOW NO FORWARD — not to model one.
+    //  No analyst FCF consensus exists, and the answer is to show no forward — not to model one.
     // GuruFocus publishes EPS, revenue, EBIT, EBITDA, net income and OPERATING cash flow per share
     // — not free cash flow, because capex is not forecast. Two substitutes were tried and both are
     // refused:
@@ -138,7 +138,7 @@ export const BASIS: Record<Basis, {
     //
     // A multiple is a fact about a price and a filing. Neither substitute is one.
     /**
-     * ⚠⚠ NULL BECAUSE THERE IS NO FCF **SERIES**, NOT BECAUSE NO FORECAST EXISTS — and this comment
+     *  Null because there is no FCF **SERIES**, NOT BECAUSE NO FORECAST EXISTS — and this comment
      * used to say the latter, which is false. Probed 2026-08-17: `stock/{sym}/analyst_estimate` has
      * `operating_cash_flow_estimate` and `operating_cash_flow_per_share_estimate` but no free-cash-
      * flow line at any cadence, so there is nothing to draw a forward P/FCF LINE from — that part
@@ -149,7 +149,7 @@ export const BASIS: Record<Basis, {
      * that do not are Berkshire, JPMorgan and a Samsung share-class duplicate — i.e. financials,
      * where free cash flow is not a meaningful line. That is an answer, not a coverage gap.
      *
-     * ⚠⚠ AND `forward_fcf_yield` MUST NOT BE SHOWN AS-IS, BECAUSE ITS NUMERATOR SILENTLY SWITCHES
+     *  AND `forward_fcf_yield` MUST NOT BE SHOWN AS-IS, BECAUSE ITS NUMERATOR SILENTLY SWITCHES
      * YEARS. The payload is internally consistent on the trailing side — `ttm_total_free_cash_flow /
      * mktcap` reproduces `FCFyield` to three figures (Andritz 6.645 vs 6.65, Apple 2.781 vs 2.78),
      * and `price x shares` IS `mktcap` exactly. The forward one does not reconcile against the same
@@ -201,7 +201,7 @@ function byYear(metrics: MetricRow[], codes: string[]): Map<number, number> {
  * The `target_date` of the LATEST observation among `codes` — the fiscal year END the newest
  * point belongs to, not just its year.
  *
- * ⚠ THE DAY MATTERS, BECAUSE THE PRICE IS NOW LIVE. The forecast sits a fixed number of years
+ *  The day matters, because the price is now live. The forecast sits a fixed number of years
  * past this date (`PROJECT_YEARS`), so the horizon a live price is annualised over is the
  * distance from TODAY to it — up to a year shorter, depending how long ago the company last
  * reported. Rounding that back to the full horizon understates the CAGR by however stale the
@@ -245,7 +245,7 @@ export function yearsBetween(from: string | null, to: string | null): number | n
 }
 
 /**
- * ⚠⚠ THE FUNDAMENTAL-MODAL HISTORY FLOOR, AND IT IS THE BACKEND'S, NOT A NUMBER PICKED HERE.
+ *  The fundamental-modal history floor, and it is the backend's, not a number picked here.
  *
  * `routers/earnings.py::_BLEND_START = "2015-01-01"` bounds every Long Equity endpoint the Graphs
  * tab reads, for three stated reasons: it matches the charts' start year, it keeps the read
@@ -253,17 +253,17 @@ export function yearsBetween(from: string | null, to: string | null): number | n
  * and — the one that bites here — "it also fixes WHERE a level series is rebased to 100: at the
  * first date on screen, rather than at a 1990s base the viewer cannot see."
  *
- * ⚠⚠ `/by-isin/{isin}/metrics` HAS NO SUCH FLOOR. It returns the raw rows, so this tab — the only
+ *  `/by-isin/{isin}/metrics` HAS NO SUCH FLOOR. It returns the raw rows, so this tab — the only
  * consumer of that endpoint that plots a long history — ran NVIDIA back to **1999** while every
  * card on the Graphs tab beside it began at 2015. Same modal, same company, two start years, and
  * the caption stated the wrong one with total confidence ("indexed to 100 at FY1999").
  *
- * ⚠ IT IS A CLIENT COPY OF A SERVER CONSTANT, WHICH IS A REAL COST — the two can drift, and
+ *  It is a client copy of a server constant, which is a real cost — the two can drift, and
  * nothing would fail if they did. The alternative is worse: filtering server-side would change an
  * endpoint six other things read, and inferring the floor from a payload that does not carry one
  * is guessing. If `_BLEND_START` ever moves, this moves with it.
  *
- * ⚠ DELIBERATELY NOT MERGED WITH `MULTIPLE_FROM_YEAR` in `QuickValuationTab`, which is also 2015.
+ *  Deliberately not merged with `MULTIPLE_FROM_YEAR` in `QuickValuationTab`, which is also 2015.
  * That one is a fact about GuruFocus's forward-P/E indicator (its history starts 2015-11-30);
  * this one is a house display floor. They agree today by coincidence and may not tomorrow.
  */
@@ -275,17 +275,17 @@ export const HISTORY_FROM_YEAR = 2017;
  * in only one is KEPT with a null on the other side — the gap is information (a company that
  * stopped reporting FCF is not a company with a flat FCF). `codes` selects the basis; see `BASIS`.
  *
- * ⚠⚠ THE WINDOW IS THE FUNDAMENTALS' SPAN. NOT A FIXED NUMBER OF YEARS, AND NOT THE UNION — and
+ *  The window is the fundamentals' span. NOT A FIXED NUMBER OF YEARS, AND NOT THE UNION — and
  * both of those were tried, in that order, and each was wrong in its own direction.
  *
- * ⚠ IT WAS `all.slice(-10)` OVER THE UNION, WHICH ATE A REAL YEAR OFF THE FAR END. The two series
+ *  It was `all.slice(-10)` OVER THE UNION, WHICH ATE A REAL YEAR OFF THE FAR END. The two series
  * have different reporting lags: GuruFocus publishes `Month End Stock Price` for a fiscal year the
  * moment that year ends, while the FCF/EPS for it lands months later with the filing. So the union
  * routinely carries ONE MORE recent year than the fundamentals do, that price-only year consumed a
  * slot, and the tenth-oldest — a fully paired year — silently fell off the start. Reported as "why
  * does this start at 2017? it should start at 2015 since the graphs in Graphs also start in 2015".
  *
- * ⚠⚠ AND DROPPING THE CAP ALTOGETHER RAN IT BACK TO 1999, which is the same mistake from the other
+ *  And dropping the cap altogether ran it back to 1999, which is the same mistake from the other
  * end. `/by-isin/{isin}/metrics` carries a price history reaching back decades — GuruFocus has
  * `Month End Stock Price` for the 1990s — and, for a company like NVIDIA, per-share figures that
  * reach almost as far. "Every year in the payload" is the right rule for the Graphs tab and the
@@ -293,17 +293,17 @@ export const HISTORY_FROM_YEAR = 2017;
  * `*-inputs` endpoints, which are floored server-side at `_BLEND_START`, while this tab reads the
  * raw `/metrics` and got everything. See `HISTORY_FROM_YEAR` above.
  *
- * ⚠ SO TWO RULES COMPOSE, AND BOTH ARE NEEDED. The house floor stops a 1990s history; the
+ *  So two rules compose, and both are needed. The house floor stops a 1990s history; the
  * first-reported-year clip stops a leading run of price with no per-share figure beside it, which
  * is what a company whose fundamentals begin in 2019 would otherwise draw — four years of a lone
  * line, inside the floor, that the floor cannot catch. `Math.max` of the two.
  *
- * ⚠ THE CLIP IS ASYMMETRIC ON PURPOSE. A leading run with no PRICE is left in place: that is a
+ *  The clip is asymmetric on purpose. A leading run with no PRICE is left in place: that is a
  * genuine gap in a series we otherwise have (an unlisted stretch, a listing we cannot price), and
  * it is the same "gap is information" rule the trailing side keeps. Only the value side clips,
  * because only the value side defines what the chart is able to say.
  *
- * ⚠ AND THE START IS NOT COSMETIC — IT MOVES EVERY POINT. `rebase` anchors on the first year both
+ *  And the start is not cosmetic — it moves every point. `rebase` anchors on the first year both
  * series are positive IN WHAT IT IS GIVEN, so the window does not merely shorten the line, it
  * re-bases both lines against a different year, and the CAGR tiles above measure from there too.
  *
@@ -333,7 +333,7 @@ export function priceVsMetric(
  * euro of price — the reciprocal of P/FCF (or, on the EPS basis, of the P/E), and the one direction
  * of that pair that stays readable.
  *
- * ⚠ A NEGATIVE YIELD IS A REAL NUMBER AND IS KEPT. This is exactly where a yield and a multiple
+ *  A negative yield is a real number and is kept. This is exactly where a yield and a multiple
  * part company: −20x sorts below every cheap year and reads as the cheapest the stock has ever
  * been, whereas −5% reads as what it is — a year the company burned cash (or lost money) equal to
  * 5% of its price. The ratio does not invert as it crosses zero, so nothing has to be dropped.
@@ -370,8 +370,8 @@ export function dailyYieldHistory(metrics: MetricRow[], codes: string[]): DailyY
 /**
  * The consensus for the fiscal years still AHEAD of `after`, oldest first.
  *
- * ⚠ FIRST CODE THAT ANSWERS WINS — it is a priority list, never a union (see `EPS_EST_CODES`).
- * ⚠ `after` DROPS ESTIMATES THAT HAVE BEEN OVERTAKEN. GuruFocus keeps an estimate row for a year
+ *  First code that answers wins — it is a priority list, never a union (see `EPS_EST_CODES`).
+ *  `after` DROPS ESTIMATES THAT HAVE BEEN OVERTAKEN. GuruFocus keeps an estimate row for a year
  * the company has since reported, so without this the "forward" ladder opens with a forecast of a
  * year we already have the actual for — the same year appearing twice, once measured and once
  * guessed, with no way for a reader to tell which point is which.
@@ -392,7 +392,7 @@ export function forwardEstimates(
 /**
  * The middle multiple, not the average one.
  *
- * ⚠ A MEAN IS THE WRONG CENTRE FOR A MULTIPLE. One year where earnings nearly touched zero prints
+ *  A mean is the wrong centre for a multiple. One year where earnings nearly touched zero prints
  * a 300× that no reader would call typical, and it drags a ten-point mean by ~30×. The median
  * ignores it — which is the correct treatment, because that year says something about the earnings
  * denominator, not about what the market pays for this business.
@@ -407,7 +407,7 @@ export function medianOf(xs: number[]): number | null {
 /**
  * The share price a per-share amount implies at a demanded yield: `value/share ÷ yield`.
  *
- * ⚠ A NON-POSITIVE YIELD HAS NO PRICE, AND NEITHER DOES A NEGATIVE CASH FLOW OR A LOSS. At 0% the
+ *  A non-positive yield has no price, and neither does a negative cash flow or a loss. At 0% the
  * division is infinite (any price is justified by no earnings); at a negative yield it flips sign
  * and returns a positive-looking figure built on nonsense. Both come back null rather than as a
  * number a reader would have no reason to distrust.
@@ -429,17 +429,17 @@ export function cagrBetween(from: number | null, to: number | null, years: numbe
 /**
  * `base` compounded at `cagrPct` for `years` — `cagrBetween` run backwards.
  *
- * ⚠⚠ THE EXACT INVERSE, AND IT HAS TO BE, because the calculator shows the growth rate and the
+ *  The exact inverse, and it has to be, because the calculator shows the growth rate and the
  * end value as two editable views of ONE assumption. If the round trip lost anything, typing a
  * rate would move the end value, which would move the rate back, and the field would fight the
  * person using it. `compoundFrom(b, cagrBetween(b, v, y) * 100, y) === v` to floating point.
  *
- * ⚠ A NON-POSITIVE BASE HAS NO GROWTH RATE — refused, not clamped. FCF/share and EPS both go
+ *  A non-positive base has no growth rate — refused, not clamped. FCF/share and EPS both go
  * negative (whole cards on this tab exist because they do), and a company whose cash flow is
  * −2.10 does not "grow at 12%" to anywhere: every rate maps to a more negative number, and −2.10
  * compounding to −6.52 would render as a forecast rather than as the nonsense it is.
  *
- * ⚠ A RATE OF −100% OR WORSE IS REFUSED for the same reason: it lands on zero or flips the sign,
+ *  A rate of −100% OR WORSE IS REFUSED for the same reason: it lands on zero or flips the sign,
  * and a per-share figure of exactly 0 divides into a price target of infinity.
  */
 export function compoundFrom(
@@ -465,11 +465,11 @@ export type PriceTarget = {
 /**
  * The whole price-target calculation in one place.
  *
- * ⚠ ONE COMPUTATION, TWO READERS. The calculator panel prints these and the chart draws the price
+ *  One computation, two readers. The calculator panel prints these and the chart draws the price
  * line out to `forecastPrice`; computing it twice would let the line land somewhere the panel does
  * not say. The chart's projected price IS this figure, not a second estimate of it.
  *
- * ⚠ `years` IS THE HORIZON FROM `currentPrice`'s OWN DATE, NOT THE PROJECTION'S LENGTH. The two
+ *  `years` IS THE HORIZON FROM `currentPrice`'s OWN DATE, NOT THE PROJECTION'S LENGTH. The two
  * were the same while the price was the fiscal year-end close; with a live price the forecast is
  * nearer than two years away, and passing 2 anyway divides the return by too big a number —
  * silently, and by more the more stale the accounts are. `yearsBetween` computes it.
@@ -493,7 +493,7 @@ export type Rebased = { anchor: number | null; rows: { year: number; price: numb
  * Both series as an index, 100 at the anchor year — the shape that makes "price ran ahead of the
  * business" visible at all, since €700 of price and €20 of FCF/share share no axis.
  *
- * ⚠ THE ANCHOR IS THE FIRST YEAR BOTH ARE POSITIVE, NOT THE FIRST YEAR ON THE CHART. Rebasing off
+ *  The anchor is the first year both are positive, not the first year on the chart. Rebasing off
  * a cash-burn (or loss) year is division by a negative: every later point flips sign, and the chart
  * draws a company whose cash flow "fell" while it was in fact recovering. If no year has both
  * positive there is no index — `anchor` is null and the caller must not draw one.

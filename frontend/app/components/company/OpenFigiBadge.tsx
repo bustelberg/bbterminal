@@ -20,7 +20,7 @@ export default function OpenFigiBadge({
     return (
       <span className="px-1.5 py-0.5 text-[11px] font-medium bg-pos-500/15 text-pos-400 border border-pos-500/25 rounded cursor-help"
         title={`OpenFIGI confirms this ISIN${name ? ` → "${name}"` : ''}.${checked}`}>
-        ✓ FIGI
+         FIGI
       </span>
     );
   if (status === 'mismatch')

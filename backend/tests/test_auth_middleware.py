@@ -167,7 +167,7 @@ class TestManagementDashboardForUsers:
 
     def test_the_page_s_reads_are_allowed(self, monkeypatch):
         for path in ("/api/airs/portfolios/overview",
-                     # ⚠ `/accounts/{p}/isins`, NOT `/holdings` — see
+                     #  `/accounts/{p}/isins`, NOT `/holdings` — see
                      # TestExpandingAnAccountIsAdminOnly. This list said `/holdings` until
                      # 2026-08-06, which is exactly the access the Overview row now withholds.
                      "/api/airs/accounts/BUS_X/isins",
@@ -179,7 +179,7 @@ class TestManagementDashboardForUsers:
             assert _run(monkeypatch, "GET", path, "user") == (200, True), path
 
     def test_a_read_that_arrives_as_post_is_allowed(self, monkeypatch):
-        """⚠ These POST because a basket of ISINs does not fit in a URL. They mutate nothing, and
+        """ These POST because a basket of ISINs does not fit in a URL. They mutate nothing, and
         the method-based write tier would 403 a user on a page they may open."""
         for path in ("/api/airs/basket/analysis",
                      "/api/asset-pipeline/basket/performance",
@@ -189,7 +189,7 @@ class TestManagementDashboardForUsers:
             assert _run(monkeypatch, "POST", path, "user") == (200, True), path
 
     def test_the_ingest_sibling_one_segment_down_is_named_in_full(self, monkeypatch):
-        """⚠ WHY BOTH LISTS ARE EXACT-MATCH, NEVER PREFIX. `fundamental-coverage` reports what we
+        """ WHY BOTH LISTS ARE EXACT-MATCH, NEVER PREFIX. `fundamental-coverage` reports what we
         hold; `fundamental-coverage/ingest` spends GuruFocus quota to go and fetch it. A user may
         now fire both — but only because each is written out by name, and this test is the
         difference between that and a prefix that would also hand over whatever lands under
@@ -200,7 +200,7 @@ class TestManagementDashboardForUsers:
                     "user") == (403, False)
 
     def test_the_request_held_sse_scrapes_stay_admin_only(self, monkeypatch):
-        """⚠ THE JOB FORM IS OPEN, THE SSE FORM IS NOT — see
+        """ THE JOB FORM IS OPEN, THE SSE FORM IS NOT — see
         TestManagementDashboardRefreshesAreOpen. These GETs hold a request open for the whole
         Playwright scrape and belong to the admin-only /airs-portfolio page; the Dashboard starts
         the same work as a cancellable background job. The blocking POST twins are likewise not the
@@ -234,12 +234,12 @@ class TestManagementDashboardForUsers:
 class TestManagementDashboardRefreshesAreOpen:
     """Every refresh on /management-dashboard is a non-admin's to fire (2026-08-19, on request).
 
-    ⚠ THE PAGE WAS READABLE BUT FROZEN. A user could see that the AIRS scrape was days old, that an
+     THE PAGE WAS READABLE BUT FROZEN. A user could see that the AIRS scrape was days old, that an
     index had not been rebuilt, that a constituent had no fundamentals — and could do nothing about
     any of it. The judgement recorded in `_USER_REFRESH_PATHS` is that a stale dashboard nobody can
     refresh costs more than the GuruFocus quota and AirSPMS sessions these spend.
 
-    ⚠ THESE ARE THE RULE, NOT THE VISIBLE BUTTONS. The panels no longer gate the controls on
+     THESE ARE THE RULE, NOT THE VISIBLE BUTTONS. The panels no longer gate the controls on
     `isAdmin`, which is presentation. If this class goes red the buttons 403 whatever they look
     like; if only the panels change, the permission is a suggestion."""
 
@@ -271,7 +271,7 @@ class TestManagementDashboardRefreshesAreOpen:
             assert _run(monkeypatch, method, path, None) == (401, False), path
 
     def test_a_user_can_watch_and_stop_what_they_started(self, monkeypatch):
-        """⚠ THE TRANSPORT COMES WITH THE PERMISSION. Every path above returns a job handle and
+        """ THE TRANSPORT COMES WITH THE PERMISSION. Every path above returns a job handle and
         reports through `/api/jobs`; without the list, the stream and the Cancel a user would start
         minutes of work with no progress and no way out — the state this panel kept being reported
         as "stuck"."""
@@ -285,14 +285,14 @@ class TestManagementDashboardRefreshesAreOpen:
         assert _run(monkeypatch, "POST", "/api/jobs", "user") == (403, False)
 
     def test_the_job_suffix_is_not_a_skeleton_key(self, monkeypatch):
-        """⚠ ANCHORED PATTERNS, NOT "anything ending in /job". Every allowed path is written out; a
+        """ ANCHORED PATTERNS, NOT "anything ending in /job". Every allowed path is written out; a
         job starter that is not the Dashboard's stays admin-only."""
         assert _run(monkeypatch, "POST", "/api/asset-pipeline/ingest/job", "user") == (403, False)
         assert _run(monkeypatch, "POST", "/api/airs/portfolios/BUS_X/delete/job",
                     "user") == (403, False)
 
     def test_the_refresh_tier_did_not_open_the_mutations_beside_it(self, monkeypatch):
-        """⚠ THE WHOLE REASON THIS IS A LIST OF PATHS AND NOT AN `/api/airs/` WRITE PREFIX. These
+        """ THE WHOLE REASON THIS IS A LIST OF PATHS AND NOT AN `/api/airs/` WRITE PREFIX. These
         sit one segment from a refresh a user may now fire, and each CHANGES what the page says
         rather than making it current."""
         for method, path in (("DELETE", "/api/airs/portfolios/BUS_X"),
@@ -310,7 +310,7 @@ class TestExpandingAnAccountIsAdminOnly:
     The summary table stays user-readable — what is withheld is the book behind a row: its
     positions and their EUR values, its mutations, the reconciliation, the link picker.
 
-    ⚠ THESE ARE THE RULE, NOT THE HIDDEN `<tr>`. The frontend drops the row's click handler for a
+     THESE ARE THE RULE, NOT THE HIDDEN `<tr>`. The frontend drops the row's click handler for a
     non-admin, which is presentation; every one of these URLs is still sitting in a bundle that
     user downloads. If this class goes green while the panel is restricted, the restriction is
     real; if only the panel changes, it is a suggestion."""
@@ -329,14 +329,14 @@ class TestExpandingAnAccountIsAdminOnly:
             assert _run(monkeypatch, "GET", path, "admin") == (200, True), path
 
     def test_isins_stays_readable_because_analyse_shares_it(self, monkeypatch):
-        """⚠ THE ONE THAT MUST NOT BE SWEPT UP, and the reason this is a pattern list rather than
+        """ THE ONE THAT MUST NOT BE SWEPT UP, and the reason this is a pattern list rather than
         an `/api/airs/accounts/` prefix. A non-admin keeps the Analyse button, and for a book with
         no paired model portfolio `/isins` is the ONLY way it gets a basket to analyse
         (`openModal` in PortfolioOverviewPanel). A prefix would take that away silently."""
         assert _run(monkeypatch, "GET", "/api/airs/accounts/BUS_X/isins", "user") == (200, True)
 
     def test_the_account_name_may_contain_anything_url_safe(self, monkeypatch):
-        """⚠ AIRS's `Portefeuille` is a 24-char legacy code with underscores and digits, and it
+        """ AIRS's `Portefeuille` is a 24-char legacy code with underscores and digits, and it
         arrives percent-encoded. A pattern anchored on a narrower character class would match the
         tidy test id and miss the real ones — i.e. pass here and allow in production."""
         for pid in ("BUS_WTS_StMerken_Dyn", "BUS_BM_AAN_kw_USD_2026_d", "MoTopSelectie_FX", "7"):
@@ -443,12 +443,12 @@ class TestTheOneAssetPipelineWriteAUserMayMake:
     """`/api/asset-pipeline/latest-close/isin/{isin}/refresh` — bring ONE instrument's stored
     closes up to date, from the Deep Valuation tab's share-price row.
 
-    ⚠⚠ THE READ IT REPAIRS IS ALREADY A USER READ. `/api/asset-pipeline/latest-close/` sits in
+     THE READ IT REPAIRS IS ALREADY A USER READ. `/api/asset-pipeline/latest-close/` sits in
     `_USER_READ_PREFIXES` because the Management Dashboard needs it, so the refresh button beside
     that figure is on screen for every authenticated user. Left in the write tier it 403s for all
     of them — a visible control that fails for most of the people who can see it.
 
-    ⚠⚠ AND IT IS A PATTERN, NOT A PREFIX. `/api/asset-pipeline/` also holds the bulk ingest, the
+     AND IT IS A PATTERN, NOT A PREFIX. `/api/asset-pipeline/` also holds the bulk ingest, the
     OpenFIGI resolve and the row refresh. Widening this to a prefix hands every one of those to
     any logged-in user, which is the trap `_USER_POST_READ_PATHS` states in its own note.
     """
@@ -475,7 +475,7 @@ class TestTheOneAssetPipelineWriteAUserMayMake:
         assert _run(monkeypatch, "POST", "/api/asset-pipeline/existing", "user") == (403, False)
 
     def test_it_does_not_open_a_deeper_or_wider_path(self, monkeypatch):
-        # ⚠ ANCHORED AT BOTH ENDS. A trailing segment past `/refresh`, or a second ISIN segment,
+        #  Anchored at both ends. A trailing segment past `/refresh`, or a second ISIN segment,
         # is a different endpoint — and `[^/]+` is what stops one being smuggled through.
         assert _run(monkeypatch, "POST",
                     "/api/asset-pipeline/latest-close/isin/US0378331005/refresh/all",
@@ -491,14 +491,14 @@ class TestTheOneAssetPipelineWriteAUserMayMake:
 class TestEveryLongEquityCardReadAUserOpens:
     """The Fundamental modal's benchmark line, on /management-dashboard's Long Equity tab.
 
-    ⚠⚠ THE ONE THAT WAS SPLIT OUT OF THE OTHERS AND DID NOT FOLLOW THEM INTO THE ALLOW-LIST.
+     THE ONE THAT WAS SPLIT OUT OF THE OTHERS AND DID NOT FOLLOW THEM INTO THE ALLOW-LIST.
     Until 2026-08-19 the per-period market caps rode inside every one of the ten card payloads —
     29.9% of each — and were lifted into a single shared `universe-period-caps` read to stop
     shipping the same table ten times. The ten were already user-readable; the endpoint carved out
     of them was not. A non-admin picking ACWI therefore got `ACWI: Admin role required` on every
     card, from a request whose CONTENT they were already being served.
 
-    ⚠ SO THE TEST IS THE WHOLE SET, NOT THE ONE THAT BROKE. The failure was a list that fell out of
+     SO THE TEST IS THE WHOLE SET, NOT THE ONE THAT BROKE. The failure was a list that fell out of
     step with its callers, and pinning only the repaired entry would leave the next split-out
     endpoint free to do exactly the same thing.
     """
@@ -523,13 +523,13 @@ class TestEveryLongEquityCardReadAUserOpens:
             assert _run(monkeypatch, "POST", f"/api/earnings/{p}", None) == (401, False)
 
     def test_the_tier_is_EXACT_PATHS_so_a_sibling_does_not_inherit(self, monkeypatch):
-        # ⚠ THE REASON THIS TIER IS EXACT PATHS AND NEVER A PREFIX. A prefix over
+        #  The reason this tier is exact paths and never a prefix. A prefix over
         # `/api/earnings/margin-inputs` would carry anything filed beneath it, and nothing about
         # being one segment down makes an endpoint a read.
         assert _run(monkeypatch, 'POST', '/api/earnings/margin-inputs/ingest', 'user') == (403, False)
 
     def test_the_coverage_READ_and_its_INGEST_are_allowed_by_DIFFERENT_TIERS(self, monkeypatch):
-        # ⚠⚠ BOTH ARE USER-ALLOWED AND THAT IS NOT AN ACCIDENT OF ONE LIST.
+        #  Both are user-allowed and that is not an accident of one list.
         # `fundamental-coverage` computes what we already hold and sits in
         # `_USER_POST_READ_PATHS`; `fundamental-coverage/ingest` SPENDS GuruFocus quota and is
         # allowed separately, as a /management-dashboard refresh (`_USER_REFRESH_PATHS`,

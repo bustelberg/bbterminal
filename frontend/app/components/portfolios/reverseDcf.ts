@@ -7,7 +7,7 @@
  *
  * Pure and dependency-free: no React, no fetching, no formatting.
  *
- * ⚠ IT IS SOLVED, NOT SEARCHED. The spreadsheet this ports from lays out a residual grid and hands
+ *  It is solved, not searched. The spreadsheet this ports from lays out a residual grid and hands
  * it to Solver, which leaves the answers stale the moment an input moves. Here it is bisected on
  * demand, so a figure on screen is always the one today's inputs imply.
  */
@@ -29,7 +29,7 @@ export type ReverseDcfAssumptions = {
 };
 
 /**
- * ⚠ 3% IS A MACRO ASSUMPTION AND THERE IS NO COMPANY-SPECIFIC VERSION OF IT. Long-run nominal
+ *  3% IS A MACRO ASSUMPTION AND THERE IS NO COMPANY-SPECIFIC VERSION OF IT. Long-run nominal
  * growth for a going concern; no business grows faster than the economy for ever, so deriving this
  * one from the company's own history would encode the last decade as eternity. Stated as a
  * convention rather than dressed up as a measurement.
@@ -44,7 +44,7 @@ export const FALLBACK_DISCOUNT_RATE = 0.10;
  * The discount rate to start from: the company's OWN cost of capital where GuruFocus publishes one,
  * so a utility and a biotech do not get the same hurdle by default.
  *
- * ⚠ A WACC AT OR BELOW THE PERPETUITY GROWTH MAKES THE TERMINAL VALUE INFINITE, not large. The
+ *  A wacc at or below the perpetuity growth makes the terminal value infinite, not large. The
  * Gordon leg divides by (r − gp), so a 2.5% WACC against 3% terminal growth is a negative
  * denominator and a negative valuation — the model returns null and the panel would read "no
  * solution" for a company whose only sin is a low cost of capital. Anything not comfortably above
@@ -63,7 +63,7 @@ const ok = (v: number | null | undefined): v is number => v != null && Number.is
  * What the cash flows are worth: a growing annuity over the explicit years, plus a Gordon terminal
  * value on the final year's flow, discounted back.
  *
- * ⚠ THE ANNUITY DIVIDES BY (r − g) AND THE SOLVER WALKS g THROUGH r. At g = r the closed form is
+ *  The annuity divides by (r − g) AND THE SOLVER WALKS g THROUGH r. At g = r the closed form is
  * 0/0; the limit is finite (every discounted term equals fcf/(1+r), so the sum is n·fcf/(1+r)) and
  * is used inside a small band around it. Without that the bisection hits ±Infinity mid-bracket and
  * the sign test decides on a non-number.
@@ -87,7 +87,7 @@ export function modelValue(fcf: number, g: number, r: number, n: number, gp: num
 }
 
 /**
- * ⚠ −99%/yr, NOT A "SANE" FLOOR. This was −50% on the same instinct that capped the top at 100%,
+ *  −99%/yr, NOT A "SANE" FLOOR. This was −50% on the same instinct that capped the top at 100%,
  * and it refused the same way: a company priced below what a halving cash flow is worth came back
  * "no solution" instead of a number. −100% is the true limit — cash flows shrink to nothing and
  * `(1+g)` hits zero — so the bracket stops just short of it.
@@ -98,7 +98,7 @@ export function modelValue(fcf: number, g: number, r: number, n: number, gp: num
  */
 const LOW_G = -0.99;
 /**
- * ⚠ THE CEILING IS NOT THE DISCOUNT RATE, AND CAPPING IT THERE IS A REAL BUG. The rule "growth
+ *  The ceiling is not the discount rate, and capping it there is a real bug. The rule "growth
  * cannot reach the discount rate" belongs to a PERPETUAL growing annuity. This one runs for `n`
  * years — a finite sum, which converges for any g. At g > r the closed form's numerator and
  * denominator both go negative and it stays correct; only g = r is singular (0/0), and that has
@@ -110,7 +110,7 @@ const LOW_G = -0.99;
  * implies roughly 24% annual growth. Refusing to answer read as a limitation of the company; it
  * was a limitation of the bracket.
  *
- * ⚠ AND THE TOP IS NOT A JUDGEMENT ABOUT WHAT IS PLAUSIBLE. It was 100%/yr on the reasoning that
+ *  And the top is not a judgement about what is plausible. It was 100%/yr on the reasoning that
  * past that the output stops being a valuation — but that reasoning belongs to the READER, not to
  * the solver, and it cost real answers: a company with ~3,600M of free cash flow behind a
  * multi-trillion market cap came back "no solution" when the honest reply is a number so large it

@@ -1,6 +1,6 @@
 """`common.pg.load_rows_via_copy` — one COPY instead of chunked PostgREST round trips.
 
-⚠⚠ THE ROWS ARE SHIPPED AS JSON, NOT AS CSV COLUMNS, AND THAT IS THE POINT OF THESE TESTS.
+ THE ROWS ARE SHIPPED AS JSON, NOT AS CSV COLUMNS, AND THAT IS THE POINT OF THESE TESTS.
 Every other COPY loader in this codebase parses with `line.split(",")`, which is safe only because
 those queries select numbers and dates. This one selects `name`, `gf_company_name`,
 `openfigi_name`, `leonteq_name` — and **1,948 rows in `asset_grid` have a comma in `name`**
@@ -60,7 +60,7 @@ class TestTextSafety:
 
 class TestTypesMatchPostgREST:
     def test_null_is_none_and_not_an_empty_string(self, monkeypatch):
-        """⚠ The distinction bare CSV cannot make. Callers test `r.get(x) is None` and a `""`
+        """ The distinction bare CSV cannot make. Callers test `r.get(x) is None` and a `""`
         would read as a real, empty value."""
         _patch(monkeypatch, _copy_bytes('{"isin":"X","delisted_at":null,"name":""}'))
         rows = pg.load_rows_via_copy("asset_grid", "isin,delisted_at,name", "isin", ["x"])

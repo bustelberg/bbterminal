@@ -5,19 +5,19 @@ import { useCallback, useSyncExternalStore } from 'react';
 /**
  * The app's language choice.
  *
- * ⚠⚠ DUTCH IS THE DEFAULT AND ENGLISH IS THE SOURCE — TWO DIFFERENT THINGS, AND CONFLATING THEM IS
+ *  Dutch is the default and english is the source — two different things, and conflating them is
  * how a codebase ends up half-authored in each. The readers are Dutch, so an unset preference now
  * resolves to `'nl'` (2026-09-07, on request). Strings are still WRITTEN in English first and
  * translated from there; every copy module keeps its `EN` block as the original and its `NL` block
  * as the translation, and the type is what makes a forgotten translation a compile error. Nothing
  * about the default changes that direction.
  *
- * ⚠⚠ THE FALLBACK AND `getServerSnapshot` MOVE TOGETHER OR NOT AT ALL. They are two halves of one
+ *  The fallback and `getServerSnapshot` MOVE TOGETHER OR NOT AT ALL. They are two halves of one
  * answer: the server renders with the snapshot and React hydrates against it. Change only `read()`
  * and every first paint is English HTML replaced by Dutch on hydration — a visible flash on every
  * load, and React discarding the subtree to recover. Both say `'nl'`.
  *
- * ⚠⚠ THE SWITCH IS GLOBAL SINCE 2026-08-21, AND THAT REVERSED THE RULE THIS NOTE USED TO STATE.
+ *  The switch is global since 2026-08-21, AND THAT REVERSED THE RULE THIS NOTE USED TO STATE.
  * It argued that a language control above a screen it does not translate is worse than none — the
  * reader flips it, nothing moves, and they conclude the feature is broken rather than unfinished —
  * so the switch lived inside the Fundamental modal, the only place translated at the time.
@@ -35,18 +35,18 @@ import { useCallback, useSyncExternalStore } from 'react';
  * `home/homeCopy.ts`); /management-dashboard's page chrome, Benchmarks, Cross-portfolio and the
  * Overview holdings table; the Fundamental modal's `Long Equity` headings and `Tables`.
  *
- * ⚠ THE SIDEBAR AND THE HOME TILES NAME THE SAME PAGES, and `sidebarCopy.test.ts` pins that they
+ *  The sidebar and the home tiles name the same pages, and `sidebarCopy.test.ts` pins that they
  * name them IDENTICALLY. Two maps that both label `/schedule` are two chances to call it two
  * things in one screenshot.
  *
- * ⚠ THE HOME PAGE IS THE FIRST SURFACE THAT IS TRANSLATED END TO END, and it is the one the switch
+ *  The home page is the first surface that is translated end to end, and it is the one the switch
  * is judged by: it is where every reader lands, so an untranslated home page made the control look
  * broken on the very first press. Getting there needed a split — `app/page.tsx` stays a SERVER
  * component (it reads the session and the `view_as` cookie to decide which tiles exist) and hands
  * the hrefs to a client child that looks the copy up. Server-rendered copy cannot follow this
  * preference at all.
  *
- * ⚠ ENGLISH IS THE SOURCE, NOT A PEER. Every string is authored in English and translated from
+ *  English is the source, not a peer. Every string is authored in English and translated from
  * there. When copy changes, the English changes first and the Dutch follows — `TablesCopy`'s type
  * makes a forgotten Dutch string a compile error rather than a silent fall-back to English, which
  * would show a half-translated table and look like a rendering bug.
@@ -64,7 +64,7 @@ const KEY = 'bb:lang';
 const isLang = (v: unknown): v is Lang => v === 'en' || v === 'nl';
 
 /**
- * ⚠⚠ AN EXTERNAL STORE, NOT `useState` + AN EFFECT THAT READS `localStorage`.
+ *  An external store, not `useState` + AN EFFECT THAT READS `localStorage`.
  *
  * The obvious shape — seed the state to `'en'`, then adopt the stored value in a `useEffect` — is
  * wrong twice. It sets state synchronously inside an effect, which React now flags as a cascading
@@ -72,18 +72,18 @@ const isLang = (v: unknown): v is Lang => v === 'en' || v === 'nl';
  * open modal would not move the table in another. `useSyncExternalStore` is the primitive for
  * exactly this: one value, read from outside React, with an explicit server snapshot.
  *
- * ⚠ `getServerSnapshot` RETURNS THE DEFAULT AND MUST RETURN THE SAME ONE `read()` FALLS BACK TO —
+ *  `getServerSnapshot` RETURNS THE DEFAULT AND MUST RETURN THE SAME ONE `read()` FALLS BACK TO —
  * `'nl'` since 2026-09-07. These components are `'use client'` but Next still renders them on the
  * server, where `localStorage` does not exist. React uses this snapshot during hydration and
  * re-reads the real one immediately after, which is what keeps the server's HTML and the first
  * client render in agreement — seeding from storage directly makes them disagree and React throws
  * away the subtree to recover.
  *
- * ⚠ A READER WHO HAS CHOSEN `'en'` STILL GETS ONE CORRECTED PAINT, and that is unchanged in kind
+ *  A reader who has chosen `'en'` STILL GETS ONE CORRECTED PAINT, and that is unchanged in kind
  * from before — it was Dutch readers paying it, and it is now the smaller group. There is no way
  * around it without moving the preference into a cookie the server can read.
  *
- * ⚠ THE SNAPSHOT IS CACHED IN `current` BECAUSE `getSnapshot` MUST BE STABLE. React calls it on
+ *  The snapshot is cached in `current` BECAUSE `getSnapshot` MUST BE STABLE. React calls it on
  * every render and re-renders if the result differs; hitting `localStorage` each time is both a
  * synchronous disk-backed read in the render path and, on a parse failure, a value that could
  * differ between two calls in the same commit.
@@ -94,7 +94,7 @@ const listeners = new Set<() => void>();
 function read(): Lang {
   try {
     const stored = window.localStorage.getItem(KEY);
-    // ⚠ AN UNKNOWN STORED VALUE FALLS BACK RATHER THAN BEING TRUSTED. `'de'` in this key would
+    //  An unknown stored value falls back rather than being trusted. `'de'` in this key would
     // otherwise index `COPY` to `undefined` and blank every string in the table.
     return isLang(stored) ? stored : 'nl';
   } catch (e) {
@@ -113,7 +113,7 @@ const getServerSnapshot = (): Lang => 'nl';
 
 function subscribe(onChange: () => void): () => void {
   listeners.add(onChange);
-  // ⚠ `storage` FIRES IN OTHER TABS, NOT THIS ONE — that is the whole point of listening to it.
+  //  `storage` FIRES IN OTHER TABS, NOT THIS ONE — that is the whole point of listening to it.
   // Same-tab changes come through `listeners`, which `setLang` notifies directly.
   const onStorage = (e: StorageEvent) => {
     if (e.key !== KEY) return;
@@ -136,7 +136,7 @@ export function useLang(): [Lang, (l: Lang) => void] {
     try {
       window.localStorage.setItem(KEY, l);
     } catch (e) {
-      // ⚠ THE CHOICE STILL TAKES EFFECT FOR THIS SESSION. Failing to persist is a reason not to
+      //  The choice still takes effect for this session. Failing to persist is a reason not to
       // remember it next time, not a reason to ignore the click that just happened.
       console.warn('[bb:i18n] could not persist the language:', e);
     }
@@ -151,23 +151,23 @@ const OWNER_KEY = 'bb:lang:owner';
 /**
  * Bind the stored preference to the reader who chose it, and hand a different reader the DEFAULT.
  *
- * ⚠⚠ THE DEFAULT BEING `'nl'` IS ONLY HALF OF "NEW USERS GET DUTCH", AND THE OTHER HALF IS WHOSE
- * BROWSER THEY ARE IN (2026-09-08, on request). `read()` falls back to `'nl'` only when `bb:lang`
+ *  The default being `'nl'` IS ONLY HALF OF "NEW USERS GET DUTCH", AND THE OTHER HALF IS WHOSE
+ * Browser they are in (2026-09-08, on request). `read()` falls back to `'nl'` only when `bb:lang`
  * is ABSENT, and `setLang` is the only thing that ever writes it — so a stored value is always
  * somebody's deliberate press. On a machine where an admin (or an earlier account) once pressed
  * EN, a brand-new user signs up and reads English, with nothing on screen saying why and no reason
  * to suspect a setting they never touched. A language is a property of the READER, so it has to
  * travel with the account rather than with the browser profile.
  *
- * ⚠ SIGNING OUT FORGETS BOTH, so the next person at this machine starts from the default even
+ *  Signing out forgets both, so the next person at this machine starts from the default even
  * before they have an identity — which is the state the login and set-password pages render in.
  *
- * ⚠ A BROWSER THAT PREDATES THIS KEY LOSES ITS CHOICE EXACTLY ONCE: `owner` is absent, the signed-
+ *  A browser that predates this key loses its choice exactly once: `owner` is absent, the signed-
  * in email is not, so the first claim clears and re-owns. That is deliberate rather than tolerated
  * — the preference cannot be attributed, and the request is that an unattributed reader gets
  * Dutch. Pressing EN again is one click and sticks for good.
  *
- * ⚠ IT NOTIFIES THROUGH THE SAME `listeners` AS `setLang`. Clearing storage without invalidating
+ *  It notifies through the same `listeners` AS `setLang`. Clearing storage without invalidating
  * `current` would leave every mounted component on the previous reader's language until a reload,
  * which is the half-applied state that looks like the switch is broken.
  */
@@ -182,7 +182,7 @@ export function claimLangFor(email: string | null): void {
     if (email == null) window.localStorage.removeItem(OWNER_KEY);
     else window.localStorage.setItem(OWNER_KEY, email);
   } catch (e) {
-    // ⚠ A BLOCKED STORAGE IS NOT A REASON TO FAIL TO RENDER. Fall through to the notify below so
+    //  A blocked storage is not a reason to fail to render. Fall through to the notify below so
     // the in-memory snapshot is still consistent with whatever `read()` can see.
     console.warn('[bb:i18n] could not re-own the language preference:', e);
   }

@@ -1,12 +1,12 @@
 """The fleet scan's narration reaches the job's progress line, not just `_STATUS["log"]`.
 
-⚠⚠ THE REPORTED SYMPTOM: "Refresh all" sat on **"starting…" for a long time** before the first
+ THE REPORTED SYMPTOM: "Refresh all" sat on **"starting…" for a long time** before the first
 portfolio appeared. Nothing was stuck. `run_airs_vermogen_refresh_sync` calls its `on_step` hook
 only inside the ACCOUNT LOOP, and everything before it — a headless-browser sign-in, three menu
 navigations, three filters, a paged scrape of the Front-Office list, then the roster and plan reads
 — narrates exclusively through `_emit`, which appends to `_STATUS["log"]`.
 
-⚠ THAT LOG USED TO BE POLLED. The portfolios panel read `/vermogen/status` every 2.5s and printed
+ THAT LOG USED TO BE POLLED. The portfolios panel read `/vermogen/status` every 2.5s and printed
 it. When "Refresh all" became a job (2026-08-13) the poll went away and nothing re-pointed the log
 at the toast, so the most detailed narration in this module started going nowhere — and the phase
 it covers is the one with no denominator, where a bar cannot say anything either.
@@ -53,14 +53,14 @@ class TestEmitReachesTheToast:
         assert sink == []
 
     def test_it_still_appends_to_the_log(self, sink):
-        """⚠ THE LOG IS NOT REPLACED BY THE TOAST. It is the only place the full roster and the
-        per-report ✓/—/✗ breakdown appear, and the panel reads it once at the end."""
+        """ THE LOG IS NOT REPLACED BY THE TOAST. It is the only place the full roster and the
+        per-report /—/ breakdown appear, and the panel reads it once at the end."""
         V._emit("discovery", message="page 1: 25 new")
         assert (V._STATUS["log"] or [])[-1]["message"] == "page 1: 25 new"
 
 
 class TestThePositionIsCarried:
-    """⚠ THE BAR MUST NOT FLICKER BACK TO ZERO. `scan_one` narrates each of the four downloads
+    """ THE BAR MUST NOT FLICKER BACK TO ZERO. `scan_one` narrates each of the four downloads
     under an account, so a mid-loop `_emit` reporting its own `0/0` would reset a bar at 12/44 four
     times per account."""
 
@@ -84,7 +84,7 @@ class TestThePositionIsCarried:
 
 
 class TestAReporterNeverBreaksTheScan:
-    """⚠ THE WORK IS THE SCAN; THE LINE ON SCREEN IS A COURTESY. A listener that raises must not
+    """ THE WORK IS THE SCAN; THE LINE ON SCREEN IS A COURTESY. A listener that raises must not
     lose a refresh that has already downloaded and stored 30 accounts."""
 
     def test_a_raising_sink_is_swallowed_by_emit(self, monkeypatch):
@@ -105,7 +105,7 @@ class TestAReporterNeverBreaksTheScan:
 
 
 class TestTheSinkIsClearedWithTheLock:
-    """⚠ SET INSIDE THE LOCK HOLD, CLEARED IN THE SAME `finally`. Left dangling, the scheduler's
+    """ SET INSIDE THE LOCK HOLD, CLEARED IN THE SAME `finally`. Left dangling, the scheduler's
     05:00 tick — which passes no hook — would push its lines onto whatever toast the last manual
     press left behind."""
 
@@ -139,7 +139,7 @@ class TestTheSinkIsClearedWithTheLock:
 
 
 class TestThePerRowRefreshNarratesToo:
-    """⚠⚠ THE SAME HOLE, ONE LEVEL DOWN, AND IT WAS ONE MISSING ARGUMENT. `scan_one` already
+    """ THE SAME HOLE, ONE LEVEL DOWN, AND IT WAS ONE MISSING ARGUMENT. `scan_one` already
     narrates every download the moment it lands — `on_report`, with per-report timings — and the
     FLEET loop passes it. `refresh_one_portfolio` did not, so a single row's refresh emitted four
     lines total and the toast read "AITopSelectie OFF DYN — scanning AIRS reports" at 0% for the
@@ -177,7 +177,7 @@ class TestThePerRowRefreshNarratesToo:
         assert any("CHILD_B" in m and "Vermogensoverzicht" in m for _d, _t, m in seen)
 
     def test_a_per_download_line_does_not_reset_the_bar(self, monkeypatch):
-        """⚠ THE POSITION IS CARRIED. Five downloads per account, so a `0/0` from each would drag
+        """ THE POSITION IS CARRIED. Five downloads per account, so a `0/0` from each would drag
         the bar back to the start five times per book."""
         seen = self._rig(monkeypatch, ["CHILD_A"])
         V.refresh_one_portfolio("ACC", on_step=lambda d, t, m: seen.append((d, t, m)))
@@ -208,7 +208,7 @@ class TestThePerRowRefreshNarratesToo:
 
 
 class TestTheFirstLineIsImmediate:
-    """⚠ THE POINT OF THE WHOLE CHANGE. The press must produce a line before any work, naming the
+    """ THE POINT OF THE WHOLE CHANGE. The press must produce a line before any work, naming the
     slow thing — otherwise the reader's only evidence for a minutes-long browser login is a toast
     that says "starting…"."""
 

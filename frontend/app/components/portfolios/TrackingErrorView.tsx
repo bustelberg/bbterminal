@@ -1,22 +1,22 @@
 'use client';
 
 /**
- * REALISED TRACKING ERROR — the Risk panel's second view.
+ * Realised tracking error — the Risk panel's second view.
  *
  *     aₜ = Rₜᵖ − Rₜᵇ      TE = √( 1/(T−1) · Σ (aₜ − ā)² ) · √f
  *
- * ⚠⚠ IT SITS BESIDE ACTIVE SHARE BECAUSE THE TWO ANSWER THE SAME QUESTION FROM OPPOSITE ENDS, and
+ *  It sits beside active share because the two answer the same question from opposite ends, and
  * that is the whole reason for the switch rather than two separate buttons. Active share is what
  * the book LOOKS like against the index; tracking error is what that difference has actually DONE.
  * A book can be 80% active and track closely (it owns different names in the same sectors), or 30%
  * active and wander (its few bets are enormous). Neither number is complete alone, and reading one
  * as a proxy for the other is the standard mistake.
  *
- * ⚠ EVERY LABEL SAYS "REALISED". The other definition — ex-ante, `√(wₐᵀΣwₐ)` from a covariance
+ *  Every label says "REALISED". The other definition — ex-ante, `√(wₐᵀΣwₐ)` from a covariance
  * matrix — is a FORECAST, needs a risk model we do not have, and routinely disagrees with this one.
  * A tile reading just "Tracking error" would be read as whichever the reader is used to.
  *
- * ⚠ THE ACTIVE RETURN IS SHOWN BESIDE IT, always. TE is the SPREAD of that quantity, and the two
+ *  The active return is shown beside it, always. TE is the SPREAD of that quantity, and the two
  * are constantly confused — so the panel prints both rather than letting one stand for the other.
  */
 import { useEffect, useState } from 'react';
@@ -38,13 +38,13 @@ import type { ActiveShareHolding } from './ActiveSharePanel';
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
 /**
- * ⚠⚠ THE SYMBOLS MOVED TO `riskCopy.te.legend` (2026-09-01) — DEFINED ONCE, NOW IN TWO LANGUAGES.
+ *  The symbols moved to `riskCopy.te.legend` (2026-09-01) — DEFINED ONCE, NOW IN TWO LANGUAGES.
  * Four cards share `aₜ`, `T` and `f`, and written per tile the definitions drift on the first edit:
  * a view where `T` means "paired periods" in one tooltip and "observations" in the next has taught
  * the reader that the symbol is decorative. That argument is unchanged; what changed is that the
  * one place is now the copy module, so a Dutch reader gets the definition rather than the digits.
  *
- * ⚠ THE "the answer:" PREFIX IS PART OF THE TRANSLATED STRING (`teAnswer`, `IR`), not glued on
+ *  THE "the answer:" PREFIX IS PART OF THE TRANSLATED STRING (`teAnswer`, `IR`), not glued on
  * here — concatenated at the call site the Dutch card would read "the answer: het antwoord".
  */
 
@@ -67,9 +67,9 @@ export default function TrackingErrorView({
   holdings: ActiveShareHolding[];
   benchmark: string;
   /**
-   * The book's identity, forwarded from the panel — see the ⚠ on `ActiveSharePanel`'s own props.
+   * The book's identity, forwarded from the panel — see the  on `ActiveSharePanel`'s own props.
    *
-   * ⚠ THIS VIEW HAS TWO CLOCKS AND THEY ARE NOT THE SAME ONE. The WEIGHTS are today's book at its
+   *  This view has two clocks and they are not the same one. The WEIGHTS are today's book at its
    * AIRS valuation date; the RETURNS are a five-year price window ending at the last close both
    * series shared. A card that named only one would date half of what it measured.
    */
@@ -82,7 +82,7 @@ export default function TrackingErrorView({
   const [error, setError] = useState<string | null>(null);
   const freq = 'monthly';
 
-  // ⚠ A STRING KEY, NOT THE ARRAY — `holdings` is rebuilt on every parent render, so depending on
+  //  A string key, not the array — `holdings` is rebuilt on every parent render, so depending on
   // its identity would refetch for ever.
   const key = `${benchmark}|${freq}|${holdings.length}`
     + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
@@ -114,12 +114,12 @@ export default function TrackingErrorView({
   const periodsPerYear = 12;
 
   /**
-   * ⚠⚠ THE READING THE NUMBER DOES NOT GIVE ANYONE ON ITS OWN — see `activeBand`. A tracking error
+   *  The reading the number does not give anyone on its own — see `activeBand`. A tracking error
    * is a spread with no stated centre, and the centre every reader supplies is the benchmark; ours
    * is ā, because `_tracking_error.py` subtracts it. So the tile prints the interval rather than
    * leaving the reader to assume the symmetric one, which belongs to the other definition.
    *
-   * ⚠ COMPUTED HERE AND NOT INSIDE THE TOOLTIP, so the arithmetic is unit-tested (`activeBand`)
+   *  Computed here and not inside the tooltip, so the arithmetic is unit-tested (`activeBand`)
    * and this file only formats it. Returns null on any missing operand, and the worked line then
    * falls back to the formula alone.
    */
@@ -127,9 +127,9 @@ export default function TrackingErrorView({
     data?.mean_active_per_period_pct, data?.periods_per_year, data?.tracking_error_pct);
 
   /**
-   * WHAT EVERY CARD IN THIS VIEW IS MEASURED FROM, built once.
+   * What every card in this view is measured from, built once.
    *
-   * ⚠ FOUR CARDS, ONE PAIR OF INPUTS. Each tile is a different reading of the SAME paired series,
+   *  Four cards, one pair of inputs. Each tile is a different reading of the SAME paired series,
    * so four separately-worded Wheres would be four places for the sources to drift — and two tiles
    * naming different vendors for one number is unreconcilable from the outside.
    */
@@ -141,7 +141,7 @@ export default function TrackingErrorView({
     : '';
 
   /**
-   * ⚠⚠ TWO CLOCKS, BOTH STATED. The returns span a real window that is NOT "five years back from
+   *  Two clocks, both stated. The returns span a real window that is NOT "five years back from
    * today" — a recently-listed holding shortens the grid and a stale series ends it early — and the
    * WEIGHTS are today's book at its own AIRS valuation date. The card used to say "trailing window
    * — the sleeve as it stands today, carried backwards", which asserted both and dated neither.
@@ -177,7 +177,7 @@ export default function TrackingErrorView({
                   String.raw`a_t = R_t^{\,p} - R_t^{\,b}\quad\Rightarrow\quad TE = \sqrt{\dfrac{\sum_t (a_t - \bar{a})^2}{T - 1}}\;\sqrt{f}`,
                   String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
                   + String.raw` \;\Rightarrow\; ${subNum(data.tracking_error_pct, 2)}\%`
-                  // ⚠ A SECOND WORKED LINE, because the band is a second piece of arithmetic and
+                  //  A second worked line, because the band is a second piece of arithmetic and
                   // not a restatement of the first. `\\[4pt]` is the same separator `withWorked`
                   // puts between the symbolic and substituted halves, so all three lines set as
                   // one aligned display rather than as a formula with a sentence stuck under it.
@@ -244,9 +244,9 @@ export default function TrackingErrorView({
           )}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {/* ⚠ THE BOOK IS NAMED AND THE WINDOW IS DATED, same rule as the cards above — see the
-                ⚠⚠ on `when`. "Today's sleeve carried back 5 years" asserted a start date rather
-                than reporting one, and the grid rarely reaches the full five. ⚠ NOT badged: this
+            {/*  THE BOOK IS NAMED AND THE WINDOW IS DATED, same rule as the cards above — see the
+                 on `when`. "Today's sleeve carried back 5 years" asserted a start date rather
+                than reporting one, and the grid rarely reaches the full five.  NOT badged: this
                 is a plain <p> outside the card system, and `v()` only renders inside one. */}
             {`${portfolioName}'s stock sleeve at its current weights, priced from `}
             {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} — `}

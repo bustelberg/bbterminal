@@ -8,16 +8,16 @@ WHAT THIS ANSWERS
     chart is blank or starts late, and there is otherwise no way to see it without opening each
     company one at a time.
 
-⚠ ONE COLUMN PAIR PER LINE, NOT A DERIVED FIGURE. A `from`/`to` says what exists; a value would
+ ONE COLUMN PAIR PER LINE, NOT A DERIVED FIGURE. A `from`/`to` says what exists; a value would
     say what it is, which is the charts' job. The pair is what makes the table a coverage report:
     after a backfill you can see the spans appear, and a line that reads 2021-2025 where its
     neighbours read 2015-2025 is the reason a nine-year chart has a four-year trend.
 
-⚠ THE LINES ARE THE ONES THE CARDS CONSUME, taken from `earnings._METRIC_CODES` rather than listed
+ THE LINES ARE THE ONES THE CARDS CONSUME, taken from `earnings._METRIC_CODES` rather than listed
     again here. A second list would drift the day a card starts reading a new line, and the table
     would report full coverage for a chart that cannot be drawn.
 
-⚠ ONE BULK READ PER LINE, NEVER PER COMPANY. Measured on SP500 (503 members), a per-company loop
+ ONE BULK READ PER LINE, NEVER PER COMPANY. Measured on SP500 (503 members), a per-company loop
     costs 44.5 s for ONE metric against 0.1 s for a bulk read — and this needs nineteen of them.
     See `earnings._metrics_by_company`.
 """
@@ -30,13 +30,13 @@ _log = logging.getLogger(__name__)
 # The raw GuruFocus lines every Long Equity card is built from, in statement order so the table
 # reads like a set of accounts rather than an alphabetical list. `label` is the column head.
 #
-# ⚠ THE KEYS ARE `_METRIC_CODES` KEYS. That module owns which GuruFocus spelling each one maps to
+#  The keys are `_METRIC_CODES` KEYS. That module owns which GuruFocus spelling each one maps to
 # (there are two per line, and a bank uses different keys again) — this is only the ORDER and the
 # reader-facing names.
 COLUMNS: tuple[dict, ...] = (
     {"key": "revenue", "label": "Revenue", "note": "Income statement — the top line."},
     {"key": "gross_profit", "label": "Gross profit",
-     "note": "⚠ A BANK HAS NO GROSS PROFIT LINE AT ALL (GuruFocus template 'B'), so a blank here "
+     "note": " A BANK HAS NO GROSS PROFIT LINE AT ALL (GuruFocus template 'B'), so a blank here "
              "is an answer — the concept does not apply — not a gap."},
     {"key": "operating_income", "label": "Operating income", "note": "Income statement."},
     {"key": "net_income", "label": "Net income",
@@ -73,7 +73,7 @@ _KEYS: tuple[str, ...] = tuple(c["key"] for c in COLUMNS)
 def normalise_cadence(value: str | None) -> str:
     """A request's cadence → the one it will actually be answered on.
 
-    ⚠ AN UNRECOGNISED VALUE MUST RESOLVE TO A REAL BASIS, NOT TO NOTHING. `_metrics_by_company`
+     AN UNRECOGNISED VALUE MUST RESOLVE TO A REAL BASIS, NOT TO NOTHING. `_metrics_by_company`
     falls back to the ANNUAL codes for anything that is not "quarterly", so passing the raw string
     through would echo a cadence the rows were not computed on — annual spans under a heading that
     says something else. The table's whole job is saying which periods we hold, and "2025" versus
@@ -85,18 +85,18 @@ def normalise_cadence(value: str | None) -> str:
 def constituent_fundamentals(company_ids: list[int], cadence: str = "annual") -> dict[int, dict]:
     """{company_id: {metric key: {"from": period, "to": period, "n": count}}}.
 
-    ⚠ A LINE WITH NO ROWS IS ABSENT FROM THE DICT, not present with nulls. The table renders the
+     A LINE WITH NO ROWS IS ABSENT FROM THE DICT, not present with nulls. The table renders the
     difference as a dash, and "we hold nothing" is the finding — padding it with an empty object
     would make an unfetched company look identical to one whose fiscal year has not landed.
 
-    ⚠ `cadence="quarterly"` REPORTS THE **TRAILING-TWELVE-MONTH** SPAN, NOT THE RAW QUARTERS, because
+     `cadence="quarterly"` REPORTS THE **TRAILING-TWELVE-MONTH** SPAN, NOT THE RAW QUARTERS, because
     that is what the tab draws — it reads through the same `_metrics_by_company`, so this table
     cannot claim a period the chart would not plot. Two consequences worth knowing before reading a
     span as a gap: a series needs FOUR quarters before it has any TTM point at all, so `from` sits
     three quarters after the first raw quarter and a company with three or fewer is absent
     entirely; and `n` counts TTM points, i.e. raw quarters minus three.
 
-    ⚠ THE TWO CADENCES ARE ONE GuruFocus CALL, NOT TWO. `fetch_financials` writes the `annuals` and
+     THE TWO CADENCES ARE ONE GuruFocus CALL, NOT TWO. `fetch_financials` writes the `annuals` and
     `quarterly` blocks of the same blob, so switching this toggle never means "fetch again" — it
     means "look at what the same fetch already brought". Measured 2026-08-04 on the live DB: of 264
     SP500 constituents with annual Free Cash Flow, 263 also have the quarterly line. That ONE row is
@@ -107,7 +107,7 @@ def constituent_fundamentals(company_ids: list[int], cadence: str = "annual") ->
 
     if not company_ids:
         return {}
-    # ⚠ ONE READ FOR ALL NINETEEN LINES, NOT ONE PER LINE. The module header above says "one bulk
+    #  One read for all nineteen lines, not one per line. The module header above says "one bulk
     # read per line, never per company", which is what fixed the 44.5s-per-metric loop — but on the
     # COPY transport each of those reads opens its OWN Postgres connection (connect + TLS + auth),
     # so nineteen of them is nineteen handshakes to fetch rows that sit side by side in

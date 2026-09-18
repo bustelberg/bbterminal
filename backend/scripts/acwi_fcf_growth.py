@@ -1,12 +1,12 @@
 """The true free-cash-flow growth of an index, on a fixed basket, weighted by each year's own euros.
 
-⚠⚠ IT SUMS EUROS. It does NOT average per-member growth rates, which is what the app's level line
+ IT SUMS EUROS. It does NOT average per-member growth rates, which is what the app's level line
 does and which is wrong twice over: it weights a growth RATE by MARKET CAP (measured on ACWI
 revenue, NVIDIA holds 4.77% of cap and supplies 0.02% of revenue — a ~240x overweight on the
 quantity being measured), and averaging rates that are floored at -100% and unbounded above is
 upward-biased in proportion to their dispersion.
 
-⚠ AND SUMMING IS STILL THE CAP-WEIGHTED ANSWER, which is the part that looks wrong. A cap-weighted
+ AND SUMMING IS STILL THE CAP-WEIGHTED ANSWER, which is the part that looks wrong. A cap-weighted
 index holds the SAME FRACTION of every company: buying `w_i = cap_i/Σcap` at price `p_i` leaves
 `n_i = shares_i / Σcap` — the price cancels. So the claim on a fundamental is `(1/Σcap)·ΣF_i`,
 exactly proportional to the sum. Cap weighting enters through the SHARE COUNT, never as a weight on
@@ -21,13 +21,13 @@ Four things this corrects, each measured on ACWI and each invisible on the chart
      3.80%). Averaging double-voted it; summing adds its whole income statement twice.
   3. FINANCIALS. A bank's operating cash flow moves with DEPOSIT AND LOAN FLOWS, so its "free cash
      flow" swings by trillions with no economic content (PT Bank Mandiri: -1,278bn, -1,482bn,
-     +3,909bn EUR in consecutive years). Excluded — ⚠ BOTH SPELLINGS, since Yahoo says "Financials"
+     +3,909bn EUR in consecutive years). Excluded —  BOTH SPELLINGS, since Yahoo says "Financials"
      (225 members) AND "Financial Services" (78) and listing one leaves 78 banks in.
   4. A FIXED BASKET. A sum changes when its members change, so a year with fewer filers is a smaller
      index for that reason alone. Only members reporting in EVERY year are counted, and the basket
      size is printed — a CAGR over a moving basket is not a CAGR.
 
-⚠ THE 1000x SHARE-COUNT DEFECT NEEDS NO FIX HERE, and that is a property of the construction rather
+ THE 1000x SHARE-COUNT DEFECT NEEDS NO FIX HERE, and that is a property of the construction rather
 than luck. Three Japanese filers carry an FY2025 share count 1,000x too small (Japan Post Bank
 3,618.10 -> 3.62, Denso, Mitsubishi Heavy), which makes GuruFocus's per-share figure 1,000x too
 LARGE. `per_share x shares` multiplies the two back together and the errors cancel exactly:
@@ -73,7 +73,7 @@ def main() -> int:
                   if r.get("company_id")})
     print(f"[1/3] {args.universe}: {len(ids)} membership rows")
 
-    # ⚠ ONE CALL. `fundamental_totals` already dedupes dual-class rows, excludes financials for the
+    #  One call. `fundamental_totals` already dedupes dual-class rows, excludes financials for the
     # metrics where a sum is meaningless, and converts each filing at its OWN period-end rate. Doing
     # any of it again here would be a second definition of the same rule.
     if args.keep_financials:
@@ -89,7 +89,7 @@ def main() -> int:
     years = [str(y) for y in range(args.from_year, args.to_year + 1)]
 
     def value_in(cid: int, year: str) -> float | None:
-        # ⚠ ONE FIGURE PER YEAR, THE LATEST FILED. A company changing its year-end can file twice
+        #  One figure per year, the latest filed. A company changing its year-end can file twice
         # against one year, and counting both would double it inside the sum.
         per = per_cid.get(cid) or {}
         dated = sorted((d for d in per if d[:4] == year), reverse=True)

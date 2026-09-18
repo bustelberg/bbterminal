@@ -129,11 +129,11 @@ _NEXT_PAGE_SELECTORS = [
     "a:has-text('Next')",
     # Common arrow glyphs used by icon-only Next buttons.
     "button:has-text('›')",
-    "button:has-text('❯')",
+    "button:has-text('')",
     "button:has-text('→')",
     "button:has-text('▶')",
     "a:has-text('›')",
-    "a:has-text('❯')",
+    "a:has-text('')",
     # Class-name patterns from common pagination libraries.
     "[class*='pagination'] [class*='next']",
     "[class*='Pagination'] [class*='next']",

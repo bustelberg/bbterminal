@@ -125,7 +125,7 @@ class _Query:
     def like(self, col: str, pattern: str) -> "_Query":
         """PostgREST `.like` — SQL LIKE, with BOTH its wildcards.
 
-        ⚠ `_` MATCHES ANY SINGLE CHARACTER, and every metric code in this project contains one
+         `_` MATCHES ANY SINGLE CHARACTER, and every metric code in this project contains one
         (`annuals__Income Statement__Revenue`), while some contain a literal `%` (`ROE %`). A fake
         that treated the pattern as a prefix would pass code that only works by accident here and
         over-matches in production, which is precisely the trap `_page_metrics` is written around.
@@ -176,7 +176,7 @@ class _Query:
         # PostgREST. A stable sort makes the composition exact.
         for col, desc in reversed(self._order):
             rows = sorted(rows, key=lambda r, c=col: (r.get(c) is None, r.get(c)), reverse=desc)
-        # ⚠ APPLIED AFTER THE SORT AND BEFORE THE SLICE — see `unstable_ties`. Rows the ORDER BY
+        #  Applied after the sort and before the slice — see `unstable_ties`. Rows the ORDER BY
         # cannot separate come back in an unspecified order, so a page boundary inside a tie group
         # is a lost row. A total sort key makes every group a singleton and this a no-op.
         if self._store.unstable_ties and self._order:
@@ -202,7 +202,7 @@ class _Query:
             rows = rows[start : end + 1]
         if self._limit is not None:
             rows = rows[: self._limit]
-        # ⚠ THE ROW CAP, and it is SILENT — exactly as PostgREST's is. A caller that does not
+        #  The row cap, and it is SILENT — exactly as PostgREST's is. A caller that does not
         # page gets a short answer with nothing to distinguish it from a complete one.
         if self._store.max_rows is not None:
             rows = rows[: self._store.max_rows]
@@ -217,7 +217,7 @@ class FakeSupabase:
         max_rows: int | None = None,
         unstable_ties: bool = False,
     ):
-        # ⚠⚠ POSTGRES MAKES NO PROMISE ABOUT THE ORDER OF **TIED** ROWS, and a pager whose sort key
+        #  Postgres makes no promise about the order of **TIED** ROWS, and a pager whose sort key
         # is not unique is therefore not a pager: a boundary landing inside a tie group serves some
         # rows twice and others never. Off by default (a stable sort is the friendlier default for
         # every other test); set it to prove a reader's ORDER BY is total.

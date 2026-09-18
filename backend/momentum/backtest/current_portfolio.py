@@ -41,8 +41,8 @@ _logger = logging.getLogger(__name__)
 # `is_decidable` — so the pipeline's pre-flight gate can test decidability with
 # the SAME rule this walk uses instead of a second, disagreeing one.
 
-# ⚠ HOW MANY SESSIONS A COMPANY'S LAST CLOSE MAY BE BEHIND THE DECIDING BAR AND
-# STILL BE BOUGHT. The basket enters at the deciding bar — the trading day before
+#  How many sessions a company's last close may be behind the deciding bar and
+# Still be bought. The basket enters at the deciding bar — the trading day before
 # the rebalance (first Monday ⇒ the preceding Friday). A company whose series
 # stops earlier gets entered at an OLDER close, and every session between that
 # close and the deciding bar is then booked as return the strategy never earned:
@@ -156,7 +156,7 @@ def run_current_portfolio(
     retrospective question must not be able to move them. Default None = the current
     period only, which is what the pipeline runs.
 
-    ⚠ THE DAYS IT PRODUCES ARE A CALCULATION, NOT A DECISION, AND MUST NOT BE
+     THE DAYS IT PRODUCES ARE A CALCULATION, NOT A DECISION, AND MUST NOT BE
     PERSISTED. `current_picks_day` is the record of what the pipeline actually
     decided each day; writing a recomputed past into it would overwrite decisions
     that were made on the data available AT THE TIME with ones made on the data we
@@ -164,7 +164,7 @@ def run_current_portfolio(
     has its OWN store (`daily_holdings_cache`) — see the caller.
 
     `cached_selections` supplies an already-computed SELECTION for a date, so its
-    signals + score/select are skipped. ⚠ IT SHORT-CIRCUITS ONLY THAT STEP. Entry and
+    signals + score/select are skipped.  IT SHORT-CIRCUITS ONLY THAT STEP. Entry and
     exit prices, forward returns, turnover and the chain-linked cumulative are still
     derived here, every run, from the live price index — every one of them is a
     property of the WINDOW (turnover is measured against the previous day IN IT, the
@@ -243,7 +243,7 @@ def run_current_portfolio(
     month_start = rebalance_date
     month_key = rebalance_date.isoformat()[:7]
 
-    # ⚠ THE FIRST THING TO CHECK WHEN A REBALANCE LOOKS WRONG: which date did it
+    #  The first thing to check when a rebalance looks wrong: which date did it
     # decide FOR, off which bar, from how much data. Every downstream number —
     # signals, entry prices, the period the return is measured over — hangs off
     # these three, and none of them is visible in the holdings table afterwards.
@@ -308,7 +308,7 @@ def run_current_portfolio(
     # or back to `daily_from` when the caller asked for a retrospective walk.
     # Built up front so the signal panel can compute every cutoff in one pass.
     #
-    # ⚠ THE FLOOR NEVER MOVES FORWARD. `min(daily_from, month_start)` — a
+    #  The floor never moves forward. `min(daily_from, month_start)` — a
     # `daily_from` INSIDE the current period would otherwise silently truncate the
     # live daily-picks panel the /schedule card reads, turning a read-only question
     # into a change of what the pipeline reports.
@@ -335,7 +335,7 @@ def run_current_portfolio(
     # so the daily loop below is a cheap dict lookup. Includes month_start so
     # the locked-at-start holdings use the same code path.
     t_panel = time.perf_counter()
-    # ⚠ THE CACHED DAYS ARE DROPPED FROM THE CUTOFFS, WHICH IS WHERE THE SAVING IS.
+    #  The cached days are dropped from the cutoffs, which is where the saving is.
     # The panel is the expensive step (signals for every company at every cutoff);
     # skipping a day's cutoff is what makes a re-run cost one day instead of forty.
     # `month_start` is NEVER skipped — it is the locked basket the pipeline reports,
@@ -360,7 +360,7 @@ def run_current_portfolio(
         return CurrentPortfolio(as_of_date=month_start.isoformat(), latest_price_date=None, holdings=[])
 
     # ── The deciding bar, enforced ────────────────────────────────
-    # ⚠ EVERY NAME IN THE BASKET MUST BE PRICED AT THE BAR THE BASKET ENTERS ON.
+    #  Every name in the basket must be priced at the bar the basket enters on.
     # `_price_on_or_before` will happily walk back weeks to find a company its
     # last close, which prices the entry at a date the portfolio did not exist —
     # see `MAX_ENTRY_GAP_DAYS`. Filtering HERE, before scoring, is what keeps the
@@ -444,7 +444,7 @@ def run_current_portfolio(
     )
     t_month_start_select_elapsed = time.perf_counter() - t_month_start_select
 
-    # ⚠ THE SECTOR RANKING IS WHERE A REBALANCE MOST OFTEN SURPRISES YOU, and it
+    #  The sector ranking is where a rebalance most often surprises you, and it
     # is invisible afterwards: the holdings table shows the sectors that WON, never
     # the ones that lost or by how little. Scores are min-max normalized across the
     # pool and the sector score is a mean of them, so one outlier entering or
@@ -452,7 +452,7 @@ def run_current_portfolio(
     # Technology for Capital Goods across 6 of 24 holdings).
     if send_event and not selected.empty:
         try:
-            # ⚠ AGGREGATED OVER `scored` — EVERY SCORED COMPANY, WHICH IS THE POOL
+            #  Aggregated over `scored` — EVERY SCORED COMPANY, WHICH IS THE POOL
             # `score_and_select` RANKS SECTORS ON. Not `selection_pool(...)`: the
             # `min_price_score` floor decides which COMPANIES are bought, not
             # which SECTORS exist, and ranking on the survivors flatters exactly
@@ -592,7 +592,7 @@ def run_current_portfolio(
             if daily_signals.empty:
                 continue
             t_select = time.perf_counter()
-            # ⚠ SCORED ONCE, THEN SELECTED AND AGGREGATED FROM THE SAME FRAME. Calling
+            #  Scored once, then selected and aggregated from the same frame. Calling
             # `score_and_select` and then re-scoring for the sector table would pay the
             # scoring cost twice AND let the two answers drift apart — the sector scores
             # are meant to explain THIS day's pick, not a parallel computation of it.
@@ -610,7 +610,7 @@ def run_current_portfolio(
                 min_price_score=config.min_price_score,
                 backfill_below_min_score=config.backfill_below_min_score,
             )
-            # ⚠ OVER `scored`, THE SAME ROWS `select_from_scored` NOW RANKS SECTORS ON — not over
+            #  OVER `scored`, THE SAME ROWS `select_from_scored` NOW RANKS SECTORS ON — not over
             # the floor-filtered pool. Aggregating these two differently is how the table stops
             # explaining the selection it sits beside.
             day_sector_scores = sector_pool_scores(scored)

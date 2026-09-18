@@ -8,7 +8,7 @@ WHY REBUILD SOMETHING WE ALREADY HAVE
     we cap-weight on FULL market cap (S&P float-adjusts) and our membership is a snapshot
     (S&P's committee adds and drops names mid-year).
 
-⚠ THE WEIGHT IS AS OF THE START OF THE PERIOD, NOT TODAY.
+ THE WEIGHT IS AS OF THE START OF THE PERIOD, NOT TODAY.
     This is the whole correctness story. Weighting a year-to-date return by TODAY's market
     cap is LOOK-AHEAD BIAS: a stock that doubled has (roughly) twice the cap it started with,
     so weighting by today's cap retroactively gives the winners more of the portfolio than
@@ -27,7 +27,7 @@ WHY REBUILD SOMETHING WE ALREADY HAVE
     fund tracking a cap-weighted index actually does — cap weights need no rebalancing to
     stay cap weights.
 
-⚠ ONE COMPANY, ONE ROW.
+ ONE COMPANY, ONE ROW.
     GuruFocus reports the FULL company market cap on EVERY share class. Alphabet is in the
     grid twice (GOOGL + GOOG), each carrying €3,785bn — so a naive sum counts it twice. Over
     a top-500-by-cap pool that was €7,683bn of €67,863bn, 11.3% of total weight, fictional.
@@ -63,7 +63,7 @@ def _members(label: str, *, require_market_cap: bool = True) -> list[dict]:
     different fields and can disagree, and it is the exchange's currency the close is
     quoted in.
 
-    ⚠ `require_market_cap=False` KEEPS THE CONSTITUENTS THIS OTHERWISE DELETES, and it exists for
+     `require_market_cap=False` KEEPS THE CONSTITUENTS THIS OTHERWISE DELETES, and it exists for
     a caller that LISTS the index rather than weighting it. The default drops any company with no
     stored `market_cap_eur`, which is right here — the index is cap-weighted, so a member with no
     cap cannot be given a weight and silently taking a share of the others' would be worse. But
@@ -72,7 +72,7 @@ def _members(label: str, *, require_market_cap: bool = True) -> list[dict]:
     default shows 22 rows and calls it the AEX. `_benchmark_fundamental_grid` passes False to list
     all 25 and mark the three as unpriceable, which is the honest form for a grid of figures.
 
-    ⚠ THE DEDUPE SURVIVES EITHER WAY. It keeps the highest-cap row per company NAME, and a missing
+     THE DEDUPE SURVIVES EITHER WAY. It keeps the highest-cap row per company NAME, and a missing
     cap reads as 0 there — so an unfiltered call still folds share classes (GOOGL+GOOG are one
     company) and still prefers the row that has a cap. Removing the filter cannot resurrect a
     duplicate.
@@ -115,7 +115,7 @@ def _members(label: str, *, require_market_cap: bool = True) -> list[dict]:
 def weight_basis(label: str) -> dict:
     """How this index's constituent weights were arrived at, and who fell out on the way.
 
-    ⚠ THE FUNDAMENTAL BLEND WEIGHTS ON **TODAY's** CAP, NOT THE START-OF-WINDOW CAP THE PRICE
+     THE FUNDAMENTAL BLEND WEIGHTS ON **TODAY's** CAP, NOT THE START-OF-WINDOW CAP THE PRICE
     INDEX USES. `_window_rows` backs the start weight out through the price precisely because
     weighting a RETURN by today's cap is look-ahead bias (measured: +9.10% → +21.70%). A growth
     blend has no single window to back a cap out to — each constituent's series starts in a
@@ -123,7 +123,7 @@ def weight_basis(label: str) -> dict:
     that have since grown, and it is stated rather than buried: a constituent whose revenue rose
     tenfold carries its post-growth weight over its whole history.
 
-    ⚠ AND A CONSTITUENT WITH NO STORED CAP IS NOT IN THE INDEX AT ALL. `_members` requires
+     AND A CONSTITUENT WITH NO STORED CAP IS NOT IN THE INDEX AT ALL. `_members` requires
     `market_cap_eur`, and the names that lack one are systematically the ones GuruFocus does not
     cover — LSE listings above all. Measured 2026-08-04 on the AEX: **Shell, Unilever and RELX**
     are all missing, so the 22 that remain are renormalised over 100% and **ASML alone reads
@@ -192,7 +192,7 @@ def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str
     mirrors `momentum/data/fx.py`, which divides). Getting it upside down would invert every
     FX move.
 
-    ⚠ THE IMPLEMENTATION — INCLUDING THE PAGING RULES AND THE COPY FAST PATH — NOW LIVES IN
+     THE IMPLEMENTATION — INCLUDING THE PAGING RULES AND THE COPY FAST PATH — NOW LIVES IN
     `common/fx_load.py`, TOGETHER WITH ITS TWIN'S. This function and `_airs_portfolio_perf._fx`
     each documented the other as its twin and then drifted: only this side had the one-request
     COPY, so the Analyse modal paid **17 sequential PostgREST requests for `fx_rate` (13,617
@@ -226,7 +226,7 @@ def split_factor(jumps: list[tuple[float, float]]) -> float | None:
     exactly one copy of the whitelist test, and both the full-series path and the two-mark path
     reach it.
 
-    ⚠ THE PAIRS MUST BE CONSECUTIVE BARS, AND THAT IS THE WHOLE SAFETY PROPERTY. Hand it a pair
+     THE PAIRS MUST BE CONSECUTIVE BARS, AND THAT IS THE WHOLE SAFETY PROPERTY. Hand it a pair
     that merely brackets a window and the test becomes a test of the RETURN: a stock that doubles
     over the year gives a ratio of exactly 2.0, matches the 1:2 whitelist entry to 0%, and its gain
     is "corrected" away. A split is a one-DAY discontinuity; nothing else may be offered here.
@@ -249,7 +249,7 @@ def split_factor(jumps: list[tuple[float, float]]) -> float | None:
 def _split_adjust(series: list[tuple[str, float]]) -> tuple[list[tuple[str, float]], float | None]:
     """Put a price series back on ONE scale across an unadjusted split.
 
-    ⚠ OUR STORED PRICES ARE NOT SPLIT-ADJUSTED, AND CANNOT SELF-HEAL. `ingest/prices.py`
+     OUR STORED PRICES ARE NOT SPLIT-ADJUSTED, AND CANNOT SELF-HEAL. `ingest/prices.py`
     fetches only dates NEWER than what we already hold, so when the vendor retroactively
     rewrites history for a split, we never re-read it: the pre-split prices sit at the old
     scale for ever. Measured on the S&P 500, 2026 YTD — 3 of 493 constituents:
@@ -263,14 +263,14 @@ def _split_adjust(series: list[tuple[str, float]]) -> tuple[list[tuple[str, floa
     so the bogus ratio inflates the weight by exactly the factor it fakes the loss. One bad
     series thus hits the index twice, in the same direction.
 
-    ⚠ WE DO NOT ADJUST EVERY BIG MOVE. A real stock CAN fall 45% in a day (a failed trial, a
+     WE DO NOT ADJUST EVERY BIG MOVE. A real stock CAN fall 45% in a day (a failed trial, a
     fraud, a bid collapsing), and "correcting" that would erase a genuine loss — the same
     error with the sign flipped. So a jump is only treated as a split when its ratio lands
     within 5% of an ACTUAL SPLIT RATIO (`_SPLIT_RATIOS` — an explicit whitelist). KLA's 9.151
     -> 9:1 (1.7% off); CrowdStrike's 3.953 -> 4:1 (1.2%); DuPont's 2.905 -> 1:3 (3.2%). A -45%
     crash gives 1.818, nearest 2:1 and 9% off, so it is left alone and stays a loss.
 
-    ⚠ KNOWN LIMIT: a 2:1 split and a stock that HALVES in a day are numerically identical, and
+     KNOWN LIMIT: a 2:1 split and a stock that HALVES in a day are numerically identical, and
     no amount of looking at the price series can separate them. (A split leaves market cap
     unchanged; a crash halves it — but we store only the CURRENT cap, so that check isn't
     available.) Every adjustment is therefore surfaced in the response and shown in the UI,
@@ -316,7 +316,7 @@ def _rate(fx: dict[str, dict[str, float]], ccy: str | None, when: str) -> float 
 
     Returns UNITS OF `ccy` PER EUR, so `eur = native / rate`.
 
-    ⚠ MINOR UNITS. Yahoo quotes London in PENCE (`GBp`), and `fx_rate` has no such code — so
+     MINOR UNITS. Yahoo quotes London in PENCE (`GBp`), and `fx_rate` has no such code — so
     passing it through returned None, and every caller reads a missing rate as "unpriceable".
     343 asset rows are quoted that way: Judges Scientific has 5,930 bars going back to 2003 and
     was dropped from every portfolio holding it, silently, as if we had no prices for it.
@@ -334,7 +334,7 @@ def _rate(fx: dict[str, dict[str, float]], ccy: str | None, when: str) -> float 
         return None
     if when in tbl:
         return tbl[when] * divisor
-    # ⚠⚠ KEEP THE LIST COMPREHENSION. A GENERATOR HERE IS ~2.3x SLOWER — MEASURED, NOT ASSUMED.
+    #  Keep the list comprehension. A GENERATOR HERE IS ~2.3x SLOWER — MEASURED, NOT ASSUMED.
     # `_rate` runs 103,835 times per Analyse computation (once per close per holding) and this
     # branch is taken 8,569 of them. Swapping the comprehension for `max(d for d in tbl ...)`
     # looked like a free win — same O(n) scan, no list allocated — and profiling said otherwise:
@@ -343,7 +343,7 @@ def _rate(fx: dict[str, dict[str, float]], ccy: str | None, when: str) -> float 
     # frame, while a generator expression still builds a frame and resumes it per item — so the
     # "allocation-free" version pays 2M frame resumptions to avoid one list.
     #
-    # ⚠ The real fix is NOT here: it is to stop calling `_rate` per date at all. The series and
+    #  The real fix is NOT here: it is to stop calling `_rate` per date at all. The series and
     # the FX table are both date-ordered, so `_eur_series` could merge-walk them once (O(n+m))
     # instead of scanning the table per close (O(n·m)). A bisect over cached sorted keys was
     # rejected — the cache would key on the `fx` dict's identity, and `id()` is reused after GC,
@@ -362,12 +362,12 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
     so they all use the SAME weighting. A second copy of this loop is a second place for the
     look-ahead bias to creep back in.
 
-    ⚠ TWO WAYS IN, ONE LOOP. `closes` is the whole series per member; `marks` (when given) is just
+     TWO WAYS IN, ONE LOOP. `closes` is the whole series per member; `marks` (when given) is just
     what this window consumes — `{start:(d,p), end:(d,p), jumps:[(prev,cur)]}`, selected in
     Postgres. The arithmetic below is identical either way, which is the point: the loader is an
     optimisation and must never become a second definition of an index return.
 
-    ⚠ WHY THE SERIES WAS EVER LOADED WHOLE. This loop reads exactly TWO prices per member — but
+     WHY THE SERIES WAS EVER LOADED WHOLE. This loop reads exactly TWO prices per member — but
     `_split_adjust` reads all of them, because our stored closes are not split-adjusted and a split
     is only visible as a one-day discontinuity between CONSECUTIVE bars. So the marks path has to
     carry that evidence with it (`jumps`); two bare prices cannot tell a 9:1 split from a −89% year
@@ -409,7 +409,7 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
         if not r0 or not r1:
             continue
 
-        # THE WEIGHT IS AS OF THE START. Roll the CURRENT cap back on the price move — the
+        # The weight is as of the start. Roll the CURRENT cap back on the price move — the
         # share count is what stays put, not the cap. Using cap_now here is look-ahead bias.
         cap_now_eur = float(m["market_cap_eur"])
         cap_start_eur = cap_now_eur * (first_p / last_p)
@@ -426,7 +426,7 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
             "return_eur_pct": ((last_p / r1) / (first_p / r0) - 1.0) * 100.0,
             "market_cap_eur": cap_now_eur,
             "start_cap_eur": cap_start_eur,
-            # ⚠ PROVENANCE FOR THE CAP, AND IT DESCRIBES `market_cap_eur` — NOT THE WEIGHT.
+            #  Provenance for the cap, and it describes `market_cap_eur` — NOT THE WEIGHT.
             # `cap_start_eur` above is the number the weight is formed from, rolled back on the
             # price move; the cap shown to a reader is TODAY's. So `cap / Σcap` does not reproduce
             # the Weight column and is not supposed to — the surface has to say so.
@@ -441,7 +441,7 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
 
 
 # ── the cap ──────────────────────────────────────────────────────────────────────────────────
-# A CAP IS A PROPERTY OF THE INDEX, NOT OF THE ARITHMETIC.
+# A cap is a property of the index, not of the arithmetic.
 #
 # The S&P 500 and ACWI are uncapped: no constituent is near a level where a cap would bind, so
 # raw cap weights ARE the index's weights. The AEX is not that kind of index. It holds 25 names
@@ -470,7 +470,7 @@ def index_weights(rows: list[dict], label: str) -> list[float]:
     silently leaves a constituent above the cap. The loop is bounded — each pass adds at least
     one member to the capped set, so it cannot run longer than there are rows.
 
-    ⚠ THE CAP IS APPLIED AT THE WINDOW OPEN, NOT AT THE INDEX'S REVIEW DATE. Euronext caps at a
+     THE CAP IS APPLIED AT THE WINDOW OPEN, NOT AT THE INDEX'S REVIEW DATE. Euronext caps at a
     quarterly review and then lets the weights DRIFT with prices until the next one; this engine
     is buy-and-hold from the window open, so what we produce is "capped as at the window open,
     then held". For a YTD window that is close (the last real review was December). For an
@@ -478,7 +478,7 @@ def index_weights(rows: list[dict], label: str) -> list[float]:
     true review date would need the review calendar AND a rebalance the rest of this engine does
     not model.
 
-    ⚠ A CAP IS NOT A FLOAT ADJUSTMENT, AND IT DOES NOT STAND IN FOR ONE. The AEX weights on free
+     A CAP IS NOT A FLOAT ADJUSTMENT, AND IT DOES NOT STAND IN FOR ONE. The AEX weights on free
     float; `market_cap_eur` is a FULL cap (see the module docstring — it over-weights family- and
     state-held names whatever the price source). Heineken is ~50% held by Heineken Holding and
     Prosus carries the Naspers cross-holding, so both stay over-weighted here even after capping.
@@ -493,7 +493,7 @@ def index_weights(rows: list[dict], label: str) -> list[float]:
     if cap is None:
         return w
 
-    # ⚠ REFUSED, NOT FUDGED. With n members a cap of `cap`% can hold at most n*cap% of weight; if
+    #  Refused, not fudged. With n members a cap of `cap`% can hold at most n*cap% of weight; if
     # that is under 100 the constituents cannot sum to the index and no redistribution exists.
     # Silently returning weights that sum to 75% would understate every return by a quarter. For
     # the AEX (25 names, 15%) the ceiling is 375% — so this fires only when the universe itself

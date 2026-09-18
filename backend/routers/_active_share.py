@@ -6,27 +6,27 @@
 matching underweight by construction (both vectors sum to 1), so without it every difference is
 counted twice.
 
-⚠⚠ THE MATCH IS ON THE ISSUER, NOT ON THE LINE, AND THIS IS THE WHOLE DIFFICULTY. Alphabet A and
+ THE MATCH IS ON THE ISSUER, NOT ON THE LINE, AND THIS IS THE WHOLE DIFFICULTY. Alphabet A and
 Alphabet C are two ISINs and one company; an ADR and its home line are two ISINs and one company.
 Matching on ISIN alone reports a book that holds GOOG against an index carrying GOOGL as having NO
 overlap in Alphabet — a ~4% swing on a US book, invented entirely by the identifier. So both sides
 collapse to an issuer key first, and both sides SUM their lines into it.
 
-⚠ THE KEY IS THE ONE `_asset_benchmark.members` ALREADY DEDUPES ON — the GuruFocus company name,
+ THE KEY IS THE ONE `_asset_benchmark.members` ALREADY DEDUPES ON — the GuruFocus company name,
 normalised. That is not a convenience: the index side is already collapsed by it (Yahoo reports the
 full company cap on every share class, so `members` keeps one row per company), so keying the
 portfolio the same way is what makes the two vectors talk about the same objects. A second notion
 of "same issuer" here would disagree with the index's own dedupe, and the disagreement would show
 up as active share.
 
-⚠ BOTH VECTORS MUST SUM TO 1 OR THE ½ IS WRONG. The portfolio is renormalised over the individual
+ BOTH VECTORS MUST SUM TO 1 OR THE ½ IS WRONG. The portfolio is renormalised over the individual
 stocks alone — funds, cash, bonds and unpriceable lines are dropped, not zero-weighted. Leaving
 cash in at its real weight would report liquidity as "active", which is a defensible measure but a
 DIFFERENT one, and mixing the two is how a 30% figure becomes uncomparable with anybody else's.
 `stocks_pct` says how much of the book this sleeve actually is, so the renormalisation is never
 silent.
 
-⚠ THE BENCHMARK IS NOT FLOAT-ADJUSTED and is priced over the names we can bridge — the same two
+ THE BENCHMARK IS NOT FLOAT-ADJUSTED and is priced over the names we can bridge — the same two
 caveats `_asset_benchmark` carries, and they land differently here than on a return. A missing
 constituent does not reduce the index's weight in the rest, it INFLATES it (renormalisation), so an
 unheld name we cannot price makes active share read slightly LOW. `benchmark_covered_pct` is
@@ -40,7 +40,7 @@ from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 
 # What a portfolio line must have before it can be compared with an index at all.
-# ⚠ `currency` IS THE LISTING'S, and the exposure view needs it — see `_portfolio_exposure`.
+#  `currency` IS THE LISTING'S, and the exposure view needs it — see `_portfolio_exposure`.
 _GRID_COLS = "isin,gf_company_name,name,currency,status,analysis_id"
 
 # Trailing corporate forms, stripped before two names are called the same issuer. Deliberately
@@ -50,7 +50,7 @@ _SUFFIX = re.compile(
     r"as|a/s|oyj|spa|s\.p\.a\.|holding|holdings|group|the)\.?$", re.I)
 
 # A SHARE-CLASS or depositary marker — the part of a name that identifies a LINE, not a company.
-# ⚠ ANCHORED AT THE END and applied in the same loop as `_SUFFIX`; see `_issuer_key`.
+#  Anchored at the end and applied in the same loop as `_SUFFIX`; see `_issuer_key`.
 _CLASS = re.compile(
     r"[\s,.]+(class\s+[a-c]|cl\s+[a-c]|series\s+[a-c]|[ab]\s+shares|shares\s+[ab]|"
     r"sponsored\s+adr|unsponsored\s+adr|adr|ads|reg\s*s|registered)\.?$", re.I)
@@ -59,18 +59,18 @@ _CLASS = re.compile(
 def _issuer_key(name: str | None) -> str:
     """The comparison key for one issuer.
 
-    ⚠⚠ IT MUST MATCH `_asset_benchmark.members`' OWN DEDUPE KEY, which is
+     IT MUST MATCH `_asset_benchmark.members`' OWN DEDUPE KEY, which is
     `(gf_company_name or name).strip().lower()`. Everything below is applied to BOTH sides, so the
     two stay in step; the suffix strip is the only thing added, and it is added on both.
 
-    ⚠ SUFFIX-ONLY, AND NOT A FUZZY MATCH. `asset_pipeline.resolve.same_company` exists for
+     SUFFIX-ONLY, AND NOT A FUZZY MATCH. `asset_pipeline.resolve.same_company` exists for
     resolving an unknown listing and scores similarity — the wrong tool here, because a false
     positive is not a bad listing, it is two different companies fused into one row of a risk
     report. `token_set_ratio` scores a SUBSET as 100 (`eur` ⊂ `Shell PLC EUR`), which is exactly
     the failure mode a holdings list is full of. Exact-after-normalising refuses more than it
     should and never invents an overlap.
 
-    ⚠⚠ THE TWO STRIPS ALTERNATE UNTIL THE NAME STOPS CHANGING, AND RUNNING THEM IN SEQUENCE IS A
+     THE TWO STRIPS ALTERNATE UNTIL THE NAME STOPS CHANGING, AND RUNNING THEM IN SEQUENCE IS A
     BUG I SHIPPED INTO THE FIRST VERSION OF THIS FILE. "Alphabet Inc Class C" ends in the class
     marker, so the corporate-form loop matches nothing; strip the class afterwards and you are left
     with "alphabet inc" against the index's "alphabet" — a full 100% active share in the single
@@ -106,7 +106,7 @@ def _grid_by_isin(isins: list[str]) -> dict[str, dict]:
         key = (r.get("isin") or "").strip().upper()
         if not key:
             continue
-        # ⚠ ONE ROW PER ISIN, PREFERRING ONE THAT CARRIES A COMPANY NAME. `asset_grid` is one row
+        #  One row per ISIN, preferring one that carries a company name. `asset_grid` is one row
         # per EXECUTION, so a company traded on several venues appears several times and only some
         # of those rows may have bridged to a company. Taking whichever came back first would make
         # the issuer key depend on row order.
@@ -119,7 +119,7 @@ def _grid_by_isin(isins: list[str]) -> dict[str, dict]:
 def _fold(entries: list[tuple[str, str, float]]) -> dict[str, dict]:
     """Sum weights onto issuer keys. `entries` is (key, display name, weight).
 
-    ⚠ SUMMING, NOT REPLACING — a book holding both Alphabet classes holds ONE position in Alphabet
+     SUMMING, NOT REPLACING — a book holding both Alphabet classes holds ONE position in Alphabet
     for this purpose, and taking either line alone would understate the overlap by the other.
     """
     out: dict[str, dict] = {}
@@ -143,7 +143,7 @@ class IssuerError(Exception):
 def build_issuer_weights(holdings: list[dict], benchmark: str) -> dict:
     """Both sides of the comparison, folded onto ISSUER keys and each summing to 100.
 
-    ⚠⚠ SHARED BY ACTIVE SHARE AND CONCENTRATION so the two describe the same objects. Both ask
+     SHARED BY ACTIVE SHARE AND CONCENTRATION so the two describe the same objects. Both ask
     questions about ISSUERS — "how far from the index is this book", "how much of it sits in its
     ten largest" — and a second folding here would let a book hold 49 lines on one view and 47
     issuers on the other with nothing on screen saying why.
@@ -172,7 +172,7 @@ def build_issuer_weights(holdings: list[dict], benchmark: str) -> dict:
         g = grid.get(isin) or {}
         raw = g.get("gf_company_name") or g.get("name") or h.get("name")
         key = _issuer_key(raw)
-        # ⚠ AN UNKEYABLE LINE STILL COUNTS AS ACTIVE, and falls back to its ISIN so it can never
+        #  An unkeyable line still counts as active, and falls back to its ISIN so it can never
         # collide with another. It is genuinely a position the index does not have a matching row
         # for — dropping it would renormalise the rest upward and quietly LOWER active share, which
         # is the flattering direction. It is listed so the reader can see what could not be matched.
@@ -202,7 +202,7 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
     """Active share of the book's individual stocks against `benchmark`.
 
     `holdings` are the rows the Analyse modal is already showing — `{isin, weight_pct, name,
-    is_fund}`. ⚠ THE WEIGHTS ARE THE ONES ON SCREEN, taken rather than recomputed: this panel sits
+    is_fund}`.  THE WEIGHTS ARE THE ONES ON SCREEN, taken rather than recomputed: this panel sits
     one click from the Holdings table, and a risk figure derived from a second weighting would be
     a number the table cannot be made to reproduce.
     """
@@ -235,12 +235,12 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
         "available": True,
         "benchmark": benchmark,
         "active_share_pct": active_share,
-        # ⚠ RETURNED, NOT LEFT TO THE CLIENT AS `100 − AS`. The identity is the POINT (it is what
+        #  Returned, not left to the client as `100 − AS`. The identity is the POINT (it is what
         # makes active share a share of something), and a reader checking it against the two
         # printed numbers must find it holds to the digit rather than to the rounding.
         "overlap_pct": overlap,
         "stocks_pct": (stocks_w / total_all * 100.0) if total_all > 0 else None,
-        # ⚠ THE TWO OPERANDS, NOT JUST THEIR RATIO. `stocks_pct` is the one figure on this panel a
+        #  The two operands, not just their ratio. `stocks_pct` is the one figure on this panel a
         # reader cannot check against anything on screen — the Holdings table shows the lines, not
         # the two sums — so the card prints the division and needs both halves to do it. Returned
         # rather than re-derived on the client, which would be a second definition of "a stock".
@@ -253,7 +253,7 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
         "off_benchmark_pct": sum(r["portfolio_pct"] for r in held if r["benchmark_pct"] <= 0),
         "benchmark_members": len(bench),
         "benchmark_covered_pct": coverage.get("covered_pct"),
-        # ⚠⚠ WHEN THE INDEX SIDE WAS MEASURED — a RANGE, and separate from the book's own date.
+        #  When the index side was measured — a RANGE, and separate from the book's own date.
         # The two sides of this comparison are read from different places on different schedules
         # (the book from AIRS, the caps from Yahoo), so one "as of" over the pair would be a date
         # that is true of neither. The panel prints both and lets the reader judge whether they are

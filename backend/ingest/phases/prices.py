@@ -432,20 +432,20 @@ def _run_prices_phase(
             with lock:
                 done = counters["processed"]
                 errs, forb = counters["errors"], counters["forbidden"]
-                # ⚠ THE TWO METRICS ARE COUNTED SEPARATELY AND WERE ONLY EVER REPORTED TOGETHER.
+                #  The two metrics are counted separately and were only ever reported together.
                 # Every company is fetched for close_price AND volume (`r_p`/`r_v` below) and the
                 # counters have always been split, but the live line said only "done/total" — so a
                 # run where every volume fetch was failing looked identical to a healthy one until
                 # the final summary. The signal engine ranks on BOTH (five price signals, two
                 # volume), so "prices are in" is not the same statement as "the rebalance can run".
                 #
-                # ⚠⚠ THESE ARE SERIES *UPDATED*, NOT SERIES *HELD*, AND THE DENOMINATOR IS THE
+                #  These are series *UPDATED*, NOT SERIES *HELD*, AND THE DENOMINATOR IS THE
                 # TRAP. Both increment only on `rows_loaded > 0`, so a company that is already
                 # current contributes NOTHING — which is the right accounting (`+0` is an answer,
                 # not a failure) and makes "947/1479 prices" a lie in the alarming direction: it
                 # would read as 532 companies missing a price when they are simply already priced
                 # through the bar. Rendered as `+N`, the same language the final summary uses.
-                # WHAT IS MISSING is a different question with a different answer — the freshness
+                # What is missing is a different question with a different answer — the freshness
                 # re-probe after this phase, which compares against the deciding bar.
                 got_p, got_v = counters["prices"], counters["volumes"]
                 # (label, seconds-in-flight) per worker, oldest first.
@@ -472,12 +472,12 @@ def _run_prices_phase(
             warn = ""
             if throttled:
                 warn = (
-                    f" · ⚠ tail throttled — oldest fetch {oldest:.0f}s "
+                    f" ·  tail throttled — oldest fetch {oldest:.0f}s "
                     "(GuruFocus/Cloudflare rate-limiting; each wedged name is "
                     "retried across the impersonation ladder, then skipped)"
                 )
             elif stalled:
-                warn = f" · ⚠ STALLED {idle:.0f}s with no completion"
+                warn = f" ·  STALLED {idle:.0f}s with no completion"
             msg = (
                 f"Refreshing {done}/{total} · +{got_p} price / +{got_v} volume series · "
                 f"{rate:.0f}/min · ETA {eta_min:.0f}m · "
@@ -486,7 +486,7 @@ def _run_prices_phase(
             # Write the structured counter alongside the message so the card's
             # header count (companies_processed) can't drift ahead of the
             # heartbeat line during a wedged tail (no completions → no checkpoint).
-            # ⚠ THE SPLIT COUNTERS GO ON THE ROW *LIVE*, not only in the final write below. They
+            #  The split counters go on the row *LIVE*, not only in the final write below. They
             # are columns the /schedule panel already types (`prices_refreshed`/`volumes_refreshed`)
             # and could only ever be read after the phase finished — which is exactly when nobody
             # needs them. A 25-minute fetch is the whole of somebody's wait.
@@ -564,7 +564,7 @@ def _refresh_price_coverage(step=None) -> None:
     longer. A scheduled refresh on its own timer would drift from the writer and serve a
     confident, out-of-date "last close" — the failure that looks like data rather than absence.
 
-    ⚠ BEST-EFFORT ON PURPOSE. The prices themselves are already committed by the time we get
+     BEST-EFFORT ON PURPOSE. The prices themselves are already committed by the time we get
     here; a failure to refresh a derived summary must not fail the run or mask the price
     counters above it. Logged at WARNING (uvicorn leaves the root logger at WARNING, so `info`
     is invisible in production) and reported as a step, so a silently stale grid is impossible.

@@ -1,5 +1,5 @@
 /**
- * ⚠ THE DANGEROUS SIMPLIFICATION HERE IS `filter(r => r.portfolio_pct > 0)`.
+ *  The dangerous simplification here is `filter(r => r.portfolio_pct > 0)`.
  *
  * It reads like "hide the empty rows" and it deletes the most informative ones: a bucket the book
  * does NOT hold while the benchmark does is an unowned region/sector — the thing Brinson scores as
@@ -20,7 +20,7 @@ describe('visibleBuckets', () => {
   });
 
   it('KEEPS a bucket the portfolio does not hold but the benchmark does', () => {
-    // ⚠ The whole point. Measured precedent: a model holding 6% Healthcare was credited +1.73pp
+    //  The whole point. Measured precedent: a model holding 6% Healthcare was credited +1.73pp
     // of allocation for "avoiding" a sector it actually owned — a false finding born of a bucket
     // silently going missing. Hiding an unowned-but-indexed bucket is the same failure, inverted.
     const rows = [row('Healthcare', 0, 6.2)];
@@ -41,12 +41,12 @@ describe('visibleBuckets', () => {
     expect(visibleBuckets(rows).map((r) => r.bucket)).toEqual(['kept']);
   });
 
-  it('⚠ hides a bucket that is small-but-nonzero, because it still PRINTS "0.00%"', () => {
+  it(' hides a bucket that is small-but-nonzero, because it still PRINTS "0.00%"', () => {
     // The bug this file was written for and did not catch: a threshold calibrated to a different
     // precision than the formatter let a bucket through a filter written to remove it, and the
     // reader still saw "Pacific 0%".
     //
-    // ⚠ THE LITERALS MOVED WITH `DISPLAY_DECIMALS` 0 -> 2, AND THE RULE DID NOT. They were 0.2 and
+    //  The literals moved with `DISPLAY_DECIMALS` 0 -> 2, AND THE RULE DID NOT. They were 0.2 and
     // 0.49, chosen when values printed at zero decimals so both rendered "0%". At two decimals
     // they render "0.20%" and "0.49%" — visible information, correctly KEPT — so this test was
     // asserting the old precision's behaviour, not the invariant. The invariant is "hidden if and
@@ -59,7 +59,7 @@ describe('visibleBuckets', () => {
   });
 
   it('the filter and the formatter agree by construction', () => {
-    // ⚠ THE ACTUAL INVARIANT, RESTATED FOR A FORMATTER THAT NO LONGER BLANKS ITS ZEROS
+    //  The actual invariant, restated for a formatter that no longer blanks its zeros
     // (2026-08-13). It used to read `shown === (formatPct(v) !== '')` — one rule seen from two
     // sides. Now that a zero PRINTS "0.00%", emptiness is no longer the signal, so the invariant is
     // the thing it always meant: a row survives exactly when at least one side renders as something
@@ -82,13 +82,13 @@ describe('visibleBuckets', () => {
 });
 
 describe('formatPct', () => {
-  it('⚠ prints a measured zero as "0.00%" — the unowned-sector row is the finding', () => {
+  it(' prints a measured zero as "0.00%" — the unowned-sector row is the finding', () => {
     // Blank there does not read as "zero", it reads as "we could not work this out".
     expect(formatPct(0)).toBe('0.00%');
     expect(formatPct(0.004)).toBe('0.00%');
   });
 
-  it('⚠ still blanks a NON-value, which is a different fact from a zero', () => {
+  it(' still blanks a NON-value, which is a different fact from a zero', () => {
     expect(formatPct(null)).toBe('');
     expect(formatPct(undefined)).toBe('');
     expect(formatPct('n/a')).toBe('');

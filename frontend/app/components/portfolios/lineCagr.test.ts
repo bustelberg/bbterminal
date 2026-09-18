@@ -6,7 +6,7 @@ import {
 /**
  * The CAGR behind the `Table` view.
  *
- * ⚠ EVERY CASE HERE IS AN ABSENCE THAT WOULD OTHERWISE HAVE BEEN A PLAUSIBLE NUMBER. A CAGR is one
+ *  Every case here is an absence that would otherwise have been a plausible number. A CAGR is one
  * division and a root; nothing about the arithmetic is hard. What is hard is refusing to answer
  * when the window is not the window the column claims — and every one of those failures reads as a
  * finding rather than as a bug.
@@ -41,7 +41,7 @@ describe('the arithmetic', () => {
 });
 
 describe('it measures the window the column CLAIMS', () => {
-  it('⚠ it does NOT fall back to the earliest period it has', () => {
+  it(' it does NOT fall back to the earliest period it has', () => {
     // Six years of history, asked for ten. Answering 6 would be a wrong number in a 10y column,
     // and wrong in the flattering direction for anything that has been rising.
     const series = lvl([['2018', 100], ['2019', 110], ['2020', 121], ['2021', 133],
@@ -65,7 +65,7 @@ describe('it measures the window the column CLAIMS', () => {
 });
 
 describe('quarterly axes', () => {
-  it('⚠ it compares the SAME quarter, n years back', () => {
+  it(' it compares the SAME quarter, n years back', () => {
     // Q3 against Q1 five years back would read a seasonal swing as compound growth.
     const series = lvl([['2019-Q1', 50], ['2019-Q3', 100], ['2024-Q1', 90], ['2024-Q3', 200]]);
     const got = lineCagr(series, 5);
@@ -80,12 +80,12 @@ describe('quarterly axes', () => {
 });
 
 describe('which periods may be an endpoint', () => {
-  it('⚠ an ESTIMATE is never the end — that would be a forecast dressed as a track record', () => {
+  it(' an ESTIMATE is never the end — that would be a forecast dressed as a track record', () => {
     const series = lvl([['2019', 100], ['2024', 200], ['2025e', 260]]);
     expect(lineCagr(series, 5)).toMatchObject({ to: '2024' });
   });
 
-  it('⚠ LTM is never the end either — its span is five years AND SOME MONTHS', () => {
+  it(' LTM is never the end either — its span is five years AND SOME MONTHS', () => {
     // Real and current, but it ends at the newest quarterly filing, so dividing by 5 overstates
     // the rate and nothing on screen would show the span was not 5.0.
     const series = lvl([['2019', 100], ['2024', 200], ['LTM', 215]]);
@@ -136,13 +136,13 @@ describe('expected growth, from the actuals into the consensus', () => {
     expect(got.pct).toBeCloseTo(10, 6);            // 100 -> 133.1 over 3 years
   });
 
-  it('⚠ the base is the ACTUAL, never the nearest estimate', () => {
+  it(' the base is the ACTUAL, never the nearest estimate', () => {
     // 2026e -> 2029e would be the consensus's own internal slope: three forecasts compared with
     // each other, with no contact with anything that happened.
     expect(forwardCagr(s, 3)).toMatchObject({ from: '2025' });
   });
 
-  it('⚠ the target is matched by FISCAL YEAR, not by position in the estimate list', () => {
+  it(' the target is matched by FISCAL YEAR, not by position in the estimate list', () => {
     // Ragged estimate columns (AEX runs to 2030e, ACWI to 2031e) must not change what "3y" means.
     const ragged = lvl([['2025', 100], ['2027e', 121], ['2028e', 133.1], ['2031e', 200]]);
     expect(forwardCagr(ragged, 3)).toMatchObject({ from: '2025', to: '2028e' });
@@ -158,11 +158,11 @@ describe('expected growth, from the actuals into the consensus', () => {
     expect((got as { reason: string }).reason).toContain('2028e');
   });
 
-  it('⚠ `lineCagr` still refuses to end on an estimate — the two do not overlap', () => {
+  it(' `lineCagr` still refuses to end on an estimate — the two do not overlap', () => {
     // The whole reason these are separate functions: the historical rate must never reach into the
     // forecast by accident, and the forward one must ask for it by name.
     //
-    // ⚠ TWO YEARS, NOT THREE, AND THE DIFFERENCE IS THE FIXTURE'S NOT THE RULE'S. `s` holds
+    //  Two years, not three, and the difference is the fixture's not the rule's. `s` holds
     // actuals for 2023-2025 only, so a 3-year LOOKBACK wants 2022 and correctly refuses — which
     // would have proved nothing about estimates. The backward window has to fit inside the actuals
     // while the forward one reaches into the consensus; that asymmetry is the point being made.
@@ -196,7 +196,7 @@ describe('expected growth, from the actuals into the consensus', () => {
 
 describe('both rows measured over ONE window', () => {
   /**
-   * ⚠⚠ THE CASE THIS EXISTS FOR IS THE NORMAL ONE, NOT AN EDGE. Each line ends at its own latest
+   *  The case this exists for is the normal one, not an edge. Each line ends at its own latest
    * DRAWN period, and the coverage floor holds a period back until enough constituents have filed —
    * so a twenty-holding book crosses into a new fiscal year weeks before a 1,900-name index does.
    * Left alone the book reads 2020→2025 and the index 2019→2024, printed side by side under one
@@ -251,7 +251,7 @@ describe('the excess', () => {
     expect((cagrExcess(p, b) as { pp: number }).pp).toBeCloseTo(6.42, 2);
   });
 
-  it('⚠ refuses when the two span different windows', () => {
+  it(' refuses when the two span different windows', () => {
     // A portfolio measured 2019→2024 against an index measured 2015→2020 is two different
     // questions subtracted from each other.
     const other = lineCagr(lvl([['2015', 100], ['2020', 150]]), 5);

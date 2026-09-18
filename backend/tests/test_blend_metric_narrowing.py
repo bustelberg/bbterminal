@@ -5,13 +5,13 @@ That is right for a 40-name book and impossible for an index: the S&P 500 is ~1,
 for a checkbox. So a request may NAME its metrics, and the read becomes one chunked, paged query
 per metric across every constituent.
 
-⚠ THE DANGER IS NOT SPEED, IT IS DIVERGENCE. Two loaders feeding one blend is two places for the
+ THE DANGER IS NOT SPEED, IT IS DIVERGENCE. Two loaders feeding one blend is two places for the
 rules to live — which cadence spelling a metric uses, which code the result is emitted under, what
 happens to a company with no rows. If they drift, a chart shows a portfolio line and a benchmark
 line built by different rules and calls the gap a finding. So the narrowed reader is asserted to
 produce the SAME rows as the loop it replaces, on both cadences.
 
-⚠ AND THE TTM ROWS MUST CARRY `company_id`. They are synthesised, not read, so the field is easy
+ AND THE TTM ROWS MUST CARRY `company_id`. They are synthesised, not read, so the field is easy
 to leave off — and `_blend_rows` keys every point by the company that reported it. Without it a
 PORTFOLIO's growth cards raised KeyError the moment the tab switched to quarterly (a 500), while
 the single-company path, which never blends, stayed green. Measured and fixed 2026-08-04.

@@ -7,7 +7,7 @@ import OwnerEarningsModal from '../portfolios/OwnerEarningsModal';
 /**
  * Two companies in ONE Fundamental view — both drawn on the same chart, on every chart.
  *
- * ⚠⚠ IT IS THE DIALOG FROM /management-dashboard, WITH COMPANY B IN THE BENCHMARK SLOT. Every Long
+ *  It is the dialog from /management-dashboard, WITH COMPANY B IN THE BENCHMARK SLOT. Every Long
  * Equity card already draws a second line on a shared y-domain — same axis, same legend, same hover
  * order, same coverage floor — computed by running the card's OWN helper (`marginByYear`,
  * `debtRatioByYear`, …) over a second row set. A company is a one-holding book to those same
@@ -19,11 +19,11 @@ import OwnerEarningsModal from '../portfolios/OwnerEarningsModal';
  * ratio on the tab, and the first divergence would be invisible — two lines on one axis look
  * comparable whether or not they are.
  *
- * ⚠ SIDE-BY-SIDE PANELS CAME FIRST AND WERE WORSE. Two independent dialogs meant two y-domains, two
+ *  Side-by-side panels came first and were worse. Two independent dialogs meant two y-domains, two
  * legends and two scroll positions; reading a 3pp margin gap off two charts a screen apart is
  * eyeballing, not comparing. One chart with both lines answers it directly.
  *
- * ⚠ THE COST: ONE COMPARISON LINE PER CHART. Choosing company B means not showing the index on
+ *  The cost: one comparison line per chart. Choosing company B means not showing the index on
  * that chart. The tab's own selector still offers ACWI/SP500/AEX, so B can be swapped back out for
  * a market without leaving the page.
  */
@@ -35,7 +35,7 @@ export default function ResearchDashboard() {
     <div className="p-6 space-y-4 min-w-0">
       <div>
         <h1 className="text-lg font-semibold text-fg-strong">Research Dashboard</h1>
-        {/* ⚠ THE MECHANISM IS NOT THE SUBTITLE. This line used to explain that company B takes the
+        {/*  THE MECHANISM IS NOT THE SUBTITLE. This line used to explain that company B takes the
             benchmark line and that the charts therefore compare directly rather than side by side
             — true, load-bearing, and the reason this page is built the way it is, which is why it
             lives in the docstring above and in CLAUDE.md. A reader arriving here needs to know
@@ -45,10 +45,10 @@ export default function ResearchDashboard() {
         </p>
       </div>
 
-      {/* ⚠ `mx-auto` IS THE CENTRING — `max-w-3xl` alone only caps the width, and a capped block
+      {/*  `mx-auto` IS THE CENTRING — `max-w-3xl` alone only caps the width, and a capped block
           with no auto margin sits hard left under a full-width panel. */}
       <div className="grid gap-4 md:grid-cols-2 max-w-3xl mx-auto">
-        {/* ⚠ THE ROLES CAME OFF THE LABELS, NOT OUT OF THE PAGE. "the subject" / "drawn beside it"
+        {/*  THE ROLES CAME OFF THE LABELS, NOT OUT OF THE PAGE. "the subject" / "drawn beside it"
             described what each side becomes; at the label's new size that was a sentence where a
             field name belongs. Which of the two is optional, and what happens without it, is still
             said once — in the empty state below, where a reader who has picked neither is looking. */}
@@ -57,7 +57,7 @@ export default function ResearchDashboard() {
       </div>
 
       {a ? (
-        /* ⚠ KEYED ON BOTH ISINs so changing either company REMOUNTS the tab. Its cadence, its
+        /*  KEYED ON BOTH ISINs so changing either company REMOUNTS the tab. Its cadence, its
            selected comparison and every card's fetch are per-pair state; carried across a switch
            they would describe the previous pair under the new names. */
         <OwnerEarningsModal
@@ -67,7 +67,7 @@ export default function ResearchDashboard() {
           name={a.name ?? a.isin}
           compare={b ? { isin: b.isin, name: b.name ?? b.isin } : null}
           /* Closing an embedded card means "clear the subject" — there is no dialog to dismiss,
-             and a ✕ that did nothing would be worse than no ✕. */
+             and a  that did nothing would be worse than no . */
           onClose={() => setA(null)}
         />
       ) : (

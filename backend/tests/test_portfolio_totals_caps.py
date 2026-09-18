@@ -1,6 +1,6 @@
 """A BOOK converts its MONEY weights into SHARES with ONE price, and that price does not move.
 
-⚠⚠ A PORTFOLIO WEIGHT IS A MONEY WEIGHT AND A FUNDAMENTAL IS A PER-SHARE FACT, so exactly one
+ A PORTFOLIO WEIGHT IS A MONEY WEIGHT AND A FUNDAMENTAL IS A PER-SHARE FACT, so exactly one
 conversion bridges them — the market cap. Owning `w_i` of a book worth `B`:
 
     n_i = w_i·B / price_i = w_i·B · shares_i / cap_i(T)
@@ -8,14 +8,14 @@ conversion bridges them — the market cap. Owning `w_i` of a book worth `B`:
 
 `B` cancels in every ratio, so the contribution is `w_i · F_i(t) / cap_i(T)`.
 
-⚠⚠ `T`, NOT `t`. The share count is fixed when you buy, so the cap that converts it is fixed too.
+ `T`, NOT `t`. The share count is fixed when you buy, so the cap that converts it is fixed too.
 Divided by each period's own cap the sum stops being a portfolio and becomes a fresh purchase at
 every year's valuation: its growth is then `growth(FCF) − growth(price)`, i.e. a YIELD series. A
 company that doubles its cash flow while its cap doubles reads **0%** against the benchmark's
 **+100%**, in the same chart — and that series is, up to SBC and a constant, the FCF-SBC yield card
 four rows below it, so the tab drew one quantity twice and called one of them growth.
 
-⚠⚠ AND BEFORE THAT IT DID NOT EVEN FAIL AS AN ABSENCE. The per-period lookup used the FILING DATE
+ AND BEFORE THAT IT DID NOT EVEN FAIL AS AN ABSENCE. The per-period lookup used the FILING DATE
 (`2015-12-31`) against caps keyed by PERIOD (`2015`), so every filed period was dropped — while the
 LTM branch, which fell back to the newest cap, survived alone. One period is enough to put
 `blend_series` on the aggregate path with no step it can span: a single invisible point beside a
@@ -31,20 +31,20 @@ import pytest
 
 from tests._fake_supabase import FakeSupabase
 
-#: ⚠⚠ AND NOW THERE IS NO LIVE PER-SHARE METRIC AT ALL, so the fixture DECLARES one. `fcf_ps` left
+#:  AND NOW THERE IS NO LIVE PER-SHARE METRIC AT ALL, so the fixture DECLARES one. `fcf_ps` left
 #: `_AGGREGATABLE_PER_SHARE` on 2026-08-26 and `eps_nri` followed on 2026-08-31 — both are drawn
 #: from a positives-only growth chain and neither has euros anywhere. The set is empty, which makes
 #: the cap-basis arithmetic below unreachable from real configuration and NOT untrue: every line of
 #: it is what a per-share metric added back would run through. So the fixture patches `eps_nri` into
 #: the set, exactly as `test_aggregate_blend` patches a pairing to keep the both-legs rule alive.
 #:
-#: ⚠ THE ALTERNATIVE WAS DELETING THE FILE, and that is the trade being made deliberately: the code
+#:  THE ALTERNATIVE WAS DELETING THE FILE, and that is the trade being made deliberately: the code
 #: is still here (`fundamental_totals`' per-share branch, `_shares_at`, the one-cap conversion), so
 #: it is still capable of the 2026-08-26 outage this file was written for.
 EPS = "annuals__Per Share Data__EPS without NRI"
 SHARES = "annuals__Income Statement__Shares Outstanding (Diluted Average)"
 
-#: ⚠ THE SHAPE THAT TELLS THE TWO CONSTRUCTIONS APART, and the one a real book has: cash flow
+#:  THE SHAPE THAT TELLS THE TWO CONSTRUCTIONS APART, and the one a real book has: cash flow
 #: DOUBLES (1.0 → 2.0 per share on a flat share count) and so does the market cap. On the euro sum
 #: that is +100%; on a per-period cap it is 0%, because the yield never moved.
 _ROWS = [
@@ -70,11 +70,11 @@ def earnings(monkeypatch):
         "asset_grid": [{"isin": "US0000000001", "sector": "Technology"}],
     })
     monkeypatch.setattr(e, "supabase", fake)
-    # ⚠ THE SET IS EMPTY IN REAL CONFIGURATION — see the note on `EPS` above. Without this,
+    #  The set is empty in real configuration — see the note on `EPS` above. Without this,
     # `fundamental_totals` filters every metric out and each assertion below fails on an absent
     # key rather than on the arithmetic it is about.
     monkeypatch.setattr(e, "_AGGREGATABLE_PER_SHARE", frozenset({"eps_nri"}))
-    # ⚠ FX OUT OF THE WAY: 1.0 EUR per EUR, so every figure below is exact.
+    #  Fx out of the way: 1.0 EUR per EUR, so every figure below is exact.
     import routers._benchmark_index as bi
 
     monkeypatch.setattr(bi, "_fx_to_eur", lambda *_a, **_k: {})
@@ -107,7 +107,7 @@ def test_repeated_share_unit_mismatches_reject_only_that_member():
 
 class TestTheCapIsOneDate:
     def test_a_one_company_book_grows_exactly_like_that_company_in_an_index(self, earnings):
-        """⚠⚠ THE INVARIANT. With one member, `w·F/cap(T)` and `F` differ by a CONSTANT, so the two
+        """ THE INVARIANT. With one member, `w·F/cap(T)` and `F` differ by a CONSTANT, so the two
         constructions must agree to the last bit. They did not before: the book read 0% where the
         index read +100%. Verified on eight live companies at 8.9e-16."""
         index = _series(earnings.fundamental_totals([1], ["eps_nri"]))
@@ -133,7 +133,7 @@ class TestTheCapIsOneDate:
         assert book["2024-12-31"] == pytest.approx(5.0 * (1.0 * 100 * 1e6) / 2_000.0)
 
     def test_every_filed_period_survives_on_both_cadences(self, earnings):
-        """⚠ THE OUTAGE ITSELF: a per-period lookup keyed by FILING DATE against caps keyed by
+        """ THE OUTAGE ITSELF: a per-period lookup keyed by FILING DATE against caps keyed by
         PERIOD misses every time. There is no such lookup left, on either vocabulary."""
         for caps, cadence in ((_CAPS_DOUBLING, "annual"), (_CAPS_QUARTERLY, "quarterly")):
             book = _series(earnings.fundamental_totals(
@@ -141,14 +141,14 @@ class TestTheCapIsOneDate:
             assert sorted(book) == ["2024-12-31", "2025-12-31"], cadence
 
     def test_a_member_with_no_cap_at_all_is_left_out_entirely(self, earnings):
-        # ⚠ NOT A ZERO, and no longer a period-by-period drop: there is no price at which to turn
+        #  Not a zero, and no longer a period-by-period drop: there is no price at which to turn
         # this book's money weight into shares, so the member has no claim to contribute.
         assert _series(earnings.fundamental_totals(
             [1], ["eps_nri"], weight_by_cid={1: 5.0}, caps={})) == {}
 
 
 class TestLtmRidesOnTheSameBasis:
-    """⚠ IT USED TO HAVE A FALLBACK OF ITS OWN — the newest cap, where the filed periods each
+    """ IT USED TO HAVE A FALLBACK OF ITS OWN — the newest cap, where the filed periods each
     demanded their own — which is what let it survive alone when every other period was dropped."""
 
     @pytest.fixture
@@ -163,7 +163,7 @@ class TestLtmRidesOnTheSameBasis:
         assert book["LTM"] == pytest.approx(5.0 * (3.0 * 100 * 1e6) / 2_000.0)
 
     def test_it_cannot_be_the_only_surviving_period(self, with_ltm):
-        # ⚠⚠ THE BLANK CHART, PINNED. No cap ⇒ no member ⇒ no euros at all, which falls cleanly
+        #  The blank chart, pinned. No cap ⇒ no member ⇒ no euros at all, which falls cleanly
         # back to the growth chain — rather than one member on one period, which puts
         # `blend_series` on the aggregate path with no step it can span.
         assert _series(with_ltm.fundamental_totals(

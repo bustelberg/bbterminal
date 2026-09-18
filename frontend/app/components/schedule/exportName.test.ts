@@ -8,7 +8,7 @@ describe('holdingsExportName', () => {
   });
 
   it('takes the month from as_of_date, NOT from today', () => {
-    // ⚠ THE CASE THAT MOTIVATES THE WHOLE MODULE. A first-Monday-of-September rebalance is
+    //  The case that motivates the whole module. A first-Monday-of-September rebalance is
     // decided on Friday 4 Sep and the tick fires from Saturday 5 Sep, so the file is
     // downloaded in a week whose `today` may still read August in some zones while the
     // portfolio it contains is unambiguously September's.

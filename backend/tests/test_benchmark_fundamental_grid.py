@@ -15,7 +15,7 @@ def _row(period: str, **vals: float) -> dict:
 
 
 class TestTheUnitDecidesWhetherFxIsAppliedAtAll:
-    """⚠ Two of the nineteen lines are not currency, and dividing them by an FX rate produces a
+    """ Two of the nineteen lines are not currency, and dividing them by an FX rate produces a
     plausible wrong number rather than an error — NVIDIA's ~24,514M diluted shares came back as
     20,902M before this map existed, and a share count is exactly what a reader would use to
     sanity-check a market cap."""
@@ -34,7 +34,7 @@ class TestTheUnitDecidesWhetherFxIsAppliedAtAll:
 
 
 class TestWhatTheIndexRowMayDoWithAColumn:
-    """⚠ DERIVED FROM THE UNIT, NOT FROM THE TTM ROLL-UP RULE. The TTM rule aggregates ONE company
+    """ DERIVED FROM THE UNIT, NOT FROM THE TTM ROLL-UP RULE. The TTM rule aggregates ONE company
     OVER TIME; this aggregates MANY companies AT ONE TIME. They agree on most lines and part
     company exactly where it matters: `shares` is `mean` over time (a share count IS an average of
     four quarters) and was therefore handed a cap-weighted mean ACROSS companies — a number whose
@@ -53,7 +53,7 @@ class TestWhatTheIndexRowMayDoWithAColumn:
 
 
 class TestThePeriodLabelComesFromTheRealMonth:
-    """⚠ A fiscal quarter need not end on 03-31/06-30/09-30/12-31, and synthesising the calendar
+    """ A fiscal quarter need not end on 03-31/06-30/09-30/12-31, and synthesising the calendar
     quarter would move every point of an off-calendar filer into a quarter it does not belong to."""
 
     def test_a_calendar_quarter_end(self):
@@ -67,7 +67,7 @@ class TestThePeriodLabelComesFromTheRealMonth:
 
 
 class TestCoverageGatesTheWeights:
-    """⚠ THE DENOMINATOR IS THE INDEX, NOT THE COVERED SET, so `covered_pct` falls as you scrub
+    """ THE DENOMINATOR IS THE INDEX, NOT THE COVERED SET, so `covered_pct` falls as you scrub
     back — which is the finding. Dividing by the rows that happen to have data would pin it at
     100% in every period and describe nothing."""
 
@@ -100,7 +100,7 @@ class TestCoverageGatesTheWeights:
 
 
 class TestACappedIndexGetsNoWeightsAtAnyCoverage:
-    """⚠⚠ THE AEX. Euronext caps a constituent at 15% at each review, precisely because ASML would
+    """ THE AEX. Euronext caps a constituent at 15% at each review, precisely because ASML would
     otherwise swallow a 25-name index: uncapped it is 37.53% against the real index's 15.00%. So
     `cap / Σcap` is not that index's weighting AT ANY COVERAGE LEVEL — full data makes an uncapped
     weight more precisely wrong, not less.

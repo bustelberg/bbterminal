@@ -18,24 +18,24 @@ THE REASONS ARE NOT INTERCHANGEABLE, AND THAT IS THE POINT
                   statement of its own — `stock/QQQ/financials` returns null. Looking through to
                   its constituents is a different feature, not a gap in this one.
     unsubscribed  a real company on an exchange outside the GuruFocus subscription (India, UK,
-                  Ireland, Russia, Africa, LatAm, AU/NZ). ⚠ THE DATA EXISTS AND WE CANNOT BUY IT —
+                  Ireland, Russia, Africa, LatAm, AU/NZ).  THE DATA EXISTS AND WE CANNOT BUY IT —
                   the only reason on this list that is about our subscription rather than about
                   the instrument, and the only one a purchase would fix.
     no_company    an equity we simply have no `company` row for. A gap in OUR ingest, fixable by
                   adding it — unlike `unsubscribed`, which no amount of ingesting will fix.
-    no_metrics    a company row EXISTS and no fundamentals have been ingested for it. ⚠ THIS USED
+    no_metrics    a company row EXISTS and no fundamentals have been ingested for it.  THIS USED
                   TO BE REPORTED AS `covered`, which claimed "fundamentals can be fetched" on the
                   strength of a company row alone. Measured 2026-07-23: 2,776 company rows, SEVEN
                   of them carrying any `annuals__` metric — so a portfolio read 100% covered and
                   would have charted nothing. Fixable by running the earnings ingest.
     covered       a company row exists AND the fundamentals are actually there.
 
-⚠ `unsubscribed` AND `no_company` MUST NOT BE MERGED. They look identical on screen ("no
+ `unsubscribed` AND `no_company` MUST NOT BE MERGED. They look identical on screen ("no
     fundamentals for this one") and have opposite remedies: one is a purchase decision, the other
     is a five-minute ingest. Collapsing them turns an actionable gap into a shrug. `no_metrics` is
     a third remedy again — the company is there and the ingest has not run for it.
 
-⚠ "COVERED" MUST MEAN THE DATA IS THERE, NOT THAT THE ROW IS. Every other reason on the list is a
+ "COVERED" MUST MEAN THE DATA IS THERE, NOT THAT THE ROW IS. Every other reason on the list is a
     reason something CANNOT be fetched; `covered` is the one that promises it can, and it is the
     denominator every blended figure is renormalised over. A `covered` that only checked for a
     company row made that promise on evidence it never had.
@@ -61,11 +61,11 @@ def classify_holding(isin: str | None, grid: dict | None, has_company: bool,
                      subscribed: bool | None, has_metrics: bool = False) -> str:
     """One holding's coverage reason. Pure — every input is already resolved by the caller.
 
-    ⚠ ORDER IS THE RULE. `not_equity` and `fund` come BEFORE the company/subscription tests,
+     ORDER IS THE RULE. `not_equity` and `fund` come BEFORE the company/subscription tests,
     because a bond on an unsubscribed exchange is not an unsubscribed company — reporting it as
     one would put it on the list of things a subscription would fix, and it never would.
 
-    ⚠ A COMPANY PINNED TO AN UNSUBSCRIBED EXCHANGE IS NOT NECESSARILY UNREACHABLE — so it is NOT
+     A COMPANY PINNED TO AN UNSUBSCRIBED EXCHANGE IS NOT NECESSARILY UNREACHABLE — so it is NOT
     pre-classified `unsubscribed`. Shopify's `company` row sits on TSX (out of subscription), yet
     GuruFocus lists it as NASDAQ:SHOP, which we DO subscribe to; the same is true of Brookfield
     (NYSE:BN). Whether a subscribed primary listing exists is only knowable via the ISIN bridge (an
@@ -82,7 +82,7 @@ def classify_holding(isin: str | None, grid: dict | None, has_company: bool,
     if (g.get("asset_class") or "").strip().lower() in _FUND_CLASSES:
         return "fund"
     if has_company:
-        # ⚠ The company existing is not the fundamentals existing. See the module docstring.
+        #  The company existing is not the fundamentals existing. See the module docstring.
         return "covered" if has_metrics else "no_metrics"
     # No company row. Distinguish "we cannot buy this data" from "we have not ingested it".
     return "unsubscribed" if subscribed is False else "no_company"
@@ -97,7 +97,7 @@ def coverage_for(members: list[dict]) -> dict:
     from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
     from index_universe.acwi.exchange_map import is_gf_subscribed_exchange  # noqa: PLC0415
 
-    # ⚠ RESOLVE THE ALIAS FIRST. `company`/`gurufocus_listing` are keyed on the RAW ISIN, so an
+    #  Resolve the alias first. `company`/`gurufocus_listing` are keyed on the RAW ISIN, so an
     # aliased row reads as "not ingested" while its canonical sits there fully covered — measured
     # on the TSMC ADR (US8740391003 -> TW0002330008, company 3223).
     raw = sorted({m["isin"] for m in members if m.get("isin")})
@@ -119,7 +119,7 @@ def coverage_for(members: list[dict]) -> dict:
 
     # Which of those companies have fundamentals AT ALL.
     #
-    # ⚠ PROBED WITH ONE SENTINEL METRIC, NOT `LIKE 'annuals__%'`. A company carries ~85 annual
+    #  Probed with one sentinel metric, not `LIKE 'annuals__%'`. A company carries ~85 annual
     # codes x ~25 years, so a wildcard over 20 companies is ~40,000 rows against PostgREST's
     # SILENT 1,000-row cap — and every company past the cut-off would come back `no_metrics`,
     # inventing a gap. One code x 20 companies is ~600 rows and cannot truncate.

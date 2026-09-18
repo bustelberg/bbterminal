@@ -169,7 +169,7 @@ export default function ScheduledStrategiesCard({ sched, readOnly = false }: { s
                         }`}
                         title="Toggle whether non-admin users can see this strategy on the read-only /schedule view"
                       >
-                        {s.user_visible ? '✓ Visible to user' : 'Hidden from user'}
+                        {s.user_visible ? ' Visible to user' : 'Hidden from user'}
                       </button>
                       <button
                         type="button"

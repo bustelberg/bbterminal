@@ -37,7 +37,7 @@ class TestItRecognisesAFragmentNotJustADocument:
 
 
 class TestItDoesNotRelabelABrokenDownload:
-    """⚠ THE REASON THERE IS A SIZE BOUND. A real spreadsheet never begins with a tag, but a
+    """ THE REASON THERE IS A SIZE BOUND. A real spreadsheet never begins with a tag, but a
     TRUNCATED or corrupted binary might — and calling that "an HTML page" would dress a genuine
     transport fault in a tidier diagnosis and send the next investigation to the wrong place."""
 
@@ -58,14 +58,14 @@ class TestItDoesNotRelabelABrokenDownload:
 
 
 class TestAirsNoDataIsAnAnswerNotAFailure:
-    """⚠ 14 OF 44 ACCOUNTS FAILED THEIR MODEL REPORT ON EVERY SINGLE RUN, AND NONE OF THEM WAS
+    """ 14 OF 44 ACCOUNTS FAILED THEIR MODEL REPORT ON EVERY SINGLE RUN, AND NONE OF THEM WAS
     BROKEN. AIRS answers a report it has nothing for with a ~170-byte fragment; that was reported
     as a hard error, so those books never counted as COMPLETE — which meant they wore a permanent
-    ⚠, and (the expensive part) an account that can never be complete is never skipped as fresh, so
+    , and (the expensive part) an account that can never be complete is never skipped as fresh, so
     they were the ONLY accounts the incremental scan ever visited: "1/14: BUS_WTS_SterkeMerken_Fx…"
     while the 30 real books were correctly skipped.
 
-    ⚠ WHAT MAKES THIS SAFE TO CLASSIFY IS THE OTHER THREE REPORTS. A dead session or an IP block
+     WHAT MAKES THIS SAFE TO CLASSIFY IS THE OTHER THREE REPORTS. A dead session or an IP block
     breaks all four; measured 2026-07-30 the same accounts in the same session returned Rendement
     44/44, Vermogensoverzicht 44/44, Mutaties 44/44 and Model 30/44. Per-REPORT failure is a fact
     about the report. The 14 are all `_MV` (meervoudig), `_BM_`, `WTS test` or `_Fx` books — the
@@ -109,7 +109,7 @@ class TestAirsNoDataIsAnAnswerNotAFailure:
         assert _is_no_data(b"PK\x03\x04" + b"x" * 400) is False
 
     def test_the_step_wrapper_counts_it_as_retrieved(self):
-        """⚠ THE POINT OF THE WHOLE CHANGE. `reports_ok` is what `accounts_to_scan` reads to decide
+        """ THE POINT OF THE WHOLE CHANGE. `reports_ok` is what `accounts_to_scan` reads to decide
         an account is complete and can be skipped — so a no-data report must land in `ok`, not in
         `errors`, or the account is re-scanned for ever."""
         import inspect
@@ -125,7 +125,7 @@ class TestAirsNoDataIsAnAnswerNotAFailure:
 
 
 class TestTheRosterIsCheckedAgainstAirsOwnCount:
-    """⚠ THE THREE FILTERS ARE SENT AND NOTHING CONFIRMS THEY APPLIED.
+    """ THE THREE FILTERS ARE SENT AND NOTHING CONFIRMS THEY APPLIED.
 
     `actief=actief&portefeuilleIntern=1&metConsolidatie=0` defines the Front-Office population, and
     the response to a wrong combination is a perfectly normal table with the wrong rows in it. The
@@ -154,7 +154,7 @@ class TestTheRosterIsCheckedAgainstAirsOwnCount:
             assert _SELECTIE_RE.search(text) is None, text
 
     def test_the_scraper_dedupes_and_stops_when_a_page_adds_nothing(self):
-        """⚠ AirSPMS CLAMPS an out-of-range page instead of returning nothing — the trap the
+        """ AirSPMS CLAMPS an out-of-range page instead of returning nothing — the trap the
         model-portfolio list already documents. A pager that trusts the "next" arrow re-reads the
         last page, and appending without dedupe turns that into extra portfolios rather than an
         error."""
@@ -173,7 +173,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
     2026-07-30 the day's valuation had not run, so all ~25 books with holdings paid a wasted request
     before landing on the 29th — on a Monday it is three (Mon, Sun, Sat) before Friday.
 
-    ⚠⚠ THE MEMO THAT FIXED IT THEN BROKE 29 OF 46 BOOKS (2026-08-21), and this class now pins the
+     THE MEMO THAT FIXED IT THEN BROKE 29 OF 46 BOOKS (2026-08-21), and this class now pins the
     rule that makes it sound. A single failure was taken as proof the DATE was dead, and a failure is
     only ever proof about the BOOK that made it — books are valued on different cadences, so one book
     a week behind ruled out six good dates on its way back to its own, and every account scanned
@@ -187,7 +187,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         no memo at all                               refreshed 29   badged 0   downloads 139
         quorum of 3, and only ABOVE the newest hit   refreshed 29   badged 0   downloads 113
 
-    ⚠ THE QUORUM ALONE IS NOT ENOUGH, which is why the second row is in that table: books SHARE
+     THE QUORUM ALONE IS NOT ENOUGH, which is why the second row is in that table: books SHARE
     cadences, so three books that are all a week behind rule out the very date a fourth one needs.
     What makes it sound is the second condition — a book cannot be valued AHEAD of the newest batch
     that has run, so a date is only dead once some account has successfully fetched an OLDER one.
@@ -213,7 +213,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
             return b"ok"
 
         monkeypatch.setattr(airs_scanner, "download_vermogensoverzicht_sync", fake)
-        # ⚠ ALL THREE, so a test starts from a known memo rather than from whatever the previous
+        #  All three, so a test starts from a known memo rather than from whatever the previous
         # one left in the module. The TTL stamp matters as much as the two it guards: leaving it
         # unset would make the first call in each test reset the memo again, which is fine here but
         # would quietly hide a test that MEANT to carry state across a phase (see the inheritance
@@ -231,7 +231,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         for acct in ("A", "B", "C", "D", "E"):
             airs_vermogen._vermogen_most_recent(acct, "2026-01-01")
         tried_today = [c[0] for c in calls if c[1] == today]
-        # ⚠ EXACTLY THE QUORUM, THEN NEVER AGAIN. Fewer would mean one book can speak for the
+        #  Exactly the quorum, then never again. Fewer would mean one book can speak for the
         # fleet (the bug); more would mean the memo never pays for itself.
         assert tried_today == ["A", "B", "C"], tried_today
         assert [c[0] for c in calls].count("E") == 1, "E should have skipped straight to the hit"
@@ -247,11 +247,11 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         assert dates["A"] == dates["B"] < today
 
     def test_a_book_that_is_simply_BEHIND_does_not_rule_dates_out_for_the_fleet(self, monkeypatch):
-        """⚠⚠ THE REGRESSION. This is the production failure, in five accounts.
+        """ THE REGRESSION. This is the production failure, in five accounts.
 
         `slow` is valued a week ago, so it fails on six dates the fleet is perfectly valued on. Under
         the old rule those six were dead for everyone after it, and the books that needed them wore a
-        permanent "⚠ Vermogensoverzicht" on /management-dashboard while their stored holdings sat
+        permanent " Vermogensoverzicht" on /management-dashboard while their stored holdings sat
         days out of date. Every one of them must still get its own snapshot.
         """
         import airs_vermogen
@@ -268,7 +268,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
             assert got == day(1), f"{acct} got {got}, not the fleet's newest valued date"
 
     def test_the_horizon_reaches_a_book_valued_more_than_a_week_ago(self, monkeypatch):
-        """⚠ THE SECOND, INDEPENDENT DEFECT. The walk was `range(0, 7)`, and two of the 29 badged
+        """ THE SECOND, INDEPENDENT DEFECT. The walk was `range(0, 7)`, and two of the 29 badged
         books were last valued 8 days back — unreachable even with an empty memo."""
         import airs_vermogen
         from datetime import date, timedelta
@@ -279,7 +279,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         assert airs_vermogen._WALK_BACK_DAYS > 8
 
     def test_a_dead_session_still_raises_rather_than_returning_a_wrong_date(self, monkeypatch):
-        """⚠ EXHAUSTION IS STILL A FAILURE. An auth failure returns the same empty body on EVERY
+        """ EXHAUSTION IS STILL A FAILURE. An auth failure returns the same empty body on EVERY
         date; widening the horizon must not turn that into a silent success on some old date."""
         import airs_vermogen
         import pytest as _pytest
@@ -289,7 +289,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
             airs_vermogen._vermogen_most_recent("A", "2026-01-01")
 
     def test_a_later_refresh_does_not_inherit_a_finished_runs_ruled_out_dates(self, monkeypatch):
-        """⚠⚠ THE PRODUCTION FAILURE, ONE LEVEL UP FROM THE CASCADE (2026-08-22).
+        """ THE PRODUCTION FAILURE, ONE LEVEL UP FROM THE CASCADE (2026-08-22).
 
         The memo is process-global and `run_airs_vermogen_refresh_sync` was the only caller that
         ever reset it. `refresh_one_portfolio` — the per-row Refresh button, the Analyse modal's
@@ -299,7 +299,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         The dates a fleet run rules out are by construction the NEWEST ones (today, and the weekend
         behind it), which are exactly the dates AirSPMS has since valued by the time anybody presses
         Refresh. So the button walked past the date it needed, landed older or exhausted its
-        horizon, and the row kept its ⚠ Vermogensoverzicht — reported as "I still see this behind
+        horizon, and the row kept its  Vermogensoverzicht — reported as "I still see this behind
         most portfolios" after the cascade fix had shipped.
 
         This is the whole bug in two phases and one process, and it is deliberately written against
@@ -319,7 +319,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         assert airs_vermogen._UNVALUED_DATES.get(day(0)) == {"A", "B", "C"}
 
         # Phase 2 — the batch runs, today becomes valued, and somebody presses Refresh on a row.
-        # ⚠ NO RESET BETWEEN THE PHASES, deliberately: not resetting is precisely what the per-row
+        #  No reset between the phases, deliberately: not resetting is precisely what the per-row
         # button did, and a test that reset here would be testing the fleet path a second time.
         airs_vermogen._MEMO_STARTED_AT = (
             airs_vermogen._time.monotonic() - airs_vermogen._MEMO_TTL_S - 1)
@@ -332,14 +332,14 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         monkeypatch.setattr(airs_scanner, "download_vermogensoverzicht_sync", now_valued)
 
         got, _blob = airs_vermogen._vermogen_most_recent("A", "2026-01-01")
-        # ⚠ THE ASSERTION THAT FAILS WITHOUT THE FIX: it comes back with day(1), the newest date the
+        #  The assertion that fails without the fix: it comes back with day(1), the newest date the
         # PREVIOUS run had proved, having skipped today without asking.
         assert got == day(0), (
             f"the refresh got {got}, not today — it skipped a date that has since been valued")
         assert calls == [("A", day(0))], calls
 
     def test_the_memo_expires_on_a_clock_not_on_a_caller_remembering(self):
-        """⚠⚠ WHY THE TTL LIVES ON THE READ PATH. The rule this replaces was "the fleet run clears
+        """ WHY THE TTL LIVES ON THE READ PATH. The rule this replaces was "the fleet run clears
         it at the top", pinned by a test that grepped `run_airs_vermogen_refresh_sync` for the
         string `_UNVALUED_DATES.clear()`. That assertion was true for the entire time production was
         broken: the clear was there, and two other entry points reached the memo without it.
@@ -358,7 +358,7 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
         airs_vermogen._expire_valuation_memo()
 
         assert airs_vermogen._UNVALUED_DATES == {}
-        # ⚠ BOTH HALVES, OR THE PAIR IS INCOHERENT — `_NEWEST_VALUED` is the LICENCE to rule a date
+        #  Both halves, or the pair is incoherent — `_NEWEST_VALUED` is the LICENCE to rule a date
         # out, so keeping it while dropping the misses licences one run's answer against another's
         # evidence.
         assert airs_vermogen._NEWEST_VALUED is None
@@ -374,13 +374,13 @@ class TestTheValuationDateIsDiscoveredOncePerRun:
 
 
 class TestBooksTooSmallToBePortfoliosAreNotRescanned:
-    """⚠ THE FLEET SPENT 60 DOWNLOADS A RUN ON BOOKS NOBODY LOOKS AT. Of 46 accounts, 5 are AIRS
+    """ THE FLEET SPENT 60 DOWNLOADS A RUN ON BOOKS NOBODY LOOKS AT. Of 46 accounts, 5 are AIRS
     benchmarks carrying exactly 1 holding and 10 are `_MV` / `WTS test` shells carrying none —
     against 10-29 for every real book. Each cost four reports on every pass, and because several
     could never be complete the freshness skip never caught them either: they were the ONLY
     accounts an incremental scan ever visited.
 
-    ⚠ THE HARD PART IS THAT ZERO AND UNKNOWN LOOK IDENTICAL. A book storing no holdings has no rows
+     THE HARD PART IS THAT ZERO AND UNKNOWN LOOK IDENTICAL. A book storing no holdings has no rows
     in `airs_holding`, so it is simply absent from the counts — exactly like one never scanned.
     Treating absence as bogus would strand a brand-new account for ever (it could never acquire the
     holdings that would rescue it); treating it as unknown misses the emptiest books, which are the
@@ -405,7 +405,7 @@ class TestBooksTooSmallToBePortfoliosAreNotRescanned:
         assert bogus_accounts({}, v) == {"bus_neutraal_kl_mv"}
 
     def test_an_account_whose_holdings_were_NEVER_FETCHED_is_not_bogus(self):
-        """⚠ THE ONE THAT WOULD BE PERMANENT. Skipping it means never fetching it, which means it
+        """ THE ONE THAT WOULD BE PERMANENT. Skipping it means never fetching it, which means it
         can never stop being skipped."""
         from airs_vermogen import bogus_accounts
 

@@ -4,7 +4,7 @@ Three pieces tied together:
   - `sync_fx_rates_to_db` keeps the `fx_rate` table covering the whole
     requested window — it extends FORWARD from the stored max and
     BACKWARDS from the stored min. Skipped under db_only mode.
-    ⚠ The backwards leg was missing until 2026-08-18, and `load_fx_rates`
+     The backwards leg was missing until 2026-08-18, and `load_fx_rates`
     below hides the gap rather than showing it: see its `.ffill().bfill()`.
   - `load_fx_rates` reads the synced table into per-currency
     `pd.Series` ready for in-memory conversion (weekends/holidays are
@@ -44,7 +44,7 @@ def sync_fx_rates_to_db(
     `on_progress(code, status)` is called after each currency. Returns a per-currency status
     dict for logging. EUR is skipped (base currency).
 
-    ⚠⚠ THE BACKWARDS LEG EXISTS BECAUSE THERE WAS NONE, AND ITS ABSENCE PRODUCED A NUMBER RATHER
+     THE BACKWARDS LEG EXISTS BECAUSE THERE WAS NONE, AND ITS ABSENCE PRODUCED A NUMBER RATHER
         THAN A BLANK (2026-08-18). This function only ever extended FORWARD: it read the stored max
         and fetched from max+1, so a currency whose stored history simply STARTS too late was never
         repaired by anything, in any environment, for ever. And `load_fx_rates` HIDES that — its
@@ -53,18 +53,18 @@ def sync_fx_rates_to_db(
         whole stretch at ONE wrong rate. No empty cell, no error, just a return that is wrong by
         however much the currency moved before its first stored day.
 
-    ⚠ THE FORWARD LEG'S "ALREADY COVERED" SHORT-CIRCUIT USED TO RETURN FROM THE FUNCTION, which is
+     THE FORWARD LEG'S "ALREADY COVERED" SHORT-CIRCUIT USED TO RETURN FROM THE FUNCTION, which is
         precisely why the head gap was unreachable: a currency current to today — every currency,
         most days — returned `cached` before anything could look at where its history began. The
         two legs are now independent and both are evaluated.
 
-    ⚠ THE BACKWARDS FETCH UPSERTS EVERYTHING IT GETS, not just the rows before the old minimum.
+     THE BACKWARDS FETCH UPSERTS EVERYTHING IT GETS, not just the rows before the old minimum.
         ECB has no end parameter, so the response spans `start_date` → today anyway; writing all of
         it repairs interior HOLES as a side effect, which nothing else in the codebase does. The
         cost is bounded and one-off: after the first successful run the stored min is at or before
         `start_date` and this leg never fires for that currency again.
 
-    ⚠ IT IS THE SAME `fetch_history` THE FORWARD LEG USES — ECB, the USD pegs and the TWD special
+     IT IS THE SAME `fetch_history` THE FORWARD LEG USES — ECB, the USD pegs and the TWD special
         case behind one call. A second fetcher for "old" rates would be a second place for a peg to
         be derived differently at the two ends of one series.
     """
@@ -126,7 +126,7 @@ def sync_fx_rates_to_db(
                 back_rows = _upsert(code, back)
                 rows += back_rows
                 if back_rows:
-                    # ⚠ THE EARLIEST DATE ECB ACTUALLY RETURNED, NOT THE ONE WE ASKED FOR. A
+                    #  The earliest date ecb actually returned, not the one we asked for. A
                     # currency whose published history begins in 2005 does not gain a 2000 start
                     # by being asked for one, and this table's whole problem is coverage being
                     # reported as wider than it is.
@@ -134,7 +134,7 @@ def sync_fx_rates_to_db(
                     note = f"backfilled to {got_from} (was {existing_min})"
                     existing_min = min(str(existing_min), got_from)
             except Exception as e:  # noqa: BLE001
-                # ⚠ NOT FATAL TO THE FORWARDS LEG. A failed head repair must not cost today's rate
+                #  Not fatal to the forwards leg. A failed head repair must not cost today's rate
                 # — that would turn a long-standing gap into a fresh one.
                 note = f"backfill failed: {e}"
 

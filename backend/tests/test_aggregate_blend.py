@@ -1,28 +1,28 @@
 """A fundamental index sums the EUROS behind it; it does not average per-member growth rates.
 
-⚠⚠ THE BUG THIS PINS READ +19.1%/yr WHERE THE ANSWER IS +7.56%/yr (ACWI FCF/share, 2015→2025).
+ THE BUG THIS PINS READ +19.1%/yr WHERE THE ANSWER IS +7.56%/yr (ACWI FCF/share, 2015→2025).
 
 `blend_series` chained a LEVEL line from `Σw_i·g_i / Σw_i` — each member's own growth, averaged by
 MARKET CAP. Two independent defects, and they compound:
 
-  * WRONG WEIGHT. Growth of a sum is `Σv_i(d)/Σv_i(a) − 1`, i.e. each member's growth weighted by
+  * Wrong weight. Growth of a sum is `Σv_i(d)/Σv_i(a) − 1`, i.e. each member's growth weighted by
     ITS SHARE OF THE TOTAL BEING GROWN. Cap gives a company with a big valuation and small cash
     flow a big vote on cash-flow growth — on ACWI revenue, NVIDIA holds 4.77% of cap and supplies
     0.02% of revenue, a ~240x overweight on the quantity being measured.
-  * UPWARD BIAS. A growth rate is floored at −100% and unbounded above, so averaging an asymmetric
+  * Upward bias. A growth rate is floored at −100% and unbounded above, so averaging an asymmetric
     distribution is biased and the bias scales with dispersion.
 
-⚠⚠ AND IT IS NOT ABOUT NEGATIVES, WHICH IS THE PART EVERY DISCUSSION OF IT GETS WRONG. Revenue is
+ AND IT IS NOT ABOUT NEGATIVES, WHICH IS THE PART EVERY DISCUSSION OF IT GETS WRONG. Revenue is
 never negative, so every zero-crossing rule is a no-op on it — and the two constructions still
 disagree by more than 5pp/yr on ACWI (~9.95% averaged against +4.60% summed). The whole gap is the
 weight.
 
-⚠ SUMMING IS STILL THE CAP-WEIGHTED ANSWER. A cap-weighted index holds the SAME FRACTION of every
+ SUMMING IS STILL THE CAP-WEIGHTED ANSWER. A cap-weighted index holds the SAME FRACTION of every
 company (`n_i = shares_i/Σcap` — the price cancels), so its claim on a fundamental is
 `(1/Σcap)·ΣF_i`, exactly proportional to the sum, and the scale cancels in any growth ratio. Cap
 weighting enters through the SHARE COUNT inside `F_i`, never as a weight on a rate.
 
-⚠ THE TESTS ARE BUILT SO THE RIGHT ANSWER IS NOT A MATTER OF OPINION: each panel's own euro total is
+ THE TESTS ARE BUILT SO THE RIGHT ANSWER IS NOT A MATTER OF OPINION: each panel's own euro total is
 stated, and the growth of that total IS the index's growth. Only one construction reproduces it.
 
 Pure — no DB, no network.
@@ -62,7 +62,7 @@ class TestTheLineSumsEuros:
         assert got["2021"] == 110.0
 
     def test_without_euros_it_keeps_the_growth_chain(self):
-        # ⚠ THE FALLBACK MUST STAY, and it must be the SAME members minus `fund_points` — this is
+        #  The fallback must stay, and it must be the SAME members minus `fund_points` — this is
         # the assertion that would have caught the aggregate silently never firing, which is how it
         # shipped the first time: three metrics, identical numbers on both paths, nothing to say
         # the new one had not run.
@@ -79,7 +79,7 @@ class TestTheLineSumsEuros:
         assert "aggregate" not in blend_series(bare, REVENUE, year_bucket)
 
     def test_the_euros_are_bucketed_like_the_values(self):
-        # ⚠ THE CALLER KEYS BY FILING DATE AND THE CHAIN WALKS BUCKETED PERIODS. Unbucketed, every
+        #  The caller keys by filing date and the chain walks bucketed periods. Unbucketed, every
         # lookup misses, `fund` is empty, and the branch silently never fires — the exact failure
         # above. Same members, dates one day apart from the values': still aggregates.
         shifted = [{**m, "fund_points": {"2020-06-30": m["fund_points"]["2020-12-31"],
@@ -90,7 +90,7 @@ class TestTheLineSumsEuros:
 
 class TestASumNeedsNoGuards:
     def test_a_round_trip_through_zero_nets_out(self):
-        # ⚠⚠ THE PROPERTY THAT MAKES THIS CONSTRUCTION RIGHT FOR FCF. The growth path floors each
+        #  The property that makes this construction right for FCF. The growth path floors each
         # member at −100% one year and refuses the ratio the next, so a member that goes −200 and
         # back to +200 leaves a permanent mark on the index. A sum subtracts 200 and adds it back.
         a = {"weight": 100.0,
@@ -117,7 +117,7 @@ class TestASumNeedsNoGuards:
         assert round(got["2021"], 6) == 110.0   # +10%, the only member that spans the step
 
     def test_the_series_stops_rather_than_going_negative(self):
-        # ⚠ A LINE THAT STOPS IS VISIBLE; POINTS A LOG AXIS CANNOT DRAW ARE NOT. Unreachable for a
+        #  A line that stops is visible; points a log axis cannot draw are not. Unreachable for a
         # real index — aggregate free cash flow is deeply positive — so reaching it means the
         # totals are wrong, and stopping is how that becomes noticeable.
         a = {"weight": 100.0,
@@ -129,7 +129,7 @@ class TestASumNeedsNoGuards:
 
 class TestTheEurosAreCarriedLikeTheValues:
     def test_a_member_that_skips_a_period_keeps_its_euros(self):
-        # ⚠ UNCARRIED, THE PER-STEP INTERSECTION SHRINKS TO WHOEVER FILED, and the aggregate
+        #  Uncarried, the per-step intersection shrinks to whoever filed, and the aggregate
         # sawtooths on composition — the failure `carry_forward` exists to prevent, quietly
         # reintroduced one construction over. `b` does not file 2021; it must still be in the step.
         a = {"weight": 100.0,
@@ -160,7 +160,7 @@ class TestTheDecompositionIsAnIdentity:
                 == round(m["contribution_pp"], 6)
 
     def test_the_share_is_of_the_EUROS_not_the_cap(self):
-        # ⚠ THE ENTIRE FINDING IN ONE ASSERTION. BIG_CAP carries 90% of the market cap and 10% of
+        #  The entire finding in one assertion. BIG_CAP carries 90% of the market cap and 10% of
         # the euros; its share of the move is the second. A cap share here would be the old bug
         # wearing the new construction's name.
         bd = blend_breakdown([BIG_CAP, SMALL], REVENUE, "2021")
@@ -169,7 +169,7 @@ class TestTheDecompositionIsAnIdentity:
         assert round(big["contribution_pp"], 6) == 10.0     # 10% x +100%
 
     def test_a_non_positive_base_still_contributes_exactly(self):
-        # ⚠⚠ NOBODY IS DROPPED, WHICH THE GROWTH PATH CANNOT MANAGE. `share x growth` needs a
+        #  Nobody is dropped, which the growth path cannot manage. `share x growth` needs a
         # positive base and the difference form does not, so the factors go null while the pp
         # stays exact — and the column still sums.
         crosser = {"weight": 100.0,
@@ -186,7 +186,7 @@ class TestTheDecompositionIsAnIdentity:
         assert round(total, 9) == round(bd["step_pct"], 9) == 50.0
 
     def test_a_share_over_a_sum_containing_negatives_may_exceed_100_percent(self):
-        # ⚠⚠ CORRECT, NOT A BUG TO CLAMP. `s_a` can contain negatives, so a profitable member's
+        #  Correct, not a bug to clamp. `s_a` can contain negatives, so a profitable member's
         # share has a denominator smaller than its own numerator. Clamping would break the only
         # identity this panel exists for — `share × growth = pp`, which still holds here.
         crosser = {"weight": 100.0,
@@ -203,7 +203,7 @@ class TestTheDecompositionIsAnIdentity:
 
 
 class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
-    """⚠⚠ THE SEAM BETWEEN TWO `blend_series` CALLS, WHICH NOTHING ELSE ASSERTS ACROSS.
+    """ THE SEAM BETWEEN TWO `blend_series` CALLS, WHICH NOTHING ELSE ASSERTS ACROSS.
 
     A forecast is a separate metric code, blended separately and rebased on the actual it
     continues, so aggregating the ACTUAL leg alone puts the two halves of one chart on two
@@ -211,7 +211,7 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
     the forecast restarted near the per-share one, a vertical jump from LTM to 2026e. Every unit
     was individually correct and it was caught BY EYE.
 
-    ⚠⚠ THE FIRST FIX WAS TO HOLD THE WHOLE METRIC BACK, and this class asserted that — that a
+     THE FIRST FIX WAS TO HOLD THE WHOLE METRIC BACK, and this class asserted that — that a
     metric WITH a consensus is never aggregated. It was superseded the same day: the euros for a
     year nobody has lived CAN be built (`estimate × latest filed shares`, see `_shares_at`), so
     both legs aggregate and `continue_from` joins them at the real euro step —
@@ -221,7 +221,7 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
     """
 
     def test_a_metric_whose_consensus_can_be_priced_is_aggregated_with_it(self, monkeypatch):
-        """⚠⚠ THE ONLY LIVE SUBJECT LEFT THE SET ON 2026-08-31, so this drives the rule against a
+        """ THE ONLY LIVE SUBJECT LEFT THE SET ON 2026-08-31, so this drives the rule against a
         DECLARED pairing rather than against today's configuration. `eps_nri` was the one metric
         that both aggregated and carried a consensus; it is now positives-only
         (`_POSITIVE_ONLY_METRICS`) and `_AGGREGATABLE_PER_SHARE` is empty, which would leave the
@@ -230,7 +230,7 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
         from routers import earnings as e
         monkeypatch.setattr(e, "_AGGREGATABLE_PER_SHARE", frozenset({"eps_nri"}))
         monkeypatch.setattr(e, "_AGGREGATABLE_FORECAST", frozenset({"eps_nri_estimate"}))
-        # ⚠ THE PRECONDITION, ASSERTED — without an actual overlap the rule below is vacuous.
+        #  The precondition, asserted — without an actual overlap the rule below is vacuous.
         assert e._FORECAST_METRIC["eps_nri"] == "eps_nri_estimate"
 
         assert "eps_nri" in e.aggregatable_metrics([])
@@ -238,10 +238,10 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
         assert e.aggregatable_metrics(["revenue", "fcf_ps"]) == ["revenue", "fcf_ps"]
 
     def test_todays_configuration_sums_every_charted_level(self):
-        """⚠ WHERE THE TWO SETS ACTUALLY STAND, pinned so the trade is a decision rather than a
+        """ WHERE THE TWO SETS ACTUALLY STAND, pinned so the trade is a decision rather than a
         drift.
 
-        ⚠⚠ `fcf_ps` WENT BACK ON THE AGGREGATE ON 2026-09-04, because the rate average was wrong by
+         `fcf_ps` WENT BACK ON THE AGGREGATE ON 2026-09-04, because the rate average was wrong by
         a factor of four rather than merely biased. ACWI 2015→2025, same members and window:
         +33.93%/yr as a cap-weighted average of per-member growth rates, against +7.52%/yr as the
         growth of the SUM of their free cash flow — with the median constituent at +8.90%/yr and
@@ -251,12 +251,12 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
         `eps_nri` followed the same day and reads the same way: +26.50%/yr as a rate average
         against +8.31% summed, with the median constituent at +8.82%.
 
-        ⚠⚠ AND ITS FORECAST LEG CAME ALONG WITHOUT ANYONE LISTING IT — `_AGGREGATABLE_FORECAST` is
+         AND ITS FORECAST LEG CAME ALONG WITHOUT ANYONE LISTING IT — `_AGGREGATABLE_FORECAST` is
         derived from this set, which is the whole reason a consensus cannot end up on a different
         construction from the actual it continues. Asserted here because it is the property that
         makes the pair safe, not an implementation detail.
 
-        ⚠ A METRIC IN BOTH SETS WOULD BE A SURVIVORSHIP-FILTERED SUM, which is the one combination
+         A METRIC IN BOTH SETS WOULD BE A SURVIVORSHIP-FILTERED SUM, which is the one combination
         nothing wants — the sum needs no filter and the filter only adds bias. That is why the two
         edits are one decision, and it is asserted below rather than left to memory."""
         from routers import earnings as e
@@ -269,7 +269,7 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
                     & (e._AGGREGATABLE_PER_SHARE | e._AGGREGATABLE_TOTAL))
 
     def test_a_metric_whose_consensus_cannot_be_priced_is_refused_whole(self, monkeypatch):
-        # ⚠ THE RULE ITSELF, WITH THE PRICEABLE SET EMPTIED — this is what `aggregatable_metrics`
+        #  The rule itself, with the priceable set emptied — this is what `aggregatable_metrics`
         # is FOR, and with today's data every consensus happens to be priceable, so the branch
         # would otherwise never be exercised at all.
         from routers import earnings as e
@@ -281,7 +281,7 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
             (e._AGGREGATABLE_PER_SHARE | e._AGGREGATABLE_TOTAL) - set(e._FORECAST_METRIC))
 
     def test_it_is_decided_once_and_not_per_request(self):
-        # ⚠ A NARROWED REQUEST AND A FULL ONE MUST AGREE. Keying the rule off "is the forecast code
+        #  A narrowed request and a full one must agree. Keying the rule off "is the forecast code
         # in this payload" would let the same metric draw two different lines depending on which
         # chart asked for it.
         from routers.earnings import aggregatable_metrics
@@ -296,7 +296,7 @@ class TestAMetricIsAggregatableOnlyIfItsForecastLegIs:
 
 
 class TestTheLtmPointNeedsItsOwnEuros:
-    """⚠⚠ LTM IS NOT A FILED PERIOD — this app assembles it — so the euros must be built for it
+    """ LTM IS NOT A FILED PERIOD — this app assembles it — so the euros must be built for it
     explicitly (`fundamental_totals` multiplies `_ltm_by_company`'s value by the as-of share count).
 
     Without them the outcome depends on THE DATE THE CODE RUNS, which is the worst property a
@@ -321,18 +321,18 @@ class TestTheLtmPointNeedsItsOwnEuros:
         assert got == {"2023": 100.0, "2024": 110.0, "LTM": 121.0}
 
     def test_the_key_survives_bucketing(self):
-        # ⚠ `year_bucket("LTM")` is `"LTM"[:4]` = `"LTM"`, so the caller may key the euros on the
+        #  `year_bucket("LTM")` is `"LTM"[:4]` = `"LTM"`, so the caller may key the euros on the
         # literal period. If that ever changed, the point would silently vanish — the same class of
         # miss as keying the euros by filing date on a chain that walks buckets.
         assert year_bucket("LTM") == "LTM"
 
 
 class TestTheForecastLegJoinsTheLineItContinues:
-    """⚠⚠ THE SEAM, MEASURED. A forecast is its own `blend_series` call; on the aggregate path it
+    """ THE SEAM, MEASURED. A forecast is its own `blend_series` call; on the aggregate path it
     must start where the actual leg stopped, and the join is the real euro step across the
     boundary — `Σest(first forecast) ÷ Σactual(last actual)`.
 
-    ⚠ THIS IS MORE EXACT THAN THE GROWTH PATH'S CONTINUATION, not merely equivalent: that one
+     THIS IS MORE EXACT THAN THE GROWTH PATH'S CONTINUATION, not merely equivalent: that one
     restarts the forecast at the weighted mean of each member's value rebased on its OWN actual
     base, which only approximates where the line stopped. Measured on the fixture below: 127.78
     against a true 110.0, i.e. a fabricated +16pp jump at the seam.
@@ -369,11 +369,11 @@ class TestTheForecastLegJoinsTheLineItContinues:
         assert _levels(f) == {"2025": 110.0}          # 100 x 1100/1000
 
     def test_without_the_join_it_restarts_at_100(self):
-        # ⚠ THE FALLBACK IS 100, NOT A GUESS. A standalone series has nothing to continue.
+        #  The fallback is 100, NOT A GUESS. A standalone series has nothing to continue.
         assert _levels(blend_series(self.FORECAST, REVENUE, year_bucket)) == {"2025": 100.0}
 
     def test_the_old_growth_chain_leg_lands_nowhere_near_the_line(self):
-        # ⚠ THE BUG THIS REPLACES, kept as a number rather than a description: the actual leg on
+        #  The bug this replaces, kept as a number rather than a description: the actual leg on
         # the aggregate and the forecast leg on the growth chain drew a vertical jump at LTM.
         bare = [{k: v for k, v in m.items()
                  if k not in ("fund_points", "fund_base_points")} for m in self.FORECAST]

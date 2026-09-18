@@ -1,14 +1,14 @@
 /**
  * Every Deep Valuation expression must PARSE AS LaTeX — in strict mode — and keep its tail.
  *
- * ⚠⚠ THE FAILURE THIS EXISTS FOR IS INVISIBLE ON SCREEN, which is why a tooltip cannot be the
+ *  The failure this exists for is invisible on screen, which is why a tooltip cannot be the
  * place these live. An unescaped `%` starts a LaTeX COMMENT, so `… = +5.8%` renders as the
  * expression up to the first figure and STOPS — a shorter formula that looks finished. The app
  * renders with `throwOnError: false` and default strictness (right at runtime: one bad tooltip
  * degrades instead of blanking the panel), so nothing tells anybody. This is the thing that tells
  * somebody. Same shape as `workedFormula.latex.test.ts`, which guards the shared builders.
  *
- * ⚠ THE OPERANDS BELOW ARE THE SHAPE OF THE LIVE ONES: a real bridge with a rerating DOWN (the
+ *  The operands below are the shape of the live ones: a real bridge with a rerating DOWN (the
  * common case — the house default exit multiple is 20x), a negatively-filed capex, and a
  * perpetuity growth low enough for the terminal leg to be finite.
  *
@@ -35,7 +35,7 @@ const renderLikeApp = (tex: string) =>
 /**
  * The text a READER would see — the `katex-html` half only.
  *
- * ⚠ STRIPPING TAGS FROM THE WHOLE OUTPUT DOES NOT WORK: KaTeX also emits a `katex-mathml` tree
+ *  Stripping tags from the whole output does not work: KaTeX also emits a `katex-mathml` tree
  * whose `<annotation>` holds the ORIGINAL TeX verbatim, so a naive strip finds the truncated tail
  * there and concludes nothing was lost. Same trap `workedFormula.latex.test.ts` documents.
  */
@@ -78,7 +78,7 @@ describe('every Deep Valuation expression parses in strict mode', () => {
     }))).not.toThrow();
   });
 
-  it('⚠⚠ and it states the exponent `modelValue` actually uses, not the naive one', () => {
+  it(' and it states the exponent `modelValue` actually uses, not the naive one', () => {
     // `modelValue` pays the BASE cash flow in year 1 and grows from year 2: its closed form
     // `F(1 − x^n)/(r − g)` expands to `Σ F(1+g)^{t-1}/(1+r)^t`, and its `g = r` limit case
     // (`F·n/(1+r)`, every term equal) only comes out right on that reading. Written with `t` the
@@ -98,7 +98,7 @@ describe('every Deep Valuation expression parses in strict mode', () => {
 
 describe('the percent signs survive', () => {
   /**
-   * ⚠⚠ THE TAIL IS THE ASSERTION, NOT THE PARSE. Every one of these lines ends in the answer, so a
+   *  The tail is the assertion, not the parse. Every one of these lines ends in the answer, so a
    * `%` eaten as a comment takes exactly the figure the reader opened the tooltip for.
    */
   it('the EGM return keeps its answer', () => {
@@ -106,7 +106,7 @@ describe('the percent signs survive', () => {
   });
 
   it('the implied growth keeps every operand AND the solved rate', () => {
-    // ⚠ FOUR PERCENTAGES ON ONE LINE — the discount rate, the perpetuity rate and the answer, with
+    //  Four percentages on one line — the discount rate, the perpetuity rate and the answer, with
     // the answer LAST. This is the most exposed expression of the set.
     const seen = shown(workedImpliedGrowth({
       fcf: 11430.3, rate: 0.098, perpetuityGrowth: 0.03, years: 10,
@@ -135,7 +135,7 @@ describe('the percent signs survive', () => {
 
 describe('a missing operand collapses the line rather than guessing', () => {
   /**
-   * ⚠ `AspectCard` DROPS AN EMPTY `worked`, so '' is the shape that leaves the card looking as it
+   *  `AspectCard` DROPS AN EMPTY `worked`, so '' is the shape that leaves the card looking as it
    * did before any of this existed. A builder that returned a half-formula instead would put a
    * `n/a` or an `undefined` inside a typeset expression, which reads as a rendering fault.
    */
@@ -144,7 +144,7 @@ describe('a missing operand collapses the line rather than guessing', () => {
     expect(workedForwardFcf(17000, null, 15368.8)).toBe('');
     expect(workedGrowthCapex(-1631.2, null, 605.3)).toBe('');
     expect(workedCashFlowValued(null, 202.3, 605.3, 11430.3)).toBe('');
-    // ⚠ AND WITH NEITHER CORRECTION AVAILABLE — `F = F` is not arithmetic worth typesetting.
+    //  And with neither correction available — `F = F` is not arithmetic worth typesetting.
     expect(workedCashFlowValued(11027.3, null, null, 11027.3)).toBe('');
     // …but ONE of them is enough, and the symbolic half then carries only that term.
     expect(workedCashFlowValued(11027.3, 202.3, null, 10825)).toContain('F - S');
@@ -156,13 +156,13 @@ describe('a missing operand collapses the line rather than guessing', () => {
     expect(workedImpliedPrice(null, BRIDGE, 10, 375.42)).toBe('');
   });
 
-  it('⚠ and refuses a non-positive cash flow — there is no growth rate that works', () => {
+  it(' and refuses a non-positive cash flow — there is no growth rate that works', () => {
     expect(workedImpliedGrowth({
       fcf: -50, rate: 0.098, perpetuityGrowth: 0.03, years: 10, target: 220500, growth: 0.243,
     })).toBe('');
   });
 
-  it('⚠ and a bridge with no usable forward P/E, which is the live absence', () => {
+  it(' and a bridge with no usable forward P/E, which is the live absence', () => {
     // A company GuruFocus publishes no forward multiple for: the rerating leg has nothing to start
     // from, so the return and the implied price both have no worked line — not a zero rerating.
     const noPE: EgmBridge = {
@@ -176,8 +176,8 @@ describe('a missing operand collapses the line rather than guessing', () => {
 
 describe('the operands are the bridge\'s own', () => {
   /**
-   * ⚠⚠ THE ONE THING A WORKED EXAMPLE MUST NOT DO IS QUOTE DIFFERENT NUMBERS FROM THE ARITHMETIC
-   * IT PROVES. The panel holds `yieldUsed` as `number | null` and the model reads a null as 0, so
+   *  The one thing a worked example must not do is quote different numbers from the arithmetic
+   * It proves. The panel holds `yieldUsed` as `number | null` and the model reads a null as 0, so
    * rebuilding the operands from the inputs would print a blank where the model multiplied by 1.
    */
   it('reads growth, yield and both multiples off the legs', () => {
@@ -196,7 +196,7 @@ describe('the operands are the bridge\'s own', () => {
 
 describe('the hurdle block — a second model on the same inputs', () => {
   /**
-   * ⚠⚠ THESE TWO ARE THE ONLY EXPRESSIONS ON THE PANEL CONTAINING `h`, and they were unreachable
+   *  These two are the only expressions on the panel containing `h`, and they were unreachable
    * from the screen until 2026-09-01: `Fair value` had been demoted to a tooltip and the hurdle
    * input drove nothing a reader could find. Promoted back under their own caption, they are
    * rendered — so they have to parse like everything else here.
@@ -209,7 +209,7 @@ describe('the hurdle block — a second model on the same inputs', () => {
   it('the operands survive to the screen', () => {
     const seen = shown(workedMaxPE(20, 0.10, 0.003, 0.10, 10, 20.608));
     expect(seen).toContain('20.61');          // the answer
-    expect(seen).toContain('0.1000');         // ⚠ FOUR DECIMALS on the rates — see workedEgmReturn
+    expect(seen).toContain('0.1000');         //  FOUR DECIMALS on the rates — see workedEgmReturn
     expect(shown(workedFairValue(11.46, 20.608, 236.17))).toContain('236.17');
   });
 

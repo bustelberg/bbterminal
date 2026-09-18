@@ -12,7 +12,7 @@ the first ~2 companies of every 20 are ever seen.
 Measured on SP500 mid-backfill 2026-08-04: the probe returned **38** where the truth was **214**.
 Nothing errored and no cell was blank — the number was simply wrong, and consistently so.
 
-⚠ THE DAMAGE WAS NOT THE FIGURE ON SCREEN. `needs()` reads this to decide which GuruFocus feeds a
+ THE DAMAGE WAS NOT THE FIGURE ON SCREEN. `needs()` reads this to decide which GuruFocus feeds a
 company is missing, so ~90% of the companies that ALREADY had indicators were marked as needing
 them and the backfill re-fetched data it already held — one wasted API call each, against a
 metered monthly quota. A cheap wrong answer here costs money.
@@ -20,7 +20,7 @@ metered monthly quota. A cheap wrong answer here costs money.
 So these tests do not check coverage logic. They check that the reader keeps asking until the
 table is exhausted, against a fake that truncates the way the real one does.
 
-⚠ THE PAGER IS NOW THE FALLBACK — `_has` tries ONE `SELECT DISTINCT` COPY first, because the paged
+ THE PAGER IS NOW THE FALLBACK — `_has` tries ONE `SELECT DISTINCT` COPY first, because the paged
 path's cost scales with the SERIES LENGTH to answer a boolean (ACWI: at least 95 round trips per
 sentinel, before the pages an indicator series adds). The fixture below disables that fast path
 explicitly, so these tests keep testing the thing they were written for. `TestTheFastPathIsA
@@ -54,7 +54,7 @@ def _rows(companies: int, per_company: int, code: str) -> list[dict]:
 def _patched(monkeypatch):
     """`_has` reads the module-level `supabase`; hand it a truncating fake.
 
-    ⚠ AND THE COPY FAST PATH IS TURNED OFF, DELIBERATELY. `_has` asks Postgres directly first and
+     AND THE COPY FAST PATH IS TURNED OFF, DELIBERATELY. `_has` asks Postgres directly first and
     only pages when that returns None — so on a machine with `SUPABASE_DB_URL` set these tests
     would silently exercise a real database instead of the pager they exist to pin. Forcing None
     here is what makes them a test of the fallback rather than a test of the environment.
@@ -71,7 +71,7 @@ def _patched(monkeypatch):
 
 class TestTheProbePages:
     def test_a_long_series_does_not_hide_the_companies_behind_it(self, _patched):
-        # ⚠ THE REGRESSION, IN ITS EXACT SHAPE. 20 companies x 30 rows = 600 against a 50-row cap:
+        #  The regression, in its exact shape. 20 companies x 30 rows = 600 against a 50-row cap:
         # unpaged, the answer is the first ~2 companies. Paged, it is all twenty.
         code = "indicator_q_forward_pe_ratio"
         fb = _patched(_rows(companies=20, per_company=30, code=code))
@@ -103,7 +103,7 @@ class TestTheProbePages:
         assert fb._has([100, 101], "annual_pettm_estimate") == {100, 101}
 
     def test_an_empty_table_is_an_empty_answer_not_a_hang(self, _patched):
-        # ⚠ The loop breaks on an EMPTY page, never on `len(page) < _PAGE` — the latter is only
+        #  The loop breaks on an EMPTY page, never on `len(page) < _PAGE` — the latter is only
         # correct while the server's cap is >= the page size, which is the assumption that failed.
         fb = _patched([])
         assert fb._has([100, 101], "anything") == set()
@@ -122,7 +122,7 @@ class TestTheFastPathIsAFastPathOnly:
         assert fb._has([7, 8, 9], "annuals__Cashflow Statement__Free Cash Flow") == {7, 8}
 
     def test_an_empty_copy_answer_is_an_answer_not_a_fallback(self, monkeypatch):
-        # ⚠ `set()` MEANS "NONE OF THEM HAVE IT" AND `None` MEANS "ASK THE OTHER WAY". Collapsing
+        #  `set()` MEANS "NONE OF THEM HAVE IT" AND `None` MEANS "ASK THE OTHER WAY". Collapsing
         # the two is the bug this asserts against: if an empty COPY result fell through to the
         # pager, every genuinely-empty probe would pay the full paged read to learn the same thing.
         from routers import _fundamental_backfill as fb
@@ -136,7 +136,7 @@ class TestTheFastPathIsAFastPathOnly:
         assert calls == ["copy"], "the COPY path did not run"
 
     def test_a_refusal_falls_back_and_still_finds_them(self, monkeypatch):
-        # ⚠ A FALL-BACK IS A SLOW ANSWER, NEVER A WRONG ONE. `needs()` reads this to decide what to
+        #  A fall-back is a slow answer, never a wrong one. `needs()` reads this to decide what to
         # spend GuruFocus quota on, so an unconfigured or broken direct connection must degrade to
         # the paged read — not to "nobody has anything", which re-fetches the whole index.
         from routers import _fundamental_backfill as fb

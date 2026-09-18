@@ -6,13 +6,13 @@
  * normal "today's scan hasn't run yet" state, and anything TWO or more trading days back means the
  * scan has genuinely missed days and the numbers on screen are stale.
  *
- * ⚠ This exists because a cached AIRS value shown as if it were current is exactly how a stale
+ *  This exists because a cached AIRS value shown as if it were current is exactly how a stale
  * holding gets trusted: a 4-day-old AMD value read €114,587 / +142% while AIRS-live was €107,086 /
  * +126%, and nothing on the page said the value was from a past scan. The date alone is not enough —
  * a reader does not compute "is 2026-07-16 stale today?" in their head. The badge does it for them.
  *
- * ⚠⚠ BUT IT MEASURES **AIRS's VALUATION DATE**, NOT OUR COPY — AND ITS TOOLTIP USED TO NAME A
- * REMEDY THAT CANNOT WORK. It said `"Refresh from AIRS" pulls the current book`, which reads as
+ *  But it measures **AIRS's VALUATION DATE**, NOT OUR COPY — AND ITS TOOLTIP USED TO NAME A
+ * Remedy that cannot work. It said `"Refresh from AIRS" pulls the current book`, which reads as
  * "press the button and this clears". It does not: `_vermogen_most_recent` already walks back to
  * the most recent AVAILABLE valuation, so a refresh returns the same date whenever AIRS has
  * published nothing newer.
@@ -61,7 +61,7 @@ export function snapshotFreshness(asOf: string | null | undefined):
 /**
  * WHOSE lag an amber badge is describing — the source's, or ours.
  *
- * ⚠⚠ AN AMBER BADGE THAT NAMES NO ACTIONABLE CAUSE IS A DEAD END, and this one named the WRONG
+ *  An amber badge that names no actionable cause is a dead end, and this one named the WRONG
  * action for weeks. `asOf` is the day AIRS VALUED a book; `fetchedAt` is when we last READ it. Only
  * the second is ours. Measured 2026-08-17, straight after a full "Refresh all": 31 accounts
  * re-scanned, the newest valuation AIRS returned for any of them 2026-08-15, and twenty still dated
@@ -78,16 +78,16 @@ export function snapshotFreshness(asOf: string | null | undefined):
 /**
  * Was this read from the source TODAY?
  *
- * ⚠⚠ THE RULE FOR THE PROVENANCE BADGE (2026-08-19): a copy that is not from today is outdated,
+ *  The rule for the provenance badge (2026-08-19): a copy that is not from today is outdated,
  * and outdated is amber. Not "≥2 trading days", which is what it was — a figure read on Monday and
  * still on screen on Wednesday looked as current as one read an hour ago.
  *
- * ⚠ CALENDAR DAYS, NOT TRADING DAYS, and that is the literal rule rather than a softened one. It
+ *  Calendar days, not trading days, and that is the literal rule rather than a softened one. It
  * means a Saturday lights up everything read on Friday. That is not a false alarm: nothing HAS been
  * read today, the scheduled scans are Mon-Fri, and a manual Refresh does clear it — so the badge
  * stays actionable, which is the one property amber must keep.
  *
- * ⚠ COMPARED IN LOCAL TIME, on the date portion only. `fetched_at` is an ISO timestamp in UTC;
+ *  Compared in local time, on the date portion only. `fetched_at` is an ISO timestamp in UTC;
  * slicing to `YYYY-MM-DD` and comparing to the browser's own local date is what makes "today" mean
  * the reader's today. Parsing it as a Date and diffing hours would make a 23:30 CET fetch read as
  * yesterday's for the first hour of the morning.
@@ -108,7 +108,7 @@ export function lagOwner(
   if (snapshotFreshness(asOf)?.tone !== 'stale') return null;
   if (!fetchedAt) return null;
   const days = businessDaysBehind(fetchedAt.slice(0, 10));
-  // ⚠ TODAY ONLY, NOT `days <= 1`. The badge and this line must agree — see `provenanceFreshness`,
+  //  Today only, not `days <= 1`. The badge and this line must agree — see `provenanceFreshness`,
   // which is the one place the verdict is computed — and the badge now goes amber on anything not
   // read today. Leaving "yesterday" on the source side here would put a blue icon over a card
   // whose own text said our copy was a day behind.
@@ -122,7 +122,7 @@ export function lagOwner(
       + 'will pull whatever AIRS has now.' };
 }
 
-/** "as of <date>" with a freshness tone: faint when fresh/expected, amber ⚠ when genuinely stale
+/** "as of <date>" with a freshness tone: faint when fresh/expected, amber  when genuinely stale
  *  (≥2 trading days). The tooltip explains that AIRS values only change on a scan. */
 export function SnapshotAge({ asOf, prefix = 'as of' }: {
   asOf?: string | null; prefix?: string;
@@ -136,7 +136,7 @@ export function SnapshotAge({ asOf, prefix = 'as of' }: {
       title={`AIRS snapshot dated ${asOf} — ${f.label}. This is the newest valuation AIRS HAS for `
         + 'this book; the scan already walks back to the most recent available one, so refreshing '
         + 're-reads AIRS but cannot produce a valuation AIRS has not published.'}>
-      {f.tone === 'stale' && '⚠ '}{prefix} <span className="font-mono">{asOf}</span>
+      {f.tone === 'stale' && ' '}{prefix} <span className="font-mono">{asOf}</span>
       {f.tone !== 'fresh' && <> · {f.label}</>}
     </span>
   );

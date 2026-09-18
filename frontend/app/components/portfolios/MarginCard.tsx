@@ -27,18 +27,18 @@ import CardHeading from './CardHeading';
  * benchmark line is the index's same margin, directly comparable (both %). Click through to the
  * three base inputs per company.
  *
- * ⚠ THE MARGIN IS DERIVED HERE from the raw lines (`marginByYear`), so the line, the tiles and the
+ *  The margin is derived here from the raw lines (`marginByYear`), so the line, the tiles and the
  * drill-down are the same computation. Aggregation is a weight-weighted average of per-company
  * margins — currency-safe, unlike summing mixed-currency amounts.
  */
 
-/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+/**  `String.raw`, or every backslash in the expressions below is eaten before KaTeX
  *  sees it. */
 const R = String.raw;
 
 export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection = true, benchTarget, onRefreshed }: {
   holdingsTarget: Target; holdingsName?: string | null;
-  /** Tab-level toggle. ⚠ This card USED to subtract SBC unconditionally; it now follows
+  /** Tab-level toggle.  This card USED to subtract SBC unconditionally; it now follows
    *  the checkbox, and its title changes with it. */
   sbcCorrection?: boolean;
   /** The index to draw beside the book — same endpoint, same helper. See `benchSeries`. */
@@ -85,7 +85,7 @@ export default function MarginCard({ holdingsTarget, holdingsName, sbcCorrection
   const own = holdingsName ?? 'Margin';
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(marginByYr, benchByYr), [marginByYr, benchByYr]);

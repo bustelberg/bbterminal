@@ -54,7 +54,7 @@ ISIN = "US0378331005"          # Apple
 ISIN_EU = "AT0000730007"       # Andritz AG
 CUSIP = "037833100"            # Apple
 
-# THE TRAP THIS SCRIPT EXISTS TO CATCH
+# The trap this script exists to catch
 # ------------------------------------
 # `stock/{sym}/<anything>` NEVER 404s. An unrecognised sub-path returns HTTP 200
 # and a plausible-looking date-indexed series of zeros — the same 46 fiscal-year

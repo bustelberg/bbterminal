@@ -4,11 +4,11 @@
     uv run python scripts/compute_relative_momentum.py --universe ACWI --universe AEX --verbose
     uv run python scripts/compute_relative_momentum.py --universe ACWI --dry-run
 
-⚠ INTENDED CADENCE: once a day, AFTER the 05:00 UTC `price_update` tick — the ranks are only as
+ INTENDED CADENCE: once a day, AFTER the 05:00 UTC `price_update` tick — the ranks are only as
   current as the closes they are built from, and running before it ranks yesterday's prices under
   today's date. Not yet wired into `scheduler.py`; run it by hand until the shape is settled.
 
-⚠ `--as-of` DEFAULTS TO THE NEWEST CLOSE WE ACTUALLY HOLD, not to today. Today is a date we may
+ `--as-of` DEFAULTS TO THE NEWEST CLOSE WE ACTUALLY HOLD, not to today. Today is a date we may
   have no prices for (a weekend, a holiday, a pipeline that has not run), and asking for it would
   either drop every name on the staleness rule or rank an empty set. `latest_db_price_date()` is
   the same answer /backtest uses for its default end date.
@@ -35,7 +35,7 @@ def _run(universe: str, as_of: date, *, dry_run: bool, verbose: bool) -> int:
     prefix = f"[{universe}]"
 
     def step(msg: str) -> None:
-        # ⚠ Printed unconditionally, not behind --verbose. This takes seconds per universe and a
+        #  Printed unconditionally, not behind --verbose. This takes seconds per universe and a
         #   silent wait is indistinguishable from a hang; --verbose adds the library's own logging
         #   on top, it does not gate the fact that something is happening.
         print(f"{prefix} {msg}", flush=True)
@@ -43,7 +43,7 @@ def _run(universe: str, as_of: date, *, dry_run: bool, verbose: bool) -> int:
     try:
         result = relative.compute(universe, as_of, on_step=step)
     except Exception as e:
-        # ⚠ Named loudly and per universe, and the loop continues: one dead universe must not stop
+        #  Named loudly and per universe, and the loop continues: one dead universe must not stop
         #   the others from being refreshed.
         print(f"{prefix} FAILED: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         return 0

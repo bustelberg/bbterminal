@@ -1,6 +1,6 @@
 """Performance of the AIRS model portfolios, in EUR: YTD, since-inception, Sharpe, Sortino.
 
-⚠ READ THIS BEFORE TRUSTING `ytd_pct` — IT IS NOT ALWAYS A FULL YEAR.
+ READ THIS BEFORE TRUSTING `ytd_pct` — IT IS NOT ALWAYS A FULL YEAR.
     A model portfolio is a COMPOSITION, not an account — AIRS stores what it should hold, not
     a track record. We hold exactly one composition per portfolio (the current one), because
     AirSPMS's snapshot dropdown offers only 2-3 dates and they are not a monthly history:
@@ -28,7 +28,7 @@
     on a model defined EIGHT DAYS earlier — the best portfolio in the list, on weights it had
     never held. Its realized return over those eight days was +0.51%.)
 
-⚠ SHARPE AND SORTINO ARE MEASURED OVER THE SINCE-INCEPTION WINDOW, NEVER YTD.
+ SHARPE AND SORTINO ARE MEASURED OVER THE SINCE-INCEPTION WINDOW, NEVER YTD.
     They are ratios of a return to the volatility that produced it, so they are only as honest
     as the return underneath them — and a YTD-anchored one is a backtest for half the list. So
     the ratios ride the SAME window as `since_model_pct`: from the model's own effective date,
@@ -36,7 +36,7 @@
     (not zero, not a small number) for a model defined last week: `MIN_STAT_DAYS` daily returns
     are needed before a ratio is a statistic rather than noise with two decimals.
 
-⚠ WEIGHTS ARE THE MODEL'S OWN, RENORMALISED OVER WHAT WE CAN PRICE.
+ WEIGHTS ARE THE MODEL'S OWN, RENORMALISED OVER WHAT WE CAN PRICE.
     25 of 248 held ISINs have no price series (structured products, in-house funds — see
     `store_one`'s zero-bar guard). Renormalising assumes the unpriced behave like the priced,
     which is a real assumption, so `covered_pct` is returned and shown. Cash IS priced — at a
@@ -99,7 +99,7 @@ MIN_STAT_DAYS = 20
 # last close ON OR BEFORE it (`_at_or_before`), which may be days back over a holiday break, and
 # an inception date can itself fall on a weekend.
 #
-# ⚠ This window is a PERFORMANCE bound, never a correctness one — a series sparse enough to have
+#  This window is a PERFORMANCE bound, never a correctness one — a series sparse enough to have
 # no bar inside it still gets its opening bar, fetched directly by `_prepend_opening_bars`. It
 # was a correctness bound until 2026-07-14, and silently: iShares Euro HY Corp Bd is mapped to a
 # dead US OTC line (`ISHHF`, 54 bars in TEN years) whose last close before 1 Jan was 2025-11-03 —
@@ -134,7 +134,7 @@ def _executions(isins: list[str]) -> dict[str, dict]:
     IN-clause goes in the URL, hence the chunking); the chunked loop stays as the fallback.
 
     The `r["isin"] not in out` guard reads like a "first listing wins" tie-break that would make
-    this transport-order-dependent — it is not. ⚠ **`asset_execution.isin` carries a UNIQUE
+    this transport-order-dependent — it is not.  **`asset_execution.isin` carries a UNIQUE
     constraint** (`asset_execution_isin_key`; measured 16,613 rows / 16,613 distinct ISINs), so
     there is never a second row to lose a tie. Checked rather than assumed, because if a duplicate
     were possible the two transports could disagree about the winner and only under COPY.
@@ -167,7 +167,7 @@ def _closes_paged(analysis_ids: list[int], start: str, end: str,
             # wrong number off it. (I hit exactly this while probing coverage: it reported 102
             # priced holdings when the answer is 221.)
             #
-            # ⚠ THE SORT KEY MUST BE UNIQUE OR THE PAGING SILENTLY LOSES ROWS. `target_date`
+            #  The sort key must be unique or the paging silently loses rows. `target_date`
             # alone is not: ~220 holdings share every trading day, so almost every 1,000-row
             # page boundary falls INSIDE a date. Postgres makes no promise about the order of
             # tied rows between two separate LIMIT/OFFSET queries, so a row can be served on
@@ -216,14 +216,14 @@ def _closes(analysis_ids: list[int], start: str, end: str) -> dict[int, list[tup
     out: dict[int, list[tuple[str, float]]] = {}
     if df.empty:
         return out
-    # ⚠ `.tolist()` FIRST — DO NOT ZIP THE SERIES DIRECTLY. Iterating a pandas Series yields one
+    #  `.tolist()` FIRST — DO NOT ZIP THE SERIES DIRECTLY. Iterating a pandas Series yields one
     # boxed scalar per element, and these columns are ARROW-backed, so every element costs an
     # ArrowExtensionArray.__iter__ step. Profiled 2026-08-11 on one Analyse call: **102,348 calls
     # to that iterator, 0.26s of self time** — the largest pure-Python cost in the endpoint, spent
     # entirely on boxing. `.tolist()` does the whole column in one C-level pass and hands back
     # native Python objects, after which this is an ordinary zip over lists.
     #
-    # ⚠ NULLS ARRIVE AS `None` FROM AN ARROW COLUMN AND AS `nan` FROM A NUMPY ONE, and `pd.notna`
+    #  Nulls arrive as `None` FROM AN ARROW COLUMN AND AS `nan` FROM A NUMPY ONE, and `pd.notna`
     # is gone now, so BOTH have to be handled here: `c is not None` catches Arrow, `c == c`
     # catches NaN. Dropping either check silently turns a missing close into a real price of
     # `nan`, which then propagates through every return computed off this series.
@@ -243,7 +243,7 @@ def _fx(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float
     applies the divisor. Asking `fx_rate` for "GBp" returns nothing at all: pence is a quoting
     convention, not a currency, and 343 of our rows are quoted in it.
 
-    ⚠ THIS READ MUST PAGE, AND IT IS THE READ WHERE TRUNCATION IS INVISIBLE.
+     THIS READ MUST PAGE, AND IT IS THE READ WHERE TRUNCATION IS INVISIBLE.
         PostgREST caps a response and truncates SILENTLY — at 1,000 rows on Supabase cloud and
         10,000 locally. This window spans every currency our holdings quote in, back to the
         oldest bar in the price load: measured 2026-08-03, that is 19,037 rows over 27
@@ -272,7 +272,7 @@ def _fx(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float
         assumption that just failed. Advancing by `len(rows)` and stopping on empty is correct
         under any cap, at the cost of one extra empty request per chunk.
 
-    ⚠ THE BODY MOVED TO `common/fx_load.py` (2026-08-11) AND SO DID ITS TWIN'S. Every rule in the
+     THE BODY MOVED TO `common/fx_load.py` (2026-08-11) AND SO DID ITS TWIN'S. Every rule in the
     docstring above is a correctness rule with an incident behind it, and it had to be right in
     TWO places at once — here and in `_benchmark_index._fx_to_eur`, which each docstring already
     called the other's twin. They had drifted in exactly the way that arrangement invites: the
@@ -318,7 +318,7 @@ def _prepend_opening_bars(closes: dict[int, list[tuple[str, float]]],
     in place; the bar is real history, so a series it is added to is simply more complete for every
     other anchor too.
 
-    ⚠⚠ "NORMALLY NONE" WAS WRONG, AND IT WAS THE SLOWEST THING ON /management-dashboard. Measured
+     "NORMALLY NONE" WAS WRONG, AND IT WAS THE SLOWEST THING ON /management-dashboard. Measured
     2026-08-11 on the portfolios grid: **71 series lacked their opening bar**, each fetched by its
     own `analysis_id=eq.N … limit 1` round trip. Locally that is 483ms of a 6.4s endpoint; in
     production, where a PostgREST call is a ~60ms network hop rather than ~5ms, it is **~4.3
@@ -331,7 +331,7 @@ def _prepend_opening_bars(closes: dict[int, list[tuple[str, float]]],
     if not missing:
         return
 
-    # ⚠ ONE ANCHOR PER CALL IS WHAT MAKES THIS COLLAPSIBLE. Every row wants "the last close on or
+    #  One anchor per call is what makes this collapsible. Every row wants "the last close on or
     # before the SAME date", so `DISTINCT ON (analysis_id) … ORDER BY analysis_id, target_date DESC`
     # answers all of them in one pass — the identical result the loop produced, in one round trip.
     from common.pg import _run_copy  # noqa: PLC0415
@@ -348,7 +348,7 @@ def _prepend_opening_bars(closes: dict[int, list[tuple[str, float]]],
                 closes.setdefault(int(aid_s), []).insert(0, (d, float(c)))
         return
 
-    # ⚠ THE PER-SERIES FALLBACK STAYS, because COPY is optional (`SUPABASE_DB_URL` absent, psycopg
+    #  The per-series fallback stays, because COPY is optional (`SUPABASE_DB_URL` absent, psycopg
     # missing, a connection fault) and this bar is a CORRECTNESS input, not an optimisation: a
     # holding without it reads as unpriceable and silently leaves the basket.
     for aid in missing:
@@ -529,7 +529,7 @@ def _lookthrough_series(
     from the coverage denominator. This looks THROUGH the certificate to the model and prices the
     basket instead.
 
-    ⚠ ANCHOR-INDEPENDENT, ON PURPOSE. It returns an absolute level (a buy-and-hold return index
+     ANCHOR-INDEPENDENT, ON PURPOSE. It returns an absolute level (a buy-and-hold return index
     of the model's CURRENT weights, based at 100 on the date the whole basket is first priceable),
     NOT a curve normalised to one anchor. That is what lets the SAME series price the certificate
     at the parent's YTD anchor AND at its inception: `level(t) / level(anchor)` is the model's
@@ -642,17 +642,17 @@ def compute_portfolio_performance(year: int | None = None, *,
     jan1 = f"{year}-01-01"
     today = date.today().isoformat()
 
-    # ⚠ THROUGH `_airs_ref`, NOT A QUERY OF ITS OWN — the module's whole point. A `select` of four
+    #  THROUGH `_airs_ref`, NOT A QUERY OF ITS OWN — the module's whole point. A `select` of four
     # columns with a `not.is.null` filter is a DIFFERENT request from the canonical one, so the
     # per-request memo cannot collapse it and the Analyse modal paid for a second read of a 102-row
     # table. The filter moves to Python, which is the rule that module states.
     ports = [p for p in ref_models() if p.get("positions_datum")]
-    # ⚠ ONE PORTFOLIO'S NUMBERS SHOULD NOT COST FIFTY-SIX PORTFOLIOS' PRICES. The Analyse modal
+    #  One portfolio's numbers should not cost fifty-six portfolios' prices. The Analyse modal
     # reads exactly one row out of this function's output, and paid for the whole fleet to get it
     # — every model's holdings resolved, priced and FX-converted, then 55/56 of that thrown away.
     # Measured: 5.56s to open the modal.
     #
-    # ⚠ AND IT IS THE SAME ANSWER, NOT AN APPROXIMATION OF IT. The only fleet-wide inputs are the
+    #  And it is the same answer, not an approximation of it. The only fleet-wide inputs are the
     # price and FX WINDOWS, and both are lower bounds: `lookback` reaches back to the earliest
     # inception, `fx_from` to the oldest bar loaded. Narrowing them to one portfolio's own history
     # cannot change ITS marks — `_prepend_opening_bars` fetches each anchor's opening bar
@@ -667,7 +667,7 @@ def compute_portfolio_performance(year: int | None = None, *,
     if not ports:
         return []
 
-    # ⚠⚠ AND THIS ONE WAS A LATENT TRUNCATION, NOT ONLY A DUPLICATE REQUEST. It read the WHOLE
+    #  And this one was a latent truncation, not only a duplicate request. It read the WHOLE
     # `airs_model_portfolio_position` table with no `.range()` — 1,001 rows against PostgREST's
     # **1,000-row cap on Supabase cloud** (10,000 locally). So it came back complete on a laptop
     # and one row short in production, silently, with no ORDER BY to even make WHICH row
@@ -754,7 +754,7 @@ def compute_portfolio_performance(year: int | None = None, *,
         # realized rather than backtested.
         eff = p["positions_datum"]
 
-        # ⚠ THE YTD ANCHOR IS max(1 Jan, INCEPTION) — NOT 1 January. See `ytd_anchor_for`, which
+        #  The YTD anchor is max(1 Jan, INCEPTION) — NOT 1 January. See `ytd_anchor_for`, which
         # the per-holding marks behind this row share, so the entry prices shown when a portfolio
         # is expanded are the entry prices this number was actually computed from.
         #
@@ -911,7 +911,7 @@ def compute_portfolio_performance(year: int | None = None, *,
         scanned = p.get("positions_scanned_at")
 
         if tracing:
-            # THE ARITHMETIC, not a re-derivation of it. `_index`'s end value is
+            # The arithmetic, not a re-derivation of it. `_index`'s end value is
             # Σ wᵢ·(Pᵢ(T)/Pᵢ(anchor)) / Σwᵢ, so each priced leg's contribution in percentage
             # points is its own EUR return scaled by the weight it holds AFTER renormalisation
             # over what could be priced. `reconciles` asserts that: three columns that don't sum
@@ -1071,7 +1071,7 @@ def compute_holding_marks(isins: list[str], anchor: str,
     EUR series the curve is built from (`_split_adjust` → per-date FX), and its `return_pct` is
     the identical quantity `_index` weights into the portfolio figure.
 
-    ⚠ THE PRICES ARE IN EUR, and that is not cosmetic. The return is an EUR return (it carries
+     THE PRICES ARE IN EUR, and that is not cosmetic. The return is an EUR return (it carries
     the FX leg), so printing the NATIVE closes beside it would show a reader two numbers whose
     ratio is not the third: Main Street Capital's local close can rise while the euro figure
     falls, purely on USD/EUR. The native close and the currency ride along too — but as the
@@ -1106,7 +1106,7 @@ def compute_holding_marks(isins: list[str], anchor: str,
     ex = _executions(sorted(set(isins) | member_isins))
     ids = sorted({e["analysis_id"] for e in ex.values()})
     closes = _closes(ids, lookback, today)
-    # THE SAME opening-bar guarantee the portfolio figure gets. Without it this loader's shorter
+    # The same opening-bar guarantee the portfolio figure gets. Without it this loader's shorter
     # window silently sees less history than the one it is supposed to be itemising, and a
     # sparsely-traded holding shows a blank row underneath a return it is part of.
     _prepend_opening_bars(closes, ids, anchor)

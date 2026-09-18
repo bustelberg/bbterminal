@@ -4,31 +4,31 @@ import { useLang, type Lang } from '../../../lib/i18n';
 import { v } from '../../../lib/dynamicValue';
 
 /**
- * THE DEEP VALUATION TAB, IN BOTH LANGUAGES — the EGM panel, the Reverse DCF, and the two
+ * The deep valuation tab, in both languages — the EGM panel, the Reverse DCF, and the two
  * raw-data modals behind them.
  *
- * ⚠⚠ ENGLISH IS THE SOURCE AND A MISSING DUTCH STRING IS A COMPILE ERROR. `nl` is typed as
+ *  English is the source and a missing dutch string is a compile error. `nl` is typed as
  * `DeepValuationCopy`, so a key added to `en` and forgotten here fails `tsc` rather than falling
  * back — a half-translated panel renders as a rendering bug, not as an unfinished translation, and
  * nobody reports it as the latter. Same rule `managementCopy` and `riskCopy` set.
  *
- * ⚠⚠ THE VOCABULARY IS A DUTCH WEALTH MANAGER'S, NOT A DICTIONARY'S. `Reverse DCF`, `WACC`, `P/E`,
+ *  The vocabulary is a dutch wealth manager's, not a dictionary's. `Reverse DCF`, `WACC`, `P/E`,
  * `CAGR`, `TTM`, `EPS` and `FCF` stay — they are what is said out loud in this business and a
  * translated `omgekeerde contantewaardeberekening` would be more Dutch and less readable. Where a
  * real Dutch word exists it IS used: rendement, groeivoet, disconteringsvoet, eeuwigdurende groei,
  * afschrijvingen, uitkeringsrendement, koers, aandelen.
  *
- * ⚠⚠ `P/E` WAS `K/W` IN THIS FILE AND WAS PUT BACK (2026-09-07, on request: "Forward K/W should
+ *  `P/E` WAS `K/W` IN THIS FILE AND WAS PUT BACK (2026-09-07, on request: "Forward K/W should
  * still be P/E in dutch"). `koers/winst` is a real Dutch term and the note above already said P/E
  * stays — the Dutch block simply did not follow its own rule, in 17 places. It is also the rule the
  * neighbouring tab keeps: `quickValuationCopy` renders `P/E` and `P/FCF` in both languages, and one
  * modal calling the same ratio two things depending on the tab is worse than either name.
  *
- * ⚠ NUMBERS AND CURRENCY CODES ARE OPERANDS, NEVER TRANSLATED. Every function here takes its
+ *  Numbers and currency codes are operands, never translated. Every function here takes its
  * figures pre-formatted from the call site: a `toFixed` on this side would be a second rounding
  * convention, and the two languages would print different numbers for one model.
  *
- * ⚠⚠ THE PANEL SHOWS TWO MODELS, AND THE COPY HAS TO KEEP THEM APART. Everything above
+ *  The panel shows two models, and the copy has to keep them apart. Everything above
  * `atYourHurdle` answers "at today's price, what do I earn?" — growth, yield and the rerating,
  * all facts about the company. The two rows under that caption answer "what may I pay to earn my
  * hurdle?", which is a fact about the READER. They were one undifferentiated list once, read as
@@ -36,7 +36,7 @@ import { v } from '../../../lib/dynamicValue';
  * `Hurdle rate` input driving nothing anybody could see. The caption is what lets both be visible
  * without competing, so a copy edit that drops it re-opens the original bug.
  *
- * ⚠ THE ⓘ CARDS ARE IN SCOPE. They carry the definition, the convention chosen and the caveat that
+ *  THE ⓘ CARDS ARE IN SCOPE. They carry the definition, the convention chosen and the caveat that
  * stops a figure being misread — a Dutch reader who must switch languages to learn that growth
  * capex is ADDED back has been given the digits and not the number.
  */
@@ -50,7 +50,7 @@ export type DeepValuationCopy = {
   /**
    * Strings BOTH panels use.
    *
-   * ⚠ A SHARED SECTION, NOT A BORROW ACROSS TWO. The nesting exists so a call site cannot reach
+   *  A shared section, not a borrow across two. The nesting exists so a call site cannot reach
    * into another panel's copy by accident, and `t.egm.guruFocus` read from inside the Reverse DCF
    * was exactly that — it happened to be the right sentence, which is what makes the habit hard to
    * see. One vendor sentence used by two panels belongs to neither of them.
@@ -71,7 +71,7 @@ export type DeepValuationCopy = {
     /**
      * The hurdle block — a SECOND MODEL, run on the same inputs and answering the other question.
      *
-     * ⚠⚠ THE CAPTION IS NOT DECORATION, IT IS WHAT MAKES THE BLOCK LEGIBLE. `Fair value` used to
+     *  The caption is not decoration, it is what makes the block legible. `Fair value` used to
      * be a bare row beside the expected return and was demoted to a tooltip for exactly that
      * reason: two verdicts in one undifferentiated list read as rivals, and a reader cannot tell
      * which question each is answering. Under a caption that names the question they stop
@@ -88,7 +88,7 @@ export type DeepValuationCopy = {
       expectedReturn: Card; priceTarget: Card; priceMove: Card;
       maxPE: Card; fairValue: Card; fairValueGap: Card;
     };
-    /** ⚠ A FAIR VALUE WITH NO COMPARISON INVITES THE SUBTRACTION AND ANSWERS NOTHING. The upside
+    /**  A FAIR VALUE WITH NO COMPARISON INVITES THE SUBTRACTION AND ANSWERS NOTHING. The upside
      *  was computed and thrown away for months; it belongs in this card. */
     fairValueVsPrice: (pct: string) => string;
     fairValueNoEps: string;
@@ -116,7 +116,7 @@ export type DeepValuationCopy = {
     storedCloseBack: string; storedCloseInUse: string; impliedPEHint: string;
     dividendBack: string; dividendInUse: string;
     /** The ⓘ over the price row, which has SIX states because an overridden price has no
-     *  provenance at all — see the ⚠⚠ at the call site. */
+     *  provenance at all — see the  at the call site. */
     priceTyped: string; priceClosingOf: (name: string) => string;
     priceWhereTyped: string; loading: string;
     yahooFinance: (symbol: string) => string;
@@ -128,7 +128,7 @@ export type DeepValuationCopy = {
     reReadOverridden: string; reReadStale: string;
     /** The forward P/E's own Refresh — a different vendor and transport from the share price's. */
     reReadForwardPE: string; reReadNoCompany: string;
-    /** ⚠ THE OVERRIDE STATES. A typed forward P/E HIDES whatever the refresh fetches, exactly as a
+    /**  THE OVERRIDE STATES. A typed forward P/E HIDES whatever the refresh fetches, exactly as a
      *  typed share price does — the button must say so, and the ⓘ must stop dating a vendor
      *  observation the box is no longer showing. */
     reReadForwardPEOverridden: string;
@@ -136,7 +136,7 @@ export type DeepValuationCopy = {
     forwardPEHowTyped: (vendor: string, date: string) => string;
     forwardPEDerivedWhere: string;
     forwardPEAsOf: (date: string) => string;
-    /** What the toast reports. ⚠ THE DATE, NOT "done" — see `refreshForwardPE`. */
+    /** What the toast reports.  THE DATE, NOT "done" — see `refreshForwardPE`. */
     forwardPEMoved: (date: string) => string;
     forwardPEUnchanged: (date: string) => string;
     forwardPENone: string;
@@ -157,7 +157,7 @@ export type DeepValuationCopy = {
       n: (years: string) => string;
       p0: string; p0Row: string; pn: (years: string) => string;
       rerating: string;
-      /** ⚠ THE ONLY SYMBOL ON THIS PANEL THAT DESCRIBES THE READER, not the company. */
+      /**  THE ONLY SYMBOL ON THIS PANEL THAT DESCRIBES THE READER, not the company. */
       h: string; epsFY1: string; maxPE: string;
     };
   };
@@ -185,7 +185,7 @@ export type DeepValuationCopy = {
     base: string; normalise: string;
     baseTitle: string; normaliseTitle: string;
     nextFY: string; nextFYNone: string;
-    /** ⚠ APPENDED TO EVERY CASH-FLOW CARD — one sentence, one place, so the four lines cannot
+    /**  APPENDED TO EVERY CASH-FLOW CARD — one sentence, one place, so the four lines cannot
      *  disagree about which window they share. */
     ttmNote: string; normOff: string; notLikeForLike: string;
     /** The two headline field labels; the currency suffix is added at the call site. */
@@ -200,7 +200,7 @@ export type DeepValuationCopy = {
     /** The two corrections, each with a "not reported" branch — an absent line is not a zero. */
     sbcHow: string; sbcAbsent: string;
     capexHow: string; daHow: string;
-    /** ⚠ TWO PARAGRAPHS, TWO KEYS: the first says WHY it is added back, the second what the
+    /**  TWO PARAGRAPHS, TWO KEYS: the first says WHY it is added back, the second what the
      *  proxy is worth. Joined at the call site so the blank line between them stays one rule. */
     growthCapexAdded: string; growthCapexHow: string; growthCapexAbsent: string;
     /** The valued figure. */
@@ -405,7 +405,7 @@ const en: DeepValuationCopy = {
     legend: {
       g: 'assumed EPS growth, per year',
       y: 'assumed dividend yield, applied every year',
-      // ⚠ BOTH SAY "forward", AND THAT IS THE POINT. They sit in one legend, either side of a
+      //  Both say "forward", AND THAT IS THE POINT. They sit in one legend, either side of a
       // ratio; one naming the convention and the other not reads as two different kinds of
       // multiple, which is the misreading the row labels were just changed to remove.
       peExit: 'the forward multiple you assume on sale',
@@ -497,7 +497,7 @@ const en: DeepValuationCopy = {
     fcfWhatForward: (fy) => `Consensus free cash flow for ${fy}.`,
     fcfHowDirect: 'Analyst forecast for the next fiscal year.',
     fcfHowDerived: 'Consensus operating cash flow less the latest reported capex.',
-    // ⚠⚠ THE OTHER REASON THE VENDOR'S FIGURE IS NOT USED, AND IT WAS PRINTING THE ONE ABOVE.
+    //  The other reason the vendor's figure is not used, and it was printing the one above.
     // A stored consensus FCF nets a FORWARD capex, so its add-back needs a FORWARD D&A
     // (`EBITDA_est − EBIT_est`). Without those two estimates the correction would fall back to the
     // trailing lines and the two halves would sit on different bases — Meta FY2026 lands 10.4bn
@@ -586,7 +586,7 @@ const en: DeepValuationCopy = {
     title: 'Assumptions — the data behind the defaults',
     growthSection: 'Growth rate — “analysts”',
     growthNote: 'The growth the consensus EPS estimates imply, first future period to last. '
-      + '⚠ Not a published long-term rate — GuruFocus files that as a single number with no date, '
+      + ' Not a published long-term rate — GuruFocus files that as a single number with no date, '
       + 'so it never reaches our database.',
     noEstimates: 'No consensus EPS estimates ingested.',
     colFiscalPeriod: 'Fiscal period', colEpsEstimate: 'EPS estimate',
@@ -605,7 +605,7 @@ const en: DeepValuationCopy = {
     excludedTitle: 'Excluded — no positive EPS, so no meaningful multiple.',
     medianOfUsable: (n) => `Median of ${n} usable year(s)`,
     yieldSection: 'Dividend yield — “reported”',
-    yieldNote: '⚠ Not an average — the single most recent observation, picked by date across the '
+    yieldNote: ' Not an average — the single most recent observation, picked by date across the '
       + 'annual and quarterly rows (both carry the same annualised measure). It is trailing '
       + 'dividends over the price at that period end, so it ages as the price moves.',
     noYieldLine: 'No dividend-yield line ingested — the model assumes a non-payer at 0%.',
@@ -977,7 +977,7 @@ const nl: DeepValuationCopy = {
     title: 'Aannames — de gegevens achter de standaardwaarden',
     growthSection: 'Groeivoet — “analisten”',
     growthNote: 'De groei die de consensus-EPS-ramingen impliceren, van de eerste toekomstige '
-      + 'periode tot de laatste. ⚠ Geen gepubliceerde langetermijnvoet — GuruFocus legt die vast '
+      + 'periode tot de laatste.  Geen gepubliceerde langetermijnvoet — GuruFocus legt die vast '
       + 'als één getal zonder datum, waardoor het onze database nooit bereikt.',
     noEstimates: 'Geen consensus-EPS-ramingen ingelezen.',
     colFiscalPeriod: 'Boekperiode', colEpsEstimate: 'EPS-raming',
@@ -997,7 +997,7 @@ const nl: DeepValuationCopy = {
     excludedTitle: 'Uitgesloten — geen positieve EPS, dus geen betekenisvolle multiple.',
     medianOfUsable: (n) => `Mediaan van ${n} bruikbaar jaar/jaren`,
     yieldSection: 'Dividendrendement — “gerapporteerd”',
-    yieldNote: '⚠ Geen gemiddelde — de enkele meest recente waarneming, gekozen op datum over de '
+    yieldNote: ' Geen gemiddelde — de enkele meest recente waarneming, gekozen op datum over de '
       + 'jaar- en kwartaalregels heen (beide dragen dezelfde geannualiseerde maatstaf). Het is het '
       + 'dividend over de afgelopen twaalf maanden gedeeld door de koers aan het einde van die '
       + 'periode, dus het veroudert naarmate de koers beweegt.',
@@ -1015,7 +1015,7 @@ export const DEEP_VALUATION_COPY: Record<Lang, DeepValuationCopy> = { en, nl };
 /**
  * The copy for the reader's current language.
  *
- * ⚠ A HOOK, NOT A `t('some.key')` LOOKUP — the key path is checked by the compiler this way, and a
+ *  A hook, not a `t('some.key')` LOOKUP — the key path is checked by the compiler this way, and a
  * string key is checked by nobody and fails at runtime as an empty cell. It is also why the tree is
  * nested: `t.dcf.rowCapex` reads as the surface it belongs to, so a call site cannot borrow another
  * panel's string by accident.

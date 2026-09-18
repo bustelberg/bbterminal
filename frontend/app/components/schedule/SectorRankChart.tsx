@@ -11,8 +11,8 @@ import { maxRank, sectorRankSeries, type RankDay } from './sectorRankSeries';
 /**
  * Each sector's RANK over the window — one small panel per sector.
  *
- * ⚠ SMALL MULTIPLES, NOT ELEVEN LINES ON ONE AXIS, AND THAT IS A MEASURED DECISION RATHER THAN A
- * STYLE ONE. A bump chart is the obvious form for rank-over-time, and it needs one distinguishable
+ *  Small multiples, not eleven lines on one axis, and that is a measured decision rather than a
+ * Style one. A bump chart is the obvious form for rank-over-time, and it needs one distinguishable
  * colour per series. This palette does not have eleven: `dataviz/scripts/validate_palette.js` over
  * all pairs on the light surface FAILS the NORMAL-vision floor for Services vs Energy (dE 3.5,
  * floor 15) and the CVD floor for Industrials vs Technology (dE 0.9 deutan). Overlaying them would
@@ -20,11 +20,11 @@ import { maxRank, sectorRankSeries, type RankDay } from './sectorRankSeries';
  * told apart even by a reader with full colour vision. One series per panel means colour carries
  * nothing load-bearing — the panel heading names the sector.
  *
- * ⚠ ONE SHARED Y-DOMAIN ACROSS PANELS. Per-panel autoscaling would draw a sector that swung from
+ *  One shared y-domain across panels. Per-panel autoscaling would draw a sector that swung from
  * 1st to 11th and one that wobbled between 3rd and 4th with identical amplitude — the classic way
  * small multiples lie. `maxRank` is computed over every panel and applied to all of them.
  *
- * ⚠ Y IS INVERTED: rank 1 at the TOP. A rank axis running 1-at-the-bottom reads as "up is better"
+ *  Y is inverted: rank 1 at the TOP. A rank axis running 1-at-the-bottom reads as "up is better"
  * while showing the opposite.
  */
 export default function SectorRankChart({ days, topN, windowLabel }: {
@@ -101,7 +101,7 @@ export default function SectorRankChart({ days, topN, windowLabel }: {
                   <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle}
                     labelStyle={{ color: chartTheme.axisLabel }}
                     formatter={(v) => [typeof v === 'number' ? `#${v}` : '—', 'Rank']} />
-                  {/* ⚠ THE CEILING — the rank a sector has to stay AT OR ABOVE to be bought.
+                  {/*  THE CEILING — the rank a sector has to stay AT OR ABOVE to be bought.
                       It shipped on `chartTheme.zeroLine` (#d7dce2), which at a 92px panel is
                       invisible: the single most important line on the chart read as a grid
                       artefact. It is now ink-toned and labelled ON each panel rather than
@@ -122,7 +122,7 @@ export default function SectorRankChart({ days, topN, windowLabel }: {
                         }} />
                     </>
                   )}
-                  {/* ⚠ A DROP-OUT IS SHADED, A DATA HOLE IS NOT — the two look identical as a bare
+                  {/*  A DROP-OUT IS SHADED, A DATA HOLE IS NOT — the two look identical as a bare
                       break in the line, and that ambiguity got reported as a bug twice. Shaded =
                       the day WAS ranked and this sector was not in the pool: with a
                       `min_price_score` floor and no backfill, a name below it is dropped outright,
@@ -134,7 +134,7 @@ export default function SectorRankChart({ days, topN, windowLabel }: {
                     <ReferenceArea key={r.from} x1={r.from} x2={r.to}
                       fill={chartTheme.axisTick} fillOpacity={0.16} ifOverflow="extendDomain" />
                   ))}
-                  {/* ⚠ `connectNulls={false}`: a day with no rank is a BREAK in the line.
+                  {/*  `connectNulls={false}`: a day with no rank is a BREAK in the line.
                       Joining across it would draw a confident path through a period with none. */}
                   <Line dataKey="rank" type="monotone" stroke={color} strokeWidth={1.75}
                     dot={false} connectNulls={false} isAnimationActive={false} />

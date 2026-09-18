@@ -1,6 +1,6 @@
 """No test may open a real Supabase connection.
 
-⚠ THIS EXISTS BECAUSE THE SUITE WAS QUIETLY QUERYING PRODUCTION. Fourteen tests in
+ THIS EXISTS BECAUSE THE SUITE WAS QUIETLY QUERYING PRODUCTION. Fourteen tests in
 `test_lookthrough.py` called `compute_attribution(2089, ...)` — a hardcoded PROD portfolio id —
 with no fake, and nine more in `test_fundamental_coverage.py` / `test_airs_portfolio_analysis.py`
 patched one module's `supabase` handle while the code had grown a hop through another module that
@@ -18,7 +18,7 @@ The guard inverts that: the failure now lands on the machine of whoever wrote th
 first run, with a message naming the fix. It replaces an environment difference — which nobody can
 see — with an assertion, which everybody can.
 
-⚠ IT PATCHES `deps.create_client`, NOT THE ENV VARS. Emptying `SUPABASE_URL` would not work:
+ IT PATCHES `deps.create_client`, NOT THE ENV VARS. Emptying `SUPABASE_URL` would not work:
 `deps` re-reads the dotenv files at import and puts them straight back. `create_client` is the one
 place `_LazySupabase._build()` goes through, so it is the only chokepoint that cannot be bypassed
 by a module reaching for its own handle.
@@ -36,7 +36,7 @@ import pytest
 def pytest_collection_modifyitems(items):
     """Give every unmarked test the `fast` tier.
 
-    ⚠ THE DEFAULT IS `fast`, NOT "UNTIERED", AND THAT DIRECTION IS THE WHOLE POINT. Requiring an
+     THE DEFAULT IS `fast`, NOT "UNTIERED", AND THAT DIRECTION IS THE WHOLE POINT. Requiring an
     explicit `@pytest.mark.fast` on 2,100 tests would mean a new test written without one is
     silently absent from the loop that is supposed to be everybody's default — a test that never
     runs, which is worse than no test because it reads as coverage. Inverting it makes the failure
@@ -71,12 +71,12 @@ def _no_live_supabase(monkeypatch, request):
 
 @pytest.fixture(autouse=True)
 def _no_live_copy(monkeypatch):
-    """⚠⚠ THE COPY TRANSPORT IS A SECOND DOOR TO THE SAME DATABASE, AND THE GUARD ABOVE CANNOT SEE
+    """ THE COPY TRANSPORT IS A SECOND DOOR TO THE SAME DATABASE, AND THE GUARD ABOVE CANNOT SEE
     IT. `common.pg._run_copy` opens its own `psycopg.connect(SUPABASE_DB_URL)` — it never goes
     through `deps.create_client`, so patching that chokepoint fences PostgREST and leaves direct
     Postgres wide open.
 
-    ⚠ AND IT IS QUIETER THAN THE HOLE IT REOPENED. `_run_copy` catches `Exception` by design (any
+     AND IT IS QUIETER THAN THE HOLE IT REOPENED. `_run_copy` catches `Exception` by design (any
     failure → fall back, never raise), so a test reaching the database this way cannot even fail
     loudly; it just returns whatever that database happens to hold. Measured 2026-08-10: three
     readers grew a COPY fast path in front of a PostgREST read the tests fake, and the fast path
@@ -92,7 +92,7 @@ def _no_live_copy(monkeypatch):
     keeps those two answers consistent — code that branches on `copy_path_enabled()` must not be
     told the path is available and then handed None.
 
-    ⚠ THIS IS NOT "COPY IS UNTESTED". A test that wants the COPY path monkeypatches `_run_copy` (or
+     THIS IS NOT "COPY IS UNTESTED". A test that wants the COPY path monkeypatches `_run_copy` (or
     `_db_url`) with its own fixture bytes; that patch is applied after this autouse one and wins.
     What is refused is the *unconfigured, accidental* use — reaching a real server.
     """

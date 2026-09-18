@@ -1,13 +1,13 @@
 """Remove GuruFocus rows for a company whose vendor data our own price history contradicts.
 
-⚠⚠ THE MOTIVATING CASE. Diploma plc trades on the LSE, which our GuruFocus subscription does not
+ THE MOTIVATING CASE. Diploma plc trades on the LSE, which our GuruFocus subscription does not
 cover. GuruFocus did not refuse the request — it returned a complete statements payload whose price
 column is **0 from 1998 to 2013** and then **frozen at 11.1 from 2016-09 to 2023-03** while the real
 share price went £8.79 to £28.10, before stepping 3.81x in one period. `refuse_unsubscribed` now
 stops this being fetched again; it cannot remove what is already stored, and the Fundamental modal
 draws these rows today.
 
-⚠⚠ THE SCOPE IS `source_code = 'gurufocus'`, AND THE COLUMN IS WHY THIS IS SAFE. Diploma's 21,411
+ THE SCOPE IS `source_code = 'gurufocus'`, AND THE COLUMN IS WHY THIS IS SAFE. Diploma's 21,411
 `metric_data` rows are NOT all from the vendor: 20,898 carry `source_code='gurufocus'` (the
 `annuals__`/`quarterly__` financial line items) and **513 carry `source_code='longequity'`** — the
 research scores, ranks and qualitative fields that the LongEquity reports produce and that nothing
@@ -15,14 +15,14 @@ here is questioning. Deleting by company, or by an `annuals__`/`quarterly__` cod
 have taken the flat-coded rows too or relied on a naming convention; the source column says
 outright where a row came from. Verified: no other LSE company carries a single `quarterly__` row.
 
-⚠⚠ IT PURGES ONLY WHAT THE EVIDENCE CONDEMNS, NOT EVERY UNSUBSCRIBED COMPANY. Two companies sit on
+ IT PURGES ONLY WHAT THE EVIDENCE CONDEMNS, NOT EVERY UNSUBSCRIBED COMPANY. Two companies sit on
 an exchange outside the subscription while holding vendor rows — Diploma and VERBUND AG (Vienna,
 `WBO`). VERBUND's series AGREES with ours, which is the expected result if `WBO` is simply missing
 from `FEASIBLE_GF_EXCHANGES` rather than genuinely unsubscribed. So every candidate is put through
 the same cross-source check the audit uses (`ingest.earnings.price_sanity.compare`) and only a
 FAILING one is offered for deletion. A coverage-map gap must not cost a company its data.
 
-⚠ DRY RUN BY DEFAULT. Nothing is deleted without `--apply`, and `--apply` writes every row it is
+ DRY RUN BY DEFAULT. Nothing is deleted without `--apply`, and `--apply` writes every row it is
 about to remove to a JSON backup first (`--no-backup` to skip, which you should not).
 
 Usage:
@@ -50,7 +50,7 @@ PRICE_CODE = "quarterly__Valuation and Quality__Month End Stock Price"
 
 
 def _paged(table: str, select: str, build, order: str) -> list[dict]:
-    """⚠ PAGED. PostgREST truncates at 1,000 rows on cloud, and a purge that reads a truncated list
+    """ PAGED. PostgREST truncates at 1,000 rows on cloud, and a purge that reads a truncated list
     would report a partial backup as complete."""
     out: list[dict] = []
     off = 0
@@ -122,7 +122,7 @@ def main() -> int:
                               for r in rows if r["metric_code"] == PRICE_CODE)
         verdict = compare(vendor_price, our_closes(c.get("isin")))
         if verdict.ok:
-            # ⚠ A PASS IS LEFT ALONE, LOUDLY. This is the VERBUND case: an exchange missing from
+            #  A pass is left alone, loudly. This is the VERBUND case: an exchange missing from
             # the coverage map looks identical to an unsubscribed one from here, and its data is
             # fine. Saying so is what stops the next reader "tidying up" the whole list.
             print(f"  KEEP {name}: {len(rows):,} vendor rows - {verdict.reason}", flush=True)
@@ -139,7 +139,7 @@ def main() -> int:
 
     print()
     for c, rows, _ in condemned:
-        # ⚠ WHAT SURVIVES IS NAMED, because a purge that silently took the research scores as well
+        #  What survives is named, because a purge that silently took the research scores as well
         # would be discovered weeks later on a page nobody connected to this run.
         kept = _paged("metric_data", "source_code",
                       lambda q, i=c["company_id"]: q.eq("company_id", i)
@@ -159,7 +159,7 @@ def main() -> int:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     for c, _rows, reason in condemned:
         cid = c["company_id"]
-        # ⚠⚠ THE BACKUP IS READ FRESH AND IN FULL, not reused from the summary above, which selected
+        #  The backup is read fresh and in full, not reused from the summary above, which selected
         # three columns. A backup that cannot restore the row it deleted is not a backup.
         full = vendor_rows(cid, "*")
         if not args.no_backup:
@@ -169,23 +169,23 @@ def main() -> int:
                  "exchange": _exchange_of(c), "reason": reason,
                  "source_code": VENDOR, "rows": full}, indent=1, default=str), encoding="utf-8")
             print(f"\nbacked up {len(full):,} rows -> {path}", flush=True)
-        # ⚠⚠ ONE STATEMENT, BOTH COLUMNS. `company_id` alone would take the LongEquity research rows
+        #  One statement, both columns. `company_id` alone would take the LongEquity research rows
         # with it — 513 of them on Diploma, from a source nothing here is questioning.
         #
-        # ⚠⚠ AND IT IS DELIBERATELY **NOT** CHUNKED. A chunked version shipped first and was wrong
+        #  And it is deliberately **NOT** CHUNKED. A chunked version shipped first and was wrong
         # twice over. It chunked `metric_code` into `IN_CHUNK_SIZE` (200) groups, which PostgREST
         # encodes into the URL — and these codes are ~50 characters each
         # (`quarterly__Valuation and Quality__Month End Stock Price`), so the very first chunk came
         # back **414 URI too long**. `IN_CHUNK_SIZE` is calibrated for integer ids, not for long
         # strings; the guard it exists for is payload size, and a URI limit is a different limit.
         #
-        # ⚠⚠ THE DEEPER ERROR WAS THE REASONING, WHICH WAS BACKWARDS. The chunking was justified by
+        #  The deeper error was the reasoning, which was backwards. The chunking was justified by
         # the 8s `statement_timeout` on `authenticator` — "a timeout mid-way leaves a company
         # half-purged". A single DELETE is one transaction, so a timeout rolls ALL of it back and
         # leaves zero deleted; it is FOUR statements that create four independent transactions and
         # therefore the partial purge. Chunking manufactured the hazard it claimed to prevent.
         #
-        # ⚠ This filter is also two short predicates, so there is no URI to overflow, and it is the
+        #  This filter is also two short predicates, so there is no URI to overflow, and it is the
         # same shape `routers/companies.py` uses to drop a whole company's `metric_data`.
         deps.supabase.table("metric_data").delete() \
             .eq("company_id", cid).eq("source_code", VENDOR).execute()
@@ -195,7 +195,7 @@ def main() -> int:
                  .eq("company_id", cid).neq("source_code", VENDOR).limit(1).execute().count)
         print(f"deleted; {left} '{VENDOR}' rows remain, {other:,} other rows untouched", flush=True)
 
-    # ⚠ ASCII ONLY IN PRINTED TEXT. This runs in PowerShell, whose console is cp1252 — a marker
+    #  Ascii only in printed text. This runs in PowerShell, whose console is cp1252 — a marker
     # glyph here raises UnicodeEncodeError and kills the run AFTER the delete but BEFORE the
     # summary, which is the worst moment for it to fail. (The audit script hit exactly that.)
     print("\nNOTE: the Fundamental modal will now show no vendor data for these companies,")

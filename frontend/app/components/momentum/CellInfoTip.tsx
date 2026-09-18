@@ -16,7 +16,7 @@ import { createPortal } from 'react-dom';
  */
 export default function CellInfoTip({ children, trigger }: {
   children: React.ReactNode;
-  /** Custom hover affordance in place of the default "i" badge (e.g. a ⚠).
+  /** Custom hover affordance in place of the default "i" badge (e.g. a ).
    * Rendered inside the same measured anchor span so positioning is unchanged. */
   trigger?: React.ReactNode;
 }) {

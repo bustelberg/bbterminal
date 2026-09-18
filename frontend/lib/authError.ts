@@ -1,8 +1,8 @@
 /**
  * What went wrong on the way back from an email link, in one sentence the person can act on.
  *
- * ⚠⚠ IT EXISTS BECAUSE THE ONLY MESSAGE THIS FLOW EVER PRODUCED WAS "Auth session missing", AT THE
- * WRONG SCREEN, AT THE WRONG MOMENT. `/auth/confirm` discarded the result of
+ *  It exists because the only message this flow ever produced was "Auth session missing", AT THE
+ * Wrong screen, at the wrong moment. `/auth/confirm` discarded the result of
  * `exchangeCodeForSession` / `verifyOtp` and redirected to `/set-password` regardless — so every
  * failure below arrived at a working-looking password form, and the person learned something was
  * wrong only after choosing a password and pressing Save. At that point the library string names
@@ -21,7 +21,7 @@
  *      human clicks, Supabase answers `?error=access_denied&error_code=otp_expired`. A local
  *      Mailpit inbox has no scanner.
  *
- * ⚠ THE FULL DETAIL GOES TO THE SERVER LOG, ONE SHORT LINE TO THE PERSON — the same rule the rest
+ *  The full detail goes to the server log, one short line to the person — the same rule the rest
  * of this app follows. These sentences are the short line; they name what to DO, because "invalid
  * flow state" is not an instruction.
  */
@@ -44,7 +44,7 @@ export function describeAuthError(
   const hay = `${errorCode ?? ''} ${error ?? ''} ${errorDescription ?? ''} ${message ?? ''}`
     .toLowerCase();
 
-  // ⚠ THE CODE-VERIFIER CASE IS CHECKED FIRST because its `error_description` often ALSO contains
+  //  The code-verifier case is checked first because its `error_description` often ALSO contains
   // the word "invalid", and the generic invalid-link sentence below would swallow the one piece of
   // advice that actually resolves it: open the link where you asked for it.
   if (hay.includes('code verifier') || hay.includes('code_verifier')
@@ -62,7 +62,7 @@ export function describeAuthError(
   if (hay.includes('not found') || hay.includes('invalid')) {
     return 'That link could not be verified. Request a new one below.';
   }
-  // ⚠ A LAST RESORT THAT STILL SAYS WHAT TO DO. Returning the raw message here would put
+  //  A last resort that still says what to do. Returning the raw message here would put
   // "AuthApiError: ..." in front of someone trying to create an account; returning nothing would
   // put them back where this started.
   return 'Sign-in could not be completed from that link. Request a new one below.';
@@ -71,13 +71,13 @@ export function describeAuthError(
 /**
  * Why the sign-in email could not be SENT — a different question from why a link failed.
  *
- * ⚠⚠ THE RATE LIMIT IS THE ONE THAT MATTERS, AND IT READS AS A BUG. Supabase's built-in email
+ *  The rate limit is the one that matters, and it reads as a bug. Supabase's built-in email
  * service is capped at **2 messages per hour per project** and the cap cannot be raised without
  * custom SMTP — it is a testing service, not a production one. The raw message is "email rate limit
  * exceeded", which tells someone trying to create an account nothing about waiting, and nothing
  * about it being a project-wide cap rather than something they did.
  *
- * ⚠ IT BITES HARDEST EXACTLY WHEN A LINK HAS JUST FAILED. Every failure path in this flow ends by
+ *  It bites hardest exactly when a link has just failed. Every failure path in this flow ends by
  * telling the person to request a new link — and after two of those, the third silently cannot be
  * sent. Saying "wait an hour" is the difference between a delay and an app that looks broken.
  */
@@ -100,7 +100,7 @@ export function describeSendError(message?: string | null): string {
 /**
  * Was this redirect back from Supabase already an error, before we tried anything?
  *
- * ⚠ IT HAS TO BE CHECKED BEFORE THE EXCHANGE, NOT AFTER. When `/auth/v1/verify` rejects a token it
+ *  It has to be checked before the exchange, not after. When `/auth/v1/verify` rejects a token it
  * redirects with `?error=...` and NO `code` and NO `token_hash` — so a route that only looks for
  * those two sees an empty query, concludes nothing to do, and carries on to the password screen as
  * if it had succeeded. That is precisely the path that produced "Auth session missing".

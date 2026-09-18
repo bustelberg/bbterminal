@@ -16,7 +16,7 @@ import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
  * no ISIN) — and it composes the pair into the row you actually want: named from the Fixed side,
  * every number AIRS's own, and each value carrying its own provenance (where / when / how).
  *
- * THREE TABS, SPLIT BY WHAT THE PANEL IS ABOUT — and each is a different UNIT OF ANALYSIS, which
+ * Three tabs, split by what the panel is about — and each is a different UNIT OF ANALYSIS, which
  * is why stacking them read as one long page of trailing detail. Overview is one row per
  * portfolio. Cross-portfolio is a PAIR of portfolios: how they move together, a question no single
  * row can answer. Benchmarks are not portfolios at all — they are indices rebuilt from our own
@@ -25,11 +25,11 @@ import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
 type TabKey = 'bustelberg' | 'toppenberg' | 'topselecties';
 
 /**
- * ⚠ THE ORDER LIVES HERE, THE WORDS LIVE IN `managementCopy`. A tab's label and its hover are
+ *  The order lives here, the words live in `managementCopy`. A tab's label and its hover are
  * copy and are translated; which tabs exist and in what order is a fact about the page. Keeping
  * the strings here would have meant a second English original for the translation to drift from.
  *
- * ⚠⚠ `cross` AND `benchmarks` WERE TAKEN OFF THE PAGE ON 2026-09-01, ON REQUEST AND EXPLICITLY
+ *  `cross` AND `benchmarks` WERE TAKEN OFF THE PAGE ON 2026-09-01, ON REQUEST AND EXPLICITLY
  * "FOR NOW". Nothing behind them was deleted: `CorrelationMatrix.tsx`, `BenchmarksPanel.tsx` and
  * `benchmarks/FundamentalGridPane.tsx` are untouched on disk, every `/api/benchmarks/index/*`
  * route still serves, and the scheduled jobs that keep that data current (`benchmark_price_slice`
@@ -37,7 +37,7 @@ type TabKey = 'bustelberg' | 'toppenberg' | 'topselecties';
  * unchanged. `TabKey` still names all three, and their copy is still translated
  * in both languages, so putting one back is: add it to this array and re-add its two lines below.
  *
- * ⚠⚠ AND THE BENCHMARK DATA IS STILL READ, JUST NOT THROUGH THESE ROUTES. The Fundamental modal's
+ *  And the benchmark data is still read, just not through these routes. The Fundamental modal's
  * Long Equity benchmark line does NOT call `/api/benchmarks/index/*` — it reads
  * `/api/earnings/fundamental-blend-metrics` + `/universe-period-caps`, i.e. the TEMPLATE UNIVERSE
  * (ACWI / SP500 / AEX) and the `metric_data` rows behind its constituents. What the removed tab
@@ -52,7 +52,7 @@ export default function Page() {
   const t = useMgmtCopy();
   const [tab, select] = useState<TabKey>('bustelberg');
   /**
-   * ⚠⚠ THE LAZY-MOUNT LATCH WENT WITH THE TWO TABS (2026-09-01) AND COMES BACK WITH THEM. It was a
+   *  The lazy-mount latch went with the two tabs (2026-09-01) AND COMES BACK WITH THEM. It was a
    * `seen` set: a pane was not rendered until its tab had been opened, and after that stayed
    * mounted and hidden with CSS — because each was a real request (an N×N correlation grid over
    * every portfolio, a full index rebuild), expensive enough not to spend on a page load nobody
@@ -60,11 +60,11 @@ export default function Page() {
    * only pane left and it mounts unconditionally, so the set had exactly one member, was never
    * read, and was state that existed to answer a question nobody asks.
    *
-   * ⚠ RESTORING A TAB MEANS RESTORING THIS TOO. Re-adding a pane without it makes the page fetch
+   *  Restoring a tab means restoring this too. Re-adding a pane without it makes the page fetch
    * that panel on every load of a dashboard whose default tab is Overview — which is the cost the
    * latch was written for, and it will not look like a regression, only like a slow page.
    */
-  // ⚠ THE FIRST LINE IN THE CONSOLE NAMES THE ENVIRONMENT, because the most common way this page
+  //  The first line in the console names the environment, because the most common way this page
   // is "broken" in production is that it is pointed somewhere else. A wrong `NEXT_PUBLIC_API_URL`
   // — or a session that never attached — makes every panel render empty, and every panel's own
   // message then blames the data. One line at boot separates "the database has nothing in it"
@@ -75,7 +75,7 @@ export default function Page() {
       origin: typeof window !== 'undefined' ? window.location.origin : '?',
       // Presence only — a bearer token is never logged (see `apiFetch`).
       signedIn: typeof document !== 'undefined' && document.cookie.includes('sb-'),
-      // ⚠ THE TRACE NAMES WHAT IS ACTUALLY MOUNTED. It listed the Cross-portfolio and Benchmarks
+      //  The trace names what is actually mounted. It listed the Cross-portfolio and Benchmarks
       // panes as "lazy" — true while they were tabs, and after they were removed it would have had
       // the first line in the console describing a page that no longer exists, which is the one
       // line whose whole job is to be trusted.
@@ -93,7 +93,7 @@ export default function Page() {
       <div className="px-8 py-6 space-y-6">
         {/* The segmented control the rest of the app uses for a small, fixed set of named views
             (see the holdings table's "Weight returns by") — discrete choices, not a slider.
-            ⚠ NOT RENDERED AT ONE TAB. A segmented control with a single, permanently-pressed
+             NOT RENDERED AT ONE TAB. A segmented control with a single, permanently-pressed
             button is a control that cannot do anything, and a reader who presses it and sees
             nothing move learns to distrust the ones that work. It comes back on its own the
             moment `TAB_ORDER` grows — see the note there. */}
@@ -109,7 +109,7 @@ export default function Page() {
           ))}
         </div>
 
-        {/* ⚠ HIDDEN, NOT UNMOUNTED. Unmounting throws away the table's expanded rows, sort and
+        {/*  HIDDEN, NOT UNMOUNTED. Unmounting throws away the table's expanded rows, sort and
             filters — and refetches the panel — on a switch a reader makes to glance at one thing
             and come back. */}
         <PortfolioOverviewPanel collection={tab} />

@@ -395,7 +395,7 @@ def report_cutoff_coverage(box: dict) -> bool:
 def rebaseline(path: Path) -> int:
     """Recompute a fixture's `expected_holdings_json` from its OWN frozen inputs.
 
-    ⚠ THIS IS THE DELIBERATE RE-BASELINE, AND IT IS NOT THE SAME ACT AS A
+     THIS IS THE DELIBERATE RE-BASELINE, AND IT IS NOT THE SAME ACT AS A
     RE-CAPTURE. A re-capture reads the live DB, so the INPUTS move too — and the
     price table is append-only in `recorded_at`, not in `target_date`, so a bar
     can appear inside a window a past rebalance already computed over (Bayer's

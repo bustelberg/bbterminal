@@ -134,7 +134,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
     # without requiring the caller to pick the right window.
     if req.mode == "current_portfolio":
         _today = date.today()
-        # ⚠ THE LOAD WINDOW HAS TO REACH BEHIND THE WALK, NOT JUST BEHIND TODAY. The
+        #  The load window has to reach behind the walk, not just behind today. The
         # signals need ~12 months before the EARLIEST cutoff, so a retrospective
         # walk needs its months added on top — otherwise the oldest days in the
         # window silently score on a short history and select a different basket.
@@ -146,7 +146,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         # month → serve the stored snapshot, no recompute. Recompute button
         # passes force_recompute=True to bypass.
         #
-        # ⚠ AND A RETROSPECTIVE WALK CAN NEVER BE SERVED FROM IT. The cache holds
+        #  And a retrospective walk can never be served from it. The cache holds
         # the CURRENT month's snapshot + its daily picks; answering "what would we
         # have held over the last two months" with it would return this month's days
         # under a two-month heading, which looks like a correct, complete answer.
@@ -266,7 +266,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({"type": "error", "message": "DB has no price data — run an ingest first"})
             return
         if req.mode == "current_portfolio":
-            # ⚠ THE GATE IS THE TRADING CALENDAR, NEVER THE CALENDAR MONTH.
+            #  The gate is the trading calendar, never the calendar month.
             # A rebalance is decided on the close STRICTLY BEFORE its date (the
             # engine's `<` cutoff), so the first Monday of August is decidable
             # from the Friday of July — and "is there a close dated inside the

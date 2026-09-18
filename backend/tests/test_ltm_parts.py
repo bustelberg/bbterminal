@@ -1,6 +1,6 @@
 """The filings behind an LTM must be THE filings the LTM was computed from.
 
-⚠⚠ THE WHOLE POINT OF THE `parts=` OUT PARAMETER. A breakdown panel that explains 4.25 with four
+ THE WHOLE POINT OF THE `parts=` OUT PARAMETER. A breakdown panel that explains 4.25 with four
 quarters the roll-up did not use is worse than no panel: it is checked once and believed thereafter.
 So `_ttm_by_period` reports the window it actually used rather than a `_ttm_parts()` twin
 re-deriving "the last four" — which is not the rule (see below) and would drift the day either side
@@ -34,7 +34,7 @@ class TestThePartsAreTheWindow:
         assert abs(sum(p["value"] for p in parts[newest]) - out[newest]) < 1e-12
 
     def test_every_emitted_period_has_parts_and_nothing_else_does(self):
-        """⚠ THE TWO DICTS ARE KEYED THE SAME WAY. A panel looks its window up by the point's own
+        """ THE TWO DICTS ARE KEYED THE SAME WAY. A panel looks its window up by the point's own
         label; a parts dict keyed differently would silently show nothing."""
         parts: dict[str, list[dict]] = {}
         out = _ttm_by_period(rows(QUARTERS, [1.0] * 6), "sum", key="date", parts=parts)
@@ -46,7 +46,7 @@ class TestThePartsAreTheWindow:
         assert set(parts) == set(out) == {"2025-Q4", "2026-Q1", "2026-Q2"}
 
     def test_each_part_carries_its_OWN_quarter_end(self):
-        """⚠ AN OFF-CALENDAR FILER'S DATES ARE NOT 03-31/06-30/09-30/12-31, which is why the panel
+        """ AN OFF-CALENDAR FILER'S DATES ARE NOT 03-31/06-30/09-30/12-31, which is why the panel
         prints them rather than implying them from position."""
         odd = ["2025-01-31", "2025-04-30", "2025-07-31", "2025-10-31", "2026-01-31"]
         parts: dict[str, list[dict]] = {}
@@ -56,7 +56,7 @@ class TestThePartsAreTheWindow:
 
 class TestItReportsTheRuleTheEngineRan:
     def test_a_MEAN_is_the_average_of_its_parts_not_their_sum(self):
-        """⚠ A SHARE COUNT IS ALREADY AN AVERAGE OVER EACH QUARTER. Four summed reports four times
+        """ A SHARE COUNT IS ALREADY AN AVERAGE OVER EACH QUARTER. Four summed reports four times
         the company. The panel prints the same parts either way, so the operator between them is
         the only thing that says which arithmetic ran — which is why the rule is returned."""
         parts: dict[str, list[dict]] = {}
@@ -76,7 +76,7 @@ class TestItReportsTheRuleTheEngineRan:
 
 class TestARefusedWindowHasNoParts:
     def test_a_HOLE_produces_neither_a_point_nor_parts(self):
-        """⚠⚠ THE CASE THAT MAKES A SEPARATE `_ttm_parts()` DANGEROUS. Four consecutive ROWS across
+        """ THE CASE THAT MAKES A SEPARATE `_ttm_parts()` DANGEROUS. Four consecutive ROWS across
         a missing quarter span more than a year, so the engine emits nothing — while "the last four
         rows" would happily hand a panel four filings for a point that is not on the chart."""
         holed = ["2025-03-31", "2025-06-30", "2025-09-30", "2026-06-30"]
@@ -102,7 +102,7 @@ class TestARefusedWindowHasNoParts:
 
 class TestADroppedQuarterIsAbsentFromTheParts:
     def test_the_breakdown_shows_what_was_USED_not_what_was_filed(self):
-        """⚠ `_drop_quarter_outliers` RUNS BEFORE THE WINDOWS. A corrupt quarter is not in the
+        """ `_drop_quarter_outliers` RUNS BEFORE THE WINDOWS. A corrupt quarter is not in the
         figure, so it must not be in the explanation of the figure — and its absence shifts the
         window back rather than leaving a three-filing year."""
         vals = [1.0, 1.1, 90_000.0, 1.3, 1.4, 1.5]

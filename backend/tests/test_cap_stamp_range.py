@@ -1,6 +1,6 @@
 """When a cap-weighted index was measured — see `_asset_benchmark.cap_stamp_range`.
 
-⚠⚠ THE CLAIM WORTH PINNING IS THAT AN UNSTAMPED CONSTITUENT IS COUNTED RATHER THAN DROPPED. A
+ THE CLAIM WORTH PINNING IS THAT AN UNSTAMPED CONSTITUENT IS COUNTED RATHER THAN DROPPED. A
 plain min/max over the stamped subset produces a tight, recent, confident-looking window that
 describes two names out of a thousand — and reads as MORE precise than the honest wide one.
 """
@@ -28,7 +28,7 @@ class TestTheRangeSpansEveryStamp:
 
 class TestAnUnstampedConstituentIsCountedNotHidden:
     def test_the_count_reports_them(self):
-        # ⚠ THE RANGE STILL READS 25th-to-25th — which is why the 3 matters. Without it the caller
+        #  The range still reads 25th-to-25th — which is why the 3 matters. Without it the caller
         # would print one confident date for an index that is three-quarters unmeasured.
         rows = _m("2026-08-25T09:00:00Z", None, None, "")
         assert cap_stamp_range(rows) == ("2026-08-25T09:00:00Z", "2026-08-25T09:00:00Z", 3)
@@ -38,7 +38,7 @@ class TestAnUnstampedConstituentIsCountedNotHidden:
         assert cap_stamp_range(rows) == ("2026-08-25T09:00:00Z", "2026-08-25T09:00:00Z", 2)
 
     def test_nothing_stamped_reports_no_range_and_every_row(self):
-        # ⚠ NOT `(None, None, 0)` — the rows exist, none of them is dated, and the caller has to
+        #  NOT `(None, None, 0)` — the rows exist, none of them is dated, and the caller has to
         # be able to tell that apart from an index with no constituents at all.
         assert cap_stamp_range([{}, {"market_cap_checked_at": None}]) == (None, None, 2)
 

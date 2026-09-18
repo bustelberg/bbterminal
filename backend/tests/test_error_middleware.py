@@ -85,7 +85,7 @@ class TestUnhandledExceptions:
 
 class TestCancellationIsNotSwallowed:
     def test_client_disconnect_still_propagates(self):
-        """⚠ `CancelledError` is a BaseException and must NOT be converted into a 500. A cancelled
+        """ `CancelledError` is a BaseException and must NOT be converted into a 500. A cancelled
         request has no client left to answer, and catching it would keep dead requests alive."""
         async def call_next(_req):
             raise asyncio.CancelledError()

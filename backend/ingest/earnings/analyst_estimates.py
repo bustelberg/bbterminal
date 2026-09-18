@@ -93,7 +93,7 @@ def fetch_analyst_estimates(
 
     result = EarningsResult(source="analyst_estimates")
 
-    # ⚠ BEFORE ANYTHING ELSE, INCLUDING THE CACHE READ. An unsubscribed exchange must not
+    #  Before anything else, including the cache read. An unsubscribed exchange must not
     # reach the vendor, and must not resurrect a payload an earlier unguarded run cached.
     refusal = refuse_unsubscribed(exchange, "analyst_estimates")
     if refusal is not None:
@@ -151,7 +151,7 @@ def fetch_analyst_estimates(
     result.rows_loaded, result.rows_unchanged = _upsert_metric_rows(supabase, rows)
     _log(f"Loaded {result.rows_loaded} rows into DB"
          + (f", {result.rows_unchanged} already identical" if result.rows_unchanged else ""))
-    # ⚠ EVEN WHEN `rows` IS EMPTY — a company analysts do not cover is the case this records. See
+    #  Even when `rows` IS EMPTY — a company analysts do not cover is the case this records. See
     # `_stamp_fetched`: without it the smart refresh re-asks that company on every press, for ever.
     _stamp_fetched(supabase, company_id, "analyst_estimates", _log)
     return result

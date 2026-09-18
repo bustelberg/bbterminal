@@ -1,6 +1,6 @@
 """The allocation POLICY grid — per risk profile, per asset class, a min / default / max share.
 
-⚠ NULL IS NOT ZERO, AND THAT IS THE WHOLE REASON THE COLUMNS ARE NULLABLE. "No policy recorded" and
+ NULL IS NOT ZERO, AND THAT IS THE WHOLE REASON THE COLUMNS ARE NULLABLE. "No policy recorded" and
 "hold none of this" are the same claim for a MINIMUM and opposite claims for a DEFAULT and a
 MAXIMUM. A grid seeded with zeros — or an editor that saves blanks as 0 — publishes a policy nobody
 wrote, one that reads "this profile may hold no equities", and it looks exactly like a policy that
@@ -39,7 +39,7 @@ class TestTheGridIsAlwaysComplete:
         assert got[("Defensief", "Cash")] == (0.0, 1.0, 70.0)
 
     def test_postgres_numerics_arrive_as_STRINGS_and_are_returned_as_numbers(self, monkeypatch):
-        # ⚠ PostgREST serialises `numeric` as a string. Passed through untouched, the editor's
+        #  PostgREST serialises `numeric` as a string. Passed through untouched, the editor's
         # inputs go stringly-typed and its defaults-sum CONCATENATES instead of adding — "607040".
         monkeypatch.setattr(ab, "supabase", _FakeDb([
             {"variant": "Offensief", "bucket": "Equity",
@@ -50,16 +50,16 @@ class TestTheGridIsAlwaysComplete:
         assert all(isinstance(c[f], float) for f in ("min_pct", "default_pct", "max_pct"))
 
     def test_cash_IS_a_policy_class_and_unclassified_is_not(self):
-        """⚠⚠ CASH WAS EXCLUDED UNTIL 2026-08-18, ON REASONING THAT ONLY HELD FOR THE DEFAULT.
+        """ CASH WAS EXCLUDED UNTIL 2026-08-18, ON REASONING THAT ONLY HELD FOR THE DEFAULT.
         Cash is the REMAINDER of the invested classes, so a target for it is redundant — true. Its
         BOUNDS are not: "hold at most 10% cash" is a real mandate, it is the one most likely to be
         breached by drift rather than by decision, and with no band there was no line for the
         allocation bar to breach. A fully-liquidated book showed 100% cash against no policy at all.
 
-        ⚠ CONSEQUENCE, pinned below: the four classes now span the whole book, so a COMPLETE policy
+         CONSEQUENCE, pinned below: the four classes now span the whole book, so a COMPLETE policy
         totals 100 where 95 used to be ordinary.
 
-        ⚠ UNCLASSIFIED STAYS OUT, and for a different reason than cash ever was: it is not a
+         UNCLASSIFIED STAYS OUT, and for a different reason than cash ever was: it is not a
         holding decision at all, it is our own inability to see inside an instrument. Nobody can set
         a target for how much of a book we fail to classify.
         """
@@ -67,7 +67,7 @@ class TestTheGridIsAlwaysComplete:
         assert "Unclassified" not in ab.POLICY_BUCKETS
 
     def test_the_policy_classes_are_the_allocation_bar_ones_in_the_same_order(self):
-        """⚠ A band is DRAWN OVER the bar it governs. Two orders would put a class's policy over a
+        """ A band is DRAWN OVER the bar it governs. Two orders would put a class's policy over a
         different class's bar in any code that zips them."""
         from routers._airs_portfolio_analysis import _ALWAYS_SHOWN
 
@@ -104,7 +104,7 @@ class TestValidation:
         {"max_pct": 30}, {"min_pct": 5}, {"default_pct": 20}, {"min_pct": 5, "max_pct": 30}, {},
     ])
     def test_a_HALF_FILLED_row_is_legal(self, cell):
-        # ⚠ The grid is filled in over time. Refusing to store a maximum until its minimum exists
+        #  The grid is filled in over time. Refusing to store a maximum until its minimum exists
         # makes the editor unusable on the way there — only pairs that are BOTH present compare.
         assert ab.validate_band(cell) is None
 
@@ -116,7 +116,7 @@ class TestSaving:
         return [{**base, **over}]
 
     def test_a_bad_cell_rejects_the_WHOLE_grid_before_anything_is_written(self, monkeypatch):
-        # ⚠ A grid save is ONE intent. Landing the first eight cells and refusing the ninth leaves
+        #  A grid save is ONE intent. Landing the first eight cells and refusing the ninth leaves
         # a policy half-updated while the reader believes all of it took.
         db = _FakeDb([])
         monkeypatch.setattr(ab, "supabase", db)

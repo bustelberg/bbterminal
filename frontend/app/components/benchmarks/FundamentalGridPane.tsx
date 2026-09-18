@@ -15,19 +15,19 @@ import {
 } from './fundamentalGrid';
 
 /**
- * EVERY CONSTITUENT'S FUNDAMENTALS FOR ONE PERIOD, WITH THE CAP THAT WEIGHTS THEM.
+ * Every constituent's fundamentals for one period, with the cap that weights them.
  *
  * The sibling of the coverage pane: that one says which periods we HOLD, this one shows the
  * numbers. Rows are companies, columns are the lines, and the period is a slider — because
  * weighting is CROSS-SECTIONAL. To weight FY2021 you need every constituent's FY2021 cap at once,
  * which is a screen of rows, not a screen of years.
  *
- * ⚠⚠ THE CONTROLS MOVE THE NUMBERS AND NOTHING ELSE. Every column, every row, the row ORDER, the
+ *  The controls move the numbers and nothing else. Every column, every row, the row ORDER, the
  * index row and the two notice lines are all present and in the same place at every slider
  * position — so scrubbing reads as one table being re-valued rather than as a new table each time.
- * Four separate things had to be fixed to make that true, and each is marked ⚠ STABLE below:
+ * Four separate things had to be fixed to make that true, and each is marked  STABLE below:
  *   1. (WITHDRAWN 2026-08-19) the sort was anchored to a FIXED period. It made the column you
- *      clicked non-monotonic — see the ⚠⚠ on `rows`. The order now follows the period on screen,
+ *      clicked non-monotonic — see the  on `rows`. The order now follows the period on screen,
  *      so rows DO move with the slider; the other three still hold.
  *   2. the index row is always rendered, showing dashes when its coverage floor withholds it;
  *   3. the notice lines occupy reserved height whether or not they have anything to say;
@@ -37,7 +37,7 @@ import {
  */
 /** The per-row ingest button.
  *
- *  ⚠ IT NO LONGER REQUIRES AN ISIN. It used to disable itself on `!isin`, because the job endpoint
+ *   It no longer requires an ISIN. It used to disable itself on `!isin`, because the job endpoint
  *  resolved the company that way — which greyed the button out for the 12 S&P constituents whose
  *  `company.isin` is null, Assurant among them, even though every one of them has a ticker, an
  *  exchange and a company row. The job is keyed on `company_id` now, which the grid always has. */
@@ -58,13 +58,13 @@ function FetchButton({ busy, title, onClick }: {
  * What an empty cell says instead of a dash — see `cellState` for the three states and why they
  * must not collapse.
  *
- * ⚠ ONE COMPONENT, EVERY COLUMN. Cap, Weight and the nineteen metric columns all read from the
+ *  One component, every column. Cap, Weight and the nineteen metric columns all read from the
  * SAME GuruFocus blob (`market_cap` is `annuals__Valuation and Quality__Market Cap`), so an
  * unsubscribed exchange is as true of the Cap cell as of the Revenue cell. Rendering the badge
  * inline three times is three places for the tone or the wording to drift apart, on a table whose
  * whole job is that its columns are comparable.
  *
- * ⚠ QUIET ON PURPOSE. Nineteen columns x ~1,700 rows means most cells can be a badge; at the row
+ *  Quiet on purpose. Nineteen columns x ~1,700 rows means most cells can be a badge; at the row
  * badge's weight the table would read as one solid warning and the FIGURES would become the
  * exception. UNSUB keeps the warn tone it has in the name cell (same fact, same colour); NO DATA is
  * faint, because it is the common, temporary one.
@@ -103,7 +103,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   refreshKey?: number;
 }) {
   /**
-   * ⚠ STABLE (4) — BOTH CADENCES ARE KEPT, NOT SWAPPED. The quarter control moves between the
+   *  STABLE (4) — BOTH CADENCES ARE KEPT, NOT SWAPPED. The quarter control moves between the
    * annual payload and the quarterly one, and clearing `data` to refetch would drop the whole
    * table to "Loading…" and back on every press. They are two views of ONE GuruFocus fetch, so
    * holding both costs nothing but memory and makes the control feel like a slider instead of a
@@ -117,7 +117,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   const [sortKey, setSortKey] = useState<string>('market_cap');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
   /** ONLY what the reader picked — '' until they touch the slider. The year actually in force is
-   *  derived below; see the ⚠⚠ there for why this is not simply `year`.
+   *  derived below; see the  there for why this is not simply `year`.
    *  It is held as the YEAR, not as a slider index, because the two cadences do not necessarily
    *  start at the same one and an index would silently jump the reader to a different year when
    *  the period control switches payload. */
@@ -126,23 +126,23 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   /**
    * Rows with an ingest in flight — a SET, not a single id.
    *
-   * ⚠ CONCURRENCY IS THE POINT OF MOVING TO JOBS. As a blocking POST this had to disable every
+   *  Concurrency is the point of moving to jobs. As a blocking POST this had to disable every
    * other button, because a second press would have opened a second long request with no way to
    * tell them apart. A job is a handle: press five rows and five toasts report separately, each
    * cancellable on its own. Only the pressed row spins.
    */
   const [fetching, setFetching] = useState<ReadonlySet<number>>(new Set());
-  /** Guards the Total row's button only. ⚠ The run's progress belongs to the toast — a second
+  /** Guards the Total row's button only.  The run's progress belongs to the toast — a second
    *  rendering of one job is a second thing to keep in step. */
   const [filling, setFilling] = useState(false);
 
   const data = byCadence[cadence] ?? null;
 
-  // ⚠ THE YEAR IS RESET ONLY ON A LABEL CHANGE, NOT ON A REFRESH. After an ingest the reader is
+  //  The year is reset only on a label change, not on a refresh. After an ingest the reader is
   // looking at a period they chose; dropping them back to the newest year would lose their place
   // for no reason — the payload changes, the question they were asking does not.
   //
-  // ⚠ THE UPDATER RETURNS THE SAME OBJECT WHEN THERE IS NOTHING TO CLEAR, AND THAT IS NOT A
+  //  The updater returns the same object when there is nothing to clear, and that is not a
   // MICRO-OPTIMISATION. This effect also runs on MOUNT, and a bare `setByCadence({})` hands React
   // a NEW object every time — which is a real state change, which re-runs the fetch effect below
   // (`byCadence` is in its deps), which aborts the request it had just started and fires a second
@@ -174,9 +174,9 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   }, [label, cadence, byCadence]);
 
   /**
-   * FETCH ONE COMPANY'S FUNDAMENTALS — every metric in this table, both cadences.
+   * Fetch one company's fundamentals — every metric in this table, both cadences.
    *
-   * ⚠ IT STARTS A JOB AND RETURNS. The outcome is reported by the toast stack
+   *  It starts a job and returns. The outcome is reported by the toast stack
    * (`lib/stores/jobs.ts`, rendered from the root layout), not here — which is what buys three
    * things this button did not have as a plain POST:
    *   * a Cancel that actually stops the work, at the boundary between two GuruFocus feeds;
@@ -185,11 +185,11 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
    * The old blocking endpoint is untouched and still what scripts use; both run the same
    * `ingest_company`, so "ingest" cannot come to mean two things.
    *
-   * ⚠ ONE PRESS COVERS BOTH SLIDER POSITIONS: `fetch_financials` writes the `annuals` AND
+   *  One press covers both slider positions: `fetch_financials` writes the `annuals` AND
    * `quarterly` blocks of a single blob, which is also why the reload refreshes every cadence
    * held rather than only the one on screen.
    *
-   * ⚠ BY ISIN, NEVER BY THE ROW'S `company_id`. In the benchmark payloads that field can be an
+   *  By ISIN, never by the row's `company_id`. In the benchmark payloads that field can be an
    * `analysis_id` (the price machinery keys on that name) and the two id spaces are disjoint —
    * measured, analysis_id 1457 is a real asset row and not a company at all. ISIN is what both
    * worlds carry, and a row without one cannot be ingested at all.
@@ -198,7 +198,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
     const who = name || `company ${companyId}`;
     setFetching((s) => new Set(s).add(companyId));
     try {
-      // ⚠ `feeds=statements` — ONE call, and it fills every column this grid draws. The endpoint
+      //  `feeds=statements` — ONE call, and it fills every column this grid draws. The endpoint
       // still accepts `all`; that is what the blocking endpoint and `scripts/` use, and it is the
       // seam that lets this button be the cheap one without forking the ingest.
       const { done } = await startJob(
@@ -206,10 +206,10 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
         + '?feeds=statements',
         who);
       const job = await done;
-      // ⚠ RELOAD ON `done` ONLY. A cancelled run may have written one feed of three and a failed
+      //  Reload on `done` ONLY. A cancelled run may have written one feed of three and a failed
       // one may have written none — re-reading either is harmless but pointless, and re-reading
       // after a cancel would quietly undo the impression that anything was stopped.
-      // ⚠ The ingest also moves the INDEX's fundamentals, which the Long Equity benchmark overlay
+      //  The ingest also moves the INDEX's fundamentals, which the Long Equity benchmark overlay
       // caches by universe — a fill whose result only ever appears here would leave that line drawn
       // off the pre-fill constituents. The job started minutes ago, so `apiFetch`'s automatic
       // invalidation (on the request that started it) is long spent.
@@ -222,14 +222,14 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   };
 
   /**
-   * FETCH EVERY CONSTITUENT THAT IS MISSING — the Total row's own button.
+   * Fetch every constituent that is missing — the Total row's own button.
    *
-   * ⚠ IT LIVES IN THE TOTAL ROW'S FETCH CELL, which is the intersection of "all rows" and "the
+   *  It lives in the total row's fetch cell, which is the intersection of "all rows" and "the
    * fetch action" — the same column each company's own button sits in. It used to be a control in
    * the panel header, where it was adjacent to the price/constituent Refresh and easy to read as
    * part of it; they are different vendors with different quotas.
    *
-   * ⚠ AND IT COUNTS WHAT IT WILL FETCH, not what the grid is missing. `fillable` comes from the
+   *  And it counts what it will fetch, not what the grid is missing. `fillable` comes from the
    * FILL's own `needs`/`eligible` — on the AEX the grid is missing 3 constituents and `fillable`
    * is 0, because all three are LSE listings outside the subscription and no press could ever load
    * them. A button offering to fetch three companies it will then refuse is worse than no button.
@@ -241,7 +241,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
         `${API_URL}/api/benchmarks/index/${encodeURIComponent(label)}/fundamentals/ingest/job`,
         `${label} fundamentals`);
       const job = await done;
-      // ⚠ RE-READ AFTER A CANCEL TOO, UNLIKE A SINGLE ROW. A cancelled bulk run has still loaded
+      //  Re-read after a cancel too, unlike a single row. A cancelled bulk run has still loaded
       // every company it got through — often hundreds — so leaving the pre-fill figures on screen
       // would hide real work that was really done.
       if (job.status !== 'failed') {
@@ -258,7 +258,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   /**
    * Re-read every cadence we hold, IN PLACE.
    *
-   * ⚠ IT MUST NOT CLEAR FIRST. `setByCadence({})` would drop the table to its empty state and back
+   *  It must not clear first. `setByCadence({})` would drop the table to its empty state and back
    * — the exact flash that was fixed two passes ago — and it would do so at the one moment the
    * reader is watching a specific row to see whether it filled in. Fetching first and swapping
    * after means the table never leaves the screen.
@@ -284,7 +284,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   );
 
   /**
-   * ⚠⚠ DERIVED DURING RENDER, NOT SET BY AN EFFECT — AND THAT IS THE FLASH.
+   *  Derived during render, not set by an effect — and that is the flash.
    *
    * This used to be `useState('')` plus an effect that landed on the newest year once a payload
    * arrived. An effect runs AFTER the commit, so the first render with data still had `year = ''`,
@@ -317,7 +317,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   const measures = useMemo(() => columns.filter((c) => c.key !== 'market_cap'), [columns]);
 
   /**
-   * ⚠ STABLE (5) — ONE ROW LIST ACROSS BOTH CADENCES, NOT ONE PER PAYLOAD.
+   *  STABLE (5) — ONE ROW LIST ACROSS BOTH CADENCES, NOT ONE PER PAYLOAD.
    *
    * The two payloads do not carry identical constituent sets: a TTM point needs four quarters
    * behind it, so a company with three has annual lines and no quarterly ones (measured on SP500:
@@ -341,7 +341,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   }, [loaded]);
 
   /**
-   * ⚠ STABLE (1) — THE SORT IS ANCHORED TO A FIXED PAYLOAD AND A FIXED PERIOD, NEVER THE SELECTED
+   *  STABLE (1) — THE SORT IS ANCHORED TO A FIXED PAYLOAD AND A FIXED PERIOD, NEVER THE SELECTED
    * ONE.
    *
    * Sorting on the visible period is the obvious implementation and it makes the table unreadable
@@ -362,7 +362,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
 
   const needle = q.trim().toLowerCase();
   /**
-   * ⚠⚠ SORTED ON THE PERIOD ON SCREEN — AND THIS REVERSES A DELIBERATE EARLIER DECISION, so the
+   *  Sorted on the period on screen — and this reverses a deliberate earlier decision, so the
    * reasoning on both sides belongs here.
    *
    * It used to rank on a FIXED anchor (the newest period), so the running order did not move as the
@@ -387,7 +387,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   /**
    * The index row, built from EVERY row the current basis can answer for.
    *
-   * ⚠ NOT FROM THE FILTERED LIST. It is labelled with the index's own name, so computing it over
+   *  Not from the filtered list. It is labelled with the index's own name, so computing it over
    * whatever the search box has narrowed to would put "SP500" on the total of four companies —
    * true of the rows on screen, false of the label above them. Typing in the filter now leaves it
    * untouched, which is also what makes it usable: you can search for a company and still read its
@@ -401,7 +401,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   const usable = summary?.weights_usable ?? false;
 
   /**
-   * ⚠⚠ ROW VIRTUALIZATION — AND THE REASON IS THE SLIDER, NOT THE SCROLLBAR.
+   *  Row virtualization — and the reason is the slider, not the scrollbar.
    *
    * ACWI is 1,949 constituents x ~26 columns, so the table was **~50,000 `<td>` elements**, all
    * mounted. Scrolling that is merely heavy; the slider is what made it painful, because moving
@@ -411,17 +411,17 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
    *
    * With ~40 rows mounted, a tick re-renders about 1,000 cells instead of 50,000.
    *
-   * ⚠ PADDING ROWS, NOT ABSOLUTE POSITIONING. TanStack's own table example positions each `<tr>`
+   *  Padding rows, not absolute positioning. TanStack's own table example positions each `<tr>`
    * absolutely with a transform — which cannot work here: this table is `table-fixed` over a
    * `<colgroup>`, and it has two STICKY columns (`#` and Company). Taking the rows out of the
    * table's flow throws away the colgroup widths and the sticky offsets together. A spacer row
    * above and below keeps every row a normal table row; the same pattern `AssetPipelineTable` uses
    * over 16,150 instruments.
    *
-   * ⚠ THE TOTAL ROW IS NOT VIRTUALIZED. It is one row, it is the denominator every weight below
+   *  The total row is not virtualized. It is one row, it is the denominator every weight below
    * divides by, and it must render at every scroll position — it sits ahead of the top spacer.
    *
-   * ⚠ `measureElement` RATHER THAN A FIXED HEIGHT, because the row height is not a constant here:
+   *  `measureElement` RATHER THAN A FIXED HEIGHT, because the row height is not a constant here:
    * this app scales its whole UI off `html { font-size }` and steps it down at three breakpoints
    * (17.5 -> 16 -> 15 -> 14px), so a hardcoded estimate would be right on a desktop and drift on a
    * phone. Every row is a single line by construction (`truncate` inside fixed widths), so the
@@ -432,7 +432,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 32,
-    // ⚠ GENEROUS ON PURPOSE. The virtualizer measures the scroll container, whose top is the
+    //  Generous on purpose. The virtualizer measures the scroll container, whose top is the
     // sticky header rather than the first data row, so its idea of the offset runs ahead of the
     // real one by the header + Total row. That error is CONSTANT (it does not grow with scrolling)
     // and a couple of rows wide; the overscan absorbs it rather than leaving a gap at the seam.
@@ -452,7 +452,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
   const th = 'py-2 font-medium cursor-pointer select-none hover:text-fg';
 
   /**
-   * ⚠⚠ NO EARLY RETURNS. THE PANE HAS ONE SHAPE, LOADED OR NOT.
+   *  No early returns. THE PANE HAS ONE SHAPE, LOADED OR NOT.
    *
    * There used to be three: an error box, a one-line "Loading…", and a one-line "nothing
    * ingested". Each is a different height, and the pane sits ABOVE the constituent price table —
@@ -472,7 +472,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
 
   const staleYear = year && year < String(new Date().getFullYear());
   /**
-   * ⚠ THIS INDEX CAPS, SO IT GETS NO WEIGHTS AND NO INDEX ROW.
+   *  This index caps, so it gets no weights and no index row.
    *
    * `cap / Σcap` is the index's weighting only where the index does not cap. The AEX caps a
    * constituent at 15% and ASML is 37.53% of it uncapped — a total built on that is an ASML
@@ -481,13 +481,13 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
    */
   const capped = data?.weight_cap_pct != null;
   /** Coverage is genuinely the reason the Total row's line aggregates are withheld — as opposed to
-   *  the index capping, which withholds them at any coverage. ⚠ Compared against the floor
+   *  the index capping, which withholds them at any coverage.  Compared against the floor
    *  DIRECTLY rather than reading `weights_usable`, which folds both reasons into one boolean and
    *  cannot tell the notice which sentence to print. */
   const coverageShort = !empty
     && (summary?.cap_covered_pct ?? 0) < (data?.min_coverage_pct ?? 0);
   /**
-   * ⚠ NO LONGER A GAP — AND THE BADGE THAT SHOWED IT IS GONE.
+   *  No longer a gap — and the badge that showed it is gone.
    *
    * This used to be "constituents the grid never saw": `_members` dropped anything with no stored
    * market cap, so the AEX listed 22 of 25 and Shell, Unilever and RELX were absent rather than
@@ -498,9 +498,9 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
    * company — 2 on the S&P), and folding them is correct, not a loss. Flagging that number as
    * missing would have replaced a real warning with a false one, which is worse than no warning.
    */
-  // ⚠ DERIVED FROM THE HEADINGS AND THE CAPPED FLAG ONLY — never from the rows. See `gridWidths`:
+  //  Derived from the headings and the capped flag only — never from the rows. See `gridWidths`:
   // the moment a width depends on the data, the table's shape depends on the slider.
-  // ⚠ `true` — THE FETCH COLUMN IS ALWAYS RENDERED NOW (2026-08-19). It used to be admin-only and
+  //  `true` — THE FETCH COLUMN IS ALWAYS RENDERED NOW (2026-08-19). It used to be admin-only and
   // this flag had to agree with the three `isAdmin` guards below, or every column after them took
   // its neighbour's width. One less thing that can disagree.
   const { widths, total } = gridWidths(measures.map((c) => c.label), true);
@@ -517,14 +517,14 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
             className="w-56 accent-accent-600 disabled:opacity-40" />
           <span className="font-mono text-fg tabular-nums w-10">{year || '—'}</span>
         </label>
-        {/* Reserved so the row does not reflow when a fetch starts. ⚠ INGEST PROGRESS IS NOT HERE:
+        {/* Reserved so the row does not reflow when a fetch starts.  INGEST PROGRESS IS NOT HERE:
             it belongs to the toast stack, which outlives this page. A second copy on the panel
             would be a second thing to keep in step with the job's real state. */}
         <span className="text-fg-faint w-24">{loading ? 'loading…' : ''}</span>
       </div>
 
       {/* ── The period control: ONE row, five positions, always present.
-          ⚠ `Full year` IS THE ANNUAL CADENCE, not a quarter — which is why this is one control and
+           `Full year` IS THE ANNUAL CADENCE, not a quarter — which is why this is one control and
           not a cadence toggle beside a quarter picker. Those were two controls whose product
           included combinations that do not exist (there is no "2025" period in the quarterly
           payload), and picking one showed an empty table. Here every position resolves. */}
@@ -533,7 +533,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
         <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden">
           {([null, 1, 2, 3, 4] as const).map((qq) => {
             const active = qq === null ? cadence === 'annual' : cadence === 'quarterly' && quarter === qq;
-            // ⚠ GREYED, NOT HIDDEN — removing the button would make the control's width jump from
+            //  Greyed, not hidden — removing the button would make the control's width jump from
             // year to year and hide WHICH quarters exist. Until the quarterly payload is loaded
             // nothing is known to be missing, so nothing is greyed.
             const missing = (qq !== null && knowsQuarters && !quartersHere.includes(qq)) || empty;
@@ -574,15 +574,15 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
         </span>
       </div>
 
-      {/* ⚠ STABLE (3) — TWO RESERVED LINES, ALWAYS RENDERED. These used to be conditional blocks,
+      {/*  STABLE (3) — TWO RESERVED LINES, ALWAYS RENDERED. These used to be conditional blocks,
           so every slider position that crossed the coverage floor or the current year pushed the
           whole table up or down by a line. Fixed height + `truncate` means the text can change
           without the geometry doing so; the full sentence is on the title. */}
-      {/* ⚠ THE CAPPED-INDEX BANNER WAS REMOVED ON REQUEST (2026-08-06). It said the Weight column
+      {/*  THE CAPPED-INDEX BANNER WAS REMOVED ON REQUEST (2026-08-06). It said the Weight column
           is a share of the summed caps rather than the AEX's own weighting — still true, and still
           on that column's header tooltip, just no longer shouted on every view of the index.
 
-          ⚠ SO THIS LINE IS NOW **ONLY** ABOUT COVERAGE, and it has to gate on coverage rather than
+           SO THIS LINE IS NOW **ONLY** ABOUT COVERAGE, and it has to gate on coverage rather than
           on `usable`. `weights_usable` is false for a capped index at ANY coverage, so falling
           through to the coverage sentence would have printed "caps cover 88% of 25, floor 60%" on
           the AEX — an explanation that contradicts itself, and a reader sent to fix something that
@@ -597,12 +597,12 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
               + 'The “Fill all” button beneath this grid fetches the rest.'
             : undefined}>
           {coverageShort
-            ? `⚠ Total-row line aggregates withheld — caps cover `
+            ? ` Total-row line aggregates withheld — caps cover `
               + `${summary?.cap_covered_pct ?? 0}% of ${data?.members ?? 0}, `
               + `floor ${data?.min_coverage_pct}%.`
             : ''}
         </p>
-        {/* ⚠ SURVIVORSHIP, STATED. These are TODAY's constituents shown at an older period's
+        {/*  SURVIVORSHIP, STATED. These are TODAY's constituents shown at an older period's
             figures — the index did not hold this exact set back then. */}
         <p className="h-5 truncate text-fg-faint" title={staleYear
           ? 'Companies that have since left the index are absent, and recent joiners are shown '
@@ -618,10 +618,10 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
                    focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30
                    disabled:opacity-40" />
 
-      {/* ⚠ THE TABLE SCROLLS INSIDE ITS OWN CONTAINER — twenty columns are far wider than the
+      {/*  THE TABLE SCROLLS INSIDE ITS OWN CONTAINER — twenty columns are far wider than the
           viewport, and without this the page itself scrolls sideways.
 
-          ⚠⚠ `h-`, NOT `max-h-`. With a max-height the box is as tall as its contents: one line
+           `h-`, NOT `max-h-`. With a max-height the box is as tall as its contents: one line
           while loading, full height once the rows land — so everything below the pane jumped down
           the page as the fetch completed. A fixed height means the box is the same size before and
           after, and the arrival of data changes only what is inside it. The cost is some empty
@@ -634,7 +634,7 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
           </p>
         ) : (
         <>
-        {/* ⚠⚠ `table-fixed` PLUS AN EXPLICIT WIDTH, NOT `w-full`. Auto layout sizes columns from
+        {/*  `table-fixed` PLUS AN EXPLICIT WIDTH, NOT `w-full`. Auto layout sizes columns from
             their CONTENT, which made the geometry a function of the period: 2018 holds fewer and
             shorter figures than 2025, so columns shrank and the headings wrapped to two lines —
             the header bar visibly rebuilding as the slider moved. Fixed layout takes its widths
@@ -646,11 +646,11 @@ export default function FundamentalGridPane({ label, refreshKey = 0 }: {
             {widths.map((w, i) => <col key={i} style={{ width: `${w}rem` }} />)}
           </colgroup>
           <thead className="text-fg-muted border-b border-neutral-800/40 sticky top-0 bg-card z-20">
-            {/* ⚠ EVERY HEADING IS `whitespace-nowrap` AS WELL. The colgroup stops the columns from
+            {/*  EVERY HEADING IS `whitespace-nowrap` AS WELL. The colgroup stops the columns from
                 resizing; nowrap is what guarantees a heading cannot wrap inside the width it was
                 given — belt and braces, because the two failures look identical on screen. */}
             <tr>
-              {/* ⚠ THE ROW NUMBER PINS TOO, AND COMPANY'S OFFSET MUST MATCH ITS WIDTH. Both are
+              {/*  THE ROW NUMBER PINS TOO, AND COMPANY'S OFFSET MUST MATCH ITS WIDTH. Both are
                   sticky; leaving Company at `left-0` would slide it over the numbers the moment
                   the table scrolls sideways — 3rem here, `left-[3rem]` there, and the same 3 in
                   `fixedWidthsRem`. */}
@@ -663,13 +663,13 @@ it renumbers whenever the order changes — including when the period slider mov
                 onClick={() => click('name')}>
                 Company{caret('name')}
               </th>
-              {/* ⚠ NO LONGER ADMIN-ONLY (2026-08-19). The ingest still spends GuruFocus quota —
+              {/*  NO LONGER ADMIN-ONLY (2026-08-19). The ingest still spends GuruFocus quota —
                   that is why it was gated — but this grid is the one place that shows WHICH
                   constituents are missing a figure, so the reader who can see the hole is now the
                   one who can fill it. The API gate agrees
                   (`_auth_middleware.py::_USER_REFRESH_PATTERNS`); nothing here 403s.
 
-                  ⚠⚠ ONE BUTTON, AND IT FETCHES ONLY WHAT THIS TABLE SHOWS. All nineteen columns
+                   ONE BUTTON, AND IT FETCHES ONLY WHAT THIS TABLE SHOWS. All nineteen columns
                   here come from ONE GuruFocus feed (`fetch_financials`) — market cap included. It
                   was briefly two (`Table` / `All`), the second adding analyst estimates and
                   indicators: two extra calls per company for data this grid cannot render. Those
@@ -698,21 +698,21 @@ reported in. Every value column is converted to EUR; this is what the native too
                 title="Market cap in the selected period — and the sort ranks on that same period, so this column always reads in order.">
                 Cap (€){caret('market_cap')}
               </th>
-              {/* ⚠ UNCONDITIONAL, INCLUDING ON A CAPPED INDEX (2026-08-06, on request) — see
+              {/*  UNCONDITIONAL, INCLUDING ON A CAPPED INDEX (2026-08-06, on request) — see
                   `weightPct`. Defined as cap ÷ Σ available caps it is arithmetic over the numbers
                   on screen, so it is shown everywhere; what it is NOT is the index's weighting,
                   and the tooltip has to say so because for the AEX the gap is 37.53% vs 15.00%. */}
-              {/* ⚠ SORTS ON THE CAP, and that is not a shortcut: a weight IS `cap ÷ Σcap`, so the
+              {/*  SORTS ON THE CAP, and that is not a shortcut: a weight IS `cap ÷ Σcap`, so the
                   two orders are identical by construction. Ranking this column separately would be
                   a second definition of one ranking, and the day one changed they would disagree
                   by a rounding step with nothing to say which was right. */}
               <th className={`text-right px-2 whitespace-nowrap ${th}`} onClick={() => click('weight')}
                 title={'Share of the summed market caps in this period: this company’s cap ÷ the '
-                  + 'Total row.\n\n⚠ NOT the index’s weight. The denominator is only the caps we '
+                  + 'Total row.\n\n NOT the index’s weight. The denominator is only the caps we '
                   + 'hold, so a constituent showing a dash does not dilute anyone — it inflates '
                   + 'everyone else pro rata.'
                   + (capped
-                    ? `\n⚠ ${label} caps a constituent at ${data?.weight_cap_pct}% at each review, `
+                    ? `\n ${label} caps a constituent at ${data?.weight_cap_pct}% at each review, `
                       + 'and this column does not — ASML reads ~37% here against the real index’s '
                       + '15.00%.'
                     : '')}>
@@ -727,31 +727,31 @@ reported in. Every value column is converted to EUR; this is what the native too
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-800/20">
-            {/* ⚠ STABLE (2) — ALWAYS RENDERED, INCLUDING ON A CAPPED INDEX. It appeared and
+            {/*  STABLE (2) — ALWAYS RENDERED, INCLUDING ON A CAPPED INDEX. It appeared and
                 disappeared with the coverage floor at first, so scrubbing across it moved all 264
                 rows by one line; then it was suppressed outright for the AEX. Both are gone: the
                 row is always here and only its CELLS change.
 
-                ⚠⚠ A SUM OF CAPS IS NOT A WEIGHTING, AND THAT DISTINCTION IS WHY THIS ROW CAN BE
+                 A SUM OF CAPS IS NOT A WEIGHTING, AND THAT DISTINCTION IS WHY THIS ROW CAN BE
                 UNCONDITIONAL WHILE THE WEIGHTS STAY GATED. Adding up the market caps we hold is
                 arithmetic over observed numbers — it is true for the AEX exactly as it is for the
                 S&P, because Euronext's 15% cap changes what each constituent's SHARE of the index
                 is and not what any of them is WORTH. The weight column and the per-line aggregates
                 are claims about the index and keep every gate they had.
 
-                ⚠ SO THE ROW MUST SAY WHAT IT SUMMED. `Total · 22/25 caps` is a sum over the
+                 SO THE ROW MUST SAY WHAT IT SUMMED. `Total · 22/25 caps` is a sum over the
                 constituents we could price, not the index's market cap — three missing names make
                 it smaller than the real figure, and a bare "Total" would invite it to be read as
                 the latter. The count is the whole difference between a partial sum and a wrong
                 one. */}
             <tr className="bg-inset font-medium">
-              {/* ⚠ THE DENOMINATOR IS NOW THE WHOLE INDEX, which is what makes this count worth
+              {/*  THE DENOMINATOR IS NOW THE WHOLE INDEX, which is what makes this count worth
                   reading. It used to be "constituents that have a stored market cap", so the AEX
                   read "22/22 caps" — apparently complete coverage of a 25-name index, with Shell,
                   Unilever and RELX not merely unpriced but uncounted. Every constituent has a row
                   now, so `members` IS the membership and "22/25" is the real shortfall.
 
-                  ⚠ THE TOTAL ROW IS NOT NUMBERED. It is not a constituent, and a "1" here would
+                   THE TOTAL ROW IS NOT NUMBERED. It is not a constituent, and a "1" here would
                   push every company's rank up by one against the list it is summarising. */}
               <td className="sticky left-0 bg-inset z-10" />
               <td className="px-3 py-2 sticky left-[3rem] bg-inset z-10 text-fg-strong truncate"
@@ -762,10 +762,10 @@ reported in. Every value column is converted to EUR; this is what the native too
                   + 'missing from the sum makes this a floor, never the total.'}>
                 Total · {summary?.with_market_cap ?? 0}/{summary?.members ?? 0} caps
               </td>
-              {/* ⚠ THE ONE TOTAL-ROW CELL WITH SOMETHING TO SAY. Every company's own Fetch sits in
+              {/*  THE ONE TOTAL-ROW CELL WITH SOMETHING TO SAY. Every company's own Fetch sits in
                   this column, so the all-companies action belongs in the all-companies row of it.
 
-                  ⚠ ALWAYS RENDERED, INCLUDING AT ZERO (2026-08-06, on request). It was hidden when
+                   ALWAYS RENDERED, INCLUDING AT ZERO (2026-08-06, on request). It was hidden when
                   nothing was missing, which made the control appear and disappear with the data —
                   the same class of thing as the index row that used to vanish. And a press at zero
                   is not wasted: `fillable` is a snapshot taken when the grid loaded, so pressing
@@ -800,7 +800,7 @@ reported in. Every value column is converted to EUR; this is what the native too
               <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">
                 {totalCap ? '100.0%' : '—'}
               </td>
-              {/* ⚠ THE MEASURE CELLS KEEP EVERY GATE — only the Cap sum was un-gated. Adding up
+              {/*  THE MEASURE CELLS KEEP EVERY GATE — only the Cap sum was un-gated. Adding up
                   caps is arithmetic; a cap-weighted line aggregate is a claim about the index, and
                   it is still withheld below the coverage floor and on a capped index. */}
               {measures.map((c) => {
@@ -816,7 +816,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                           + 'amount do not sum across companies into anything.'
                         : undefined}>
                     {a ? fmtCell(a.value, c.unit) : '—'}
-                    {/* ⚠ A SHORT COLUMN SAYS SO. An aggregate built from a third of the index
+                    {/*  A SHORT COLUMN SAYS SO. An aggregate built from a third of the index
                         reads identically to one built from all of it. */}
                     {a && summary && a.contributors < summary.covered && (
                       <span className="ml-1 text-[10px] text-warn-400">{a.contributors}</span>
@@ -825,7 +825,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                 );
               })}
             </tr>
-            {/* ⚠ THE SPACERS CARRY THE HEIGHT OF EVERY ROW NOT MOUNTED, so the scrollbar and the
+            {/*  THE SPACERS CARRY THE HEIGHT OF EVERY ROW NOT MOUNTED, so the scrollbar and the
                 scroll position describe the whole index rather than the visible window.
                 `colSpan` is `widths.length` — the colgroup's own length, so it cannot fall out of
                 step with the column count the way a hardcoded number would. */}
@@ -834,32 +834,32 @@ reported in. Every value column is converted to EUR; this is what the native too
             )}
             {vItems.map((vi) => {
               const { id, ident, cur } = rows[vi.index];
-              // ⚠ THE RANK COMES FROM THE VIRTUAL INDEX, NOT FROM THE MAP POSITION. `vItems` is a
+              //  The rank comes from the virtual index, not from the map position. `vItems` is a
               // window into the list, so its own index starts at 0 wherever you have scrolled to —
               // using it would number every screen 1..40 and quietly renumber the index.
               const i = vi.index;
-              // ⚠ IDENTITY FROM THE UNION, NUMBERS FROM THE CURRENT BASIS. `cur` is null for a
+              //  Identity from the union, numbers from the current basis. `cur` is null for a
               // company this cadence cannot answer for — the row stays, every figure is a dash.
-              // ⚠ AGAINST `totalCap` UNCONDITIONALLY — no longer gated on `usable`. The gate said
+              //  AGAINST `totalCap` UNCONDITIONALLY — no longer gated on `usable`. The gate said
               // "we will not publish a weight over a partial index"; the column's definition now
               // IS the partial one (share of summed available caps), so gating it would withhold
               // the very number it was asked to show. What stays gated is the line aggregates.
               const w = cur ? weightPct(cur, period, totalCap) : null;
               return (
                 // `data-index` + the measure ref are what let the virtualizer learn the real row
-                // height instead of trusting `estimateSize` — see the ⚠ on the virtualizer.
+                // height instead of trusting `estimateSize` — see the  on the virtualizer.
                 <tr key={id} data-index={i} ref={rowVirtualizer.measureElement}
                   className="hover:bg-overlay/[0.02] transition-colors">
                   {/* The position in the list as shown — 1-based, so it reads as a rank rather
-                      than an index. Pinned alongside the name; see the header's ⚠. */}
+                      than an index. Pinned alongside the name; see the header's . */}
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fg-faint
                                  sticky left-0 bg-card z-10">
                     {i + 1}
                   </td>
-                  {/* ⚠ `truncate` NOW THAT THE WIDTH IS FIXED. Under auto layout the column grew
+                  {/*  `truncate` NOW THAT THE WIDTH IS FIXED. Under auto layout the column grew
                       to fit "Koninklijke Ahold Delhaize"; under fixed layout a nowrap name simply
                       overflows into the Ticker column beside it. The full name is on the title. */}
-                  {/* ⚠ THE BADGE LIVES HERE, IN THE STICKY NAME CELL, ON PURPOSE. This table
+                  {/*  THE BADGE LIVES HERE, IN THE STICKY NAME CELL, ON PURPOSE. This table
                       scrolls sideways through nineteen metric columns, and the moment you are
                       asking "why is this row empty?" you are looking at those columns — a badge
                       in Exch, Ticker or Fetch has scrolled out of view by then. This column pins.
@@ -886,7 +886,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                     </span>
                   </td>
                   <td className="px-2 py-1.5">
-                    {/* ⚠ NO BUTTON ON A ROW THAT CANNOT BE FETCHED. The backend refuses these
+                    {/*  NO BUTTON ON A ROW THAT CANNOT BE FETCHED. The backend refuses these
                         before spending a call, so pressing it was always free — but it returned
                         a refusal that read like a failure, and offering an action that never
                         works is how a real gap and a permanent answer come to look alike. The
@@ -906,7 +906,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                     title={ident.exchange ?? undefined}>
                     {ident.exchange ?? '—'}
                   </td>
-                  {/* ⚠ PLAIN TEXT WHEN THERE IS NO URL, NEVER A DEAD LINK. `gf_url` is null when
+                  {/*  PLAIN TEXT WHEN THERE IS NO URL, NEVER A DEAD LINK. `gf_url` is null when
                       the row has no ticker or no exchange, and an anchor that goes nowhere reads
                       as "GuruFocus has no page for this" rather than "we could not build one".
                       `rel="noreferrer"` because `target="_blank"` without it hands the opened tab
@@ -925,7 +925,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                   <td className="px-2 py-1.5 font-mono text-fg-faint truncate">
                     {ident.currency ?? '—'}
                   </td>
-                  {/* ⚠ CAP AND WEIGHT GET THE SAME THREE STATES AS THE METRIC COLUMNS, because
+                  {/*  CAP AND WEIGHT GET THE SAME THREE STATES AS THE METRIC COLUMNS, because
                       they come from the same place: `market_cap` is a GuruFocus line
                       (`annuals__Valuation and Quality__Market Cap`), so an unsubscribed exchange
                       explains a missing cap exactly as it explains a missing revenue. A dash here
@@ -941,7 +941,7 @@ reported in. Every value column is converted to EUR; this is what the native too
                     })()}
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fg-muted">
-                    {/* ⚠ FORMATTED HERE AT 2dp, NOT THROUGH `fmtCell`'s 1dp percent. A weight of
+                    {/*  FORMATTED HERE AT 2dp, NOT THROUGH `fmtCell`'s 1dp percent. A weight of
                         0.04% and one of 0.00% are different constituents; `cellState` is asked only
                         for the KIND, and the text stays this column's own. */}
                     {(() => {
@@ -956,11 +956,11 @@ reported in. Every value column is converted to EUR; this is what the native too
                       ? (cur.n as Record<string, Record<string, number>>)[period]?.[c.key]
                       : undefined;
                     const rate = cur ? (cur.fx as Record<string, number>)[period] : undefined;
-                    // ⚠ THE NATIVE READING RIDES ALONG ONLY WHERE A CONVERSION HAPPENED. A share
+                    //  The native reading rides along only where a conversion happened. A share
                     // count and a percent are not currency and were never converted, so offering
                     // "native" for them would imply a second reading that does not exist.
                     const converted = c.unit === 'millions' || c.unit === 'per_share';
-                    // ⚠ NEVER A BARE DASH — see `cellState`. An empty cell has two different
+                    //  Never a bare dash — see `cellState`. An empty cell has two different
                     // causes with two different fixes ("this can never be filled" vs "nobody has
                     // fetched it"), and a dash renders them identically.
                     const st = cellState(v, c.unit, ident.unavailable_label);

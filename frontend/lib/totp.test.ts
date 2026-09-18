@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { base32ToBytes, expectedTotp, explainCode } from './totp'
 
-// ⚠⚠ RFC 6238's OWN TEST VECTOR, not a value captured from this implementation. A baseline
+//  RFC 6238's OWN TEST VECTOR, not a value captured from this implementation. A baseline
 // snapshotted off the code under test pins that code's bugs as the contract — and the whole point
 // of this module is to be authoritative about what a secret "should" be showing, so it has to
 // agree with the standard rather than with itself.
@@ -23,7 +23,7 @@ describe('base32ToBytes', () => {
   })
 
   it('refuses anything that is not base32 rather than returning noise', () => {
-    // ⚠ `1`, `8` and `0` are not in the alphabet — silently mapping them to -1 would produce a
+    //  `1`, `8` and `0` are not in the alphabet — silently mapping them to -1 would produce a
     // plausible-looking key and therefore a plausible-looking WRONG code.
     expect(base32ToBytes('not-base32!')).toBeNull()
     expect(base32ToBytes('ABC108')).toBeNull()
@@ -32,7 +32,7 @@ describe('base32ToBytes', () => {
 })
 
 describe('expectedTotp', () => {
-  it('⚠⚠ agrees with RFC 6238 at T=59s', async () => {
+  it(' agrees with RFC 6238 at T=59s', async () => {
     expect(await expectedTotp(RFC_SECRET, 59_000)).toBe('287082')
   })
 
@@ -51,7 +51,7 @@ describe('expectedTotp', () => {
   })
 
   it('returns null on an unreadable secret rather than a wrong code', async () => {
-    // ⚠ NOT `'not base32'` — strip the space and upper-case it and every letter of NOTBASE32 is
+    //  NOT `'not base32'` — strip the space and upper-case it and every letter of NOTBASE32 is
     // in the alphabet, so it decodes happily. The rejection has to be tested with a character
     // that genuinely is not: `1`, `8`, `0` and punctuation are the ones people actually mistype.
     expect(await expectedTotp('not-base32!')).toBeNull()
@@ -65,7 +65,7 @@ describe('explainCode — the whole reason this module exists', () => {
     expect(await explainCode(RFC_SECRET, code, 59_000)).toEqual({ kind: 'matches' })
   })
 
-  it('⚠⚠ separates a stale authenticator from a clock problem', async () => {
+  it(' separates a stale authenticator from a clock problem', async () => {
     // THE case this exists for. A code from a DIFFERENT secret matches no window of this one, so
     // the reader can be told their app is on an old entry instead of being sent, wrongly, to
     // check a clock that is fine.
@@ -90,7 +90,7 @@ describe('explainCode — the whole reason this module exists', () => {
     expect(await explainCode('nonsense!!', '123456')).toEqual({ kind: 'unknown' })
   })
 
-  it('⚠ treats six random digits as a wrong secret, not as skew', async () => {
+  it(' treats six random digits as a wrong secret, not as skew', async () => {
     expect(await explainCode(RFC_SECRET, '000000', 59_000)).toEqual({ kind: 'wrong-secret' })
   })
 })

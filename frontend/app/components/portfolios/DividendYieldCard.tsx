@@ -29,7 +29,7 @@ import CardHeading from './CardHeading';
  * a LINEAR % axis (a ratio, not a compounding series — no log / exponential trend). Click through
  * to the two base lines per company.
  *
- * ⚠ THIS REPLACED A "DIVIDEND / SHARE" CARD, AND THE UNIT IS THE WHOLE REASON. A per-share amount
+ *  This replaced a "DIVIDEND / SHARE" CARD, AND THE UNIT IS THE WHOLE REASON. A per-share amount
  * has no portfolio-level meaning — there is no portfolio share, the amounts sit in different
  * currencies, and the level rule rebases each holding to 100 at its first year, which a dividend
  * series starting at 0.00 cannot survive. The portfolio card was therefore permanently empty while
@@ -38,7 +38,7 @@ import CardHeading from './CardHeading';
  * dropped. Mirrors {@link ./FcfSbcYieldCard}.
  */
 
-/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+/**  `String.raw`, or every backslash in the expressions below is eaten before KaTeX
  *  sees it. */
 const R = String.raw;
 
@@ -54,12 +54,12 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
   /**
    * Daily is a PER-CARD override of the tab's cadence, and only these two yield cards offer it.
    *
-   * ⚠ IT IS NOT A THIRD SETTING ON THE TAB TOGGLE. A yield is the only shape here with a daily
+   *  It is not a third setting on the tab toggle. A yield is the only shape here with a daily
    * input: the denominator is a price, which moves every trading day. The other ten cards are pure
    * accounting — revenue, margins, debt ratios — and a tab-wide "Daily" would blank all of them.
    */
   const [daily, setDaily] = useState(false);
-  // ⚠ Memoised, and `daily` is a dep: it is the effect key below AND the modal's target, so a
+  //  Memoised, and `daily` is a dep: it is the effect key below AND the modal's target, so a
   // fresh object each render would refetch forever while a stale one would leave the drill-down
   // showing a different cadence from the chart it opened from.
   const target = useMemo(
@@ -120,13 +120,13 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
   const own = holdingsName ?? 'Dividend yield';
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(yieldByYr, benchByYr), [yieldByYr, benchByYr]);
   const avg = stats.own.avg;
   // The latest year's coverage — a yield averaged over 40% of the book is not the book's yield.
-  // ⚠ KEYED ON THE PERIOD THE `Latest` TILE ACTUALLY PRINTS (`own.latestX`), not on this line's own
+  //  Keyed on the period the `Latest` TILE ACTUALLY PRINTS (`own.latestX`), not on this line's own
   // newest. With a benchmark on screen the tiles are pinned to the shared window, so reading
   // coverage off a later year would report the share of the book behind a figure that is not shown.
   const latestCov = stats.own.latestX != null ? covByYr.get(stats.own.latestX) ?? null : null;
@@ -159,7 +159,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
                 R`\text{yield} = \dfrac{\text{dividends per share}}{\text{year-end price}}`,
                 workedMean(stats.own.values))}
               how="A yield is currency-free, so the weighted average IS the book's yield (the weights are value weights). A company that pays nothing counts as 0%; one we have no dividend line for is left out and the year renormalises over the rest." />} />}>
-            {/* ⚠ THE BOOK'S COVERAGE, AND ONLY THE BOOK'S — passed as a child so it lands after
+            {/*  THE BOOK'S COVERAGE, AND ONLY THE BOOK'S — passed as a child so it lands after
                 both pairs. The index has its own (very different) coverage; showing one figure
                 under a row that carries two lines would read as if it described both. */}
             {latestCov != null && latestCov < 99.5 && (
@@ -185,7 +185,7 @@ export default function DividendYieldCard({ holdingsTarget, holdingsName, benchT
                   formatter={(v, n) => [`${typeof v === 'number' ? v.toFixed(2) : '—'}%`, n === 'bench' ? (benchTarget?.label ?? 'Benchmark') : own]} />
                 <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
                 {avg != null && <ReferenceLine y={avg} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />}
-                {/* ⚠ NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
+                {/*  NO DOTS ON A DAILY SERIES — 2,700 markers is a solid band, not a line. */}
                 <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={daily ? false : { r: 2.5 }} connectNulls />
                 {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
               </ComposedChart>

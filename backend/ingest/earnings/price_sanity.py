@@ -1,6 +1,6 @@
 """Does the vendor's price history agree with our own? A test for a series that STOPPED MOVING.
 
-⚠⚠ IT EXISTS BECAUSE A PAYLOAD-SHAPE HEURISTIC DOES NOT WORK, AND THAT IS MEASURED. The motivating
+ IT EXISTS BECAUSE A PAYLOAD-SHAPE HEURISTIC DOES NOT WORK, AND THAT IS MEASURED. The motivating
 case is Diploma plc (`LSE:DPLM`): GuruFocus returned a complete statements payload whose
 `Month End Stock Price` is **0 for 1998-2013** and then **frozen at 11.1 from 2016-09 to 2023-03**,
 while the real share price went £8.79 to £28.10, before stepping 3.81x in one period. Two obvious
@@ -12,15 +12,15 @@ detectors were tried against the 1,782 companies that hold a price series, and b
     catches Diploma (14 frozen) also refuses **Nebius Group (11 frozen)**, whose price is
     legitimately flat through its ~2.5-year suspension.
 
-⚠⚠ SO THE TEST IS AGREEMENT BETWEEN TWO INDEPENDENT SOURCES. We hold a yfinance series for 1,721 of
+ SO THE TEST IS AGREEMENT BETWEEN TWO INDEPENDENT SOURCES. We hold a yfinance series for 1,721 of
 those companies through the ISIN bridge, and it is a genuinely separate observation of the same
 security. A real halt makes BOTH series flat and passes; a vendor reporting a stale number while
 the stock moved makes them disagree, which nothing about the payload alone could reveal.
 
-⚠⚠ AND IT COMPARES **RETURNS**, NOT LEVELS — a level test was written first and had to be thrown
+ AND IT COMPARES **RETURNS**, NOT LEVELS — a level test was written first and had to be thrown
 away, because it measured OUR defects as loudly as the vendor's. Two of them, both known:
 
-  * **Our closes are not split-adjusted** (see the ⚠⚠ in CLAUDE.md — ingest only fetches dates
+  * **Our closes are not split-adjusted** (see the  in CLAUDE.md — ingest only fetches dates
     newer than our stored max, so a vendor's retroactive split rewrite is never re-read), while
     GuruFocus's are. A level-ratio test therefore reported the SPLIT RATIO as a disagreement, and
     the first run flagged **3M, Rockwell Automation, Ciena, Reliance and Invesco** — none of them
@@ -33,7 +33,7 @@ vendor does not cover has no return at all. What it still catches is the Diploma
 vendor reporting NO CHANGE across a span in which the stock demonstrably moved — which is not
 something a split or a coverage gap can produce.
 
-⚠ MEASURED OVER THE WHOLE DATABASE: of the 1,721 companies holding both a vendor series and one of
+ MEASURED OVER THE WHOLE DATABASE: of the 1,721 companies holding both a vendor series and one of
 ours, **exactly one is flagged** — Diploma, on 10 of its 25 comparable periods — and that stays
 true at every `REAL_MOVE` from 3% to 15%. A detector with one true positive and no false ones is
 worth having; the three it replaced each flagged dozens of healthy companies.
@@ -46,19 +46,19 @@ from bisect import bisect_right
 from dataclasses import dataclass, field
 
 #: A vendor move at or below this is "the vendor says nothing happened".
-#: ⚠ NOT ZERO. A frozen series repeats a value exactly, but rounding to two decimals on a large
+#:  NOT ZERO. A frozen series repeats a value exactly, but rounding to two decimals on a large
 #: price can leave a whisker of movement, and a rule that demanded an exact repeat would miss it.
 FLAT_MOVE = 0.005
 
 #: …while OUR series moved at least this much over the same span.
 #:
-#: ⚠⚠ SWEPT AGAINST THE WHOLE DATABASE, NOT CHOSEN. The first value tried was 20%, and it MISSED
+#:  SWEPT AGAINST THE WHOLE DATABASE, NOT CHOSEN. The first value tried was 20%, and it MISSED
 #: THE ONE CASE THIS MODULE EXISTS FOR: these prints are semi-annual, and Diploma compounded at
 #: roughly 8-10% per half-year, so almost none of its individual spans cleared 20% even though the
 #: stock tripled across them. A threshold set by intuition about "a big move" was reasoning about
 #: the wrong horizon.
 #:
-#: ⚠ THE SWEEP ALSO SHOWS THE RULE IS INSENSITIVE, WHICH IS THE REASSURING PART. Over 1,721
+#:  THE SWEEP ALSO SHOWS THE RULE IS INSENSITIVE, WHICH IS THE REASSURING PART. Over 1,721
 #: companies holding both series, the count tripping `> MAX_STALE_PERIODS` is **1 at every setting
 #: from 3% to 15%** — always Diploma, never anything else — and Diploma's own stale count moves
 #: 12 / 12 / 10 / 9 / 6 across that range. 8% sits in the middle with the true positive at 10 of 25
@@ -67,7 +67,7 @@ REAL_MOVE = 0.08
 
 #: How many such periods before it is a finding rather than an oddity.
 #:
-#: ⚠ ONE IS NOT EVIDENCE — a single stale print happens, and our own series carries unadjusted
+#:  ONE IS NOT EVIDENCE — a single stale print happens, and our own series carries unadjusted
 #: splits which can produce one. Diploma has ten.
 MAX_STALE_PERIODS = 4
 
@@ -87,11 +87,11 @@ class Verdict:
 def _asof(ours: list[tuple[str, float]], when: str, _dates: list[str] | None = None) -> float | None:
     """Our last close at or before `when`.
 
-    ⚠ AT OR BEFORE, NEVER THE NEAREST — a month-end print compared against a close from the
+     AT OR BEFORE, NEVER THE NEAREST — a month-end print compared against a close from the
     following week would import a real price move as a disagreement, in a direction that depends on
     the month.
 
-    ⚠ BISECTED, NOT SCANNED. `asset_price` holds ~5,900 bars per instrument and the audit asks ~50
+     BISECTED, NOT SCANNED. `asset_price` holds ~5,900 bars per instrument and the audit asks ~50
     questions of each across 1,721 companies; a linear scan per lookup is ~500M string comparisons
     and turns a report into something nobody runs. ISO dates sort lexicographically, so the bisect
     needs no parsing.
@@ -110,7 +110,7 @@ def compare(vendor: list[tuple[str, float]],
     only the RATIO of consecutive levels within each series is used, so a scale, a currency and a
     single split all cancel.
 
-    ⚠ IT ABSTAINS RATHER THAN GUESSES. Too few comparable periods is `ok=True` WITH A REASON — "it
+     IT ABSTAINS RATHER THAN GUESSES. Too few comparable periods is `ok=True` WITH A REASON — "it
     is fine" and "I cannot tell" must not both be a silent pass, and judging on thin evidence would
     fire on every recent listing.
     """
@@ -120,7 +120,7 @@ def compare(vendor: list[tuple[str, float]],
         return v
     ours = sorted(ours)
 
-    # ⚠ ZEROS ARE DROPPED, NOT TREATED AS A PRICE. A zero is the vendor's way of saying "no figure
+    #  Zeros are dropped, not treated as a price. A zero is the vendor's way of saying "no figure
     # for this period"; used as a level it would manufacture a -100% return and then a +infinite one.
     pts = [(d, val) for d, val in sorted(vendor) if val]
 

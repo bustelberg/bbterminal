@@ -1,10 +1,10 @@
 """IS THE GURUFOCUS `financials` ENDPOINT BACK? One command, two API calls, an exit code.
 
-⚠⚠ WRITTEN DURING THE OUTAGE OF 2026-08-31, when the endpoint answered EVERY symbol with its full
+ WRITTEN DURING THE OUTAGE OF 2026-08-31, when the endpoint answered EVERY symbol with its full
 15.7 KB template and no values — AAPL and ASML included — while `summary`, `keyratios` and `price`
 stayed healthy and the monthly quota was half spent. Nothing upstream said anything was wrong.
 
-⚠⚠ THE CANARY IS ON THE **PATH**, NOT THE SYMBOL, AND THAT IS THE WHOLE DIAGNOSIS. This API never
+ THE CANARY IS ON THE **PATH**, NOT THE SYMBOL, AND THAT IS THE WHOLE DIAGNOSIS. This API never
 404s: an unknown sub-path answers 200 with a 46-point list (~874 chars). So there are three states
 and they look alike from a distance:
 
@@ -40,7 +40,7 @@ def _values(node) -> int:
 def main() -> int:
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
 
-    # ⚠ AAPL, DELIBERATELY: the biggest, best-covered company the vendor has. If this one is empty
+    #  Aapl, deliberately: the biggest, best-covered company the vendor has. If this one is empty
     # the answer is never "that company has no data", which is exactly the doubt a thin constituent
     # leaves behind.
     real = _api_request(_build_api_url("stock/AAPL/financials")).data

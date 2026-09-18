@@ -5,30 +5,30 @@
 The active return is the difference itself; the tracking error is its spread. Two different
 numbers, and this module returns both so they cannot be confused for one another.
 
-⚠⚠ THIS IS EX-POST (REALISED) TE, AND THE DISTINCTION IS NOT PEDANTRY. The other definition is
+ THIS IS EX-POST (REALISED) TE, AND THE DISTINCTION IS NOT PEDANTRY. The other definition is
 ex-ante — `√(wₐᵀ Σ wₐ)` from a covariance matrix and the vector of active weights — which is a
 FORECAST, needs a risk model we do not have, and routinely disagrees with this one by a wide margin
 (a concentrated book that happened to move with its index has low realised TE and high predicted
 TE). Nothing on the panel may be labelled just "tracking error"; it says "realised".
 
-⚠⚠ ā IS SUBTRACTED. Some providers do not — they report √(Σaₜ²/T)·√f, which is the same number only
+ ā IS SUBTRACTED. Some providers do not — they report √(Σaₜ²/T)·√f, which is the same number only
 when the book exactly matched the index on average, and larger otherwise. Both are defensible; what
 is not defensible is being unsure which one a figure is. This one goes through `annualized_stats`,
 already THE definition of volatility in this codebase (`std(r, ddof=1)·√ppy`), so TE and every vol
 on the screen are computed by one function. T−1 is Bessel: these are samples, not populations.
 
-⚠⚠ WEEKLY BY DEFAULT, AND THAT IS THE SAME MEASUREMENT THE BETA COLUMN IS BUILT ON — not a
+ WEEKLY BY DEFAULT, AND THAT IS THE SAME MEASUREMENT THE BETA COLUMN IS BUILT ON — not a
 convention borrowed for tidiness. The benchmark trackers are LONDON-listed (ISAC.L, 0KZC.L) and
 close at 16:30 London; a US holding closes at 21:00, so half its trading day lands in the next
 benchmark bar. That is non-synchronous trading, and it does not cancel: measured on this book,
 Microsoft vs ACWI reads corr 0.38 daily against 0.50 weekly.
 
-⚠ AND IT BIASES TE UPWARD, THE OPPOSITE DIRECTION FROM BETA. `var(a) = var(p) + var(b) − 2cov(p,b)`,
+ AND IT BIASES TE UPWARD, THE OPPOSITE DIRECTION FROM BETA. `var(a) = var(p) + var(b) − 2cov(p,b)`,
 so an artificially LOW covariance makes the active return look more volatile than it is. Daily is
 offered because it is what people ask for, and it is labelled as inflated rather than quietly
 served.
 
-⚠ THE PORTFOLIO SERIES IS SYNTHETIC: today's stock sleeve at today's weights, carried backwards.
+ THE PORTFOLIO SERIES IS SYNTHETIC: today's stock sleeve at today's weights, carried backwards.
 It is NOT the book's realised history — a name bought in March contributes its January return here.
 That is the standard "tracking error of the portfolio as it stands", it is the only series that
 describes the SAME portfolio the active-share tile beside it describes, and the panel says so. The
@@ -38,11 +38,11 @@ only for the whole book (funds and cash included) — a different portfolio agai
 from __future__ import annotations
 
 #: Observations per year, per cadence — the `f` in the formula.
-#: ⚠ 52, NOT 52.18. The weekly series is built by ISO week (`_by_week`), so a year contributes 52
+#:  52, NOT 52.18. The weekly series is built by ISO week (`_by_week`), so a year contributes 52
 #: or 53 buckets and the annualisation constant has to be the bucket count, not the calendar.
 PERIODS: dict[str, float] = {"daily": 252.0, "weekly": 52.0, "monthly": 12.0}
 
-#: The least data a cadence may report a TE from. ⚠ A TE over eight weekly observations is not a
+#: The least data a cadence may report a TE from.  A TE over eight weekly observations is not a
 #: small sample, it is a number with no meaning — the Bessel correction does not rescue n=8.
 MIN_OBS: dict[str, int] = {"daily": 120, "weekly": 52, "monthly": 24}
 
@@ -50,7 +50,7 @@ MIN_OBS: dict[str, int] = {"daily": 120, "weekly": 52, "monthly": 24}
 def _bucket_end_dates(series: list[tuple[str, float]], freq: str) -> dict:
     """`{period key: the last calendar date in that period}`.
 
-    ⚠⚠ A DRAWDOWN IS USELESS WITHOUT ITS DATES, and a bucket key is not one. `(2026, 12)` is
+     A DRAWDOWN IS USELESS WITHOUT ITS DATES, and a bucket key is not one. `(2026, 12)` is
     an ISO week, `"2026-03"` a month; a client conversation needs "peaked 14 February, bottomed
     23 April, recovered 8 August". So the same walk that buckets the prices records which day each
     bucket actually ended on — derived from the series rather than from the calendar, because the
@@ -79,7 +79,7 @@ def _bucket_key(d: str, freq: str):
 def _bucket(series: list[tuple[str, float]], freq: str) -> dict:
     """`{period key: last close in that period}` — the cadence the returns are measured on.
 
-    ⚠ THE LAST CLOSE IN THE PERIOD, NEVER "THE FRIDAY" OR "THE 31ST". A market shut on the last
+     THE LAST CLOSE IN THE PERIOD, NEVER "THE FRIDAY" OR "THE 31ST". A market shut on the last
     weekday still had a week; keying on the weekday would drop it for one series and keep it for
     the other, which is precisely the misalignment a weekly basis exists to remove. Same rule as
     `_airs_portfolio_analysis._by_week`, which the beta column uses.
@@ -105,7 +105,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
                         preloaded: dict | None = None) -> dict:
     """The portfolio and benchmark return series, on ONE aligned period grid.
 
-    ⚠⚠ SHARED BY TRACKING ERROR AND CORRELATION SO THE IDENTITY BETWEEN THEM HOLDS ON SCREEN.
+     SHARED BY TRACKING ERROR AND CORRELATION SO THE IDENTITY BETWEEN THEM HOLDS ON SCREEN.
     `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` is only checkable if both views measure the same periods, the
     same holdings and the same renormalisation — two builders agreeing today is two builders that
     can stop agreeing, and the disagreement would look like a maths error in whichever panel the
@@ -129,7 +129,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             f"{benchmark} has no investable tracker in our price world, so there is no series to "
             f"measure against. Available: {', '.join(sorted(_BENCHMARK_RISK_ETF))}.")
 
-    # ⚠ THE SLEEVE, EXACTLY AS ACTIVE SHARE DEFINES IT — individual stocks with an ISIN, renormalised
+    #  The sleeve, exactly as active share defines it — individual stocks with an ISIN, renormalised
     # to 1. Funds and cash are dropped, not zero-weighted; see `_active_share`.
     stocks = [h for h in holdings
               if not h.get("is_fund")
@@ -148,7 +148,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             names.setdefault(k, str(h["name"]))
     isins = sorted(weight)
 
-    # ⚠ `preloaded` LETS ONE PRICE LOAD SERVE SEVERAL CADENCES. The load is the expensive part
+    #  `preloaded` LETS ONE PRICE LOAD SERVE SEVERAL CADENCES. The load is the expensive part
     # (executions + closes + FX for every holding); re-bucketing it is free. The drawdown view
     # measures all three frequencies in one request precisely because the difference between them
     # is the thing it has to be honest about — see `_portfolio_drawdown`.
@@ -167,7 +167,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     if not priced or len(b_buckets) < 2:
         raise SeriesError("Too little price history to measure against.")
 
-    # ⚠⚠ THE INTERSECTION OF PERIODS, NEVER A ZIP. A Stockholm listing and a London-traded ETF do
+    #  The intersection of periods, never a zip. A Stockholm listing and a London-traded ETF do
     # not share a calendar, so pairing two return series by POSITION offsets them from the first
     # mismatched holiday onward and yields a perfectly plausible figure computed against the wrong
     # days. Same rule the beta column follows.
@@ -181,12 +181,12 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     port: list[float] = []
     bench_r: list[float] = []
     weight_used: list[float] = []
-    # ⚠ PER HOLDING, ALIGNED TO `keys` WITH `None` FOR A PERIOD IT HAS NO PRICE IN — never 0.0.
+    #  Per holding, aligned to `keys` WITH `None` FOR A PERIOD IT HAS NO PRICE IN — never 0.0.
     # The correlation matrix pairs each column on the periods BOTH have; a zero would be read as
     # "this stock did not move", which is a strong and false statement about a stock that had not
     # listed yet.
     per_holding: dict[str, list[float | None]] = {i: [] for i in priced}
-    # ⚠⚠ THE PERIOD EACH OBSERVATION ACTUALLY IS, because the three return lists are NOT aligned
+    #  The period each observation actually is, because the three return lists are NOT aligned
     # to `keys[1:]`. A step whose benchmark bucket is missing, or where no holding had both ends,
     # is skipped — so indexing back into `keys` to date observation `i` silently drifts by however
     # many were dropped. A drawdown reports DATES, so this is the difference between "bottomed
@@ -199,7 +199,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
                 per_holding[i].append(None)
             continue
         rb = b_buckets[cur] / b_buckets[prev] - 1.0
-        # ⚠ RENORMALISED OVER THE HOLDINGS THAT HAVE BOTH ENDS OF THIS STEP, period by period. A
+        #  Renormalised over the holdings that have both ends of this step, period by period. A
         # name that listed two years ago simply is not in the earlier steps, and carrying it at
         # zero return would damp the book's measured volatility — the flattering direction. What is
         # reported instead is how much weight each step actually spoke for.
@@ -261,7 +261,7 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
     ppy = built["periods_per_year"]
 
     a = np.asarray(active, dtype=float)
-    # ⚠ THROUGH `annualized_stats` — the ONE definition of volatility here, so TE and the vol
+    #  THROUGH `annualized_stats` — the ONE definition of volatility here, so TE and the vol
     # column beside it cannot be two different formulas. It is `std(ddof=1) × √ppy`, i.e. Bessel,
     # with ā subtracted.
     st = annualized_stats(a.tolist(), periods_per_year=ppy)
@@ -275,23 +275,23 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
         "periods_per_year": ppy,
         "observations": len(active),
         "years": years,
-        # ⚠⚠ THE WINDOW THE RETURNS ACTUALLY COVER, not `years` back from today. The card used to
+        #  The window the returns actually cover, not `years` back from today. The card used to
         # say "trailing window — as it stands today", which is an assumption where a date belongs:
         # a holding that listed two years ago shortens the paired grid, and a stale price series
         # ends it early. `obs_dates` is each period's own last trading day, so these are real dates
         # the reader can check against a chart.
-        # ⚠ FILTERED — a bucket whose end date could not be resolved contributes None, and
+        #  FILTERED — a bucket whose end date could not be resolved contributes None, and
         # min()/max() over a list containing one would raise rather than report the gap.
         "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
         "window_to": (dates[-1] if dates else None),
         "tracking_error_pct": None if te is None else te * 100.0,
-        # ⚠ THE ACTIVE RETURN ITSELF, because it is the quantity TE is the spread OF and reporting
+        #  The active return itself, because it is the quantity TE is the spread OF and reporting
         # one without the other is what makes the two get confused. Mean per period, and the same
         # figure annualised geometrically — a book can have a large TE and no active return at all.
         "mean_active_per_period_pct": mean_active * 100.0,
         "active_return_ann_pct": (float(np.prod(1.0 + a) ** (ppy / len(a)) - 1.0) * 100.0
                                   if np.all(1.0 + a > 0) else None),
-        # ⚠ TE IS A DENOMINATOR HERE, so a near-zero one is refused rather than printed as a huge
+        #  Te is a denominator here, so a near-zero one is refused rather than printed as a huge
         # ratio. The information ratio is the active return per unit of the risk taken to get it.
         "information_ratio": (
             None if not te or te <= 1e-9 or not np.all(1.0 + a > 0)
@@ -302,7 +302,7 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
         "priced_holdings": built["priced"],
         "total_holdings": built["total"],
         "benchmark_isin": built["benchmark_isin"],
-        # ⚠ THE CADENCE'S OWN BIAS, CARRIED WITH THE NUMBER rather than left in a doc. See the
+        #  The cadence's own bias, carried with the number rather than left in a doc. See the
         # module header: non-synchronous closes inflate the spread of a DIFFERENCE.
         "cadence_note": (
             "Daily closes are not synchronous — the tracker closes at 16:30 London, a US holding at "

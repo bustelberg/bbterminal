@@ -12,7 +12,7 @@ knew about the first — `_strip_spreadsheet_preamble` was written for the model
 export, where AirSPMS prepends an APOSTROPHE before the zip magic — but the front-office report
 funnel never used it, so the same vendor quirk arrived as a mystery on a different endpoint.
 
-⚠ THE POINT OF THE SECOND CHECK IS THAT A REMAINING FAILURE MUST NAME ITSELF. The old guard only
+ THE POINT OF THE SECOND CHECK IS THAT A REMAINING FAILURE MUST NAME ITSELF. The old guard only
 caught a body beginning exactly `<!doctype`; leading whitespace, a bare `<html>` or a BOM sailed
 through into pandas, where an expired session, a "no data for this period" page and an IP block
 were all one indistinguishable engine error.

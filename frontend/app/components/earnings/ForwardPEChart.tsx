@@ -260,7 +260,7 @@ function ForwardPEChartInner({
             }
             : undefined}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
-          {/* ⚠ THE WIDEST LABEL IN THE MODAL AND THEREFORE THE BIGGEST WIN — `2025-06` needs 44px of
+          {/*  THE WIDEST LABEL IN THE MODAL AND THEREFORE THE BIGGEST WIN — `2025-06` needs 44px of
               pitch lying flat and 17px tilted, so a quarterly axis goes from ~6 labels to ~15. */}
           <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(0, 7)} {...tiltedAxis({ fontSize: 11 })} />
           <YAxis tick={{ fontSize: 12, fill: chartTheme.axisTick }} tickFormatter={(v: number) => `${v.toFixed(0)}x`} />

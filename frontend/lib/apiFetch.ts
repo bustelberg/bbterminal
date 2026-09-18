@@ -18,7 +18,7 @@
  * flow still work; mutation endpoints will respond 401 which the UI
  * surfaces normally.
  *
- * ⚠ IT ALSO SERVES THE FUNDAMENTAL READS FROM MEMORY — an ALLOWLIST of
+ *  It also serves the fundamental reads from memory — an ALLOWLIST of
  * paths (`lib/readCache.ts`), never "every GET", because most of this
  * app is a live dashboard. Callers change nothing: a hit is replayed as
  * a normal `Response`. Any successful write invalidates the lot. Pass
@@ -93,17 +93,17 @@ export async function apiFetch(
   if (_isViewingAsUser() && !headers.has('x-view-as')) {
     headers.set('X-View-As', 'user');
   }
-  // ⚠ TRACED FROM HERE BECAUSE THIS IS THE ONE CHOKEPOINT. Every backend call in the app goes
+  //  Traced from here because this is the one chokepoint. Every backend call in the app goes
   // through this function, so one line here logs method, path, status, duration and payload size
   // for every panel — including the calls nobody thought to instrument, which are exactly the
   // ones that go wrong in production. It never touches the body (see `debugTrace`): the size
   // comes from `content-length`, and cloning to count rows would double the memory of every
   // payload on the page.
   //
-  // ⚠ THE TOKEN IS NEVER LOGGED, here or anywhere. It is a bearer credential; a console trace is
+  //  The token is never logged, here or anywhere. It is a bearer credential; a console trace is
   // pasted into chats and screenshots.
   const method = (init.method ?? 'GET').toUpperCase();
-  // ⚠ THE CACHE SITS HERE, AT THE CHOKEPOINT, FOR THE SAME REASON THE TRACE DOES: every card,
+  //  The cache sits here, at the chokepoint, for the same reason the trace does: every card,
   // drill-down and tab in the Fundamental modal already calls `apiFetch`, so there is nothing to
   // remember at ~40 call sites and nothing for a new one to forget. What may be cached is an
   // explicit allowlist in `readCache`; everything else falls straight through.
@@ -114,7 +114,7 @@ export async function apiFetch(
   try {
     const resp = await fetch(url, { ...init, headers });
     done(resp);
-    // ⚠ ANY SUCCESSFUL WRITE DROPS EVERY CACHED READ. The fundamental reads are derived from
+    //  Any successful write drops every cached read. The fundamental reads are derived from
     // `metric_data`, which changes only by an ingest — and an ingest is a POST from one of ~15
     // "Fetch financials" buttons. Invalidating from here rather than from each of them is what
     // makes it impossible for a new button to ship without it.
@@ -124,7 +124,7 @@ export async function apiFetch(
     // A network failure never reaches the caller's `resp.ok` check — it throws, and without this
     // the console shows nothing at all for a request that was made and died.
     //
-    // ⚠ UNLESS WE ARE THE ONES WHO STOPPED IT. `init.signal.aborted` is the precise test — not
+    //  Unless we are the ones who stopped it. `init.signal.aborted` is the precise test — not
     // `e.name === 'AbortError'`, which an `AbortSignal.timeout()` also raises and which IS a real
     // failure. See `traceRequest`: a stream closed on unmount was logging as a red FAILED.
     done(null, e, init.signal?.aborted === true);
@@ -135,7 +135,7 @@ export async function apiFetch(
 /**
  * A cacheable read: from memory when we have it, otherwise fetched once and shared.
  *
- * ⚠ THE CALLER'S `signal` IS NOT PASSED TO THE FETCH, DELIBERATELY. The response belongs to
+ *  The caller's `signal` IS NOT PASSED TO THE FETCH, DELIBERATELY. The response belongs to
  * everyone waiting on it, so one component unmounting must not cancel the request the other eleven
  * are still waiting for. The aborting caller still gets its `AbortError` (below) — it simply stops
  * being the reason the request lives or dies, and the answer it walked away from lands in the cache
@@ -147,7 +147,7 @@ async function _servedFromCache(
   const key = readKey(method, url, init.body, _isViewingAsUser());
   const hit = getRead(key);
   if (hit) {
-    // ⚠ SAID OUT LOUD. A request served from memory makes no network entry at all, so without this
+    //  Said out loud. A request served from memory makes no network entry at all, so without this
     // line the console shows a panel that rendered data it never asked for — which is exactly how
     // a stale answer stays invisible. Same shape as `traceRequest`'s line, with the age instead of
     // a duration.

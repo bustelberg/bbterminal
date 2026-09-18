@@ -6,7 +6,7 @@ same composite natural key. This is the single batched-upsert loop they used to
 duplicate verbatim — prices wraps each batch in the transient-retry primitive;
 earnings passes pre-validated rows and doesn't.
 
-⚠⚠ AND `changed_rows` IS WHY A BULK FUNDAMENTALS FILL IS AFFORDABLE. See its docstring: the
+ AND `changed_rows` IS WHY A BULK FUNDAMENTALS FILL IS AFFORDABLE. See its docstring: the
 earnings path re-writes a company's ENTIRE history on every refresh, and measured, essentially all
 of it is already there.
 """
@@ -19,7 +19,7 @@ from common.retry import retry
 # metric_data's natural key — the conflict target every metric upsert uses.
 METRIC_CONFLICT = "company_id,metric_code,source_code,target_date"
 
-#: What is read back to decide whether a row needs writing. ⚠ `is_prediction` IS PART OF THE
+#: What is read back to decide whether a row needs writing.  `is_prediction` IS PART OF THE
 #: COMPARISON, not just the key: the estimates feed writes True and the other two False, so a row
 #: that changed only in that flag must still be written or the forecast/actual split rots silently.
 _COMPARE_COLUMNS = "metric_code,target_date,numeric_value,is_prediction"
@@ -34,12 +34,12 @@ def _key(row: dict) -> tuple[str, str]:
 def rows_match(new: dict, stored: dict) -> bool:
     """Is this parsed row already in the database, exactly?
 
-    ⚠ `numeric_value` IS `double precision` (see the initial schema), so a Python float written and
+     `numeric_value` IS `double precision` (see the initial schema), so a Python float written and
     read back is the identical value — `==` is exact here rather than a tolerance. A tolerance would
     be the wrong instrument anyway: the question is "does writing this change anything", and any
     difference at all means yes.
 
-    ⚠ NULL IS A VALUE, NOT AN ABSENCE. The financials parser deliberately emits a row with
+     NULL IS A VALUE, NOT AN ABSENCE. The financials parser deliberately emits a row with
     `numeric_value = None` where GuruFocus reported "N/A", so the dashboard can show that the period
     EXISTS with no figure rather than walking back to a numeric from years ago. Treating None as
     "no row" would make those the one thing this never stops re-writing.
@@ -62,7 +62,7 @@ def partition_changed(rows: list[dict], stored: dict[tuple[str, str], dict]) -> 
 def changed_rows(supabase: Client, rows: list[dict]) -> tuple[list[dict], int]:
     """Of these rows, the ones that would actually change something. Returns `(rows, n_unchanged)`.
 
-    ⚠⚠ THIS IS THE COST OF A FUNDAMENTALS REFRESH, AND ALMOST ALL OF IT WAS BUYING NOTHING.
+     THIS IS THE COST OF A FUNDAMENTALS REFRESH, AND ALMOST ALL OF IT WAS BUYING NOTHING.
     `_parse_financials` flattens the whole GuruFocus blob — **263 leaf fields x ~160 periods**, so
     16,512 to 36,494 rows for ONE company — and every refresh upserted all of them, 500 at a time,
     into a table of 69,003,374 rows whose indexes are four times their reindexed size. Measured
@@ -84,17 +84,17 @@ def changed_rows(supabase: Client, rows: list[dict]) -> tuple[list[dict], int]:
     upserting. The read is also the cheap side of the asymmetry on purpose: it is a single streamed
     query, while the write is dozens of separate PostgREST round trips.
 
-    ⚠ SCOPED TO THE CODES BEING WRITTEN, NOT TO THE COMPANY. `fetch_financials` takes a
+     SCOPED TO THE CODES BEING WRITTEN, NOT TO THE COMPANY. `fetch_financials` takes a
     `metric_codes` filter — `routers/_asset_dividends.py` uses it to persist TWO codes (~320 rows) —
     and reading the company's whole 36,000-row history to diff 320 of them would make the narrow
     path dramatically worse than it was. The `metric_code = ANY(...)` filter also lands on
     `idx_metric_data_metric_source_company_date`, which leads on exactly that column.
 
-    ⚠ NO COPY PATH MEANS NO FILTER, NOT A GUESS — the same rule as `due_company_ids`. Without a
+     NO COPY PATH MEANS NO FILTER, NOT A GUESS — the same rule as `due_company_ids`. Without a
     direct connection everything is handed back for writing, which is the behaviour this replaced:
     slower, never wrong. Anything unreadable degrades the same way.
 
-    ⚠ AND THERE IS DELIBERATELY NO PostgREST FALLBACK, which is why `supabase` is accepted and
+     AND THERE IS DELIBERATELY NO PostgREST FALLBACK, which is why `supabase` is accepted and
     unused (it keeps the signature symmetric with `upsert_metric_rows`, and is where such a fallback
     would go). Reading 36,000 rows through PostgREST's 1,000-row pages is ~37 round trips to save
     ~73 — a wash, for a paged reader that would have to be got exactly right (see the cap trap in
@@ -105,7 +105,7 @@ def changed_rows(supabase: Client, rows: list[dict]) -> tuple[list[dict], int]:
     if not rows:
         return [], 0
 
-    # ⚠ GROUPED BY (company_id, source_code), because those two are the read's FILTER and a caller
+    #  Grouped by (company_id, source_code), because those two are the read's FILTER and a caller
     # is not forbidden from mixing them. Every earnings feed passes exactly one group, so this is
     # one query in practice — but a silent cross-company comparison would skip real writes.
     groups: dict[tuple, list[dict]] = {}
@@ -144,7 +144,7 @@ def upsert_metric_rows(
     timeout backoff) — the price/volume path wants that resilience; the
     earnings path passes pre-validated rows and doesn't.
 
-    ⚠ IT WRITES WHAT IT IS GIVEN. Deciding what is worth writing is `changed_rows`, called by the
+     IT WRITES WHAT IT IS GIVEN. Deciding what is worth writing is `changed_rows`, called by the
     earnings wrapper before this — kept separate so the price path, which already fetches only dates
     newer than its stored maximum and so has nothing to diff away, does not pay for a read it cannot
     use."""

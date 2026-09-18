@@ -13,7 +13,7 @@ WHY THIS MODULE EXISTS
     implementation of "attributable" is a second definition of it, and it will drift on the first
     edit that touches one and not the other.
 
-⚠ THE BASIS IS THE BEGINWAARDE, AND THAT COSTS SOMETHING REAL — SAY SO, NEVER HIDE IT.
+ THE BASIS IS THE BEGINWAARDE, AND THAT COSTS SOMETHING REAL — SAY SO, NEVER HIDE IT.
     Two classes of holding cannot be expressed on this basis at all:
 
       bought mid-window   no Beginwaarde ⇒ weight 0 ⇒ absent. Correct for a 1 Jan-anchored
@@ -51,7 +51,7 @@ AXIS_IDX = {"sector": 0, "region": 1, "currency": 2}
 
 
 def window_start(source: str, window: str, effective: str | None) -> str | None:
-    """The date the weights are taken at. ⚠ AIRS reports the book over the CALENDAR year only, so
+    """The date the weights are taken at.  AIRS reports the book over the CALENDAR year only, so
     a book-sourced window always opens 1 January — 'since inception' has no book equivalent and
     must not silently borrow the model's."""
     if source == "book":
@@ -63,7 +63,7 @@ def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
     """The model's NOMINAL composition as legs: weight = the design percentage, return = the
     yfinance EUR return over `start`.
 
-    ⚠ A MODEL HAS NO BEGINWAARDE — it is a set of intended percentages, not a book with a value on
+     A MODEL HAS NO BEGINWAARDE — it is a set of intended percentages, not a book with a value on
     a date. So the basis switch does not reach this path: the weight is the stated percentage
     either way, and only the exclusions below apply.
     """
@@ -71,7 +71,7 @@ def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
     if eff:
         pos = [r for r in pos if r.get("datum") == eff]
 
-    # ⚠ THE SAME EXPANSION THE COMPOSITION CHART USES, from the same function. A certificate has
+    #  The same expansion the composition chart uses, from the same function. A certificate has
     # no price series, so unexpanded it lands in `unpriced` — and an unpriced EQUITY is the
     # dangerous exclusion above: its sectors read as UNOWNED.
     from ._airs_lookthrough import expand_positions  # noqa: PLC0415
@@ -93,7 +93,7 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
     """The paired AIRS BOOK as legs: weight = the START-of-window EUR value as a % of the book,
     return = the INSTRUMENT's own EUR price return over `start`. None when no book is paired.
 
-    ⚠⚠ THE RETURN IS PRICED FROM `asset_price`, NOT FROM AIRS, AND THAT IS THE WHOLE POINT OF THIS
+     THE RETURN IS PRICED FROM `asset_price`, NOT FROM AIRS, AND THAT IS THE WHOLE POINT OF THIS
     FUNCTION'S EXISTENCE IN A BRINSON PANEL. Selection effect is `w_b × (R_p,bucket − R_b,bucket)`:
     it subtracts the portfolio's return from the BENCHMARK's for the same names. The benchmark is
     rebuilt from `asset_price` (`_asset_benchmark`), so pricing our side off AIRS put the SAME
@@ -113,7 +113,7 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
     the rule — "THE BENCHMARK MUST BE PRICED IN THE SAME WORLD AS THE PORTFOLIO" — and it had been
     applied to the benchmark and never back-applied here.
 
-    ⚠⚠ AND IT FIXES A SECOND FAULT THAT WAS WORSE. `_expand_book_rows` splits a certificate's start
+     AND IT FIXES A SECOND FAULT THAT WAS WORSE. `_expand_book_rows` splits a certificate's start
     AND current value by each holding's share, so every instrument inside one came out with the
     WRAPPER's return: BUS_Offensief's 50 legs carried 31 distinct returns, and its 23 wrapped legs
     carried FOUR between them. "Selection" on those was measuring the certificate. This is the same
@@ -121,31 +121,31 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
     +0.08% against its own +2.82%); `book_legs` fed Brinson and never got the fix. Pricing the
     INSTRUMENT rather than the book's slice of it closes both faults with one source.
 
-    ⚠ THE PRICE THIS PAYS, AND IT IS REAL: these legs no longer reproduce AIRS's own
+     THE PRICE THIS PAYS, AND IT IS REAL: these legs no longer reproduce AIRS's own
     `cumulatief_rendement`. They are not AIRS's numbers any more. That is correct for a RELATIVE
     decomposition — a difference between two vendors is not alpha — but it means the panel's
     portfolio return will sit a little away from the book's own. `airs_return_pct` rides along on
     every leg so the gap can be shown rather than discovered, and the headline return elsewhere in
     the modal still comes from AIRS, which remains the system of record for what the book MADE.
 
-    ⚠ IT ALSO RETIRES THE TOTAL-vs-PRICE ASYMMETRY. The old basis was a TOTAL return (income in the
+     IT ALSO RETIRES THE TOTAL-vs-PRICE ASYMMETRY. The old basis was a TOTAL return (income in the
     numerator) against a PRICE-return benchmark, so every dividend a holding paid read as selection
     skill (~1.1pp/yr, validated against ISAC). Both sides are now price returns. The income is
     still loaded and still carried per leg (`income_eur`), because the reader is owed the fact that
     it is NOT in the comparison — it is simply no longer smuggled into one side of it.
 
-    ⚠ THE WEIGHT IS STILL AIRS'S BEGINWAARDE, AND DELIBERATELY SO. A weight does not need the two
+     THE WEIGHT IS STILL AIRS'S BEGINWAARDE, AND DELIBERATELY SO. A weight does not need the two
     sides to share a vendor — Brinson compares OUR weight against the INDEX's by construction —
     and the Beginwaarde share is what the book actually held. Only the return had to be unified.
 
-    ⚠ THE WEIGHT IS THE BEGINWAARDE, NOT THE HUIDIGE WAARDE. Weighting a window's return by the
+     THE WEIGHT IS THE BEGINWAARDE, NOT THE HUIDIGE WAARDE. Weighting a window's return by the
     CURRENT value overweights the winners (a holding that doubled carries ~2× the share it started
     with), which retroactively inflates the portfolio return — the same look-ahead bias the
     benchmark avoids with start-of-window cap weights. Measured on AITopSelectie: current-weighting
     read +58.75% against the book's true +44.99%. Start-weighting reproduces the realised return
     exactly (Σstartᵢ·retᵢ / Σstartᵢ = (Σcur − Σstart) / Σstart).
 
-    ⚠ A HOLDING WITH NO BEGINWAARDE GETS WEIGHT 0 AND DROPS OUT. It was bought during the window.
+     A HOLDING WITH NO BEGINWAARDE GETS WEIGHT 0 AND DROPS OUT. It was bought during the window.
     That is right for attribution and is the sharp edge of using this basis for composition too —
     see the module header.
     """
@@ -161,12 +161,12 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
         return None
     rows = _expand_book_rows(
         resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or [])
-    # THE ROW'S OWN INCOME LOADER, keyed on `holding_name` exactly as `account_holdings` keys it.
+    # The row's own income loader, keyed on `holding_name` exactly as `account_holdings` keys it.
     # A second pass over the Mutaties journal here would be a second answer to "what did this
     # holding pay", free to drift from the column the reader is comparing against.
     income, _sold = _direct_result(link["portefeuille"],
                                    {r.get("holding_name") for r in rows if r.get("holding_name")})
-    # ⚠ THE SAME LOADER `model_legs` USES, OVER THE SAME WINDOW — which is what puts the book path
+    #  The same loader `model_legs` USES, OVER THE SAME WINDOW — which is what puts the book path
     # and the model path on one basis as well, not just this side and the benchmark. Priced AFTER
     # the expansion, so a looked-through leg is priced as the INSTRUMENT it is rather than as its
     # certificate's slice.
@@ -177,7 +177,7 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
         start_val = float(r.get("start_value_eur") or 0)
         cur = float(r.get("current_value_eur") or 0)
         is_cash = r.get("asset_class") == "Cash" or not r.get("isin")
-        # ⚠ THE TAX IS ADDED, NOT SUBTRACTED, AND IT IS NOT A TYPO. `tax_eur` is already negative
+        #  The tax is added, not subtracted, and it is not a typo. `tax_eur` is already negative
         # (AIRS books withholding as a debit), so `gross + tax` IS the net. Writing the intuitive
         # `- tax` adds the withholding back and overstates every foreign holding by twice it —
         # silently, because the result is still a plausible number. Same note as `valueWithIncome`.
@@ -187,19 +187,19 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
         out.append({
             "isin": isin,
             "weight_pct": start_val / total * 100.0,
-            # ⚠ THE CURRENT VALUE, CARRIED BUT NEVER WEIGHED HERE. `weight_pct` above is and stays
+            #  The current value, carried but never weighed here. `weight_pct` above is and stays
             # Beginwaarde — a Brinson decomposition is only valid on the weights that earned the
             # return. This rides along so the drill-down can print TODAY's weight in a column of
             # its own beside it, which is what makes that table reconcile with the composition
             # bars (weighed today since 2026-09-03) without either side changing basis.
             "current_value_eur": cur,
-            # ⚠ THE INSTRUMENT'S OWN EUR PRICE RETURN, from the SAME series the benchmark is built
+            #  The instrument's own EUR price return, from the SAME series the benchmark is built
             # from. None where we cannot price it — which `split_legs` then reports as `unpriced`,
             # the one exclusion that is a genuine gap rather than an answer.
             "return_pct": None if not isin else (marks.get(isin) or {}).get("return_pct"),
-            # ⚠ AIRS'S OWN FIGURE, CARRIED BUT NOT USED. It is what the book says this position
+            #  AIRS'S own figure, carried but not used. It is what the book says this position
             # made, and it is how the difference between this panel and the book's own return can
-            # be shown rather than discovered. ⚠ For a leg inside a certificate it is the WRAPPER's
+            # be shown rather than discovered.  For a leg inside a certificate it is the WRAPPER's
             # rate stamped on this holding — never present it as the instrument's.
             "airs_return_pct": (((cur + net_income) / start_val - 1.0) * 100.0)
             if (not is_cash and start_val > 0) else None,
@@ -207,7 +207,7 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
             "is_cash": is_cash,
             "via_names": r.get("via_names") or [],
             "asset_class": r.get("bucket"),
-            # ⚠ CARRIED, AND NO LONGER INSIDE THE RETURN. Both sides of the comparison are price
+            #  Carried, and no longer inside the return. Both sides of the comparison are price
             # returns now, so a dividend can no longer read as selection skill — but the reader is
             # still owed the fact that income exists and is OUT of the comparison. `None` is a book
             # whose journal we have not read; 0.0 is a holding that genuinely paid nothing.
@@ -220,7 +220,7 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
 def portfolio_legs(source: str, portfolio_id: int, eff: str | None,
                    start: str) -> list[dict] | None:
     """Legs from the chosen source. None only when `source=book` and no book is paired."""
-    # ⚠ BOTH PATHS NOW TAKE `start` AND BOTH PRICE FROM `asset_price`. The book path used to price
+    #  Both paths now take `start` AND BOTH PRICE FROM `asset_price`. The book path used to price
     # itself off AIRS and ignore the window entirely, so switching `source` changed the VENDOR as
     # well as the weights — two variables at once, on a control the reader thinks moves one.
     return (book_legs(portfolio_id, start) if source == "book"
@@ -231,10 +231,10 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
                codes: dict | None = None) -> tuple[list[dict], list[dict], float]:
     """Split legs into (attributable, excluded, total_weight) on ONE axis.
 
-    ⚠ THIS LADDER IS THE DEFINITION OF "ATTRIBUTABLE" AND IT LIVES HERE ONCE. Both the composition
+     THIS LADDER IS THE DEFINITION OF "ATTRIBUTABLE" AND IT LIVES HERE ONCE. Both the composition
     axes and the Brinson rows are built from its output, which is the only reason they agree.
 
-    ⚠ TWO KINDS OF EXCLUSION, AND THEY ARE NOT THE SAME FACT.
+     TWO KINDS OF EXCLUSION, AND THEY ARE NOT THE SAME FACT.
 
       fund / cash  genuinely NOT a sector bet. An ETF has no sector; the benchmark's weight in the
                    fund bucket is zero, so Brinson would score holding a world tracker as a sector
@@ -243,10 +243,10 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
                    sector read as UNOWNED — a false finding, not a missing one. It still has to go
                    (there is no return to attribute), so it is flagged LOUDLY instead.
 
-    ⚠ THE LADDER IS PER AXIS. A bond with a known domicile is attributable on `region` and not on
+     THE LADDER IS PER AXIS. A bond with a known domicile is attributable on `region` and not on
     `sector`; a fund is out on all three. `idx` picks which of `_buckets`'s three answers decides.
 
-    ⚠ NO ASSET-CLASS FILTER HERE, DELIBERATELY. The composition's sector axis used to restrict to
+     NO ASSET-CLASS FILTER HERE, DELIBERATELY. The composition's sector axis used to restrict to
     the {Equity, Equity ETF} sleeve (a pair of buckets that no longer exists — `Equity ETF` was
     retired 2026-08-18) and rely on that to keep bonds out. Two overlapping rules for
     one question is how the panels diverged in the first place — the ladder alone decides, so the
@@ -263,7 +263,7 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
     for h in legs:
         w = h["weight_pct"]
         if w <= 0:
-            # ⚠ NOT AN EXCLUSION TO REPORT — a zero-weight leg is a holding bought during the
+            #  Not an exclusion to report — a zero-weight leg is a holding bought during the
             # window (no Beginwaarde). It carries no weight to account for, so listing it among
             # the excluded would imply a percentage was taken away from the reader.
             continue
@@ -274,7 +274,7 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
         bucket = _buckets(row, is_cash=is_cash, isin=isin, codes=codes)[idx]
         # Cash returns a flat 0% — its drag is a FACT, so it is carried, not invented.
         ret = 0.0 if is_cash else h.get("return_pct")
-        # ⚠⚠ A FUND IS EXCLUDED AS A FUND, BEFORE ANYTHING ELSE CAN CALL IT SOMETHING WORSE.
+        #  A fund is excluded as a fund, before anything else can call it something worse.
         # `Letko Bross Global EM Equity Fund` is an unlisted mutual fund: OpenFIGI types it
         # `Open-End Fund`, Yahoo has no series for it, so `return_pct` is None and it was landing
         # under `unpriced` — which the Stocks drill-down warns about as "1.5% held but unpriceable,
@@ -284,7 +284,7 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
         # ordinary "excludes X% in funds, bonds and cash" line beside the chart, which is where
         # this label puts it.
         #
-        # ⚠ IT CHANGES THE LABEL, NEVER THE MEMBERSHIP — verified on BUS_Offensief_Dyn: 44
+        #  It changes the label, never the membership — verified on BUS_Offensief_Dyn: 44
         # attributable and 7 excluded both before and after, and every sector bar to the second
         # decimal (Technology 39.66%, Financials 19.24%). A fund was already out of the bars either
         # way — `unpriced` for the two with no series, `unclassified` for the four ETFs that have
@@ -292,7 +292,7 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
         # drill-down's unpriceable warning goes from 1.54% to nothing, and the ordinary "excludes
         # 17.8% in funds, bonds and cash" line takes the whole of it.
         #
-        # ⚠ AND IT IS THE **WRAPPER** TEST, NOT THE CLASS ONE: a bond fund stays in Bonds, exactly
+        #  And it is the **WRAPPER** TEST, NOT THE CLASS ONE: a bond fund stays in Bonds, exactly
         # as `_is_etf`'s own note says. `reason` only decides which line reports the exclusion.
         is_fund = _is_etf(row, str(h.get("airs_name") or h.get("name") or ""))
         reason = ("cash" if bucket == CASH_BUCKET
@@ -308,7 +308,7 @@ def split_legs(legs: list[dict], idx: int, grid: dict | None = None,
 def renormalise(attributable: list[dict]) -> float:
     """Σ of the attributable weights — the denominator both sides divide by.
 
-    ⚠ RETURNED RATHER THAN APPLIED, because the callers rebase different shapes (Brinson rebases
+     RETURNED RATHER THAN APPLIED, because the callers rebase different shapes (Brinson rebases
     (weight, return) pairs; the composition rebases holding dicts) and both must divide by this
     same number. Zero when nothing is attributable, which the caller must treat as "no answer"
     rather than dividing by it.

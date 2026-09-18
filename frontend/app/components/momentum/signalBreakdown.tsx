@@ -4,7 +4,7 @@
  * The per-company score breakdown, rendered — "why was this company picked on this day".
  *
  * Extracted from `TickerTimelineModal` (2026-07-31) so the /schedule "Daily holdings" table can
- * open the SAME view from a clicked row. ⚠ ONE RENDERER, DELIBERATELY: this shows the arithmetic
+ * open the SAME view from a clicked row.  ONE RENDERER, DELIBERATELY: this shows the arithmetic
  * behind a selection — raw signal, universe min/max, normalised 0-100, weight, then the category
  * blend into the final score. A second copy is a second explanation of one number, and the two
  * would drift the first time a pillar is added (MomentumExtra's `trend` already arrives as an
@@ -118,7 +118,7 @@ export function BreakdownView({ data }: { data: BreakdownData }) {
                   </span>
                 </div>
               </div>
-              {/* ⚠ NAME THE TWO COMPANIES THAT SET THE SCALE. Normalisation is
+              {/*  NAME THE TWO COMPANIES THAT SET THE SCALE. Normalisation is
                   (raw − min) / (max − min), so these two decide every other
                   company's 0-100 on this signal. An unnamed range is
                   unfalsifiable — "max 5221.78" reads as a fact about the market,
@@ -204,7 +204,7 @@ export function BreakdownView({ data }: { data: BreakdownData }) {
 /**
  * One end of a signal's universe range, named and checkable.
  *
- * ⚠ THESE TWO COMPANIES SET THE 0-100 SCALE FOR EVERY OTHER NAME
+ *  These two companies set the 0-100 SCALE FOR EVERY OTHER NAME
  * (`(raw − min) / (max − min)`), so a single corrupted series at an extreme
  * silently compresses the whole universe toward the middle. Worldline read
  * +1142% on a 1-for-40 reverse split our history never re-read; VERBUND's

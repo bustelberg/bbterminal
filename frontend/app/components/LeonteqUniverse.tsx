@@ -251,7 +251,7 @@ export default function LeonteqUniverse() {
         ok: true,
         message: j.created
           ? `Created “${j.label}” — ${j.members_copied ?? 0} companies${floorB ? ` (market-cap floor ${floorB} applied)` : ''}.`
-            + (missing.length ? ` ⚠ ${missing.length} dropped for a MISSING market cap — refresh market caps, then delete + re-freeze.` : '')
+            + (missing.length ? `  ${missing.length} dropped for a MISSING market cap — refresh market caps, then delete + re-freeze.` : '')
             + ' Now selectable in /backtest.'
           : `“${j.label}” already exists for today — delete it (panel below) to re-freeze with the current data + market-cap floor.`,
       });

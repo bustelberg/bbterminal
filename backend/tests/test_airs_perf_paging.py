@@ -9,13 +9,13 @@ straight out of `airs_performance` ("never recomputed here"). Both numbers were 
 
 July was a −11.96% month, and production simply never read it.
 
-⚠ THE CAP THAT BINDS IS THE SERVER'S, NOT THE `.limit()` YOU WROTE. `_year_perf` asked for
+ THE CAP THAT BINDS IS THE SERVER'S, NOT THE `.limit()` YOU WROTE. `_year_perf` asked for
 `.order("periode").limit(20000)`. PostgREST's `db-max-rows` is **1,000 on Supabase cloud and
 10,000 locally**, and it truncates SILENTLY — no error, no header, no short-read signal. The table
 holds 1,334 rows, so locally everything came back and every figure was right; in production the
 read stopped at 1,000. And because the order is ASCENDING, the rows dropped were the NEWEST.
 
-⚠ REFRESHING MADE IT WORSE, WHICH IS WHY IT LOOKED LIKE A BROKEN BUTTON. `airs_performance` is
+ REFRESHING MADE IT WORSE, WHICH IS WHY IT LOOKED LIKE A BROKEN BUTTON. `airs_performance` is
 append-only — every daily run writes another row for each month in progress — so each refresh
 pushed the newest rows further past the cap. The one action that looks like a fix was feeding it.
 
@@ -123,7 +123,7 @@ class TestTheHoldingsSnapshotIsAskedForByDate:
                              "airs_mutatie": [], "airs_model_weight": [],
                              "airs_performance": []}, max_rows=CLOUD_CAP)
         monkeypatch.setattr(acc, "supabase", fake)
-        # ⚠ AND `deps.supabase` — the mutatie/model-weight reads moved into the shared
+        #  AND `deps.supabase` — the mutatie/model-weight reads moved into the shared
         # `routers._airs_ref`, which resolves through `deps` at call time.
         monkeypatch.setattr("deps.supabase", fake)
 

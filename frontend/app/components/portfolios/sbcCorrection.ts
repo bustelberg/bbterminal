@@ -11,10 +11,10 @@
  *   question. Both are legitimate; which one a reader wants depends on what they are doing, so
  *   they choose — and the charts say which choice is in force.
  *
- * ⚠ DEFAULT ON. The uncorrected figure is the flattering one, and a chart that flatters by default
+ *  DEFAULT ON. The uncorrected figure is the flattering one, and a chart that flatters by default
  * is a chart that misleads by default.
  *
- * ⚠ ONE FUNCTION, FOUR CARDS. FCF-SBC margin, FCF-SBC yield, cash return on capital and
+ *  ONE FUNCTION, FOUR CARDS. FCF-SBC margin, FCF-SBC yield, cash return on capital and
  * FCF / Net Income all take their numerator from here. Two of them already subtracted SBC
  * unconditionally and two never did — which meant the same book could be described as both
  * SBC-corrected and not, on one screen, with nothing saying so.
@@ -23,14 +23,14 @@
 /**
  * FCF for the numerator, corrected or not.
  *
- * ⚠ A MISSING SBC IS ZERO, NOT UNKNOWN — and that is a deliberate asymmetry with how this codebase
+ *  A MISSING SBC IS ZERO, NOT UNKNOWN — and that is a deliberate asymmetry with how this codebase
  * treats missing data elsewhere. Most companies genuinely report none; blanking their ratio would
  * empty the chart for the majority in order to be pedantic about the minority. A company that pays
  * no stock compensation and a company we failed to ingest it for are indistinguishable here, and
  * the cost of conflating them is one company reading slightly high, versus losing every company
  * that legitimately reports nothing.
  *
- * ⚠ FCF ITSELF MISSING IS STILL NULL. That is the numerator; without it there is no ratio.
+ *  FCF ITSELF MISSING IS STILL NULL. That is the numerator; without it there is no ratio.
  */
 export function correctedFcf(
   fcf: number | null | undefined,

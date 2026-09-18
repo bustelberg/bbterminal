@@ -131,7 +131,7 @@ class TestItLogsWhatTheRunActuallyDID:
             assert outcome in src, f"the {outcome!r} outcome is invisible in the transcript"
 
     def test_the_holdings_are_read_back_from_the_SNAPSHOT(self):
-        """⚠ The ETF overlay and the cash sleeve rewrite the weights AFTER the
+        """ The ETF overlay and the cash sleeve rewrite the weights AFTER the
         compute returns, so the selection the engine handed back is not the book
         that was stored. Printing that one would itemise a portfolio nobody
         holds."""
@@ -178,7 +178,7 @@ class TestItLogsWhatTheRunActuallyDID:
         assert "latest loaded close" in src
 
     def test_the_sector_table_is_aggregated_over_the_pool_the_SELECTION_ranked(self):
-        """⚠ `score_and_select` ranks sectors over EVERY scored company. Logging a
+        """ `score_and_select` ranks sectors over EVERY scored company. Logging a
         table built from the `min_price_score`-filtered pool instead would explain
         the choice with the survivor bias that was deliberately removed on
         2026-07-31 — and it would look authoritative doing it."""
@@ -200,7 +200,7 @@ class TestItLogsWhatTheRunActuallyDID:
 
 
 class TestTheTranscriptSurvivesTheProcessThatWroteIt:
-    """⚠ THE RING BUFFER IS PER-PROCESS. A job run from a script, or one whose
+    """ THE RING BUFFER IS PER-PROCESS. A job run from a script, or one whose
     backend has since restarted, leaves NOTHING for the `/log` endpoint to serve —
     and "no entries" is indistinguishable from "the run did nothing". So every
     step is mirrored to a logger as well."""

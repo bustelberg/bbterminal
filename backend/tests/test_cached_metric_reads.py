@@ -8,7 +8,7 @@ THE TWO SAVINGS
     the COPY transport every read is its own connect + TLS + auth, which is ~2ms locally and
     150-250ms against Supabase.
 
-⚠⚠ AND BATCHING PER ENDPOINT — the obvious way to get the second — DESTROYS THE FIRST: the five
+ AND BATCHING PER ENDPOINT — the obvious way to get the second — DESTROYS THE FIRST: the five
     cards that want `sbc` would each fetch it, turning 18 shared reads into 30 unshared ones. That
     is SLOWER than what it replaces while looking like an optimisation, and nothing about the
     result would show it. So these tests assert the read COUNT and the BATCH SHAPE, not just the
@@ -74,7 +74,7 @@ class TestOneReadPerCaller:
 
 class TestTheBatchIsOnlyWhatIsMissing:
     def test_a_second_caller_reads_only_its_new_lines(self):
-        # ⚠ THE REGRESSION THIS FILE EXISTS FOR. Card A loads revenue+fcf+sbc; card B wants
+        #  The regression this file exists for. Card A loads revenue+fcf+sbc; card B wants
         # sbc+ocf. B must read ONLY ocf — batching "everything B asked for" would re-fetch sbc,
         # which across five cards is how 18 reads become 30.
         batches, compute = _recorder()
@@ -85,7 +85,7 @@ class TestTheBatchIsOnlyWhatIsMissing:
         assert set(out) == {"sbc", "ocf"}
 
     def test_a_different_company_set_is_a_different_line(self):
-        # ⚠ THE COMPANY SET IS IN THE KEY. Serving ACWI's revenue to an S&P request would be
+        #  The company set is in the key. Serving ACWI's revenue to an S&P request would be
         # silent and wrong; two universes are two reads.
         batches, compute = _recorder()
         bc.cached_metric_reads([1, 2], ["revenue"], "annual", compute)
@@ -104,7 +104,7 @@ class TestConcurrentCallersShareOneRead:
     def test_the_shared_line_is_computed_once(self):
         """Two cards want `sbc` at the same instant; exactly one read of it may happen.
 
-        ⚠ THIS IS THE SINGLE-FLIGHT, AND IT IS THE WHOLE REASON THE TAB IS NOT 30 READS. Without
+         THIS IS THE SINGLE-FLIGHT, AND IT IS THE WHOLE REASON THE TAB IS NOT 30 READS. Without
         it both callers miss at the same moment and both compute — a plain cache saves nothing on
         the one load that hurts, because the thirteen requests are concurrent, not sequential.
         """
@@ -145,7 +145,7 @@ class TestConcurrentCallersShareOneRead:
 
 class TestAFailedReadDoesNotStallTheTab:
     def test_the_in_flight_markers_are_released_when_compute_raises(self):
-        """⚠ THE `finally` IS LOAD-BEARING, AND THIS CALL OWNS SEVERAL KEYS AT ONCE.
+        """ THE `finally` IS LOAD-BEARING, AND THIS CALL OWNS SEVERAL KEYS AT ONCE.
 
         If a raising `compute_many` left its in-flight events unset, every waiter on ANY of those
         metrics would block for the full `_INFLIGHT_TIMEOUT` (60s) — one failed read freezing the
@@ -167,7 +167,7 @@ class TestAFailedReadDoesNotStallTheTab:
         assert batches == [["revenue"]]
 
     def test_a_metric_the_read_omits_is_simply_absent(self):
-        # ⚠ `compute_many` MUST key every metric it is given — but if it does not, the answer is
+        #  `compute_many` MUST key every metric it is given — but if it does not, the answer is
         # "we have nothing for it", never a wrong value and never a crash. `_prefetch` then leaves
         # it out of the request cache and the per-company path resolves it.
         def partial(metrics: list[str]) -> dict[str, object]:
@@ -179,7 +179,7 @@ class TestAFailedReadDoesNotStallTheTab:
 
 class TestInvalidateDropsTheseToo:
     def test_an_ingest_clears_the_metric_rows_it_just_rewrote(self):
-        # ⚠ THE ONE OUTCOME WORSE THAN NOT CACHING: rebuilding "fresh" responses on top of stale
+        #  The one outcome worse than not caching: rebuilding "fresh" responses on top of stale
         # fundamentals, because it looks like it worked.
         batches, compute = _recorder()
         bc.cached_metric_reads(IDS, ["revenue"], "annual", compute)

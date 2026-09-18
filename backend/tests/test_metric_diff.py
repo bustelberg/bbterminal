@@ -1,6 +1,6 @@
 """Writing only what changed — and, more importantly, never swallowing something that did.
 
-⚠⚠ THE MEASUREMENT THIS EXISTS FOR (local, 2026-08-17, `metric_data` at 69,003,374 rows): a
+ THE MEASUREMENT THIS EXISTS FOR (local, 2026-08-17, `metric_data` at 69,003,374 rows): a
 fundamentals refresh re-parses the whole GuruFocus blob — 263 leaf fields x ~160 periods — and
 upserted every row of it, 500 at a time.
 
@@ -13,7 +13,7 @@ upserted every row of it, 500 at a time.
 Zero changed rows in every one. Through the real path afterwards, Dassault's whole refresh is
 **1.58s** against 17.48s of upserting alone, and Legrand's 0.70s against 3.96s.
 
-⚠ A FAST NO-OP WOULD SCORE IDENTICALLY ON ALL OF THAT, which is why the tests below are mostly
+ A FAST NO-OP WOULD SCORE IDENTICALLY ON ALL OF THAT, which is why the tests below are mostly
 about the writes it must NOT skip. Verified end to end against the live local database by corrupting
 three of Legrand's stored rows three different ways — a wrong value, a NULLed value, a deleted row —
 and re-running the real `fetch_financials`: **3 written, 25,797 skipped, all three restored.** The
@@ -58,7 +58,7 @@ class TestWhatCountsAsUnchanged:
 
 
 class TestNullIsAValueNotAnAbsence:
-    """⚠⚠ `_parse_financials` DELIBERATELY EMITS A ROW WITH `numeric_value = None` where GuruFocus
+    """ `_parse_financials` DELIBERATELY EMITS A ROW WITH `numeric_value = None` where GuruFocus
     reported "N/A", so the dashboard can show the period EXISTS with no figure rather than walking
     back to a numeric from years ago. Both directions have to be caught."""
 
@@ -77,7 +77,7 @@ class TestNullIsAValueNotAnAbsence:
         assert len(fresh) == 1
 
     def test_zero_is_not_null(self):
-        """⚠ `0.0` IS FALSY. A truthiness test anywhere in the comparison would call a real zero
+        """ `0.0` IS FALSY. A truthiness test anywhere in the comparison would call a real zero
         missing — Apple nets its interest expense to exactly 0, and that is a filed figure."""
         assert not rows_match(_row(value=0.0), _row(value=None))
         assert not rows_match(_row(value=None), _row(value=0.0))
@@ -85,7 +85,7 @@ class TestNullIsAValueNotAnAbsence:
 
 
 class TestIsPredictionIsPartOfTheComparison:
-    """⚠ NOT JUST OF THE KEY. The estimates feed writes True and the other two False, so a row that
+    """ NOT JUST OF THE KEY. The estimates feed writes True and the other two False, so a row that
     changed ONLY in that flag still has to be written or the forecast/actual split rots silently —
     and that split is what `/earnings` draws its `2026e` columns from."""
 
@@ -114,7 +114,7 @@ class TestFloatComparisonIsExact:
 class TestTheRead:
 
     def test_it_asks_only_for_the_codes_it_is_about_to_write(self, monkeypatch):
-        """⚠ SCOPED TO THE CODES, NOT TO THE COMPANY. `fetch_financials` takes a `metric_codes`
+        """ SCOPED TO THE CODES, NOT TO THE COMPANY. `fetch_financials` takes a `metric_codes`
         filter — `_asset_dividends` persists TWO codes, ~320 rows — and reading the company's whole
         36,000-row history to diff 320 of them would make the narrow path far worse than before."""
         seen = {}
@@ -130,7 +130,7 @@ class TestTheRead:
         assert seen["key_col"] == "metric_code"
         assert seen["values"] == ["A", "B"]
         assert seen["where"] == {"company_id": 62, "source_code": "gurufocus"}
-        # ⚠ `is_prediction` MUST BE READ BACK, or the comparison above cannot see a flipped flag.
+        #  `is_prediction` MUST BE READ BACK, or the comparison above cannot see a flipped flag.
         assert "is_prediction" in seen["columns"] and "numeric_value" in seen["columns"]
 
     def test_it_groups_by_company_and_source(self, monkeypatch):
@@ -149,7 +149,7 @@ class TestTheRead:
             (1, "gurufocus"), (2, "gurufocus"), (1, "derived")}
 
     def test_no_copy_path_writes_EVERYTHING(self, monkeypatch):
-        """⚠ DEGRADING THE OPTIMISATION IS FINE; DEGRADING THE ANSWER IS NOT. Without a direct
+        """ DEGRADING THE OPTIMISATION IS FINE; DEGRADING THE ANSWER IS NOT. Without a direct
         Postgres connection there is no cheap way to diff, so every row is handed back for writing —
         which is precisely the behaviour this replaced: slower, never wrong."""
         monkeypatch.setattr("common.pg.load_rows_via_copy",
@@ -179,7 +179,7 @@ class TestTheRead:
 
 
 class TestTheCountsCallersDependOn:
-    """⚠⚠ `rows_loaded == 0` USED TO MEAN "the fetch came back empty" AND NOW MEANS "nothing needed
+    """ `rows_loaded == 0` USED TO MEAN "the fetch came back empty" AND NOW MEANS "nothing needed
     writing", which for an up-to-date company is the normal outcome. `_fundamental_fill._one` retries
     once on an empty answer, so reading the first as the second would re-fetch every healthy
     constituent — ~1,700 companies x up to 3 feeds of pure waste on ACWI, and it would look like this

@@ -8,7 +8,7 @@ tier (public health/cron endpoints). Authorization is role-based:
              the Management Dashboard), plus the mutations those pages need:
              the earnings refresh, and every refresh on the Management
              Dashboard.
-             ⚠ THE `/api/earnings` NAMESPACE IS STILL USER-READABLE THOUGH THE
+              THE `/api/earnings` NAMESPACE IS STILL USER-READABLE THOUGH THE
              /earnings PAGE IS NOT (2026-09-07). The Management Dashboard's
              Long Equity tab and its Fundamental modal are built on it — the
              blend endpoints, `universe-period-caps` and the eleven
@@ -38,7 +38,7 @@ Tiers (matched as `path.startswith(prefix)` unless stated):
                        figures current, never change what it says.
   everything else      admin only.
 
-⚠ THE METHOD IS NOT THE AUTHORITY ON WHETHER SOMETHING IS A READ. Both
+ THE METHOD IS NOT THE AUTHORITY ON WHETHER SOMETHING IS A READ. Both
 exceptions above exist because it lied in each direction: an SSE endpoint
 scrapes for minutes behind a GET, and a basket calculation POSTs because its
 input does not fit in a URL.
@@ -108,11 +108,11 @@ _USER_READ_PREFIXES: tuple[str, ...] = (
     "/api/jobs",
 )
 
-# ⚠ A GET IS NOT ALWAYS A READ, AND THIS IS CHECKED BEFORE THE READ TIER SO WIDENING ONE ABOVE
-# CANNOT QUIETLY RE-EXPOSE THEM. `/api/airs/scan` is a GET only because it streams (SSE); it drives
+#  A get is not always a read, and this is checked before the read tier so widening one above
+# Cannot quietly re-expose them. `/api/airs/scan` is a GET only because it streams (SSE); it drives
 # a live Playwright scrape of AirSPMS — minutes of work against a third-party system that
 # rate-limits and can lock the shared login out. Method is the wrong test for it.
-# ⚠ THE SSE SCANS ARE STILL DENIED, BUT THEIR *JOB* TWINS ARE NOT — see `_USER_REFRESH_PATTERNS`.
+#  The SSE scans are still denied, but their *JOB* TWINS ARE NOT — see `_USER_REFRESH_PATTERNS`.
 # The scrape a non-admin may start is the one the Management Dashboard starts: a background job
 # with a handle, a progress toast and a Cancel. The raw SSE forms belong to the admin-only
 # /airs-portfolio page and hold a request open for the whole scrape, which is a different thing to
@@ -122,7 +122,7 @@ _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
     "/api/airs/scan",
 )
 
-# ⚠ THE SAME DENY, BY PATTERN, BECAUSE THE ID SITS IN THE MIDDLE OF THE PATH. A prefix here can
+#  The same deny, by pattern, because the id sits in the middle of the path. A prefix here can
 # only be `/api/airs/accounts/`, which is every sub-resource of every account at once.
 #
 # These four ARE the /management-dashboard Overview EXPANDED ROW (admin-only from 2026-08-06): an
@@ -130,17 +130,17 @@ _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
 # against AIRS's figure, and the link picker. The summary table above them stays user-readable —
 # what is restricted is opening a book, not seeing that it exists.
 #
-# ⚠ HIDING THE ROW IS NOT THE RULE, THIS IS. The frontend makes the `<tr>` inert for a non-admin,
+#  Hiding the row is not the rule, this is. The frontend makes the `<tr>` inert for a non-admin,
 # which stops the click and nothing else: the URLs are three lines of a component every user
 # downloads. Without this tier the restriction would last exactly as long as nobody opened the
 # network tab.
 #
-# ⚠ `/isins` IS DELIBERATELY ABSENT AND MUST STAY ABSENT. It is the one account sub-resource the
+#  `/isins` IS DELIBERATELY ABSENT AND MUST STAY ABSENT. It is the one account sub-resource the
 # expand SHARES with the Analyse button, which non-admins keep — it is how an unpaired book gets a
 # basket to analyse (`openModal`). Folding these into the `/api/airs/accounts/` prefix would take
 # Analyse away as collateral, silently, for the rows that need it most.
 _ADMIN_ONLY_PATTERNS: tuple[re.Pattern[str], ...] = (
-    # ⚠ EXACT, NOT A PREFIX — `/api/airs/model-portfolios/scan/job` is the same work as a
+    #  Exact, not a prefix — `/api/airs/model-portfolios/scan/job` is the same work as a
     # cancellable background job and every authenticated user may start it (see
     # `_USER_REFRESH_PATTERNS`). Only the request-held SSE form is admin-only.
     re.compile(r"^/api/airs/model-portfolios/scan$"),
@@ -158,17 +158,17 @@ def _is_admin_only_pattern(path: str) -> bool:
 # (Earnings refresh is handled separately by `_is_earnings_refresh`.)
 _USER_WRITE_PREFIXES: tuple[str, ...] = ()
 
-# ⚠ READS THAT ARRIVE AS POST. This gate splits on HTTP method, so a compute-and-return endpoint
+#  Reads that arrive as post. This gate splits on HTTP method, so a compute-and-return endpoint
 # whose input is a LIST OF ISINS — too long for a URL — lands in the write tier and 403s for a user
 # on a page they are allowed to open. Every path here mutates nothing; it takes a basket in and
 # returns figures.
 #
-# ⚠ MATCHED BY EXACT PATH, NEVER PREFIX. `/api/earnings/fundamental-coverage` computes what we
+#  Matched by exact path, never prefix. `/api/earnings/fundamental-coverage` computes what we
 # hold; `/api/earnings/fundamental-coverage/ingest`, one segment further down, spends GuruFocus
 # quota to go and fetch it. A prefix would hand a user the second along with the first.
 _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/airs/basket/analysis",
-    # ⚠ A READ THAT MUST BE A POST — it takes the book's holdings in the body precisely so it can
+    #  A read that must be a post — it takes the book's holdings in the body precisely so it can
     # describe the rows the reader is looking at, and a URL cannot carry 49 ISINs and their
     # weights. It computes and returns; it stores nothing. See `_active_share`.
     "/api/airs/portfolio/active-share",
@@ -195,35 +195,35 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/earnings/portfolio-revenue-matrix",
     "/api/earnings/relative-growth-breakdown",
     "/api/earnings/sbc-ocf-inputs",
-    # ⚠⚠ THE ONE THAT WAS SPLIT OUT OF THE OTHERS AND NEVER FOLLOWED THEM HERE. Until 2026-08-19
+    #  The one that was split out of the others and never followed them here. Until 2026-08-19
     # the per-period market caps rode along inside every one of the ten card payloads above —
     # 29.9% of each — and were lifted into this single shared read to stop shipping the same table
     # ten times. The ten were already allow-listed; the endpoint carved out of them was not, so a
     # non-admin picking ACWI on /management-dashboard's Long Equity tab got `ACWI: Admin role
     # required` on every card, from a request whose CONTENT they were already being served.
-    # ⚠ IT IS A READ OF AN INDEX'S CAP HISTORY AND NOTHING ELSE — it 422s for a portfolio by
+    #  It is a read of an index's cap history and nothing else — it 422s for a portfolio by
     # design (a holding weight is not a market cap), so there is no book-level data behind it.
     "/api/earnings/universe-period-caps",
 })
 
-# ⚠⚠ THE /management-dashboard REFRESHES, OPEN TO EVERY AUTHENTICATED USER (2026-08-19, on
+#  THE /management-dashboard REFRESHES, OPEN TO EVERY AUTHENTICATED USER (2026-08-19, on
 # request). The page was readable but frozen: every button that makes what it shows CURRENT — the
 # AIRS scrape behind the Overview table, the index rebuild behind Benchmarks, the fundamentals
 # fills behind the Analyse and grid panels — sat behind the admin tier, so a user could see a stale
 # figure and had no way to act on it. They may now start all of them.
 #
-# ⚠ THIS IS A DELIBERATE COST DECISION, NOT AN OVERSIGHT BEING CORRECTED. Every path here spends
+#  This is a deliberate cost decision, not an oversight being corrected. Every path here spends
 # something real: a GuruFocus call against a MONTHLY quota, or a Playwright session against AirSPMS
 # under one shared login that rate-limits. The judgement is that a stale dashboard nobody can
 # refresh costs more than the quota does. If that stops being true, narrow THIS tier — do not
 # re-hide the buttons in the frontend and leave the endpoints open.
 #
-# ⚠ EXACT PATHS AND ANCHORED PATTERNS, NEVER PREFIXES — the same rule, and the same reason, as
+#  Exact paths and anchored patterns, never prefixes — the same rule, and the same reason, as
 # `_USER_POST_READ_PATHS` states above. `/api/airs/` and `/api/benchmarks` are read prefixes for
 # this page; a write PREFIX under either would hand over the deletes, the overrides and the link
 # picker along with the refreshes, which is exactly what the Overview row still hides.
 #
-# ⚠ WHAT IS DELIBERATELY ABSENT: DELETE on an account or a universe, the class / ISIN / link
+#  What is deliberately absent: delete on an account or a universe, the class / ISIN / link
 # overrides, and renaming a book. Those CHANGE what the page says; a refresh only makes it current.
 # That is the line, and it is the one the frontend's remaining `isAdmin` guards draw too.
 _USER_REFRESH_PATHS: frozenset[str] = frozenset({
@@ -233,18 +233,18 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).
     "/api/airs/basket/fundamentals/ingest/job",
     # The Analyse modal's input tables → fetch ONE `no_data` holding's financials.
-    # ⚠ `/ingest`, one segment below the read `/api/earnings/fundamental-coverage` that is already
+    #  `/ingest`, one segment below the read `/api/earnings/fundamental-coverage` that is already
     # in `_USER_POST_READ_PATHS`. Both are named in full, on purpose.
     "/api/earnings/fundamental-coverage/ingest",
 })
 
-# ⚠ THE BENCHMARK PROXY REFRESH, BY PATTERN because the index label sits in the middle of the path.
-# ⚠⚠ IT IS A REFRESH, NOT A MUTATION — the standing line for this tier. Pressing it asks the vendor
+#  The benchmark proxy refresh, by pattern because the index label sits in the middle of the path.
+#  It is a refresh, not a mutation — the standing line for this tier. Pressing it asks the vendor
 # for closes we do not yet hold and stores them; it cannot change what any figure SAYS, only how
 # current it is. The Analyse modal is user-visible and its ⓘ already tells a reader the tile is
 # stale, so leaving the one action that clears it to admins would be an alarm they cannot silence —
 # the exact failure `provenanceFreshness` was rewritten to avoid.
-# ⚠ `POST` ONLY, and the label is `\w+` rather than `.*`: `PROXY` holds ACWI and SP500, and a
+#  `POST` ONLY, and the label is `\w+` rather than `.*`: `PROXY` holds ACWI and SP500, and a
 # permissive segment here would hand every future `/api/benchmarks/proxy/...` route to every user.
 _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 
@@ -259,7 +259,7 @@ _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/benchmarks/index/[^/]+/fundamentals/ingest/job$"),
     # Benchmarks grid → one constituent's Fetch cell.
     re.compile(r"^/api/benchmarks/company/\d+/fundamentals/ingest/job$"),
-    # ⚠ AND THE STOP. Every path above starts work that runs for minutes and reports through the
+    #  And the stop. Every path above starts work that runs for minutes and reports through the
     # job toast; a Cancel the starter cannot press is how a run with no way out gets reported as
     # "stuck". `GET /api/jobs` + `/stream` ride the read tier (`/api/jobs` is in
     # `_USER_READ_PREFIXES`) — this is the one job-transport WRITE.
@@ -280,14 +280,14 @@ def _is_user_refresh(path: str) -> bool:
 #     the resource only when it belongs to a `user_visible` scheduled strategy (see
 #     `get_current_picks` / `load_backtest`).
 #
-# ⚠⚠ `/api/asset-pipeline/search` WAS HERE AND WENT WITH ITS PAGE (2026-09-07, /research-dashboard
+#  `/api/asset-pipeline/search` WAS HERE AND WENT WITH ITS PAGE (2026-09-07, /research-dashboard
 #   removed from the user tier on request). It existed for exactly one caller — that page's company
 #   picker — and nothing else in the app calls it. An allow-listed path whose only page is gone is a
 #   permission nobody can see: it grants no visible capability, so nothing would ever prompt a
 #   reader to question it, and the next person widening this namespace would find a precedent for
 #   reaching into it. Removing a page and leaving its API open is the same class of mistake as
 #   adding a page and forgetting to.
-#   ⚠ IT IS NOT A PREFIX GOING AWAY. `/api/asset-pipeline/` still holds `/grid` (27.56 MB of every
+#    It is not a prefix going away. `/api/asset-pipeline/` still holds `/grid` (27.56 MB of every
 #   ISIN with every column), `/ingest`, `/store`, the bulk resolve and the row refresh — all
 #   admin-only, as they always were. What users keep in that namespace is the two by-ISIN reads
 #   /management-dashboard needs (`/fundamentals/`, `/latest-close/`, `/risk/` in
@@ -310,14 +310,14 @@ def _is_earnings_refresh(path: str) -> bool:
     return "/refresh" in path[len("/api/earnings/"):]
 
 
-# ⚠ THE ONE WRITE UNDER `/api/asset-pipeline/` A NON-ADMIN MAY MAKE: bring ONE instrument's stored
+#  The one write under `/api/asset-pipeline/` A NON-ADMIN MAY MAKE: bring ONE instrument's stored
 # closes up to date, from the Deep Valuation tab's share-price row. It is the same shape of
 # permission as `_is_earnings_refresh` — a user looking at a company may spend one vendor call to
 # make that company's own figures current — and the read it repairs
 # (`/api/asset-pipeline/latest-close/`) is already in `_USER_READ_PREFIXES`, so without this the
 # button is visible to every user and 403s for most of them.
 #
-# ⚠⚠ AN EXACT PATTERN, NEVER A PREFIX — the same rule `_USER_POST_READ_PATHS` states above and for
+#  An exact pattern, never a prefix — the same rule `_USER_POST_READ_PATHS` states above and for
 # the same reason. `/api/asset-pipeline/` holds the ingest, the bulk resolve and the row refresh;
 # a prefix here would hand all of them to every authenticated user.
 _LATEST_CLOSE_REFRESH = re.compile(r"^/api/asset-pipeline/latest-close/isin/[^/]+/refresh$")
@@ -327,45 +327,45 @@ def _is_latest_close_refresh(path: str) -> bool:
     return _LATEST_CLOSE_REFRESH.match(path) is not None
 
 
-# ⚠⚠ TWO-FACTOR IS REQUIRED OF EVERY PERSON, NOT JUST ADMINS (2026-09-08, on request). It was
+#  Two-factor is required of every person, not just admins (2026-09-08, on request). It was
 # admin-only for one afternoon, on the reasoning that the blast radius lives there. The ask was
 # simpler and stricter: everyone enrols, so there is no tier to reason about and no account that
 # is the soft way in.
 #
-# ⚠⚠ AND `aal` ALONE CANNOT EXPRESS "OPT-IN", WHICH IS WHY THE FIRST CUT WAS A LOCKOUT ONE DEPLOY
+#  AND `aal` ALONE CANNOT EXPRESS "OPT-IN", WHICH IS WHY THE FIRST CUT WAS A LOCKOUT ONE DEPLOY
 # AWAY. It refused any session reporting `aal1`, assuming an account with no authenticator would
 # carry no `aal` claim; measured on the live stack it carries `aal1` anyway. That version refused
 # every account in the app, including ones with no way to comply. It survives here as the reason
 # `has_verified_factor` exists — now not to EXEMPT anybody, but to say WHICH of two different
 # things the caller has to go and do.
 #
-# ⚠⚠ AND THERE IS NO LONGER ANY WAY ROUND IT. An `X-Admin-Key` used to let `/api/admin/*` skip
+#  And there is no longer any way round it. An `X-Admin-Key` used to let `/api/admin/*` skip
 # this entirely, for the external rebalancer that could not hold a phone; both the script and the
 # credential were deleted on 2026-09-08. Every caller of every `/api/*` endpoint is now a person
 # with a session, and every one of them proves a second factor. Do not re-add a bypass without
 # re-reading why that one existed.
 #
-# ⚠ AN UNREADABLE LEVEL (None) PASSES, and that is the considered choice rather than laziness.
+#  An unreadable level (None) PASSES, and that is the considered choice rather than laziness.
 # `_token_aal` returns None when the token GoTrue just ACCEPTED cannot be parsed here — a
 # disagreement between us and the identity provider, not evidence about the user. Failing closed on
 # it would turn a library change into everyone locked out of production at once, and the same
 # incident that produced `AuthBackendUnavailable` is the argument: "we could not check" and "you
 # did not comply" are different answers. It is logged at WARNING so it cannot be silent.
 #
-# ⚠ THE FRONTEND NORMALLY GETS THERE FIRST (`proxy.ts` → /account/security or /mfa), so anything
+#  The frontend normally gets there first (`proxy.ts` → /account/security or /mfa), so anything
 # reaching a 403 here bypassed the UI: a script, a stale tab, or somebody testing. The messages are
 # written to work with no redirect behind them.
 _REQUIRE_MFA = os.environ.get("REQUIRE_MFA", "1") != "0"
 
-# ⚠⚠ PRINTED AT STARTUP BECAUSE THE VALUE IS FROZEN AT STARTUP, AND THAT IS EXACTLY WHAT CATCHES
-# PEOPLE OUT. `uvicorn --reload` watches `.py` files and NOT `.env*`, so writing `REQUIRE_MFA=0`
+#  Printed at startup because the value is frozen at startup, and that is exactly what catches
+# People out. `uvicorn --reload` watches `.py` files and NOT `.env*`, so writing `REQUIRE_MFA=0`
 # into `backend/.env.local` changes nothing until the process is restarted — and the symptom is a
 # 403 on every read with no hint that the setting you just wrote is not the setting in force
 # (2026-09-08: exactly that, on the portfolios table). One line in the terminal answers it.
 #
-# ⚠ `print`, NOT `logging.info` — the same reason `main.py` prints its CORS allow-list: uvicorn
+#  `print`, NOT `logging.info` — the same reason `main.py` prints its CORS allow-list: uvicorn
 # leaves the root logger at WARNING, so an info line is invisible precisely where it is needed.
-# ⚠ ASCII ONLY. Windows consoles encode stdout as cp1252, and a `print` carrying a character it
+#  Ascii only. Windows consoles encode stdout as cp1252, and a `print` carrying a character it
 # cannot map raises UnicodeEncodeError — at IMPORT time, so the whole backend fails to boot. An
 # arrow in this line did exactly that before it ever ran (caught immediately; it would have been a
 # dead local server with a traceback that names an encoding, not a setting).
@@ -378,10 +378,10 @@ def _mfa_denial(info: dict) -> JSONResponse | None:
     if not _REQUIRE_MFA:
         return None
     aal = info.get("aal")
-    # ⚠ Only `aal1` is a refusal. `aal2` complied; None means we could not tell (see above).
+    #  Only `aal1` is a refusal. `aal2` complied; None means we could not tell (see above).
     if aal != "aal1":
         return None
-    # ⚠ TWO DIFFERENT ACTIONS, AND NAMING THE WRONG ONE WASTES THE READER'S TIME. Somebody with no
+    #  Two different actions, and naming the wrong one wastes the reader's time. Somebody with no
     # authenticator cannot "enter their code", and somebody who has one does not need to set it up.
     if info.get("has_verified_factor"):
         detail = ("Two-factor verification required — sign in again and enter your "
@@ -451,7 +451,7 @@ async def enforce_api_auth(
     # `user_visible` rows to non-admins). Set for admins too.
     request.state.auth = info
 
-    # ⚠⚠ BEFORE THE ROLE SPLIT, BECAUSE IT APPLIES TO EVERYONE. Putting it inside the admin branch
+    #  Before the role split, because it applies to everyone. Putting it inside the admin branch
     # (where it started) would leave every read-only user exempt — and a tier that never has to
     # prove a second factor is the soft way in that requiring one everywhere exists to remove.
     denied = _mfa_denial(info)
@@ -463,7 +463,7 @@ async def enforce_api_auth(
         return await call_next(request)
 
     # Non-admin: only the allowed surface.
-    # ⚠ THE DENY IS FIRST. It covers endpoints that sit inside a user-readable prefix but are not
+    #  The deny is first. It covers endpoints that sit inside a user-readable prefix but are not
     # reads — the SSE scrapes — so it must not be reachable by widening a prefix above.
     if _starts_with_any(path, _ADMIN_ONLY_PREFIXES) or _is_admin_only_pattern(path):
         allowed = False

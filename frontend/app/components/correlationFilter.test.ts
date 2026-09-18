@@ -1,7 +1,7 @@
 /**
  * Filtering an NxN correlation matrix to a subset of portfolios.
  *
- * ⚠ THE BUG THIS EXISTS FOR: SLICING ONLY THE ROWS.
+ *  The bug this exists for: slicing only the rows.
  *
  * `matrix` is NxN over the same index space as `labels`. Filter the rows and you get rows of the
  * ORIGINAL width — so every cell after the first dropped column is read from the wrong portfolio.

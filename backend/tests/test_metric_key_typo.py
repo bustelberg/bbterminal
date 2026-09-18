@@ -1,13 +1,13 @@
 """An unknown metric key is REFUSED, never answered with revenue.
 
-⚠⚠ THE MEASURED BUG, 2026-08-17. `_metric_codes` was
+ THE MEASURED BUG, 2026-08-17. `_metric_codes` was
 `_METRIC_CODES.get(metric, _METRIC_CODES["revenue"])`, so a key the registry does not carry came
 back as REVENUE. The Tables tab asked `portfolio-revenue-matrix?metric=fcf_per_share` — the
 registry key is `fcf_ps` — and its row labelled "FCF / share CAGR" was therefore the book's
 revenue growth. Bustelberg Offensief read **+19.0%/yr** there against the Long Equity FCF/share
 card's **+28.0%** on the same book, the same window and the same modal.
 
-⚠ WHY IT SURVIVED, WHICH IS THE PART WORTH REMEMBERING. Nothing errored, no cell was empty, and
+ WHY IT SURVIVED, WHICH IS THE PART WORTH REMEMBERING. Nothing errored, no cell was empty, and
 both figures were entirely plausible for that book. The only symptom was that two numbers
 disagreed — and the tab's own footnote offered a CREDIBLE WRONG EXPLANATION for the gap
 ("point-to-point will not match the card's trend fit"). Measured on the real series, that
@@ -41,7 +41,7 @@ class TestTheRegistryIsTheOnlyAnswer:
         assert "fcf_ps" in str(e.value)
 
     def test_it_does_not_fall_back_to_revenue(self):
-        """⚠ THE ASSERTION THAT IS THE WHOLE FILE. Any exception is better than this equality."""
+        """ THE ASSERTION THAT IS THE WHOLE FILE. Any exception is better than this equality."""
         with pytest.raises(ValueError):
             got = _metric_codes("not_a_metric")
             assert got != _METRIC_CODES["revenue"], (
@@ -50,7 +50,7 @@ class TestTheRegistryIsTheOnlyAnswer:
 
 
 class TestEveryKeyTheFrontendSends:
-    """⚠ THE KEYS ARE TYPED AS STRING LITERALS IN TSX AND NOTHING CHECKS THEM AT BUILD TIME.
+    """ THE KEYS ARE TYPED AS STRING LITERALS IN TSX AND NOTHING CHECKS THEM AT BUILD TIME.
 
     `LongEquityTab`'s `CARDS[].benchmarkMetric` and `TablesTab`'s two matrix URLs are plain
     strings; a rename on either side compiles, deploys and renders. Until the fallback was removed

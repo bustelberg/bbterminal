@@ -11,7 +11,7 @@ cannot price this holding".
 of those bars sitting in the table. `DealmakersTopSel OFF FX` showed a blank row for it while
 counting it 5% of the model.
 
-⚠ THE BUG IS SILENT IN BOTH DIRECTIONS, WHICH IS WHY THE MAP IS SHARED AND NOT RE-DERIVED:
+ THE BUG IS SILENT IN BOTH DIRECTIONS, WHICH IS WHY THE MAP IS SHARED AND NOT RE-DERIVED:
 
     forget to normalise the CODE     -> no rate  -> the holding disappears
     forget to apply the DIVISOR      -> a rate   -> £46.75 prices as £4,675
@@ -66,7 +66,7 @@ class TestTheLoadersAskForTheBaseCurrency:
     that dict from `asset_execution.currency`, so both must normalise before querying — a fix in
     `_rate` alone leaves the table empty and the holding just as unpriced.
 
-    ⚠ THESE WERE `assert "SUBUNIT" in inspect.getsource(...)` AND THAT WAS ALWAYS A PROXY, NOT THE
+     THESE WERE `assert "SUBUNIT" in inspect.getsource(...)` AND THAT WAS ALWAYS A PROXY, NOT THE
     PROPERTY. It broke the moment both loaders were merged into `common/fx_load.py` (2026-08-11) —
     the behaviour was unchanged and identical for both, and the tests still went red, because they
     were asserting about the TEXT of a function rather than what it does. Rewritten to ask the
@@ -80,7 +80,7 @@ class TestTheLoadersAskForTheBaseCurrency:
         fake = FakeSupabase({"fx_rate": [
             {"currency_code": "GBP", "rate_date": "2026-01-02", "rate": 0.85}]})
         monkeypatch.setattr("deps.supabase", fake)
-        # ⚠ Patch the name AS BOUND IN `fx_load`, not `common.pg._db_url` — `fx_load` did
+        #  Patch the name AS BOUND IN `fx_load`, not `common.pg._db_url` — `fx_load` did
         # `from common.pg import _db_url`, so patching the origin would not reach it. Forces the
         # PostgREST pager, which is the path a FakeSupabase can serve.
         monkeypatch.setattr("common.fx_load._db_url", lambda: None)
@@ -116,7 +116,7 @@ class TestTheLoadersAskForTheBaseCurrency:
 
 
 class TestAMarketCapIsNotAPrice:
-    """⚠ ONE `currency` FIELD, TWO DIFFERENT UNITS — and the divisor belongs to only one of them.
+    """ ONE `currency` FIELD, TWO DIFFERENT UNITS — and the divisor belongs to only one of them.
 
     Yahoo quotes a London listing's PRICE in pence and, in the SAME v7 payload, reports its
     `marketCap` in POUNDS. Both are labelled `"GBp"`. So the rule the price path lives by — always
@@ -193,7 +193,7 @@ class TestAMarketCapIsNotAPrice:
 
 
 class TestUpperCasingIsNotNormalisation:
-    """⚠ THE THIRD WAY TO LOSE THE DIVISOR, and the quietest: `.upper()`.
+    """ THE THIRD WAY TO LOSE THE DIVISOR, and the quietest: `.upper()`.
 
     Forgetting to normalise gives no rate and the holding disappears (loud). Forgetting the divisor
     gives £4,675 for a £46.75 share (wrong, but at least the code was `GBp` all along). Upper-casing
@@ -248,7 +248,7 @@ class TestUpperCasingIsNotNormalisation:
 
 
 class TestFilsAreThousandthsNotHundredths:
-    """⚠⚠ THE ONE ENTRY WHERE COPYING THE LINE ABOVE IT WOULD BE WRONG.
+    """ THE ONE ENTRY WHERE COPYING THE LINE ABOVE IT WOULD BE WRONG.
 
     Every other minor unit here is 1/100 of its major. The Kuwaiti dinar is divided into **1,000**
     fils, and Yahoo quotes the Kuwait exchange in them: measured on the live quote, National Bank

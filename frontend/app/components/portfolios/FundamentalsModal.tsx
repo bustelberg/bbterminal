@@ -13,20 +13,20 @@ import type { FundamentalsResponse, FundamentalSeries, QualityMetric } from '../
 /**
  * Is this company fundamentally sound — and are we paying a sensible price for it?
  *
- * FOUR CHARTS, ONE CALL. Each answers a different question, and each misleads without the others:
+ * Four charts, one call. Each answers a different question, and each misleads without the others:
  *
  *   1. PRICE vs FAIR VALUE   what we pay, against five independent methods
  *   2. YIELD                 what a euro of price BUYS — cash thrown off, and cash handed back
  *   3. ROIC vs WACC          whether the business earns more than its capital costs
  *   4. SAFETY                whether cheap is cheap for a reason
  *
- * ⚠ THE PRICE LINE IS OUR OWN DAILY YFINANCE CLOSE, IN EUR — never GuruFocus's. /portfolios prices
+ *  The price line is our own daily yfinance close, in EUR — never GuruFocus's. /portfolios prices
  * everything from `asset_price`; a second vendor here would compare two price universes on a page
  * whose whole claim is that its numbers are comparable. The fair values are GuruFocus's, converted
  * to the SAME EUR — GF denominates them in its own listing's currency, and its listing need not be
  * the one we price. See `_asset_fundamentals`.
  *
- * ⚠ EVERY SERIES SAYS WHAT IT DROPPED. A loss year has no PE; a period with no FX rate cannot be
+ *  Every series says what it dropped. A loss year has no PE; a period with no FX rate cannot be
  * converted. Measured on Apple: the fair values lose 13 of 40 periods to thin FX history and
  * interest coverage 16. A line that quietly skips its bad years is a line about the good ones.
  */
@@ -38,7 +38,7 @@ const fmtPct = (v: number | null | undefined) =>
 
 /** One series as `{t, v}` on a NUMERIC time axis, for charts whose series have different cadences.
  *
- * ⚠ WHY NOT ONE MERGED FRAME (which is what `frame()` below does, correctly, for charts 2-4).
+ *  Why not one merged frame (which is what `frame()` below does, correctly, for charts 2-4).
  * Chart 1 puts a DAILY price (≈3,000 points) beside an ANNUAL band (12). Merged on date, each band
  * series is 12 values among 3,000 rows — and `connectNulls` is then the only reason the band draws
  * as a line at all rather than 12 lonely dots. That makes `connectNulls` load-bearing for the
@@ -82,12 +82,12 @@ function Gap({ s }: { s: FundamentalSeries }) {
 
 /** The quality verdict: four numbers, read in two seconds.
  *
- * ⚠ FOUR NUMBERS AND NOT ONE SCORE, DELIBERATELY. A composite 0-100 would hide the disagreement
+ *  Four numbers and not one score, deliberately. A composite 0-100 would hide the disagreement
  * between them, and the disagreement IS the finding — Intel reads a passable +3.1pp spread while
  * its ROIC fell 17 points; a single score averages the melting moat away. (GuruFocus sells a GF
  * Score; outsourcing the judgement is the thing being avoided.)
  *
- * ⚠ "NOT MEASURED" IS NOT "BAD". A bank has no ROIC and no gross margin AT ALL — structurally
+ *  "NOT MEASURED" IS NOT "BAD". A bank has no ROIC and no gross margin AT ALL — structurally
  * absent, not empty — and its cash conversion tracks its loan book rather than its collections.
  * All four are therefore inapplicable to one, which the strip SAYS rather than rendering four
  * failures.
@@ -199,7 +199,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
                 <span className="font-mono">{d.period_count}</span> periods</>}
             </p>
           </div>
-          <button onClick={onClose} className="text-fg-faint hover:text-fg text-lg leading-none">✕</button>
+          <button onClick={onClose} className="text-fg-faint hover:text-fg text-lg leading-none"></button>
         </div>
 
         {!d && !err && <p className="px-5 py-8 text-xs text-fg-subtle">Reading the accounts…</p>}
@@ -211,7 +211,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
 
         {d && (
           <div className="p-5 space-y-3">
-            {/* ⚠ A non-home listing's history has HOLES — the band would be drawn across them. */}
+            {/*  A non-home listing's history has HOLES — the band would be drawn across them. */}
             {!d.is_home && (
               <div className="bg-warn-500/10 border border-warn-500/20 rounded-lg px-3 py-2 text-[12px] text-warn-300">
                 <strong>{d.symbol}</strong>{' '}is not this ISIN&apos;s home listing. GuruFocus&apos;s
@@ -234,7 +234,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
                   close in EUR; the methods are GuruFocus, converted to the same EUR.{' '}
                   <span title="The gap between price and fair value is a RATIO — 'twice its worth' should look the same at €17 as at €278. Only a log axis draws equal ratios as equal distances; on a linear one this company's first decade would be a pixel at the bottom (prices here range 4.5x to 353x over the window).">
                     Log scale, because the gap is a ratio.</span>
-                  {/* ⚠ TWO DIFFERENT ABSENCES, AND THEY ARE NOT THE SAME SENTENCE. `dropped` = the
+                  {/*  TWO DIFFERENT ABSENCES, AND THEY ARE NOT THE SAME SENTENCE. `dropped` = the
                       method published nothing for that period; `non_positive` = it published a
                       value and the value is ≤ 0, which is an ANSWER ("no value") a log axis cannot
                       draw. Collapsing them would report a loss-making decade as missing data. */}
@@ -249,7 +249,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
                       positive earnings growth; Earnings Power ≤ 0 says the business earns
                       nothing). Those lines BREAK rather than bridge the years.</span>
                   )}</>}>
-                {/* ⚠ PER-SERIES DATA ON A NUMERIC TIME AXIS, not one merged frame. The price is
+                {/*  PER-SERIES DATA ON A NUMERIC TIME AXIS, not one merged frame. The price is
                     DAILY and the band ANNUAL; merged on date, `connectNulls` would be the only
                     thing drawing the band as a line at all — which would make it load-bearing for
                     the CADENCE gap and therefore unusable to express a real break. Apart, a null
@@ -364,7 +364,7 @@ export default function FundamentalsModal({ isin, fonds, onClose }: {
               currency ({d.currency}) and our price is{' '}
               <span className="font-mono">{d.yahoo_symbol}</span> ({d.price_currency}) — two
               listings of one share class, and their gap would otherwise read as mispricing.
-              {' '}⚠ These are <strong>restated</strong>{' '}figures: a 2019 ROIC here is what 2019 looks
+              {' '} These are <strong>restated</strong>{' '}figures: a 2019 ROIC here is what 2019 looks
               like now, not what anyone could see in 2019.
             </p>
           </div>

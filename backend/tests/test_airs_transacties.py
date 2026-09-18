@@ -1,6 +1,6 @@
 """The Transacties sheet parser — pure, over in-memory Excel bytes. No AIRS, no DB, no network.
 
-⚠ THESE TESTS PIN BEHAVIOUR, NOT A SCHEMA, and that is the point. No column of the real TRANS
+ THESE TESTS PIN BEHAVIOUR, NOT A SCHEMA, and that is the point. No column of the real TRANS
 report has been measured yet (see `airs_transacties`), so there is nothing truthful to assert
 about `Bedrag` or `Fonds`. What CAN be pinned is that whatever arrives survives the trip intact:
 every column kept, every blank an actual null rather than the truthy string "nan", every date an
@@ -43,7 +43,7 @@ class TestNothingIsLost:
             "Boekdatum": ["2026-03-12"], "Fonds": ["ASML"], "Aantal": [10],
             "SomeColumnWeHaveNeverSeen": ["x"],
         })))
-        # ⚠ The report's order, not ours. A reader comparing this against the AIRS export must not
+        #  The report's order, not ours. A reader comparing this against the AIRS export must not
         # have to re-find the columns.
         assert sheet.columns == ["Boekdatum", "Fonds", "Aantal", "SomeColumnWeHaveNeverSeen"]
         assert sheet.rows[0]["SomeColumnWeHaveNeverSeen"] == "x"
@@ -68,7 +68,7 @@ class TestTheNanTrap:
     """A blank Excel cell is float NaN. `str()` renders it "nan", which is TRUTHY — the same trap
     that once counted a cash line as a holding.
 
-    ⚠ EVERY FIXTURE HERE CARRIES A SECOND, POPULATED COLUMN, and that is not padding. The parser
+     EVERY FIXTURE HERE CARRIES A SECOND, POPULATED COLUMN, and that is not padding. The parser
     drops a WHOLLY empty row as a spacer (AIRS pads exports with blank lines between sections), so
     a single-column fixture testing "the blank cell becomes None" builds a row that is entirely
     blank — which is deleted before any assertion can look at it. These three read `rows[1]` and
@@ -107,7 +107,7 @@ class TestASpacerRowIsNotATransaction:
         assert [r["Fonds"] for r in sheet.rows] == ["ASML", "KPN"]
 
     def test_a_row_with_one_value_is_kept(self):
-        """⚠ THE TEST THAT KEEPS THE RULE NARROW. "Mostly empty" is not "empty": a transaction
+        """ THE TEST THAT KEEPS THE RULE NARROW. "Mostly empty" is not "empty": a transaction
         carrying only a date is still a transaction, and dropping it would lose a row the reader
         can see in the AIRS export."""
         sheet = parse_transacties(_xlsx(pd.DataFrame({
@@ -131,7 +131,7 @@ class TestTyping:
         assert sheet.rows[0]["Bedrag"] == pytest.approx(-1234.56)
 
     def test_a_number_exported_as_TEXT_stays_text(self):
-        # ⚠ THE DTYPE DECIDES, NEVER THE NAME. A column called "Bedrag" that AIRS exported as text
+        #  The dtype decides, never the name. A column called "Bedrag" that AIRS exported as text
         # is a visible fact about the export; coercing it would hide that, and a value that only
         # sometimes parses is how a total silently omits rows.
         sheet = parse_transacties(_xlsx(pd.DataFrame({"Bedrag": ["1.234,56"]})))

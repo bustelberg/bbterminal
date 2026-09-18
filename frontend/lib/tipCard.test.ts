@@ -1,5 +1,5 @@
 /**
- * ⚠ A WRONG TITLE SPLIT IS WORSE THAN NO SPLIT, AND IT LOOKS FINE.
+ *  A WRONG TITLE SPLIT IS WORSE THAN NO SPLIT, AND IT LOOKS FINE.
  *
  * Promoting the first clause of a sentence to a bold heading leaves a body that begins mid-thought.
  * The card still renders, still looks designed, and reads as gibberish — nothing errors, nothing
@@ -23,7 +23,7 @@ describe('splitTipTitle', () => {
   });
 
   it('refuses a leading fragment that is really a sentence', () => {
-    // ⚠ The dangerous case. This has a dash but the head is prose; bolding it and starting the
+    //  The dangerous case. This has a dash but the head is prose; bolding it and starting the
     // body at "so this bucket" would read as a broken card.
     const t = 'Funds, cash and unclassified holdings are not a sector bet. '
       + 'They are not decomposed — just the holdings in them.';

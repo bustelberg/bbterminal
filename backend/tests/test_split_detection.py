@@ -1,11 +1,11 @@
 """Telling a SPLIT apart from a TRANSFER, when AIRS calls both of them `D` (Deponering).
 
-⚠ THE TWO NEED OPPOSITE HANDLING, WHICH IS WHY GUESSING IS NOT AN OPTION. A split multiplies every
+ THE TWO NEED OPPOSITE HANDLING, WHICH IS WHY GUESSING IS NOT AN OPTION. A split multiplies every
 earlier quantity (the shares you already held became more shares); a transfer in leaves them alone
 (new shares arrived beside them). AIRS books both as a deposit of securities with every money
 column zero, so the row itself cannot say which.
 
-⚠ THE ANSWER IS THAT TWO INDEPENDENT COLUMNS MUST AGREE:
+ THE ANSWER IS THAT TWO INDEPENDENT COLUMNS MUST AGREE:
 
   1. the QUANTITY ratio — `qty_now / (qty_now − deposited)` — must be a whitelisted split ratio;
   2. every pre-event trade's PRICE ratio, divided by that same quantity ratio, must land in a
@@ -23,7 +23,7 @@ The 1.000 is the decisive one — a 5 January purchase at EXACTLY 10.0000x the 1
 stock does not move 0.00% in four days AND independently happen to be 10x; that is one price in two
 unit bases, and the quantity column reached 10.0000 on its own.
 
-⚠ WHAT IT COST TO GET THIS WRONG, BEFORE THE DETECTION EXISTED: `qty_now − bought` mixed the bases
+ WHAT IT COST TO GET THIS WRONG, BEFORE THE DETECTION EXISTED: `qty_now − bought` mixed the bases
 and gave 296 where the truth is 170, so KLA-Tencor's opening value read EUR 32,605 instead of
 EUR 18,725 and its money-weighted return read +39.81% instead of +56.67%. Seventeen points, and
 entirely plausible-looking.
@@ -48,7 +48,7 @@ class TestTheMeasuredCase:
         assert detect_split(310, 279, 34146.96 / 310, [16567.08 / 14]) == pytest.approx(10.0)
 
     def test_aitopselectie(self):
-        # ⚠ The decisive one: the 5 Jan buy is EXACTLY 10.0000x the 1 Jan price.
+        #  The decisive one: the 5 Jan buy is EXACTLY 10.0000x the 1 Jan price.
         assert detect_split(410, 369, 44799.0 / 410,
                             [50262.02 / 46, 6474.15 / 5]) == pytest.approx(10.0)
 
@@ -64,7 +64,7 @@ class TestBothGatesMustPass:
         assert detect_split(700, 600, 100.0, [700.0]) is None
 
     def test_a_ratio_near_but_not_on_the_whitelist_is_refused(self):
-        # ⚠ 1% tolerance, deliberately tight. "Any small rational" is dense enough to sit near
+        #  1% tolerance, deliberately tight. "Any small rational" is dense enough to sit near
         # anything, which is how a real event gets "corrected" into nothing.
         assert detect_split(1050, 950, 100.0, [1000.0]) is None
 
@@ -74,7 +74,7 @@ class TestBothGatesMustPass:
         assert detect_split(310, 279, 110.15, [110.15 * 10 * 4]) is None
 
     def test_no_pre_event_trade_means_nothing_to_cross_check(self):
-        """⚠ ONE GATE IS NOT TWO. With no trade before the deposit the price test cannot run, so
+        """ ONE GATE IS NOT TWO. With no trade before the deposit the price test cannot run, so
         the quantity ratio stands alone — and a lone ratio is exactly what a transfer also has."""
         assert detect_split(310, 279, 110.15, []) is None
 
@@ -108,7 +108,7 @@ class TestItFlowsThroughTheLedger:
         return [Trade(fonds="KLA", kind="buy", datum="2026-02-03", eur=16567.08, quantity=14.0)]
 
     def _income(self):
-        """⚠⚠ THE DIVIDEND IS NOT OPTIONAL FURNITURE — IT IS PART OF THE FIGURE THIS TEST ASSERTS.
+        """ THE DIVIDEND IS NOT OPTIONAL FURNITURE — IT IS PART OF THE FIGURE THIS TEST ASSERTS.
 
         `result_eur` is `held + realised + INCOME`, so a fixture passing `{}` here computes a
         return on price alone while asserting a percentage measured on the real book, which
@@ -125,7 +125,7 @@ class TestItFlowsThroughTheLedger:
             2026-06-02   Dividend  +61.21   Dividendbelasting   -9.18
             gross 111.96   tax -16.78   NET 95.17
 
-        ⚠ NET, AND THE TAX IS ALREADY NEGATIVE — AIRS books withholding as a negative amount, so
+         NET, AND THE TAX IS ALREADY NEGATIVE — AIRS books withholding as a negative amount, so
         the net is `gross + tax`. Subtracting it instead would take the withholding off twice and
         understate every foreign holding by exactly that much.
         """
@@ -150,7 +150,7 @@ class TestItFlowsThroughTheLedger:
         assert money_weighted_return_pct(p) == pytest.approx(53.97, abs=0.01)
 
     def test_the_income_is_inside_the_return_not_beside_it(self):
-        """⚠ THE GUARD THAT KEEPS THE FIXTURE HONEST. Without it, someone restoring `{}` here
+        """ THE GUARD THAT KEEPS THE FIXTURE HONEST. Without it, someone restoring `{}` here
         turns `test_with_the_ratio_it_is_computed` red by 0.29pp — a gap small enough to look like
         a rounding tolerance and be "fixed" by widening `abs=`, which would silently drop the
         dividend out of a money-weighted RETURN. Naming the dependency makes that impossible."""
@@ -166,7 +166,7 @@ class TestItFlowsThroughTheLedger:
         assert money_weighted_return_pct(q) == pytest.approx(53.67, abs=0.01)
 
     def test_the_euro_result_is_identical_either_way(self):
-        """⚠ ONLY QUANTITIES WERE EVER AMBIGUOUS. A split moves no money, so nothing in the euro
+        """ ONLY QUANTITIES WERE EVER AMBIGUOUS. A split moves no money, so nothing in the euro
         columns may shift when one is detected — if it did, the rescale would be touching the
         result rather than the basis."""
         a = build_ledger(self._rows(), self._trades(), self._income(), 1197811.04, Y0, END,

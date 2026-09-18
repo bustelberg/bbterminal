@@ -250,7 +250,7 @@ export default function Showcase({ theme }: { theme: Theme }) {
                   <span className="h-5 w-5 ml-auto" style={{ background: '#fff', borderRadius: '999px' }} />
                 </span>
                 {/* checkbox */}
-                <span className="inline-flex h-5 w-5 items-center justify-center text-xs" style={{ background: C.accent, color: C.accentFg, borderRadius: '4px' }}>✓</span>
+                <span className="inline-flex h-5 w-5 items-center justify-center text-xs" style={{ background: C.accent, color: C.accentFg, borderRadius: '4px' }}></span>
                 <span className="px-3 py-1.5 text-sm" style={{ border: `1px solid ${C.accent}`, boxShadow: `0 0 0 3px ${C.accentSoft}`, borderRadius: C.radius, color: C.fg }}>Focused</span>
               </Row>
 

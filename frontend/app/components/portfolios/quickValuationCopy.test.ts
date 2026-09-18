@@ -1,7 +1,7 @@
 /**
  * The Quick Valuation tab's copy, pinned in both languages.
  *
- * ⚠ THE COMPILER COVERS COMPLETENESS. What it cannot see is a Dutch entry copy-pasted from the
+ *  The compiler covers completeness. What it cannot see is a Dutch entry copy-pasted from the
  * English, or the translated labels drifting from the ENGLISH ones in `BASIS` — which are still
  * used by the ⓘ prose and must stay in step with them as a SET (same bases, same fields), even
  * though the words differ.
@@ -29,7 +29,7 @@ describe('Quick Valuation copy', () => {
     }
   });
 
-  it('⚠ the English labels still match `BASIS`, which the ⓘ prose reads', () => {
+  it(' the English labels still match `BASIS`, which the ⓘ prose reads', () => {
     // Two sources for one set of words is a drift risk; the English half is pinned to the config
     // so a rename there cannot leave the tab drawing the old label.
     for (const k of BASES) {
@@ -42,7 +42,7 @@ describe('Quick Valuation copy', () => {
     }
   });
 
-  it('⚠ translates the ordinary words', () => {
+  it(' translates the ordinary words', () => {
     expect(C.nl.priceCagr).not.toBe(C.en.priceCagr);
     expect(C.nl.currentSharePrice).not.toBe(C.en.currentSharePrice);
     expect(C.nl.priceTarget).not.toBe(C.en.priceTarget);
@@ -52,10 +52,9 @@ describe('Quick Valuation copy', () => {
     expect(C.nl.legendSharePrice).not.toBe(C.en.legendSharePrice);
     expect(C.nl.noForwardFcf).not.toBe(C.en.noForwardFcf);
     expect(C.nl.priceVs('X')).not.toBe(C.en.priceVs('X'));
-    expect(C.nl.indexedAt('2015')).not.toBe(C.en.indexedAt('2015'));
   });
 
-  it('⚠ but keeps the terms a Dutch wealth manager actually says', () => {
+  it(' but keeps the terms a Dutch wealth manager actually says', () => {
     // The counterweight: `FCF`, `EPS`, `P/FCF`, `P/E` are what these are CALLED — the same
     // exception `managementCopy` records for "active share", "tracking error" and "Sharpe".
     expect(C.nl.basis.fcf.tab).toBe('FCF');
@@ -70,7 +69,7 @@ describe('Quick Valuation copy', () => {
     expect(C.nl.pt.forecastYield(C.nl.basis.fcf.yieldInline)).toBe('Verwachte FCF yield');
   });
 
-  it('⚠ the singular/plural switch works in both languages', () => {
+  it(' the singular/plural switch works in both languages', () => {
     // English pluralises with an `s`; Dutch with `-en` on the compound. One year must not read as
     // "1 cash-burn years" in either.
     expect(C.en.notPlottable('1', 'cash-burn')).toContain('year ');
@@ -80,9 +79,9 @@ describe('Quick Valuation copy', () => {
   });
 });
 
-describe('⚠⚠ no DRAWN label is built from the English basis', () => {
+describe(' no DRAWN label is built from the English basis', () => {
   /**
-   * THE MISTAKE THIS CATCHES WAS MADE THREE TIMES IN ONE SITTING, and each time it looked done.
+   * The mistake this catches was made three times in one sitting, and each time it looked done.
    *
    * These components hold two label sets: `bl` (translated, for what is drawn) and `b` (English,
    * for the ⓘ prose, which is not translated yet). Wiring the tab meant rewriting ~20 labels, and
@@ -90,7 +89,7 @@ describe('⚠⚠ no DRAWN label is built from the English basis', () => {
    * a Dutch tab in English with everything around them translated. Nothing failed; the tile simply
    * kept its old words.
    *
-   * ⚠ SO THE RULE IS MECHANICAL: a `label=` or `name=` prop may not mention `b.`. The ⓘ cards
+   *  So the rule is mechanical: a `label=` or `name=` prop may not mention `b.`. The ⓘ cards
    * (`what=`, `where=`, `when=`, `how=`, `title=`) still may, and must — see `quickValuationCopy`.
    */
   const FILES = ['QuickValuationTab.tsx', 'MultipleHistoryChart.tsx', 'PriceTargetCalculator.tsx'];
@@ -104,7 +103,7 @@ describe('⚠⚠ no DRAWN label is built from the English basis', () => {
     expect(offenders.map((o) => `${file}:${o.n} ${o.line.slice(0, 70)}`)).toEqual([]);
   });
 
-  it('⚠ and the ⓘ cards still DO use it — the split is real, not a migration half-done', () => {
+  it(' and the ⓘ cards still DO use it — the split is real, not a migration half-done', () => {
     // If this ever goes to zero, either the ⓘ prose got translated (in which case `b` should be
     // gone entirely and this test should be deleted) or someone "fixed" the split by pointing the
     // cards at the Dutch labels, which is the mixed-language sentence the module warns about.

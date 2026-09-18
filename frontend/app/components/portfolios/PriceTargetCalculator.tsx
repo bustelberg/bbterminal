@@ -12,7 +12,7 @@ import { useQuickValuationCopy } from './quickValuationCopy';
  *     forecast price = forecast <FCF or EPS>/share ÷ forecast yield
  *     CAGR           = (forecast price / today's price) ^ (1/years) − 1
  *
- * ⚠ THE BASIS IS FCF **OR** EPS, AND EVERY LABEL HERE COMES FROM IT (`basis`, the `BASIS` entry the
+ *  The basis is FCF **OR** EPS, AND EVERY LABEL HERE COMES FROM IT (`basis`, the `BASIS` entry the
  * tab has switched on). Not one string in this panel says "FCF" literally — an earnings yield
  * rendered under an FCF label is not a broken panel, it is a plausible valuation of a company
  * nobody analysed.
@@ -21,20 +21,20 @@ import { useQuickValuationCopy } from './quickValuationCopy';
  * and the company's own average yield over the decade — and both are editable, because the whole
  * point is to try your own.
  *
- * ⚠ "TODAY'S PRICE" IS LITERAL, AND IT IS THE ONE NON-FISCAL FIGURE ON THE PANEL. It is the newest
+ *  "TODAY'S PRICE" IS LITERAL, AND IT IS THE ONE NON-FISCAL FIGURE ON THE PANEL. It is the newest
  * yfinance close, converted into the reporting currency the rows above are filed in. When there is
- * no priced Yahoo listing the fiscal year-end close stands in and the row SAYS `⚠ fiscal` — the
+ * no priced Yahoo listing the fiscal year-end close stands in and the row SAYS ` fiscal` — the
  * whole point of the change was that a year-old price was being printed under the word "current",
  * so an unlabelled fallback would put the bug straight back.
  *
- * ⚠ WHAT EACH BASIS IS *NOT* TRAVELS WITH IT, in `BASIS[...].caveat`, and this panel prints it —
+ *  What each basis is *NOT* TRAVELS WITH IT, in `BASIS[...].caveat`, and this panel prints it —
  * an FCF that is not SBC-adjusted (the FCF-SBC cards elsewhere subtract stock compensation and are
  * a different, lower number), an EPS that is accrual rather than cash. Neither caveat is written
  * here, because a caveat hard-coded in the panel is one the switch cannot change.
  */
 
 /**
- * ⚠ THE THREE HELPERS BELOW ARE AT MODULE SCOPE, NOT INSIDE THE COMPONENT. A component created
+ *  The three helpers below are at module scope, not inside the component. A component created
  * during render is a new type on every render, so React unmounts and remounts it — which drops the
  * caret out of the input after the first keystroke. The lint rule that catches this is protecting a
  * real bug.
@@ -57,8 +57,8 @@ function Leader() {
 }
 
 /**
- * ⚠⚠ THE VALUE COLUMN IS A RIGHT-ALIGNED FLEX ROW, WHICH IS WHAT KEEPS THE BOXES IN ONE COLUMN.
- * It used to be a plain inline span, so whatever a row put after its input — a `%`, a `⚠ fiscal`
+ *  The value column is a right-aligned flex row, which is what keeps the boxes in one column.
+ * It used to be a plain inline span, so whatever a row put after its input — a `%`, a ` fiscal`
  * badge — pushed the box left by exactly that width, and only on that row. Six rows, four
  * different offsets. Anything a row appends now goes in this flex, and the fixed-width slots in
  * `Input` and `Value` below are what make the boxes themselves land on one vertical line.
@@ -83,7 +83,7 @@ function Row({ label, info, children }: {
 /**
  * A READ-ONLY figure in the value column, boxed exactly like an `Input` minus the chrome.
  *
- * ⚠ THE INVISIBLE BORDER AND THE PADDING ARE THE POINT. An input's digits sit inside a 1px border
+ *  The invisible border and the padding are the point. An input's digits sit inside a 1px border
  * and `px-1.5`; a bare span's sit on the column edge. Without matching both, the one row that is
  * an OUTPUT (`Forecast share price` — deliberately not editable) would be the only figure on the
  * card standing 7px right of every other, which reads as the alignment being broken rather than as
@@ -99,7 +99,7 @@ function Value({ children, suffix }: { children: React.ReactNode; suffix?: strin
 }
 
 /**
- * ⚠⚠ RESERVED WHETHER THE ROW USES IT OR NOT. A `%` rendered only on the rows that have one
+ *  Reserved whether the row uses it or not. A `%` rendered only on the rows that have one
  * shifts those boxes left by its width and leaves the rest flush — which is precisely the ragged
  * column reported here. Same rule, and the same reason, as the suffix slot in the Deep Valuation
  * tab's `Field`.
@@ -111,12 +111,12 @@ function SuffixSlot({ suffix }: { suffix?: string }) {
 function Input({ value, onChange, suffix, onRevert, revertTitle, disabled, disabledTitle, step }: {
   value: string; onChange: (v: string) => void; suffix?: string;
   /**
-   * Put this field back to the figure the panel computed — see the ⚠⚠ below. Absent means the
+   * Put this field back to the figure the panel computed — see the  below. Absent means the
    * field has no default to return to.
    */
   onRevert?: () => void;
   revertTitle?: string;
-  /** ⚠ THE INPUT THAT CANNOT PRODUCE AN ANSWER IS CLOSED, NOT LEFT OPEN TO BE IGNORED. A growth
+  /**  THE INPUT THAT CANNOT PRODUCE AN ANSWER IS CLOSED, NOT LEFT OPEN TO BE IGNORED. A growth
    *  rate typed against a negative base yields nothing, and a box that silently changes no figure
    *  on the panel reads as a broken control rather than as an inapplicable one. */
   disabled?: boolean;
@@ -124,13 +124,13 @@ function Input({ value, onChange, suffix, onRevert, revertTitle, disabled, disab
   /** The arrow-key increment. A rate steps in whole points; a currency figure in units. */
   step?: number;
 }) {
-  // ⚠ THE HOOK IS CALLED HERE RATHER THAN THREADED AS A PROP. This is a module-scope component in
+  //  The hook is called here rather than threaded as a prop. This is a module-scope component in
   // a client file, so it may read the preference itself — and the alternative is passing one aria
   // string through six call sites that have nothing else to say about it.
   const t = useQuickValuationCopy();
   return (
     <span className="flex items-center gap-1 justify-end">
-      {/* ⚠⚠ IT REVERTS TO `null`, NOT TO THE DEFAULT'S CURRENT VALUE, AND THE DIFFERENCE OUTLIVES
+      {/*  IT REVERTS TO `null`, NOT TO THE DEFAULT'S CURRENT VALUE, AND THE DIFFERENCE OUTLIVES
           THE CLICK. `null` means "never typed", which is what makes the box keep TRACKING the
           computed figure (see `fcfStr`'s own note): the default moves when the live price lands,
           when the basis switches, when a refetch changes the fit. Writing the number in would put
@@ -138,7 +138,7 @@ function Input({ value, onChange, suffix, onRevert, revertTitle, disabled, disab
           panel now and silently disagrees with it a moment later, which is worse than the edit it
           undid.
 
-          ⚠ IT SITS LEFT OF THE INPUT so the box does not move when it appears. A control that
+           IT SITS LEFT OF THE INPUT so the box does not move when it appears. A control that
           shifts the thing it belongs to, at the moment you start typing in it, is one you have to
           chase with the pointer. */}
       {onRevert && !disabled && (
@@ -165,7 +165,7 @@ export type PriceProvenance = {
   /** True = the newest yfinance close in the reporting currency. False = the fiscal year-end
    *  close, i.e. the old behaviour, which the panel must then admit to. */
   live: boolean;
-  /** We have not asked yet. ⚠ NOT the same as `live: false` — a fallback badge shown for the
+  /** We have not asked yet.  NOT the same as `live: false` — a fallback badge shown for the
    *  length of one request is a provenance claim we have not established. */
   pending?: boolean;
   symbol?: string | null;
@@ -191,7 +191,7 @@ export default function PriceTargetCalculator({
   cagrStr, onCagr, onResetCagr, shownCagrPct, defaultCagrPct, cagrDisabled,
   yieldStr, onYield, defaultForecastYield, onReset, onResetFcf, current,
 }: {
-  /** ⚠ COMPUTED BY THE PARENT, because the chart draws the price line out to the same target. One
+  /**  COMPUTED BY THE PARENT, because the chart draws the price line out to the same target. One
    *  computation, two readers — see the priceTarget() helper. */
   target: PriceTarget;
   /** The FCF forecast's horizon past the last REPORTED year — a label, not the CAGR's divisor. */
@@ -219,13 +219,13 @@ export default function PriceTargetCalculator({
    * entered the way people actually hold it. `null` = not the live one, so the box shows
    * `shownCagrPct` (the rate the current end value implies) and keeps tracking it.
    *
-   * ⚠⚠ THE TWO ARE ONE ASSUMPTION AND ONLY ONE IS AUTHORITATIVE. The parent's setters clear each
+   *  The two are one assumption and only one is authoritative. The parent's setters clear each
    * other, so typing in either box makes it the authority and hands the other its derived role —
    * which is why this component never has to decide which of two live values to believe.
    */
   cagrStr: string | null;
   onCagr: (v: string) => void;
-  /** ⚠ BACK TO `null`, NOT TO THE DEFAULT'S CURRENT VALUE — same rule as `onResetFcf`. Null is
+  /**  BACK TO `null`, NOT TO THE DEFAULT'S CURRENT VALUE — same rule as `onResetFcf`. Null is
    *  what keeps the box TRACKING the rate the forecast implies as that figure moves. */
   onResetCagr: () => void;
   /** The rate the CURRENT forecast per-share figure implies, when the rate box is not the live
@@ -244,7 +244,7 @@ export default function PriceTargetCalculator({
   /**
    * Clear the forecast-per-share field alone.
    *
-   * ⚠ SEPARATE FROM `onReset`, BECAUSE THE TWO EDITS ARE INDEPENDENT ASSUMPTIONS. The header's
+   *  Separate from `onReset`, BECAUSE THE TWO EDITS ARE INDEPENDENT ASSUMPTIONS. The header's
    * reset throws away the yield you chose along with the per-share figure you were correcting; on
    * a card whose whole subject is "change one input and watch the target move", that is a control
    * you learn not to press.
@@ -254,13 +254,13 @@ export default function PriceTargetCalculator({
    * The three CURRENT figures, all editable (on request: "every one of these should be adjustable
    * by the user, except Forecast share price").
    *
-   * ⚠⚠ THEY ARE BOUND BY ONE EQUATION — `yield = per-share ÷ price` — so only two can be free, and
+   *  They are bound by one equation — `yield = per-share ÷ price` — so only two can be free, and
    * the binding lives in the PARENT (see `curPsStr` in `QuickValuationTab`). The price is the free
    * one; the per-share figure and the yield are one assumption two ways, and their setters clear
    * each other. This component just renders three boxes and never has to decide which of two live
    * values to believe — the same arrangement as `cagrStr`/`fcfStr` above.
    *
-   * ⚠ ONE OBJECT rather than twelve more flat props: they are read together by three adjacent rows
+   *  One object rather than twelve more flat props: they are read together by three adjacent rows
    * and nothing in a flat list would say they interact.
    */
   current: {
@@ -282,16 +282,16 @@ export default function PriceTargetCalculator({
     onResetYield: () => void;
   };
 }) {
-  // ⚠ TRANSLATED LABELS FOR WHAT IS DRAWN, English `b` for the ⓘ prose — the same split the
+  //  Translated labels for what is drawn, English `b` for the ⓘ prose — the same split the
   // Quick Valuation tab makes. Never mix the two inside one string.
   const t = useQuickValuationCopy();
   const bl = t.basis[basisKey];
   const dirty = fcfStr != null || cagrStr != null || yieldStr != null
     || current.psStr != null || current.priceStr != null || current.yieldStr != null;
   /**
-   * ⚠⚠ A TYPED PRICE HAS NO VENDOR, NO DATE AND NO STALENESS, and the row must stop claiming all
-   * three the moment one is entered. This is the ⚠⚠ the Deep Valuation tab's share-price card
-   * already carries: a card that names yfinance, prints `⚠ 12d old` and dates a figure the reader
+   *  A typed price has no vendor, no date and no staleness, and the row must stop claiming all
+   * three the moment one is entered. This is the  the Deep Valuation tab's share-price card
+   * already carries: a card that names yfinance, prints ` 12d old` and dates a figure the reader
    * typed thirty seconds ago is making three provenance claims the number does not have.
    */
   const priceTyped = current.priceStr != null;
@@ -303,7 +303,7 @@ export default function PriceTargetCalculator({
   const ccy = currency ? currency + ' ' : '';
 
   return (
-    // ⚠ A FLEX COLUMN, BECAUSE THIS CARD IS SHORTER THAN THE CHART BESIDE IT. The 2×2 grid sizes
+    //  A flex column, because this card is shorter than the chart beside it. The 2×2 grid sizes
     // every cell to the tallest, so seven text rows in a cell built for a 320px plot leave a gap.
     // The rows stay at the top, the CAGR — the conclusion — is pushed to the bottom edge by its
     // own `mt-auto`, and the space lands between them where it reads as layout rather than as a
@@ -335,7 +335,7 @@ export default function PriceTargetCalculator({
             : `Back to ${current.defaultPs.toFixed(2)} — the last reported year. The box then keeps `
               + 'tracking that figure as it moves, which typing the number in would not.'} />
       </Row>
-      {/* ⚠⚠ ABOVE THE FIGURE IT PRODUCES, BECAUSE THAT IS THE ORDER THE ASSUMPTION IS MADE IN.
+      {/*  ABOVE THE FIGURE IT PRODUCES, BECAUSE THAT IS THE ORDER THE ASSUMPTION IS MADE IN.
           "It compounds at 12%" comes first and "so it reaches 41.20" follows; printed the other
           way round the rate reads as a statistic ABOUT the forecast rather than as the lever that
           sets it, which is the whole reason this row exists. Both are editable and each derives
@@ -365,7 +365,7 @@ export default function PriceTargetCalculator({
           where="The dotted trend line."
           when={`${years} years after the last reported year.`}
           how="This is a trend estimate. You can replace it." />} />}>
-        {/* ⚠⚠ "RESET TO THE OFFICIAL FORECAST" IS NOT AVAILABLE HERE AND THE BUTTON MUST NOT IMPLY
+        {/*  "RESET TO THE OFFICIAL FORECAST" IS NOT AVAILABLE HERE AND THE BUTTON MUST NOT IMPLY
             IT IS. There is no analyst FCF forecast to return to — `BASIS.fcf.estimateCodes` is
             `null` because no analyst publishes one, which is a fact about the vendor rather than a
             gap in our ingest. What this restores is OUR fitted trend, and the tooltip says exactly
@@ -377,7 +377,7 @@ export default function PriceTargetCalculator({
           revertTitle={defaultForecastFcfPs == null
             ? 'Clear your figure. There is no computed forecast to fall back to for this company.'
             : `Back to ${defaultForecastFcfPs.toFixed(2)} — the panel's own fitted trend, `
-              + `${years} years past the last reported year. ⚠ Not an analyst forecast: nobody `
+              + `${years} years past the last reported year.  Not an analyst forecast: nobody `
               + 'publishes one for free cash flow. The box then keeps tracking that figure as it '
               + 'moves, which typing the number in would not.'} />
       </Row>
@@ -405,7 +405,7 @@ export default function PriceTargetCalculator({
           how="This value sets the target price." />} />}>
         <Input value={show(yieldStr, defaultForecastYield, 1)} onChange={onYield} suffix="%" />
       </Row>
-      {/* ⚠ THE ONE ROW THAT IS NOT FISCAL. Everything above it comes from the last filed year;
+      {/*  THE ONE ROW THAT IS NOT FISCAL. Everything above it comes from the last filed year;
           this is the market's price for the shares now, and the yield and CAGR are measured from
           it. The two provenances therefore cannot share one info card — a live figure described
           as a fiscal close, or the reverse, is worse than either being wrong. */}
@@ -433,11 +433,11 @@ export default function PriceTargetCalculator({
         {/* Provenance in the row, not only in the tooltip: a stale price that reads as live is the
             failure this row exists to fix, and nobody opens a tooltip to check a number that
             looks fine.
-            ⚠ LEFT OF THE BOX, NOT RIGHT OF IT — same rule as the ↺ beside it. Appended after the
+             LEFT OF THE BOX, NOT RIGHT OF IT — same rule as the ↺ beside it. Appended after the
             value it pushed this row's box left by its own width, and only when a badge happened
             to apply, so the column went ragged on exactly the rows carrying a warning. The Row's
             own `gap-1` spaces it, which is why no `ml-1` survives here.
-            ⚠⚠ SUPPRESSED ENTIRELY ON A TYPED PRICE. `⚠ fiscal` or `⚠ 12d old` beside a figure the
+             SUPPRESSED ENTIRELY ON A TYPED PRICE. ` fiscal` or ` 12d old` beside a figure the
             reader just entered is a claim about a vendor and a date the number does not have —
             and it is the badge, not the tooltip, that people actually read. */}
         {priceTyped ? null : price.pending ? (
@@ -460,13 +460,13 @@ export default function PriceTargetCalculator({
           what={`Target share price from forecast ${b.perShare} and ${b.yieldInline}.`}
           where={`${b.perShare} divided by ${b.yieldInline}.`}
           when={`${years} years out.`}
-          // ⚠⚠ THE SAME NUMBER IS WORKED ON THE `Price target FY20xx` TILE IN `QuickValuationTab`
-          // AND WAS SYMBOLS HERE — one figure explained two ways, one click apart, which reads as
+          //  The same number is worked on the `Price target FY20xx` TILE IN `QuickValuationTab`
+          // And was symbols here — one figure explained two ways, one click apart, which reads as
           // two different computations rather than one shown twice.
           worked={workedRatio(target.forecastPs, target.forecastYield,
             target.forecastPrice == null ? '' : n2(target.forecastPrice), '', '%')}
           how="Not available when either input is zero or negative." />} />}>
-        {/* ⚠ THE ONE OUTPUT ON THE CARD, AND THE ONLY ROW WITHOUT A BOX — on request. `Value`
+        {/*  THE ONE OUTPUT ON THE CARD, AND THE ONLY ROW WITHOUT A BOX — on request. `Value`
             keeps its digits in the same column as the six editable ones anyway; being read-only is
             said by the absence of a border, not by standing 7px out of line. */}
         <Value>{ccy}{n2(target.forecastPrice)}</Value>
@@ -482,7 +482,7 @@ export default function PriceTargetCalculator({
             what="Annualised return from the current price to the target price."
             where="(target price / current price)^(1 / years) - 1."
             when={`From ${fmtDate(price.date)} to ${targetYear != null ? `FY${targetYear}` : 'the forecast year'} (${horizonYears.toFixed(1)} years).`}
-            /* ⚠ ALL FOUR OPERANDS ARE IN SCOPE HERE and always were; the card simply never
+            /*  ALL FOUR OPERANDS ARE IN SCOPE HERE and always were; the card simply never
                used them. `horizonYears` is the one that matters most — it is a fraction off a
                live price, and the whole reason the tile is named by its endpoint rather than its
                length, so seeing it in the exponent is what makes the number self-explaining. */
@@ -493,14 +493,14 @@ export default function PriceTargetCalculator({
         <Leader />
         {/* The one figure here that is a conclusion rather than an input, so it carries the sign's
             colour — a target below today's price is the finding, not a formatting accident.
-            ⚠ IT TAKES THE SAME TRAILING SLOTS AS THE ROWS ABOVE (`w-20` + the suffix reserve) even
+             IT TAKES THE SAME TRAILING SLOTS AS THE ROWS ABOVE (`w-20` + the suffix reserve) even
             though it is larger and bolder: a footer figure hanging past the column it concludes
             reads as a stray, not as emphasis. `text-right` inside the box does the rest. */}
         <span className={`w-20 px-1.5 border border-transparent text-right font-mono text-base font-semibold shrink-0 ${
           target.cagr == null ? 'text-fg-muted' : target.cagr >= 0 ? 'text-pos-500' : 'text-neg-500'}`}>
           {fmtCagr(target.cagr)}
         </span>
-        {/* ⚠ THE RESERVE TOO, EMPTY. Every row above ends at (column edge − this slot); without it
+        {/*  THE RESERVE TOO, EMPTY. Every row above ends at (column edge − this slot); without it
             the one figure the card exists to produce would be the only thing touching the edge. */}
         <SuffixSlot />
       </div>

@@ -1,12 +1,12 @@
 """Find companies whose GuruFocus price history contradicts our own yfinance series.
 
-⚠⚠ THE GATE IN `refuse_unsubscribed` STOPS THIS HAPPENING AGAIN; IT CANNOT UNDO WHAT IS STORED.
+ THE GATE IN `refuse_unsubscribed` STOPS THIS HAPPENING AGAIN; IT CANNOT UNDO WHAT IS STORED.
 Diploma plc was filled before that gate existed and its rows are still in `metric_data` — a price
 column that is 0 for fifteen years and then frozen for seven, feeding every Fundamental-modal chart
 that touches it. This is how such a company is FOUND, since nothing about the payload itself looks
 wrong (see `ingest/earnings/price_sanity` for the two detectors that were tried and rejected).
 
-⚠ READ-ONLY. It names companies and prints the evidence; it deletes nothing. Purging a company's
+ READ-ONLY. It names companies and prints the evidence; it deletes nothing. Purging a company's
 rows is a separate, deliberate act.
 
 Usage:
@@ -31,7 +31,7 @@ PRICE_CODE = "quarterly__Valuation and Quality__Month End Stock Price"
 
 
 def _paged(table: str, select: str, build, order: str) -> list[dict]:
-    """⚠ PAGED. PostgREST truncates at 1,000 rows on cloud and this reads whole tables; an unpaged
+    """ PAGED. PostgREST truncates at 1,000 rows on cloud and this reads whole tables; an unpaged
     version would audit the first thousand rows and report the rest as clean."""
     out: list[dict] = []
     off = 0
@@ -72,7 +72,7 @@ def main() -> int:
         off += len(rows)
     print(f"  {len(vendor)} companies carry one", flush=True)
 
-    # ⚠ THE BRIDGE IS THE ISIN, the only key the two worlds share — see `timeseries.resolve`, which
+    #  The bridge is the ISIN, the only key the two worlds share — see `timeseries.resolve`, which
     # refuses to mix them for exactly this reason. A company with no ISIN cannot be audited.
     print("Bridging to the asset world by ISIN...", flush=True)
     by_isin: dict[str, int] = {}
@@ -86,11 +86,11 @@ def main() -> int:
             and (not args.company or cid == args.company)]
     print(f"  {len(todo)} companies have both a vendor series and one of ours\n", flush=True)
 
-    # ⚠⚠ ONE `COPY`, NOT 1,721 PAGED READS. `asset_price` holds ~9,000 bars per instrument, so
+    #  ONE `COPY`, NOT 1,721 PAGED READS. `asset_price` holds ~9,000 bars per instrument, so
     # per-company PostgREST paging would be millions of rows over HTTP and this script would take
     # hours — the exact cost `common/pg.load_rows_via_copy` exists to remove (measured elsewhere in
     # this codebase at 17 pages/12.68s -> 0.80s). One statement, one MVCC snapshot.
-    # ⚠ IT FALLS BACK RATHER THAN FAILING: `load_rows_via_copy` returns None when the direct
+    #  It falls back rather than failing: `load_rows_via_copy` returns None when the direct
     # connection is unconfigured, and the paged path below is then correct, only slow.
     print("Reading our own closes...", flush=True)
     aids = sorted({by_isin[comps[cid]["isin"]] for cid in todo})

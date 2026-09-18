@@ -13,17 +13,17 @@ import { egmSource, reverseDcfSource, SOURCE_CODES, vendorName } from './egmInpu
 import EgmAssumptionsModal from './EgmAssumptionsModal';
 import ReverseDcfPanel, { type GrowthEstimates } from './ReverseDcfPanel';
 import { type MetricRow } from './quickValuation';
-// ⚠ `v()` MARKS A LIVE VALUE FOR BADGING and is rendered ONLY by `AspectCard`/`Legend` — a marked
+//  `v()` MARKS A LIVE VALUE FOR BADGING and is rendered ONLY by `AspectCard`/`Legend` — a marked
 // string used as a button label or a bare <p> reaches the DOM with its marks intact. Every use
 // below is inside a card field.
 import { v } from '../../../lib/dynamicValue';
 // `2026-07-31` reads as a database key; a card is read by a person. Shared with the
 // Reverse DCF panel below — see `asOfLine.onDate`.
 import { onDate } from './asOfLine';
-// ⚠ THE SAME WORKED-FORMULA VOCABULARY THE RISK VIEWS USE, not a second one for this tab. Every
+//  The same worked-formula vocabulary the risk views use, not a second one for this tab. Every
 // ⓘ that states a formula owes the reader the same expression with real operands in it, written
-// the same way — see `workedFormula`'s own ⚠⚠ on the forty-conventions failure this prevents.
-// ⚠ AND THE EXPRESSIONS THEMSELVES LIVE IN A PURE MODULE, not in this JSX: a LaTeX string is
+// the same way — see `workedFormula`'s own  on the forty-conventions failure this prevents.
+//  And the expressions themselves live in a pure module, not in this JSX: a LaTeX string is
 // testable and a tooltip is not — see `valuationFormulas` and its strict-mode render test.
 import {
   workedEgmReturn, workedFairValue, workedFairValueGap, workedImpliedPrice, workedMaxPE,
@@ -39,10 +39,10 @@ import { useDeepValuationCopy } from './deepValuationCopy';
  * the metrics payload in `egmInputs.ts` (pure); this file fetches once, renders, and recalculates
  * in the browser as the assumptions change — no server round-trip.
  *
- * ⚠ SINGLE COMPANY ONLY. Forward P/E, next-year EPS and a dividend yield are per-share facts about
+ *  Single company only. Forward P/E, next-year EPS and a dividend yield are per-share facts about
  * one issuer; a basket has none of them in a summable form.
  *
- * ⚠ THE ASSUMPTIONS ARE THE USER'S AND THE REFERENCES ARE NOT INPUTS. `analystGrowth5Y` and
+ *  The assumptions are the user's and the references are not inputs. `analystGrowth5Y` and
  * `medianPE5Y` are shown beside the two fields they speak to, and one click copies either into the
  * field — but nothing computes from them unless the user puts them there. A "reference" that
  * quietly seeds the model is an assumption nobody made.
@@ -63,7 +63,7 @@ function loadSaved(isin: string): Partial<EgmAssumptions> {
     for (const k of ['growthRate', 'exitPE', 'hurdleRate', 'years'] as const) {
       if (typeof p?.[k] === 'number' && Number.isFinite(p[k])) out[k] = p[k];
     }
-    // ⚠ The yield is stored ONLY when overridden. Persisting the measured value would freeze last
+    //  The yield is stored ONLY when overridden. Persisting the measured value would freeze last
     // period's figure into this instrument for ever, and the field would stop tracking the data
     // it is supposed to default to.
     if (typeof p?.dividendYield === 'number' && Number.isFinite(p.dividendYield)) {
@@ -78,52 +78,48 @@ function loadSaved(isin: string): Partial<EgmAssumptions> {
  * copies in. Kept as a STRING while typing so an intermediate "1." or "-" doesn't get parsed into
  * a valuation and bounce the caret.
  *
- * ⚠⚠ ONE ROW, INCLUDING THE REFERENCE. It was a label-over-input stack, then a row with the
+ *  One row, including the reference. It was a label-over-input stack, then a row with the
  * reference on a SECOND line beneath it — which doubles the height of every field that has one,
  * for a figure that is one click and not part of the model. Four fields became eight lines. The
  * reference is now a chip at the end of the same row: same affordance, half the table.
  *
- * ⚠ THE SUFFIX SLOT IS RESERVED WHETHER OR NOT IT IS USED. Exit P/E is a multiple and carries no
+ *  The suffix slot is reserved whether or not it is used. Exit P/E is a multiple and carries no
  * `%`; without a fixed slot its input sits a character right of the other three, which is exactly
  * the raggedness a column of aligned fields exists to remove.
  *
- * ⚠ THE CHIP IS A BUTTON AND LOOKS LIKE ONE. As a bare number with a separate "use" link beside
+ *  The chip is a button and looks like one. As a bare number with a separate "use" link beside
  * it, the number read as data — as though the field were already showing it.
  */
 function Field({
-  label, value, onChange, suffix, step = '0.1', placeholder, info, hint, hintTitle, onUseHint,
-  action, badge,
+  label, value, onChange, suffix, step = '0.1', placeholder, info, action, badge,
 }: {
   label: string; value: string; onChange: (v: string) => void;
   suffix?: string; step?: string; placeholder?: string;
   /**
    * Where this field's DEFAULT comes from, and what unit it is in.
    *
-   * ⚠⚠ THERE WAS NO SUCH ICON HERE AT ALL until 2026-08-18, and three of the four defaults are
-   * HOUSE CONSTANTS rather than facts about the company — a 10% growth rate, a 20x exit multiple
+   *  There was no such icon here at all until 2026-08-18, and three of the four defaults are
+   * House constants rather than facts about the company — a 10% growth rate, a 20x exit multiple
    * and a 10% hurdle, identical on every name this tab opens. Shown as pre-filled figures beside
    * two that ARE measured, they read as this company's numbers. On a stock trading at 78.5x, the
    * 20x default is doing more to the answer than every other input combined.
    */
   info?: React.ReactNode;
   /** The reference figure, already formatted. Null when there is none to offer. */
-  hint?: string | null;
   /** What the reference IS, on hover — for a caveat that qualifies ONE field. It used to be a
    *  standing paragraph under all four: a line every reader pays for, about a figure they may
    *  never use. */
-  hintTitle?: string;
-  onUseHint?: () => void;
   /** A compact provenance stamp for a measured default, such as a vendor observation date. */
   badge?: React.ReactNode;
   /**
    * A control that goes and gets this field's default again — today only the Forward P/E's.
    *
-   * ⚠⚠ THE SLOT IS RENDERED FOR EVERY FIELD, EMPTY OR NOT, for the same reason the hint chip is
+   *  The slot is rendered for every field, empty or not, for the same reason the hint chip is
    * always a `<button>`: these six rows are one column and anything that appears on some of them
    * moves the ⓘ on those and not the others. An empty fixed-width span costs nothing and keeps the
    * six ⓘ icons on the single vertical line the note below is about.
    *
-   * ⚠⚠ AND IT IS SIZED FOR THE WIDEST LABEL, BECAUSE IT WAS SIZED FOR A GLYPH. This slot was
+   *  And it is sized for the widest label, because it was sized for a glyph. This slot was
    * `w-4` — 16px, correct for the ↻ character it was built for and still described in every
    * comment around it. The control has since become a WORD in three states (`Refresh` / `Cancel`
    * / `Cancelling…`), and at 11px `Cancelling…` is ~62px, so it overflowed a 16px box by ~23px on
@@ -132,7 +128,7 @@ function Field({
    * nothing between them. Fixed-width still — that rule is what keeps the ⓘ column straight —
    * just fixed at the size of what actually goes in it.
    *
-   * ⚠ WIDENING HERE CANNOT MOVE THE ⓘ, and that is why this was the safe end to fix: the ⓘ is
+   *  Widening here cannot move the ⓘ, and that is why this was the safe end to fix: the ⓘ is
    * the LAST slot, so its distance from the right edge is its own `w-9` and nothing before it.
    * The label is the flex child that gives up the width.
    */
@@ -147,28 +143,17 @@ function Field({
         onChange={(e) => onChange(e.target.value)}
         className="w-16 shrink-0 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-[12px] font-mono text-fg-strong text-right focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />
       <span className="w-2 shrink-0 text-[11px] text-fg-muted">{suffix}</span>
-      {/* ⚠ FIXED-WIDTH SLOT so the four inputs stay in one column whether a field has a
+      {/*  FIXED-WIDTH SLOT so the four inputs stay in one column whether a field has a
           reference or not — `Hurdle rate` has none, and without this its input would slide right.
-          ⚠⚠ AND THE CHIP IS ALWAYS A <button>, NEVER SOMETIMES A <span>. The dividend row used to
+           AND THE CHIP IS ALWAYS A <button>, NEVER SOMETIMES A <span>. The dividend row used to
           render a plain span while the field was showing its measured default and swap to a button
           the moment it was overridden — different padding, different box, so TYPING IN THE FIELD
           resized the row beside it. A control that is not currently applicable is DISABLED, which
           keeps its geometry; it does not stop existing. */}
-      <span className="w-14 shrink-0 text-right">
-        {hint && (
-          <button type="button" onClick={onUseHint} disabled={!onUseHint}
-            title={hintTitle ?? `Use ${hint}`}
-            className={`rounded px-1 py-px font-mono text-[10px] ${onUseHint
-              ? 'text-accent-400 hover:bg-overlay/5 hover:underline'
-              : 'text-fg-faint cursor-default'}`}>
-            {hint}
-          </button>
-        )}
-      </span>
-      {/* ⚠ `w-[4.5rem]` is `Cancelling…` at 11px plus the button's own padding — see the ⚠⚠ on
+      {/*  `w-[4.5rem]` is `Cancelling…` at 11px plus the button's own padding — see the  on
           `action`. Do not put it back to a glyph-width box while the label is a word. */}
       <span className="flex w-[4.5rem] shrink-0 items-center justify-center">{action}</span>
-      {/* ⚠⚠ THE ⓘ IS A TRAILING SLOT, NOT A SUFFIX ON THE LABEL. Beside the label its x landed
+      {/*  THE ⓘ IS A TRAILING SLOT, NOT A SUFFIX ON THE LABEL. Beside the label its x landed
           wherever that label happened to end — `Growth rate ⓘ` and `Dividend yield ⓘ` are forty
           pixels apart, so a column of four explanations read as scattered punctuation. Last slot,
           fixed width, and every ⓘ on both panels lands on one vertical line: the boxes are
@@ -199,11 +184,11 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * The toast this panel's refresh is reporting into, while it runs.
    *
-   * ⚠⚠ THE ID, NOT A BOOLEAN — because the button has to be able to CANCEL, and cancelling needs
+   *  The id, not a boolean — because the button has to be able to CANCEL, and cancelling needs
    * the handle. A private `refreshing` flag could only spin; the reader's one way to stop the work
    * would have been the toast in the corner, which is not where they pressed.
    *
-   * ⚠ THE STATE IS READ BACK OUT OF THE STORE, NOT MIRRORED HERE. `cancelRequested` flips the
+   *  The state is read back out of the store, not mirrored here. `cancelRequested` flips the
    * moment Cancel is pressed and `status` follows when the work actually stops — two facts the
    * store already owns, and a local copy of them is a second source of truth that drifts in
    * exactly the window the button is trying to describe.
@@ -211,13 +196,13 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * The yfinance close — the price this panel actually shows, and the one ↻ refreshes.
    *
-   * ⚠⚠ NOT THE `close_price` IN THE METRICS PAYLOAD. That is `metric_data` filed by GURUFOCUS;
+   *  Not the `close_price` IN THE METRICS PAYLOAD. That is `metric_data` filed by GURUFOCUS;
    * this is `asset_price`, filed by YFINANCE. Two price worlds, keyed differently
    * (`company_id` vs `analysis_id`) — the pair `timeseries.resolve()` refuses to mix. The panel
    * read the first and the refresh button wrote the second, so the button did real work, the
    * toast said so truthfully, and the figure never moved.
    *
-   * ⚠ `undefined` = NOT ASKED YET, `null` = ASKED AND THERE IS NONE. The card must not claim
+   *  `undefined` = NOT ASKED YET, `null` = ASKED AND THERE IS NONE. The card must not claim
    * "GuruFocus" for the length of one request on a company that has a perfectly good Yahoo close
    * arriving.
    */
@@ -225,7 +210,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * The GuruFocus company behind this ISIN, from the metrics payload.
    *
-   * ⚠ IT WAS ALREADY ON THE WIRE AND WAS BEING THROWN AWAY. `/by-isin/{isin}/metrics` answers
+   *  It was already on the wire and was being thrown away. `/by-isin/{isin}/metrics` answers
    * `{company_id, company_name, currency, metrics}` (Bridge A) and this panel kept only the last
    * two — so refreshing anything GuruFocus files, which is keyed by `company_id`, looked like it
    * needed a second lookup. It does not.
@@ -234,19 +219,19 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * The forward P/E observation date the last `load` saw.
    *
-   * ⚠⚠ A REF, NOT STATE, BECAUSE THE REFRESH READS IT IMMEDIATELY AFTER AWAITING `load` — state
+   *  A ref, not state, because the refresh reads it immediately after awaiting `load` — state
    * set inside that call is not visible to the same tick, so a `useState` here would always report
    * the PREVIOUS date and the toast would say "unchanged" on the one run that moved it.
    */
   const fwdPeDateRef = useRef<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   /**
-   * ⚠ ITS OWN HANDLE, NOT A SHARED ONE. Both buttons are cancellable, and cancelling needs the
+   *  Its own handle, not a shared one. Both buttons are cancellable, and cancelling needs the
    * job id — sharing one would make pressing ↻ on the forward P/E show the share price's spinner,
    * and Cancel on either stop whichever ran last.
    */
   const [peJobId, setPeJobId] = useState<string | null>(null);
-  // ⚠ THE SAME SUBSCRIPTION `JobToaster` USES — `store.use` with a selector, so this re-renders
+  //  The same subscription `JobToaster` USES — `store.use` with a selector, so this re-renders
   // on the job frames and nothing else.
   const jobs = jobsStore.use((st) => st.jobs);
   const job = jobId == null ? null : jobs.find((j) => j.id === jobId) ?? null;
@@ -258,24 +243,25 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
 
   // Held as strings so a half-typed value stays on screen; parsed on every render for the model.
   //
-  // ⚠ THE SAVED OVERRIDES ARE READ IN THE INITIALISER, NOT IN AN EFFECT. Loading them afterwards
+  //  The saved overrides are read in the initialiser, not in an effect. Loading them afterwards
   // means one render at the defaults first — a fair value the user never assumed, on screen long
   // enough to be read. The parent keys this component on the ISIN, so a different instrument
   // remounts and re-reads rather than needing a reset effect.
+  const savedAssumptions = useRef(loadSaved(isin));
   const [growthStr, setGrowthStr] = useState(
-    () => ((loadSaved(isin).growthRate ?? EGM_DEFAULTS.growthRate) * 100).toFixed(1));
+    () => ((savedAssumptions.current.growthRate ?? EGM_DEFAULTS.growthRate) * 100).toFixed(1));
   const [exitStr, setExitStr] = useState(
-    () => String(loadSaved(isin).exitPE ?? EGM_DEFAULTS.exitPE));
+    () => String(savedAssumptions.current.exitPE ?? EGM_DEFAULTS.exitPE));
   const [hurdleStr, setHurdleStr] = useState(
-    () => ((loadSaved(isin).hurdleRate ?? EGM_DEFAULTS.hurdleRate) * 100).toFixed(1));
-  // ⚠ BLANK MEANS "USE THE MEASURED YIELD" — the same convention as the reverse DCF's starting
+    () => ((savedAssumptions.current.hurdleRate ?? EGM_DEFAULTS.hurdleRate) * 100).toFixed(1));
+  //  Blank means "USE THE MEASURED YIELD" — the same convention as the reverse DCF's starting
   // cash flow. The measured value isn't known when this initialiser runs (the payload hasn't
   // loaded), so seeding the string from it is impossible; an empty override that resolves later
   // is, and it keeps the field tracking the data until someone deliberately types over it.
   /**
    * The two MEASURED figures, overridable.
    *
-   * ⚠⚠ THEY ARE INPUTS, NOT ASSUMPTIONS, AND THEY ARE DELIBERATELY NOT PERSISTED. The four fields
+   *  They are inputs, not assumptions, and they are deliberately not persisted. The four fields
    * above are saved per ISIN because a growth rate is a view somebody formed; a price and a
    * multiple are facts that move on their own, and freezing them into localStorage would leave a
    * reader valuing this company at last month's close for ever with nothing on screen to say so.
@@ -287,28 +273,28 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const [priceStr, setPriceStr] = useState('');
   const [fwdPeStr, setFwdPeStr] = useState('');
   const [divStr, setDivStr] = useState(() => {
-    const saved = loadSaved(isin).dividendYield;
+    const saved = savedAssumptions.current.dividendYield;
     return saved == null ? '' : (saved * 100).toFixed(2);
   });
 
   /**
    * The one payload this panel is built from.
    *
-   * ⚠ EXTRACTED FROM THE EFFECT SO A BUTTON CAN RUN IT AGAIN (2026-08-18). `blank` is the
+   *  Extracted from the effect so a button can run it again (2026-08-18). `blank` is the
    * difference between the two callers: on a company change the panel must clear (a valuation for
    * the previous instrument, on screen under this one's name, is the worst state available), but a
    * REFRESH must leave the figures up — blanking them for the length of a request makes the panel
    * flash and, worse, collapses its height, which is exactly what everything else here was fixed
    * to stop doing.
    */
-  // ⚠ HOISTED ABOVE `load`, which now needs it: the panel dates its own reads so `egmSource`
+  //  Hoisted above `load`, which now needs it: the panel dates its own reads so `egmSource`
   // resolves "the latest observation" against one clock rather than two.
   const today = new Date().toISOString().slice(0, 10);
 
   const load = useCallback(async (blank: boolean, signal?: AbortSignal) => {
     if (blank) { setMetrics(null); setCurrency(null); }
     setErr(null);
-    // ⚠ `?cadence=annual` spelt out so this shares the Long Equity tab's cached payload — see the
+    //  `?cadence=annual` spelt out so this shares the Long Equity tab's cached payload — see the
     // same line in `QuickValuationTab`. It is the server's default, so the wire is unchanged; only
     // the cache key matches.
     const r = await apiFetch(
@@ -317,7 +303,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     if (r.status === 404) { setMetrics([]); return 'no financials for this company'; }
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
-    // ⚠ A CANCELLED RUN MUST NOT WRITE. A cacheable read is SHARED, so aborting one caller does
+    //  A cancelled run must not write. A cacheable read is SHARED, so aborting one caller does
     // not stop the request — it resolves anyway, and without this check the panel would repaint
     // from a refresh the reader had already stopped.
     if (signal?.aborted) return 'cancelled';
@@ -329,7 +315,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     return undefined;
   }, [isin, today]);
 
-  // ⚠ THE MOUNT LOAD KEEPS ITS OWN try/catch — it is not a job, it is the panel appearing, and a
+  //  The mount load keeps its own try/catch — it is not a job, it is the panel appearing, and a
   // toast for "this tab opened" is noise. `startLocalJob` handles the refresh path's failures.
   useEffect(() => {
     void (async () => {
@@ -342,31 +328,31 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * Re-read the payload, past the cache.
    *
-   * ⚠⚠ THE INVALIDATION IS THE WHOLE POINT. `/by-isin/{isin}/metrics` is on `readCache`'s
+   *  The invalidation is the whole point. `/by-isin/{isin}/metrics` is on `readCache`'s
    * allowlist with a ten-minute TTL, so a plain re-fetch is answered from memory and the button
    * does nothing at all — visibly nothing, since the figure it was pressed to move stays put. The
    * cache is dropped whole rather than by key: `readKey` folds in the view-as-user flag, and a
    * near-miss there fails the same silent way.
    *
-   * ⚠ IT CANNOT MAKE OUR STORED PRICE NEWER THAN INGEST HAS MADE IT. This re-reads what the server
+   *  It cannot make our stored price newer than ingest has made it. This re-reads what the server
    * holds; if the price series itself is behind, that is a pipeline question and the ⓘ says so
    * rather than letting the button imply otherwise.
    */
   /**
    * Go to Yahoo for this instrument's missing bars, then re-read the panel.
    *
-   * ⚠⚠ IT ACTUALLY FETCHES NOW. It used to drop the read cache and re-request our own metrics
+   *  It actually fetches now. It used to drop the read cache and re-request our own metrics
    * payload, which brings back whatever the ingest last stored — so on a company the pipeline had
    * not reached, the button was honest work with no possible effect: the date it was pressed to
    * move could not move. `…/latest-close/isin/{isin}/refresh` asks YAHOO for the gap.
    *
-   * ⚠ THE GAP, NOT THE SERIES — see `_pull_latest_close`. The server opens Yahoo's window five
+   *  The gap, not the series — see `_pull_latest_close`. The server opens Yahoo's window five
    * days before our newest stored bar, so refreshing a two-day-old price downloads a handful of
    * bars rather than the decades a full `store_series` would. That distinction is the difference
    * between a button and a page that hangs, and it is why this is a dedicated endpoint rather than
    * a flag on the cheap GET every card fires on mount.
    *
-   * ⚠ THEN THE PANEL RE-READS, AND THE CACHE MUST BE DROPPED BETWEEN THE TWO. The metrics payload
+   *  Then the panel re-reads, and the cache must be dropped between the two. The metrics payload
    * is on `readCache`'s allowlist with a ten-minute TTL, so a re-request straight after the write
    * is answered from memory with the price we just replaced — the fetch would succeed and the
    * figure would not move, which is indistinguishable from the fetch having failed.
@@ -380,13 +366,13 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
           + (currency ? `?currency=${encodeURIComponent(currency)}` : ''),
           { method: 'POST', signal });
         const b = await r.json().catch(() => null) as (LatestClose & { detail?: string }) | null;
-        // ⚠ 404 IS AN ANSWER, NOT A FAILURE — no priced Yahoo listing, or an instrument we have
+        //  404 IS AN ANSWER, NOT A FAILURE — no priced Yahoo listing, or an instrument we have
         // never ingested. Painting that red beside the real errors teaches the reader to ignore
         // both; the card says what it is and the panel keeps the price it already had.
         if (r.status === 404) return b?.detail ?? 'no priced Yahoo listing for this instrument';
         if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
         if (signal.aborted) return 'cancelled';
-        // ⚠⚠ THE ANSWER IS THE RESPONSE, NOT A RE-READ. This endpoint returns the refreshed close
+        //  The answer is the response, not a re-read. This endpoint returns the refreshed close
         // in the same shape the GET does, so the panel repaints from what it just fetched. The
         // previous version re-requested the METRICS payload instead — a different price series
         // entirely, which the write could not touch, so the toast went green and nothing moved.
@@ -400,7 +386,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * Ask GuruFocus for this company's forward P/E again, then re-read the panel.
    *
-   * ⚠⚠ A DIFFERENT VENDOR AND A DIFFERENT TRANSPORT FROM THE SHARE PRICE ↻ BESIDE IT, which is why
+   *  A different vendor and a different transport from the share price ↻ BESIDE IT, which is why
    * this is a second button and not a reuse of that one. The price is `asset_price`, filed by
    * YFINANCE, keyed by `analysis_id`, refreshed by a plain POST that RETURNS the new close. The
    * forward P/E is `metric_data`, filed by GURUFOCUS, keyed by `company_id`, and its refresher is
@@ -408,19 +394,19 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
    * `timeseries.resolve()` refuses to mix — and a single button over both would have to lie about
    * one of them.
    *
-   * ⚠⚠ SO THE ANSWER IS NOT THE RESPONSE HERE, AND THE RE-READ MUST DROP THE CACHE FIRST. The
-   * share-price button carries a ⚠⚠ saying the answer IS its response, because an earlier version
+   *  So the answer is not the response here, and the re-read must drop the cache first. The
+   * share-price button carries a  saying the answer IS its response, because an earlier version
    * re-requested a cached payload and the figure never moved. The same trap is live on this path
    * and cannot be dodged the same way: the stream carries progress lines, not a P/E. The metrics
    * payload is on `readCache`'s allowlist with a ten-minute TTL, so `invalidateReadCache` runs
    * BETWEEN the write and the re-read — without it the fetch succeeds, the toast goes green and
    * the number on screen is the one we just replaced.
    *
-   * ⚠ `force=true`. The unforced path skips a source GuruFocus already answered today, which is
+   *  `force=true`. The unforced path skips a source GuruFocus already answered today, which is
    * exactly the case somebody presses this button in: the stored figure looks wrong and they want
    * it fetched again, not a no-op with a green toast.
    *
-   * ⚠ `indicators` ALONE, NOT `refresh-all`. It is one vendor call for the one figure this button
+   *  `indicators` ALONE, NOT `refresh-all`. It is one vendor call for the one figure this button
    * is under; `refresh-all` is five, spends the monthly quota four times over for nothing, and
    * would move three other fields the reader did not ask about.
    */
@@ -431,7 +417,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
       async (signal) => {
         await runSSE(
           `${API_URL}/api/earnings/${companyId}/refresh/indicators?force=true`,
-          // ⚠ THE STREAM'S LINES ARE DISCARDED ON PURPOSE. They are the fetcher's own log
+          //  The stream's lines are discarded on purpose. They are the fetcher's own log
           // ("forward_pe_ratio: calling …", "… rows parsed"), useful in the Earnings dashboard's
           // console and noise in a one-line toast — and counting them told the reader nothing
           // about whether the FIGURE moved, which is the only question here.
@@ -441,7 +427,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
         invalidateReadCache('refreshed the forward P/E on the Deep Valuation tab');
         await load(false, signal);
         const after = fwdPeDateRef.current;
-        // ⚠⚠ THE TOAST REPORTS THE DATE, NOT "done". This button was shipped saying
+        //  The toast reports the date, not "done". This button was shipped saying
         // "forward P/E re-read" whatever happened, and the first thing it produced was a bug report
         // — "I refreshed it but it's still old" — because a green toast over an unmoved date is
         // indistinguishable from a fetch that failed. GuruFocus publishes this quarterly-ish, so
@@ -455,12 +441,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   }, [companyId, name, isin, load, t.egm]);
 
   /**
-   * ⚠ NOT FETCHED UNTIL THE REPORTING CURRENCY IS KNOWN. The close is converted server-side into
+   *  Not fetched until the reporting currency is known. The close is converted server-side into
    * the currency the EPS and cash-flow series are filed in; asking before we know it would get a
    * price in the listing's own currency, and a price divided into a figure filed in another is a
    * yield wrong by the exchange rate that still looks entirely plausible.
    *
-   * ⚠ A 404 IS THE FALLBACK PATH, NOT AN ERROR — no priced Yahoo listing for this ISIN. The panel
+   *  A 404 IS THE FALLBACK PATH, NOT AN ERROR — no priced Yahoo listing for this ISIN. The panel
    * keeps the GuruFocus close and the card says which one it is showing.
    */
   useEffect(() => {
@@ -478,7 +464,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     return () => { alive = false; };
   }, [isin, currency]);
 
-  // ⚠ A SECOND REQUEST, AND THE ONLY ONE ON THIS TAB. These rates are scalars with no date, so
+  //  A second request, and the only one on this tab. These rates are scalars with no date, so
   // they never reach `metric_data` and cannot ride the metrics payload. Failure is silent by
   // design — the comparison column is context, and losing it must not take the panel with it.
   useEffect(() => {
@@ -502,7 +488,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
 
   // Blank → the measured yield; typed → the reader's. Resolved here so `calculateEGM` only ever
   // sees one number and the panel and the model cannot disagree about which it used.
-  /** A typed box as a number, or null for "left alone". ⚠ A HALF-TYPED "1." OR "-" IS NULL, not
+  /** A typed box as a number, or null for "left alone".  A HALF-TYPED "1." OR "-" IS NULL, not
    *  NaN: the field is kept as a STRING while typing precisely so an intermediate keystroke cannot
    *  be parsed into a valuation, and `parseFloat` would hand `NaN` straight through. */
   const numOrNull = (t: string): number | null => {
@@ -540,12 +526,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
         ...(divOverride != null && Number.isFinite(divOverride) ? { dividendYield: divOverride } : {}),
       }));
     } catch { /* a full or blocked localStorage must not take the panel down */ }
-    // ⚠ `divOverride` is a dep in its own right. Typing the measured yield in by hand leaves
+    //  `divOverride` is a dep in its own right. Typing the measured yield in by hand leaves
     // `assumptions.dividendYield` unchanged — same number — so without this the effect would not
     // re-run and the override would never be written; it would silently revert on reopen.
   }, [isin, assumptions, metrics, divOverride]);
 
-  const reset = useCallback(() => {
+  const resetOldDefaults = useCallback(() => {
     setGrowthStr((EGM_DEFAULTS.growthRate * 100).toFixed(1));
     setExitStr(String(EGM_DEFAULTS.exitPE));
     setHurdleStr((EGM_DEFAULTS.hurdleRate * 100).toFixed(1));
@@ -556,7 +542,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * The price the panel shows and the model computes from, and where it came from.
    *
-   * ⚠ THE yfinance CLOSE WINS AND THE GURUFOCUS ONE IS THE FALLBACK — in that order because the
+   *  THE yfinance CLOSE WINS AND THE GURUFOCUS ONE IS THE FALLBACK — in that order because the
    * label says "now": the first is refreshable from this row, the second moves only when the
    * GuruFocus ingest runs. `close_in` (converted into the reporting currency) is required, not
    * `close`: the raw one may be in the listing's own currency, and dividing a dollar EPS by a euro
@@ -567,7 +553,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const measuredPrice = livePrice ?? src.price;
   const priceOverride = numOrNull(priceStr);
   const price = priceOverride ?? measuredPrice;
-  /** ⚠ THE DATE AND THE SOURCE BELONG TO THE MEASURED CLOSE, and a typed price has neither — so
+  /**  THE DATE AND THE SOURCE BELONG TO THE MEASURED CLOSE, and a typed price has neither — so
    *  they are suppressed rather than left pointing at a figure no longer on screen. A "3 days old"
    *  badge under a number the reader just typed is the same defect as a label claiming "now" over
    *  a fiscal year-end close. */
@@ -578,7 +564,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   /**
    * How many calendar days old the stored close is.
    *
-   * ⚠ CALENDAR, NOT TRADING, DAYS — and the threshold is set for it. A Friday close read on Monday
+   *  Calendar, not trading, days — and the threshold is set for it. A Friday close read on Monday
    * is three calendar days old and perfectly current, so anything under a week is normal; past
    * that the series is genuinely behind. Counting trading days properly needs an exchange calendar
    * this panel has no business carrying for one badge.
@@ -588,24 +574,53 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
       / 86_400_000);
   const priceStale = priceAgeDays != null && priceAgeDays > 7;
 
-  /** ⚠ THE OVERRIDE REACHES THE MODEL, NOT JUST THE DISPLAY. `forwardPE` is the base of the
+  /**  THE OVERRIDE REACHES THE MODEL, NOT JUST THE DISPLAY. `forwardPE` is the base of the
    *  rerating leg (`multFactor = (exitPE / forwardPE) ^ (1/years)`), so a typed multiple has to go
    *  into `calculateEGM`'s INPUTS — showing it in the box and computing off the vendor's would be
    *  a panel disagreeing with itself. */
   const forwardPE = numOrNull(fwdPeStr) ?? src.forwardPE;
+  const suggestedGrowth = ((src.analystGrowth5Y ?? EGM_DEFAULTS.growthRate) * 100).toFixed(1);
+  const suggestedExitPE = (src.medianPE5Y ?? EGM_DEFAULTS.exitPE).toFixed(1);
+  const suggestedDividend = src.dividendYield == null ? '' : (src.dividendYield * 100).toFixed(2);
+  const suggestedPrice = measuredPrice == null ? '' : measuredPrice.toFixed(2);
+  const suggestedForwardPE = (price != null && src.epsNextFY != null && src.epsNextFY > 0
+    ? price / src.epsNextFY : src.forwardPE)?.toFixed(1) ?? '';
   const r = calculateEGM({ ...src, price, forwardPE }, assumptions);
-  const isDefault = assumptions.growthRate === EGM_DEFAULTS.growthRate
-    && assumptions.exitPE === EGM_DEFAULTS.exitPE
-    && assumptions.hurdleRate === EGM_DEFAULTS.hurdleRate
-    && divOverride == null
-    // ⚠ THE TWO MEASURED FIELDS COUNT AS DIRTY TOO. Reset means "back to what the data says", and
+  const isDefault = growthStr === suggestedGrowth
+    && exitStr === suggestedExitPE
+    && hurdleStr === (EGM_DEFAULTS.hurdleRate * 100).toFixed(1)
+    && divStr === suggestedDividend
+    //  The two measured fields count as dirty too. Reset means "back to what the data says", and
     // a Reset button that leaves a typed price in place is the worst kind: it looks like it worked.
-    && priceOverride == null && numOrNull(fwdPeStr) == null;
+    && priceStr === suggestedPrice && fwdPeStr === suggestedForwardPE;
 
   // The multiple the price implies on the consensus EPS. It is a reference when GuruFocus supplied
   // its own Forward P/E, and the automatic EGM fallback when that dedicated indicator is absent.
   const impliedPE = price != null && src.epsNextFY != null && src.epsNextFY > 0
     ? price / src.epsNextFY : null;
+
+  // The figures formerly offered in the separate right-hand suggestion column are the model's
+  // starting inputs. They remain editable; Reset restores this exact set.
+  const defaultsSeeded = useRef(false);
+  useEffect(() => {
+    if (metrics == null || defaultsSeeded.current) return;
+    defaultsSeeded.current = true;
+    if (savedAssumptions.current.growthRate == null) setGrowthStr(suggestedGrowth);
+    if (savedAssumptions.current.exitPE == null) setExitStr(suggestedExitPE);
+    if (savedAssumptions.current.dividendYield == null) setDivStr(suggestedDividend);
+    setPriceStr(suggestedPrice);
+    setFwdPeStr(suggestedForwardPE);
+  }, [metrics, suggestedGrowth, suggestedExitPE, suggestedDividend, suggestedPrice,
+    suggestedForwardPE]);
+
+  const reset = useCallback(() => {
+    setGrowthStr(suggestedGrowth);
+    setExitStr(suggestedExitPE);
+    setHurdleStr((EGM_DEFAULTS.hurdleRate * 100).toFixed(1));
+    setDivStr(suggestedDividend);
+    setPriceStr(suggestedPrice);
+    setFwdPeStr(suggestedForwardPE);
+  }, [suggestedGrowth, suggestedExitPE, suggestedDividend, suggestedPrice, suggestedForwardPE]);
 
 
   const ccy = currency ? `${currency} ` : '';
@@ -622,11 +637,11 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     <div className="space-y-4">
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-4 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
-        {/* ⚠ THE HORIZON STAYS, AND IT IS THE PART THAT CANNOT GO. With the subtitle removed
+        {/*  THE HORIZON STAYS, AND IT IS THE PART THAT CANNOT GO. With the subtitle removed
             nothing else on the panel says how long the figures run for, and an annualised return
             with no window is not a smaller claim than a wrong one — it is an unreadable one. It
             keeps the faint, smaller weight so the NAME is still what the eye lands on.
-            ⚠ INTERPOLATED, NEVER TYPED. `assumptions.years` is fixed at 10 today (the EGM has no
+             INTERPOLATED, NEVER TYPED. `assumptions.years` is fixed at 10 today (the EGM has no
             horizon field, unlike the reverse DCF below), but a hardcoded "10" in a heading is a
             caption that silently stops being true the day one is added. */}
         <h4 className="text-base font-semibold text-fg-strong">
@@ -635,7 +650,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             for a {assumptions.years}-year horizon
           </span>
         </h4>
-        {/* ⚠ NO SUBTITLE — REMOVED 2026-08-18, and the bridge below is why. It read
+        {/*  NO SUBTITLE — REMOVED 2026-08-18, and the bridge below is why. It read
             "earnings growth + dividend yield + change in the multiple, over 10 years", which was
             the right three drivers, the wrong operator (they compound; the sum is +6.2% against an
             answer of +5.8%) and, once the bridge landed, a prose restatement of the three rows
@@ -644,7 +659,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
       </div>
 
       {/**
-        * ⚠⚠ INPUT LEFT, OUTPUT RIGHT — ONE PAIR OF RECTANGLES, EQUAL WIDTH AND HEIGHT.
+        *  Input left, output right — one pair of rectangles, equal width and height.
         *
         * It was two stacked bordered boxes of different widths (a `max-w-md` bridge over a
         * full-width assumptions block) with a bare line of prose floating between them, in the
@@ -652,12 +667,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
         * the screen. A model with four inputs and two outputs has exactly one honest shape: what
         * you assume, and what that produces, side by side.
         *
-        * ⚠ THE HEIGHTS MATCH FOR FREE — grid children stretch, so neither box can end up the odd
+        *  The heights match for free — grid children stretch, so neither box can end up the odd
         * one out as the fair-value line appears or a hint wraps. `justify-center` on each body
         * then keeps the content optically centred in whichever box is the shorter of the two,
         * rather than pinned to the top with a pool of space beneath it.
         *
-        * ⚠ ONE COLUMN BELOW `md`. Side by side at 320px would put a 16-character label, an input
+        *  One column below `md`. Side by side at 320px would put a 16-character label, an input
         * and a `%` into about 130px.
         */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
@@ -666,9 +681,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
         <div className="flex flex-col rounded-lg border border-neutral-800/40 bg-inset p-3">
           <div className="flex items-center gap-2">
             <span className="text-[11px] uppercase tracking-wide text-fg-faint">{t.egm.inputs}</span>
-            {/* ⚠ `Reset`, not `Reset to defaults` — it is only ever on screen while something IS
+            {/*  `Reset`, not `Reset to defaults` — it is only ever on screen while something IS
                 off-default, so the qualifier answers a question nobody can be asking.
-                ⚠⚠ RENDERED ALWAYS, HIDDEN WITH `invisible`. Mounting it on the first keystroke
+                 RENDERED ALWAYS, HIDDEN WITH `invisible`. Mounting it on the first keystroke
                 made the header row taller (a bordered button against a bare label), which grew
                 this box, which grew the OUTPUT box beside it through the grid's stretch — the
                 whole panel jumped because someone typed a digit. `visibility: hidden` reserves the
@@ -684,7 +699,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
 
           <div className="flex flex-col divide-y divide-neutral-800/30">
           {/**
-            * ⚠⚠ THE ORDER IS AN ARGUMENT, NOT A LAYOUT (2026-09-01, on request). It reads
+            *  The order is an argument, not a layout (2026-09-01, on request). It reads
             * MEASURED → REQUIRED → ASSUMED:
             *
             *   Share price now, Forward P/E   what the market is doing — both vendor facts, both
@@ -697,20 +712,20 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             *   Exit P/E                       the next ten years; the exit multiple is last because
             *                                  it is the one the rerating leg lands on.
             *
-            * ⚠ THE PREVIOUS ORDER PUT THE ASSUMPTIONS FIRST and the two measured facts third and
+            *  The previous order put the assumptions first and the two measured facts third and
             * fourth, on the reasoning that the panel is about the assumptions. That is true of the
             * MODEL and wrong about READING it: the price and the forward P/E are where the answer
             * starts, and a reader checking whether a figure is current had to look past three
             * house constants to find the two that are not.
             */}
-            {/* ⚠⚠ THE TWO MEASURED INPUTS, AND THEY ARE INPUTS AT ALL BECAUSE THEY WERE
+            {/*  THE TWO MEASURED INPUTS, AND THEY ARE INPUTS AT ALL BECAUSE THEY WERE
                 UNCHALLENGEABLE AS OUTPUTS. Both were read-only figures printed in the OUTPUT
                 table, which made the one number the whole rerating leg is measured from something
                 a reader could see and not act on: the vendor's forward P/E and
                 `price ÷ consensus EPS` routinely disagree — five weeks apart on argenx as this was
                 written, 42.0x against 38.2x — and the chip beside each is the way to take the
                 other. A typed value reaches `calculateEGM`.
-                ⚠ THEY LEAD THE COLUMN — see the ⚠⚠ on the order above. This note used to end
+                 THEY LEAD THE COLUMN — see the  on the order above. This note used to end
                 "now they are the panel's first two rows", which stopped being true the moment
                 anything was inserted above them and stayed in the file saying so. */}
             <Field label={`${t.egm.sharePriceNow}${currency ? ` (${currency})` : ''}`}
@@ -731,28 +746,24 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 when={priceOverride != null ? t.egm.whateverMoment
                   : v(onDate(priceDate, lang)) + (priceStale ? `, ${v(t.egm.daysOld(String(priceAgeDays)))}` : '')}
                 how={t.egm.cards.price.how} />} />}
-              hint={measuredPrice == null ? null : measuredPrice.toFixed(2)}
-              hintTitle={priceOverride != null
-                ? t.egm.storedCloseBack : t.egm.storedCloseInUse}
-              onUseHint={priceOverride != null ? () => setPriceStr('') : undefined}
               /**
-               * ⚠⚠ IT MOVED HERE FROM THE OUTPUT TABLE, IT IS NOT A SECOND ONE. The share price's
+               *  It moved here from the output table, it is not a second one. The share price's
                * Refresh lived in the `Share price now` row of the results table below, sharing that
                * row's ⓘ cell — a `w-[3.25rem]` column, 52px, holding a 16px icon and a ~54px word
                * behind 16px of padding. It overflowed by roughly the width of the button, which is
                * what was reported as cramped; widening that column was not available, because its
                * width is what lands every ⓘ in all three tables on one vertical line.
                *
-               * ⚠⚠ AND THE INPUT ROW IS WHERE IT BELONGED ANYWAY — this is the panel's OTHER
+               *  And the input row is where it belonged anyway — this is the panel's OTHER
                * measured input, and its twin (the forward P/E) has had its Refresh in exactly this
                * slot all along. Two vendor facts, two overridable boxes, two identical controls in
                * one column, instead of one on an input row and one on an output row four tiles
                * apart. Requested in those words.
                *
-               * ⚠ THE OUTPUT ROW KEEPS ITS ⓘ. The provenance — which vendor, which date, how stale
+               *  The output row keeps its ⓘ. The provenance — which vendor, which date, how stale
                * — is about the FIGURE and stays behind it; only the action moved.
                *
-               * ⚠⚠ ONE CONTROL, THREE STATES — AND IT TURNS INTO THE CANCEL. The reader pressed the
+               *  One control, three states — and it turns into the cancel. The reader pressed the
                * button HERE, so this is where the way to stop it belongs; sending them to the toast
                * in the corner to undo something they started on this row is the same mistake as a
                * Cancel that does nothing.
@@ -760,23 +771,23 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                *   Cancel       running — press again to abort the re-read
                *   Cancelling…  the window after the press, while the fetch unwinds
                *
-               * ⚠ IT KEYS OFF THE TOAST STORE, NOT A LOCAL FLAG. `cancelRequested` flips on the
+               *  It keys off the toast store, not a local flag. `cancelRequested` flips on the
                * press and `status` follows when the work actually stops; a private boolean would
                * have to be kept in step with both and would be wrong in exactly the window this
                * button exists to describe.
                *
-               * ⚠ RENDERED IN ALL THREE STATES, never conditionally. Showing it only when the close
+               *  Rendered in all three states, never conditionally. Showing it only when the close
                * is stale would move the row the moment a refresh cleared the staleness — the reader
                * would press a button and watch it vanish along with the layout under it.
                *
-               * ⚠⚠ THE LABEL CHANGES WIDTH ON EVERY PRESS, SO ITS ROOM IS RESERVED RATHER THAN
+               *  The label changes width on every press, so its room is reserved rather than
                * ASSUMED — `Refresh` / `Cancel` / `Cancelling…` are 7, 6 and 11 characters. The note
                * that used to sit here said "ONE CHARACTER IN EVERY STATE, in a fixed-width box",
                * true of the ↻ this began as and quietly false ever since; that sentence outliving
                * its glyph is how the forward P/E's twin came to sit in a 16px slot holding a ~62px
-               * word. `Field`'s action slot is sized for the longest state — see the ⚠⚠ there.
+               * word. `Field`'s action slot is sized for the longest state — see the  there.
                *
-               * ⚠ This is the canonical note for BOTH refresh buttons on this panel; the forward
+               *  This is the canonical note for BOTH refresh buttons on this panel; the forward
                * P/E's points at it. The only differences there are the vendor and the transport.
                */
               action={(
@@ -784,8 +795,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                   onClick={() => (refreshing && jobId ? void cancelJob(jobId) : refreshPrice())}
                   disabled={cancelling}
                   aria-label={refreshing ? t.egm.reReadCancel : t.egm.reReadClose}
-                  // ⚠ IT STILL WORKS WITH AN OVERRIDE IN PLACE, AND WOULD LOOK BROKEN WITHOUT
-                  // SAYING SO: the fetch updates the STORED close, which a typed price is hiding,
+                  //  It still works with an override in place, and would look broken without
+                  // Saying so: the fetch updates the STORED close, which a typed price is hiding,
                   // so the figure in the box does not move. The refreshed value lands on the chip
                   // immediately to its left, one click from being used.
                   title={cancelling ? t.egm.cancelling
@@ -794,7 +805,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         ? t.egm.reReadOverridden + 'so the new figure appears on the chip beside it'
                         : priceStale ? t.egm.reReadStale
                           : t.egm.reReadClose}
-                  // ⚠ AMBER WHEN IT IS WORTH PRESSING, faint when it is not — the one thing this
+                  //  Amber when it is worth pressing, faint when it is not — the one thing this
                   // button says without being hovered, and the reason it is rendered in all three
                   // states rather than appearing when the close goes stale.
                   className={`rounded px-1.5 py-0.5 align-middle text-[11px] leading-none ${
@@ -818,8 +829,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 where={numOrNull(fwdPeStr) != null ? t.egm.yoursTypedHere
                   : src.forwardPEOrigin === 'derived' ? t.egm.forwardPEDerivedWhere
                     : t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE))}
-                /* ⚠⚠ AN OVERRIDDEN FORWARD P/E HAS NO VENDOR DATE, and saying otherwise is worse
-                   than saying nothing — the exact ⚠⚠ the share-price card already carries. `where`
+                /*  AN OVERRIDDEN FORWARD P/E HAS NO VENDOR DATE, and saying otherwise is worse
+                   than saying nothing — the exact  the share-price card already carries. `where`
                    branched on the override from the start and `when` did not, so a typed multiple
                    produced a card reading "Yours, typed here" above "24 July 2026": two answers
                    about two different numbers, one of which is not on screen. Reported as "I
@@ -828,7 +839,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                   : src.forwardPEDate == null ? t.egm.noObservationStored
                     : v(onDate(src.forwardPEDate, lang))}
                 how={(numOrNull(fwdPeStr) != null && src.forwardPEDate != null
-                  // ⚠ THE WAY BACK, NAMED. With a typed value the useful sentence is not how the
+                  //  The way back, named. With a typed value the useful sentence is not how the
                   // leg is computed — it is that a vendor figure exists behind it and how to get
                   // back to it, which is what the share-price card says in the same state.
                   ? `${t.egm.forwardPEHowTyped(vendorName(SOURCE_CODES.forwardPE),
@@ -840,23 +851,20 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                     ? `\n\n${t.egm.forwardPEDisagrees(`${impliedPE.toFixed(1)}x`,
                       `${src.forwardPE.toFixed(1)}x`)}`
                     : '')} />} />}
-              hint={impliedPE != null ? `${impliedPE.toFixed(1)}` : null}
-              hintTitle={t.egm.impliedPEHint}
-              onUseHint={impliedPE != null ? () => setFwdPeStr(impliedPE.toFixed(1)) : undefined}
               /**
-               * ⚠⚠ THE ONE MEASURED FIGURE ON THIS PANEL WITH NO WAY TO GO AND GET IT AGAIN, until
+               *  The one measured figure on this panel with no way to go and get it again, until
                * now. Three of the six inputs are house constants and the share price has had its ↻
                * since 2026-08 — but the forward P/E is a vendor observation like the price, it
                * drives the entire rerating leg, and a reader who thought it stale could only wait
                * for the quarterly `benchmark_fundamentals_fill` or refresh every source of the
                * company from another page.
                *
-               * ⚠ SAME THREE STATES AND THE SAME LABELS AS THE SHARE PRICE'S Refresh — see the note
+               *  Same three states and the same labels as the share price's Refresh — see the note
                * at that button. Two controls on one panel that both re-read a vendor figure must
                * not have two vocabularies; the only difference here is which vendor and which
                * transport, and that is in `refreshForwardPE`.
                *
-               * ⚠ DISABLED, NOT ABSENT, WITH NO COMPANY. `/by-isin/{isin}/metrics` answers 404 for
+               *  Disabled, not absent, with no company. `/by-isin/{isin}/metrics` answers 404 for
                * an instrument GuruFocus has no company row for, and the button would then have
                * nothing to call — but a control that vanishes takes its column with it, which is
                * the geometry rule the whole `Field` row is built on.
@@ -867,8 +875,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                     ? void cancelJob(peJobId) : refreshForwardPE())}
                   disabled={peCancelling || companyId == null}
                   aria-label={peRefreshing ? t.egm.reReadCancel : t.egm.reReadForwardPE}
-                  // ⚠ IT STILL WORKS WITH AN OVERRIDE IN PLACE AND WOULD LOOK BROKEN WITHOUT
-                  // SAYING SO — the same sentence the share price's ↻ carries, for the same
+                  //  It still works with an override in place and would look broken without
+                  // Saying so — the same sentence the share price's ↻ carries, for the same
                   // reason: the fetch updates the STORED figure, which a typed value is hiding,
                   // so nothing in the box moves and the result lands on the chip beside it.
                   title={peCancelling ? t.egm.cancelling
@@ -876,7 +884,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       : companyId == null ? t.egm.reReadNoCompany
                         : numOrNull(fwdPeStr) != null ? t.egm.reReadForwardPEOverridden
                           : t.egm.reReadForwardPE}
-                  // ⚠ PADDED LIKE THE REFERENCE CHIP BESIDE IT (`rounded px-1 py-px`), which is the
+                  //  Padded like the reference chip beside it (`rounded px-1 py-px`), which is the
                   // other pressable thing on this row. Bare `leading-none` text gave it no
                   // breathing room and a hit target the height of an 11px line.
                   className={`rounded px-1.5 py-0.5 align-middle text-[11px] leading-none ${
@@ -902,12 +910,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 how={t.egm.growthHow(t.egm.houseDefault(`${(EGM_DEFAULTS.growthRate * 100).toFixed(0)}%`)
                   + (src.analystGrowth5Y != null
                     ? t.egm.analystsImply(`${(src.analystGrowth5Y * 100).toFixed(1)}%`) : '') + '.')} />} />}
-              hint={src.analystGrowth5Y != null
-                ? `${(src.analystGrowth5Y * 100).toFixed(1)}%` : null}
-              hintTitle={t.egm.analystHint}
-              onUseHint={src.analystGrowth5Y != null
-                ? () => setGrowthStr(((src.analystGrowth5Y as number) * 100).toFixed(1)) : undefined} />
-            {/* ⚠ AN ASSUMPTION, NOT A READING. The model applies this yield in EVERY one of the
+              />
+            {/*  AN ASSUMPTION, NOT A READING. The model applies this yield in EVERY one of the
                 ten years, so it is a claim about the next decade; the measured figure is only its
                 default. Blank = use what GuruFocus reports. */}
             <Field label={t.egm.dividendYield} value={divStr} onChange={setDivStr} suffix="%"
@@ -924,27 +928,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 when={t.egm.everyYearFor(String(assumptions.years))}
                 how={t.egm.cards.dividend.how} />} />}
               placeholder={src.dividendYield == null ? '0.00' : (src.dividendYield * 100).toFixed(2)}
-              hint={src.dividendYield == null ? null
-                : `${(src.dividendYield * 100).toFixed(2)}%`}
-              /**
-               * ⚠⚠ CLICKABLE IN BOTH DIRECTIONS, WHICH THE OTHER MEASURED CHIPS ARE NOT. It used
-               * to be disabled while the field was blank, on the reasoning that the measured yield
-               * was already in use so there was nothing to apply — true of the MODEL and wrong
-               * about the FIELD: the figure was a greyed placeholder, so nudging it to 0.5% meant
-               * retyping it from scratch. Clicking now puts it in as a real value to edit from.
-               *
-               * ⚠ THAT MAKES IT AN OVERRIDE, AND AN OVERRIDE PERSISTS (see `loadSaved`) — so a
-               * clicked yield stops tracking the payload. Deliberate and visible: the box then
-               * holds a typed number rather than a grey placeholder, and Reset clears it. The
-               * hazard `loadSaved` warns about is persisting the measured value SILENTLY, which
-               * this is not.
-               */
-              hintTitle={divOverride != null ? t.egm.dividendBack : t.egm.dividendInUse}
-              onUseHint={src.dividendYield == null ? undefined
-                : divOverride != null
-                  ? () => setDivStr('')
-                  : () => setDivStr((src.dividendYield as number * 100).toFixed(2))} />
-            {/* ⚠ THE CHIP IS THE FIGURE, NOT A SENTENCE ABOUT IT. `5y median P/E: 57.3` under a
+              />
+            {/*  THE CHIP IS THE FIGURE, NOT A SENTENCE ABOUT IT. `5y median P/E: 57.3` under a
                 field labelled `Exit P/E` repeated the label an inch above it and named a source
                 the hover can carry. */}
             <Field label={t.egm.exitPE} value={exitStr} onChange={setExitStr} step="0.5"
@@ -957,13 +942,10 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                   + (forwardPE != null && forwardPE > 0
                     ? t.egm.reratingRuns(`${forwardPE.toFixed(1)}x`,
                       `${assumptions.exitPE.toFixed(1)}x`) : '')} />} />}
-              hint={src.medianPE5Y != null ? src.medianPE5Y.toFixed(1) : null}
-              hintTitle={t.egm.medianPEHint}
-              onUseHint={src.medianPE5Y != null
-                ? () => setExitStr((src.medianPE5Y as number).toFixed(1)) : undefined} />
+              />
           </div>
 
-          {/* ⚠ ONE CONTROL, NOT A LABEL PLUS AN AFFORDANCE BESIDE IT. It read `Assumptions`
+          {/*  ONE CONTROL, NOT A LABEL PLUS AN AFFORDANCE BESIDE IT. It read `Assumptions`
               (a dotted-underlined button) followed by `raw data ↗` (a static span) — two pieces of
               text for one click, and the half that looked like the link was not the button. */}
           <button type="button" onClick={() => setShowWorking(true)}
@@ -979,7 +961,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
 
           <div className="flex flex-1 flex-col justify-center">
             {/**
-              * ⚠⚠ THE TABLE IS ALWAYS THE SAME FOUR ROWS. It used to swap for a paragraph whenever
+              *  The table is always the same four rows. It used to swap for a paragraph whenever
               * `calculateEGM` refused — and refusing is something the READER can cause: type `0`
               * into Exit P/E and the model has no multiple to rerate to, so the entire output box
               * changed shape mid-keystroke. Worse, the paragraph blamed a missing forward P/E — a
@@ -992,7 +974,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             <table className="w-full table-fixed text-[12px]">
               {/* The last column is the ⓘ slot — see `Field`. Empty on every row with no
                   explanation, which is what holds the ones that have to a single vertical line. */}
-              {/* ⚠⚠ THE ⓘ COLUMN IS WIDER THAN THE ICON, AND THE ICON IS PADDED BY THE
+              {/*  THE ⓘ COLUMN IS WIDER THAN THE ICON, AND THE ICON IS PADDED BY THE
                   DIFFERENCE. That pair is what moves the FIGURES left while leaving the icons on
                   the same vertical line they already sat on: the column grows from the left, the
                   padding pushes the glyph back to where it was, and the gap between the last
@@ -1014,7 +996,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       <td className="truncate py-0.5 text-fg-muted">
                         {leg.key === 'growth' ? t.egm.legEarningsGrowth
                           : leg.key === 'yield' ? t.egm.dividendYield
-                            // ⚠ THE ENDPOINTS COME OFF THE LEG WHERE THERE IS ONE — they travel with
+                            //  The endpoints come off the leg where there is one — they travel with
                             // the arithmetic (see `EgmLeg`), so a label can never name a different
                             // pair than the figure beside it was computed from. With no bridge
                             // nothing was computed, so the fields themselves are the only source.
@@ -1026,7 +1008,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                               </span></>
                             )}
                       </td>
-                      {/* ⚠ NO `/yr` ON THE LEGS. Every row here is annualised, so repeating the unit
+                      {/*  NO `/yr` ON THE LEGS. Every row here is annualised, so repeating the unit
                           four times states one fact four times; it is said ONCE, on the answer,
                           where a reader taking only that number away still gets it. */}
                       <td className={`py-0.5 pl-2 text-right font-mono tabular-nums ${
@@ -1052,7 +1034,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                     {r.bridge == null ? '—' : `×${r.bridge.factor.toFixed(3)}`}
                   </td>
                   <td className="pt-1 pl-4">
-                    {/* ⚠⚠ THE COMPOUNDING NOTE IS IN THE HOVER, IT DID NOT GO AWAY. It was two lines
+                    {/*  THE COMPOUNDING NOTE IS IN THE HOVER, IT DID NOT GO AWAY. It was two lines
                         of prose under the rule. True and load-bearing — but on a panel whose job is
                         "as little as possible", a permanent paragraph about an arithmetic subtlety
                         is the first thing a reader skips, and the `×` column beside it already
@@ -1072,10 +1054,10 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         { sym: String.raw`PE_{\text{fwd}}`, is: t.egm.legend.peFwd },
                         { sym: 'n', is: t.egm.legend.n(String(assumptions.years)) },
                       ]}
-                      // ⚠ THE FORMULA LEFT THIS FIELD AND THE CAVEAT STAYED. `how` is where the
+                      //  The formula left this field and the caveat stayed. `how` is where the
                       // card says how to READ the figure, and the one thing a reader gets wrong
                       // here is adding the column up — see `EgmBridge.sumOfRates`.
-                      // ⚠ THE ASYMMETRY WITH THE PRICE ROWS, STATED ON THIS SIDE TOO. They say
+                      //  The asymmetry with the price rows, stated on this side too. They say
                       // "price only"; this one said nothing, so a reader raising the yield saw
                       // this figure move and the implied price sit still with no card explaining
                       // the pair. Dividends are cash paid, not price you can sell at.
@@ -1090,35 +1072,35 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             </table>
 
             {/**
-              * ⚠⚠ THE CONCLUSION IS TWO PRICES AND THE MOVE BETWEEN THEM. It was a `Fair value`
+              *  The conclusion is two prices and the move between them. It was a `Fair value`
               * line — EPS × the hurdle-clearing multiple — which answers a DIFFERENT question
               * ("what may I pay?") in the same shape as this one ("what do I get?"), and the two
               * sat one above the other as competing verdicts. What the bridge above computes is a
               * return; the thing a return is about is a price you buy at and a price you sell at,
               * so those are the three rows.
               *
-              * ⚠⚠ THE IMPLIED PRICE IS THE CAPITAL LEG AND THE RETURN IS THE TOTAL, AND ON A PAYER
-              * THEY DO NOT TIE. Dividends are cash you were paid, not price you can sell at, so
+              *  The implied price is the capital leg and the return is the total, and on a payer
+              * They do not tie. Dividends are cash you were paid, not price you can sell at, so
               * compounding them into a "share price" would quote a figure no screen will ever
               * show. `priceReturn` is what the two prices give exactly; `totalReturn` adds the
               * dividends. They are IDENTICAL on a non-payer — which is most of the names this tab
               * is opened on, and precisely why a bug here would go unseen — so the dividend line
               * appears only when there is one to show.
               *
-              * ⚠ `Fair value` HAS NOT BEEN DELETED, it moved into the hover on the implied price:
+              *  `Fair value` HAS NOT BEEN DELETED, it moved into the hover on the implied price:
               * still an output, no longer a rival headline.
               */}
-            {/* ⚠ UNCONDITIONAL, like the table above. `n/a` is a value; an absent table is a
+            {/*  UNCONDITIONAL, like the table above. `n/a` is a value; an absent table is a
                 different panel, and `impliedPrice` goes null on inputs the reader types. */}
             {(
               /* Same fixed columns as the bridge above, and for the same reason — `USD 331.83`
                  and `USD 1,219.28` are different widths, and the reader changes which one it is. */
               <table className="mt-2 w-full table-fixed border-t border-neutral-800/40 pt-1.5 text-[12px]">
-                {/* ⚠ THREE COLUMNS, MIRRORING THE BRIDGE ABOVE — label, figure, per-year rate. The
+                {/*  THREE COLUMNS, MIRRORING THE BRIDGE ABOVE — label, figure, per-year rate. The
                     two price rows leave the third cell empty on purpose: it is what makes the
                     Return row's `/yr` read as a THIRD column rather than as something appended to
                     the figure beside it, and it keeps both tables on the same rhythm. */}
-                {/* Same ⓘ-column rule as the bridge above — see the ⚠⚠ there. */}
+                {/* Same ⓘ-column rule as the bridge above — see the  there. */}
                 <colgroup>
                   <col />
                   <col className="w-[6rem]" />
@@ -1127,11 +1109,11 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 </colgroup>
                 <tbody>
                   <tr>
-                    {/* ⚠ THE ⓘ SITS BEHIND THE FIGURE, NOT BEHIND THE NAME. It is about the
+                    {/*  THE ⓘ SITS BEHIND THE FIGURE, NOT BEHIND THE NAME. It is about the
                         NUMBER — where it came from and how stale it is — and after the label it
                         was separated from it by the whole width of the column. In the trailing
                         slot it also lines up with every other ⓘ on the page.
-                        ⚠⚠ THE REFRESH USED TO SHARE THIS CELL AND NO LONGER DOES. A 52px column
+                         THE REFRESH USED TO SHARE THIS CELL AND NO LONGER DOES. A 52px column
                         cannot hold a 16px icon and a ~54px word behind 16px of padding, and the
                         column's width is exactly what keeps those ⓘ aligned, so it could not be
                         widened to make room. The action moved to the `Share price now` INPUT row,
@@ -1142,7 +1124,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       {money(price)}
                     </td>
                     <td />
-                    {/* ⚠ PLAIN `pt-1.5 pl-4`, IDENTICAL TO EVERY OTHER ⓘ CELL ON THE PANEL. It was
+                    {/*  PLAIN `pt-1.5 pl-4`, IDENTICAL TO EVERY OTHER ⓘ CELL ON THE PANEL. It was
                         a flex row while it held the Refresh too, which is what let its contents
                         overflow a `table-fixed` column without wrapping or clipping — the cell
                         simply grew past the table's right edge and nothing said so. One ⓘ, one
@@ -1151,7 +1133,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       <InfoTip content={<AspectCard
                         what={priceOverride != null ? t.egm.priceTyped
                           : t.egm.priceClosingOf(name ?? isin)}
-                        // ⚠⚠ AN OVERRIDDEN PRICE HAS NO VENDOR AND NO DATE, and saying otherwise is
+                        //  An overridden price has no vendor and no date, and saying otherwise is
                         // worse than saying nothing: this card would name Yahoo, print a staleness
                         // badge and offer a ↻ over a figure the reader typed thirty seconds ago —
                         // three claims about provenance the number does not have.
@@ -1159,7 +1141,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                           : live === undefined ? t.egm.loading
                             : priceFromYahoo
                               ? t.egm.yahooFinance(live?.symbol ?? '')
-                              // ⚠ NAMED, NOT HIDDEN. Without a priced Yahoo listing the figure is
+                              //  Named, not hidden. Without a priced Yahoo listing the figure is
                               // GuruFocus's own close, which ↻ cannot move — and a card claiming
                               // Yahoo over it is how a button gets blamed for a missing instrument.
                               : t.common.guruFocus(vendorName(SOURCE_CODES.price))}
@@ -1183,7 +1165,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         what={t.egm.cards.priceTarget.what}
                         where={t.egm.cards.priceTarget.where}
                         when={t.egm.yearsOut(String(assumptions.years))}
-                        // ⚠ OPERANDS OFF `bridge`, LIKE THE RETURN ROW — see `bridgeParts`. The
+                        //  Operands off `bridge`, LIKE THE RETURN ROW — see `bridgeParts`. The
                         // implied price and the annual return share `multFactor`, so quoting the
                         // multiples from `assumptions`/`src` here would be a second route to the
                         // same pair, free to drift from the one the model actually used.
@@ -1196,11 +1178,11 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                           { sym: String.raw`\dfrac{PE_{\text{exit}}}{PE_{\text{fwd}}}`,
                             is: t.egm.legend.rerating },
                         ]}
-                        // ⚠ NO `y` HERE, AND THAT IS THE POINT OF THE SENTENCE BELOW. This is the
+                        //  NO `y` HERE, AND THAT IS THE POINT OF THE SENTENCE BELOW. This is the
                         // capital leg alone; a legend row for the dividend yield would imply it
                         // was in the expression, on the one figure that deliberately excludes it.
                         how={t.egm.priceOnlyFairValue(money(r.fairValue), mult(r.maxPE))
-                          // ⚠ THE ONE DISCLOSURE NOTHING ELSE CARRIES, kept to a single clause and
+                          //  The one disclosure nothing else carries, kept to a single clause and
                           // shown only when true. This figure reruns from the VENDOR's forward
                           // P/E; when the price does not actually imply that multiple on the
                           // consensus EPS, the rerating leg starts from a multiple the market is
@@ -1214,7 +1196,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                     </td>
                   </tr>
                   <tr className="border-t border-neutral-800/40">
-                    {/* ⚠⚠ THE `incl. div` NOTE IS IN THE HOVER, NOT INLINE. It appeared beside the
+                    {/*  THE `incl. div` NOTE IS IN THE HOVER, NOT INLINE. It appeared beside the
                         figure only when the two returns differed — i.e. the moment someone typed a
                         dividend yield — which reflowed the row that had just been edited. The ⓘ is
                         rendered unconditionally and its CONTENT changes instead, so a payer and a
@@ -1225,7 +1207,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       (r.priceReturn ?? 0) >= 0 ? 'text-pos-500' : 'text-neg-500'}`}>
                       {pct1(r.priceReturn)}
                     </td>
-                    {/* ⚠⚠ `priceCagr`, NOT THE BRIDGE'S `expectedReturn`. On a dividend payer those
+                    {/*  `priceCagr`, NOT THE BRIDGE'S `expectedReturn`. On a dividend payer those
                         are different numbers — the total per year against the price leg per year —
                         and this cell sits beside two PRICES, so the only annual rate it may quote
                         is the one those two prices imply. Reaching for the bridge total here would
@@ -1258,18 +1240,18 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             )}
 
             {/**
-              * ⚠⚠ A SECOND MODEL, UNDER ITS OWN CAPTION, AND THE CAPTION IS THE WHOLE FIX.
+              *  A second model, under its own caption, and the caption is the whole fix.
               * `Fair value` was a bare row beside the expected return once and was demoted into a
               * tooltip because the two "sat one above the other as competing verdicts" — a
               * reader could not tell which question each answered. The demotion solved that and
               * created a worse problem: a `Hurdle rate` input whose every visible effect had
               * disappeared, so the box looked ornamental and its arithmetic unfindable.
               *
-              * ⚠ THE ANSWER IS SEPARATION, NOT SUPPRESSION. Everything above asks what today's
+              *  The answer is separation, not suppression. Everything above asks what today's
               * price EARNS you; these two ask what you may PAY to earn your hurdle. Named, they
               * are two answers to two questions; unnamed, they were two answers to one.
               *
-              * ⚠ `h` IS THE ONLY INPUT ON THIS PANEL THAT DESCRIBES THE READER rather than the
+              *  `h` IS THE ONLY INPUT ON THIS PANEL THAT DESCRIBES THE READER rather than the
               * company, and it appears in no expression above — which is why it belongs here and
               * nowhere else. See `workedMaxPE`.
               */}
@@ -1278,7 +1260,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             </p>
             <table className="w-full table-fixed text-[12px]">
               {/* The same four columns as the two tables above, so all three blocks share one
-                  rhythm and every ⓘ lands on the one vertical line. ⚠ THE THIRD COLUMN STAYS
+                  rhythm and every ⓘ lands on the one vertical line.  THE THIRD COLUMN STAYS
                   EMPTY HERE: it means "per year" everywhere on this panel, and neither of these
                   two figures is a rate. */}
               <colgroup>
@@ -1327,7 +1309,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                         { sym: String.raw`EPS_{\text{FY1}}`, is: t.egm.legend.epsFY1 },
                         { sym: String.raw`PE_{\max}`, is: t.egm.legend.maxPE },
                       ]}
-                      /* ⚠⚠ THE COMPARISON MOVED OUT OF THIS CARD AND ONTO ITS OWN ROW BELOW (on
+                      /*  THE COMPARISON MOVED OUT OF THIS CARD AND ONTO ITS OWN ROW BELOW (on
                          request). It lived here because `upside` was computed and read by nothing
                          at all, and a fair value printed beside nothing invites the reader to do
                          the subtraction against a price two rows up. A visible row answers that
@@ -1338,12 +1320,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       how={r.fairValue == null ? t.egm.fairValueNoEps : undefined} />} />
                   </td>
                 </tr>
-                {/* ⚠ THE FIGURE `upside` HAS ALWAYS BEEN, NOW ON SCREEN. `fairValue ÷ price − 1`,
+                {/*  THE FIGURE `upside` HAS ALWAYS BEEN, NOW ON SCREEN. `fairValue ÷ price − 1`,
                     straight off the result — not recomputed here from the two rows above it, which
                     is the version that drifts. */}
                 <tr>
                   <td className="truncate py-0.5 pl-3 text-fg-subtle">{t.egm.fairValueGap}</td>
-                  {/* ⚠ SIGN-COLOURED, LIKE EVERY OTHER CONCLUSION ON THIS PANEL. A fair value below
+                  {/*  SIGN-COLOURED, LIKE EVERY OTHER CONCLUSION ON THIS PANEL. A fair value below
                       today's price is the finding, not a formatting accident — same rule as the
                       `Return` row and the price-target card's Est. CAGR. */}
                   <td className={`py-0.5 pl-2 text-right font-mono tabular-nums font-semibold ${

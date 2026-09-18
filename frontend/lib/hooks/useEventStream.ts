@@ -43,7 +43,7 @@ export function useEventStream(
 
     const connect = async () => {
       if (stopped || document.hidden) return;
-      // ⚠ HELD LOCALLY AS WELL AS IN `abort`. The shared `abort` is reassigned by the NEXT
+      //  Held locally as well as in `abort`. The shared `abort` is reassigned by the NEXT
       // connect, so a catch block reading it could ask "was I aborted?" of a controller belonging
       // to a later attempt. `ctrl` is this attempt's own.
       const ctrl = new AbortController();
@@ -69,8 +69,8 @@ export function useEventStream(
       } catch {
         setConnected(false);
         /**
-         * ⚠⚠ AN ABORT WE CAUSED IS NOT A CONNECTION FAILURE, AND COUNTING IT HAS A CONSEQUENCE
-         * BEYOND THE CONSOLE. `failures` is what trips `failed=true`, which tells every caller to
+         *  An abort we caused is not a connection failure, and counting it has a consequence
+         * Beyond the console. `failures` is what trips `failed=true`, which tells every caller to
          * abandon the stream and fall back to POLLING — so a page that was hidden and shown a few
          * times could talk itself into permanent polling while the stream was working perfectly.
          * The visibility handler resets the counter, which is why this has not bitten yet; that is

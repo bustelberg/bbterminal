@@ -115,7 +115,7 @@ export async function tailRunToConsole(
       const page = await fetchPage(runId, cursor, signal);
       if (!page) return;
       if (page.gap) {
-        console.warn(`⚠ [${label}] ${page.gap} step(s) were dropped from the server's ring buffer — the transcript below has a gap`);
+        console.warn(` [${label}] ${page.gap} step(s) were dropped from the server's ring buffer — the transcript below has a gap`);
       }
       for (const e of page.entries ?? []) emit(e, label);
       cursor = page.next ?? cursor;

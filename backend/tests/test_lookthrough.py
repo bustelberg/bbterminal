@@ -8,7 +8,7 @@ weight — a sector view of two bond ETFs and a cash line, presented as the port
 After expansion: 168 legs, 29.2% classified, Technology 34.9% / Financials 15.5% / Consumer
 Cyclical 14.4%.
 
-⚠ FIVE CLASSES WERE DELETED FROM HERE ON 2026-07-29. DO NOT RE-ADD THEM IN THIS SHAPE.
+ FIVE CLASSES WERE DELETED FROM HERE ON 2026-07-29. DO NOT RE-ADD THEM IN THIS SHAPE.
 
     TestTheDrilldownAddsUpToItsOwnHeading · TestSelectingAClassMustNotMoveTheChart
     TestTheAllocationCountsTheExpandedHoldings · TestTheHoldingsTableReconcilesWithTheChartBesideIt
@@ -67,7 +67,7 @@ def _patch(monkeypatch, **kw):
     # and passing the fake through is what proves the two share one connection rather than each
     # reaching for their own.
     #
-    # ⚠ BOTH HANDLES, because the position/model reads moved into the SHARED `routers._airs_ref`
+    #  Both handles, because the position/model reads moved into the SHARED `routers._airs_ref`
     # (2026-08-11) and that module resolves `deps.supabase` at call time. Patching only this
     # module left those reads pointing at the real proxy, which tried to build a client and failed
     # with `KeyError: 'SUPABASE_URL'` — i.e. a refactor elsewhere silently took this test's
@@ -95,7 +95,7 @@ class TestItReplacesTheCertificateWithWhatItHolds:
         assert round(sum(leg["percentage"] for leg in legs), 6) == 100.0
 
     def test_a_child_that_does_not_sum_to_100_is_renormalised(self, monkeypatch):
-        """⚠ Scaled by the child's OWN total, not by 100. A composition summing to 80% would
+        """ Scaled by the child's OWN total, not by 100. A composition summing to 80% would
         otherwise shrink the parent's stake in it and hand the difference to everything else."""
         _patch(monkeypatch, child_rows=[(STOCK_A, "Apple", 48.0), (STOCK_B, "Nvidia", 32.0)])
         legs, _ = LT.expand_positions(1, "2026-06-08", _parent(50.0))
@@ -105,7 +105,7 @@ class TestItReplacesTheCertificateWithWhatItHolds:
 
 
 class TestItRefusesToLookThroughToNothing:
-    """⚠ DELETING THE WEIGHT WOULD BE INVISIBLE. Everything else renormalises around the gap, so
+    """ DELETING THE WEIGHT WOULD BE INVISIBLE. Everything else renormalises around the gap, so
     the total still reads 100% and the portfolio has silently lost a position."""
 
     def test_a_target_with_no_composition_stays_an_opaque_leg(self, monkeypatch):
@@ -125,7 +125,7 @@ class TestItRefusesToLookThroughToNothing:
 
 
 class TestCycles:
-    """⚠ A CERTIFICATE CAN POINT BACK AT ITS OWN HOLDER. `TOPS_STS_L` holds 'Star Selection Index'
+    """ A CERTIFICATE CAN POINT BACK AT ITS OWN HOLDER. `TOPS_STS_L` holds 'Star Selection Index'
     at 100%, so a link to the portfolio being expanded is a real shape in this data, not a
     hypothetical. Unguarded it recurses until the stack ends."""
 
@@ -185,7 +185,7 @@ class TestBothConsumersUseIt:
 
 
 class TestTheBookSideIsExpandedToo:
-    """⚠ TWO PATHS REACH THESE CHARTS, AND ONLY ONE WAS FIXED FIRST.
+    """ TWO PATHS REACH THESE CHARTS, AND ONLY ONE WAS FIXED FIRST.
 
     `weight_by='book'` weights the composition by AIRS's own EUR values, built from the ACCOUNT's
     holdings rather than the model's percentages — a separate loader. On ToppenbergBeheer
@@ -198,7 +198,7 @@ class TestTheBookSideIsExpandedToo:
         """A composition chart that changes the book's total is worse than an opaque one: every
         percentage on it is a share of a total the reader can no longer check.
 
-        ⚠ `_grid` IS PATCHED HERE AND DID NOT USED TO BE. Every row below already carries a
+         `_grid` IS PATCHED HERE AND DID NOT USED TO BE. Every row below already carries a
         `bucket`, and `_reclassify_book_rows` used to return immediately in that case. Since the
         `Equity ETF` merge (2026-08-18) it reads the asset grid for EVERY row instead, because
         `is_fund` has to be on all of them — the bucket no longer distinguishes a fund from an
@@ -223,7 +223,7 @@ class TestTheBookSideIsExpandedToo:
         assert sum(r["start_value_eur"] for r in out) == 120.0
 
     def test_the_start_value_travels_with_the_current_one(self, monkeypatch):
-        """⚠ Expanding `current_value_eur` alone gives every leg a return computed against a start
+        """ Expanding `current_value_eur` alone gives every leg a return computed against a start
         of zero — the per-bucket return is Sum(now) / Sum(start) - 1."""
         from routers import _airs_portfolio_analysis as A
 
@@ -279,7 +279,7 @@ class TestTheBookSideIsExpandedToo:
 
 
 class TestEveryPathThatReadsAPortfolioExpandsIt:
-    """⚠ FOUR LOADERS REACH THESE CHARTS, AND THEY WERE FIXED ONE AT A TIME.
+    """ FOUR LOADERS REACH THESE CHARTS, AND THEY WERE FIXED ONE AT A TIME.
 
     Each fix left the others contradicting it, and the contradictions got worse as they narrowed:
 
@@ -301,7 +301,7 @@ class TestEveryPathThatReadsAPortfolioExpandsIt:
         from routers import _airs_attribution_basis as basis
         from routers import _airs_portfolio_analysis as A
 
-        # The two composition paths. ⚠ The sector/region/currency AXES now weigh through the
+        # The two composition paths.  The sector/region/currency AXES now weigh through the
         # shared basis loader (2026-07-31), so they expand by reading the same function the
         # attribution table does; `_book_port_items` still backs the allocation pie + the
         # holdings table and expands on its own.
@@ -324,7 +324,7 @@ class TestEveryPathThatReadsAPortfolioExpandsIt:
 
 
 class TestNoDuplicateISINReachesTheUI:
-    """⚠ REACT MAY DROP A ROW, NOT JUST WARN. The drill-down lists are keyed by ISIN, and a
+    """ REACT MAY DROP A ROW, NOT JUST WARN. The drill-down lists are keyed by ISIN, and a
     portfolio can hold a stock directly AND through two certificates — so an unmerged expansion
     emits it three times. React logs "Encountered two children with the same key" and documents
     the behaviour as unsupported, free to duplicate OR OMIT a child. A holdings list that silently
@@ -355,7 +355,7 @@ class TestNoDuplicateISINReachesTheUI:
         assert len([r for r in out if r.get("isin") == "US67066G1040"]) == 1, "one leg per ISIN"
         merged = next(r for r in out if r["isin"] == "US67066G1040")
         assert merged["current_value_eur"] == 200.0
-        # ⚠ The START value must be summed too, or the merged leg's return is computed against
+        #  The START value must be summed too, or the merged leg's return is computed against
         # one fragment's base.
         assert merged["start_value_eur"] == 160.0
         assert sum(r["current_value_eur"] for r in out) == 200.0

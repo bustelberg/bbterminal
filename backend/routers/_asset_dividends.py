@@ -349,7 +349,7 @@ def _resolve_listing(isin: str, *, force: bool = False) -> dict:
         supabase.table("gurufocus_listing").upsert(row, on_conflict="isin").execute()
         return row
 
-    # ⚠ GuruFocus's isin/ endpoint 500s INTERMITTENTLY — measured 2026-07-27, Apple's ISIN needed
+    #  GuruFocus's isin/ endpoint 500s INTERMITTENTLY — measured 2026-07-27, Apple's ISIN needed
     # 3 tries and Shopify's 3 before a 200. A 500 gives `data=None`, and the old code read that as
     # an empty candidate list and NEGATIVE-CACHED it as `not_found` — poisoning the cache so a
     # perfectly resolvable ISIN (CA82509L1076 -> NASDAQ:SHOP) stayed unresolved until a manual
@@ -475,14 +475,14 @@ def _exchange(exchange_id: int | None) -> tuple[str | None, str | None]:
 def _backfill_fx_history(currency: str, need_from: str) -> str | None:
     """Extend `fx_rate` BACKWARDS for `currency` to cover `need_from`. Returns the new start.
 
-    ⚠⚠ IT DELEGATES NOW (2026-08-18). This used to be the ONLY backwards fill in the codebase, a
+     IT DELEGATES NOW (2026-08-18). This used to be the ONLY backwards fill in the codebase, a
     private one in a dividends router, because `momentum.data.fx.sync_fx_rates_to_db` extended
     forward and nothing extended back. That function now does both legs, so this is a thin call
     into it rather than a second implementation — two ways to widen one table is two places for the
     peg derivation and the chunking to drift, on a table whose gaps produce a plausible NUMBER
     rather than a blank (see `sync_fx_rates_to_db`'s own note).
 
-    ⚠ ONE CURRENCY, ON DEMAND, from a request path — hence the narrow window and the swallowed
+     ONE CURRENCY, ON DEMAND, from a request path — hence the narrow window and the swallowed
     failure: no EUR line on a dividend chart is better than a 500.
     """
     from datetime import date as _date  # noqa: PLC0415

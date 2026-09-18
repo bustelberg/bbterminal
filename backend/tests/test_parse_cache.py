@@ -1,11 +1,11 @@
 """`common/parse_cache.py` — reusing a parse must never let one caller see another's edits.
 
-⚠ THE HAZARD IS NOT HYPOTHETICAL. `_benchmark_index._members` runs `r["currency"] = ...` in place
+ THE HAZARD IS NOT HYPOTHETICAL. `_benchmark_index._members` runs `r["currency"] = ...` in place
 over the rows it reads. If the memo handed out the master list instead of copies, the next caller
 would inherit those edits — and ONLY on a cache hit, so the bug would appear under repeated reads
 and vanish the moment you looked at a cold one.
 
-⚠ AND A SHALLOW COPY IS ONLY SAFE WHEN EVERY VALUE IS A SCALAR. `dict(row)` shares nested values by
+ AND A SHALLOW COPY IS ONLY SAFE WHEN EVERY VALUE IS A SCALAR. `dict(row)` shares nested values by
 reference; the schema has `jsonb` and array columns (`asset_universe.params`,
 `airs_model_portfolio.positions_dates`), so flatness is verified per payload rather than assumed.
 """
@@ -21,7 +21,7 @@ from common.parse_cache import _copy_rows, _is_flat
 def _response(body: bytes) -> httpx.Response:
     """An `httpx.Response` postgrest can actually parse.
 
-    ⚠ THE `request=` IS REQUIRED AND ITS ABSENCE FAILS LATE. `httpx.Response(200, content=...)`
+     THE `request=` IS REQUIRED AND ITS ABSENCE FAILS LATE. `httpx.Response(200, content=...)`
     constructs fine, but postgrest reads `response.request` to find the Content-Range header for
     the row count, and httpx raises `RuntimeError: The request instance has not been set on this
     response` only at that point — so the omission looks like a bug in the code under test rather

@@ -234,7 +234,7 @@ export default function DiversifierAnalysis() {
               className="w-24 bg-page border border-neutral-700 rounded px-2 py-1 text-xs font-mono text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none placeholder-fg-faint"
             />
             {d.cutoffYear && (
-              <button onClick={() => d.setCutoffYear('')} className="text-fg-subtle hover:text-fg-strong" title="Clear filter">✕</button>
+              <button onClick={() => d.setCutoffYear('')} className="text-fg-subtle hover:text-fg-strong" title="Clear filter"></button>
             )}
           </label>
         </div>

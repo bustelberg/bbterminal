@@ -25,13 +25,13 @@ THE BRIDGE IS THE ISIN, AND IT IS A JOIN, NOT A COLUMN
     count already follows — *the count is a VIEW, never a column*. The join has no drift because
     it has nothing to keep in sync.
 
-⚠ THE WEIGHTING MATHS IS NOT COPIED — IT IS REUSED (`_benchmark_index._window_rows`).
+ THE WEIGHTING MATHS IS NOT COPIED — IT IS REUSED (`_benchmark_index._window_rows`).
     Start-of-window cap weights (roll the cap back on the price move; weighting by TODAY's cap is
     look-ahead bias and turned +9.10% into +21.70%), split-adjustment, per-date FX. A second copy
     of that loop is a second place for the bias to grow back. This module's job is only to supply
     the same shape of `members` and `closes` from a different source.
 
-⚠ STILL NOT FLOAT-ADJUSTED. `market_cap_eur` is a FULL market cap, and MSCI weights ACWI on free
+ STILL NOT FLOAT-ADJUSTED. `market_cap_eur` is a FULL market cap, and MSCI weights ACWI on free
     float. That over-weights state- and family-held names (mostly EM and Asia) whichever price
     source we use — it is a property of the weight, not of the price. iShares' own file carries
     the float weights; using them is the next step, not this one.
@@ -65,26 +65,26 @@ def window_marks_multi(analysis_ids: list[int], lookback: str, start_anchors: li
                        end: str) -> dict[str, dict[int, dict]]:
     """`{anchor: window_marks(...)}` for several anchors, in ONE COPY.
 
-    ⚠ WHY: `index_returns` prices a model's YTD **and** its since-inception window, and its
+     WHY: `index_returns` prices a model's YTD **and** its since-inception window, and its
     docstring said "ONE price load" — but it ran `window_marks` once per anchor, so the Analyse
     modal issued **two COPYs over the identical 500 ids and the identical date window**, differing
     only in which anchor selected the opening mark. Measured 2026-08-11: 356 ms + 352 ms, of which
     one was pure duplication. The bars are the same bars; only the *selection* differs, and
     selection is what SQL is good at.
 
-    ⚠ THE JUMP SET IS PER-ANCHOR AND MUST STAY THAT WAY. Jumps are filtered to those at or after
+     THE JUMP SET IS PER-ANCHOR AND MUST STAY THAT WAY. Jumps are filtered to those at or after
     that anchor's own opening mark (`prev_date >= s.target_date`) — a split BEFORE the opening mark
     is already absorbed into it and applying it again would rescale a price that was never on the
     old basis. So `s` is computed per (instrument, anchor) and the jump join carries the anchor.
     A single shared jump set would be wrong for whichever anchor is later.
 
-    ⚠ `end` IS ANCHOR-INDEPENDENT and is emitted ONCE, then copied into every anchor's dict —
+     `end` IS ANCHOR-INDEPENDENT and is emitted ONCE, then copied into every anchor's dict —
     emitting it per anchor would multiply the largest part of the result by the anchor count for
     no information.
     """
     anchors = sorted(set(start_anchors))
     if not analysis_ids or not anchors:
-        # ⚠ SHAPE PARITY WITH THE PER-ANCHOR LOADER, which yields `{anchor: {}}` rather than `{}`.
+        #  Shape parity with the per-anchor loader, which yields `{anchor: {}}` rather than `{}`.
         # `index_returns` indexes `marks[s]` directly, so a bare `{}` is a KeyError, not a
         # fallback.
         return {a: {} for a in anchors}
@@ -148,12 +148,12 @@ def window_marks(analysis_ids: list[int], lookback: str, start_anchor: str,
     """Per instrument, ONLY what pricing one window needs: the opening mark, the closing mark, and
     the consecutive-bar jumps between them. One `COPY`; the selection happens in Postgres.
 
-    ⚠ AN INDEX RETURN READS TWO PRICES PER MEMBER AND WE WERE SHIPPING THE WHOLE SERIES. Measured
+     AN INDEX RETURN READS TWO PRICES PER MEMBER AND WE WERE SHIPPING THE WHOLE SERIES. Measured
     2026-07-30 on the local DB: ACWI's YTD loaded **264,678 close rows** to use 3,368 numbers —
     roughly 8 MB across the wire for 0.1% of it, on every panel load. SP500 loaded 77,567 for 978.
     The window function below returns ~2 rows per member instead.
 
-    ⚠ IT IS NOT "JUST THE TWO PRICES", AND THAT IS THE WHOLE DESIGN. Our stored closes are NOT
+     IT IS NOT "JUST THE TWO PRICES", AND THAT IS THE WHOLE DESIGN. Our stored closes are NOT
     split-adjusted and cannot self-heal (`_split_adjust`), and a split is visible ONLY as a one-day
     discontinuity between CONSECUTIVE bars. Two bare marks cannot tell KLA's 9:1 from an −89% year
     — and the bogus ratio would hit the index twice, because the start weight is backed out through
@@ -161,17 +161,17 @@ def window_marks(analysis_ids: list[int], lookback: str, start_anchor: str,
     `_JUMP_LO.._JUMP_HI` band, and `split_factor` applies the whitelist to those in Python. The
     band is a cheap PRE-FILTER; the decision stays where the whitelist lives.
 
-    ⚠ `end` IS AN UPPER BOUND, NEVER "TODAY'S PRICE". The closing mark is the newest bar at or
+     `end` IS AN UPPER BOUND, NEVER "TODAY'S PRICE". The closing mark is the newest bar at or
     before it, per member — a name whose vendor lags by a day is marked at its own last close, the
     same rule the full-series path's `s[-1]` gave.
 
-    ⚠ AND THE SCAN MUST BEGIN AT `lookback`, NOT AT `start_anchor`. The opening mark is the last
+     AND THE SCAN MUST BEGIN AT `lookback`, NOT AT `start_anchor`. The opening mark is the last
     close ON OR BEFORE the anchor — 31 December IS the 1 January mark, and no exchange prints a bar
     on New Year's Day. Bounding the window at the anchor found an opening mark for nobody: measured,
     every one of the 25 AEX members came back with `start: None` and the index priced zero
     constituents. The caller passes the same 45-day lookback the series path always used.
 
-    ⚠ THE JUMPS ARE THE ONES AT OR AFTER EACH MEMBER'S OWN OPENING MARK — hence the join back to
+     THE JUMPS ARE THE ONES AT OR AFTER EACH MEMBER'S OWN OPENING MARK — hence the join back to
     `s`. A split BEFORE the opening mark has already been absorbed into it and must not be applied
     again; one AFTER it must (`_split_adjust` rescales every close earlier than the split, which
     the opening mark then is). Filtering on the anchor date instead would miss a split falling
@@ -235,11 +235,11 @@ _COVERAGE_WARN_PCT = 97.0
 def _missing_by_country(ids: list[int], priced: list[dict]) -> list[dict]:
     """The countries this rebuild is missing most of: `[{country, missing, members}]`, worst first.
 
-    ⚠ BEST EFFORT, AND AN EMPTY LIST MEANS "COULD NOT SAY", NOT "NOTHING MISSING". `covered_pct`
+     BEST EFFORT, AND AN EMPTY LIST MEANS "COULD NOT SAY", NOT "NOTHING MISSING". `covered_pct`
     already carries the magnitude; this only ever adds the WHERE. A failure here must cost the
     modal nothing, so it is caught and swallowed — a missing sentence, never a missing panel.
 
-    ⚠ COUNTED IN COMPANIES, NOT WEIGHT. Weight would be the better measure and is not available:
+     COUNTED IN COMPANIES, NOT WEIGHT. Weight would be the better measure and is not available:
     an unpriced member has no cap in the asset world, which is why it is unpriced. A count is the
     honest thing we can actually say, and the copy says "names" rather than implying weight.
     """
@@ -269,19 +269,19 @@ def _missing_by_country(ids: list[int], priced: list[dict]) -> list[dict]:
 def _universe_company_ids(label: str) -> list[int]:
     """Every company in the universe.
 
-    ⚠⚠ PAGED, AND THE UNPAGED VERSION WAS A LIVE PRODUCTION BUG THAT LOCAL DEV COULD NOT SEE.
+     PAGED, AND THE UNPAGED VERSION WAS A LIVE PRODUCTION BUG THAT LOCAL DEV COULD NOT SEE.
     This was a bare `.execute()`. PostgREST caps a response at 1,000 rows on Supabase cloud and
     10,000 locally, and truncates SILENTLY — so every local run returned all 1,998 ACWI rows and
     looked correct, while production built the ACWI index from about half its constituents and
     Leonteq from 1,000 of 1,639. A cap-weighted index over an arbitrary half of its members is not
     a slightly-off number; it is a different index, and nothing anywhere reported a problem.
 
-    ⚠ ORDERED ON THE PK. Postgres makes no promise about row order across separate LIMIT/OFFSET
+     ORDERED ON THE PK. Postgres makes no promise about row order across separate LIMIT/OFFSET
     queries, so an unordered page boundary serves some rows twice and skips others — which is how
     the (since-removed) membership backfill script came to report the S&P at 28, 411 and 503
     members on three consecutive runs of identical code.
 
-    ⚠ ADVANCE BY WHAT CAME BACK, break on an empty page. `len(rows) < page` is only correct while
+     ADVANCE BY WHAT CAME BACK, break on an empty page. `len(rows) < page` is only correct while
     the server's cap is at least the page size, which is precisely the assumption that failed here.
     """
     uni = (supabase.table("universe").select("universe_id")
@@ -304,7 +304,7 @@ def _universe_company_ids(label: str) -> list[int]:
 def _universe_analysis_ids(label: str) -> list[int]:
     """The universe's constituents as ASSET ids, straight from `universe_asset_membership`.
 
-    ⚠ `universe_asset_membership` IS A VIEW, NOT A TABLE (migration 20260806060000). It IS the
+     `universe_asset_membership` IS A VIEW, NOT A TABLE (migration 20260806060000). It IS the
     three-hop join `universe_membership.company_id -> company.isin -> asset_execution.isin`,
     evaluated live, so it cannot drift from the membership it mirrors. It was briefly a
     backfilled table and that was a mistake: nothing wrote to it except a manual script, and it
@@ -312,7 +312,7 @@ def _universe_analysis_ids(label: str) -> list[int]:
     `/asset-pipeline` Benchmarks chips — already depended on it. Measured cost of the view on the
     full grid: 28.0 ms against the table's 29.9-33.9 ms, i.e. none.
 
-    ⚠ PAGED AND ORDERED, for the same reason as `_universe_company_ids` — ACWI is 1,723 rows here
+     PAGED AND ORDERED, for the same reason as `_universe_company_ids` — ACWI is 1,723 rows here
     and PostgREST silently caps at 1,000 on cloud. Ordering on `analysis_id` alone is safe ONLY
     because of the `.eq(universe_id)` filter above it: the view is DISTINCT on the pair, so the
     key is unique within one universe. A reader that drops that filter needs its own tiebreaker.
@@ -337,13 +337,13 @@ def _universe_analysis_ids(label: str) -> list[int]:
 def file_member_count(label: str) -> int:
     """How many constituents the PROVIDER'S FILE authorises for this universe.
 
-    ⚠⚠ THIS NUMBER EXISTS BECAUSE MEMBERSHIP IS NO LONGER AUTHORED IN ONE PLACE (2026-09-01).
+     THIS NUMBER EXISTS BECAUSE MEMBERSHIP IS NO LONGER AUTHORED IN ONE PLACE (2026-09-01).
     `universe_asset_membership` now unions `index_file_membership` — ACWI constituents resolved
     straight from the iShares holdings file by ticker+exchange — precisely so a name outside the
     GuruFocus subscription can be a member. 129 of ACWI's are: Constellation Software, Royal Bank
     of Canada, BHP, Commonwealth Bank. They have no `company` row at all.
 
-    ⚠ IT IS NOT A DENOMINATOR AND MUST NOT BECOME ONE. Most of these rows ARE also reachable
+     IT IS NOT A DENOMINATOR AND MUST NOT BECOME ONE. Most of these rows ARE also reachable
     through the company world (1,409 of 1,540 on ACWI), so adding this to `universe_members` would
     double-count. It is reported beside that count so a reader can see the second source exists;
     the ratio it sits next to is still company-side and still says so.
@@ -368,13 +368,13 @@ def file_member_count(label: str) -> int:
 def cap_stamp_range(rows: list[dict]) -> tuple[str | None, str | None, int]:
     """`(oldest, newest, how_many_unstamped)` over `market_cap_checked_at`.
 
-    ⚠⚠ WHEN A CAP-WEIGHTED INDEX WAS MEASURED IS A RANGE, NOT A DATE, and reporting one date would
+     WHEN A CAP-WEIGHTED INDEX WAS MEASURED IS A RANGE, NOT A DATE, and reporting one date would
     be a claim the data does not support. `market_cap_checked_at` is stamped per constituent by
     whichever refresh last touched that name, so on a live index the stamps spread over days. A
     caller that printed only the newest would be describing the freshest constituent and implying
     it of all 1,700.
 
-    ⚠⚠ AND THE UNSTAMPED ONES ARE COUNTED, NEVER JUST SKIPPED. A plain min/max silently narrows to
+     AND THE UNSTAMPED ONES ARE COUNTED, NEVER JUST SKIPPED. A plain min/max silently narrows to
     whatever happens to carry a stamp, so an index where two names were refreshed this morning and
     nothing else has ever been stamped would report a tight, recent, entirely meaningless window —
     and it would look more precise than a wide honest one. The count is what tells the reader the
@@ -393,18 +393,18 @@ def members(label: str) -> tuple[list[dict], dict]:
     slot carries the `analysis_id`, because the price series is `asset_price`, not `metric_data`.
     The name is the loop's, not ours; what matters is that ONE loop does the weighting.
 
-    ⚠ ONE COMPANY, ONE ROW. Yahoo, like GuruFocus, reports the FULL company market cap on EVERY
+     ONE COMPANY, ONE ROW. Yahoo, like GuruFocus, reports the FULL company market cap on EVERY
     share class — Alphabet is GOOGL *and* GOOG, each carrying the whole cap, so a naive sum counts
     it twice (11.3% of the S&P's weight, fictional). Deduped on the COMPANY name, keeping the
     largest cap, exactly as `_benchmark_index._members` does.
     """
-    # ⚠⚠ TWO DIFFERENT COUNTS, AND CONFLATING THEM WOULD HIDE THE THING COVERAGE EXISTS TO SHOW.
+    #  Two different counts, and conflating them would hide the thing coverage exists to show.
     #   `universe_members` is the size of the INDEX; the priced count is what we could bridge into
     #   the asset world and price. Taking the denominator from the asset side would make
     #   `covered_pct` read ~100% while a fifth of ACWI was missing: the bridge loss would vanish
     #   into the number designed to report exactly that kind of loss.
     #
-    # ⚠⚠ THE DENOMINATOR IS NO LONGER THE COMPANY WORLD ALONE (2026-09-01). It used to be, and the
+    #  The denominator is no longer the company world alone (2026-09-01). It used to be, and the
     #   note here said so, "because that is where membership is authored" — which stopped being
     #   true when `universe_asset_membership` began unioning `index_file_membership`. ACWI gained
     #   129 constituents with NO company row (Constellation Software, RBC, BHP, Commonwealth Bank),
@@ -415,7 +415,7 @@ def members(label: str) -> tuple[list[dict], dict]:
         return [], {"universe_members": 0, "priced": 0, "covered_pct": None}
 
     aids = _universe_analysis_ids(label)
-    # ONE COPY for the whole universe (502 ids) instead of three chunked round trips.
+    # One copy for the whole universe (502 ids) instead of three chunked round trips.
     grid_rows = load_rows_via_copy("asset_grid", _BENCH_GRID_COLS, "analysis_id", aids)
     if grid_rows is None:
         grid_rows = []
@@ -423,7 +423,7 @@ def members(label: str) -> tuple[list[dict], dict]:
             grid_rows += (supabase.table("asset_grid").select(_BENCH_GRID_COLS)
                           .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or [])
 
-    # ⚠ ONE ROW PER ANALYSIS ASSET, NOT PER LISTING. `asset_grid` is one row per EXECUTION, so a
+    #  One row per analysis asset, not per listing. `asset_grid` is one row per EXECUTION, so a
     #   company traded on several venues appears several times — measured on the S&P, 501 assets
     #   come back as 506 rows. Keeping all of them would weight those companies twice. `is_default`
     #   marks the execution the pipeline chose; where it is unset, the deepest price history wins,
@@ -444,7 +444,7 @@ def members(label: str) -> tuple[list[dict], dict]:
         if better:
             grid[r["analysis_id"]] = r
 
-    # WHERE THE CAP CAME FROM AND WHEN — for the panel's per-row provenance, not for the maths.
+    # Where the cap came from and when — for the panel's per-row provenance, not for the maths.
     # `asset_grid` carries `market_cap_eur` and its currency but not the native figure or the
     # timestamp; both live on `asset_analysis`, which the Refresh button stamps every run
     # (`_benchmark_refresh._caps`). Surfaced because a cap is a fetched number with an age, and a
@@ -458,14 +458,14 @@ def members(label: str) -> tuple[list[dict], dict]:
                   .in_("analysis_id", priced_aids[i:i + IN_CHUNK_SIZE]).execute().data or []):
             caps[r["analysis_id"]] = r
 
-    # ⚠⚠ ONE COMPANY, ONE ROW — AND THE ASSET WORLD DOES NOT MAKE THIS UNNECESSARY. Keying
+    #  One company, one row — and the asset world does not make this unnecessary. Keying
     #   membership on `analysis_id` collapses a company's LISTINGS, not its SHARE CLASSES: those
     #   have different ISINs, hence different assets. Measured on the S&P after the repoint,
     #   Alphabet is still two rows (`US02079K3059` and `US02079K1079`) each carrying the FULL
     #   ~EUR 3.9tn cap, and Fox Corp likewise. Dropping this dedupe would add ~11% of fictional
     #   weight to the index — the exact figure `_benchmark_index` records for the same trap.
     #
-    # ⚠ THE KEY PREFERS `gf_company_name`, THE COMPANY-WORLD NAME, so the dedupe behaves exactly as
+    #  The key prefers `gf_company_name`, THE COMPANY-WORLD NAME, so the dedupe behaves exactly as
     #   it did before the repoint. It falls back to the asset name for a constituent with no
     #   company row — those cannot collide with a share-class sibling, since a sibling would have
     #   brought a company row with it.
@@ -495,7 +495,7 @@ def members(label: str) -> tuple[list[dict], dict]:
 
     out = list(by_name.values())
     caps_from, caps_to, caps_unstamped = cap_stamp_range(out)
-    # ⚠⚠ WHICH COUNTRIES ARE MISSING, NOT JUST HOW MANY NAMES. The note under `covered_pct` has
+    #  Which countries are missing, not just how many names. The note under `covered_pct` has
     #   always said the missing names are "systematic (a whole country), not random" — and the
     #   warning on screen said the opposite in effect, blaming "no price series yet" and inviting
     #   the reader to treat every tilt as merely approximate. Measured on ACWI: **India is 5 priced
@@ -504,19 +504,19 @@ def members(label: str) -> tuple[list[dict], dict]:
     #   against this benchmark is not looking at a slightly noisy index, they are looking at one
     #   with India removed. Naming that is the difference between a caveat and a warning.
     #
-    # ⚠ GATED ON THE SAME THRESHOLD THE UI USES TO SHOW THE WARNING. A fully-covered universe pays
+    #  Gated on the same threshold the ui uses to show the warning. A fully-covered universe pays
     #   nothing for this — there is no sentence to write — and this sits on the Analyse modal's
     #   one request, whose wall clock is the reader's wait.
     pct = (len(out) / len(ids) * 100.0) if ids else None
     missing_countries = (_missing_by_country(ids, out)
                          if pct is not None and pct < _COVERAGE_WARN_PCT else [])
     coverage = {
-        # ⚠⚠ STILL THE COMPANY WORLD, AND `priced` CAN NOW EXCEED IT. Since 2026-09-01
+        #  Still the company world, and `priced` CAN NOW EXCEED IT. Since 2026-09-01
         # `universe_asset_membership` unions `index_file_membership`, so ACWI has 129 constituents
         # with no `company` row at all — Constellation Software, RBC, BHP, Commonwealth Bank. They
         # are priced and they are in the index; they are not in this denominator.
         #
-        # ⚠ REPORTED AS TWO NUMBERS RATHER THAN ONE WIDER ONE, deliberately. Adding them together
+        #  Reported as two numbers rather than one wider one, deliberately. Adding them together
         # needs the count of file members the company world ALSO reaches, and that is the bridge
         # this module deleted a query for — re-deriving it to make one ratio prettier would put a
         # round trip back on the benchmark path. Two honest numbers beat one invented denominator,
@@ -555,7 +555,7 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
 
     ids = [m["company_id"] for m in mem]
     fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
-    # ⚠ ONE QUERY FOR ALL WINDOWS. Each window still has its OWN opening mark and its OWN jump
+    #  One query for all windows. Each window still has its OWN opening mark and its OWN jump
     # set — a mark selected for January cannot answer for a since-inception start — but the BARS
     # are identical, so only the selection differs and Postgres does it per anchor in one pass.
     # This function's docstring already claimed "ONE price load"; until 2026-08-11 it ran one COPY
@@ -620,7 +620,7 @@ def compute_index(label: str, year: int | None = None, start: str | None = None)
     """The `/benchmarks` panel's index — the ASSET-path twin of `_benchmark_index.compute_index`,
     returning the identical shape.
 
-    ⚠ WHY THE PANEL MOVED HERE (2026-07-16). Its own subtitle promises "same basis as a portfolio,
+     WHY THE PANEL MOVED HERE (2026-07-16). Its own subtitle promises "same basis as a portfolio,
     so the numbers are comparable" — and every portfolio on that page is priced from `asset_price`
     (yfinance) while the panel was priced from GuruFocus. Two price vendors, two adjustment
     conventions, two FX sources; the difference between them reads as alpha. That is the rule the
@@ -661,7 +661,7 @@ def compute_index(label: str, year: int | None = None, start: str | None = None)
 
     ids = [m["company_id"] for m in mem]
     fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
-    # ⚠ ONLY THE MARKS THIS WINDOW USES — see `window_marks`. The panel was loading every close of
+    #  Only the marks this window uses — see `window_marks`. The panel was loading every close of
     # every constituent (ACWI: 264,678 rows) to read two prices each. Falls back to the whole
     # series when COPY is unavailable, which is the only way `window_marks` can return nothing.
     marks = window_marks(ids, lookback, start_anchor, today)
@@ -677,7 +677,7 @@ def compute_index(label: str, year: int | None = None, start: str | None = None)
                 "ytd_eur_pct": None, "ytd_local_pct": None,
                 "note": "No constituent had a price on both ends of the window."}
 
-    # THE SAME `index_weights` as every other surface — capped where the index caps.
+    # The same `index_weights` as every other surface — capped where the index caps.
     for r, x in zip(rows, index_weights(rows, label)):
         r["weight_pct"] = x
     ytd_eur = sum(r["weight_pct"] / 100.0 * r["return_eur_pct"] for r in rows)

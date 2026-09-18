@@ -4,7 +4,7 @@
  * `MomentumTopSelectie Neutraal September` — the strategy's own name, then the month the
  * portfolio is FOR.
  *
- * ⚠⚠ THE MONTH COMES FROM THE SNAPSHOT'S `as_of_date`, NEVER FROM `today`. `as_of_date` is
+ *  The month comes from the snapshot's `as_of_date`, NEVER FROM `today`. `as_of_date` is
  * the GRID date the period is anchored to — the rebalance date the picks were decided for
  * (see `momentum/schedule.compute_next_due_at`, which reads exactly this column as its
  * reference). Those two disagree for several days every month by DESIGN: the rebalance for
@@ -12,11 +12,11 @@
  * fires from the Saturday, so a file downloaded on 5 September is the SEPTEMBER portfolio.
  * Stamping it "August" would misfile the one export somebody keeps.
  *
- * ⚠ ENGLISH MONTH NAMES, matching every other date this app renders (`LongEquityUniverse`,
+ *  English month names, matching every other date this app renders (`LongEquityUniverse`,
  * `FrozenUniversesPanel`, `AirsPortfolioUpload` all format `en-GB`/`en-US`). The strategy
  * NAME is whatever the user typed and is passed through untouched, Dutch or otherwise.
  *
- * ⚠ NO YEAR, as specified. Two Septembers a year apart therefore collide in a downloads
+ *  No year, as specified. Two Septembers a year apart therefore collide in a downloads
  * folder — the browser will suffix "(1)", which is a worse label than a year would be. Say
  * so before changing it: the name was asked for in exactly this shape.
  */
@@ -29,7 +29,7 @@ const MONTHS = [
 /**
  * `(strategyName, asOfDate)` → the export basename, WITHOUT extension or date stamp.
  *
- * ⚠ PARSED OFF THE STRING, NOT THROUGH `new Date()`. `as_of_date` is a plain `YYYY-MM-DD`
+ *  Parsed off the string, not through `new Date()`. `as_of_date` is a plain `YYYY-MM-DD`
  * calendar date with no time and no zone; `new Date('2026-09-01')` is parsed as UTC
  * MIDNIGHT and then read back in the viewer's local zone, so anyone west of Greenwich gets
  * the 31st of August — the month boundary is precisely where a scheduled strategy's file

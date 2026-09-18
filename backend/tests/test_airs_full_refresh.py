@@ -1,6 +1,6 @@
 """ONE refresh function, both halves, every button.
 
-⚠⚠ THE REPORTED SYMPTOM (2026-08-18): "there should be a single function which we call to fully
+ THE REPORTED SYMPTOM (2026-08-18): "there should be a single function which we call to fully
 refresh a single portfolio, each refresh button needs to make use of the same function."
 
 A portfolio is a PAIR in AIRS — the Fixed model (weights, ISINs, an effective date) and the
@@ -14,7 +14,7 @@ So the same-looking button did different work depending on where the reader came
 button on /management-dashboard could refresh a model at all. Neither half's docstring was wrong;
 there was simply no object called "a portfolio refresh" for either of them to be half of.
 
-⚠ WHAT THESE TESTS PIN IS THE COMPOSITION, NOT THE SCRAPING. Both halves are stubbed — their own
+ WHAT THESE TESTS PIN IS THE COMPOSITION, NOT THE SCRAPING. Both halves are stubbed — their own
 behaviour is covered by `test_airs_refresh_cancel.py` and `test_airs_portfolio_refresh.py`. What
 can only be got wrong HERE is: both halves run, one failing does not cancel the other, an absent
 half is reported rather than assumed, and the verdict is the worse of the two.
@@ -57,7 +57,7 @@ def halves(monkeypatch):
 
 class TestBothHalvesRun:
     def test_from_either_handle(self, halves):
-        """⚠ THE TWO BUTTONS HOLD DIFFERENT HANDLES — the account row knows a `portefeuille`, the
+        """ THE TWO BUTTONS HOLD DIFFERENT HANDLES — the account row knows a `portefeuille`, the
         model row an `id`. Requiring one of them is how they ended up as two functions."""
         F.refresh_portfolio_fully(portefeuille=BOOK)
         assert halves == [("book", BOOK), ("model", MODEL_ID)]
@@ -80,7 +80,7 @@ class TestBothHalvesRun:
 
 
 class TestOneHalfFailingDoesNotLoseTheOther:
-    """⚠ THEY READ DIFFERENT SOURCES. AIRS being down says nothing about Yahoo, and stopping after
+    """ THEY READ DIFFERENT SOURCES. AIRS being down says nothing about Yahoo, and stopping after
     a failed book scan would leave the half that WAS available stale for no reason at all."""
 
     def test_a_failed_book_still_runs_the_model(self, monkeypatch, halves):
@@ -92,7 +92,7 @@ class TestOneHalfFailingDoesNotLoseTheOther:
         assert ("model", MODEL_ID) in halves
         assert out["book_status"] == "error"
         assert out["model_status"] == "ok"
-        # ⚠ AND THE WHOLE THING IS NOT "ok". Half a refresh reported as a refresh is the claim
+        #  And the whole thing is not "ok". Half a refresh reported as a refresh is the claim
         # this module exists to stop.
         assert out["status"] == "error"
 
@@ -116,7 +116,7 @@ class TestOneHalfFailingDoesNotLoseTheOther:
 
 
 class TestAnAbsentHalfIsReportedNotAssumed:
-    """⚠ 18 OF 51 ACCOUNTS HAVE NO MODEL, and a model can exist with no account running it. That
+    """ 18 OF 51 ACCOUNTS HAVE NO MODEL, and a model can exist with no account running it. That
     is a normal state, not a failure — but it must not be reported as a completed half."""
 
     def test_a_book_with_no_model(self, monkeypatch, halves):
@@ -174,7 +174,7 @@ class TestTheTwoHooksAnswerTwoQuestions:
         F.refresh_portfolio_fully(portefeuille=BOOK, on_step=lambda d, t, _m: steps.append((d, t)))
         totals = {t for _d, t in steps}
         assert totals == {6}, f"the two halves disagree about the denominator: {totals}"
-        # ⚠ MONOTONIC. Each half owned the bar before, so a full refresh ran 0->100% twice, which
+        #  MONOTONIC. Each half owned the bar before, so a full refresh ran 0->100% twice, which
         # on screen is indistinguishable from the job having restarted.
         assert [d for d, _t in steps] == sorted(d for d, _t in steps)
         assert steps[-1] == (6, 6)
@@ -195,7 +195,7 @@ class TestTheTwoHooksAnswerTwoQuestions:
 
 
 class TestTheBulkPathIsTheSingleOne:
-    """⚠ `refresh_many` ADDS A THREAD POOL AND NOTHING ELSE. A second bulk implementation is the
+    """ `refresh_many` ADDS A THREAD POOL AND NOTHING ELSE. A second bulk implementation is the
     mistake `scan_one`'s docstring records having already been made one layer down — two copies of
     "scan an account" that had drifted, so only one of them recorded which reports arrived."""
 
@@ -230,7 +230,7 @@ class TestTheBulkPathIsTheSingleOne:
         assert "that book will not scan" in out[1]["message"]
 
     def test_the_cascade_is_off_for_a_sweep(self, monkeypatch, halves):
-        """⚠ THE ASYMMETRY IS DELIBERATE. A single press cascades so the books behind a
+        """ THE ASYMMETRY IS DELIBERATE. A single press cascades so the books behind a
         certificate are re-read too; a sweep reaches those on their own turn, and leaving it on
         would pull nine accounts for TOPS_BEOFF_BEH_DYN alone at four downloads each."""
         kw: list[dict] = []
@@ -243,13 +243,13 @@ class TestTheBulkPathIsTheSingleOne:
 class TestOneHalfOnly:
     """`halves` — the scope the 05:00 tick runs at.
 
-    ⚠⚠ IT IS WHAT MAKES THAT HOUR SAFE. Nothing that scrapes the AIRS accounts may run before AIRS
+     IT IS WHAT MAKES THAT HOUR SAFE. Nothing that scrapes the AIRS accounts may run before AIRS
     has valued the books: the fleet job forces and fires once, so an early pass stores YESTERDAY's
     valuation and nothing re-reads it until tomorrow — holdings a full day behind that look
     perfectly current. The MODEL half has no such hazard (a composition is a dated set of weights;
     its other steps talk to OpenFIGI, the ECB and Yahoo), so it is the half that can run early.
 
-    ⚠ A SKIPPED HALF IS NOT AN ABSENT ONE. "We chose not to" and "there was none" are different
+     A SKIPPED HALF IS NOT AN ABSENT ONE. "We chose not to" and "there was none" are different
     facts, and the verdict must not read either as a failure.
     """
 
@@ -275,7 +275,7 @@ class TestOneHalfOnly:
             portefeuille=BOOK, halves=("book",))["model_status"] == "skipped"
 
     def test_a_failure_in_the_half_that_RAN_still_fails_the_verdict(self, monkeypatch, halves):
-        # ⚠ The skip must not become a way for a real failure to read as ok.
+        #  The skip must not become a way for a real failure to read as ok.
         def _boom(*_a, **_k):
             raise RuntimeError("Yahoo returned nothing")
         monkeypatch.setattr("routers._airs_portfolio_refresh.refresh_portfolio", _boom)

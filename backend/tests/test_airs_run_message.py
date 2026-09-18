@@ -34,7 +34,7 @@ class TestItCountsWhatTheRunDid:
         assert out == {"added": 0, "updated": 0, "up_to_date": 3, "failed": 0, "too_small": 0}
 
     def test_an_account_that_stored_nothing_is_failed_not_updated(self):
-        """⚠ THE ONE THAT MATTERS. Every report can fail while the account is still visited.
+        """ THE ONE THAT MATTERS. Every report can fail while the account is still visited.
         Counting the visit as an update reports work that did not happen."""
         out = count_outcomes([], known={"old"}, outcomes={"old": []})
         assert out["failed"] == 1
@@ -60,7 +60,7 @@ class TestItCountsWhatTheRunDid:
         assert out == {"added": 1, "updated": 2, "up_to_date": 2, "failed": 1, "too_small": 0}
 
     def test_books_the_run_never_looked_at_are_counted_too(self):
-        """⚠⚠ THE PARTITION HAD QUIETLY STOPPED BEING ONE, AND THAT IS THE WHOLE BUG BEHIND
+        """ THE PARTITION HAD QUIETLY STOPPED BEING ONE, AND THAT IS THE WHOLE BUG BEHIND
         "Refresh all says everything is up to date yet the rows show stale".
 
         `bogus_accounts` drops books under the holdings floor from `todo` AFTER `accounts_to_scan`
@@ -109,7 +109,7 @@ class TestTheLineItPrints:
 
 
 class TestItNeverClaimsTheDATAIsCurrent:
-    """⚠⚠ THE LINE SAID "44 ALREADY UP TO DATE" WHILE THE ROWS SAID "3 TRADING DAYS OLD", AND BOTH
+    """ THE LINE SAID "44 ALREADY UP TO DATE" WHILE THE ROWS SAID "3 TRADING DAYS OLD", AND BOTH
     WERE TRUE. Every count here is about OUR COPY — what we fetched and when. The ⓘ on each row
     measures AIRS's VALUATION DATE. Read side by side they are flatly contradictory, and the reader
     is right to believe the pessimistic one.
@@ -137,7 +137,7 @@ class TestItNeverClaimsTheDATAIsCurrent:
         assert msg.endswith("· newest AIRS valuation 2026-08-15")
 
     def test_it_is_omitted_when_the_run_read_nothing(self):
-        """⚠ A SKIP-EVERYTHING RUN LEARNED NO VALUATION DATE. Printing the stored one would state
+        """ A SKIP-EVERYTHING RUN LEARNED NO VALUATION DATE. Printing the stored one would state
         a finding this run did not make — the same rule `count_outcomes` follows for `added`."""
         msg = format_run_message({"added": 0, "updated": 0, "up_to_date": 44, "failed": 0})
         assert "AIRS valuation" not in msg
@@ -149,14 +149,14 @@ class TestItNeverClaimsTheDATAIsCurrent:
         assert msg.index("2 failed") < msg.index("newest AIRS valuation")
 
     def test_the_books_it_never_looked_at_are_named_in_the_line(self):
-        """⚠⚠ THE OTHER HALF OF "up to date, yet the rows show stale". The valuation clause explained
+        """ THE OTHER HALF OF "up to date, yet the rows show stale". The valuation clause explained
         the rows we DID read; this one accounts for the rows we did not. Without it the sentence
         describes a subset of the fleet in the voice of the whole of it — measured 2026-08-17, 29 of
         45 accounts, with four of the unmentioned sixteen twelve trading days behind."""
         msg = format_run_message(
             {"added": 0, "updated": 28, "up_to_date": 1, "failed": 0, "too_small": 16})
         assert "16 not re-read" in msg and "under 5 holdings" in msg
-        # ⚠ AND IT SAYS THE SKIP IS BOUNDED. "not re-read" alone reads as "never", which is what it
+        #  And it says the skip is bounded. "not re-read" alone reads as "never", which is what it
         # used to be and is the reason four rows rotted for twelve trading days.
         assert "14 days" in msg
 

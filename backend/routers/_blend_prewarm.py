@@ -13,20 +13,20 @@ WHY
     viewer of every portfolio. That is the whole argument for doing it ahead of time: the work is
     identical, it is only a question of who waits for it.
 
-⚠⚠ TRIGGERED FROM `invalidate()`, NOT FROM THE INGEST JOB. The ask was "prewarm after the
+ TRIGGERED FROM `invalidate()`, NOT FROM THE INGEST JOB. The ask was "prewarm after the
     fundamentals ingest", and that is one of TWO writers that drop the cache — the other is the
     per-company Fetch in the modal (`benchmarks.py`), which is pressed while a reader is looking at
     the very chart it invalidates. Hanging the trigger off the thing that clears the cache covers
     both and cannot be forgotten by a third; it is the same discipline as `apiFetch` invalidating
     at the chokepoint rather than at ~15 buttons.
 
-⚠⚠ AND THEREFORE DEBOUNCED, WHICH IS THE POINT OF THE DESIGN RATHER THAN A DETAIL. A bulk fill
+ AND THEREFORE DEBOUNCED, WHICH IS THE POINT OF THE DESIGN RATHER THAN A DETAIL. A bulk fill
     invalidates once, but a reader working through a table presses Fetch on company after company;
     without a debounce that is one ~22s rebuild per press, each one thrown away by the next. The
     thread waits for `_QUIET_SECONDS` of no further invalidation before it starts, and any
     invalidation DURING a rebuild abandons it — what it was building is stale by definition.
 
-⚠ SERIAL, AND IT COSTS ALMOST NOTHING TO BE. The browser fires the twelve requests together and
+ SERIAL, AND IT COSTS ALMOST NOTHING TO BE. The browser fires the twelve requests together and
     gets ~20s of wall clock out of ~140s of summed work, which makes serial look like a 7x
     penalty. It is not: measured at **21.8s** for ACWI, because the expensive half is the metric
     reads and `cached_metric_reads` already shares those — the first endpoint pays for them and the
@@ -34,12 +34,12 @@ WHY
     buying ~1.3s and costing a spike of GIL contention on a one-worker box, which is the one way a
     speed-up becomes a slow-down. Nobody is waiting on this; it queues.
 
-⚠ ARMED EXPLICITLY BY THE APP, so a process that is not serving pages never starts the thread.
+ ARMED EXPLICITLY BY THE APP, so a process that is not serving pages never starts the thread.
     `invalidate()` runs in unit tests (`test_fill_cancel`) where `deps.create_client` is rigged to
     raise; an always-on background rebuild there would be a thread failing against a fake Supabase
     and logging about it. `arm()` is called from ONE startup hook in `main.py`.
 
-⚠ IT NEVER BLOCKS AND NEVER RAISES INTO ITS CALLER. A prewarm is an optimisation; a failed one
+ IT NEVER BLOCKS AND NEVER RAISES INTO ITS CALLER. A prewarm is an optimisation; a failed one
     must cost exactly the cold load it was trying to avoid. Failures are logged at WARNING (uvicorn
     leaves root at WARNING in production — an `info` line here would be invisible where it matters).
 """
@@ -56,17 +56,17 @@ _log = logging.getLogger(__name__)
 
 # What the Long Equity benchmark dropdown offers, and the cadence the tab opens on.
 #
-# ⚠ ANNUAL ONLY, AND AEX IS IN THE LIST ANYWAY. Quarterly is a deliberate click and doubles this
+#  Annual only, and aex is in the list anyway. Quarterly is a deliberate click and doubles this
 # whole budget for a view most readers never open; the cache still fills it lazily on the first
 # press, exactly as before. AEX costs ~2s — it is here not because it is slow but because
 # `invalidate()` dropped it too, and leaving one of three dropdown entries cold is the kind of
 # asymmetry that later reads as a bug.
 #
-# ⚠ ORDER IS COST-DESCENDING ON PURPOSE. An invalidation mid-rebuild abandons the rest, so the
+#  Order is cost-descending on purpose. An invalidation mid-rebuild abandons the rest, so the
 # entry that hurts most to lose is the one already finished rather than the one still queued.
 _DEFAULT_TARGETS = "ACWI:annual,SP500:annual,AEX:annual"
 
-# ⚠ THE ENV VAR IS A KILL SWITCH AS WELL AS A KNOB: `BLEND_PREWARM=` (empty) disables it entirely,
+#  The env var is a kill switch as well as a knob: `BLEND_PREWARM=` (empty) disables it entirely,
 # which is what a box under memory pressure or a second replica wants. Unset = the default above.
 _TARGETS_ENV = "BLEND_PREWARM"
 
@@ -75,7 +75,7 @@ _TARGETS_ENV = "BLEND_PREWARM"
 # writes only: startup has no preceding write burst to coalesce (see `_boot_fast_path` below).
 _QUIET_SECONDS = 90.0
 
-# ⚠ A REBUILD MUST NOT RACE THE SCHEDULED PIPELINE. Both are heavy, both are in-process, and the
+#  A rebuild must not race the scheduled pipeline. Both are heavy, both are in-process, and the
 # pipeline is the one with a deadline. This polls rather than waits on the lock: acquiring it would
 # make the prewarm a participant in the pipeline's mutual exclusion and could delay a rebalance.
 _PIPELINE_POLL_SECONDS = 60.0
@@ -110,7 +110,7 @@ def _targets() -> list[tuple[str, str]]:
 def arm() -> None:
     """Start the background rebuilder AND queue the first pass. Idempotent.
 
-    ⚠⚠ THE FIRST PASS IS THE WHOLE POINT AND IT WAS MISSING. This started a thread whose first act
+     THE FIRST PASS IS THE WHOLE POINT AND IT WAS MISSING. This started a thread whose first act
     is `_wake.wait()`, and only `notify()` — i.e. only `invalidate()`, i.e. only a fundamentals
     WRITE — ever set that event. So on a fresh process nothing was warmed: the thread sat idle and
     the first reader paid the full cold path. Which is every Railway deploy, every restart, and
@@ -132,7 +132,7 @@ def arm() -> None:
         threading.Thread(target=_run, name="bb-blend-prewarm", daemon=True).start()
     _log.info("[blend-prewarm] armed for %s; warming shared chart prerequisites now",
               ", ".join(f"{a}/{b}" for a, b in targets))
-    # ⚠ THROUGH `notify()`, NOT BY SETTING THE EVENT HERE. It is the one place that bumps the
+    #  THROUGH `notify()`, NOT BY SETTING THE EVENT HERE. It is the one place that bumps the
     # generation and stamps the clock, and the worker's abandon-check reads both; poking `_wake`
     # directly would start a pass it cannot reason about. `_boot_fast_path` consumes this first
     # notification without the write debounce; later notifications retain the quiet grace.
@@ -142,7 +142,7 @@ def arm() -> None:
 def notify() -> None:
     """Something dropped the cache — schedule a rebuild once the writes go quiet.
 
-    ⚠ CALLED FROM `_blend_cache.invalidate()`, WHICH RUNS IN WORKER THREADS AND IN TESTS. It must
+     CALLED FROM `_blend_cache.invalidate()`, WHICH RUNS IN WORKER THREADS AND IN TESTS. It must
     therefore be non-blocking, loop-free and a no-op when unarmed.
     """
     global _generation, _last_notify
@@ -165,7 +165,7 @@ def _pipeline_busy() -> bool:
 def _browser_request():
     """A stub ASGI request that accepts gzip.
 
-    ⚠ NOT `None`. `cached_blend` fills its cache either way, but a request that does not accept
+     NOT `None`. `cached_blend` fills its cache either way, but a request that does not accept
     gzip takes the `gzip.decompress` branch on the way out — decompressing megabytes we are about
     to throw away. Saying "gzip" hands back the stored bytes untouched.
     """
@@ -177,11 +177,11 @@ def _browser_request():
 def _endpoints() -> list[tuple[str, object]]:
     """Every `@cached_blend` endpoint the Long Equity tab fires for a benchmark.
 
-    ⚠ IMPORTED LAZILY, INSIDE THE WORKER. `routers.earnings` imports `_blend_cache`, which imports
+     IMPORTED LAZILY, INSIDE THE WORKER. `routers.earnings` imports `_blend_cache`, which imports
     this module's `notify()` — importing `earnings` at module scope would close that circle at
     startup. It is also why this file knows nothing about the endpoints until it needs them.
 
-    ⚠ THE LIST IS EXPLICIT RATHER THAN DISCOVERED. Walking the router for decorated functions would
+     THE LIST IS EXPLICIT RATHER THAN DISCOVERED. Walking the router for decorated functions would
     silently pick up a portfolio-only endpoint, and a prewarm that spends 140s on something no
     benchmark selection asks for is invisible waste — it succeeds, it just warms the wrong thing.
     """
@@ -216,10 +216,10 @@ def _boot_endpoints() -> list[tuple[str, object]]:
     return [(name, fn) for name, fn in _endpoints() if name in _BOOT_CRITICAL_ENDPOINTS]
 
 
-# What `LongEquityTab.tsx` names on the growth blend. ⚠ IT MUST MATCH THE CLIENT'S LIST EXACTLY:
+# What `LongEquityTab.tsx` names on the growth blend.  IT MUST MATCH THE CLIENT'S LIST EXACTLY:
 # `cache_key` includes the sorted metrics tuple, so a different list warms an entry the tab will
 # never ask for — a prewarm that costs full price and hits nothing, with no symptom but the wait.
-# ⚠ `price_ps` IS THE SHARE-PRICE CARD, FIRST ON THE TAB — added with it. Omitting it here does not
+#  `price_ps` IS THE SHARE-PRICE CARD, FIRST ON THE TAB — added with it. Omitting it here does not
 # break the card, which is exactly the problem: the benchmark blend would simply miss the prewarm
 # and the first reader of every index would pay the full rebuild, silently.
 _BLEND_METRICS = ["price_ps", "eps_nri", "eps_nri_estimate", "revenue", "fcf_ps", "shares"]
@@ -248,7 +248,7 @@ async def _warm_one(label: str, cadence: str, gen: int,
                 extra["response"] = Response()
             await fn(body, _browser_request(), **extra)
         except Exception as exc:                            # noqa: BLE001
-            # ⚠ ONE ENDPOINT'S FAILURE IS NOT THE REBUILD'S. A label with no members 404s and
+            #  One endpoint's failure is not the rebuild's. A label with no members 404s and
             # always will; the other twelve are still worth warming.
             _log.warning("[blend-prewarm] %s %s/%s failed: %s: %s",
                          name, label, cadence, type(exc).__name__, exc)
@@ -286,7 +286,7 @@ async def _warm_boot_critical(gen: int) -> None:
 def _run() -> None:
     """The worker: wait for quiet, stand off the pipeline, rebuild, repeat.
 
-    ⚠ ITS OWN EVENT LOOP, IN ITS OWN THREAD. The endpoints are coroutines that do their real work
+     ITS OWN EVENT LOOP, IN ITS OWN THREAD. The endpoints are coroutines that do their real work
     inside `asyncio.to_thread`, so they run correctly on any loop — and running them here rather
     than on the server's loop is what keeps a rebuild off the path of every live request.
     """
@@ -326,7 +326,7 @@ def _run() -> None:
             _log.warning("[blend-prewarm] pipeline is running — holding off %.0fs",
                          _PIPELINE_POLL_SECONDS)
             time.sleep(_PIPELINE_POLL_SECONDS)
-        # ⚠ CLEARED BEFORE THE SNAPSHOT, NEVER AFTER. Between a rebuild finishing and the flag
+        #  Cleared before the snapshot, never after. Between a rebuild finishing and the flag
         # being cleared, an invalidation would set an already-set event and be lost — the cache
         # would sit cold until the NEXT write. Clearing first means such a notify re-sets it and we
         # go round again, at worst rebuilding something that was already fresh.

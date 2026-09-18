@@ -4,19 +4,19 @@ import { periodDenoms, weightAt, type Weighted } from './marginData';
  * The two extra LINES every ratio card's drill-down carries under its raw inputs: the market cap
  * that period, and the weight it produced.
  *
- * ⚠ WHY THESE ARE ROWS AND NOT A THIRD LINE INSIDE EACH CELL. The growth cards' drill-down
+ *  Why these are rows and not a third line inside each cell. The growth cards' drill-down
  * (`HoldingsRevenueModal`) stacks three numbers in one cell because it has ONE line per company.
  * These tables already put one line per ROW — Revenue, FCF, SBC, then the ratio — and name it in
  * the `Line` column. Cap and weight are simply two more of those, which is why this reads as part
  * of the table rather than as a second convention bolted onto it.
  *
- * ⚠⚠ THE WEIGHT IS THAT PERIOD'S, NOT TODAY'S — and the denominator comes from `periodDenoms`,
+ *  The weight is that period's, not today's — and the denominator comes from `periodDenoms`,
  * which applies the same two tests as the `weightedByYear` that drew the line. Weighting 2018 by
  * today's cap is look-ahead bias: measured on the S&P, NVIDIA is carried at 7.46% of a year it was
  * 0.63% of, and the FCF-SBC margin benchmark moves up to 3.00pp. The column sums to exactly 100%
  * in every period, which is what makes it checkable against the chart.
  *
- * ⚠ NO CAP ROW ON A PORTFOLIO. A holding weight is not a market cap and has no history, so a book
+ *  No cap row on a portfolio. A holding weight is not a market cap and has no history, so a book
  * gets the weight line alone — its weight genuinely does not move between periods except as the
  * reporting set changes, which is itself worth seeing.
  */
@@ -31,7 +31,7 @@ function capBn(v: number | null | undefined): string {
 }
 
 /** The blank identity cells a continuation row needs so its `Line` cell lands in the right column.
- *  ⚠ The first one stays sticky — without it the row slides under the pinned Company column when
+ *   The first one stays sticky — without it the row slides under the pinned Company column when
  *  the table scrolls sideways, which is visible as a gap the other rows do not have. */
 function Lead({ n }: { n: number }) {
   return (
@@ -73,7 +73,7 @@ export function CapWeightLines<T extends Weighted>({ row, years, denoms, lead = 
         {years.map((y) => {
           const w = weightAt(row, y);
           const d = denoms[y];
-          // ⚠ A DASH, NOT 0%, WHERE THE ROW IS NOT IN THIS PERIOD'S AVERAGE. Three ways that
+          //  A dash, not 0%, WHERE THE ROW IS NOT IN THIS PERIOD'S AVERAGE. Three ways that
           // happens — no cap that period, no weight at all, or the card's own inputs missing so
           // the ratio could not be computed — and all three mean "out of this period", which a
           // 0% would misreport as a holding too small to matter.

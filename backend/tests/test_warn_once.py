@@ -1,6 +1,6 @@
 """`_warn_once` — the reason the earnings log stopped repeating itself.
 
-⚠ THE POINT IS NOT VOLUME FOR ITS OWN SAKE. A log nobody reads is worth the same as no log, and
+ THE POINT IS NOT VOLUME FOR ITS OWN SAKE. A log nobody reads is worth the same as no log, and
 these lines were drowning the scheduler's own output: `_blend_prewarm` walks ~1,500 ACWI
 constituents across 12 endpoints on startup and after every fundamentals write, re-detecting and
 re-announcing the same level shifts every time.
@@ -24,19 +24,19 @@ class TestItSpeaksOnce:
         assert "thing happened" in caplog.text
 
     def test_the_second_call_with_the_same_key_says_nothing(self, caplog):
-        """⚠ THE WHOLE FEATURE. Same company, same metric, next request — the fact has not changed,
+        """ THE WHOLE FEATURE. Same company, same metric, next request — the fact has not changed,
         so repeating it only pushes something else off the screen."""
         _fresh()
         with caplog.at_level(logging.WARNING):
             E._warn_once("k", "[earnings] %s happened", "thing")
-            # ⚠ caplog collects for the WHOLE test, not just this block — without the clear the
+            #  caplog collects for the WHOLE test, not just this block — without the clear the
             # first call's record is still there and the assertion passes for the wrong reason.
             caplog.clear()
             E._warn_once("k", "[earnings] %s happened", "thing")
         assert caplog.text == ""
 
     def test_a_different_key_still_speaks(self, caplog):
-        """⚠ IT DEDUPLICATES, IT DOES NOT SILENCE. A second company with a real level shift is a
+        """ IT DEDUPLICATES, IT DOES NOT SILENCE. A second company with a real level shift is a
         different fact and must still reach the terminal."""
         _fresh()
         with caplog.at_level(logging.WARNING):
@@ -46,7 +46,7 @@ class TestItSpeaksOnce:
         assert "second" in caplog.text
 
     def test_it_stays_at_WARNING(self, caplog):
-        """⚠ NOT DOWNGRADED TO DEBUG — that was the other way to make the noise stop, and it makes
+        """ NOT DOWNGRADED TO DEBUG — that was the other way to make the noise stop, and it makes
         the signal stop too: uvicorn leaves the root logger at WARNING, so a debug line is
         invisible in exactly the terminal this was cleaning up. A kept level shift WILL step an
         index and somebody should see it, once."""
@@ -66,7 +66,7 @@ class TestDebugOnlyDataQualityNotes:
 
 class TestTheCallSites:
     def test_the_three_noisy_ones_are_converted(self):
-        """⚠ Pinned on source because the alternative is driving a blend, which needs a database.
+        """ Pinned on source because the alternative is driving a blend, which needs a database.
         These are the three lines that were repeating; a fourth appearing later should be a
         deliberate choice, not a copy-paste of `_log.warning`."""
         import inspect  # noqa: PLC0415

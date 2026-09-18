@@ -1,5 +1,5 @@
 /**
- * ⚠⚠ THE ONE CLAIM WORTH PINNING IS THAT THE BAND IS CENTRED ON ā AND NOT ON ZERO. Every other
+ *  The one claim worth pinning is that the band is centred on ā AND NOT ON ZERO. Every other
  * assertion here exists to stop that centre drifting back to the benchmark by accident — which is
  * what "TE 12.41%" means to almost every reader, and what the OTHER definition of tracking error
  * (ā not subtracted) would actually give.
@@ -14,13 +14,13 @@ describe('oneSigmaBand', () => {
     expect(b.centre).toBeCloseTo(3.12, 10);
     expect(b.lo).toBeCloseTo(-9.29, 10);
     expect(b.hi).toBeCloseTo(15.53, 10);
-    // ⚠ THE ASYMMETRY IS THE POINT: a symmetric −12.41/+12.41 would be the definition that does
+    //  The asymmetry is the point: a symmetric −12.41/+12.41 would be the definition that does
     // not subtract ā, and it is 3.12pp away from this one in both directions.
     expect(b.hi + b.lo).toBeCloseTo(2 * b.centre, 10);
   });
 
   it('carries the TE through verbatim — no second annualisation', () => {
-    // ⚠ `annualized_stats` already applied √f. Doing it again here would be a silent ×7.21 at
+    //  `annualized_stats` already applied √f. Doing it again here would be a silent ×7.21 at
     // weekly, and the band would still look plausible.
     for (const f of [12, 52, 252]) {
       expect(oneSigmaBand(0.1, f, 12.41)!.te).toBe(12.41);
@@ -58,7 +58,7 @@ describe('oneSigmaBand', () => {
   });
 
   it('refuses a band it cannot lay either side of', () => {
-    // ⚠ SAME REFUSAL THE INFORMATION-RATIO TILE MAKES: a ~0 TE is not a zero-width band worth
+    //  Same refusal the information-ratio tile makes: a ~0 TE is not a zero-width band worth
     // printing, it is a figure with no risk in it.
     expect(oneSigmaBand(0.06, 52, 0)).toBeNull();
     expect(oneSigmaBand(0.06, 52, -1)).toBeNull();

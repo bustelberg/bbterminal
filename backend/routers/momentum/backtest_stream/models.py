@@ -95,13 +95,13 @@ class BacktestRequest(BaseModel):
     backfill_below_min_score: bool = False
     # How each signal is mapped to [0,1] before the weighted blend.
     #
-    # ⚠⚠ "minmax" IS THE DEFAULT FOR COMPATIBILITY, NOT BECAUSE IT IS RIGHT. It hands the signal
+    #  "minmax" IS THE DEFAULT FOR COMPATIBILITY, NOT BECAUSE IT IS RIGHT. It hands the signal
     # with the fattest tail a fraction of the weight it was given — measured on ACWI, `mom_12_1`
     # got 16.6% of a requested 33.3%, and the top-20 selection overlap against "rank" was 6 of 20.
     # "rank" (percentile) makes the weights exact and is the one to pick for a new strategy;
     # "robust_z" is outlier-resistant but keeps magnitude.
     #
-    # ⚠ CHANGING IT ALSO CHANGES WHAT `min_price_score` MEANS — the median stock scores 5/100 under
+    #  Changing it also changes what `min_price_score` MEANS — the median stock scores 5/100 under
     # "minmax" and 50/100 under "rank" — so it is part of `strategy_hash`, and an existing strategy
     # keeps its stored value.
     score_normalization: Literal["minmax", "rank", "robust_z"] = "minmax"
@@ -134,7 +134,7 @@ class BacktestRequest(BaseModel):
     # trading day over the last N months". 0 (default) = the current period only,
     # which is what the pipeline and the cron run.
     #
-    # ⚠ NON-ZERO MAKES THE WHOLE REQUEST READ-ONLY. It answers a question ABOUT the
+    #  Non-zero makes the whole request read-only. It answers a question ABOUT the
     # past; it is not a decision, so it must not become one. With it set, the run
     # persists NOTHING — no `current_picks_snapshot`, no `current_picks_day` — and
     # bypasses the cached-snapshot short-circuit (that cache holds the current

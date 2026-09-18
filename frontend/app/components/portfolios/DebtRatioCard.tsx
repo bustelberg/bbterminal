@@ -26,12 +26,12 @@ import CardHeading from './CardHeading';
  * LINEAR % axis (a ratio, not a compounding series — no log / exponential trend). Click through to
  * the three base balance-sheet lines per company.
  *
- * ⚠ THE RATIO IS DERIVED HERE from the raw lines (`debtRatioByYear`), so the line, the tiles and the
+ *  The ratio is derived here from the raw lines (`debtRatioByYear`), so the line, the tiles and the
  * drill-down are one computation. Aggregation is a weight-weighted average of per-company ratios —
  * currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./MarginCard}.
  */
 
-/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+/**  `String.raw`, or every backslash in the expressions below is eaten before KaTeX
  *  sees it. */
 const R = String.raw;
 
@@ -78,7 +78,7 @@ export default function DebtRatioCard({ holdingsTarget, holdingsName, benchTarge
   const own = holdingsName ?? 'Debt / assets ex-GW';
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(ratioByYr, benchByYr), [ratioByYr, benchByYr]);

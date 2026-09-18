@@ -1,6 +1,6 @@
 """Daily drift check — has the vendor rewritten history we already stored?
 
-⚠ THE PIPELINE CANNOT SEE A CORRECTION TO THE PAST. `_upsert_metric_rows` writes
+ THE PIPELINE CANNOT SEE A CORRECTION TO THE PAST. `_upsert_metric_rows` writes
 only `d > existing_max`, so a split, a reverse split or a free-share attribution
 leaves our old bars on the old basis for ever while new ones arrive on the new
 one. Measured on Leonteq 2026-08-02: 173 companies had wrong close history, 887
@@ -12,14 +12,14 @@ them, and it exists because the undocumented `?start_date=&end_date=` filter
 makes a probe **23 bytes instead of 268,703** — an 11,682× cut that turns
 "re-verify the universe" from a 20-minute, 400 MB job into a few seconds.
 
-⚠ IT DOES NOT SAVE QUOTA, WHICH IS WHY IT RUNS ON A SLICE. `api_usage` counts
+ IT DOES NOT SAVE QUOTA, WHICH IS WHY IT RUNS ON A SLICE. `api_usage` counts
 REQUESTS (20,000/region/month), and a one-day probe costs the same one request as
 a full history. Probing all 1,479 daily would be ~32,500 requests/month — over
 the USA cap on its own, with nothing left for the price updates that share it. So
 each day probes 1/`SLICE_DIVISOR` of the universe: every company is re-verified
 within a week, at ~300 requests a day.
 
-⚠ AND THE ESCALATION IS A FULL FETCH, NOT A SECOND PROBE. Two sequential
+ AND THE ESCALATION IS A FULL FETCH, NOT A SECOND PROBE. Two sequential
 single-day probes cost two requests and can still both miss a one-bar vendor
 correction. One probe that disagrees is already proof; what it cannot tell you is
 HOW MUCH else moved, and only the full series answers that.
@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 # within a week.
 SLICE_DIVISOR = 5
 WORKERS = 8
-# ⚠ THE PROBE READS CLOSE PRICE ONLY, AND THAT HALVES THE BILL FOR NOTHING LOST.
+#  The probe reads close price only, and that halves the bill for nothing lost.
 # The corporate actions that rewrite history re-scale BOTH series — a 1-for-40
 # multiplies price by 40 and divides volume by 40 — so the close alone detects
 # them, and the escalation refetches both metrics anyway. Probing volume too
@@ -51,7 +51,7 @@ WORKERS = 8
 _PROBE_METRIC = ("close_price", "price")
 # A stored/vendor difference beyond this is drift; below it is float noise.
 TOLERANCE = 1e-6
-# ⚠ THE PROBE DATE IS THE OLDEST BAR WE HOLD, and that is not arbitrary: a
+#  The probe date is the oldest bar we hold, and that is not arbitrary: a
 # re-scale multiplies the WHOLE history, so the oldest bar is the one where a
 # 10/11 attribution (Air Liquide: an ordinary-looking −9.1% step) has had the
 # most compounding to separate it from a real move — and it is the bar a

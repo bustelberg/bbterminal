@@ -1,17 +1,17 @@
 """Which constituents actually move a blended fundamental line, and by how much.
 
-⚠⚠ THE LINE IS A CHAIN OF WEIGHTED STEPS, SO ONE BAD CELL IS NOT ONE BAD POINT — it multiplies
+ THE LINE IS A CHAIN OF WEIGHTED STEPS, SO ONE BAD CELL IS NOT ONE BAD POINT — it multiplies
 through every period after it. `_fundamental_blend` already carries two guards written after exactly
 that (`_MIN_STEP_BASE_FRACTION` for a divisor too small to divide by, `_MAX_STEP_GROWTH` for a
 result too large to have come from a business), and both were derived by reading the distribution of
 real steps. This prints that distribution again, for any metric and universe, so the next suspicion
 is answered with the data rather than with an argument.
 
-⚠ IT RANKS BY INDEX IMPACT, NOT BY GROWTH. A +9,000% step in a 0.01%-weight constituent is a
+ IT RANKS BY INDEX IMPACT, NOT BY GROWTH. A +9,000% step in a 0.01%-weight constituent is a
 curiosity; the same step at 0.07% weight is what moved ACWI's FCF/share line by +116pp. The product
 `weight x growth` is the only ordering that finds the second without drowning in the first.
 
-⚠ AND IT SHOWS WHAT THE GUARDS REFUSED, not only what they let through. A cap that is doing nothing
+ AND IT SHOWS WHAT THE GUARDS REFUSED, not only what they let through. A cap that is doing nothing
 and a cap that is load-bearing look identical from the answer alone.
 
     cd backend && uv run python scripts/diagnose_blend_steps.py
@@ -33,12 +33,12 @@ from routers import _fundamental_blend as fb  # noqa: E402
 def _members(universe: str, metric: str) -> list[dict]:
     """`[{weight, points}]` for one universe — the SAME assembly `earnings.py` feeds the blend.
 
-    ⚠ MIRRORED, NOT IMPORTED, because the endpoint builds it inline. A second assembly is a
+     MIRRORED, NOT IMPORTED, because the endpoint builds it inline. A second assembly is a
     second thing to keep in step — so it is kept deliberately literal: same metric codes, same
     start date, same cap source. If this and the endpoint ever disagree, the diagnostic is wrong
     and not the line.
 
-    ⚠ PAGED ON `.range()`. `metric_data` is far past any server row cap for a whole index, and an
+     PAGED ON `.range()`. `metric_data` is far past any server row cap for a whole index, and an
     unpaged read here would silently measure a fraction of the constituents.
     """
     from collections import defaultdict
@@ -46,8 +46,8 @@ def _members(universe: str, metric: str) -> list[dict]:
     from deps import IN_CHUNK_SIZE, supabase
     from routers.earnings import _BLEND_START, _metric_codes
 
-    # ⚠ MEMBERSHIP AND CAPS EXACTLY AS THE ENDPOINT TAKES THEM — `universe_membership` by label,
-    # then `company.market_cap_eur`. ⚠ A member with no cap is NOT dropped here: the endpoint
+    #  Membership and caps exactly as the endpoint takes them — `universe_membership` by label,
+    # then `company.market_cap_eur`.  A member with no cap is NOT dropped here: the endpoint
     # falls back to `1.0`, so dropping it would measure a different index from the one on screen.
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", universe).limit(1).execute().data or [])
@@ -95,7 +95,7 @@ def _members(universe: str, metric: str) -> list[dict]:
 
 
 def _company_names(ids: list[int]) -> dict[int, str]:
-    """⚠ NAMES, BECAUSE A company_id IN THE OUTPUT IS A ROW NOBODY CAN CHECK. The whole point is
+    """ NAMES, BECAUSE A company_id IN THE OUTPUT IS A ROW NOBODY CAN CHECK. The whole point is
     to be able to look the filing up."""
     from deps import IN_CHUNK_SIZE, supabase
 
@@ -117,7 +117,7 @@ def main() -> int:
     print(f"[1/4] loading {args.universe} members for {args.metric} …")
     members = _members(args.universe, args.metric)
     if not members:
-        # ⚠ LOUD. An empty member list makes every number below zero, which reads as "no problem
+        #  LOUD. An empty member list makes every number below zero, which reads as "no problem
         # found" rather than "nothing was measured".
         print("  !! no members — is the universe label right, and does this DB hold its caps?")
         return 2
@@ -125,7 +125,7 @@ def main() -> int:
     with_periods = sum(1 for m in members if m.get("weights") is not None)
     print(f"[2/4] {len(members)} members · {with_periods} carry PER-PERIOD weights")
     if not with_periods:
-        # ⚠⚠ THE FINDING THIS SCRIPT WAS WRITTEN TO CATCH. With no `weights` map every step is
+        #  The finding this script was written to catch. With no `weights` map every step is
         # weighted by `_weight_at`'s scalar fallback — TODAY's market cap — so a constituent's
         # 2017 growth is weighted by its 2026 size. On a metric whose biggest movers grew INTO
         # the index that is look-ahead bias, and it inflates the line without any cell being
@@ -133,14 +133,14 @@ def main() -> int:
         print("      !! none do — every step is weighted by TODAY's cap (look-ahead).")
 
     # ── every step, with what the guards did to it ─────────────────────────────────────────────
-    # ⚠ ONE DENOMINATOR FOR EVERY STEP, taken once. Per-period totals would be more exact but
+    #  One denominator for every step, taken once. Per-period totals would be more exact but
     # this assembly carries a single scalar cap per member anyway — see the finding below.
     total_w = sum(float(m.get("weight") or 0.0) for m in members) or 1.0
     accepted: list[tuple[float, str, str, float, float, float, float]] = []
     refused_missing = 0
     for m in members:
         at = m.get("points") or {}
-        # ⚠⚠ THE TWO MAGNITUDE GUARDS WERE REMOVED ON 2026-09-04 and this script still called
+        #  The two magnitude guards were removed on 2026-09-04 and this script still called
         # them — `fb.base_bar_scale` no longer exists, so every invocation died on an
         # AttributeError and the one tool for answering "which constituent moved the line" was
         # unusable in exactly the incident it exists for. `step_growth` now takes two arguments
@@ -152,7 +152,7 @@ def main() -> int:
             if g is None:
                 refused_missing += 1
                 continue
-            # ⚠ NORMALISED. `_weight_at` hands back whatever the member carries — for this
+            #  NORMALISED. `_weight_at` hands back whatever the member carries — for this
             # assembly that is a raw EUR market cap, so the raw product is unreadable and,
             # worse, looks like a percentage. Dividing by the period total makes the column
             # what it claims to be: this step's contribution to the index in points.
@@ -171,7 +171,7 @@ def main() -> int:
             return f"{growths[min(len(growths) - 1, int(len(growths) * q))] * 100:+,.0f}%"
         print(f"      accepted growth distribution: p50 {pct(0.50)} · p99 {pct(0.99)} · "
               f"p99.9 {pct(0.999)} · p99.99 {pct(0.9999)} · max {growths[-1] * 100:+,.0f}%")
-        # ⚠⚠ A UNIT BREAK IS NEAR-EXACTLY 100x OR 1000x, WHICH IS WHAT MAKES IT FINDABLE — see
+        #  A unit break is near-exactly 100x OR 1000x, WHICH IS WHAT MAKES IT FINDABLE — see
         # `step_growth`: the right catch is STRUCTURAL, not a threshold on the answer. With the
         # cap gone these all enter the line at full weight, so they are worth counting.
         near = [g for g in growths if 50.0 <= g]

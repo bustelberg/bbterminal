@@ -30,7 +30,7 @@ const en = {
     eachShare: (owner: string) => `Each holding's share of ${owner}.`,
     share: (name: string, owner: string) => `${name}'s share of ${owner}.`,
     /**
-     * ⚠⚠ THE PROSE IS ONE SHORT SENTENCE AND THE MATHS IS TYPESET (2026-09-01, on request). These
+     *  The prose is one short sentence and the maths is typeset (2026-09-01, on request). These
      * cards used to state their formulas as prose with Unicode operators — `Σ(w × r) ÷ Σw over
      * your Technology holdings`, eighteen of them, which is what put `AttributionPanel` on
      * `tooltipStyle`'s ratchet. That is a row of glyphs resembling a formula: no real scripts, a
@@ -49,7 +49,7 @@ const en = {
     holdingContribution: (name: string, owner: string, held: boolean) => held
       ? `How much of ${owner}'s return ${name} is responsible for.` : `What ${name} was worth to ${owner}.`,
     contributionNote: (owner: string, held: boolean) => held ? `share of ${owner}'s return` : `what it was worth to ${owner}`,
-    /** ⚠ THE MATRIX HAS NO `owner` VARIABLE — that lives in the Names table, where the same
+    /**  THE MATRIX HAS NO `owner` VARIABLE — that lives in the Names table, where the same
      *  three columns describe either the book or the index. Here the portfolio side is always
      *  the reader's, so the legend needs a word for it rather than a passed-in name. */
     yours: 'your book',
@@ -81,7 +81,7 @@ const en = {
 /**
  * Widen the literal types `as const` produced, so `nl` may hold any string of the same shape.
  *
- * ⚠⚠ IT WIDENS A FUNCTION'S RETURN, IT DOES NOT FORCE IT TO `string`. The first version mapped
+ *  It widens a function's return, it does not force it to `string`. The first version mapped
  * every function to `(...args) => string`, which was true while every entry returned prose — and
  * became wrong the moment a `legend` builder returned an array of `{sym, is}` for the typeset
  * cards. Recursing through the return type keeps the original guarantee (a Dutch entry has the same

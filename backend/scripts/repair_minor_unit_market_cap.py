@@ -108,9 +108,9 @@ def main() -> None:
 
     print()
     if skipped_no_native:
-        print(f"⚠ {skipped_no_native:,} skipped — no `market_cap_native` to recompute from.")
+        print(f" {skipped_no_native:,} skipped — no `market_cap_native` to recompute from.")
     if skipped_no_fx:
-        print(f"⚠ {skipped_no_fx:,} skipped — no FX rate available for the major currency.")
+        print(f" {skipped_no_fx:,} skipped — no FX rate available for the major currency.")
 
     if not args.apply:
         print(f"\nDRY RUN — nothing written. {len(plans):,} rows would be repaired.")

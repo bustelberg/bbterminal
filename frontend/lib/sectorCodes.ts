@@ -1,7 +1,7 @@
 /**
  * Short codes + readable ink for sector chips — the SECONDARY ENCODING beside `sectorColors.ts`.
  *
- * ⚠ WHY COLOUR ALONE CANNOT DO THIS JOB, MEASURED RATHER THAN ASSERTED. The sector palette carries
+ *  WHY COLOUR ALONE CANNOT DO THIS JOB, MEASURED RATHER THAN ASSERTED. The sector palette carries
  * 14 distinct hues, and `dataviz/scripts/validate_palette.js` over all pairs on the light surface
  * reports:
  *
@@ -14,7 +14,7 @@
  * here so "Other" is not available. Two of those pairs are indistinguishable to a reader with FULL
  * colour vision, which is not a colourblindness edge case; it is the chart being unreadable.
  *
- * ⚠ AND TEXTURE WOULD NOT HAVE FIXED IT. Stripes/crosshatch are the standard answer for a CVD-band
+ *  AND TEXTURE WOULD NOT HAVE FIXED IT. Stripes/crosshatch are the standard answer for a CVD-band
  * failure, but they do not rescue a NORMAL-vision failure, and at a 12px chip a hatch pattern is
  * mush — the pattern needs more pixels than the mark has. A two-letter code is legible at that size,
  * survives greyscale, print and forced-colors mode, and needs no legend lookup at all.
@@ -54,7 +54,7 @@ export const SECTOR_CODES: Record<string, string> = {
 /**
  * Two-letter code for a sector. Unknown labels fall back to their first two alphanumerics.
  *
- * ⚠ The fallback can collide with a mapped code, and that is accepted: an unmapped sector is
+ *  The fallback can collide with a mapped code, and that is accepted: an unmapped sector is
  * already off the palette's fixed order, and the full name is on hover and in the legend either
  * way. Silently renaming it to avoid a collision would be worse — the code would stop matching
  * the label a reader sees everywhere else.
@@ -71,7 +71,7 @@ export function sectorCode(sector: string | null | undefined): string {
 /**
  * Readable ink for text sitting ON a filled swatch: near-black or white, whichever contrasts.
  *
- * ⚠ IT HAS TO BE COMPUTED, NOT FIXED. White text is the obvious default and it is unreadable on
+ *  IT HAS TO BE COMPUTED, NOT FIXED. White text is the obvious default and it is unreadable on
  * the light half of this palette — Utilities `#fbbf24` and Materials `#84cc16` are the two the
  * validator already flags at 1.63 and 1.92 against a white surface. Relative luminance per
  * WCAG 2.x; the 0.45 threshold puts the crossover between those light hues and the mid-tone blues.

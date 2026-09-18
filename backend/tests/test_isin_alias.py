@@ -20,7 +20,7 @@ def _tables(alias=True, adr_gf=True, ord_gf=False):
              "name": "TSMC", "exchange": "NYSE", "currency": "USD", "med_adv_eur": 4.96e9,
              "first_date": "1997-10-09", "years": 28.8, "status": "ok", "asset_class": "equity",
              "listing_country": "United States", "is_leveraged": False,
-             # ⚠ The identity fields must SURVIVE — they describe the security, and these two
+             #  The identity fields must SURVIVE — they describe the security, and these two
              # genuinely are different securities.
              "openfigi_figi": "BBG000BD8ZK0", "openfigi_type": "Depositary Receipt",
              "openfigi_name": "TAIWAN SEMICONDUCTOR-SP ADR"},
@@ -49,7 +49,7 @@ def _run(monkeypatch, **kw):
 
 class TestTheAliasTakesTheCanonicalsInstrument:
     def test_the_same_analysis_id_not_a_copied_symbol(self, monkeypatch):
-        """⚠ THE SAME SERIES, NOT A DUPLICATE OF IT. Copying the symbol alone would leave two rows
+        """ THE SAME SERIES, NOT A DUPLICATE OF IT. Copying the symbol alone would leave two rows
         that agree today and diverge at the next price refresh."""
         _, rows, _ = _run(monkeypatch)
         assert rows[ADR]["analysis_id"] == rows[ORD]["analysis_id"] == 9040
@@ -61,7 +61,7 @@ class TestTheAliasTakesTheCanonicalsInstrument:
         assert rows[ADR]["yahoo_symbol"] == "2330.TW"
 
     def test_the_openfigi_identity_is_NOT_overwritten(self, monkeypatch):
-        """⚠ It describes the SECURITY, and these are different securities. Overwriting it erases
+        """ It describes the SECURITY, and these are different securities. Overwriting it erases
         the only record that this row is an ADR — exactly what a reader needs to interpret a price
         shared with the ordinary."""
         _, rows, _ = _run(monkeypatch)
@@ -84,7 +84,7 @@ class TestItIsIdempotentAndSurvivesAReResolve:
         assert isin_alias.apply_aliases() == 0
 
     def test_it_puts_the_row_back_after_something_re_resolves_it(self, monkeypatch):
-        """⚠ THE WHOLE POINT. `fast_resolve`, the repointers and the queue worker all write
+        """ THE WHOLE POINT. `fast_resolve`, the repointers and the queue worker all write
         `asset_execution` per ISIN; an override they can silently undo is not an override."""
         fake = FakeSupabase(_tables())
         monkeypatch.setattr(isin_alias, "supabase", fake)
@@ -100,7 +100,7 @@ class TestItIsIdempotentAndSurvivesAReResolve:
 
 class TestTheGuruFocusListingFollowsTheSameRule:
     def test_a_stale_listing_on_the_alias_is_removed_when_the_canonical_has_none(self, monkeypatch):
-        """⚠ DELETED, NOT LEFT BEHIND — a kept row is the exact drift this exists to prevent."""
+        """ DELETED, NOT LEFT BEHIND — a kept row is the exact drift this exists to prevent."""
         _, _, gf = _run(monkeypatch, adr_gf=True, ord_gf=False)
         assert ADR not in gf
 

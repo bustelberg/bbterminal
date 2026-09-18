@@ -3,18 +3,18 @@ import type { Lang } from '../../../lib/i18n';
 /**
  * Every user-visible string in the `Tables` tab, in both languages.
  *
- * ⚠⚠ THE COPY IS A TYPE, NOT A LOOKUP WITH A FALL-BACK. `COPY` is `Record<Lang, TablesCopy>`, so a
+ *  The copy is a type, not a lookup with a fall-back. `COPY` is `Record<Lang, TablesCopy>`, so a
  * string added to English and forgotten in Dutch fails `tsc` — it does not quietly render the
  * English one. A table that is 90% Dutch reads as a rendering fault rather than an unfinished
  * translation, and the reader cannot tell which of the two it is looking at.
  *
- * ⚠ INTERPOLATION IS A FUNCTION PER STRING, NEVER A TEMPLATE WITH `{placeholders}`. Dutch does not
+ *  Interpolation is a function per string, never a template with `{placeholders}`. Dutch does not
  * share English word order — "the 5-year column" is "de 5-jaarskolom", and the expectation
  * labels have different word order — so a shared skeleton with holes punched in it forces English
  * grammar onto the translation. Each language owns its whole sentence, including where the number
  * goes.
  *
- * ⚠ WHAT IS **NOT** TRANSLATED, ON PURPOSE:
+ *  What is **NOT** TRANSLATED, ON PURPOSE:
  *  - The dash tooltips (`Cagr.reason`, `WindowMean.reason`). They are produced by `lineCagr.ts` and
  *    `windowStats.ts` — pure modules shared with `CagrTable` and the growth cards, none of which
  *    are translated. Threading a language through them would either duplicate the modules or
@@ -27,19 +27,19 @@ import type { Lang } from '../../../lib/i18n';
 /**
  * The rows, in the order they are drawn.
  *
- * ⚠ GROUPED BY WHAT THEY ANSWER, not by when they were added: the RATES first (what grew, and how
+ *  Grouped by what they answer, not by when they were added: the RATES first (what grew, and how
  * fast), then the per-year RATIOS averaged over the window (how good the business is), then the one
  * FORWARD row last — an expectation is a different kind of claim from a measurement and reads oddly
  * in among them.
  *
- * ⚠⚠ THERE IS ONE RATE ROW PER **LEVEL** CHART ON THE LONG EQUITY TAB, AND THAT IS THE RULE. Share
+ *  There is one rate row per **LEVEL** CHART ON THE LONG EQUITY TAB, AND THAT IS THE RULE. Share
  * price, EPS, Revenue, FCF/share, Invested capital and Shares outstanding are all currency-or-count
  * levels that COMPOUND, so "what did it grow at" is the summary of each — and a tab that draws six
  * such charts while summarising three leaves the reader to eyeball the other three off a log axis.
  * The RATIO charts (margins, ROIC, coverage, yields) do not compound and get a window MEAN instead;
  * annualising a percentage that oscillates around a level is not a rate of anything.
  *
- * ⚠ THE RATE ORDER MIRRORS THE CHART ORDER on the tab, so a reader moving between the two is not
+ *  The rate order mirrors the chart order on the tab, so a reader moving between the two is not
  * re-finding rows: revenue → EPS → FCF/share → price → invested capital → shares.
  */
 export const MEASURE_KEYS = [
@@ -52,7 +52,7 @@ export type MeasureKey = (typeof MEASURE_KEYS)[number];
 /**
  * The rows that are RATES — a compounded growth of a level — as opposed to a window mean.
  *
- * ⚠ DECLARED, NOT INFERRED FROM THE `Cagr` SUFFIX. `epsFwd` is a rate too and is deliberately NOT
+ *  Declared, not inferred from the `Cagr` SUFFIX. `epsFwd` is a rate too and is deliberately NOT
  * in here: the forecast is a rate too but is not a historical level chart.
  */
 export const RATE_KEYS = [
@@ -60,7 +60,7 @@ export const RATE_KEYS = [
 ] as const satisfies readonly MeasureKey[];
 
 export type TablesCopy = {
-  /** ⚠ The heading follows the window chips — see the ⚠ on it in `TablesTab`. */
+  /**  The heading follows the window chips — see the  on it in `TablesTab`. */
   title: (windows: readonly number[]) => string;
   /** The year suffix used on column headings and the `3y` badge. */
   yearSuffix: string;
@@ -83,19 +83,19 @@ export type TablesCopy = {
    * The row's FORMULA IN SYMBOLS — the first line of its ⓘ, above a blank line and then the same
    * formula with this book's own numbers in it (`TablesTab::subFor` builds that second half).
    *
-   * ⚠⚠ SYMBOLS FIRST, SUBSTITUTION SECOND, AND THE BLANK LINE BETWEEN THEM IS THE POINT — it is
+   *  Symbols first, substitution second, and the blank line between them is the point — it is
    * the shape the Money-weighted column already uses, asked for here by name. A reader checking a
    * figure has two separate doubts ("what was computed?" and "does that arithmetic give this?") and
    * prose answers only the first. The substitution answers the second WITHOUT sending them
    * anywhere: the drill-down behind the row label carries every holding and every year, which is
    * the right place for a full audit and the wrong one for "is 84.8× the average of those ten".
    *
-   * ⚠ NO EM DASH IN ANY OF THESE STRINGS. `AboutCard` promotes a leading fragment before ' — ' to
+   *  No em dash in any of these strings. `AboutCard` promotes a leading fragment before ' — ' to
    * the card's bold title when it is under 48 characters and carries no sentence punctuation — and
    * half of a formula, bolded, with the rest starting mid-expression, is exactly the wrong split.
    * Commas and colons instead; the guard is real but it should not be the only thing holding.
    *
-   * ⚠ `w` IS NOT DEFINED IN EVERY FORMULA, deliberately. It is the same weight on every row (the
+   *  `w` IS NOT DEFINED IN EVERY FORMULA, deliberately. It is the same weight on every row (the
    * holding's own share, or an index constituent's cap for that period), stated once in the
    * row-specific tooltip rather than nine times in the table body.
    */
@@ -106,11 +106,11 @@ export type TablesCopy = {
   rateTip: (from: string, to: string, years: number) => string;
   /** A mean cell's hover. `of` is the window asked for; `n < of` means it is short. */
   meanTip: (n: number, from: string, to: string, of: number | null) => string;
-  /** The row label's own hover: what clicking it opens. ⚠ IT PROMISES THE INPUTS, NOT "details" —
+  /** The row label's own hover: what clicking it opens.  IT PROMISES THE INPUTS, NOT "details" —
    *  a reader who doubts a figure is looking for the numbers it was divided from, and a vaguer word
    *  makes them guess whether it is worth a click. */
   showNumbers: string;
-  /** ⚠ A COVERAGE THAT DOES NOT EXIST, which is a statement about the book rather than a gap: no
+  /**  A COVERAGE THAT DOES NOT EXIST, which is a statement about the book rather than a gap: no
    *  interest was paid across the whole window, so there is nothing to cover. See
    *  `coverageFromBurden`. */
   noCoverage: (from: string, to: string) => string;
@@ -218,7 +218,7 @@ const nl: TablesCopy = {
   showWindow: (w) => `Toon de ${w}-jaarskolom voor beide zijden en het verschil.`,
   hideRow: (chip) => `${chip} verbergen`,
   showRow: (chip) => `${chip} tonen`,
-  // ⚠⚠ SPELLED OUT, NOT ABBREVIATED — AND WITH NO ACRONYM LEFT ANYWHERE, INCLUDING THE CHIPS. The
+  //  Spelled out, not abbreviated — and with no acronym left anywhere, including the chips. The
   // English acronyms do not survive the crossing: `FCF` and `EPS` are read on sight by an
   // English-speaking analyst, their Dutch contractions are not, and `WPA` for winst per aandeel
   // landed as unreadable despite being a real abbreviation.

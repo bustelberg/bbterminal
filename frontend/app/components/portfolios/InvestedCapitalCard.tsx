@@ -43,7 +43,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
    * LEVEL, and an index at 100 next to EUR millions is two scales on one axis — the dual-axis
    * mistake with the second axis hidden.
    *
-   * ⚠ THAT NO LONGER APPLIES, because BOTH lines are now indexed to 100 on their shared anchor
+   *  That no longer applies, because BOTH lines are now indexed to 100 on their shared anchor
    * (see `rebaseSeries` below) and the actual amounts moved to the hover. The two are on one
    * honest axis in either mode, so the benchmark draws for a single company too.
    */
@@ -91,17 +91,17 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
     () => (benchData ? investedCapitalIndexByYear(benchData.rows) : null), [benchData]);
 
   /**
-   * ⚠⚠ THE WINDOW BOTH TILES ARE MEASURED OVER — see `sharedSpan`/`CardStats`. The R² and CAGR
+   *  The window both tiles are measured over — see `sharedSpan`/`CardStats`. The R² and CAGR
    * below now have a benchmark twin beside them, and a fitted rate over one series' 1998–2025
-   * printed next to another's 2015–2025 is not a comparison. ⚠ IT NARROWS THE FIT, SO THE DASHED
-   * TREND MOVES WITH IT — deliberately: the tile is the fit, and a number that describes points the
+   * printed next to another's 2015–2025 is not a comparison.  IT NARROWS THE FIT, SO THE DASHED
+   * Trend moves with it — deliberately: the tile is the fit, and a number that describes points the
    * chart does not draw is the failure this card's siblings already guard against.
    */
   const statSpan = useMemo(
     () => (benchByYr ? sharedSpan(new Map(points.map((p) => [p.year, p.value])), benchByYr) : null),
     [points, benchByYr]);
   const ownStat = useMemo(() => clipPoints(points, statSpan), [points, statSpan]);
-  /** ⚠ THE INDEX'S OWN POINTS, over the same span, through the SAME `logLinearFit`. There is no
+  /**  THE INDEX'S OWN POINTS, over the same span, through the SAME `logLinearFit`. There is no
    *  second "benchmark trend" implementation for this one to drift from. */
   const benchStat = useMemo(
     () => clipPoints(
@@ -115,7 +115,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
   const fit = useMemo(() => logLinearFit(ownStat), [ownStat]);
   const benchFit = useMemo(() => logLinearFit(benchStat), [benchStat]);
 
-  /** ⚠⚠ INDEXED AXIS, ACTUAL HOVER — the same rule as the three growth cards, and for the same
+  /**  INDEXED AXIS, ACTUAL HOVER — the same rule as the three growth cards, and for the same
    *  reason: invested capital is a LEVEL, so a company's EUR base and a blended index cannot share
    *  a raw axis. Both are rebased to 100 on the first year they share with positive values; the
    *  real EUR amount rides along for the tooltip, because "this company deploys EUR X of capital"
@@ -138,7 +138,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
     const trendScale = indexed ? 100 / (ownByYr.get(indexed.anchor) as number) : 1;
     const years = new Set<number>(points.map((p) => p.year));
     if (plotBench) for (const y of plotBench.keys()) years.add(y);
-    // ⚠ OFF THE RAW SERIES, NOT THE PLOTTED ONE — same rule, same reason, as the growth cards: a
+    //  Off the raw series, not the plotted one — same rule, same reason, as the growth cards: a
     // rebase is one constant per series and divides out of `v / prev`. See `stepChanges`.
     const ownStep = stepChanges(ownByYr);
     const benchStep = benchByYr ? stepChanges(benchByYr) : null;
@@ -166,7 +166,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
     paddedLogDomain(chartData.flatMap((d) => [d.value, d.trend, d.bench]).filter((v): v is number => v != null)),
   [chartData]);
 
-  /** ⚠ AN INDEX IS A BARE NUMBER — see the same guard in `MetricGrowthCard`. `fmt` scales to
+  /**  AN INDEX IS A BARE NUMBER — see the same guard in `MetricGrowthCard`. `fmt` scales to
    *  M/B/T, so left to it an index of 100 renders as "100M" and reads as an amount. */
   const fmtIndex = (v: number | null | undefined, dp = 0) => (v == null ? '—' : v.toFixed(dp));
 
@@ -180,10 +180,10 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
   };
   const ccy = !isIndex && currency ? `${currency} ` : '';
   /**
-   * ⚠ THE SAME SPELLING AS EVERY OTHER CAGR TILE (`cagrPct`, two decimals) — this card sits in the
+   *  The same spelling as every other CAGR tile (`cagrPct`, two decimals) — this card sits in the
    * same grid as the growth cards and its row is in the `Tables` tab, so a reader compares them.
    *
-   * ⚠⚠ IT IS STILL THE **FITTED** RATE, WHICH THE OTHERS NO LONGER ARE. `fit.cagr` is `e^slope − 1`
+   *  It is still the **FITTED** RATE, WHICH THE OTHERS NO LONGER ARE. `fit.cagr` is `e^slope − 1`
    * of the log-linear regression; `MetricGrowthCard` and the `Tables` row for invested capital both
    * report the point-to-point `endpointCagr`, which is the one definition `lineCagr`'s header says
    * this app has. So this tile and the `Invested capital CAGR` row can legitimately differ, by
@@ -213,7 +213,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                 where="Computed here — a log-linear regression on the points below."
                 when={`Over the ${fit.n} year(s) shown.`}
                 how="Invested capital = non-current liabilities + total equity — the long-term capital funding the business, and the base the Cash-return card divides FCF by." />} />} />
-            {/* ⚠ THE SAME REGRESSION OVER THE OTHER LINE, over the same years — see `statSpan`. */}
+            {/*  THE SAME REGRESSION OVER THE OTHER LINE, over the same years — see `statSpan`. */}
             {statSpan != null && (
               <Stat label={benchTileLabel('R²', benchTarget?.label)} color={chartTheme.pos}
                 value={benchFit.r2 == null ? '—' : benchFit.r2.toFixed(2)}
@@ -232,7 +232,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                   + `over the ${benchFit.n} year(s) it shares with this line — the same regression `
                   + 'as the tile beside it, so the two are comparable by construction.'} />} />
             )}
-            {/* ⚠ SILENT UNLESS THE BENCHMARK ACTUALLY SHORTENED THE SPAN. See `SpanNote`. */}
+            {/*  SILENT UNLESS THE BENCHMARK ACTUALLY SHORTENED THE SPAN. See `SpanNote`. */}
             <SpanNote span={statSpan} benchLabel={benchTarget?.label}
               narrowed={statSpan != null && points.length > ownStat.length} />
           </div>
@@ -246,7 +246,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                 <YAxis scale="log" domain={logDomain ?? ['dataMin', 'dataMax']} allowDataOverflow
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                   tickFormatter={(v: number) => (indexed ? fmtIndex(v) : fmt(v))} width={60} />
-                {/* ⚠ THE SAME HOVER AS THE GROWTH CARDS, AND DELIBERATELY NOT A LOOKALIKE OF IT —
+                {/*  THE SAME HOVER AS THE GROWTH CARDS, AND DELIBERATELY NOT A LOOKALIKE OF IT —
                     this is the same kind of chart as Revenue (a currency level, indexed, on a log
                     axis), so it reads the same helper (`pctSince`) rather than re-phrasing the same
                     fact. Never a bare index: the plotted number is cumulative growth since the
@@ -262,7 +262,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                       { rawValue?: number | null; step?: Step | null; benchStep?: Step | null }
                       | undefined;
                     const plotted = typeof v === 'number' ? v : null;
-                    // ⚠ WHOSE LINE, NOT WHICH METRIC — the card heading already says "Invested
+                    //  Whose line, not which metric — the card heading already says "Invested
                     // capital", and the benchmark row was always named for its index.
                     const label = name === 'bench' ? (benchTarget?.label ?? 'Benchmark')
                       : (holdingsName ?? 'Invested capital');
@@ -278,12 +278,12 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
                     return [`${ccy}${fmt(raw)}${tail}`, label];
                   }} />
                 <Line dataKey="value" name="value" type="monotone" stroke={chartTheme.accent} strokeWidth={2} dot={{ r: 2.5 }} connectNulls />
-                {/* ⚠ `tooltipType="none"` — OUT OF THE HOVER, as on the growth cards. It is a fitted
+                {/*  `tooltipType="none"` — OUT OF THE HOVER, as on the growth cards. It is a fitted
                     line, not a measurement: its value at a point is what a constant-growth
                     exponential says should have happened, listed in the same ink as a figure that
                     did. The fit is already stated in the R²/CAGR tiles and the dashed legend. */}
                 <Line dataKey="trend" name="trend" tooltipType="none" type="monotone" stroke={chartTheme.warn} strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-                {/* ⚠ THE BENCHMARK IS GREEN ON ALL FOURTEEN CHARTS — see `MetricGrowthCard` for the
+                {/*  THE BENCHMARK IS GREEN ON ALL FOURTEEN CHARTS — see `MetricGrowthCard` for the
                     measured separations, including why green beside this card's amber trend line
                     needs the trend to stay dashed. */}
                 {benchByYr && <Line dataKey="bench" name="bench" type="monotone" stroke={chartTheme.pos} strokeWidth={2} dot={{ r: 2 }} connectNulls />}
@@ -292,7 +292,7 @@ export default function InvestedCapitalCard({ holdingsTarget, holdingsName, isAg
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <LegendItem color={chartTheme.accent}
                 label={`${holdingsName ?? 'Invested capital'}${isIndex ? ' (index)' : ''}`} />
-              {/* ⚠ DASHED, because the line is. It wore a SOLID amber swatch while the trend it
+              {/*  DASHED, because the line is. It wore a SOLID amber swatch while the trend it
                   names is drawn `strokeDasharray="5 3"` — on a chart whose whole point is telling a
                   fitted line from a measured one, that is the one distinction the legend must
                   carry. `(index)` above stays inline: it qualifies the VALUES on that same line,

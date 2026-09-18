@@ -10,7 +10,7 @@ describe('correctedFcf', () => {
     expect(correctedFcf(1000, 150, false)).toBe(1000);
   });
 
-  it('⚠ treats a MISSING SBC as zero, not as unknown', () => {
+  it(' treats a MISSING SBC as zero, not as unknown', () => {
     // Deliberately asymmetric with how missing data is handled elsewhere here: most companies
     // genuinely report no stock compensation, so blanking their ratio would empty the chart for
     // the majority to be pedantic about the minority.
@@ -18,7 +18,7 @@ describe('correctedFcf', () => {
     expect(correctedFcf(1000, undefined, true)).toBe(1000);
   });
 
-  it('⚠ but a missing FCF is still null — that is the numerator', () => {
+  it(' but a missing FCF is still null — that is the numerator', () => {
     expect(correctedFcf(null, 150, true)).toBeNull();
     expect(correctedFcf(undefined, 150, false)).toBeNull();
   });

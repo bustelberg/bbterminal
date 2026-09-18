@@ -8,11 +8,11 @@ FOUR AXES, and they are not independent — which is the point of running them t
   * DEDUPE    — whether the 30 metric requests across the cards collapse to the 18 distinct ones.
   * BATCH     — whether the metrics one card claims are read in ONE query or one query each.
 
-⚠ INTERLEAVED (a,b,c,d, a,b,c,d, …), NEVER IN BLOCKS. Run-to-run spread here is wide and the
+ INTERLEAVED (a,b,c,d, a,b,c,d, …), NEVER IN BLOCKS. Run-to-run spread here is wide and the
     machine warms under the benchmarking itself, so a blocked A/B hands you a stable-looking
     difference that does not exist. Same rule the pytest suite's notes state.
 
-⚠ THE BATCH AXIS BARELY MOVES LOCALLY AND THAT IS EXPECTED, NOT A NULL RESULT. What it removes is
+ THE BATCH AXIS BARELY MOVES LOCALLY AND THAT IS EXPECTED, NOT A NULL RESULT. What it removes is
     Postgres CONNECTIONS (connect + TLS + auth per `COPY`), which cost ~2ms to a local Docker
     Postgres and 150-250ms to Supabase. Count the connections, don't read the clock — the counter
     below is the number that predicts production.
@@ -33,7 +33,7 @@ NAMES = ['margin_inputs', 'debt_ratio_inputs', 'cash_return_inputs', 'interest_b
          'fcf_sbc_yield_inputs', 'dividend_yield_inputs']
 fns = [getattr(E, n) for n in NAMES]
 
-# ⚠ CAPTURED BEFORE THE LOOP PATCHES THEM. Reading these back off the module inside the loop
+#  Captured before the loop patches them. Reading these back off the module inside the loop
 # returns whatever the previous round installed, so every config after the first would measure the
 # one before it.
 _real = _blend_cache.cached_metric_reads

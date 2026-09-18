@@ -156,7 +156,7 @@ class TestOneWeightingForTheWholeIndex:
 
 
 class TestTheBenchmarksPanelIsPricedInThePortfolioWorld:
-    """⚠ THE PANEL'S OWN SUBTITLE IS THE SPEC: "same basis as a portfolio, so the numbers are
+    """ THE PANEL'S OWN SUBTITLE IS THE SPEC: "same basis as a portfolio, so the numbers are
     comparable". The portfolios on that page are priced from `asset_price` (yfinance). Until
     2026-07-16 the panel was priced from GuruFocus — two vendors, two adjustment conventions, two
     FX sources, and the difference between them reads as alpha.

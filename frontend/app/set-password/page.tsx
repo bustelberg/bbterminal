@@ -17,7 +17,7 @@ const MIN_LENGTH = 8
 /**
  * Choose a permanent password — reachable only with a live session from `/auth/confirm`.
  *
- * ⚠⚠ IT USED TO ASSUME THE SESSION AND FIND OUT AT SUBMIT TIME. The page rendered its form
+ *  It used to assume the session and find out at submit time. The page rendered its form
  * unconditionally and called `updateUser({ password })`; with no session that fails with
  * "Auth session missing" — a library string naming the symptom, shown only AFTER someone had
  * chosen a password, typed it twice and pressed Save, on the one screen where nothing they could
@@ -34,14 +34,14 @@ export default function SetPasswordPage() {
   const [reveal, setReveal] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  // `null` = still checking. ⚠ THREE STATES, NOT TWO: rendering the form while the answer is
+  // `null` = still checking.  THREE STATES, NOT TWO: rendering the form while the answer is
   // unknown is how someone starts typing into a form that is about to be replaced.
   const [signedIn, setSignedIn] = useState<boolean | null>(null)
 
   useEffect(() => {
     let alive = true
     void (async () => {
-      // ⚠ `getUser`, NOT `getSession` — the same rule `proxy.ts` states. `getSession` returns
+      //  `getUser`, NOT `getSession` — the same rule `proxy.ts` states. `getSession` returns
       // whatever is in storage without asking whether it is still valid, so an expired session
       // would render the form and fail at submit exactly as before.
       const { data: { user } } = await supabase.auth.getUser()
@@ -51,12 +51,12 @@ export default function SetPasswordPage() {
   }, [supabase])
 
   /**
-   * ⚠⚠ THE TWO RULES ARE CHECKED WHILE TYPING, NOT ONLY AT SUBMIT. Reported from the live form:
+   *  The two rules are checked while typing, not only at submit. Reported from the live form:
    * fifteen characters in the first box, eight in the second, and the page said nothing until the
    * button was pressed — so the first thing this screen ever tells a new user is that they got it
    * wrong. Both rules are decidable from what is on screen, so there is no reason to wait.
    *
-   * ⚠ THE MISMATCH LINE IS SUPPRESSED WHILE THE SECOND BOX IS EMPTY, and the length line while the
+   *  The mismatch line is suppressed while the second box is empty, and the length line while the
    * first is. "Too short" under an empty field is a complaint about not having typed yet.
    */
   const tooShort = password.length > 0 && password.length < MIN_LENGTH
@@ -79,7 +79,7 @@ export default function SetPasswordPage() {
     setLoading(true)
     const { error } = await supabase.auth.updateUser({ password })
     if (error) {
-      // ⚠ THE RAW MESSAGE GOES TO THE CONSOLE, A SENTENCE TO THE SCREEN. If the session went away
+      //  The raw message goes to the console, a sentence to the screen. If the session went away
       // between the check on mount and this submit, "Auth session missing" is still the string
       // Supabase returns — and it is still not something a person can act on.
       console.warn('[set-password] updateUser failed:', error)
@@ -107,7 +107,7 @@ export default function SetPasswordPage() {
     )
   }
 
-  // ⚠ NO PASSWORD FORM WITHOUT A SESSION. Offering one would be offering an action that cannot
+  //  No password form without a session. Offering one would be offering an action that cannot
   // succeed — and the failure would arrive after the work, phrased as a fault in the password.
   if (!signedIn) {
     return (
@@ -137,13 +137,13 @@ export default function SetPasswordPage() {
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <div className="flex items-baseline justify-between mb-1.5">
-            {/* ⚠ NOT `${authLabelClass} mb-0`. Tailwind resolves a conflict by stylesheet order,
+            {/*  NOT `${authLabelClass} mb-0`. Tailwind resolves a conflict by stylesheet order,
                 not by position in the class string, so appending an override is a coin toss —
                 this row carries the spacing itself and the label is spelled out. */}
             <label htmlFor="password" className="block text-xs font-medium text-fg-muted">
               Password
             </label>
-            {/* ⚠ ONE TOGGLE FOR BOTH FIELDS. Two would let someone reveal the box they typed
+            {/*  ONE TOGGLE FOR BOTH FIELDS. Two would let someone reveal the box they typed
                 correctly and keep the other hidden, which is the opposite of what it is for. */}
             <button
               type="button"

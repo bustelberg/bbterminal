@@ -1,30 +1,30 @@
 /**
- * THE DEEP VALUATION TAB'S WORKED EXPRESSIONS — the EGM's three and the Reverse DCF's five.
+ * The deep valuation tab's worked expressions — the EGM's three and the Reverse DCF's five.
  *
- * ⚠⚠ THEY LIVE HERE RATHER THAN IN THE JSX BECAUSE A LaTeX STRING IS TESTABLE AND A TOOLTIP IS
+ *  They live here rather than in the jsx because a LaTeX STRING IS TESTABLE AND A TOOLTIP IS
  * NOT. The failure these guard against is invisible on screen: an unescaped `%` starts a LaTeX
  * COMMENT, so `= +5.8%` truncates the line at the first figure and paints a shorter formula that
- * looks finished (see `workedFormula`'s own ⚠⚠, and `workedFormula.latex.test.ts`, which renders
+ * looks finished (see `workedFormula`'s own , and `workedFormula.latex.test.ts`, which renders
  * in strict mode so the same input throws instead). Written inline, each of these would be a
  * string nothing could render until a person opened that one ⓘ on a company where every operand
  * happened to be present.
  *
- * ⚠ THE OPERANDS COME OFF THE RESULT, NOT OFF THE INPUTS — the rule `workedCagr` and `workedBand`
+ *  The operands come off the result, not off the inputs — the rule `workedCagr` and `workedBand`
  * already follow. The EGM's legs carry the growth, yield and the two multiples the model actually
  * used, so a worked line built from `assumptions` and `src` would be a second route to the same
  * pair, free to drift from the arithmetic it claims to prove.
  *
- * ⚠ THE RESULT IS PASSED IN, ALWAYS — it is the tile's own value, never recomputed here. A second
+ *  The result is passed in, always — it is the tile's own value, never recomputed here. A second
  * implementation whose only job is to agree with the first is the thing that stops agreeing.
  *
- * ⚠⚠ A MONEY RESULT ARRIVES AS A NUMBER AND IS PRINTED WITH `subNum`, NOT WITH THE PANEL'S OWN
+ *  A money result arrives as a number and is printed with `subNum`, NOT WITH THE PANEL'S OWN
  * FORMATTER. `mn()` and `money()` prefix a CURRENCY CODE (`USD 15,369M`), and in maths mode
  * `USD` is not a word — it is the product of three variables, set in italics. The one formatted
  * string that IS safe is a percentage: it carries no letters, and `texEscape` turns its `%` into
  * `\%` before KaTeX can read it as a comment. Units live in the legend and on the row's own label,
  * where they are prose.
  *
- * ⚠ EVERY BUILDER RETURNS '' WHEN AN OPERAND IS MISSING, and `AspectCard` collapses an empty
+ *  Every builder returns '' WHEN AN OPERAND IS MISSING, and `AspectCard` collapses an empty
  * `worked` rather than leaving a gap. A worked example is worth having only while every number in
  * it is real.
  */
@@ -36,7 +36,7 @@ const ok = (v: number | null | undefined): v is number => v != null && Number.is
 /**
  * The bridge's own operands.
  *
- * ⚠ THE PANEL'S `yieldUsed` IS `number | null` AND THE MODEL READS A NULL AS 0, so the two are the
+ *  The panel's `yieldUsed` IS `number | null` AND THE MODEL READS A NULL AS 0, so the two are the
  * same number only by a convention neither side states. The leg is what was multiplied.
  */
 export function bridgeParts(b: EgmBridge) {
@@ -52,7 +52,7 @@ export function bridgeParts(b: EgmBridge) {
 /**
  * `(1+g)(1+y)(PE_exit ÷ PE_fwd)^(1/n) − 1` — the EGM's expected annual return.
  *
- * ⚠ FOUR DECIMALS ON THE TWO RATES, not the two `subDigits` would give a number below 1. A yield
+ *  Four decimals on the two rates, not the two `subDigits` would give a number below 1. A yield
  * of 0.30% is `0.003`, and at three decimals it rounds to `0.003` — which is fine — while a yield
  * of 0.0025 becomes `0.003` too, so two different companies print the same operand beside two
  * different answers. The rates here are decimals of a percent and need the extra digit.
@@ -70,12 +70,12 @@ export function workedEgmReturn(bridge: EgmBridge, years: number, result: string
 /**
  * `P₀ (1+g)^n · (PE_exit ÷ PE_fwd)` — the price at the end of the window.
  *
- * ⚠ THE RERATING IS APPLIED ONCE, NOT PER YEAR, and the expression has to show that: the same
+ *  The rerating is applied once, not per year, and the expression has to show that: the same
  * ratio appears under a `1/n` exponent in the return above, and a reader moving between the two
  * ⓘs is entitled to see why the same two multiples give a per-year figure there and a whole-period
  * one here.
  *
- * ⚠ NO DIVIDEND TERM. This is the capital leg alone — see `EgmResult.impliedPrice`.
+ *  No dividend term. This is the capital leg alone — see `EgmResult.impliedPrice`.
  */
 export function workedImpliedPrice(price: number | null | undefined, bridge: EgmBridge,
   years: number, result: number | null | undefined): string {
@@ -102,12 +102,12 @@ export function workedPriceMove(implied: number | null | undefined,
  * `PE_exit · ((1+g)(1+y) / (1+h))^n` — the highest multiple you can pay TODAY and still clear the
  * hurdle.
  *
- * ⚠⚠ THIS IS NOT THE EGM AND THE ⓘ IT SITS IN SAYS SO. The return above solves price → return;
+ *  This is not the EGM and the ⓘ IT SITS IN SAYS SO. The return above solves price → return;
  * this solves required return → price. `h` is the ONLY input in this file that describes the
  * READER rather than the company, and it appears in no other expression here — which is exactly
  * why the panel was showing a hurdle-rate box whose effect nobody could find.
  *
- * ⚠ THE COMPOUNDER IS THE SAME ONE THE RETURN USES, written out rather than passed as a scalar:
+ *  The compounder is the same one the return uses, written out rather than passed as a scalar:
  * a reader moving between the two ⓘs has to be able to see that `(1+g)(1+y)` is one quantity used
  * twice, or the two models look like they disagree about growth.
  */
@@ -123,7 +123,7 @@ export function workedMaxPE(exitPE: number | null | undefined, g: number, y: num
 /**
  * `EPS_FY1 · PE_max` — the price that multiple implies.
  *
- * ⚠ NEXT YEAR'S EPS, NOT THE TRAILING ONE, because `PE_max` is built from a FORWARD exit multiple
+ *  Next year's EPS, not the trailing one, because `PE_max` is built from a FORWARD exit multiple
  * and the growth that reaches it. Multiplying a forward multiple by a trailing EPS understates the
  * fair value by one year of growth, which on a compounder is most of the difference the reader
  * came to see.
@@ -139,7 +139,7 @@ export function workedFairValue(eps: number | null | undefined,
 /**
  * `FV / P_0 − 1` — how far today's price sits from the fair value.
  *
- * ⚠ A SIBLING OF `workedPriceMove`, NOT A REUSE OF IT. That one is `P_n / P_0 − 1`, the move to the
+ *  A sibling of `workedPriceMove`, NOT A REUSE OF IT. That one is `P_n / P_0 − 1`, the move to the
  * IMPLIED price at the end of the window; this is the gap to the fair value TODAY. The arithmetic
  * is the same shape and the numerators are two different quantities, so sharing the builder would
  * put `P_n` over a figure that is not it — the one failure this file exists to prevent.
@@ -155,7 +155,7 @@ export function workedFairValueGap(fairValue: number | null | undefined,
 /**
  * `OCF_est − |C|` — next year's free cash flow, derived.
  *
- * ⚠ THE BARS ARE NOT DECORATION. The vendor files capex NEGATIVE; without the magnitude this
+ *  The bars are not decoration. The vendor files capex NEGATIVE; without the magnitude this
  * expression ADDS the company's capital spending to its cash flow, and the result is a bigger,
  * entirely plausible number. Same reason `growthCapex` takes `Math.abs`.
  */
@@ -180,7 +180,7 @@ export function workedGrowthCapex(capex: number | null | undefined,
 /**
  * `F − S + G` — the base and whichever corrections actually ran.
  *
- * ⚠⚠ THE SYMBOLIC HALF IS BUILT FROM WHAT RAN, NOT FROM THE FULL FORM. Printing `F − S + G` over a
+ *  The symbolic half is built from what ran, not from the full form. Printing `F − S + G` over a
  * company with no stock-compensation line states an arithmetic that did not happen — the same "an
  * absent line is not a zero" rule the rows keep, one level up in the notation. A reader checking
  * the subtraction would find one term short and no explanation for it.
@@ -191,7 +191,7 @@ export function workedCashFlowValued(base: number | null | undefined,
   if (!ok(base) || !ok(total)) return '';
   const hasSbc = ok(sbc);
   const hasGrowth = ok(growth);
-  // ⚠ NO CORRECTION RAN ⇒ NO WORKED LINE. `F = F` is not an arithmetic anybody needs checking, and
+  //  No correction ran ⇒ NO WORKED LINE. `F = F` is not an arithmetic anybody needs checking, and
   // a typeset restatement of the row above invites the reader to look for the step it is missing.
   if (!hasSbc && !hasGrowth) return '';
   return withWorked(
@@ -205,7 +205,7 @@ export function workedCashFlowValued(base: number | null | undefined,
 /**
  * `P₀ × N` — the market cap solved against.
  *
- * ⚠ `N` IS IN MILLIONS, which is why the product is too and why nothing in this panel scales
+ *  `N` IS IN MILLIONS, which is why the product is too and why nothing in this panel scales
  * anything. Stated in the legend rather than left to the box's `(m)` suffix.
  */
 export function workedMarketCap(price: number | null | undefined,
@@ -219,15 +219,15 @@ export function workedMarketCap(price: number | null | undefined,
 /**
  * The reverse DCF itself, as an EQUALITY with one unknown.
  *
- * ⚠⚠ IT IS NOT WRITTEN AS `PV = …`, AND THAT IS THE WHOLE POINT OF THE PANEL. A present value on
+ *  It is not written as `PV = …`, AND THAT IS THE WHOLE POINT OF THE PANEL. A present value on
  * the left of an equals sign reads as a valuation this app computed; what is actually happening is
  * that every term but `g` is known and `g` is what makes the two sides meet. The `⟹ g = …` tail
  * says which way the arrow runs.
  *
- * ⚠ THE PERPETUITY LEG IS SHOWN. It is usually most of the value, and a formula that stopped at
+ *  The perpetuity leg is shown. It is usually most of the value, and a formula that stopped at
  * the explicit years would understate what the reader is being asked to believe.
  *
- * ⚠⚠ THE EXPONENT IS `t-1`, NOT `t`, AND THE FIRST VERSION OF THIS LINE GOT IT WRONG. `modelValue`
+ *  The exponent is `t-1`, NOT `t`, AND THE FIRST VERSION OF THIS LINE GOT IT WRONG. `modelValue`
  * pays the BASE cash flow in year 1 and starts growing in year 2 — its closed form is
  * `F·(1 − x^n)/(r − g)` with `x = (1+g)/(1+r)`, which expands to `Σ F(1+g)^{t-1}/(1+r)^t`, and its
  * `g = r` limit case (`F·n/(1+r)`, every term equal) only comes out right on that reading. The

@@ -49,7 +49,7 @@ const NEGATIVE_BY_CONVENTION = new Set<LineItem>(['interest_expense', 'income_ta
 
 /** One income-statement line — TWO charts, native currency and EUR.
  *
- * ONE THING HERE IS THE OPPOSITE OF THE DIVIDEND COLUMN, and it decides how to read the
+ * One thing here is the opposite of the dividend column, and it decides how to read the
  * "not this row's listing" warning:
  *
  *   Dividends are reported in the DECLARATION currency on every listing of an ISIN.
@@ -63,7 +63,7 @@ const NEGATIVE_BY_CONVENTION = new Set<LineItem>(['interest_expense', 'income_ta
  *     Same company, same year, DIFFERENT number. So here a non-home listing is not a
  *     cosmetic detail — it changes the currency basis of the whole series.
  *
- * VALUES ARE IN MILLIONS. 14,092 is $14.1bn, and rendering it as dollars would be off by
+ * Values are in millions. 14,092 is $14.1bn, and rendering it as dollars would be off by
  * six orders of magnitude. The axis says so, and the header formats it as bn/M. */
 export default function AssetFinancialModal({
   row, isin, item, onClose, onLoaded,

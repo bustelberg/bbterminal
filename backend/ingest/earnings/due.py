@@ -7,7 +7,7 @@ WHY A DETECTOR AND NOT A SCHEDULE
     ticker (see `docs/gurufocus_api.md`). So a report date is unknowable, and the only instrument
     available is to project when the next period ENDED and probe some sensible interval after.
 
-⚠⚠ THE LAG CANNOT BE LEARNED FROM OUR OWN HISTORY, WHICH IS THE FIRST THING YOU WOULD TRY.
+ THE LAG CANNOT BE LEARNED FROM OUR OWN HISTORY, WHICH IS THE FIRST THING YOU WOULD TRY.
     `metric_data.recorded_at` records when WE fetched, not when the vendor published. Measured
     2026-08-11 over every quarterly period since mid-2024, the per-company FASTEST-EVER observed
     lag is:
@@ -21,7 +21,7 @@ WHY A DETECTOR AND NOT A SCHEDULE
     anything: nothing has EVER appeared sooner than 27 days after period end, so 25 is a safe
     "not before this" and the rest is discovered by probing.
 
-⚠ IT ANSWERS "MAYBE", AND THE CALLER MUST SAY SO. A press that finds nothing new is the NORMAL
+ IT ANSWERS "MAYBE", AND THE CALLER MUST SAY SO. A press that finds nothing new is the NORMAL
     outcome for a company that has not reported yet — not a failure, and not a broken button. This
     returns a suspicion with its reasoning attached so the UI can phrase it honestly.
 
@@ -57,7 +57,7 @@ def _month_end(year: int, month: int) -> date:
 def _next_period_end(newest: date, cadence_months: int) -> date:
     """The end of the period following `newest`.
 
-    ⚠ MONTHS, NOT DAYS, AND THE DIFFERENCE IS A REAL BUG. Adding a 91-day "quarter" to
+     MONTHS, NOT DAYS, AND THE DIFFERENCE IS A REAL BUG. Adding a 91-day "quarter" to
     2025-12-31 gives 2026-04-01 — a date that is not a fiscal period end and that pushes every
     projection one day later for the rest of the year. GuruFocus reports periods as `YYYY-MM`, so
     a period always ENDS at a month end; advancing whole months and snapping there is exact.
@@ -69,15 +69,15 @@ def _next_period_end(newest: date, cadence_months: int) -> date:
 def infer_cadence_months(periods: list[date]) -> int | None:
     """Quarterly (3), semi-annual (6) or annual (12) — from the company's OWN spacing.
 
-    ⚠ NOT HARDCODED TO 3. Semi-annual filing is normal outside the US, and an annual-only series
+     NOT HARDCODED TO 3. Semi-annual filing is normal outside the US, and an annual-only series
     is common for the smaller names; assuming quarterly would mark both permanently overdue and
     nag on every page load.
 
-    ⚠ MEDIAN, SO ONE ODD GAP CANNOT MOVE IT. A fiscal-year change leaves a stub period, and a
+     MEDIAN, SO ONE ODD GAP CANNOT MOVE IT. A fiscal-year change leaves a stub period, and a
     missed filing leaves a double gap; both are single observations among dozens and the median
     ignores them where a mean would not.
 
-    ⚠ SNAPPED TO A REAL CADENCE. A median of 89 or 94 days is a quarterly filer with ragged month
+     SNAPPED TO A REAL CADENCE. A median of 89 or 94 days is a quarterly filer with ragged month
     lengths, not a company on an 89-day cycle. Snapping keeps the projection landing on the period
     the company will actually report.
 
@@ -107,7 +107,7 @@ def period_due(periods: list[date | str], today: date, *,
     and None when the newest period we hold is still the newest one that can exist, or when the
     cadence cannot be inferred.
 
-    ⚠ THE LABEL NAMES THE PERIOD END, NEVER A QUARTER NUMBER, and that is not fussiness. "Q2 2026"
+     THE LABEL NAMES THE PERIOD END, NEVER A QUARTER NUMBER, and that is not fussiness. "Q2 2026"
     is only right for a December year-end: a company whose fiscal year ends in June calls the
     quarter ending 2026-06-30 its FOURTH. Naming the month is true for every filer, and a label
     that is wrong for a minority is worse than a label that is plain for everyone.
@@ -120,7 +120,7 @@ def period_due(periods: list[date | str], today: date, *,
         return None
 
     nxt = _next_period_end(seen[-1], cadence)
-    # ⚠ THE PERIOD MUST HAVE ENDED. Projecting forward says when it WILL end; a company cannot
+    #  The period must have ended. Projecting forward says when it WILL end; a company cannot
     # report a quarter that is still running, and `due_since` alone would not catch that for a
     # long-lagged annual filer.
     if nxt > today:

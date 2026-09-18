@@ -6,7 +6,7 @@ import { describeMfaError, explainVerdict } from '../../../lib/mfaError';
 import { expectedTotp, explainCode, serverSkewSeconds } from '../../../lib/totp';
 import { useSecurityCopy } from '../../components/account/securityCopy';
 
-/** ⚠ The Supabase origin, not our backend — this page never calls `API_URL`. See the header. */
+/**  The Supabase origin, not our backend — this page never calls `API_URL`. See the header. */
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
 import {
   CODE_LENGTH, type Factor, groupSecret, isCompleteCode, normaliseCode, suggestName,
@@ -16,15 +16,15 @@ import {
 /**
  * Manage the authenticators on your own account — enrol, confirm, list, remove.
  *
- * ⚠⚠ THIS PAGE TALKS TO SUPABASE DIRECTLY AND NEVER TO OUR BACKEND. `supabase.auth.mfa.*` goes to
+ *  This page talks to supabase directly and never to our backend. `supabase.auth.mfa.*` goes to
  * `NEXT_PUBLIC_SUPABASE_URL`, not `API_URL`, so it needs no entry in `_auth_middleware.py` — which
  * makes it the one exception to `userAllowedPaths`' standing warning that adding a page there is
  * half the job. Worth stating, because the absence of the second half looks like an omission.
  *
- * ⚠ EVERY SIGNED-IN USER, NOT JUST ADMINS. These are the reader's own credentials; an admin cannot
+ *  Every signed-in user, not just admins. These are the reader's own credentials; an admin cannot
  * enrol somebody else's phone and there is nothing here to gate.
  *
- * ⚠ IT DOES NOT ENFORCE ANYTHING. Nothing reads `aal` yet — `proxy.ts` and `verify_token` are
+ *  It does not enforce anything. Nothing reads `aal` yet — `proxy.ts` and `verify_token` are
  * steps 4 and 5 — so a user who enrols a factor can still sign in with a password alone. The page
  * says so rather than implying a protection that is not switched on: a security screen that
  * overstates what it did is worse than one that admits the gap.
@@ -63,14 +63,14 @@ export default function AccountSecurityPage() {
   useEffect(() => { void load(); }, [load]);
 
   /**
-   * ⚠⚠ CHECK THE CLOCK BEFORE ANYBODY SCANS, NOT AFTER THREE FAILED CODES. GoTrue accepts a code
+   *  Check the clock before anybody scans, not after three failed codes. GoTrue accepts a code
    * for roughly −45s to +30s around its own time and that window is NOT configurable (measured
    * 2026-09-08; the only TOTP settings it exposes are enroll/verify enabled). So a machine even a
    * minute out cannot enrol at all — and the reader has no way to know that, because every code
    * their phone shows is correct. Telling them up front costs one HEAD request; telling them
    * afterwards costs a deleted authenticator entry and a rescan, three times over.
    *
-   * ⚠ THE BROWSER IS THE PROXY FOR THE PHONE HERE, and that is sound in the direction that
+   *  The browser is the proxy for the phone here, and that is sound in the direction that
    * matters: a phone on automatic time is right, so when this machine disagrees with the server it
    * is this machine that is wrong. It cannot catch a phone with hand-set time — nothing here can —
    * which is what the post-failure diagnosis is still for.
@@ -80,7 +80,7 @@ export default function AccountSecurityPage() {
     let alive = true;
     void (async () => {
       const s = await serverSkewSeconds(`${SUPABASE_URL}/auth/v1/health`);
-      // ⚠ 10s FLOOR. The `Date` header is whole-second and carries the round trip, so a couple of
+      //  10s FLOOR. The `Date` header is whole-second and carries the round trip, so a couple of
       // seconds is noise — warning on it would train people to ignore the banner.
       if (alive && s != null && Math.abs(s) >= 10) setClockSkew(s);
     })();
@@ -92,7 +92,7 @@ export default function AccountSecurityPage() {
     setNotice(null);
     setBusy(true);
     try {
-      // ⚠⚠ SWEEP THE ABANDONED ONES FIRST. See `unverifiedIds`: every enrolment nobody finished
+      //  Sweep the abandoned ones first. See `unverifiedIds`: every enrolment nobody finished
       // left a real factor behind that counts against `max_enrolled_factors`, so without this a
       // handful of closed tabs eventually make "Add" fail with "too many factors" on a page
       // showing none. Failures here are ignored on purpose — a leftover we cannot clear is not a
@@ -130,17 +130,17 @@ export default function AccountSecurityPage() {
       });
       if (e) {
         /**
-         * ⚠⚠ DIAGNOSE, DO NOT GUESS. "Invalid TOTP code" is produced by three unrelated faults and
+         *  Diagnose, do not guess. "Invalid TOTP code" is produced by three unrelated faults and
          * the copy could only ever pick one — it picked the clock, and sent somebody to check a
          * phone setting that was already correct while the real cause was a stale entry in their
          * authenticator (2026-09-08). We hold the secret we just enrolled, so we can compute what
          * it SHOULD be showing and say which of the three it is.
          *
-         * ⚠ IT IS A DIAGNOSTIC, NOT AN AUTHORISATION. The server already rejected the code; this
+         *  It is a diagnostic, not an authorisation. The server already rejected the code; this
          * only explains why. It can never let anything through.
          */
         const verdict = await explainCode(pending.secret, normaliseCode(code));
-        // ⚠ ASKED ONLY ON FAILURE. It is a round trip, and on the happy path there is nothing to
+        //  Asked only on failure. It is a round trip, and on the happy path there is nothing to
         // explain — measuring the clock on every successful enrolment would be a request spent to
         // learn something nobody needs.
         const skew = await serverSkewSeconds(`${SUPABASE_URL}/auth/v1/health`);
@@ -160,7 +160,7 @@ export default function AccountSecurityPage() {
             : verdict.kind === 'matches'
               ? '\n  → the code was right for this secret; the server still refused it.'
               : skew != null && Math.abs(skew) >= 10
-                // ⚠⚠ THE CONCLUSION THE FIRST VERSION GOT BACKWARDS. A phone/browser disagreement
+                //  The conclusion the first version got backwards. A phone/browser disagreement
                 // says nothing about WHICH drifted; the browser/server figure is what settles it,
                 // and here it usually indicts the machine the reader is sitting at.
                 ? `\n  → THIS COMPUTER is ${Math.abs(skew)}s out from the server. Fix its clock, `
@@ -190,7 +190,7 @@ export default function AccountSecurityPage() {
     setPending(null);
     setCode('');
     setError(null);
-    // ⚠ REMOVE THE HALF-MADE FACTOR ON THE WAY OUT rather than leaving it for the next sweep. It
+    //  Remove the half-made factor on the way out rather than leaving it for the next sweep. It
     // is the same cleanup, done at the moment we know it is abandoned instead of guessing later.
     if (id) await supabase.auth.mfa.unenroll({ factorId: id }).catch(() => undefined);
     await load();
@@ -201,7 +201,7 @@ export default function AccountSecurityPage() {
     setError(null);
     setBusy(true);
     try {
-      // ⚠⚠ PROVE POSSESSION BEFORE TAKING THE PROTECTION OFF. Without a code, anyone holding a
+      //  Prove possession before taking the protection off. Without a code, anyone holding a
       // session could strip two-factor from the account — which is exactly what a stolen session
       // would do first. `verifyOrder` puts the OTHER authenticators first so a lost device can
       // still be removed using the spare, which is what having a spare is for.
@@ -245,7 +245,7 @@ export default function AccountSecurityPage() {
         <p className="mt-1 text-sm text-fg-subtle leading-relaxed">{copy.intro}</p>
       </header>
 
-      {/* ⚠ ABOVE the error slot on purpose: when the clock is out, EVERY code fails, so this is
+      {/*  ABOVE the error slot on purpose: when the clock is out, EVERY code fails, so this is
           the cause and anything below it is a symptom. */}
       {clockSkew != null && (
         <p role="alert" className="rounded-lg border border-warn-500/40 bg-warn-100 px-3.5 py-3
@@ -339,7 +339,7 @@ export default function AccountSecurityPage() {
                 <p className="mt-1 text-xs text-fg-subtle">{copy.scanBody}</p>
               </div>
 
-              {/* ⚠ THE QR IS AN SVG STRING FROM GOTRUE, injected as markup because that is the
+              {/*  THE QR IS AN SVG STRING FROM GOTRUE, injected as markup because that is the
                   form Supabase returns it in. The trust boundary is the same one that issues our
                   sessions — if that server were hostile, an <svg> would be the least of it — and
                   the alternative is a QR library for one image. */}
@@ -366,7 +366,7 @@ export default function AccountSecurityPage() {
                       onClick={() => {
                         void navigator.clipboard?.writeText(pending.secret)
                           .then(() => setCopiedSecret(true))
-                          // ⚠ Clipboard access can be refused (permissions, insecure origin). The
+                          //  Clipboard access can be refused (permissions, insecure origin). The
                           // key is on screen either way, so this is a convenience, not a failure.
                           .catch((e) => console.warn('[mfa] clipboard refused:', e));
                       }}
@@ -388,7 +388,7 @@ export default function AccountSecurityPage() {
                   id="totp-code"
                   value={code}
                   onChange={(e) => setCode(normaliseCode(e.target.value))}
-                  // ⚠ `inputMode` + `autoComplete="one-time-code"`: a numeric keypad on a phone,
+                  //  `inputMode` + `autoComplete="one-time-code"`: a numeric keypad on a phone,
                   // and iOS/Android offer the code from the authenticator directly.
                   inputMode="numeric"
                   autoComplete="one-time-code"

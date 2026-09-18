@@ -1,6 +1,6 @@
 """Discovery is the one step of a fleet refresh that drives somebody else's UI with a browser.
 
-⚠⚠ AND IT WAS THE ONLY FATAL ONE (2026-08-22). AIRS's Rapportage menu became unclickable — the
+ AND IT WAS THE ONLY FATAL ONE (2026-08-22). AIRS's Rapportage menu became unclickable — the
 Front-office anchor was covered by another element matching the same selector — and a 30-second
 Playwright timeout raised straight out of `_discover_portfolios`:
 
@@ -9,7 +9,7 @@ Playwright timeout raised straight out of `_discover_portfolios`:
     intercepts pointer events
     [job] Refresh all portfolios (airs.vermogen.refresh) failed
 
-Not one of 46 accounts was scanned. The refresh is what clears a ⚠ Vermogensoverzicht badge, so a
+Not one of 46 accounts was scanned. The refresh is what clears a  Vermogensoverzicht badge, so a
 menu that could not be clicked presented as a fleet of stale books.
 
 Two independent changes, one pinned here and one in `airs_scanner`:
@@ -52,7 +52,7 @@ class TestTheStoredRosterIsTheFallback:
         assert V._roster_names() == ["BUS_A", "BUS_B"]
 
     def test_it_is_sorted_deduped_and_trimmed(self, monkeypatch):
-        # ⚠ THE SAME LIST SHAPE DISCOVERY PRODUCES, so the fallback cannot make the run behave
+        #  The same list shape discovery produces, so the fallback cannot make the run behave
         # differently in some second way — a duplicate would scan an account twice and a blank
         # would be requested from AIRS as an empty portefeuille.
         _wire(monkeypatch, [{"portefeuille": " BUS_B "}, {"portefeuille": "BUS_A"},
@@ -61,14 +61,14 @@ class TestTheStoredRosterIsTheFallback:
         assert V._roster_names() == ["BUS_A", "BUS_B"]
 
     def test_a_read_failure_is_empty_rather_than_partial(self, monkeypatch):
-        """⚠ AND THE CALLER THEN REPORTS THE ORIGINAL DISCOVERY ERROR. Returning a half-list here
+        """ AND THE CALLER THEN REPORTS THE ORIGINAL DISCOVERY ERROR. Returning a half-list here
         would scan some accounts and report a complete run — the fallback's whole risk is that it
         cannot see a portfolio opened since, and a truncated read makes that risk unbounded."""
         _wire(monkeypatch, RuntimeError("connection reset"))
         assert V._roster_names() == []
 
     def test_too_few_accounts_declines_the_fallback(self, monkeypatch):
-        """⚠ ONE DEFINITION OF "TOO FEW TO BELIEVE", shared with `_record_roster`. A stored roster
+        """ ONE DEFINITION OF "TOO FEW TO BELIEVE", shared with `_record_roster`. A stored roster
         that is itself suspiciously short is not a safer answer than the error — it is the same
         failure one step earlier, and scanning 3 of 46 books would report `status: ok`."""
         _wire(monkeypatch, [{"portefeuille": f"BUS_{i}"} for i in range(V._MIN_ROSTER - 1)])
@@ -80,20 +80,20 @@ class TestTheStoredRosterIsTheFallback:
 
 class TestADegradedRunSaysSo:
     def test_the_caveat_leads_the_message(self):
-        """⚠⚠ IT CHANGES WHAT EVERY COUNT AFTER IT MEANS. "46 accounts refreshed" off a live
+        """ IT CHANGES WHAT EVERY COUNT AFTER IT MEANS. "46 accounts refreshed" off a live
         discovery asserts that is the whole population; off a stored roster it cannot. Appending
         the caveat would put it after the numbers it qualifies, where a reader who has already
         read "46 accounts" has stopped."""
-        degraded = "⚠ Portfolio discovery failed (TimeoutError) — scanning the 46 accounts from…"
+        degraded = " Portfolio discovery failed (TimeoutError) — scanning the 46 accounts from…"
         summary = V.format_run_message({"added": 0, "updated": 46, "up_to_date": 0, "failed": 0})
         combined = f"{degraded} {summary}"
-        assert combined.startswith("⚠ Portfolio discovery failed")
+        assert combined.startswith(" Portfolio discovery failed")
         assert summary in combined
 
 
 class TestTheMenuClickCannotFailTheScan:
     def test_it_swallows_and_narrates_instead_of_raising(self, monkeypatch):
-        """⚠ AND IT EMITS `progress`, NOT `error`. `_discover_portfolios._sink` RAISES on an
+        """ AND IT EMITS `progress`, NOT `error`. `_discover_portfolios._sink` RAISES on an
         `error` event, so reporting a fault the scan immediately recovers from would reintroduce
         the exact failure this exists to remove — by a different route."""
         import airs_scanner

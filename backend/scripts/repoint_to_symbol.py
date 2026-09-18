@@ -17,11 +17,11 @@ WHY THIS EXISTS BESIDE THE OTHER TWO
     against. So this script does not rank. A human names the symbol; the script verifies it has a
     real price series and stores it.
 
-⚠ IT STILL REFUSES A ZERO-BAR SYMBOL. Naming a symbol by hand does not make it a listing — the
+ IT STILL REFUSES A ZERO-BAR SYMBOL. Naming a symbol by hand does not make it a listing — the
     GODE.DE incident wrote ten structured products onto one empty series with `status='ok'`. A
     target that probes to no bars is refused here too, exactly as the automatic paths refuse it.
 
-⚠ AN ADR AND ITS ORDINARY ARE NOT INTERCHANGEABLE, AND THIS SCRIPT WILL HAPPILY DO EITHER.
+ AN ADR AND ITS ORDINARY ARE NOT INTERCHANGEABLE, AND THIS SCRIPT WILL HAPPILY DO EITHER.
     TSMC is 1 ADR = 5 ordinary shares. Pointing both ISINs at TSM would price the ordinary 5x too
     high, silently. The pairing that is correct here is:
 
@@ -70,7 +70,7 @@ def main() -> int:
           f"EUR {float(r.get('med_adv_eur') or 0):>15,.0f}/day  "
           f"{r.get('bars')} bars {r.get('price_from')}..{r.get('price_to')}")
 
-    # ⚠ PROBE BEFORE STORING. A named symbol is a claim, not a listing.
+    #  Probe before storing. A named symbol is a claim, not a listing.
     sc = _score_retry(target)
     if not sc or not float(sc.get("med_adv_eur") or 0):
         print(f"    target     {target:<12} !! no price series — refusing. "
@@ -104,7 +104,7 @@ def main() -> int:
         "chosen": ai["analysis"], "underlying": None,
         "reason": f"Repointed to {target} by hand — named target, not a ranked pick.",
         "analysis_note": ai["analysis_note"],
-        # ⚠ NOT `analysis_asset_class` — that is the CLASS, and writing it here reclassified
+        #  NOT `analysis_asset_class` — that is the CLASS, and writing it here reclassified
         # 3i Group from Financials to "equity", which moves it to a different bucket in every
         # sector breakdown and attribution.
         "sector": sector_for(target, ai["analysis_asset_class"], r.get("sector")),
@@ -117,7 +117,7 @@ def main() -> int:
         print(f"    !! {target} stored 0 bars — NOT a usable listing. Nothing was repointed.")
         return 1
     store.set_default_executions()
-    # ⚠ A repoint writes `asset_execution` per ISIN and would hand an ALIASED or OVERRIDDEN row a
+    #  A repoint writes `asset_execution` per ISIN and would hand an ALIASED or OVERRIDDEN row a
     # listing of its own again. Put both back before returning, or the override lasts until the
     # next run. (A repoint of the overridden ISIN itself is a no-op here — it already names the
     # pinned symbol — so this cannot fight the thing the user just asked for.)
@@ -130,7 +130,7 @@ def main() -> int:
           + (f"  ({n} alias row(s) re-applied.)" if n else "")
           + (f"  ({m} symbol override(s) re-applied.)" if m else "") + "\n")
 
-    # ⚠ A HAND REPOINT IS NOT DURABLE ON ITS OWN. Nothing here records the decision, so the next
+    #  A hand repoint is not durable on its own. Nothing here records the decision, so the next
     # by-name resolution can undo it and no other database learns of it. Say so, every time.
     pinned = (supabase.table("asset_symbol_override").select("isin")
               .eq("isin", isin).limit(1).execute().data or [])

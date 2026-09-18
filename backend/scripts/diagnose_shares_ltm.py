@@ -1,12 +1,12 @@
 """Why an LTM point disagrees with the annual line it extends — for one company, one metric.
 
-⚠⚠ THE LTM POINT IS DRAWN ON THE SAME LINE AS THE FISCAL YEARS, AND IT COMES FROM A DIFFERENT
+ THE LTM POINT IS DRAWN ON THE SAME LINE AS THE FISCAL YEARS, AND IT COMES FROM A DIFFERENT
 FEED. Annual points are `annuals__…` rows; the LTM point is assembled here from `quarterly__…`
 rows (`_ttm_by_period`, per-metric roll-up in `_TTM_RULE`). So a vendor unit change, restatement or
 redenomination that lands in ONE of those two feeds is invisible inside either — each is internally
 consistent — and shows up only as a step at the seam between them.
 
-⚠ `_drop_quarter_outliers` cannot see it: it judges the quarterly series against its OWN median, and
+ `_drop_quarter_outliers` cannot see it: it judges the quarterly series against its OWN median, and
 a run of four consecutive quarters at a new level is exactly the shape it is written to KEEP
 (`_level_shift` — a restatement arrives and stays). The annual series is the second opinion it
 never gets.
@@ -30,7 +30,7 @@ from routers import earnings as ea  # noqa: E402
 def _rows(company_id: int, codes: tuple[str, ...]) -> list[dict]:
     """Every stored point for these metric codes, oldest first.
 
-    ⚠ PAGED. A company files ~110 codes a date and this reads a decade of quarters; an unpaged
+     PAGED. A company files ~110 codes a date and this reads a decade of quarters; an unpaged
     read is the 1,000-row cloud cap, and the rows it would drop are the NEWEST ones — which are
     the entire subject here.
     """

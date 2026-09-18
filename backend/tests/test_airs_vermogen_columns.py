@@ -120,7 +120,7 @@ class TestTheHeaderIsMatchedByShapeNotByLuck:
         assert h.airs_result_pct == 14.95
 
     def test_huidige_waarde_never_resolves_to_the_eur_column(self):
-        """⚠ EXACT match, never a prefix.
+        """ EXACT match, never a prefix.
 
         `Huidige waarde` (local) is a PREFIX of `Huidige waarde  EUR`. Resolve the local
         lookup with `startswith` and every USD holding's "local" value is silently its EUR
@@ -158,7 +158,7 @@ class TestAnOlderExportStillParses:
 
 
 class TestTheIsinColumn:
-    """⚠ THE MOST VALUABLE COLUMN ON THE SHEET, AND THE EASIEST TO GET SUBTLY WRONG.
+    """ THE MOST VALUABLE COLUMN ON THE SHEET, AND THE EASIEST TO GET SUBTLY WRONG.
 
     It ends the fuzzy name matching in `_airs_holding_isin` — but only if what reaches the DB is
     an ISIN or nothing. A junk value there is worse than an absent one: it matches no instrument
@@ -170,12 +170,12 @@ class TestTheIsinColumn:
         assert _one().isin == "US0320951017"
 
     def test_an_absent_column_parses_to_none_not_an_error(self):
-        """⚠ EVERY SNAPSHOT BEFORE 2026-07-23 LACKS IT. Requiring it would break all of history."""
+        """ EVERY SNAPSHOT BEFORE 2026-07-23 LACKS IT. Requiring it would break all of history."""
         row = {k: v for k, v in _ROW.items() if k != "ISIN-code"}
         assert parse_airs_excel(_xls([row]))[0].isin is None
 
     def test_the_cash_lines_blank_does_not_arrive_as_the_string_nan(self):
-        """⚠ THE TRAP. pandas reads a blank cell as float NaN, `str()` renders it `"nan"`, and
+        """ THE TRAP. pandas reads a blank cell as float NaN, `str()` renders it `"nan"`, and
         `"nan"` is TRUTHY — so every "does this row have an ISIN" test says yes. The same trap
         once counted a cash line as a holding."""
         cash = dict(_ROW, **{"Fondsomschrijving": "Liquiditeiten", "ISIN-code": None})

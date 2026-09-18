@@ -6,7 +6,7 @@ vs "USD (Dist)", which a name-anchored resolver accepts; OpenFIGI lists 36 venue
 and `IS0X` is not one of them. Measured: AIRS implied EUR 4.1523/unit, `IS0X.DE` closed at
 EUR 77.55, the correct `36B7.DE` at EUR 4.1523. Held in 5 model portfolios, up to 30% weight.
 
-⚠ AND THE WRONG LISTING WAS THE MORE LIQUID ONE — EUR 222k/day against 36B7's EUR 110k. Every
+ AND THE WRONG LISTING WAS THE MORE LIQUID ONE — EUR 222k/day against 36B7's EUR 110k. Every
 automatic repointer ranks by liquidity, so none of them can ever choose correctly here. Only a
 human can, which is precisely why the answer needs somewhere durable to live.
 """
@@ -57,7 +57,7 @@ class TestItIsIdempotent:
         assert called == [], "a correct row must not be repointed again"
 
     def test_and_it_costs_no_yahoo_call_to_decide_that(self, monkeypatch):
-        """⚠ THE ORDER MATTERS. This runs after every resolution slice; probing Yahoo to discover
+        """ THE ORDER MATTERS. This runs after every resolution slice; probing Yahoo to discover
         that nothing changed would add a call per override to every tick, and Yahoo answers an
         overloaded caller with an EMPTY result rather than a 429 — which is how a resolution lands
         on a thin foreign listing. The stored row is compared FIRST."""
@@ -99,7 +99,7 @@ class TestItRepointsADriftedRow:
 
 
 class TestItRefusesToFightTheAliasTable:
-    """⚠ TWO OVERRIDES CANNOT BOTH OWN ONE ISIN.
+    """ TWO OVERRIDES CANNOT BOTH OWN ONE ISIN.
 
     An alias points the row at ANOTHER ISIN's instrument; a symbol override gives it its OWN. If
     both claim an ISIN they overwrite each other on every pass, and which one survives depends on
@@ -157,13 +157,13 @@ class TestItIsWiredIntoTheResolutionPaths:
         src = (__import__("pathlib").Path(__file__).resolve().parent.parent
                / "scripts" / "repoint_to_symbol.py").read_text(encoding="utf-8")
         assert "apply_symbol_overrides()" in src
-        # ⚠ And it must TELL the operator the repoint is otherwise unrecorded, or the durable
+        #  And it must TELL the operator the repoint is otherwise unrecorded, or the durable
         # store stays empty precisely because the manual path appears to have worked.
         assert "asset_symbol_override" in src
 
 
 class TestARepointMustNotEraseTheSector:
-    """⚠ THE ASSET CLASS IS A FALLBACK, NOT THE SECTOR.
+    """ THE ASSET CLASS IS A FALLBACK, NOT THE SECTOR.
 
     All three repointers wrote `"sector": ai["analysis_asset_class"]` — the CLASS ("equity") —
     while the real resolver writes `sector or analysis_asset_class`, i.e. the class only when
@@ -198,7 +198,7 @@ class TestARepointMustNotEraseTheSector:
         assert resolve.sector_for('X.L', 'equity', 'Technology') == 'Technology'
 
     def test_it_does_not_carry_a_clobbered_value_forward(self, monkeypatch):
-        """⚠ Treating a previously-written "equity" as if it were a sector would make the old bug
+        """ Treating a previously-written "equity" as if it were a sector would make the old bug
         self-perpetuating: every future repoint would faithfully preserve the damage."""
         from asset_pipeline import resolve, yahoo
 

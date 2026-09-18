@@ -16,7 +16,7 @@ WHY THIS EXISTS, MEASURED ON THE /management-dashboard ANALYSE MODAL (2026-08-11
     correct on its own to load what it needs. The duplication is a property of the COMPOSITION,
     which is exactly the kind of cost that cannot be fixed in any one of them.
 
-⚠⚠ THE ROUND-TRIP COUNT IS THE POINT, NOT THE MILLISECONDS. Locally those 103 repeats cost about
+ THE ROUND-TRIP COUNT IS THE POINT, NOT THE MILLISECONDS. Locally those 103 repeats cost about
     0.8s of a 4.9s load, because a local PostgREST call is ~5ms. Production talks to Supabase over
     the network at ~50-80ms a call, where the same 103 repeats are **5-8 seconds**. A profile taken
     on a laptop will always understate this by an order of magnitude, which is why the fix is
@@ -32,7 +32,7 @@ WHAT IT IS, AND WHAT IT DELIBERATELY IS NOT
     Two transports, one rule: PostgREST GETs (through the session `deps` installs) and direct
     Postgres COPY (`common.pg._run_copy`). Those are the only two ways this codebase reads.
 
-⚠ THE HTTP RESPONSE IS CACHED, NOT THE PARSED ROWS -- and that is what makes it safe to hand the
+ THE HTTP RESPONSE IS CACHED, NOT THE PARSED ROWS -- and that is what makes it safe to hand the
     same answer to two callers. postgrest re-parses the body into FRESH dicts on every
     `APIResponse.from_http_request_response`, so a caller that mutates a row it got back cannot
     corrupt the next caller's copy. Caching `.data` would have needed a deep copy to be equally
@@ -40,12 +40,12 @@ WHAT IT IS, AND WHAT IT DELIBERATELY IS NOT
     query it replaces. Same rule for COPY: the BYTES are cached and each caller gets a new
     `BytesIO` over them, so nobody inherits anybody else's read cursor.
 
-⚠ ANY WRITE EMPTIES THE STORE. A POST/PATCH/DELETE means the snapshot may no longer describe the
+ ANY WRITE EMPTIES THE STORE. A POST/PATCH/DELETE means the snapshot may no longer describe the
     database, and a memo that keeps serving reads across it is how a request comes to contradict
     itself. Read-only endpoints never trigger this; anything else pays one re-read, which is the
     correct price.
 
-⚠ ONLY SUCCESSFUL READS ARE STORED. Caching a 500 would turn one flake into a request-long
+ ONLY SUCCESSFUL READS ARE STORED. Caching a 500 would turn one flake into a request-long
     outage, and an error is the one answer worth asking about again.
 """
 from __future__ import annotations
@@ -72,7 +72,7 @@ def read_cache(label: str = ""):
     Yields the stats dict, so a caller can report what it saved:
     `{"hits", "misses", "writes", "saved_ms"}`.
 
-    ⚠ NESTS BY DOING NOTHING. An inner `read_cache()` inside an outer one keeps using the OUTER
+     NESTS BY DOING NOTHING. An inner `read_cache()` inside an outer one keeps using the OUTER
     store rather than starting a second: a nested block that shadowed it would drop every entry
     its parent had already paid for, at the exact moment the parent is mid-computation.
     """
@@ -83,7 +83,7 @@ def read_cache(label: str = ""):
     state: dict[str, Any] = {"store": {}, "hits": 0, "misses": 0, "writes": 0,
                              "saved_ms": 0.0, "label": label}
     token = _ACTIVE.set(state)
-    # ⚠ THE DIRECT-POSTGRES CONNECTION IS SCOPED HERE TOO, and it is the larger of the two savings
+    #  The direct-postgres connection is scoped here too, and it is the larger of the two savings
     # in production. `common/pg.py` opened a fresh connection per COPY: 24ms locally, **220ms
     # against eu-west-3 through Supavisor** — so the Analyse modal's 17 COPYs spent ~3.75s just
     # connecting, invisibly, because a laptop profile puts it at 0.4s. This block is already
@@ -118,14 +118,14 @@ def note_write() -> None:
 def wrote() -> bool:
     """Whether a write has been noted inside the CURRENT memo scope.
 
-    ⚠⚠ IT EXISTS FOR THE CROSS-REQUEST LEG STORE, NOT FOR THIS MEMO. `note_write` already protects
+     IT EXISTS FOR THE CROSS-REQUEST LEG STORE, NOT FOR THIS MEMO. `note_write` already protects
     the per-request store by clearing it. What it cannot protect is a cache that OUTLIVES the
     request: `_analysis_cache`'s fingerprint is re-read at most every `_STAMP_TTL_SECONDS` (2.0),
     so a unit of work that writes a table and then reads it again could be served a snapshot taken
     before its own write. Two seconds is nothing to a scrape and everything to the one read that
     has to see what the line above it just stored.
 
-    ⚠ SO A WRITER OPTS OUT OF THE LEG STORE ENTIRELY rather than trying to invalidate it — see
+     SO A WRITER OPTS OUT OF THE LEG STORE ENTIRELY rather than trying to invalidate it — see
     `_airs_ref._paged`. The reader that has written is the only one that can know, and "go to the
     database" is always a correct answer.
     """
@@ -156,7 +156,7 @@ def store(key: Any, value: Any, elapsed_ms: float) -> None:
 def copy_bytes(key: Any, run, *args) -> io.BytesIO | None:
     """Run a COPY through the memo. `run(*args)` performs it and returns `BytesIO | None`.
 
-    ⚠ A FRESH `BytesIO` PER CALLER, over the same bytes. Handing back the cached object would give
+     A FRESH `BytesIO` PER CALLER, over the same bytes. Handing back the cached object would give
     the second caller a stream already read to EOF -- an empty result that looks exactly like "the
     database has no rows for this", which is the worst possible way to be wrong here.
     """
@@ -168,7 +168,7 @@ def copy_bytes(key: Any, run, *args) -> io.BytesIO | None:
     t0 = time.perf_counter()
     out = run(*args)
     ms = (time.perf_counter() - t0) * 1000
-    # ⚠ `None` IS NOT CACHED. It means the COPY path is unavailable (no SUPABASE_DB_URL, psycopg
+    #  `None` IS NOT CACHED. It means the COPY path is unavailable (no SUPABASE_DB_URL, psycopg
     # missing, a connection error) and the caller must fall back -- a fallback answer is not a
     # value to remember, and the connection may well be back on the next attempt.
     if out is None:

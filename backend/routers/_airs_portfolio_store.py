@@ -27,7 +27,7 @@ def portfolio_label(row: dict) -> str:
     slightly differently in each place until two screens disagree about what a portfolio is
     called.
 
-    ⚠ THE FALLBACK IS NOT UNIVERSAL, AND THAT IS DELIBERATE. The /portfolios table does NOT use
+     THE FALLBACK IS NOT UNIVERSAL, AND THAT IS DELIBERATE. The /portfolios table does NOT use
     this: it shows the code and the chosen name in two SEPARATE columns, so an unnamed row renders
     a muted "—" rather than repeating the code — while the names are being filled in, the blanks
     are the only thing showing which models still need one. This helper is for the surfaces with a
@@ -154,7 +154,7 @@ def load_portfolios() -> list[dict]:
     rows = (supabase.table("airs_model_portfolio_grid")
             .select("*").order("name").execute().data or [])
     for r in rows:
-        # ⚠ AIRS's `name`, never the chosen `display_name`: a label you picked must not be able
+        #  AIRS's `name`, never the chosen `display_name`: a label you picked must not be able
         # to invent or destroy a risk profile.
         r["variant"] = portfolio_variant(r.get("name"), r.get("omschrijving"))
     return rows

@@ -93,7 +93,7 @@ def _maybe_full_refetch(run_id: int, cids: list[int], accumulated_errors: list[s
     """Re-read the due universe's FULL history from the vendor, once a month,
     before anything is selected from it.
 
-    ⚠ THE NORMAL PIPELINE CANNOT CORRECT THE PAST. It writes only bars newer than
+     THE NORMAL PIPELINE CANNOT CORRECT THE PAST. It writes only bars newer than
     what it holds, so a vendor re-scale — a split, a reverse split, a free share
     attribution — leaves our history on the old basis for ever while new bars
     arrive on the new one. Measured on Leonteq 2026-08-02: 173 of 1,479 companies
@@ -101,7 +101,7 @@ def _maybe_full_refetch(run_id: int, cids: list[int], accumulated_errors: list[s
     (Worldline, 1-for-40) was sitting in the live book on a +1142% momentum for a
     stock that had fallen 69%.
 
-    ⚠ AND A DETECTOR IS NOT ENOUGH, WHICH IS WHY THIS IS UNCONDITIONAL. Worldline's
+     AND A DETECTOR IS NOT ENOUGH, WHICH IS WHY THIS IS UNCONDITIONAL. Worldline's
     seam was a 40× overnight jump — findable. Air Liquide's 1-for-10 attribution
     re-scales by 10/11 and looks like a −9.1% day; no threshold separates it from
     an ordinary move. The only reliable question is "vendor, what do you say every
@@ -166,13 +166,13 @@ def _log_universe_freshness(
     tells you to refresh and "these 2 are still stale" tells you WHICH vendor gaps
     you are living with. Best-effort: a diagnostic must never fail the refresh.
 
-    ⚠⚠ `required` IS PASSED IN BY THE REBALANCE AND DEFAULTED ONLY FOR THE MANUAL BUTTON. The
+     `required` IS PASSED IN BY THE REBALANCE AND DEFAULTED ONLY FOR THE MANUAL BUTTON. The
     default is `_deciding_bar_for([])`, which is the bar for a first-MONDAY strategy — right for
     the per-universe refresh, where there is no strategy in view and Monday is the house default,
     and wrong for a rebalance whose due set may sit on another weekday. Reporting "short of the
     bar" against a bar the run is not aiming at names the wrong companies in both directions.
 
-    ⚠ IT REPORTS PRICE AND VOLUME SEPARATELY, which is the half `universe_freshness` cannot: that
+     IT REPORTS PRICE AND VOLUME SEPARATELY, which is the half `universe_freshness` cannot: that
     one classifies on `close_price` alone (peer-relative, for deciding what to re-fetch), so a
     company whose price is current and whose VOLUME stopped a month ago is `fresh` there and is
     dropped by the signal engine's staleness guard anyway — two of the seven momentum signals are
@@ -585,7 +585,7 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
         # modal's Return tile shows (see `routers/_benchmark_etf`). They are not
         # "held" by any strategy, so the loop above never reaches them.
         #
-        # ⚠ IT IS HERE SO THE VENDOR CALL DOES NOT LAND ON A READER. `ensure_fresh`
+        #  It is here so the vendor call does not land on a reader. `ensure_fresh`
         # repairs a stale series lazily, but lazily means inside the Analyse modal —
         # ONE request with no partial paint, where a 1.35s GuruFocus round trip is
         # the whole of somebody's wait. Two calls a day here, and the lazy path goes
@@ -601,12 +601,12 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
                 phase="benchmarks",
             )
         except Exception as e:
-            # ⚠ NOT AN `accumulated_errors` ENTRY. A stale proxy costs the modal one
+            #  Not an `accumulated_errors` ENTRY. A stale proxy costs the modal one
             # lazy fetch, not a wrong number and not a broken pipeline run; failing
             # the price update over it would be out of all proportion.
             msg = f"Index-proxy refresh failed: {type(e).__name__}: {e}"
             log.warning("[price_update] run_id=%s %s", run_id, msg)
-            # ⚠ "warn", not "warning" — `log_step` matches ("warn", "error") exactly, so the
+            #  "warn", not "warning" — `log_step` matches ("warn", "error") exactly, so the
             # longer spelling silently logs at INFO and the line loses its colour.
             log_step(run_id, msg, level="warn", phase="benchmarks")
 
@@ -652,14 +652,14 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
     UNIVERSE up to the deciding bar, then run the momentum rebalance calculation
     off the DB.
 
-    ⚠ ONCE A MONTH IT FIRST RE-READS THE UNIVERSE'S ENTIRE HISTORY from the vendor
+     ONCE A MONTH IT FIRST RE-READS THE UNIVERSE'S ENTIRE HISTORY from the vendor
     (`_maybe_full_refetch`). The normal fetch can only ever ADD newer bars, so a
     split or a free-share attribution leaves our past on the old basis — and the
     small ones are indistinguishable from an ordinary day's move, so nothing but
     asking finds them. A rebalance decides on 12 months of history; it is the one
     moment that history has to be right.
 
-    ⚠ THE PRICES COME FIRST, AND THEY ARE THE UNIVERSE'S, NOT THE HOLDINGS'. The
+     THE PRICES COME FIRST, AND THEY ARE THE UNIVERSE'S, NOT THE HOLDINGS'. The
     price-update op keeps the ~24 held names current daily and never touches the
     ~1,455 other candidates — which are exactly the ones a rebalance ranks. On
     stale prices the failure is silent, not loud: the engine's 30-day staleness
@@ -799,8 +799,8 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                 accumulated_errors.append(msg)
 
         # ── Phase: prices — the universe, up to the DECIDING BAR ──
-        # ⚠ A REBALANCE PICKS FROM THE WHOLE UNIVERSE, SO THE WHOLE UNIVERSE HAS
-        # TO BE PRICED. The price-update op keeps the ~24 HELD names current
+        #  A rebalance picks from the whole universe, so the whole universe has
+        # To be priced. The price-update op keeps the ~24 HELD names current
         # daily; the other ~1,455 candidates it never touches, and they are the
         # ones being ranked. Selecting on prices weeks old doesn't fail loudly —
         # signals.py's 30-day guard silently DROPS the stale names, so the pick
@@ -855,7 +855,7 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                         "so every active company is in the fetch set",
                         level="warn", phase="prices",
                     )
-                # ⚠⚠ NAME THE LAGGARDS, BOTH METRICS, BEFORE AND AFTER. Until now this op reported
+                #  Name the laggards, both metrics, before and after. Until now this op reported
                 # only COUNTS ("N of M still behind") and only for close_price, so the one question
                 # a rebalance actually raises — WHICH companies went into the ranking on stale data
                 # — had no answer anywhere. The engine drops a >30-day-stale name silently, so the
@@ -886,7 +886,7 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
                     )
                     _run_prices_phase(run_id, accumulated_errors, companies_override=to_fetch)
                     log_step(run_id, "  price fetch complete", phase="prices")
-                    # ⚠ OVER THE WHOLE UNIVERSE, NOT `to_fetch`. The fetch set was the names behind
+                    #  Over the whole universe, not `to_fetch`. The fetch set was the names behind
                     # their peers; the question this answers is what the RANKING will be run on, and
                     # a name excluded from the fetch because it looked fresh on price can still be
                     # short on volume. Scoping the after-pass to what we fetched would report only
@@ -975,7 +975,7 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
             if force:
                 done_msg += " Re-decided the current period; the original decision is kept in the run history."
             if freshness_warning:
-                done_msg += f" ⚠ {freshness_warning}"
+                done_msg += f"  {freshness_warning}"
             _update_run(run_id, current_message=done_msg)
             log_step(run_id, done_msg, phase="done")
         else:
@@ -1043,7 +1043,7 @@ def _run_full_price_refresh_pipeline_sync(run_id: int) -> None:
 #: this is a bound on how OLD the oldest price in the database can get: ~2,760 active companies at
 #: 150/day cycles the whole book in ~19 days.
 #:
-#: ⚠⚠ THE NUMBER THAT MATTERS IS THE CYCLE LENGTH, AND IT IS BOUNDED BY 30. `signal_engine.daily`
+#:  THE NUMBER THAT MATTERS IS THE CYCLE LENGTH, AND IT IS BOUNDED BY 30. `signal_engine.daily`
 #: drops any name whose newest bar is more than `MAX_STALENESS_DAYS = 30` before the cutoff, and
 #: that constant is not arbitrary: 12-1 momentum anchors its numerator ~1 month back, so a series
 #: more than 30 days stale makes `asof_values` silently anchor the leg EARLIER than intended —
@@ -1051,11 +1051,11 @@ def _run_full_price_refresh_pipeline_sync(run_id: int) -> None:
 #: therefore marginal by construction, which is exactly what the month-end refresh was: measured
 #: 2026-09-02, ACWI coverage held at 1,743 of 1,758 on 09-27 and collapsed to **16** on 09-30.
 #:
-#: ⚠ IT COSTS ONE GuruFocus CALL PER COMPANY REGARDLESS OF THE GAP — `ensure_prices_for_company`
+#:  IT COSTS ONE GuruFocus CALL PER COMPANY REGARDLESS OF THE GAP — `ensure_prices_for_company`
 #: fetches only dates newer than the stored max, but that is still one request. So monthly spend is
 #: `2,760 × 30 / cycle_days`: ~2,760 at a 30-day cycle (what the month-end pass cost), ~4,400 at 19.
 #: Measured headroom: the tightest region is `usa`, which peaked at 16,301 of 20,000 in 2026-07, and
-#: its share of this is a few hundred calls a month. ⚠ The per-region budget guard still applies on
+#: its share of this is a few hundred calls a month.  The per-region budget guard still applies on
 #: top and is the real backstop.
 DAILY_PRICE_SLICE = int(os.environ.get("DAILY_PRICE_SLICE", "150"))
 
@@ -1066,7 +1066,7 @@ def _run_price_slice_pipeline_sync(run_id: int, slice_size: int = 0) -> None:
     Refreshes the `slice_size` MOST STALE companies, bounded by the same per-region GuruFocus
     budget the full pass uses. Prices only — no templates/prune/momentum.
 
-    ⚠⚠ WHY THIS REPLACED A MONTH-END PASS RATHER THAN JOINING IT. One pass a month and a 30-day
+     WHY THIS REPLACED A MONTH-END PASS RATHER THAN JOINING IT. One pass a month and a 30-day
     staleness guard are the same period, so the system was always a few days from a cliff and spent
     those days there: every name whose close was 30 days old was dropped from every signal at once,
     silently, right before the refresh that would have fixed it. Amortising the identical work over
@@ -1074,12 +1074,12 @@ def _run_price_slice_pipeline_sync(run_id: int, slice_size: int = 0) -> None:
     same monthly quota, spent evenly instead of in one spike that had to fight `full_price_refresh`'s
     own month-end window for budget.
 
-    ⚠ MOST-STALE-FIRST IS WHAT MAKES IT SELF-CORRECTING, and it is not implemented here:
+     MOST-STALE-FIRST IS WHAT MAKES IT SELF-CORRECTING, and it is not implemented here:
     `_load_all_companies()` already returns that order, so a day the job does not run is repaired
     by the next one picking up the names that aged past the others. No cursor, no state, nothing to
     get out of sync — the database's own staleness IS the cursor.
 
-    ⚠ THE FULL PASS IS STILL THERE, as `full_price_refresh`, behind its Run-now button. It is the
+     THE FULL PASS IS STILL THERE, as `full_price_refresh`, behind its Run-now button. It is the
     right tool for "re-price everything now" after a bulk import or a vendor correction; it is the
     wrong tool for keeping a universe current, which is what this does.
 
@@ -1099,8 +1099,8 @@ def _run_price_slice_pipeline_sync(run_id: int, slice_size: int = 0) -> None:
                     current_message="Selecting the most-stale companies…")
         try:
             everyone = _load_all_companies()          # already most-stale-first
-            # ⚠⚠ THE UNFETCHABLE MUST COME OUT FIRST, AND THIS IS THE DIFFERENCE BETWEEN A SLICE
-            #    THAT WORKS AND ONE THAT NEVER ADVANCES. 326 of 2,759 active companies have NO
+            #  The unfetchable must come out first, and this is the difference between a slice
+            #    That works and one that never advances. 326 of 2,759 active companies have NO
             #    price data at all, and ~322 of those are on exchanges our GuruFocus subscription
             #    does not cover (NSE 160, LSE 102, TSX 38, ASX 13, DUB 5, TSXV 3, BOM 1). Having no
             #    price makes them INFINITELY stale, so most-stale-first puts every one of them
@@ -1108,15 +1108,15 @@ def _run_price_slice_pipeline_sync(run_id: int, slice_size: int = 0) -> None:
             #    its first two days on 403s and then start again tomorrow with the same 150 names,
             #    refreshing nothing, for ever.
             #
-            #    ⚠ The full pass never hit this because it walks EVERYONE: it burns the 403s in the
+            #     The full pass never hit this because it walks EVERYONE: it burns the 403s in the
             #    first minutes and carries on. A slice has no "carries on" — its head IS its whole
             #    run. Caught by the first smoke run, whose 8 most-stale companies were 8 straight
             #    403s (NSE:INFY, ASX:OCL, TSX:GIB.A …).
             #
-            #    ⚠ `is_gf_subscribed_exchange` is the ONE definition of "can we buy this data",
+            #     `is_gf_subscribed_exchange` is the ONE definition of "can we buy this data",
             #    shared with the ACWI membership builder — not a second list to drift from it. An
             #    unknown or missing exchange is excluded, because we cannot claim coverage for it.
-            #    ⚠ `_load_all_companies` returns FLAT rows — `{cid, ticker, exchange}` — not the
+            #     `_load_all_companies` returns FLAT rows — `{cid, ticker, exchange}` — not the
             #      nested `gurufocus_exchange` shape the `company` select uses. Reading the nested
             #      key here returned None for every row, so the filter excluded the ENTIRE book and
             #      the run finished in 0.4s having refreshed nothing: a green, fast, empty success.
@@ -1133,12 +1133,12 @@ def _run_price_slice_pipeline_sync(run_id: int, slice_size: int = 0) -> None:
                    f"Asia {budget.get('asia', 0)}.")
             log_step(run_id, msg, phase="start")
             _update_run(run_id, current_message=msg)
-            # ⚠ A CYCLE THAT NO LONGER FITS INSIDE THE STALENESS GUARD IS THE ONE FAILURE THIS JOB
-            #   CANNOT SEE FROM INSIDE A SINGLE RUN — every run looks healthy while the oldest
+            #  A cycle that no longer fits inside the staleness guard is the one failure this job
+            #   Cannot see from inside a single run — every run looks healthy while the oldest
             #   price ages past 30 days and names start vanishing from every signal. Said out loud,
             #   at WARNING, because uvicorn leaves the root logger there in production.
             if cycle > 25:
-                warn = (f"⚠ Full cycle is ≈{cycle} days against a 30-day staleness guard — raise "
+                warn = (f" Full cycle is ≈{cycle} days against a 30-day staleness guard — raise "
                         f"DAILY_PRICE_SLICE (now {n}) or names will start dropping from signals.")
                 log.warning("[price_slice] run_id=%s %s", run_id, warn)
                 log_step(run_id, warn, level="error", phase="prices")

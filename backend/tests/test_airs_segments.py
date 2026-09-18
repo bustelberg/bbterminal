@@ -15,7 +15,7 @@ def H(name, cls, value, start=None, etf=False):
 
 
 class TestTheWrapperIsNotAnAssetClass:
-    """⚠ AIRS classifies what a holding INVESTS IN. An equity ETF is Equity; a bond ETF is
+    """ AIRS classifies what a holding INVESTS IN. An equity ETF is Equity; a bond ETF is
     Bonds. Measured: 10 of the 11 bond ISINs are ETFs, and on BUS_Defensief_FX an "ETFs" bucket
     would move 43.20 of the 48.65% bond sleeve out of Bonds — a defensive book reading as though
     it held almost none."""
@@ -32,7 +32,7 @@ class TestTheWrapperIsNotAnAssetClass:
         assert segs["Bonds"]["value_eur"] == 209151       # NOT reduced by the ETF's weight
 
     def test_netflix_is_not_an_etf(self):
-        """⚠ `name ILIKE '%ETF%'` matches n-ETF-lix. Measured: of the model's ISINs that test
+        """ `name ILIKE '%ETF%'` matches n-ETF-lix. Measured: of the model's ISINs that test
         flags exactly one EQUITY, and it is Netflix."""
         assert _is_etf({"name": "Netflix, Inc.", "leonteq_product_type": "EQUITY"}) is False
 
@@ -41,7 +41,7 @@ class TestTheWrapperIsNotAnAssetClass:
         plainly ETFs."""
         assert _is_etf({"name": "Vanguard FTSE Japan UCITS ETF USD Accumulation",
                         "leonteq_product_type": None}) is True
-        # ⚠ 'UCITS' alone is not enough — this one carries no UCITS in its name.
+        #  'UCITS' alone is not enough — this one carries no UCITS in its name.
         assert _is_etf({"name": "iShares J.P. Morgan EM Corporate Bond ETF",
                         "leonteq_product_type": None}) is True
 
@@ -49,7 +49,7 @@ class TestTheWrapperIsNotAnAssetClass:
         assert _is_etf({"name": "Amundi Index Solutions", "leonteq_product_type": "ETF"}) is True
 
     def test_it_reads_the_BOOK_s_name_too_not_only_the_grid_s(self):
-        """⚠⚠ THE GRID CARRIES THE VENDOR'S ABBREVIATION AND IT DROPS THE WORD. Reported 2026-08-21:
+        """ THE GRID CARRIES THE VENDOR'S ABBREVIATION AND IT DROPS THE WORD. Reported 2026-08-21:
         two funds sat in `Individual stocks` on /management-dashboard because this only ever read
         `grid_row["name"]`, and the readable name is the one the BOOK uses."""
         assert _is_etf({"name": "INVESCO MARKETS II PLC IVZ MSCI", "sector": "etf"},
@@ -58,13 +58,13 @@ class TestTheWrapperIsNotAnAssetClass:
                        "Letko Bross Global EM Equity Fund") is True
 
     def test_our_own_etf_sector_outranks_any_name_test(self):
-        """⚠ A row the asset-pipeline has already filed under the literal sector `etf` must not be
+        """ A row the asset-pipeline has already filed under the literal sector `etf` must not be
         re-decided as a company because the vendor's name says nothing. This signal alone is what
         catches the Invesco line — its grid name mentions neither ETF nor UCITS."""
         assert _is_etf({"name": "INVESCO MARKETS II PLC IVZ MSCI", "sector": "etf"}) is True
 
     def test_a_fund_need_not_be_an_ETF(self):
-        """⚠ THE FLAG MEANS 'WRAPPER', and a SICAV or a mutual fund has no earnings of its own
+        """ THE FLAG MEANS 'WRAPPER', and a SICAV or a mutual fund has no earnings of its own
         either — which is the only property its consumers (the owner-earnings gate, the
         Individual-stocks / Stock-ETFs division) actually depend on."""
         for n in ("Letko Bross Global EM Equity Fund", "Mint Tower Arbitrage Fund I - EUR",
@@ -73,7 +73,7 @@ class TestTheWrapperIsNotAnAssetClass:
             assert _is_etf(None, n) is True, n
 
     def test_the_word_boundary_is_load_bearing(self):
-        """⚠ `Fundsmith` AND `Fundamental` ARE COMPANIES. Widening to a fund word is only safe
+        """ `Fundsmith` AND `Fundamental` ARE COMPANIES. Widening to a fund word is only safe
         because the pattern is word-bounded; without it this rule would reclassify operating
         companies as wrappers and quietly drop them out of the fundamentals blend."""
         assert _is_etf({"name": "Fundsmith Equity"}, "Fundsmith Equity") is False
@@ -82,7 +82,7 @@ class TestTheWrapperIsNotAnAssetClass:
 
 
 class TestReturnAndWeightDoNotCoverTheSameHoldings:
-    """⚠ A holding with no opening value has an UNDEFINED return and REAL exposure."""
+    """ A holding with no opening value has an UNDEFINED return and REAL exposure."""
 
     def test_cash_counts_in_the_weight_and_not_in_the_return(self):
         # MoTopSelectie's cash is EUR 600,750 of a EUR 973k book. Priced into the segment return

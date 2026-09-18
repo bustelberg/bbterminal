@@ -26,12 +26,12 @@ import CardHeading from './CardHeading';
  * (a ratio, not a compounding series — no log / exponential trend). Lower = less of the cash a
  * business generates is really non-cash stock comp. Click through to the two base lines per company.
  *
- * ⚠ THE RATIO IS DERIVED HERE from the raw lines (`sbcOcfByYear`), so the line, the tiles and the
+ *  The ratio is derived here from the raw lines (`sbcOcfByYear`), so the line, the tiles and the
  * drill-down are one computation. Aggregation is a weight-weighted average of per-company ratios —
  * currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./DebtRatioCard}.
  */
 
-/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+/**  `String.raw`, or every backslash in the expressions below is eaten before KaTeX
  *  sees it. */
 const R = String.raw;
 
@@ -78,7 +78,7 @@ export default function SbcOcfCard({ holdingsTarget, holdingsName, benchTarget }
   const own = holdingsName ?? 'SBC / OCF';
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(ratioByYr, benchByYr), [ratioByYr, benchByYr]);

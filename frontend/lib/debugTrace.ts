@@ -3,24 +3,24 @@
 /**
  * A running commentary of what the app is doing, in the browser console.
  *
- * WHY IT IS ALWAYS ON, INCLUDING IN PRODUCTION
+ * Why it is always on, including in production
  *   The bugs that cost us the most this year were not crashes — they were CONFIDENT WRONG
  *   NUMBERS, and every one of them was invisible until someone happened to compare two screens:
  *   a portfolio reading +55.20% in production and +36.64% locally (a truncated read), a holding
  *   priced off the wrong vendor, an "already current" price that was never fetched. None of them
  *   raised anything. A stack trace would not have helped; a record of WHAT WAS READ, HOW MUCH
- *   CAME BACK, and WHICH BRANCH WAS TAKEN would have answered each in seconds.
+ *   Came back, and WHICH BRANCH WAS TAKEN would have answered each in seconds.
  *
  *   So this is not a developer-only aid to be stripped at build time. When something looks wrong
  *   in production the console IS the diagnostic, and it has to already be there — asking a user
  *   to reproduce with a debug flag on is asking them to reproduce a number they cannot reproduce.
  *
- * ⚠ IT NEVER READS A RESPONSE BODY. Cloning a response to count rows doubles the memory of every
+ *  It never reads a response body. Cloning a response to count rows doubles the memory of every
  *   payload on the page (ACWI alone is ~1,700 members) and, worse, a clone that is never consumed
  *   leaks. Size comes from `content-length`, which the server already sent. Shape, where it
  *   matters, is logged by the caller — which knows what it asked for.
  *
- * ⚠ AN EMPTY RESULT IS A FIRST-CLASS EVENT, NOT A QUIET SUCCESS. `traceEmpty` exists because a
+ *  An empty result is a first-class event, not a quiet success. `traceEmpty` exists because a
  *   fresh or partially-migrated database is the state this page is most likely to meet on its
  *   first production deploy, and "0 rows" rendered as a blank panel is indistinguishable from a
  *   broken one. Every panel says what it found, what it therefore drew, and why.
@@ -153,8 +153,8 @@ export function traceRequest(
     try {
       if (err || !resp) {
         /**
-         * ⚠⚠ A REQUEST WE CANCELLED OURSELVES IS NOT A FAILURE, AND CALLING IT ONE IS WORSE THAN
-         * SAYING NOTHING. Every long-lived read on this app ends by being aborted — an SSE stream
+         *  A request we cancelled ourselves is not a failure, and calling it one is worse than
+         * Saying nothing. Every long-lived read on this app ends by being aborted — an SSE stream
          * when the tab is hidden or the page unmounts, a fetch superseded by a newer selection —
          * so the normal, healthy lifecycle was painting red `FAILED` lines in the console:
          *
@@ -165,7 +165,7 @@ export function traceRequest(
          * that cries wolf on its own teardown is a console people stop reading, which costs the
          * genuine 502 sitting two lines below it.
          *
-         * ⚠ THE CALLER TELLS US, we do not sniff the error. `AbortError` alone is ambiguous — it is
+         *  The caller tells us, we do not sniff the error. `AbortError` alone is ambiguous — it is
          * also what an `AbortSignal.timeout()` raises, and a timeout IS a failure. `apiFetch` knows
          * whether ITS signal was the one that fired.
          */
@@ -175,8 +175,8 @@ export function traceRequest(
           return;
         }
         /**
-         * ⚠⚠ `TypeError: Failed to fetch` IS THE ONE ERROR THAT NAMES NOTHING, AND ITS DURATION
-         * DOES NOT DISAMBIGUATE IT EITHER. It is what the browser raises whenever no response
+         *  `TypeError: Failed to fetch` IS THE ONE ERROR THAT NAMES NOTHING, AND ITS DURATION
+         * Does not disambiguate it either. It is what the browser raises whenever no response
          * reached the page, which covers a dead backend and a REJECTED CORS PREFLIGHT alike — and
          * a rejected preflight is a real, fast, 400-answering round trip, so it lands anywhere
          * from 5 ms to 300 ms and looks exactly like a refused connection. This comment claimed
@@ -185,17 +185,17 @@ export function traceRequest(
          * because the tab was on `http://127.0.0.1:3000` and only `http://localhost:3000` was
          * allow-listed.
          *
-         * ⚠ SO THE HINT POINTS AT THE SERVER LOG rather than guessing. The browser is the one
+         *  So the hint points at the server log rather than guessing. The browser is the one
          * place the cause is NOT visible: no response means no status and no body, and CORS
          * failures are deliberately opaque to script. One `OPTIONS … 400` line at the other end
          * settles it in a glance.
          *
-         * ⚠ THE HINT IS APPENDED, THE ORIGINAL ERROR STILL LOGGED. This reads the message, which
+         *  The hint is appended, the original error still logged. This reads the message, which
          * is the sniffing `cancelled` above exists to avoid — but that test decides CONTROL FLOW
          * (is this a failure at all) while this one only adds a sentence, so a wrong guess costs
          * a misleading hint next to the real error rather than a swallowed failure.
          *
-         * ⚠ IT GOES IN THE FORMAT STRING, NOT IN A TRAILING ARGUMENT. Passed as an extra argument
+         *  It goes in the format string, not in a trailing argument. Passed as an extra argument
          * it is a VALUE, so the console (and Next's error overlay) renders it quoted with its
          * newline as a literal `\n` — the advice arrives as one unreadable line inside the error
          * it was meant to explain. Shipped that way once, in the message that reported this.

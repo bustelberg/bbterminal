@@ -13,14 +13,14 @@ it is already cached (the path is shared with the earnings pipeline). Charts 2-4
 it: GuruFocus computes those ratios itself, from its own internally-consistent numbers. Once a
 company has any financials column, all four charts cost ZERO extra API calls.
 
-⚠ THE PRICE IS YFINANCE'S, DAILY, AND NEVER GURUFOCUS'S.
+ THE PRICE IS YFINANCE'S, DAILY, AND NEVER GURUFOCUS'S.
     /portfolios prices everything from `asset_price` — every model, every benchmark, the
     correlation matrix. A GuruFocus price line here would be a second vendor with different
     adjustment conventions and different FX on a page whose entire claim is that its numbers are
     comparable. The blob's own `Month End Stock Price` is read ONLY as a cross-check
     (`price_crosscheck`), never drawn.
 
-⚠ WHICH IS EXACTLY WHY BOTH LEGS OF CHART 1 GO TO EUR.
+ WHICH IS EXACTLY WHY BOTH LEGS OF CHART 1 GO TO EUR.
     GuruFocus FX-converts financials into ITS listing's trading currency, and its listing comes
     from `pick_listing` — a different id space from `yahoo_symbol`, resolved from the same ISIN by
     a different rule. They routinely disagree: GF may hold a name on Xetra (EUR) while our price
@@ -29,18 +29,18 @@ company has any financials column, all four charts cost ZERO extra API calls.
     converted through the same `fx_rate` table the rest of the app uses; then a share is a share
     (same ISIN, same share class, one economic value) and the comparison means something.
 
-⚠ CHARTS 2-4 NEED NO CONVERSION AT ALL — a ROIC of 18% is 18% in every currency, and a Piotroski
+ CHARTS 2-4 NEED NO CONVERSION AT ALL — a ROIC of 18% is 18% in every currency, and a Piotroski
     score is a count. This is `_asset_financials`'s "skip the conversion, do not relabel it" rule,
     the one its unit system already implements for share counts.
 
-⚠ EVERY SERIES REPORTS WHAT IT DROPPED. `_series` turns a GuruFocus "" / "N/A" / "-" into a
+ EVERY SERIES REPORTS WHAT IT DROPPED. `_series` turns a GuruFocus "" / "N/A" / "-" into a
     skipped point, and those markers are FAR commoner in the ratio sections than in the statements:
     measured on one real blob, Piotroski has 17 points where Revenue has 24, Interest Coverage 20,
     GF Value 11. A loss-making year HAS no PE. Left silent, a "median over the last decade" band
     quietly becomes a median of the profitable years only — narrower, higher, and flattering.
     `points` vs `periods` is on every series so the caller can say so.
 
-⚠ DISPLAY ONLY. The blob is today's RESTATED view of history — a 2019 ROIC here is what 2019 looks
+ DISPLAY ONLY. The blob is today's RESTATED view of history — a 2019 ROIC here is what 2019 looks
     like NOW, not what anyone could have seen in 2019. Fine for reading a business; it must never
     feed the momentum signals, which live on as-of discipline.
 """
@@ -69,10 +69,10 @@ _PRICE_YEARS = 12
 
 #: Chart 1's band. FIVE methods, each a per-share value in the LISTING's currency.
 #
-# ⚠ NOT the eleven in `summary.chart`. That block offers more methods (two DCFs, the liquidation
+#  NOT the eleven in `summary.chart`. That block offers more methods (two DCFs, the liquidation
 #   floors) but as SCALARS — today's number, no history — and its two DCFs read 0.00, i.e. not
 #   computed. A band needs series; these are the series.
-# ⚠ `Net-Net Working Capital` and `Net Current Asset Value` ARE series here and are deliberately
+#  `Net-Net Working Capital` and `Net Current Asset Value` ARE series here and are deliberately
 #   excluded: they are liquidation floors (-36.34 and -8.49 on a real blob), meaningless for a
 #   going concern, and would drag the band's floor below zero on every healthy company.
 _FAIR_VALUES: tuple[tuple[str, str], ...] = (
@@ -113,7 +113,7 @@ _SAFETY: tuple[tuple[str, str, str], ...] = (
 _GF_PRICE = ("Month End Stock Price", "quality")
 
 # ── the quality verdict ──────────────────────────────────────────────────────────────────────
-# FOUR NUMBERS, AND THEY ARE NOT FOUR OPINIONS OF THE SAME THING. Each catches something the
+# Four numbers, and they are not four opinions of the same thing. Each catches something the
 # other three cannot, which is why there is no composite score here: a single 0-100 would hide
 # exactly the disagreement that makes this readable (GuruFocus already sells one; outsourcing the
 # judgement is what we are avoiding).
@@ -123,7 +123,7 @@ _GF_PRICE = ("Month End Stock Price", "quality")
 #     conversion  is the reported profit REAL, or an accrual it never collected
 #     gm_sd       is there pricing power, or does the market set the price
 #
-# ⚠ THE THRESHOLDS ARE CALIBRATED, NOT LAWS. Measured over 14 large caps on our own blobs
+#  The thresholds are calibrated, not laws. Measured over 14 large caps on our own blobs
 # (2026-07-16), 10y medians:
 #
 #     NVDA  +65.3pp   AAPL  +18.8pp   MSFT  +14.9pp   JNJ  +9.0pp   KO  +6.0pp
@@ -137,7 +137,7 @@ _TREND_FAIL = -5.0        # ROIC down >5pp, 5y median vs the prior 5. INTC reads
                           # spread while its ROIC fell SEVENTEEN points; AMD -22.6. Against
                           # MSFT +3.0, JNJ -1.1, CSCO -0.8 — flat is normal, this is a collapse.
 _CONVERSION_FAIL = 0.8    # FCF/NI below 0.8 sustained: the profit is not turning into cash.
-                          # INTC 0.74 — fab capex eats it. ⚠ HIGH IS NOT THE OPPOSITE OF GOOD:
+                          # INTC 0.74 — fab capex eats it.  HIGH IS NOT THE OPPOSITE OF GOOD:
                           # IBM 1.68 and Ford 1.54 are depreciation exceeding capex, i.e.
                           # harvesting. So this FAILS low and is never rewarded high.
 _GM_SD_FAIL = 5.0         # Standard deviation of gross margin over 10y. Quality businesses have
@@ -171,7 +171,7 @@ def _series_out(blob: dict, cadence: str, field: str, label: str, section: str,
     pts = _pts(blob, cadence, field, section)
     return {
         "field": field, "label": label, "points": pts,
-        # ⚠ NOT decoration. `dropped > 0` means the period is not on this line — GuruFocus had no
+        #  NOT decoration. `dropped > 0` means the period is not on this line — GuruFocus had no
         # value (a loss year has no PE, an unlevered year no interest coverage), or we had no FX
         # rate to convert it (see `_dropped`). A reader who takes a 27-point line for a 40-year
         # history is reading only the periods that worked.
@@ -182,7 +182,7 @@ def _series_out(blob: dict, cadence: str, field: str, label: str, section: str,
 def _dropped(series: dict) -> dict:
     """Recount `dropped` from the points as they now stand.
 
-    ⚠ IT MUST BE RECOUNTED AFTER THE EUR CONVERSION, AND THAT IS NOT PEDANTRY. `_to_eur` drops any
+     IT MUST BE RECOUNTED AFTER THE EUR CONVERSION, AND THAT IS NOT PEDANTRY. `_to_eur` drops any
     period with no FX rate on or before it, and `fx_rate`'s history is THIN — measured, Apple's
     fair values go 40 periods -> 27, losing 1986-1998 entirely. Counting drops before the
     conversion reported `dropped: 0` beside a series that had quietly lost thirteen years: the
@@ -201,7 +201,7 @@ def _metric(key: str, label: str, unit: str, value: float | None, periods: int,
             fails: bool, *, applicable: bool = True, note: str | None = None) -> dict:
     """One quality number and its verdict.
 
-    ⚠ FOUR STATES, AND THREE OF THEM ARE NOT "BAD".
+     FOUR STATES, AND THREE OF THEM ARE NOT "BAD".
         ok       measured, and it passes
         fail     measured, and it does not
         n_a      the LINE DOES NOT EXIST for this company — a bank has no ROIC and no gross
@@ -249,12 +249,12 @@ def _quality(blob: dict, cadence: str) -> list[dict]:
 
     # 3. CASH CONVERSION — the lie detector on the other three. Both margins share a denominator
     #    (revenue), so their ratio IS FCF/net income.
-    #    ⚠ A LOSS YEAR IS SKIPPED, NOT INCLUDED. With net income negative the ratio flips sign and
+    #     A loss year is skipped, not included. With net income negative the ratio flips sign and
     #    a loss-making year would score as excellent conversion.
     pairs = [f / x for f, x in zip(fcfm, nim) if x and x > 0]
     conv = st.median(pairs) if len(pairs) >= _MIN_MEDIAN_PERIODS else None
 
-    # ⚠ AND IT MEANS NOTHING FOR A BANK. A bank's operating cash flow is dominated by its BALANCE
+    #  And it means nothing for a bank. A bank's operating cash flow is dominated by its BALANCE
     #    SHEET growing — lending IS the business, so OCF routinely goes negative in a good year
     #    (JPMorgan: -147,782, which this codebase already documents as information rather than a
     #    fault). Measured, JPM scores 0.19x here: not a company failing to collect its profits,
@@ -263,7 +263,7 @@ def _quality(blob: dict, cadence: str) -> list[dict]:
 
     # 4. PRICING POWER — as the ABSENCE of drama. A quality business has a boring gross margin.
     gm_sd = st.pstdev(gm) if has_gm and len(gm) >= _MIN_MEDIAN_PERIODS else None
-    # ⚠ σ CANNOT TELL A COLLAPSE FROM AN IMPROVEMENT, AND THAT PRODUCED A WRONG VERDICT.
+    #  σ CANNOT TELL A COLLAPSE FROM AN IMPROVEMENT, AND THAT PRODUCED A WRONG VERDICT.
     #    NVIDIA's gross margin σ is 5.9 — because it went from ~35% to ~75%. That is the OPPOSITE
     #    of "the market sets our price": it is pricing power being acquired. Flagging it failed
     #    the one company in the sample with the strongest pricing power in it.
@@ -371,7 +371,7 @@ def compute_fundamentals(isin: str, cadence: str = "annuals") -> dict:
                      for p in _pts(blob, cadence, f, "quality")] or [since])
     fx = _fx({currency or "USD"}, min(fair_from, since), date.today().isoformat())
 
-    # ⚠ THE BAND IS CLIPPED TO THE PRICE WINDOW, AND THAT WAS A BUG BEFORE IT WAS A FEATURE.
+    #  The band is clipped to the price window, and that was a bug before it was a feature.
     # The price reaches back `_PRICE_YEARS` (12); the fair values reach ~27. Merged into one frame
     # the chart spanned 1999-2026 while the price line covered only its last 44% — more than half
     # of it showing fair values with nothing to compare them against, which is the ONE comparison
@@ -385,7 +385,7 @@ def compute_fundamentals(isin: str, cadence: str = "annuals") -> dict:
         s = _series_out(blob, cadence, field, label, "quality", band_periods)
         s["points"] = [p for p in _to_eur(s["points"], currency, fx)
                        if p["date"] >= window_start]
-        # ⚠ COUNTED, NOT DROPPED HERE. A fair value <= 0 is an ANSWER — Peter Lynch needs positive
+        #  Counted, not dropped here. A fair value <= 0 is an ANSWER — Peter Lynch needs positive
         # earnings growth, Graham needs positive EPS and book value, EPV <= 0 says the business
         # earns nothing. Measured, a QUARTER of the band's in-window points are <= 0 (Tesla 33/60,
         # Morgan Stanley 19/60, AMD 21/60). A log axis cannot plot them, so the CHART breaks its
@@ -400,15 +400,15 @@ def compute_fundamentals(isin: str, cadence: str = "annuals") -> dict:
         "isin": isin,
         "symbol": f"{exchange}:{ticker}",
         "company_id": gf["company_id"],
-        # ⚠ The financials' currency, which is the LISTING's — not necessarily the price's.
+        #  The financials' currency, which is the LISTING's — not necessarily the price's.
         "currency": currency,
         "yahoo_symbol": symbol,
         "price_currency": price_ccy,
-        # ⚠ A non-home listing's history has HOLES (Apple: 91 payments on Nasdaq, 63 on Zurich
+        #  A non-home listing's history has HOLES (Apple: 91 payments on Nasdaq, 63 on Zurich
         # with a five-year gap). A band drawn across one is a confident fiction, so the caller is
         # told rather than left to assume.
         "is_home": gf["is_home"],
-        # ⚠ Which INDUSTRY template GuruFocus renders this company with — 'B' (bank) has no EBIT
+        #  Which INDUSTRY template GuruFocus renders this company with — 'B' (bank) has no EBIT
         # and no gross profit at all, so two of these charts are structurally thinner for one.
         "template": _TEMPLATES.get(
             str(((blob.get("financials") or {}).get("financial_template_parameters") or {})
@@ -421,7 +421,7 @@ def compute_fundamentals(isin: str, cadence: str = "annuals") -> dict:
         # yfinance, daily, EUR. The band is GuruFocus, per-share, converted to the SAME EUR.
         "price_eur": price,
         "fair_values_eur": fair,
-        # ⚠ NEVER DRAWN. GuruFocus's own month-end price, in EUR, purely so the two vendors can be
+        #  Never drawn. GuruFocus's own month-end price, in EUR, purely so the two vendors can be
         # compared: if this and `price_eur` diverge after FX, the ISIN resolved to two different
         # securities and every fair value on the chart belongs to the other one.
         "price_crosscheck_eur": gf_price,
@@ -432,7 +432,7 @@ def compute_fundamentals(isin: str, cadence: str = "annuals") -> dict:
         "returns": [_series_out(blob, cadence, f, lab, sec, periods) for f, lab, sec in _RETURNS],
         "safety": [_series_out(blob, cadence, f, lab, sec, periods) for f, lab, sec in _SAFETY],
 
-        # ⚠ A BANK HAS NO EBIT AND NO GROSS PROFIT, so Greenblatt's earnings yield is absent and
+        #  A bank has no ebit and no gross profit, so Greenblatt's earnings yield is absent and
         # ROIC/WACC mean very little for one (its capital IS its product). That is an ANSWER about
         # the template, not a gap — `_has_line` distinguishes absent from present-but-empty.
         # The four-number verdict: does it create value, is the moat melting, is the profit

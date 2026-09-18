@@ -6,7 +6,7 @@ WHY THIS CANNOT BE DERIVED, AND MUST BE DECIDED
     real returns and no ISIN at all. Overlap: zero, of 58 models and 31 accounts. Pairing them
     is the only bridge — and neither side carries a key for it.
 
-    ⚠ THE HOLDINGS CANNOT IDENTIFY THE MODEL, WHICH IS THE OPPOSITE OF WHAT YOU EXPECT.
+     THE HOLDINGS CANNOT IDENTIFY THE MODEL, WHICH IS THE OPPOSITE OF WHAT YOU EXPECT.
     Matching on what a portfolio holds is the obvious escape from unreliable names, and it is
     exactly useless here: BUS_FTS_Bepoff_AFS / BUS_FTS_DEF_AFS / BUS_FTS_NEU_AFS hold the SAME
     27 ISINs (measured: 27 of 27 shared, all three pairs), and BUS_FTS_OFF_AFS's 25 are a
@@ -37,7 +37,7 @@ from routers._airs_ref import models as ref_models, positions as ref_positions
 # Suffixes that name the VENUE/variant of a portfolio rather than the strategy. Stripped from
 # both sides before comparing.
 #
-# ⚠ `off` IS NOT IN HERE AND MUST NOT BE. It looks like a suffix and is not — it is
+#  `off` IS NOT IN HERE AND MUST NOT BE. It looks like a suffix and is not — it is
 # "Offensief", the RISK PROFILE, and it is the only thing separating `AITopSelectie OFF FX`
 # from a hypothetical defensive sibling. Strip it and every profile of a strategy collapses
 # onto one stem, which is the wrong-link bug this module exists to prevent. Same for `def`,
@@ -45,7 +45,7 @@ from routers._airs_ref import models as ref_models, positions as ref_positions
 _VENUE_SUFFIXES = (
     "dyn",      # the live account
     "fx",       # the model
-    "afs",      # ⚠ BOTH a model suffix (BUS_FTS_OFF_AFS) and part of an account's stem
+    "afs",      #  BOTH a model suffix (BUS_FTS_OFF_AFS) and part of an account's stem
                 #   (BUS_MTS_OFF_AFS_DYN). Stripping repeatedly from both sides makes the two
                 #   conventions agree: ...offafsdyn -> ...offafs -> ...off, and ...offafs ->
                 #   ...off. Safe only because the comparison is exact afterwards.
@@ -96,7 +96,7 @@ def guess_model(account: str, models: list[dict]) -> tuple[dict | None, str]:
     if not hits:
         return None, f"no model has the stem '{stem}'"
 
-    # ⚠ THE PERFECT NAME MATCH IS THE PORTFOLIO ITSELF, AND IT IS A CYCLE. `TOPS_AZTS_L` is
+    #  The perfect name match is the portfolio itself, and it is a cycle. `TOPS_AZTS_L` is
     # both an account AND a one-line model row, so it matched ITSELF at a perfect score —
     # "this account runs itself", which is no information wearing the look of certainty. The
     # same shape `_airs_portfolio_links` hit: there the closest string to a certificate's name
@@ -105,7 +105,7 @@ def guess_model(account: str, models: list[dict]) -> tuple[dict | None, str]:
     if not hits:
         return None, "the only stem match is the account itself"
 
-    # ⚠ A ONE-POSITION MODEL IS A WRAPPER, NOT A STRATEGY. It holds a single Leonteq AMC
+    #  A one-position model is a wrapper, not a strategy. It holds a single Leonteq AMC
     # certificate standing in for another portfolio; linking an account to it says nothing
     # about what the account is running. Kept OUT of the guess but left IN the pick-list
     # below, because a human may know something we do not — the single-instrument BUS_BM_*
@@ -124,7 +124,7 @@ def _models(include_empty: bool = False) -> list[dict]:
     """The models a link may point at: the ones with a composition. A model with no positions
     is not a strategy an account can be running — it is a row we scraped and nothing more.
 
-    ⚠⚠ THE POSITION READ MUST PAGE, AND A TRUNCATION HERE SILENTLY UNPAIRS PORTFOLIOS.
+     THE POSITION READ MUST PAGE, AND A TRUNCATION HERE SILENTLY UNPAIRS PORTFOLIOS.
         `.limit(20000)` is not a bound the server honours — `db-max-rows` is, and it is **1,000
         on Supabase cloud** against 10,000 locally. Every model whose position rows fall past
         the cut counts as ZERO positions, is dropped by the filter on the last line, and then
@@ -138,14 +138,14 @@ def _models(include_empty: bool = False) -> list[dict]:
         that made `_year_perf` serve June's return in production while local served July's, one
         table over, waiting for the next scan to trip it.
     """
-    # ⚠ WAS ITS OWN PAGED READ, ORDERED ON `(portfolio_id, isin)` — WHICH IS NOT UNIQUE. Measured:
+    #  Was its own paged read, ordered on `(portfolio_id, isin)` — WHICH IS NOT UNIQUE. Measured:
     # this table holds one genuine duplicate pair (a model listing the same instrument at two
     # weights), and Postgres promises nothing about tied rows across separate LIMIT/OFFSET
     # queries, so a page boundary landing inside that tie could serve the row twice or never.
     # `_airs_ref` pages on the PRIMARY KEY and is shared with every other reader, so this is both
     # a correctness fix and two round trips removed.
     rows = ref_models()
-    # ⚠ COUNTS EVERY POSITION ROW, NOT ONLY ISIN-BEARING ONES — deliberately NOT
+    #  Counts every position row, not only ISIN-bearing ones — deliberately NOT
     # `_airs_ref.position_counts()`, which excludes rows without an ISIN because the /portfolios
     # grid counts *instruments* and a cash line is not one. The two are genuinely different
     # numbers here: 31 position rows have no ISIN, spread over 30 portfolios, so swapping in the
@@ -192,7 +192,7 @@ def list_account_links() -> dict:
     `airs_model_portfolio`: 18 of the 51 accounts have no row in the models list at all, and
     those are precisely the ones a models-table-driven view would never show.
 
-    ⚠⚠ IT IS A FLEET FACT, AND THE ANALYSE PATH ASKS FOR IT FIVE TIMES. This answers nothing about
+     IT IS A FLEET FACT, AND THE ANALYSE PATH ASKS FOR IT FIVE TIMES. This answers nothing about
     any one portfolio — it is the whole account/model pairing table — and the callers want ONE row
     out of it, which they find with a linear `next(...)` over the rebuilt list. There are five such
     lookups in `_airs_portfolio_analysis` alone, plus `_airs_attribution_basis` and
@@ -200,21 +200,21 @@ def list_account_links() -> dict:
     `_analysis_cache` means: same fingerprint, same staleness guarantee, no dependence on which
     book is open.
 
-    ⚠ `read_cache` ALREADY ABSORBS THE ROUND TRIPS, and that is why this is worth only what it is
+     `read_cache` ALREADY ABSORBS THE ROUND TRIPS, and that is why this is worth only what it is
     worth. Measured inside one `read_cache` block: the first call 1,390 ms, each repeat **23-31 ms**
     — the HTTP is served from the memo and what remains is re-PARSING the ~150 KB `airs_performance`
     body and re-running `_year_perf`'s monthly reduction over 1,968 rows. Caching the assembled
     result removes ~100 ms per modal open; it is not the 2.5s that counting bare calls suggests,
     and anyone re-measuring this outside a `read_cache` block will get that wrong number.
 
-    ⚠ THE RESULT IS SHARED BY REFERENCE AND MUST BE TREATED AS IMMUTABLE — the leg store's standing
+     THE RESULT IS SHARED BY REFERENCE AND MUST BE TREATED AS IMMUTABLE — the leg store's standing
     rule. Audited at the time of writing: all fourteen call sites READ (`next(...)` lookups, dict
     and list comprehensions that build new objects); not one assigns into a returned row. If you
     add a caller, read — do not decorate.
     """
     from common import read_cache  # noqa: PLC0415
 
-    # ⚠ ONLY INSIDE A DECLARED-EXPENSIVE UNIT OF WORK, and never across a write — the same gate as
+    #  Only inside a declared-expensive unit of work, and never across a write — the same gate as
     # `_airs_ref._paged`. Outside one, the leg store would cost a FINGERPRINT (one
     # `pg_stat_user_tables` COPY) to answer a question nobody is about to ask again, making a lone
     # caller slower by a round trip. `wrote()` opts a writer out so it cannot be handed a snapshot
@@ -292,7 +292,7 @@ def set_account_link(portefeuille: str, model_portfolio_id: int | None, note: st
 def clear_account_link(portefeuille: str) -> dict:
     """Forget the decision entirely — the guess speaks again. NOT the same as storing NULL.
 
-    Deletes by id. ⚠ NOT by `ilike(portefeuille)`: `_` is a single-character WILDCARD in LIKE
+    Deletes by id.  NOT by `ilike(portefeuille)`: `_` is a single-character WILDCARD in LIKE
     and AIRS names are full of them, so `BUS_BM_AAN_kw_EUR_2026_d` would match rows it has
     nothing to do with — and this is a delete.
     """

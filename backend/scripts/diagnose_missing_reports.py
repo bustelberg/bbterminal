@@ -1,6 +1,6 @@
-"""Which accounts wear a ⚠ report badge on /management-dashboard, and whether they should.
+"""Which accounts wear a  report badge on /management-dashboard, and whether they should.
 
-⚠ THE BADGE IS `reports_ok` FROM `airs_account_roster`, per account, from THAT account's own last
+ THE BADGE IS `reports_ok` FROM `airs_account_roster`, per account, from THAT account's own last
 scan (`routers/_airs_accounts._missing_reports`). A code missing from `reports_ok` means the scan
 raised on that report — `AirsNoData` does NOT count as missing, it is appended as ok, precisely so a
 book that genuinely has no such report stops wearing a permanent warning.
@@ -54,7 +54,7 @@ def main() -> None:
     print(f"accounts: {len(seen)}   complete: {complete}   never scanned: {never}   "
           f"badged: {len(badged)}\n")
     if not badged:
-        print("nothing badged — no ⚠ on the page")
+        print("nothing badged — no  on the page")
         return
 
     # How many badged accounts nonetheless HOLD the thing the badge says was not retrieved.
@@ -85,10 +85,10 @@ def main() -> None:
         note = f"{n} rows, newest {newest[:10]}" if n else "none"
         print(f"  {name:<32} {', '.join(LABEL[c] for c in gap):<32} {at:<20} {note}")
 
-    # ⚠ THE CONTRADICTION THIS SCRIPT EXISTS FOR.
+    #  The contradiction this script exists for.
     bad = [(n, held.get(n, (0, ''))) for n, gap, _ in badged if 'volk' in gap and held.get(n, (0,))[0]]
     if bad:
-        print(f"\n⚠ {len(bad)} account(s) badged 'Vermogensoverzicht not retrieved' while HOLDING "
+        print(f"\n {len(bad)} account(s) badged 'Vermogensoverzicht not retrieved' while HOLDING "
               f"stored holdings — the rows are from an earlier scan, which is what the badge means, "
               f"but it is also what makes it read as wrong.")
 

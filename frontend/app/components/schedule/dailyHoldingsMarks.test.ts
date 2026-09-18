@@ -22,12 +22,12 @@ describe('computeMarks — entered / sold per trading day', () => {
     expect([...computeMarks(days).get('2026-06-02')!.sold]).toEqual([3]);
   });
 
-  it('⚠ the OLDEST day marks nothing as entered', () => {
+  it(' the OLDEST day marks nothing as entered', () => {
     // Otherwise the window opening reads as a wholesale purchase — every holding green.
     expect(computeMarks(days).get('2026-06-01')!.entered.size).toBe(0);
   });
 
-  it('⚠ the NEWEST day marks nothing as sold', () => {
+  it(' the NEWEST day marks nothing as sold', () => {
     // There is no next day; nothing can be KNOWN to have been sold.
     expect(computeMarks(days).get('2026-06-03')!.sold.size).toBe(0);
   });
@@ -64,7 +64,7 @@ describe('computeMarks — entered / sold per trading day', () => {
 });
 
 describe('pickedSectors — the order the colour squares are drawn in', () => {
-  it('⚠ orders by sector_rank, not alphabetically', () => {
+  it(' orders by sector_rank, not alphabetically', () => {
     // The first square must be the day's TOP-ranked sector. Alphabetical order would look
     // identical and mean nothing.
     const holdings = [

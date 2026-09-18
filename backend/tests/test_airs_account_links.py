@@ -65,7 +65,7 @@ class TestTheFourNamingConventions:
 
 
 class TestItCannotConfuseTwoRiskProfiles:
-    """⚠ THE failure mode. The holdings cannot separate these — BUS_FTS_Bepoff/DEF/NEU_AFS hold
+    """ THE failure mode. The holdings cannot separate these — BUS_FTS_Bepoff/DEF/NEU_AFS hold
     the IDENTICAL 27 ISINs (27 of 27, all three pairs) — so the name is the only discriminator
     that exists, and a loose match here silently measures a book against another strategy."""
 
@@ -113,7 +113,7 @@ class TestTheTwoGatesThatMakeTheNameUsable:
     """Both caught on the first run over real data — each produced a perfect-looking match."""
 
     def test_an_account_never_links_to_itself(self):
-        """⚠ `TOPS_AZTS_L` is BOTH an account and a one-line model row, so it matched itself
+        """ `TOPS_AZTS_L` is BOTH an account and a one-line model row, so it matched itself
         at a perfect score: "this account runs itself" — no information, wearing certainty.
         Same cycle `_airs_portfolio_links` hit, where a certificate's best name match was the
         wrapper holding it."""

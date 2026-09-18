@@ -1,6 +1,6 @@
 """Drifted identity/serial sequences: detect one from the insert that hit it, and repair it.
 
-⚠⚠ THE FAILURE THIS EXISTS FOR DOES NOT LOOK LIKE ITS CAUSE. A sequence that has fallen behind
+ THE FAILURE THIS EXISTS FOR DOES NOT LOOK LIKE ITS CAUSE. A sequence that has fallen behind
 its table reads fine, deploys fine, and then fails on the NEXT INSERT with
 
     duplicate key value violates unique constraint "current_picks_snapshot_pkey"
@@ -19,18 +19,18 @@ Measured in production 2026-09-07, twice on one database from one incident:
     above. It surfaced later than the first only because this table is inserted into twice a day
     rather than on every click.
 
-⚠ HOW IT HAPPENS: rows inserted with EXPLICIT ids do not advance the sequence. The local→prod
+ HOW IT HAPPENS: rows inserted with EXPLICIT ids do not advance the sequence. The local→prod
 clone does exactly that, and `scripts/clone-local-to-prod.ps1` step **[7b]** — the reset that
 repairs it — is the LAST step, so any abort (Ctrl-C, a dropped connection, a disk preflight
 failure) leaves every sequence in the database drifted at once. A hand-written INSERT naming the
 id column and a restore from a data-only dump do the same thing.
 
-⚠ THE FIX IS STRICTLY SAFE AND ONLY EVER MOVES FORWARD. `setval(seq, MAX(id))` never reassigns an
+ THE FIX IS STRICTLY SAFE AND ONLY EVER MOVES FORWARD. `setval(seq, MAX(id))` never reassigns an
 id and never touches a row; moving a sequence BACKWARDS is the dangerous direction (ids of deleted
 rows would be reissued) and nothing here can do it — the repair reads `MAX(id)` and sets exactly
 that, and a sequence already ahead of its table lands on the same value it had.
 
-⚠ THE WHOLE-DATABASE VERSION IS `scripts/resync-sequences.sql`, and it stays the tool of record:
+ THE WHOLE-DATABASE VERSION IS `scripts/resync-sequences.sql`, and it stays the tool of record:
 this module repairs the ONE table whose insert just failed, because that is all the failing insert
 proves. After an aborted clone every sequence is drifted and they should be fixed in one pass, not
 one 05:00 failure at a time.
@@ -50,7 +50,7 @@ _UNIQUE_VIOLATION = "23505"
 def _message_of(exc: BaseException) -> str:
     """Everything an exception can tell us, as one lowercase string.
 
-    ⚠ THE TRANSPORTS DISAGREE ABOUT WHERE THE CODE LIVES. A supabase-py `APIError` carries a dict
+     THE TRANSPORTS DISAGREE ABOUT WHERE THE CODE LIVES. A supabase-py `APIError` carries a dict
     (`code`, `message`, `details`) and stringifies to its repr; a psycopg error carries `sqlstate`
     and puts the constraint name in `str(e)`. Reading `str(exc)` plus the attributes we know about
     is what makes one test work for both, rather than a match that quietly only ever fires on one.
@@ -69,7 +69,7 @@ def _message_of(exc: BaseException) -> str:
 def is_sequence_drift(exc: BaseException, table: str) -> bool:
     """Is this exception `table`'s primary key colliding on an id the sequence already passed?
 
-    ⚠ IT MUST NAME THE PRIMARY KEY, NOT JUST THE TABLE. A duplicate on a business unique
+     IT MUST NAME THE PRIMARY KEY, NOT JUST THE TABLE. A duplicate on a business unique
     constraint — `universe.template_key`, `(benchmark_id, target_date)` — is a real application
     conflict and re-issuing the insert after a setval would be wrong: it would either fail again
     or, worse, succeed at writing a row somebody's uniqueness rule exists to refuse. Only a
@@ -89,16 +89,16 @@ def repair_sequence(table: str, column: str) -> int | None:
     against an unrepaired sequence fails identically, and a silent second failure is how a
     diagnosis gets lost.
 
-    ⚠ IT DISCOVERS THE SEQUENCE THE SAME TWO WAYS `resync-sequences.sql` AND THE CLONE DO.
+     IT DISCOVERS THE SEQUENCE THE SAME TWO WAYS `resync-sequences.sql` AND THE CLONE DO.
     `pg_get_serial_sequence` MISSES a manually-created sequence (CREATE SEQUENCE + DEFAULT
     nextval, not OWNED BY — `company_id_seq` is one), so the default expression is parsed as a
     fallback. A version of this that only asked `pg_get_serial_sequence` would work on most
     tables and silently refuse to repair exactly the hand-made ones.
 
-    ⚠ `GREATEST(max, 1)` because a sequence cannot be set below its minimum, and `is_called :=
+     `GREATEST(max, 1)` because a sequence cannot be set below its minimum, and `is_called :=
     max > 0` so an EMPTY table's next insert gets id 1 rather than 2.
 
-    ⚠ Identifiers are matched against `^[a-z_][a-z0-9_]*$` before they reach the SQL. They are
+     Identifiers are matched against `^[a-z_][a-z0-9_]*$` before they reach the SQL. They are
     module-level literals at every call site today; the check is what keeps that true if one ever
     stops being.
     """
@@ -139,7 +139,7 @@ def repair_sequence(table: str, column: str) -> int | None:
         WHERE seq IS NOT NULL
     """
     try:
-        # ⚠ A FRESH CONNECTION, DELIBERATELY NOT THE REQUEST-SCOPED ONE. We are here because a
+        #  A fresh connection, deliberately not the request-scoped one. We are here because a
         # statement just failed; inside a transaction that psycopg has marked aborted every
         # further statement raises `InFailedSqlTransaction`, and the repair would be refused for
         # a reason that has nothing to do with the sequence.
@@ -164,10 +164,10 @@ def insert_repairing_sequence(table: str, column: str, row: dict | list[dict]):
     Use it where a failed insert costs more than the insert — the pipeline's run row and the
     schedule's snapshots, both of which take a whole surface down with them.
 
-    ⚠ ONE RETRY, AND ONLY AFTER A REPAIR THAT REPORTED SUCCESS. A retry loop over a duplicate-key
+     ONE RETRY, AND ONLY AFTER A REPAIR THAT REPORTED SUCCESS. A retry loop over a duplicate-key
     error is how a real uniqueness conflict becomes an infinite one.
 
-    ⚠ WHEN IT CANNOT REPAIR, THE ERROR IT RAISES SAYS SO IN WORDS. The raw message names a
+     WHEN IT CANNOT REPAIR, THE ERROR IT RAISES SAYS SO IN WORDS. The raw message names a
     constraint and an id and reads as an application bug; someone then has to already know the
     whole story to act on it. This one names the cause and the file that fixes it — which is the
     entire difference between a five-minute repair and a morning.

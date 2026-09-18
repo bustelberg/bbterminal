@@ -8,9 +8,9 @@ import type { HoldingTiming } from '../../../lib/types/api';
 import { TL, buildTimeline, shortDay } from './timingTimeline';
 
 /**
- * WHY THE TRADING MATTERED — one holding's year, split into "doing nothing" and "each decision".
+ * Why the trading mattered — one holding's year, split into "doing nothing" and "each decision".
  *
- * ⚠ IT ANSWERS THE QUESTION THE TWO RETURN COLUMNS RAISE AND CANNOT SETTLE. `Instrument return` is
+ *  It answers the question the two return columns raise and cannot settle. `Instrument return` is
  * what the INSTRUMENT did (AIRS's opening value restated to today's quantity, so timing is erased
  * on purpose); `Money-weighted` is what YOUR money did, and the gap between them IS the trading.
  * Neither says which trade, or by how much. This does:
@@ -19,11 +19,11 @@ import { TL, buildTimeline, shortDay } from './timingTimeline';
  *     + each trade      what it added or cost against not having made it
  *     = actual          what the money really made
  *
- * ⚠ THE IDENTITY IS EXACT, AND SHOWN. Measured, residual 0.00 on every position tried. If it ever
+ *  The identity is exact, and shown. Measured, residual 0.00 on every position tried. If it ever
  * fails, `reconciles` is false and the panel says these are three numbers rather than a
  * decomposition — the alternative is a reader trusting a sum that does not hold.
  *
- * ⚠ AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after it;
+ *  Against doing nothing, not against a perfect decision. A buy gains if the price rose after it;
  * a sell gains if it fell. A lucky call and a good one produce the same number, and nothing here
  * claims to tell them apart.
  */
@@ -51,7 +51,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
   }, [portfolioId, name]);
 
   const traded = (d?.trades ?? []).length;
-  // ⚠ `--default-non-nullable=false` makes every Pydantic-defaulted field optional in TS. A
+  //  `--default-non-nullable=false` makes every Pydantic-defaulted field optional in TS. A
   // missing effect is 0 — it changed nothing — which is a fact rather than an unknown, so these
   // are safe to default and the alternative is `?? 0` scattered through the prose below.
   const timing = d?.timing_eur ?? 0;
@@ -78,7 +78,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
 
         {!d && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
         {err && <p className="text-xs text-neg-400">{err}</p>}
-        {/* ⚠ A REFUSAL NAMES ITSELF. Four different things stop this working (no pairing, no
+        {/*  A REFUSAL NAMES ITSELF. Four different things stop this working (no pairing, no
             transactions loaded, sold out, an unprovable deposit) and each has its own sentence —
             "no data" for all of them would send a reader to fix the wrong one. */}
         {d && !d.available && <p className="text-xs text-warn-500">{d.note}</p>}
@@ -139,7 +139,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
               </table>
             </div>
 
-            {/* ⚠⚠ NAME THE BASE, ALWAYS. These percentages divide by the value of the position on
+            {/*  NAME THE BASE, ALWAYS. These percentages divide by the value of the position on
                 1 January — which is NOT the denominator behind either return column in the table
                 that opened this modal. KLA reads +54% there and +93% here, both correct, and a
                 percent with no stated base is how a reader concludes one of them is broken. */}
@@ -160,7 +160,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
               </p>
             )}
 
-            {/* ⚠ THE VERDICT IN A SENTENCE. A reader who has to subtract two numbers to learn
+            {/*  THE VERDICT IN A SENTENCE. A reader who has to subtract two numbers to learn
                 whether the trading helped has been given data, not an answer. */}
             {traded > 0 && (
               <p className="text-[12px] text-fg-soft">
@@ -177,7 +177,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
             )}
 
             {/* ── The year, with each decision on it.
-                ⚠ The segments connect OBSERVATIONS, not the path the price took — see
+                 The segments connect OBSERVATIONS, not the path the price took — see
                 `timingTimeline.ts`. The caption says so, because a straight line from the sale to
                 the repurchase makes a round trip look like a slide. */}
             {tl && (
@@ -264,7 +264,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                         title="Against not having made this trade. A buy gains if the price rose after it; a sell gains if the price fell after it.">
                         Gained / cost
                       </th>
-                      {/* ⚠ TWO NORMALISATIONS, BECAUSE THEY ANSWER DIFFERENT QUESTIONS AND A READER
+                      {/*  TWO NORMALISATIONS, BECAUSE THEY ANSWER DIFFERENT QUESTIONS AND A READER
                           given one will ask the other. "%" is how GOOD the call was per euro moved;
                           "pp" is how MUCH it mattered to the position. A brilliant call on 3 shares
                           scores a huge % and a pp of nothing — which is the honest reading. */}
@@ -284,7 +284,7 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
                         <td className="px-3 py-1.5 text-fg-muted">{t.datum ?? '—'}</td>
                         <td className="px-3 py-1.5 text-fg-soft">
                           {t.kind === 'buy' ? 'Bought' : 'Sold'}
-                          {/* ⚠ A pre-split trade has been converted to today's share basis, and
+                          {/*  A pre-split trade has been converted to today's share basis, and
                               the row says so — otherwise the share count and price look wrong
                               against the contract note. */}
                           {t.rescaled && (
@@ -316,16 +316,16 @@ export default function HoldingTimingModal({ portfolioId, name, onClose }: {
             <div className="text-[11px] space-y-1">
               {d.reconciles ? (
                 <p className="text-pos-400">
-                  ✓ The two lines add to the third exactly — this is a decomposition of the
+                   The two lines add to the third exactly — this is a decomposition of the
                   result, not three figures beside each other.
                 </p>
               ) : (
                 <p className="text-warn-500">
-                  ⚠ These lines do not add up ({eur(d.residual_eur)} out), so they are three
+                   These lines do not add up ({eur(d.residual_eur)} out), so they are three
                   separate figures rather than a decomposition. Do not read the split as the cause.
                 </p>
               )}
-              {/* ⚠⚠ THE ONE NUMBER THAT WILL NOT MATCH THE TABLE BEHIND THIS MODAL, NAMED HERE
+              {/*  THE ONE NUMBER THAT WILL NOT MATCH THE TABLE BEHIND THIS MODAL, NAMED HERE
                   RATHER THAN LEFT TO BE DISCOVERED. AIRS restates the opening value to TODAY's
                   share count, so shares bought later are priced at January's price instead of what
                   was paid. Both are correct answers to different questions. */}
@@ -351,7 +351,7 @@ const eur = (v?: number | null) =>
 const num = (v?: number | null) => (v == null ? '—' : v.toLocaleString('en-US', { maximumFractionDigits: 2 }));
 const num2 = (v?: number | null) => (v == null ? '—' : v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 /**
- * ⚠ A BLANK, NEVER A ZERO. Both of these are null exactly when the position had no opening value,
+ *  A blank, never a zero. Both of these are null exactly when the position had no opening value,
  * and "0.00pp" there would read as "this decision did not matter" when in fact it was the whole
  * result — see the AITopSelectie KLA case, bought outright on 5 January.
  */

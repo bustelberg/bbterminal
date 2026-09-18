@@ -52,7 +52,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from job_runlog import record_run
 from routers.ingest_runs import kick_off_refresh
-# ⚠ THE SCHEDULE ITSELF LIVES THERE, NOT HERE — see `_register`. Declaration only: no DB, no
+#  The schedule itself lives there, not here — see `_register`. Declaration only: no DB, no
 # APScheduler, so it is safe for both this module and the admin router to import.
 from scheduled_jobs import BY_ID, ORPHAN_MARKER, SCHEDULED_JOBS
 
@@ -123,7 +123,7 @@ _price_retry_lock = threading.Lock()
 _price_retry_counts: dict[str, int] = {}
 
 # ── PostgREST cold start ───────────────────────────────────────────
-# ⚠ A STARTUP PROBE CAN BEAT THE DATABASE TO READINESS, AND THE FAILURE LOOKS LIKE A FAULT.
+#  A startup probe can beat the database to readiness, and the failure looks like a fault.
 # PostgREST answers nothing until it has loaded its schema cache; until then EVERY query — a
 # one-row `limit(1)` included — comes back as
 #
@@ -160,7 +160,7 @@ def _is_db_warming(exc: BaseException) -> bool:
 def _await_db_ready(what: str) -> bool:
     """Block (on a daemon thread) until PostgREST serves a trivial read, or give up saying so.
 
-    ⚠ THIS IS A GATE, NOT A RETRY WRAPPER AROUND THE WORK. It spends one tiny query per attempt;
+     THIS IS A GATE, NOT A RETRY WRAPPER AROUND THE WORK. It spends one tiny query per attempt;
     wrapping the job itself would re-spend whatever the job had already done (the asset-price
     refresh costs ~1.5s of Yahoo per instrument). Once the gate opens, the job runs exactly once
     and any later error is a real one.
@@ -255,7 +255,7 @@ def _reap_orphan_runs() -> None:
                     "current_phase": "done",
                     "finished_at": now_iso,
                     "error_summary": (
-                        # ⚠ THE PREFIX IS A SHARED CONSTANT — the automatic-jobs overview matches on
+                        #  The prefix is a shared constant — the automatic-jobs overview matches on
                         # it to report this as `interrupted` rather than as a job fault. Reword it
                         # here and the overview silently goes back to calling every dev `--reload`
                         # a failure.
@@ -316,7 +316,7 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
     from ingest.phases.planner import build_plan  # noqa: PLC0415 — avoid import cycle
 
     reasons: list[str] = []
-    # ⚠ "NO REASONS" AND "WE COULD NOT TELL" ARE NOT THE SAME ANSWER. Both probes below run on
+    #  "NO REASONS" AND "WE COULD NOT TELL" ARE NOT THE SAME ANSWER. Both probes below run on
     # startup, racing the Supabase stack (PGRST002 until PostgREST's schema cache loads), and a
     # failed probe leaves `reasons` empty — which used to log "everything current", a claim we
     # had no basis for, about the exact state the kickstart exists to detect.
@@ -368,7 +368,7 @@ def _maybe_kickstart_smart(sched: BackgroundScheduler) -> None:
 def _fire_daily_price_slice() -> None:
     """Refresh the most-stale slice of the company book. Fires every day, unconditionally.
 
-    ⚠⚠ IT REPLACED A GATED MONTH-END TICK, AND THE GATE IS THE PART THAT IS GONE. The old
+     IT REPLACED A GATED MONTH-END TICK, AND THE GATE IS THE PART THAT IS GONE. The old
     `_fire_month_end_refresh` woke daily and did nothing on ~28 days out of 30, then fired one full
     pass inside a window — with a "did it already run this window" guard, a retry-tomorrow path and
     a fallback that preferred firing when the guard lookup failed. All of that machinery existed to
@@ -377,7 +377,7 @@ def _fire_daily_price_slice() -> None:
     missed, the next day's slice is simply more stale and picks up the same names, because
     `_load_all_companies()` is most-stale-first and the database's own staleness is the cursor.
 
-    ⚠ Never raises into the scheduler thread.
+     Never raises into the scheduler thread.
     """
     try:
         _fire_job("price_slice")
@@ -443,10 +443,10 @@ def _held_prices_stale() -> bool:
 
 
 def _body_asset_price_refresh(ctx=None) -> tuple[str, dict]:
-    """⚠ THE EXISTING BODY, UNCHANGED — it already owns its own `record_run` (it has three distinct
+    """ THE EXISTING BODY, UNCHANGED — it already owns its own `record_run` (it has three distinct
     `skipped` outcomes to report) and its own try/except. Wrapping it again would open a second run
     row for one run, so `_run_body` skips its own record for this one."""
-    # ⚠ ONE LINE BEFORE DELEGATING, because everything after it is inside `_run_asset_price_refresh`
+    #  One line before delegating, because everything after it is inside `_run_asset_price_refresh`
     # and that function narrates into its OWN run record, not into this job's progress stream. Its
     # three early exits are quick, but the working path fetches the gap for every held instrument —
     # so without this its toast reads "starting…" from press to finish. Making the inner function
@@ -459,11 +459,11 @@ def _body_asset_price_refresh(ctx=None) -> tuple[str, dict]:
 
 #: EVERY DECLARED JOB'S BODY, callable twice: by its scheduler tick and by the Run-now button.
 #:
-#: ⚠⚠ ONE BODY, TWO CALLERS — the rule this codebase applies to every scraper and pipeline. A button
+#:  ONE BODY, TWO CALLERS — the rule this codebase applies to every scraper and pipeline. A button
 #: that ran a second implementation would drift from the thing the schedule actually runs, and the
 #: drift would only ever be discovered by the button disagreeing with the nightly result.
 #:
-#: ⚠ A JOB WITH NO ENTRY IS NOT RUNNABLE BY HAND, and that is an answer rather than a gap: the
+#:  A JOB WITH NO ENTRY IS NOT RUNNABLE BY HAND, and that is an answer rather than a gap: the
 #: 20-second queue worker has nothing to trigger (it fires three times a minute), and the two
 #: pipeline jobs already have their own richer Run-now with a live console tail in their panels.
 JOB_BODIES: dict = {}
@@ -472,11 +472,11 @@ JOB_BODIES: dict = {}
 def _reporter(ctx):
     """`(done, total, message)` → the job's progress stream, or nowhere on a scheduler tick.
 
-    ⚠ A REPORTER MUST NEVER BE THE REASON A SCAN FAILS — the rule `airs_vermogen._step` already
+     A REPORTER MUST NEVER BE THE REASON A SCAN FAILS — the rule `airs_vermogen._step` already
     states. The work is the scan; the line on screen is a courtesy, and a listener that raised
     would lose a refresh that had already downloaded everything.
 
-    ⚠ `ctx is None` ON THE TICK, which is not a degraded mode: nobody is watching a 09:30 cron, and
+     `ctx is None` ON THE TICK, which is not a degraded mode: nobody is watching a 09:30 cron, and
     the run record carries the outcome either way.
     """
     def step(done, total, message) -> None:
@@ -505,7 +505,7 @@ def _run_body(job_id: str, ctx=None, triggered_by: str = "auto") -> str:
     import jobs as _jobs  # noqa: PLC0415
 
     body = JOB_BODIES[job_id]
-    # ⚠ THE ASSET REFRESH RECORDS ITSELF (three `skipped` outcomes of its own), so a second record
+    #  The asset refresh records itself (three `skipped` outcomes of its own), so a second record
     # here would open two rows for one run.
     if job_id == "asset_price_refresh":
         body(ctx)
@@ -515,7 +515,7 @@ def _run_body(job_id: str, ctx=None, triggered_by: str = "auto") -> str:
         try:
             detail, summary = body(ctx)
         except _Cancelled as e:
-            # ⚠⚠ CAUGHT *INSIDE* THE `with`, NOT OUTSIDE IT. Letting it propagate through
+            #  CAUGHT *INSIDE* THE `with`, NOT OUTSIDE IT. Letting it propagate through
             # `record_run` closes the row as `error` — measured: a cancelled probe wrote
             # `status=error, detail=_Cancelled: stopped at step 19` while the toast correctly said
             # `cancelled`. Two records of one event, disagreeing, and the durable one was the wrong
@@ -593,15 +593,15 @@ def _spawn_body(job_id: str) -> None:
 def start_job_now(job_id: str, *, triggered_by: str = "manual"):
     """Kick a declared job off by hand, as a CANCELLABLE registry job with a progress toast.
 
-    ⚠ THE SAME BODY THE TICK RUNS, through `_run_body` — so "Run now" cannot come to mean something
+     THE SAME BODY THE TICK RUNS, through `_run_body` — so "Run now" cannot come to mean something
     different from what the schedule does.
 
-    ⚠ `triggered_by` DEFAULTS TO `manual` BECAUSE THAT IS WHO CALLS IT — a button. The watchdog
+     `triggered_by` DEFAULTS TO `manual` BECAUSE THAT IS WHO CALLS IT — a button. The watchdog
     passes `watchdog` so its own re-runs are countable in the history, which is where its per-day
     cap now reads its budget from (see `_watchdog_budget_spent`); folded into `manual` a hand-run
     would silently spend the automatic allowance and vice versa.
 
-    ⚠ CANCELLATION IS COOPERATIVE AND ITS LATENCY DIFFERS PER JOB, which the UI states rather than
+     CANCELLATION IS COOPERATIVE AND ITS LATENCY DIFFERS PER JOB, which the UI states rather than
     hides: the AIRS scan stops between accounts (seconds), the drift probe between companies, and
     the FX and size jobs are short enough to have no useful boundary at all. "Immediately" is
     not on offer for a scraper mid-download, and claiming it would be the decorative Cancel this
@@ -622,13 +622,13 @@ def start_job_now(job_id: str, *, triggered_by: str = "manual"):
 def job_health(now=None) -> dict:
     """The three-way join the automatic-jobs page renders: declared vs registered vs actually ran.
 
-    ⚠⚠ IT LIVES HERE SO THE WATCHDOG AND THE PAGE CANNOT DISAGREE. This assembly used to be a
+     IT LIVES HERE SO THE WATCHDOG AND THE PAGE CANNOT DISAGREE. This assembly used to be a
     closure inside the admin endpoint. A self-healing tick needs the same verdict, and a second
     copy of "is this job overdue" is the one thing that must not exist: the page would say `ok`
     while the watchdog re-fired, or the reverse, and the surface built to tell you what is wrong
     would be wrong about itself.
 
-    ⚠ THE PURE PART STAYS PURE. `_scheduled_jobs_status` takes every input and reads no clock and
+     THE PURE PART STAYS PURE. `_scheduled_jobs_status` takes every input and reads no clock and
     no database; this is the impure shell that goes and gets them. `now` is injectable for the
     same reason.
 
@@ -649,12 +649,12 @@ def job_health(now=None) -> dict:
     specs = registrable(dict(os.environ))
     registered = list_scheduled_jobs()
     running = scheduler_running()
-    # ⚠ READ FROM THE BODY REGISTRY, NOT ASSUMED PER ROW. A "Run now" rendered for a job with no
+    #  Read from the body registry, not assumed per row. A "Run now" rendered for a job with no
     # body is a control that 404s on press — and a watchdog that fires one raises `KeyError`.
     runnable = set(JOB_BODIES)
 
     def _runs() -> list[dict]:
-        # ⚠⚠ THE NEWEST ROW **PER JOB**, NEVER A WINDOW FILTERED CLIENT-SIDE. A windowed
+        #  The newest row **PER JOB**, NEVER A WINDOW FILTERED CLIENT-SIDE. A windowed
         # `.limit(500)` is filled by the noisy jobs and pushes the quiet ones off the end, so it
         # accuses exactly the jobs that are behaving.
         out: list[dict] = []
@@ -664,7 +664,7 @@ def job_health(now=None) -> dict:
                     .eq("job_name", name)
                     .order("started_at", desc=True)
                     .limit(1).execute().data or [])
-        # ⚠ NORMALISED ONTO `job_name` SO THE JOIN HAS ONE KEY SPACE. `scheduled_job_run` is keyed
+        #  Normalised onto `job_name` SO THE JOIN HAS ONE KEY SPACE. `scheduled_job_run` is keyed
         # by the APScheduler job id and `ingest_run` by a pipeline job_name.
         for spec in specs:
             if not spec.records:
@@ -715,20 +715,20 @@ def job_health(now=None) -> dict:
 
 #: What the watchdog will re-run by itself, and nothing else.
 #:
-#: ⚠⚠ `missing` IS DELIBERATELY ABSENT AND IS THE MOST TEMPTING ONE. It means the job is not
+#:  `missing` IS DELIBERATELY ABSENT AND IS THE MOST TEMPTING ONE. It means the job is not
 #: REGISTERED — `add_job` threw, or the whole scheduler is down — and firing the body by hand makes
 #: the page go green while the schedule stays broken. That is the single failure this monitoring
 #: surface exists to catch, and auto-healing it would delete the evidence.
 #:
-#: ⚠ `error` IS ABSENT TOO. It has a recorded reason and a blind re-run is far likelier to repeat
+#:  `error` IS ABSENT TOO. It has a recorded reason and a blind re-run is far likelier to repeat
 #: it than to fix it; a job that fails every night should be read, not retried. `interrupted` and
 #: `overdue` are the two where "run it again" IS the fix — the first is a deploy or an OOM landing
 #: mid-run, the second is nothing having completed in the job's own allowance.
 #:
-#: ⚠ `unknown` IS ABSENT because we cannot tell whether it ran; re-running on no evidence is how a
+#:  `unknown` IS ABSENT because we cannot tell whether it ran; re-running on no evidence is how a
 #: quota gets spent twice.
 #:
-#: ⚠⚠ `missed` JOINED THEM ON 2026-09-01 AND IT IS THE CLEAREST MEMBER OF THE SET. The other two are
+#:  `missed` JOINED THEM ON 2026-09-01 AND IT IS THE CLEAREST MEMBER OF THE SET. The other two are
 #: inferences from silence; this one is a recorded fact that the tick never ran — either dropped
 #: past its grace or never fired because nothing was alive — so "run it again" is not merely the
 #: likely fix, it is the only thing that was ever missing. It is also the opposite of `error`: there
@@ -737,7 +737,7 @@ _WATCHDOG_HEALS: frozenset[str] = frozenset({"overdue", "interrupted", "missed"}
 
 #: HOW THE WATCHDOG FIRES A JOB THAT HAS NO `JOB_BODIES` ENTRY.
 #:
-#: ⚠⚠ `JOB_BODIES` MEMBERSHIP WAS DOING TWO JOBS AND THEY HAD QUIETLY DIVERGED. It decides whether
+#:  `JOB_BODIES` MEMBERSHIP WAS DOING TWO JOBS AND THEY HAD QUIETLY DIVERGED. It decides whether
 #: the overview renders a generic "Run now" — deliberately NOT for these two, which own a richer
 #: button with a live console tail inside their expanded row (`jobPanels.JOB_PANELS`) — and it also
 #: decided what the watchdog could re-run. So the two jobs the watchdog was BUILT for (measured
@@ -745,16 +745,16 @@ _WATCHDOG_HEALS: frozenset[str] = frozenset({"overdue", "interrupted", "missed"}
 #: days on 2026-09-01) were the two it skipped, reporting them as `unrunnable` and moving on. The
 #: presentation question and the capability question are now separate.
 #:
-#: ⚠ THE VALUE IS THE TICK CALLABLE ITSELF, so an automatic re-run is byte-for-byte what the
+#:  THE VALUE IS THE TICK CALLABLE ITSELF, so an automatic re-run is byte-for-byte what the
 #: schedule does. A second path into the pipeline is the one thing that must not exist here.
 #:
-#: ⚠ NO TOAST AND NO CANCEL, unlike `start_job_now` — these fire their own daemon threads and
+#:  NO TOAST AND NO CANCEL, unlike `start_job_now` — these fire their own daemon threads and
 #: narrate into `ingest_run`, which is where the /schedule panels already watch them. Wrapping them
 #: in a registry job would put a second progress surface on a run that already has one.
 #:
-#: ⚠ `asset_ingest_queue` IS ABSENT AND STAYS ABSENT. A 20-second interval worker cannot be
+#:  `asset_ingest_queue` IS ABSENT AND STAYS ABSENT. A 20-second interval worker cannot be
 #: "overdue" in any sense worth healing, and it is excluded from the gap scan for the same reason.
-#: ⚠ FILLED BY `_register_bodies` AT THE BOTTOM OF THE MODULE, exactly as `JOB_BODIES` is and for
+#:  FILLED BY `_register_bodies` AT THE BOTTOM OF THE MODULE, exactly as `JOB_BODIES` is and for
 #: exactly the same reason: the tick callables are defined throughout this file beside the schedules
 #: they belong to, so naming them here would be forward references to functions that do not exist
 #: yet. A string-and-`globals()` lookup would dodge that and turn a typo into a runtime KeyError
@@ -764,14 +764,14 @@ _WATCHDOG_STARTERS: dict[str, object] = {}
 
 #: Auto re-runs allowed per job per UTC day.
 #:
-#: ⚠⚠ THE CAP IS THE WHOLE SAFETY STORY. Without it a job that fails for a structural reason — no
+#:  THE CAP IS THE WHOLE SAFETY STORY. Without it a job that fails for a structural reason — no
 #: GuruFocus quota left, AIRS credentials rotated — is re-fired on every tick for ever, which turns
 #: one broken job into a machine that spends the day retrying it. Two is enough to ride out a
 #: transient (a deploy, a blip) and low enough that a genuine fault stays a fault someone reads.
 #: Same shape as the price-update retry's own `max 3/UTC-day`.
 _WATCHDOG_MAX_PER_DAY = 2
 
-#: ⚠⚠ THE IN-PROCESS HALF OF THE CAP, WHICH ON ITS OWN WAS A GUARD THAT EVAPORATED IN THE ONE
+#:  THE IN-PROCESS HALF OF THE CAP, WHICH ON ITS OWN WAS A GUARD THAT EVAPORATED IN THE ONE
 #: SCENARIO IT EXISTED FOR. A dict dies with the process, and the commonest reason the watchdog has
 #: work to do is a host that keeps RESTARTING — so every restart reset the budget to zero and the
 #: cap could never see what it had already spent. Harmless while the only caller was an 11:00 tick
@@ -785,12 +785,12 @@ _watchdog_fired: dict[tuple[str, str], int] = {}
 def _watchdog_budget_spent(job_id: str, today: str) -> bool:
     """Whether this job has already used its re-run budget today, counting ACROSS processes.
 
-    ⚠ THE DATABASE IS THE AUTHORITY AND A FAILED READ SPENDS NOTHING. `watchdog_runs_today` returns
+     THE DATABASE IS THE AUTHORITY AND A FAILED READ SPENDS NOTHING. `watchdog_runs_today` returns
     None when it could not count, and that is treated as "cap reached": a watchdog which cannot
     verify its own budget must not spend it, or a Supabase blip becomes the trigger for re-firing
     the whole fleet.
 
-    ⚠ THE HIGHER OF THE TWO COUNTS WINS. The in-process tally can lead the database by a moment
+     THE HIGHER OF THE TWO COUNTS WINS. The in-process tally can lead the database by a moment
     (a re-run started seconds ago may not have its row yet), and the durable one leads after a
     restart. Taking the max means neither blind spot opens the gate.
     """
@@ -799,8 +799,8 @@ def _watchdog_budget_spent(job_id: str, today: str) -> bool:
     local = _watchdog_fired.get((job_id, today), 0)
     spec = BY_ID.get(job_id)
     if job_id in _WATCHDOG_STARTERS and spec is not None:
-        # ⚠⚠ A JOB WITH NO `scheduled_job_run` ROW NEEDS A DIFFERENT MEASURING STICK, AND WITHOUT
-        # ONE THE CAP WOULD SIMPLY NEVER BIND. `watchdog_runs_today` counts rows tagged `watchdog`
+        #  A job with no `scheduled_job_run` ROW NEEDS A DIFFERENT MEASURING STICK, AND WITHOUT
+        # One the cap would simply never bind. `watchdog_runs_today` counts rows tagged `watchdog`
         # in a table these two never write to — it would return 0 for ever, and a host in a restart
         # loop would re-fire the pipeline on every boot with a guard that could not see it had.
         # Their own `ingest_run` rows are the countable thing; see `ingest_runs_today` for why
@@ -821,7 +821,7 @@ def _fire_job_watchdog() -> None:
 def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
     """Re-run the jobs the automatic-jobs page is already reporting as broken.
 
-    ⚠⚠ THE PAGE KNEW AND NOTHING ACTED ON IT. `/schedule` has been computing `overdue` and
+     THE PAGE KNEW AND NOTHING ACTED ON IT. `/schedule` has been computing `overdue` and
     `interrupted` per job for months — an honest three-way join between what is declared, what is
     registered and what actually ran — and the only consumer was a human reading it. A daily
     pipeline that dies mid-run therefore stays dead until somebody notices: measured in production
@@ -829,21 +829,21 @@ def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
     perfectly healthy `next run` beside them, because the TICK was firing and the WORK was not
     finishing.
 
-    ⚠ IT RE-RUNS, IT DOES NOT DIAGNOSE. The two states it heals are the two where "run it again" is
+     IT RE-RUNS, IT DOES NOT DIAGNOSE. The two states it heals are the two where "run it again" is
     genuinely the fix. See `_WATCHDOG_HEALS` for why `missing`, `error` and `unknown` are not on
     that list — each of them would have the watchdog erase the evidence rather than the fault.
 
-    ⚠ IT CANNOT MAKE A JOB THAT LEGITIMATELY DOES NOTHING TODAY REPORT A FRESH SUCCESS. The
+     IT CANNOT MAKE A JOB THAT LEGITIMATELY DOES NOTHING TODAY REPORT A FRESH SUCCESS. The
     month-end refresh acts only in the last days of the month; re-running it on the 12th is a
     no-op, so it will still read `interrupted` afterwards. That is a true statement about the job
     and not a watchdog failure — which is exactly why the cap exists, so it says it twice and stops
     rather than every hour for a fortnight.
 
-    ⚠ ONE AT A TIME, THROUGH `start_job_now` — the same body the tick runs, as a cancellable
+     ONE AT A TIME, THROUGH `start_job_now` — the same body the tick runs, as a cancellable
     registry job with a toast, so an automatic re-run is visible in the same place a manual one is
     and can be stopped the same way.
 
-    ⚠⚠ EXCEPT THE TWO PIPELINE JOBS, WHICH IT COULD NOT TOUCH AT ALL UNTIL 2026-09-01 AND WHICH ARE
+     EXCEPT THE TWO PIPELINE JOBS, WHICH IT COULD NOT TOUCH AT ALL UNTIL 2026-09-01 AND WHICH ARE
     THE TWO IT WAS BUILT FOR. They have no `JOB_BODIES` entry — deliberately, because they own a
     richer Run-now with a live console tail in their own expanded row — and that same membership
     was gating what this could re-run, so `daily_pipeline` and `daily_price_slice` landed in
@@ -858,7 +858,7 @@ def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
     health = job_health()
     rows = health["rows"]
     if health["history_error"]:
-        # ⚠ NO HISTORY MEANS NO VERDICT, AND A WATCHDOG WITHOUT ONE MUST DO NOTHING. Re-running
+        #  No history means no verdict, and a watchdog without one must do nothing. Re-running
         # every job because the database was briefly unreachable is the opposite of self-healing.
         return (f"skipped — could not read the run history ({health['history_error']})",
                 {"checked": 0, "restarted": 0})
@@ -879,19 +879,19 @@ def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
         key = (jid, today)
         _watchdog_fired[key] = _watchdog_fired.get(key, 0) + 1
         step(i, len(broken), f"re-running {jid} ({row.get('status')})")
-        # ⚠ LOUD. uvicorn leaves the root logger at WARNING, so an INFO line here is invisible in
+        #  LOUD. uvicorn leaves the root logger at WARNING, so an INFO line here is invisible in
         # Railway — and "why did my pipeline run at 11:00" is a question the log has to answer.
         _log.warning("[watchdog] re-running %s — %s: %s", jid, row.get("status"),
                      row.get("why") or "")
         try:
             if jid in JOB_BODIES:
-                # ⚠ TAGGED `watchdog`, WHICH IS WHAT MAKES THE CAP COUNTABLE. Left as `manual`
+                #  TAGGED `watchdog`, WHICH IS WHAT MAKES THE CAP COUNTABLE. Left as `manual`
                 # these rows would be indistinguishable from somebody pressing Run now, so the
                 # budget could not be read back out of the history — and a hand-run would spend
                 # the automatic budget.
                 start_job_now(jid, triggered_by="watchdog")
             else:
-                # ⚠ THE TICK CALLABLE ITSELF — see `_WATCHDOG_STARTERS`. It spawns its own daemon
+                #  The tick callable itself — see `_WATCHDOG_STARTERS`. It spawns its own daemon
                 # thread and writes its own `ingest_run` rows, so there is nothing to await and
                 # nothing to record here that the run does not record better.
                 _WATCHDOG_STARTERS[jid]()
@@ -914,7 +914,7 @@ def _body_job_watchdog(ctx=None) -> tuple[str, dict]:
 def scheduler_running() -> bool:
     """Whether THIS process has a live in-process scheduler.
 
-    ⚠⚠ IT IS NOT `bool(list_scheduled_jobs())`, AND THAT IS THE WHOLE REASON IT EXISTS. An empty job
+     IT IS NOT `bool(list_scheduled_jobs())`, AND THAT IS THE WHOLE REASON IT EXISTS. An empty job
     list has two opposite meanings: on a replica with `DISABLE_SCHEDULER=1` it is correct and
     expected, and on the one instance that is supposed to be running everything it means every
     registration failed. The list cannot tell them apart — a monitor that infers one from the other
@@ -1106,7 +1106,7 @@ def _fire_asset_price_refresh() -> None:
     rendered as a BLANK row in BUS_2.0_NEU_FX because its last close (2026-07-02) predated that
     portfolio's window (2026-07-09): no price inside the window, so no return over it exists.
 
-    ⚠ STANDS DOWN WHILE A WORKER IS ACTUALLY DRAINING THE INGEST QUEUE. That queue is *the*
+     STANDS DOWN WHILE A WORKER IS ACTUALLY DRAINING THE INGEST QUEUE. That queue is *the*
     single Yahoo consumer by design: Yahoo answers an overloaded caller with an EMPTY result
     rather than a 429, and an empty candidate set is how a resolution silently lands on a thin
     foreign listing (the NVDA-on-Stuttgart / Alphabet-on-Vienna class of bug). Our own traffic is
@@ -1114,7 +1114,7 @@ def _fire_asset_price_refresh() -> None:
     but it can push Yahoo into that regime while the resolver is mid-search and corrupt ITS work.
     A day-late price is a nuisance; a wrong listing is a wrong price series for ever.
 
-    ⚠ ...AND THAT MEANS THE WORKER, NOT THE BACKLOG. The first version gated on `pending > 0` and
+     ...AND THAT MEANS THE WORKER, NOT THE BACKLOG. The first version gated on `pending > 0` and
     never ran once: the queue holds 9,945 pending ISINs last touched 2026-07-07, a week earlier —
     a stalled backlog, not active work (`status()["working"]` is just `pending > 0`, so it says
     "working" about a queue nobody is draining). `is_worker_active()` reads the real heartbeat:
@@ -1134,20 +1134,20 @@ def _fire_asset_price_refresh() -> None:
 def _run_asset_price_refresh(trigger: str) -> None:
     """The body, shared by the 06:00 tick and the startup catch-up. Never raises.
 
-    ⚠ THE THREE EARLY EXITS ARE `skipped`, NOT `ok` AND NOT FAILURES. Standing down for the queue
+     THE THREE EARLY EXITS ARE `skipped`, NOT `ok` AND NOT FAILURES. Standing down for the queue
     worker, finding everything current, and waiting on a database that has not finished booting are
     all correct behaviour — but recording them as `ok` would make a job that stood down every single
     day for a fortnight (because a stalled worker looked live) indistinguishable from one doing its
     work. The overview can then show the reason.
     """
-    # ⚠ `startup` IS ITS OWN TRIGGER, so the overview does not read a restart storm under
+    #  `startup` IS ITS OWN TRIGGER, so the overview does not read a restart storm under
     # `uvicorn --reload` as the 06:00 tick having fired forty times.
     triggered = "startup" if "startup" in trigger else "auto"
     with record_run("asset_price_refresh", triggered_by=triggered) as rec:
       try:
         from asset_pipeline import price_refresh, queue as _q  # noqa: PLC0415
 
-        # ⚠ FIRST, WAIT FOR THE DATABASE — this fires on startup, in parallel with the Supabase
+        #  First, wait for the database — this fires on startup, in parallel with the Supabase
         # stack coming up, and every query below (the queue heartbeat is simply the first) fails
         # with PGRST002 until PostgREST has loaded its schema cache. Losing the catch-up to a
         # boot race costs a whole day of stale held prices; see `_await_db_ready`.
@@ -1207,7 +1207,7 @@ def _run_asset_price_refresh(trigger: str) -> None:
                  unchanged=r["unchanged"], failed=r["failed"],
                  price_backfilled=backfill["backfilled"])
       except Exception as e:  # noqa: BLE001
-        # ⚠ CAUGHT HERE, SO THE RECORD MUST BE SET BY HAND. `record_run` marks a run failed off the
+        #  Caught here, so the record must be set by hand. `record_run` marks a run failed off the
         # exception PROPAGATING; swallowing it (which this must, to keep the scheduler thread
         # alive) would otherwise close the row as `ok`.
         rec.status = "error"
@@ -1238,7 +1238,7 @@ def _maybe_kickstart_asset_prices() -> None:
 def _maybe_kickstart_airs_models() -> None:
     """On STARTUP: if we hold no model-portfolio COMPOSITIONS, scan them now.
 
-    ⚠ THE DAILY TICK CANNOT FIX A DEPLOYMENT THAT HAS NEVER HAD THEM. `airs_model_portfolio_
+     THE DAILY TICK CANNOT FIX A DEPLOYMENT THAT HAS NEVER HAD THEM. `airs_model_portfolio_
     position` was only ever populated by a human pressing "Scan AIRS", so a fresh environment
     starts empty — and `_airs_account_links._models()` keeps only models WITH a composition, so
     every account matches nothing, loses its pairing, and Analyse falls back to an unpaired
@@ -1249,13 +1249,13 @@ def _maybe_kickstart_airs_models() -> None:
     long weekend after the deploy that was supposed to fix it, which is the same reasoning as
     `_maybe_kickstart_asset_prices`.
 
-    ⚠ IT DETECTS BEFORE IT SCRAPES — ONE COUNT QUERY. The scan is minutes of authenticated
+     IT DETECTS BEFORE IT SCRAPES — ONE COUNT QUERY. The scan is minutes of authenticated
     Playwright, so it must not run on every restart: `uvicorn --reload` restarts constantly, and
     after the first successful scan the count is non-zero and this is a single round-trip no-op.
     Deliberately NOT a staleness check — refreshing an existing composition is the daily tick's
     job. This only fills a hole.
 
-    ⚠ WARNING level when it acts. uvicorn leaves the root logger at WARNING, so an `info` line is
+     WARNING level when it acts. uvicorn leaves the root logger at WARNING, so an `info` line is
     invisible in production — and "why did my deploy start scraping AIRS" is a question the log
     has to answer. The healthy no-op stays quiet.
     """
@@ -1304,7 +1304,7 @@ def _maybe_kickstart_airs_models() -> None:
 def _fire_history_drift_check() -> None:
     """Daily: probe 1/5th of the universe for a vendor rewrite of PAST bars.
 
-    ⚠ THE ONE FAILURE THE PIPELINE IS BLIND TO. Prices are only ever appended
+     THE ONE FAILURE THE PIPELINE IS BLIND TO. Prices are only ever appended
     (`d > existing_max`), so a split or a free-share attribution leaves our
     history on the old basis indefinitely — Worldline sat in the live book on a
     +1142% momentum for a stock that had fallen 69%.
@@ -1320,7 +1320,7 @@ def _fire_history_drift_check() -> None:
 
 
 def _body_history_drift(ctx=None) -> tuple[str, dict]:
-    """⚠ CANCEL LANDS AT THE NEXT PROBE. `on_step` fires per company, so this is one of the bodies
+    """ CANCEL LANDS AT THE NEXT PROBE. `on_step` fires per company, so this is one of the bodies
     that CAN stop quickly — it walks a fifth of the universe and each probe is one request."""
     from ingest.history_drift import daily_drift_check  # noqa: PLC0415
 
@@ -1329,12 +1329,12 @@ def _body_history_drift(ctx=None) -> tuple[str, dict]:
 
     def _step(m, lvl) -> None:
         (_log.warning if lvl in ("warn", "error") else _log.info)("[drift] %s", m)
-        # ⚠ NO TOTAL — the walk's size is decided inside `daily_drift_check` and never handed out,
+        #  No total — the walk's size is decided inside `daily_drift_check` and never handed out,
         # so the bar stays indeterminate and the LINE carries the progress. A fabricated total
         # would give a bar that reaches 100% and keeps going.
         seen["n"] += 1
         report(seen["n"], 0, m)
-        # ⚠ RAISED, NOT RETURNED. `daily_drift_check` has no stop hook, so the only way out is to
+        #  Raised, not returned. `daily_drift_check` has no stop hook, so the only way out is to
         # unwind it from the callback it does have — at a per-company boundary, where the last
         # company is either fully refetched or untouched.
         if ctx is not None and getattr(ctx, "cancelled", False):
@@ -1346,7 +1346,7 @@ def _body_history_drift(ctx=None) -> tuple[str, dict]:
     if drifted:
         _log.warning("[scheduler] history drift: %s of %s probed companies had rewritten "
                      "history and were refetched", len(drifted), res.get("probed"))
-    # ⚠ FINDING NOTHING IS THE JOB WORKING, NOT THE JOB SKIPPING. Most days no vendor rewrote
+    #  Finding nothing is the job working, not the job skipping. Most days no vendor rewrote
     # anything, and that is `ok` with a count of zero — the number is the point, because a probe
     # count that quietly falls to 0 means the WALK stopped, which looks identical to a clean week
     # if only the drift count is recorded.
@@ -1396,14 +1396,14 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
 
 #: The universes whose 12-1 returns are ranked into the seven relative-momentum states.
 #:
-#: ⚠ THE SAME THREE THE ANALYSE MODAL OFFERS AS BENCHMARKS, and that is the requirement, not a
+#:  THE SAME THREE THE ANALYSE MODAL OFFERS AS BENCHMARKS, and that is the requirement, not a
 #: coincidence: `_holding_risk` ranks a holding against WHICHEVER benchmark the reader picked, so a
 #: label missing here is a picker option whose momentum column silently loses its chip.
 _RANKED_UNIVERSES = ("ACWI", "SP500", "AEX")
 
 #: Coverage below this is reported as a WARNING rather than an info line.
 #:
-#: ⚠ IT IS A PRICE-STALENESS ALARM WEARING A COVERAGE THRESHOLD. The signal engine drops any name
+#:  IT IS A PRICE-STALENESS ALARM WEARING A COVERAGE THRESHOLD. The signal engine drops any name
 #: whose last close is over 30 days old, so if constituent prices stop being refreshed the first
 #: visible symptom is this number falling — not an error, not an empty page. Measured healthy:
 #: ACWI 87.6%, SP500 99.2%, AEX 88.0%.
@@ -1413,10 +1413,10 @@ _RANK_COVERAGE_WARN = 70.0
 def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
     """Compute and persist ranks after benchmark prices have refreshed.
 
-    ⚠ ONE UNIVERSE'S FAILURE IS NOT THE JOB'S, the same rule as the index refresh beside it: a
+     ONE UNIVERSE'S FAILURE IS NOT THE JOB'S, the same rule as the index refresh beside it: a
     universe with no members or a bad price load must not cost the other two their ranks.
 
-    ⚠⚠ IT RANKS AS OF THE NEWEST CLOSE WE HOLD, NEVER `today`. Today is routinely a date we have no
+     IT RANKS AS OF THE NEWEST CLOSE WE HOLD, NEVER `today`. Today is routinely a date we have no
     prices for — a weekend, a holiday, a pipeline that has not run — and asking for it would rank
     an empty set or drop every name on the staleness rule. This is the same date /backtest uses for
     its default end.
@@ -1427,7 +1427,7 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
     step = _reporter(ctx)
     as_of = latest_db_price_date()
     if as_of is None:
-        # ⚠ NOT AN ERROR. No closes at all is a statement about the price pipeline, not about this
+        #  Not an error. No closes at all is a statement about the price pipeline, not about this
         # job, and failing here would point an operator at the wrong thing.
         return "no close prices held — nothing to rank", {"ranked": 0, "skipped": True}
 
@@ -1435,7 +1435,7 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
     failed: list[str] = []
     thin: list[str] = []
     n = len(_RANKED_UNIVERSES)
-    # ⚠ THE `on_step` BELOW ALREADY EXISTED AND WENT ONLY TO THE LOG, which is invisible to whoever
+    #  THE `on_step` BELOW ALREADY EXISTED AND WENT ONLY TO THE LOG, which is invisible to whoever
     # pressed the button — ~12s and 2,270 rows of silence. It now goes to both: the log keeps the
     # per-universe detail for Railway, the toast gets the same line.
     step(0, n, f"ranking {n} universe(s) as of {as_of}…")
@@ -1456,7 +1456,7 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
             step(i, n, f"{label} — {result.universe_n}/{result.members_total} ranked "
                        f"({cov:.0f}% coverage)")
             if cov < _RANK_COVERAGE_WARN:
-                # ⚠ WARNING, because uvicorn leaves the root logger at WARNING in production and an
+                #  WARNING, because uvicorn leaves the root logger at WARNING in production and an
                 #   `info` here would be invisible exactly when it matters.
                 thin.append(f"{label} {cov:.0f}%")
                 _log.warning("[relative_momentum] %s coverage %.1f%% (%d of %d) — constituent "
@@ -1465,14 +1465,14 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
         except Exception as e:  # noqa: BLE001 — one universe must not take the others down
             _log.warning("[relative_momentum] %s failed: %s: %s", label, type(e).__name__, e)
             failed.append(f"{label}: {type(e).__name__}")
-            # ⚠ A FAILED UNIVERSE STILL ADVANCES THE COUNTER, or a job that fails on its first
+            #  A failed universe still advances the counter, or a job that fails on its first
             # label sits at 0/3 looking hung for the other two — the exact reading this whole
             # change exists to fix.
             step(i, n, f"{label} — FAILED: {type(e).__name__}")
 
     msg = f"ranked as of {as_of} — {', '.join(done) or 'nothing'}"
     if thin:
-        msg += f" · ⚠ thin coverage: {', '.join(thin)}"
+        msg += f" ·  thin coverage: {', '.join(thin)}"
     if failed:
         msg += f" · failed {', '.join(failed)}"
     return msg, {"as_of": as_of.isoformat(), "ranked": len(done),
@@ -1481,12 +1481,12 @@ def _body_relative_momentum_refresh(ctx=None) -> tuple[str, dict]:
 
 # The indices whose constituents get a due-only fundamentals pass.
 #
-# ⚠ ALL THREE. Fundamentals are not prices: the ETF's own series answers
+#  All three. Fundamentals are not prices: the ETF's own series answers
 # "what did ACWI return", and answers nothing at all about its constituents' margins — which is the
 # whole of the Long Equity tab and the fundamentals grid. Those exist only per company.
 _FUNDAMENTAL_INDICES: tuple[str, ...] = ("ACWI", "SP500", "AEX")
 
-# ⚠ THE FLOOR IS NOT ZERO. Stopping at 0 spends a region's last call and leaves the month-end
+#  The floor is not zero. Stopping at 0 spends a region's last call and leaves the month-end
 # `full_price_refresh` — the job that keeps every price series alive — with nothing. A reserve is
 # the cheap way to make this job the one that yields.
 _FUNDAMENTALS_REGION_FLOOR = 2000
@@ -1495,7 +1495,7 @@ _FUNDAMENTALS_REGION_FLOOR = 2000
 class _LogCtx:
     """The `ctx` `fill_company_ids` expects, for a run with nobody watching.
 
-    ⚠ THE TICK HAS NO JOB CONTEXT. Bodies are handed `ctx=None` on a schedule (see `_reporter`) and
+     THE TICK HAS NO JOB CONTEXT. Bodies are handed `ctx=None` on a schedule (see `_reporter`) and
     `fill_company_ids` calls `ctx.emit(...)` throughout — so a tick would die on its first narration
     line having done nothing, and the failure would read as a fundamentals problem rather than a
     plumbing one. This turns those lines into log lines.
@@ -1503,7 +1503,7 @@ class _LogCtx:
 
     def __init__(self, cancelled=None, step=None, label=""):
         self._cancelled = cancelled or (lambda: False)
-        # ⚠ THE SAME LINES NOW GO TO THE TOAST AS WELL, WHEN SOMEBODY IS WATCHING. This class was
+        #  The same lines now go to the toast as well, when somebody is watching. This class was
         # written for the tick, where `ctx is None` and the log is the only destination — and it
         # was then reused unchanged for the Run-now button, where it swallowed every narration
         # line a person was standing there waiting for. `step` is None on a tick, so the schedule's
@@ -1514,7 +1514,7 @@ class _LogCtx:
 
     def emit(self, kind: str, message: str = "", **_kw) -> None:
         self.counts[kind] = self.counts.get(kind, 0) + 1
-        # ⚠ WARNING for the milestones, not INFO. uvicorn leaves the root logger at WARNING in
+        #  WARNING for the milestones, not INFO. uvicorn leaves the root logger at WARNING in
         # production, so an info line from a QUARTERLY job is invisible exactly where someone asks
         # "did it run?" — and the next chance to find out is three months away.
         if kind in ("start", "error", "done"):
@@ -1522,7 +1522,7 @@ class _LogCtx:
         else:
             _log.info("[benchmark_fundamentals] %s: %s", kind, message)
         if self._step is not None and message:
-            # ⚠ NO done/total — this relay has no idea how many lines are coming, and inventing a
+            #  NO done/total — this relay has no idea how many lines are coming, and inventing a
             # denominator would draw a progress bar that jumps backwards. `_reporter` takes 0/0
             # happily and the toast shows the message alone.
             self._step(0, 0, f"{self._label} · {message}" if self._label else message)
@@ -1539,12 +1539,12 @@ def _fire_benchmark_fundamentals() -> None:
 def _fundamental_company_ids(label: str) -> list[tuple[int, str]]:
     """`[(company_id, gurufocus exchange_code)]` for one index — the GuruFocus side of it.
 
-    ⚠⚠ NOT `_asset_benchmark.members()`. That returns the ASSET world, whose `company_id` slot
+     NOT `_asset_benchmark.members()`. That returns the ASSET world, whose `company_id` slot
     actually carries an `analysis_id` (its own docstring says so) — handing those to a fundamentals
     fill would look up entirely unrelated companies and quietly fill the wrong ones. Fundamentals
     are keyed on the GuruFocus company.
 
-    ⚠ THE EXCHANGE RIDES ALONG because the quota is PER REGION, and the region is a property of the
+     THE EXCHANGE RIDES ALONG because the quota is PER REGION, and the region is a property of the
     listing. Without it the budget gate could only be all-or-nothing.
     """
     from deps import IN_CHUNK_SIZE, supabase  # noqa: PLC0415
@@ -1555,7 +1555,7 @@ def _fundamental_company_ids(label: str) -> list[tuple[int, str]]:
         return []
     ids: set[int] = set()
     off = 0
-    while True:  # ⚠ PAGED — 1,998 members for ACWI against PostgREST's 1,000-row cloud cap.
+    while True:  #  PAGED — 1,998 members for ACWI against PostgREST's 1,000-row cloud cap.
         rows = (supabase.table("universe_membership").select("company_id")
                 .eq("universe_id", uni[0]["universe_id"]).order("company_id")
                 .range(off, off + 999).execute().data or [])
@@ -1577,17 +1577,17 @@ def _fundamental_company_ids(label: str) -> list[tuple[int, str]]:
 def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
     """Fill statements for every benchmark constituent, bounded by the monthly GuruFocus quota.
 
-    ⚠⚠ THE BUDGET GATE IS THE POINT, and it is the shape `full_price_refresh` already uses: read
+     THE BUDGET GATE IS THE POINT, and it is the shape `full_price_refresh` already uses: read
     the per-region remaining and DROP the companies whose region is at the floor, rather than
     calling and failing. An exhausted region does not refuse politely — it returns errors that read
     as data problems, and a job that discovers its quota by exhausting it takes the month-end price
     refresh down with it.
 
-    ⚠ DECIDED BEFORE ANY CALL, PER REGION. A pass that started and stopped halfway would leave an
+     DECIDED BEFORE ANY CALL, PER REGION. A pass that started and stopped halfway would leave an
     index part-filled with no record of where it got to; budgeting up front lets the summary say
     what was deferred, and `only_due=True` means next quarter picks up exactly those.
 
-    ⚠ ONE INDEX'S FAILURE IS NOT THE JOB'S — they are independent, and the summary names whichever
+     ONE INDEX'S FAILURE IS NOT THE JOB'S — they are independent, and the summary names whichever
     fell over.
     """
     from deps import supabase  # noqa: PLC0415
@@ -1606,7 +1606,7 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
     n = len(_FUNDAMENTAL_INDICES)
     step(0, n, f"reading quota — usable above the {_FUNDAMENTALS_REGION_FLOOR}-call floor: {room}")
     for i, label in enumerate(_FUNDAMENTAL_INDICES, start=1):
-        # ⚠ A FRESH CTX PER LABEL so its lines carry the index they belong to. This is a pass over
+        #  A fresh ctx per label so its lines carry the index they belong to. This is a pass over
         # ~2,500 companies across three indices; an unlabelled line cannot say which one it is in.
         log_ctx = _LogCtx(lambda: _cancel_requested(ctx), step=step, label=label)
         try:
@@ -1658,11 +1658,11 @@ def _fire_fx_sync() -> None:
 
 
 def _body_fx_sync(ctx=None) -> tuple[str, dict]:
-    """⚠ NOT CANCELLABLE MID-RUN, and `ctx` is accepted only so every body has one shape. There is
+    """ NOT CANCELLABLE MID-RUN, and `ctx` is accepted only so every body has one shape. There is
     no boundary worth checking, and a partial FX table is worse than a complete one (a missing rate
     silently drops a holding from its portfolio — see `_fx`'s paging note).
 
-    ⚠⚠ IT IS NOT "A HANDFUL OF REQUESTS OVER SECONDS", WHICH IS WHAT THIS DOCSTRING USED TO CLAIM
+     IT IS NOT "A HANDFUL OF REQUESTS OVER SECONDS", WHICH IS WHAT THIS DOCSTRING USED TO CLAIM
     AND WHY IT EMITTED NOTHING. It asks for ~40 currencies from 2000-01-01 (the window that repairs
     every currency's HEAD — see `sync_fx_rates_to_db`'s both-ends widening), so it runs for as long
     as the ECB takes to answer for all of them. Emitting nothing left its toast reading
@@ -1677,7 +1677,7 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
 
     step = _reporter(ctx)
     currencies = list(ECB_CURRENCIES) + list(_USD_PEGS.keys()) + ["TWD"]
-    # ⚠ BEFORE THE CALL, NOT AFTER IT. The whole run is inside `sync_fx_rates_to_db`, so a line
+    #  Before the call, not after it. The whole run is inside `sync_fx_rates_to_db`, so a line
     # emitted afterwards would arrive with the summary and tell the reader nothing they had not
     # already stopped waiting for.
     step(0, len(currencies), f"asking the ECB for {len(currencies)} currencies since 2000-01-01…")
@@ -1708,7 +1708,7 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
     errors = sum(1 for s in status.values() if s.get("status") == "error")
     _log.info("[scheduler] fx sync done: %s/%s currencies updated, %s errors",
               synced, len(status), errors)
-    # ⚠ A SYNC THAT UPDATED NOTHING IS THE NORMAL CASE, NOT A SKIP. It is idempotent and fetches
+    #  A sync that updated nothing is the normal case, not a skip. It is idempotent and fetches
     # only the gap, so on a day the ECB has already been read every currency is correctly up to
     # date — `ok` with a count of 0, which is what makes a run of zeros over a WEEK legible as the
     # ECB feed having died.
@@ -1725,18 +1725,18 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
     """Bring every paired model portfolio's VALUATION current — composition, instruments, FX,
     prices, recompute — without touching the accounts.
 
-    ⚠⚠ IT RUNS THE MODEL HALF AND ONLY THE MODEL HALF. It is invoked as the final phase of the
+     IT RUNS THE MODEL HALF AND ONLY THE MODEL HALF. It is invoked as the final phase of the
     11:00 AIRS refresh, after the account scrape and model scan have released the AirSPMS session.
 
-    ⚠ This closes the account refresh's final gap: account and model scans alone do not price the
+     This closes the account refresh's final gap: account and model scans alone do not price the
     model holdings, so Analyse's YTD and valued-position figures would otherwise lag behind.
 
-    ⚠ ONE FUNCTION, THE SAME ONE THE BUTTONS CALL. `refresh_many` fans out over
+     ONE FUNCTION, THE SAME ONE THE BUTTONS CALL. `refresh_many` fans out over
     `refresh_portfolio_fully`; there is no scheduled copy of "refresh a portfolio" to drift from
     the interactive one, which is the mistake `scan_one`'s own docstring records having already
     been made one layer down.
 
-    ⚠ A FAILED PORTFOLIO IS COUNTED, NOT RAISED. One book that will not price must not abandon the
+     A FAILED PORTFOLIO IS COUNTED, NOT RAISED. One book that will not price must not abandon the
     other forty-four, and the summary names how many fell over rather than reporting the whole
     tick as either fine or broken.
     """
@@ -1746,7 +1746,7 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
     step = _reporter(ctx)
     stop = (lambda: bool(getattr(ctx, "cancelled", False))) if ctx is not None else None
 
-    # ⚠ ONLY THE PAIRED ONES. A model with no account running it has no valuation to keep current,
+    #  Only the paired ones. A model with no account running it has no valuation to keep current,
     # and an account with no model has no composition to price — `refresh_portfolio_fully` would
     # report `absent` for every one of them and spend a request finding out.
     paired = [a["portefeuille"] for a in list_account_links()["accounts"]
@@ -1778,14 +1778,14 @@ def _fire_airs_vermogen() -> None:
     scheduler worker. Re-discovers the live portfolio list + stores each
     portfolio's holdings snapshot (see `airs_vermogen`).
 
-    ⚠ IT FORCES. The manual button is incremental — it skips an account fully scanned in the last
+     IT FORCES. The manual button is incremental — it skips an account fully scanned in the last
     `AIRS_FRESH_HOURS` — but this is the once-a-day pass that has to actually pick up the day's
     valuation. Somebody pressing Refresh all at 08:00, before AIRS had valued the books, would
     otherwise make this job skip the whole fleet and the new valuation would land a day late.
     (That sentence said "the 11:00 job" and the tick has been 10:00 for months — a restated time is
     a time that goes stale. The schedule is declared once, in `scheduled_jobs.SCHEDULED_JOBS`.)
 
-    ⚠⚠ AND THAT SAME REASONING NOW CUTS THE OTHER WAY, SINCE THE TICK MOVED TO 09:30 (2026-08-13).
+     AND THAT SAME REASONING NOW CUTS THE OTHER WAY, SINCE THE TICK MOVED TO 09:30 (2026-08-13).
     If AIRS has not valued the books by then, this run stores YESTERDAY's valuation — and because
     it forces and fires once, nothing re-reads it until tomorrow. The symptom is holdings that are
     a full day behind while looking perfectly current. If that appears, add a second attempt later
@@ -1795,11 +1795,11 @@ def _fire_airs_vermogen() -> None:
 
 
 def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
-      """⚠⚠ CANCEL LANDS BETWEEN ACCOUNTS, NEVER INSIDE ONE — `run_airs_vermogen_refresh_sync`
+      """ CANCEL LANDS BETWEEN ACCOUNTS, NEVER INSIDE ONE — `run_airs_vermogen_refresh_sync`
       already takes the `should_stop` hook and checks it at exactly that boundary, because an
       account's four reports are downloaded and stored as a unit. Everything already stored is kept.
 
-      ⚠ ONE RESULT FOR BOTH HALVES, because it is one JOB — but each half keeps its own try/except,
+       ONE RESULT FOR BOTH HALVES, because it is one JOB — but each half keeps its own try/except,
       so a failed composition scan still cannot cost the daily valuation. It reports `error` if
       EITHER failed and names which: "not fatal to the accounts refresh" is a statement about
       control flow, not a reason to report a failure as ok."""
@@ -1810,7 +1810,7 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
       if True:
         try:
             from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
-            # ⚠ TWO PHASES, TWO COUNTERS, AND THE MESSAGE SAYS WHICH. The accounts pass counts
+            #  Two phases, two counters, and the message says which. The accounts pass counts
             # accounts and the model pass counts models; the totals are only known when each starts,
             # so the bar restarts between them. A restarting bar reads as a failure unless the line
             # under it names the phase — hence the prefixes below.
@@ -1826,8 +1826,8 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             _log.exception(
                 "[scheduler] airs_vermogen refresh failed: %s: %s", type(e).__name__, e,
             )
-        # ⚠ THE MODEL PORTFOLIOS TOO — NOTHING SCHEDULED HAS EVER SCANNED THEM, AND THE PAIRING
-        # SILENTLY DEPENDS ON THEM. This tick refreshes the ACCOUNTS (Rendement,
+        #  The model portfolios too — nothing scheduled has ever scanned them, and the pairing
+        # Silently depends on them. This tick refreshes the ACCOUNTS (Rendement,
         # Vermogensoverzicht); the model COMPOSITIONS were only ever populated by pressing "Scan
         # AIRS" on the portfolios page by hand. So a deployment where nobody pressed it has an
         # empty `airs_model_portfolio_position` — and `_airs_account_links._models()` keeps only
@@ -1836,10 +1836,10 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
         # fine. That is the production symptom this exists to end: "No valued positions to show",
         # on a portfolio whose rows expand normally one panel away.
         #
-        # ⚠ AFTER the accounts, in the SAME thread, never beside it. Both drive one authenticated
+        #  AFTER the accounts, in the SAME thread, never beside it. Both drive one authenticated
         # AirSPMS session through Playwright; two scrapers at once is a contended login, and the
         # failure mode there is a half-finished scan rather than an error.
-        # ⚠ SKIPPED ENTIRELY ON A CANCEL. Running minutes more of scraping after the reader asked
+        #  Skipped entirely on a cancel. Running minutes more of scraping after the reader asked
         # to stop is the same mistake the fleet refresh already refuses to make.
         try:
             if stop is not None and stop():
@@ -1850,12 +1850,12 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             )
             from routers import _airs_portfolio_store as store  # noqa: PLC0415
 
-            # ⚠ THE SCANNER ALREADY EMITS PER-ITEM EVENTS — it was being handed a no-op. Both
+            #  The scanner already emits per-item events — it was being handed a no-op. Both
             # `fetch_model_portfolios_sync` and `count_model_portfolio_holdings_sync` send a
             # `message` per portfolio; forwarding them is the difference between a toast that says
             # "starting…" for four minutes and one that names the book it is on.
             #
-            # ⚠ THE PAIR IS READ AS DATA NOW (2026-08-17). It used to say the scanner did not expose
+            #  The pair is read as data now (2026-08-17). It used to say the scanner did not expose
             # `i`/`n`, so this counted `count` events itself and reported a total of 0 — an
             # indeterminate bar for the four minutes this phase runs. `count_model_portfolio_
             # holdings_sync` carries them as fields since the manual button became a job, and both
@@ -1872,11 +1872,11 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
                 if kw.get("n"):
                     models_at["total"] = int(kw["n"])
                 step(models_at["done"], models_at["total"], f"Models · {msg}")
-                # ⚠ CHECKED HERE TOO. The model scan is the long half (one edit page + one XLS per
+                #  Checked here too. The model scan is the long half (one edit page + one XLS per
                 # portfolio, minutes); without this a Cancel pressed during it would be honoured
                 # only after every remaining book had been downloaded.
                 #
-                # ⚠ TWO MECHANISMS REACH THE SAME BOUNDARY, AND THAT IS WORTH KNOWING. This raises
+                #  Two mechanisms reach the same boundary, and that is worth knowing. This raises
                 # out of the event hook; the manual job passes `should_stop=` and the scanner
                 # returns. Both stop BETWEEN portfolios — this one because `count` is emitted after
                 # the row is downloaded, counted and persisted — so neither can leave a row half
@@ -1888,7 +1888,7 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
 
             rows = fetch_model_portfolios_sync(_relay)
             store.save_portfolios(rows)
-            # ⚠ WRITES AS IT GOES (`on_positions`), so a scan that dies halfway leaves behind
+            #  Writes as it goes (`on_positions`), so a scan that dies halfway leaves behind
             # what it did reach — the same contract the manual button has.
             count_model_portfolio_holdings_sync(
                 rows, _relay,
@@ -1931,7 +1931,7 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
 def _fire_table_size_sample() -> None:
     """Nightly: record every public table's size on disk.
 
-    ⚠ BYTES, NOT ROWS WRITTEN — see `db_growth`. Instrumenting the jobs to count their own inserts
+     BYTES, NOT ROWS WRITTEN — see `db_growth`. Instrumenting the jobs to count their own inserts
     would rank the AIRS model scan (which delete-then-inserts every portfolio'''s positions:
     thousands of rows, zero growth) above the month-end price refresh, and would be blind to
     indexes and bloat.
@@ -1943,7 +1943,7 @@ def _fire_table_size_sample() -> None:
 
 
 def _body_table_size_sample(ctx=None) -> tuple[str, dict]:
-    """⚠ NOT CANCELLABLE, AND NOT WORTH MAKING SO — one catalog read and ~50 small inserts, over in
+    """ NOT CANCELLABLE, AND NOT WORTH MAKING SO — one catalog read and ~50 small inserts, over in
     milliseconds. A cancel would land after it finished."""
     from db_growth import sample_table_sizes  # noqa: PLC0415
 
@@ -1956,7 +1956,7 @@ def _body_table_size_sample(ctx=None) -> tuple[str, dict]:
 def _register_bodies() -> None:
     """Fill `JOB_BODIES` once every body is defined.
 
-    ⚠ AT THE BOTTOM OF THE MODULE, NOT AT THE DICT. The bodies are defined throughout the file
+     AT THE BOTTOM OF THE MODULE, NOT AT THE DICT. The bodies are defined throughout the file
     beside the ticks they belong to; naming them where the dict is declared would be forward
     references to functions that do not exist yet.
     """
@@ -1970,7 +1970,7 @@ def _register_bodies() -> None:
         "benchmark_fundamentals_fill": _body_benchmark_fundamentals,
         "table_size_sample": _body_table_size_sample,
     })
-    # ⚠ THE SAME LATE BINDING, FOR THE SAME REASON — see `_WATCHDOG_STARTERS`. These two are the
+    #  The same late binding, for the same reason — see `_WATCHDOG_STARTERS`. These two are the
     # tick callables themselves rather than `(ctx) -> (str, dict)` bodies: they spawn their own
     # daemon threads and narrate into `ingest_run`, which is where /schedule already watches them.
     _WATCHDOG_STARTERS.update({
@@ -1979,7 +1979,7 @@ def _register_bodies() -> None:
     })
 
 
-#: When THIS process's scheduler came up. ⚠ SET AT START, READ BY THE GAP SCAN — it is the whole
+#: When THIS process's scheduler came up.  SET AT START, READ BY THE GAP SCAN — it is the whole
 #: evidence that a missed fire time was missed because nothing was alive to fire it.
 _booted_at: "datetime | None" = None
 
@@ -1987,14 +1987,14 @@ _booted_at: "datetime | None" = None
 def _on_job_missed(event) -> None:
     """APScheduler dropped a fire because it arrived past `misfire_grace_time`.
 
-    ⚠⚠ NOTHING LISTENED TO THIS EVENT UNTIL NOW, WHICH IS HALF OF WHY THE PRODUCTION FAILURE WAS
+     NOTHING LISTENED TO THIS EVENT UNTIL NOW, WHICH IS HALF OF WHY THE PRODUCTION FAILURE WAS
     UNDIAGNOSABLE. A dropped fire wrote no row, logged no line and left the job's `next_run_time`
     looking perfect — so `/schedule` could only report `overdue` and shrug. This is the case where
     the process WAS alive and could not get to the job in time (a blocked worker, a saturated pool),
     which is a different fault with a different fix from the process being absent, and the two must
     not arrive as the same row.
 
-    ⚠ WARNING, NOT INFO. uvicorn leaves the root logger at WARNING, so an INFO line here would be
+     WARNING, NOT INFO. uvicorn leaves the root logger at WARNING, so an INFO line here would be
     invisible in Railway — which is the one place this needs to be readable.
     """
     fire = getattr(event, "scheduled_run_time", None) or datetime.now(timezone.utc)
@@ -2038,7 +2038,7 @@ def _on_job_max_instances(event) -> None:
 def _on_job_error(event) -> None:
     """A tick raised out of its callable.
 
-    ⚠ BELT AND BRACES, AND IT COVERS A REAL SEAM. Every `_fire_*` spawns a daemon thread and the
+     BELT AND BRACES, AND IT COVERS A REAL SEAM. Every `_fire_*` spawns a daemon thread and the
     body records itself through `record_run`, so almost every failure is already durable — but an
     exception raised BEFORE the thread starts (a bad id, a failed import inside `_spawn_body`)
     happened outside every one of those try blocks and vanished. That is the narrow gap this closes;
@@ -2052,7 +2052,7 @@ def _on_job_error(event) -> None:
 def scan_for_missed_ticks(now=None) -> dict:
     """Reconstruct, from each trigger, the ticks that should have fired recently and did not.
 
-    ⚠⚠ THIS IS THE HALF THAT EXPLAINS THE PRODUCTION SYMPTOM, and it is not a misfire. The scheduler
+     THIS IS THE HALF THAT EXPLAINS THE PRODUCTION SYMPTOM, and it is not a misfire. The scheduler
     here uses APScheduler's DEFAULT IN-MEMORY JOBSTORE, so a boot recomputes every `next_run_time`
     from *now*: a fire time that passed while the process was down never existed, emits no event,
     and leaves `next_run_time` looking healthy. That is precisely how `daily_pipeline` read
@@ -2060,11 +2060,11 @@ def scan_for_missed_ticks(now=None) -> dict:
     APScheduler could ever have caught it. The trigger is a pure function of the calendar, so it can
     be asked what it WOULD have done over a window that reaches back before this process existed.
 
-    ⚠ RUN AT BOOT, WHICH IS THE ONLY MOMENT IT IS BOTH POSSIBLE AND USEFUL: possible because the
+     RUN AT BOOT, WHICH IS THE ONLY MOMENT IT IS BOTH POSSIBLE AND USEFUL: possible because the
     window now spans a period nobody was watching, useful because a restarting host reaches this
     line often. Idempotent by construction — see `record_missed`.
 
-    ⚠ IT RECORDS, IT DOES NOT HEAL. What to do about a gap is `_body_job_watchdog`'s decision, with
+     IT RECORDS, IT DOES NOT HEAL. What to do about a gap is `_body_job_watchdog`'s decision, with
     its own cap; conflating the two would make the evidence-gatherer a job-firer, and a boot loop
     would then re-fire the fleet on every restart.
     """
@@ -2080,7 +2080,7 @@ def scan_for_missed_ticks(now=None) -> dict:
     for spec in SCHEDULED_JOBS:
         if not should_scan(spec):
             continue
-        # ⚠⚠ BOTH TABLES, BECAUSE "DID THIS TICK FIRE" HAS TWO ANSWER SHEETS. A `records=False`
+        #  Both tables, because "DID THIS TICK FIRE" HAS TWO ANSWER SHEETS. A `records=False`
         # job (`daily_pipeline`, `daily_price_slice`) writes `ingest_run` rows and NO
         # `scheduled_job_run` row — by design, so one event cannot have two disagreeing records.
         # Scanning only the latter would report every night of a healthy pipeline as a missed tick,
@@ -2090,7 +2090,7 @@ def scan_for_missed_ticks(now=None) -> dict:
         own = started_at_stamps(spec.id, since)
         via_ingest = ingest_run_stamps(spec.evidence, since)
         if own is None or via_ingest is None:
-            # ⚠ A FAILED READ IS NOT AN EMPTY HISTORY. Treated as empty, one Supabase blip at boot
+            #  A failed read is not an empty history. Treated as empty, one Supabase blip at boot
             # would invent a week of misses for every job at once — the monitoring manufacturing
             # the outage it exists to report.
             unreadable.append(spec.id)
@@ -2113,7 +2113,7 @@ def scan_for_missed_ticks(now=None) -> dict:
                 written += 1
         if written:
             found[spec.id] = written
-            # ⚠ ONE LOUD LINE PER JOB, at WARNING so Railway shows it. This is the sentence somebody
+            #  One loud line per job, at WARNING so Railway shows it. This is the sentence somebody
             # greps for when a page says "overdue" and they want to know since when.
             _log.warning("[scheduler] %s missed %d scheduled tick(s) in the last %dd — the "
                          "scheduler was not running for them (first: %s)",
@@ -2126,7 +2126,7 @@ def scan_for_missed_ticks(now=None) -> dict:
 
 
 def job_misses_lookback() -> int:
-    """How many days back the gap scan looks. ⚠ ENV-OVERRIDABLE so a long outage can be
+    """How many days back the gap scan looks.  ENV-OVERRIDABLE so a long outage can be
     reconstructed once by hand without a deploy; the default is deliberately short (see
     `job_misses.DEFAULT_LOOKBACK_DAYS`)."""
     from job_misses import DEFAULT_LOOKBACK_DAYS  # noqa: PLC0415
@@ -2140,33 +2140,33 @@ def job_misses_lookback() -> int:
 def _boot_gap_pass() -> None:
     """At boot: write down which ticks were lost while nothing was running, then heal what can be.
 
-    ⚠⚠ RECORD FIRST, HEAL SECOND, AND NEVER THE OTHER WAY ROUND. The watchdog's verdict comes from
+     RECORD FIRST, HEAL SECOND, AND NEVER THE OTHER WAY ROUND. The watchdog's verdict comes from
     `job_health`, which reads the run history — so a heal that ran first would re-fire the jobs and
     the gap scan would then find their fresh rows and conclude nothing had been missed. The outage
     would erase its own evidence, every time, which is the failure mode that made this invisible in
     the first place.
 
-    ⚠⚠ THE HEAL IS THE WATCHDOG, NOT A SECOND FIRING MECHANISM. `_body_job_watchdog` already owns
+     THE HEAL IS THE WATCHDOG, NOT A SECOND FIRING MECHANISM. `_body_job_watchdog` already owns
     the decision about which states "run it again" actually fixes (`_WATCHDOG_HEALS` — not
     `missing`, `error` or `unknown`, each of which it would paper over) and the per-day cap that
     stops a structurally broken job being retried for ever. Re-firing jobs directly from here would
     be a second copy of that judgement, and the copy is the one that drifts.
 
-    ⚠⚠ WHICH IS ALSO WHY THE CAP HAD TO BECOME DURABLE FIRST (`watchdog_runs_today`). It lived in a
+     WHICH IS ALSO WHY THE CAP HAD TO BECOME DURABLE FIRST (`watchdog_runs_today`). It lived in a
     process-local dict, and a boot resets that to zero — so a host in a restart loop, which is
     exactly the host that reaches this line, would have re-fired the whole fleet on every restart
     with a guard that could never see it had already done so.
 
-    ⚠ THE WATCHDOG IS A SCHEDULED JOB AND THAT IS PRECISELY THE PROBLEM THIS SOLVES. It fires at
+     THE WATCHDOG IS A SCHEDULED JOB AND THAT IS PRECISELY THE PROBLEM THIS SOLVES. It fires at
     11:00 UTC; if the process is not alive at 11:00 UTC it is missed by the same mechanism as
     everything it was meant to heal — measured in production at 44.7h stale, itself reported
     `overdue`. Running it once per boot means any boot heals the backlog, whatever the host does to
     the clock.
 
-    ⚠ NEVER RAISES. It runs on a daemon thread off the startup hook; an exception here would be an
+     NEVER RAISES. It runs on a daemon thread off the startup hook; an exception here would be an
     unhandled thread exception during a deploy, which is noise on top of the outage it is reporting.
     """
-    # ⚠⚠ THE SCAN IS EVIDENCE AND ITS RESULT MUST NOT GATE THE HEAL — it did, and that made a boot
+    #  The scan is evidence and its result must not gate the heal — it did, and that made a boot
     # heal only the subset of broken jobs that happened to have a missed FIRE. The two answer
     # different questions: `scan_for_missed_ticks` asks "did a tick fail to fire" (the process was
     # down, or APScheduler dropped it), while the watchdog asks "is this job broken" — which is
@@ -2176,7 +2176,7 @@ def _boot_gap_pass() -> None:
     # backlog or it does not; "heals the backlog, but only when the host was also down" is a rule
     # nobody can hold in their head, and it is not the rule the docstring above claims.
     #
-    # ⚠ THE HEAL IS SAFE TO RUN UNCONDITIONALLY because the judgement is not here. `_body_job_watchdog`
+    #  The heal is safe to run unconditionally because the judgement is not here. `_body_job_watchdog`
     # decides what "run it again" actually fixes (`_WATCHDOG_HEALS` — never `missing`, `error` or
     # `unknown`) and `_watchdog_budget_spent` reads a DURABLE per-day cap, so a host in a restart
     # loop cannot re-fire the fleet on every boot. A scan that found nothing now costs one extra
@@ -2184,7 +2184,7 @@ def _boot_gap_pass() -> None:
     try:
         result = scan_for_missed_ticks()
     except Exception as e:  # noqa: BLE001
-        # ⚠ AND A FAILED SCAN NO LONGER CANCELS THE HEAL EITHER. Losing the evidence is not a
+        #  And a failed scan no longer cancels the heal either. Losing the evidence is not a
         # reason to leave the jobs broken; the watchdog reads the run history itself.
         _log.warning("[scheduler] the boot gap scan failed: %s: %s — healing anyway",
                      type(e).__name__, e)
@@ -2196,7 +2196,7 @@ def _boot_gap_pass() -> None:
         _log.info("[scheduler] boot gap scan: no missed ticks in the last %dd",
                   job_misses_lookback())
     if os.environ.get("DISABLE_BOOT_HEAL", "").lower() in ("1", "true", "yes"):
-        # ⚠ AN OFF SWITCH FOR THE HEALING HALF ALONE, because the two halves have very different
+        #  An off switch for the healing half alone, because the two halves have very different
         # risk. Recording is a handful of inserts; healing starts real jobs that spend vendor quota.
         # A deployment that wants the evidence without the action can have exactly that.
         _log.warning("[scheduler] DISABLE_BOOT_HEAL set — not re-running the broken jobs")
@@ -2213,7 +2213,7 @@ def register_scheduler(app) -> None:
         global _scheduler, _booted_at
         if _scheduler is not None:
             return  # already running (multiple startup events on reload)
-        # ⚠ STAMPED BEFORE ANYTHING ELSE. Every missed-tick row this boot writes carries it, and it
+        #  Stamped before anything else. Every missed-tick row this boot writes carries it, and it
         # is the whole argument that the tick was missed because nothing was alive: a fire time
         # before this instant, with no row, on a scheduler that only exists from here.
         _booted_at = datetime.now(timezone.utc)
@@ -2229,7 +2229,7 @@ def register_scheduler(app) -> None:
         executor_log = logging.getLogger("apscheduler.executors.default")
         if not any(isinstance(f, _ExpectedQueueOverrunFilter) for f in executor_log.filters):
             executor_log.addFilter(_ExpectedQueueOverrunFilter())
-        # ⚠⚠ THE OBSERVERS GO ON BEFORE ANY JOB IS ADDED, AND BEFORE `start()`. Until 2026-09-01
+        #  The observers go on before any job is added, and before `start()`. Until 2026-09-01
         # nothing listened to either event, which is half of why a production job could sit 20 days
         # stale with a healthy next-run beside it and no explanation anywhere: a dropped fire wrote
         # no row and logged no line. See `_on_job_missed` for what the two events can and cannot
@@ -2240,7 +2240,7 @@ def register_scheduler(app) -> None:
         sched.add_listener(_on_job_max_instances, EVENT_JOB_MAX_INSTANCES)
 
         def _register(job_id: str, fn) -> None:
-            """Register one declared job — ⚠ THE SCHEDULE COMES FROM `scheduled_jobs.py`.
+            """Register one declared job —  THE SCHEDULE COMES FROM `scheduled_jobs.py`.
 
             Every cadence below used to be a `CronTrigger(...)` literal at the call site. That was
             fine while nothing else claimed to know the schedule; the moment an admin page shows
@@ -2290,12 +2290,12 @@ def register_scheduler(app) -> None:
         # each run (it changes day-to-day) and stores each portfolio's Rendement
         # + Vermogensoverzicht. Runs on its own thread.
         #
-        # ⚠ IT ALSO SCANS THE MODEL PORTFOLIOS NOW (Stamgegevens → Model portefeuilles), which
+        #  It also scans the model portfolios now (Stamgegevens → Model portefeuilles), which
         # nothing scheduled ever did. Their compositions are what the account↔model PAIRING is
         # guessed from, so on a deployment where nobody pressed "Scan AIRS" by hand every book
         # was unpaired and Analyse fell back to a basket. See `_fire_airs_vermogen`.
         _register("airs_vermogen_refresh", _fire_airs_vermogen)
-        # ⚠ THE ONE JOB WHOSE SUBJECT IS THE OTHER JOBS — see `_body_job_watchdog`.
+        #  The one job whose subject is the other jobs — see `_body_job_watchdog`.
         _register("job_watchdog", _fire_job_watchdog)
         # Nightly database-size snapshot — one row per public table, so "how fast is this growing
         # and which tables" is a subtraction rather than a guess. Reads the Postgres catalog; it
@@ -2385,13 +2385,13 @@ def register_scheduler(app) -> None:
                 type(e).__name__, e,
             )
         next_runs = {j.id: str(j.next_run_time) for j in sched.get_jobs()}
-        # ⚠ WARNING, NOT INFO — uvicorn leaves the root logger at WARNING, so the one line that says
+        #  Warning, not info — uvicorn leaves the root logger at WARNING, so the one line that says
         # this process's scheduler exists at all was invisible in Railway. "Did the scheduler even
         # start after that deploy?" is the first question a stale job raises and the log could not
         # answer it.
         _log.warning("[scheduler] started at %s; next runs: %s", _booted_at, next_runs)
 
-        # ⚠⚠ THE GAP SCAN AND THE HEAL RUN OFF THE STARTUP HOOK, ON THEIR OWN THREAD. Both read
+        #  The gap scan and the heal run off the startup hook, on their own thread. Both read
         # Supabase (one query per job, then possibly a job start), and a FastAPI startup hook that
         # blocks on the network is a deploy that looks hung — on a host which, per the evidence
         # this was written for, is already restarting more than it should.
@@ -2414,6 +2414,6 @@ def register_scheduler(app) -> None:
             _scheduler = None
 
 
-# ⚠ AT IMPORT, AFTER EVERY BODY IS DEFINED — see `_register_bodies`. Without this the Run-now
+#  At import, after every body is defined — see `_register_bodies`. Without this the Run-now
 # endpoint would find an empty registry and report every job as not runnable by hand.
 _register_bodies()

@@ -3,14 +3,14 @@
  *
  * Pure and dependency-free.
  *
- * ⚠⚠ THE TWO CORRECTIONS PULL IN OPPOSITE DIRECTIONS, AND THAT IS NOT AN INCONSISTENCY. They fix
+ *  The two corrections pull in opposite directions, and that is not an inconsistency. They fix
  * two different faults in the same figure:
  *
  *   SBC is SUBTRACTED — a real cost that never leaves the cash flow statement. It is added back
  *   into operating cash flow as a non-cash charge, so reported FCF flatters every company that
  *   pays people in equity. The shares are issued; the dilution is borne by the holder.
  *
- *   GROWTH CAPEX is ADDED BACK — and it is added back precisely BECAUSE reported FCF already
+ *   Growth capex is ADDED BACK — and it is added back precisely BECAUSE reported FCF already
  *   subtracted it. `Free Cash Flow` is operating cash flow minus TOTAL capex, so a company
  *   building its next decade is charged the whole bill against this year's cash. What sustains the
  *   current business is maintenance capex; the excess buys growth the DCF is separately being
@@ -18,11 +18,11 @@
  *   that lower figure must deliver — the same expansion counted twice, once as a cost and once as
  *   the thing to be explained.
  *
- * ⚠⚠ SUBTRACTING GROWTH CAPEX WOULD BE ARITHMETICALLY WRONG, not merely conservative. It is
+ *  Subtracting growth capex would be arithmetically wrong, not merely conservative. It is
  * already out of FCF; deducting it again charges the same euros twice. There is no reading of
  * "correct FCF for growth capex" that subtracts.
  *
- * ⚠ D&A IS THE PROXY FOR MAINTENANCE CAPEX, and it is a proxy rather than a measurement. Nobody
+ *  D&A IS THE PROXY FOR MAINTENANCE CAPEX, and it is a proxy rather than a measurement. Nobody
  * publishes maintenance capex; depreciation is what the company itself says its existing assets
  * consume. It is imperfect in both directions — inflation makes replacement dearer than historic
  * cost, and a company that has just written down a plant depreciates little — which is why the
@@ -53,7 +53,7 @@ export type NormalisedFcf = {
   sbc: number | null;
   /** Added back. Null when either leg is missing; 0 when capex is at or below depreciation. */
   growthCapex: number | null;
-  /** Which corrections actually ran. ⚠ A correction that could not be computed is NOT a zero. */
+  /** Which corrections actually ran.  A correction that could not be computed is NOT a zero. */
   applied: { sbc: boolean; growthCapex: boolean };
 };
 
@@ -62,13 +62,13 @@ const ok = (v: number | null | undefined): v is number => v != null && Number.is
 /**
  * The FORWARD base: next year's consensus free cash flow, derived.
  *
- * ⚠⚠ DERIVED BECAUSE IT CANNOT BE READ. GuruFocus's Excel add-in has `Estimated Free Cash Flow for
+ *  Derived because it cannot be read. GuruFocus's Excel add-in has `Estimated Free Cash Flow for
  * Next FY1 End (M)`; the REST endpoint we ingest has no FCF estimate at all — only operating cash
  * flow (see `egmInputs.OCF_EST_CODE`). `FCF = OCF − capex` is the definition of the line, not an
  * approximation of it, so the only estimated quantity here is the OCF; the capex is last year's
  * filing, which is the same compromise the spreadsheet makes (its capex leg is trailing too).
  *
- * ⚠⚠ AND THE APPROXIMATION LARGELY CANCELS, WHICH IS THE REASON THIS IS SOUND RATHER THAN MERELY
+ *  And the approximation largely cancels, which is the reason this is sound rather than merely
  * CONVENIENT. Feed this to `normalisedFcf` and, for any company spending at or above depreciation:
  *
  *     (OCF_est − capex) − sbc + (capex − dep)  =  OCF_est − dep − sbc
@@ -78,12 +78,12 @@ const ok = (v: number | null | undefined): v is number => v != null && Number.is
  * figure never touches the answer. It survives only in the clamped case (capex below depreciation),
  * where an under-investing company is charged its actual spend, which is the intended behaviour.
  *
- * ⚠ `Math.abs(capex)` for the same reason `growthCapex` takes it: the vendor files capex negative
+ *  `Math.abs(capex)` for the same reason `growthCapex` takes it: the vendor files capex negative
  * and a typed override arrives positive. Adding a negative capex here would ADD the spend to the
  * estimate — a company's capex counted as cash generated, on the one figure the whole panel solves
  * against.
  *
- * ⚠ NULL WHEN EITHER LEG IS MISSING, never a partial answer. `OCF_est` alone is not free cash flow
+ *  Null when either leg is missing, never a partial answer. `OCF_est` alone is not free cash flow
  * for any company that owns anything, and a base silently missing its capex leg would read as a
  * business with no capital needs at all.
  */
@@ -94,33 +94,33 @@ export function forwardFcf(ocfEstimate: number | null | undefined,
 }
 
 /**
- * THE FORWARD BASE **AND THE CAPEX/D&A PAIR THAT MUST GO WITH IT**.
+ * The forward base **AND THE CAPEX/D&A PAIR THAT MUST GO WITH IT**.
  *
- * ⚠⚠ ONE RULE, AND IT IS THE WHOLE FUNCTION: THE ADD-BACK USES THE SAME CAPEX THE BASE NETTED.
+ *  One rule, and it is the whole function: the add-back uses the same capex the base netted.
  * The corrections only cancel — `(OCF − C) + (C − D) = OCF − D` — while both halves are the same
  * `C`. Mix them and the total is out by exactly `C_forward − C_trailing`, which on Meta FY2026 is
  * **39,593**. Measured, all four combinations, in millions:
  *
  *     vendor base 5,412 + TRAILING add-back   46,872   ← split basis, ~10.4k short
- *     vendor base 5,412 + FORWARD  add-back   57,250   ✓
+ *     vendor base 5,412 + FORWARD  add-back   57,250
  *     derived base 45,005 + trailing add-back 86,465   ← consistent, but on the trailing D&A
- *     OCF_est − D&A_est − SBC                 57,250   ✓ the same answer, by algebra
+ *     OCF_est − D&A_est − SBC                 57,250    the same answer, by algebra
  *
- * ⚠⚠ THIS IS THE DEFECT IN THE SPREADSHEET THIS PANEL PORTS. `=@GURUF(…"Estimated Free Cash Flow
+ *  This is the defect in the spreadsheet this panel ports. `=@GURUF(…"Estimated Free Cash Flow
  * for Next FY1")` nets a FORWARD capex, and the `MAX(−capex − D&A, 0)` beside it reads the TRAILING
  * lines — so the sheet lands ~39.6bn low on a company whose capex is inflecting, and exactly right
  * on one whose capex is flat. That is the worst kind of wrong: invisible on most names.
  *
- * ⚠ SO THE VENDOR'S FIGURE IS PREFERRED ONLY WHEN THE CORRECTION CAN FOLLOW IT. Forward capex is
+ *  So the vendor's figure is preferred only when the correction can follow it. Forward capex is
  * `OCF_est − FCF_est` and forward D&A is `EBITDA_est − EBIT_est` — all four from the same
  * consensus. Without EBITDA/EBIT there is no forward D&A, so taking the vendor base would force
  * the split; the derivation is used instead, where the trailing capex cancels and the only
  * trailing input reaching the answer is depreciation.
  *
- * ⚠ UNLESS `normalise` IS OFF, where there is no add-back to be inconsistent with. Then the
+ *  UNLESS `normalise` IS OFF, where there is no add-back to be inconsistent with. Then the
  * vendor's forecast is simply the better number and is taken whenever it exists.
  *
- * ⚠ `EBITDA − EBIT = D&A` IS INFERRED, NOT PUBLISHED. It assumes the vendor builds EBITDA that
+ *  `EBITDA − EBIT = D&A` IS INFERRED, NOT PUBLISHED. It assumes the vendor builds EBITDA that
  * way; the series behaves like D&A (monotone, widening with the capex programme, 51,944 for Meta
  * FY2026 against 22,729 trailing) but it is a derivation and is named as one.
  */
@@ -133,7 +133,7 @@ export function forwardLegs(o: {
   /**
    * WHY the vendor's forecast was not used, when it was not.
    *
-   * ⚠⚠ TWO CAUSES, AND THE CARD USED TO NAME ONLY ONE OF THEM. `vendor` is false either because no
+   *  Two causes, and the card used to name only one of them. `vendor` is false either because no
    * consensus FCF is stored (`no-estimate`) or because one IS stored and the forward D&A that
    * would have to accompany it is not (`no-forward-da`) — the EBITDA/EBIT pair the add-back needs.
    * The ⓘ printed "no consensus free cash flow is stored for this company" in both cases, which on
@@ -156,7 +156,7 @@ export function forwardLegs(o: {
       reason: ok(o.fcfEstimate) ? 'no-forward-da' : 'no-estimate',
     };
   }
-  // ⚠ WITH `normalise` OFF AND NO PAIR, the trailing legs ride along unused — the panel still
+  //  WITH `normalise` OFF AND NO PAIR, the trailing legs ride along unused — the panel still
   // renders them, and they are the honest figures for the rows they label.
   return {
     fcf: o.fcfEstimate,
@@ -169,7 +169,7 @@ export function forwardLegs(o: {
 /**
  * The growth half of capex: spend above what the existing assets consume.
  *
- * ⚠ `Math.abs(capex)` — the vendor files it negative and a reader typing an override will type it
+ *  `Math.abs(capex)` — the vendor files it negative and a reader typing an override will type it
  * positive. Taking the magnitude means both agree, and it removes the one sign error in this file
  * that would silently invert the correction: with a negative capex, `capex − dep` is always
  * negative, always clamps to 0, and the add-back quietly never happens on any company.
@@ -181,7 +181,7 @@ export function growthCapex(capex: number | null | undefined,
 }
 
 /**
- * ⚠ EACH CORRECTION APPLIES ONLY IF ITS INPUTS EXIST, AND SAYS SO. A missing SBC line is not a
+ *  Each correction applies only if its inputs exist, and says so. A missing SBC line is not a
  * company that pays no stock comp, and a missing depreciation line is not a company with no
  * maintenance capex. Treating either absence as a zero would publish a correction that did not
  * happen, under a heading that says it did — the reader has no way to tell a normalised figure

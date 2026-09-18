@@ -1,6 +1,6 @@
 """A rebalance is decided on the TRADING CALENDAR, never on the calendar month.
 
-    ✗ Run now failed
+     Run now failed
     Momentum rebalance phase failed: 3 of 3 strategies failed:
       [MomentumTopSelectie Offensief] Cannot compute current picks for 2026-08: latest
       price in DB is 2026-07-31 (2 days behind today).                 <- 2026-08-02
@@ -102,7 +102,7 @@ class TestItStillRefusesGenuinelyStaleData:
 
 
 class TestNoNameIsBoughtAtAStalePrice:
-    """⚠ THE SECOND HALF OF THE SAME INCIDENT.
+    """ THE SECOND HALF OF THE SAME INCIDENT.
 
         140.90 USD  2026-07-28    →    143.83  2026-07-31
 
@@ -205,7 +205,7 @@ class TestOneDefinition:
 
 
 class TestTheUniverseIsPricedBeforeItIsRanked:
-    """⚠ The price-update op keeps the ~24 HELD names current; a rebalance ranks the
+    """ The price-update op keeps the ~24 HELD names current; a rebalance ranks the
     other ~1,455. Stale candidates do not error — `signals.py` drops anything >30 days
     old — so the strategy silently selects from whatever subset was fresh."""
 

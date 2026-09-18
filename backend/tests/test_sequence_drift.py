@@ -1,6 +1,6 @@
 """`common.sequences.is_sequence_drift` — the test that decides whether an insert is retried.
 
-⚠ THE ONLY PART OF THIS MODULE THAT CAN BE UNIT-TESTED IS THE ONE THAT MATTERS. `repair_sequence`
+ THE ONLY PART OF THIS MODULE THAT CAN BE UNIT-TESTED IS THE ONE THAT MATTERS. `repair_sequence`
 needs a live Postgres and `insert_repairing_sequence` needs both that and PostgREST, so neither is
 touched here (unit tests only — see CLAUDE.md). What is pinned is the predicate: get it too WIDE
 and a real uniqueness conflict is answered by moving a sequence and re-issuing the write; get it
@@ -15,7 +15,7 @@ from common.sequences import is_sequence_drift
 class _APIError(Exception):
     """The shape supabase-py raises: a dict in `args[0]`, no useful `str()`.
 
-    ⚠ This is the shape that makes a naive `"23505" in str(exc)` test FAIL. Reproduced here
+     This is the shape that makes a naive `"23505" in str(exc)` test FAIL. Reproduced here
     rather than imported so the pin does not move if the client library changes its repr.
     """
 
@@ -61,7 +61,7 @@ class TestTheRealProductionError:
 
 class TestWhatItMustRefuse:
     def test_a_business_unique_constraint_is_NOT_a_drifted_sequence(self):
-        """⚠ THE IMPORTANT NEGATIVE. `universe.template_key` is unique on purpose; repairing a
+        """ THE IMPORTANT NEGATIVE. `universe.template_key` is unique on purpose; repairing a
         sequence and re-issuing that insert would either fail again or write the row the rule
         exists to refuse."""
         exc = _api_error("universe_template_key_key")

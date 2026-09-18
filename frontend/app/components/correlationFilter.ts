@@ -1,6 +1,6 @@
 /** Project an NxN correlation matrix onto a subset of its portfolios.
  *
- * ⚠ BOTH AXES, THROUGH THE SAME INDEX LIST. `matrix` is NxN over the same index space as
+ *  Both axes, through the same index list. `matrix` is NxN over the same index space as
  * `labels`; filtering the ROWS alone leaves rows of the original width, so every cell after the
  * first dropped column is read from the wrong portfolio. That result is still rectangular, still
  * renders as a heatmap, and is silently wrong — there is no error, just a matrix about pairs that

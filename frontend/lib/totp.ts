@@ -2,7 +2,7 @@
  * Compute the TOTP code a secret SHOULD be showing right now — so a rejected code can be DIAGNOSED
  * rather than guessed at.
  *
- * ⚠⚠ IT EXISTS BECAUSE "Invalid TOTP code" IS THE LEAST INFORMATIVE FAILURE IN THE PRODUCT. Three
+ *  It exists because "Invalid TOTP code" IS THE LEAST INFORMATIVE FAILURE IN THE PRODUCT. Three
  * completely different faults produce it and the copy could only ever guess between them:
  *
  *   1. the phone holds a DIFFERENT secret (a stale entry from an earlier attempt, or a QR that
@@ -16,10 +16,10 @@
  * somebody to their phone's date settings when the real fault is a leftover entry cost a real
  * afternoon (2026-09-08).
  *
- * ⚠ IT IS A DIAGNOSTIC, NEVER AN AUTHORISATION. The server verifies; this only explains. Nothing
+ *  It is a diagnostic, never an authorisation. The server verifies; this only explains. Nothing
  * here may ever gate a request — a check the client computes is a check an attacker controls.
  *
- * ⚠ SHA-1 IS CORRECT HERE and is not a security choice. RFC 6238 specifies HMAC-SHA-1 for TOTP,
+ *  Sha-1 is correct here and is not a security choice. RFC 6238 specifies HMAC-SHA-1 for TOTP,
  * and GoTrue's `otpauth://` URI says `algorithm=SHA1`; using anything stronger would compute codes
  * that match nobody.
  */
@@ -39,7 +39,7 @@ export function base32ToBytes(secret: string): Uint8Array | null {
 /**
  * The 6-digit code for `secret` at `atMs`, or null if the secret is unreadable.
  *
- * ⚠ `step` AND `digits` ARE PARAMETERS BECAUSE THE `otpauth://` URI CARRIES THEM. GoTrue currently
+ *  `step` AND `digits` ARE PARAMETERS BECAUSE THE `otpauth://` URI CARRIES THEM. GoTrue currently
  * sends `period=30&digits=6`; hardcoding them would make this quietly wrong the day it does not.
  */
 export async function expectedTotp(
@@ -52,7 +52,7 @@ export async function expectedTotp(
   if (!key || typeof globalThis.crypto?.subtle === 'undefined') return null;
   const counter = Math.floor(atMs / 1000 / step);
   const msg = new Uint8Array(8);
-  // ⚠ THE COUNTER IS 64-BIT BIG-ENDIAN. Writing it as a 32-bit value works until 2106 and then
+  //  The counter is 64-BIT BIG-ENDIAN. Writing it as a 32-bit value works until 2106 and then
   // silently stops; writing it little-endian never works at all.
   new DataView(msg.buffer).setBigUint64(0, BigInt(counter), false);
   const ck = await crypto.subtle.importKey(
@@ -78,7 +78,7 @@ export type CodeVerdict =
 /**
  * Why did `typed` fail for `secret`?
  *
- * ⚠ THE WINDOW SEARCH IS ±10 STEPS (5 minutes each way). Wide enough to catch a phone whose clock
+ *  The window search is ±10 STEPS (5 minutes each way). Wide enough to catch a phone whose clock
  * is minutes out — which is the whole point of distinguishing skew from a wrong secret — and
  * narrow enough that a random six digits will not collide by luck often (10⁶ codes, 21 windows).
  */
@@ -102,17 +102,17 @@ export async function explainCode(
 /**
  * How far this BROWSER's clock is from the server's, in seconds (positive = browser ahead).
  *
- * ⚠⚠ WITHOUT THIS, A SKEW DIAGNOSIS BLAMES THE WRONG DEVICE. `explainCode` compares the typed
+ *  Without this, a skew diagnosis blames the wrong device. `explainCode` compares the typed
  * code against what this browser thinks the time is — so it can prove the phone and the browser
  * disagree, and cannot tell which of them is wrong. Measured 2026-09-08: the reader's iPhone was
  * correct and the LAPTOP was 59s slow (and so, being its Docker host, was GoTrue) — and the copy
  * confidently told them to go and change their phone's settings.
  *
- * ⚠ THE `Date` HEADER IS THE SERVER'S OWN CLOCK, which is the one that matters: GoTrue verifies
+ *  THE `Date` HEADER IS THE SERVER'S OWN CLOCK, which is the one that matters: GoTrue verifies
  * against it, not against the reader. Whole seconds only, and the round trip adds a little, so
  * this is accurate to a second or two — ample for a fault that is measured in half-minutes.
  *
- * ⚠ MEASURED AT THE MIDPOINT of the request, so half the latency is cancelled rather than being
+ *  Measured at the midpoint of the request, so half the latency is cancelled rather than being
  * silently added to the answer.
  */
 export async function serverSkewSeconds(url: string): Promise<number | null> {
@@ -126,7 +126,7 @@ export async function serverSkewSeconds(url: string): Promise<number | null> {
     if (Number.isNaN(server)) return null;
     return Math.round(((before + after) / 2 - server) / 1000);
   } catch {
-    // ⚠ A diagnostic that throws is worse than one that abstains — the caller falls back to the
+    //  A diagnostic that throws is worse than one that abstains — the caller falls back to the
     // sentence that names both devices rather than neither.
     return null;
   }

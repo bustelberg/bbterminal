@@ -2,7 +2,7 @@
 
 Pure: dicts in, dataclasses out. No AIRS, no DB, no network.
 
-⚠ THE ANCHOR IS A REAL BOOK. Every figure in `TestTheMeasuredCase` is AITopSelectie OFF DYN as of
+ THE ANCHOR IS A REAL BOOK. Every figure in `TestTheMeasuredCase` is AITopSelectie OFF DYN as of
 2026-08-05, read off the live tables — so these tests pin the arithmetic that was verified against
 AIRS's own `cumulatief_rendement`, not a hand-made example that agrees with the code by
 construction.
@@ -56,7 +56,7 @@ class TestTheMeasuredCase:
         assert r.reconciles is True
 
     def test_the_positions_derived_return_reproduces_cumulatief_rendement(self):
-        # ⚠ THE POINT OF THE WHOLE PANEL. Five decimal places against AIRS's own figure.
+        #  The point of the whole panel. Five decimal places against AIRS's own figure.
         r = reconcile(BOOK, OPEN, realised_ytd_eur=REALISED_YTD)
         assert r.total_return_pct == pytest.approx(38.729375, abs=1e-4)
         assert r.return_basis == "opening_capital"
@@ -68,7 +68,7 @@ class TestTheMeasuredCase:
         assert r.gap_pp == pytest.approx(-0.891, abs=1e-3)
 
     def test_the_opening_capitals_disagree_and_the_sign_is_negative_here(self):
-        # ⚠ The rows claim MORE opening value than the book had, because AIRS restates
+        #  The rows claim MORE opening value than the book had, because AIRS restates
         # `Beginwaarde` to the CURRENT quantity. Calling this "closed positions" would be claiming
         # a negative amount of them.
         r = reconcile(BOOK, OPEN, realised_ytd_eur=REALISED_YTD)
@@ -95,7 +95,7 @@ class TestAnUnfetchedSheetIsNotZero:
 
 
 class TestFlowsRefuseTheDivision:
-    """⚠⚠ `result ÷ opening capital` is a return only when nothing was paid in or out."""
+    """ `result ÷ opening capital` is a return only when nothing was paid in or out."""
 
     def test_a_book_that_opened_at_zero_and_took_a_deposit_gets_no_percentage(self):
         # AzTopSelectie_DYN: begin 0, stortingen 1,000,000, end 998,784 — it LOST 1,216, and the
@@ -111,11 +111,11 @@ class TestFlowsRefuseTheDivision:
         r = reconcile(book, OPEN, realised_ytd_eur=REALISED_YTD)
         assert r.return_basis == "flows"
         assert r.total_return_pct is None
-        # ⚠ The EUR total survives — it is flow-free by construction (a deposit is not a result).
+        #  The EUR total survives — it is flow-free by construction (a deposit is not a result).
         assert r.total_result_eur == pytest.approx(387293.79, abs=0.01)
 
     def test_a_withdrawal_that_exactly_offsets_a_deposit_is_STILL_flows(self):
-        # ⚠ GROSS, NOT NET, AND THIS IS THE CASE THAT PROVES IT. EUR 100k in during January and
+        #  Gross, not net, and this is the case that proves it. EUR 100k in during January and
         # EUR 100k out in December nets to zero, and the extra capital was still invested for
         # eleven months — so `beginvermogen` is not the capital the result was earned on. A net
         # test would wave through exactly the book that most needs the flow-aware figure.
@@ -137,7 +137,7 @@ class TestOpenSideFromRows:
         assert side.return_pct == pytest.approx(10.0)
 
     def test_the_dividend_tax_is_added_not_subtracted(self):
-        # ⚠ `dividend_tax_eur` is already NEGATIVE. The intuitive minus adds the tax back and
+        #  `dividend_tax_eur` is already NEGATIVE. The intuitive minus adds the tax back and
         # overstates every foreign holding by twice the withholding.
         side = open_side_from_rows([{"start_value_eur": 1000.0, "current_value_eur": 1000.0,
                                      "dividend_eur": 100.0, "dividend_tax_eur": -15.0}])
@@ -151,7 +151,7 @@ class TestOpenSideFromRows:
 
 class TestRealisedResults:
     def test_the_realised_ytd_is_airss_own_column_not_proceeds_minus_cost(self):
-        # ⚠⚠ THE TRAP. A position carried across a year end realises a gain of which only part is
+        #  The trap. A position carried across a year end realises a gain of which only part is
         # this year's. proceeds − cost = 1,000 here; the year's share is 400.
         s = realised_results(_sheet([_sell("Old Holding", 5000.0, 4000.0, 400.0, prior=600.0)]))
         assert s.realised_ytd_eur == pytest.approx(400.0)
@@ -188,7 +188,7 @@ class TestRealisedResults:
         assert s.realised_ytd_eur == pytest.approx(842.5)
 
     def test_an_unrecognised_sheet_refuses_rather_than_summing_to_zero(self):
-        # ⚠ A missing column means this is not the report that was measured. A confident
+        #  A missing column means this is not the report that was measured. A confident
         # "EUR 0.00 realised" would be a plausible number, not an error.
         s = realised_results(ParsedSheet(columns=["Datum", "Fonds"], rows=[{"Fonds": "X"}]))
         assert s.unreadable is not None
@@ -202,7 +202,7 @@ class TestRealisedResults:
 
 
 class TestTwoClocks:
-    """⚠⚠ The held leg is the VOLK holdings snapshot; the book's result is the ATT report. They are
+    """ The held leg is the VOLK holdings snapshot; the book's result is the ATT report. They are
     separate downloads and land a day apart, and one day of market movement on a EUR 1.4m book was
     read as a EUR 57,330 missing position."""
 
@@ -211,18 +211,18 @@ class TestTwoClocks:
         book = {**BOOK, "periode": "2026-08-05", "beleggingsresultaat": 444624.08}
         r = reconcile(book, OPEN, realised_ytd_eur=REALISED_YTD, holdings_as_of="2026-08-04")
         assert r.dates_aligned is False
-        # ⚠ None, not False. Calling it False accuses the arithmetic of a fault the calendar owns,
+        #  None, not False. Calling it False accuses the arithmetic of a fault the calendar owns,
         # and sends a reader hunting for a position that is not missing.
         assert r.reconciles is None
         assert r.residual_reason and "2026-08-04" in r.residual_reason
 
     def test_a_tie_still_counts_even_when_the_dates_differ(self):
-        # ⚠ BUS_Offensief_Dyn reconciles to EUR 0.05 with its two sides nominally a day apart. The
+        #  BUS_Offensief_Dyn reconciles to EUR 0.05 with its two sides nominally a day apart. The
         # market plainly did not move it, so suppressing a proven agreement on a calendar
         # technicality would discard the evidence the check exists to produce.
         #
-        # ⚠ THE FIRST ASSERTION USED TO READ `abs(...) > 1  # this book genuinely differs`, WHICH
-        # CONTRADICTED THE COMMENT TWO LINES ABOVE IT. `BOOK` is BUS_Offensief_Dyn — the residual
+        #  The first assertion used to read `abs(...) > 1  # this book genuinely differs`, WHICH
+        # Contradicted the comment two lines above it. `BOOK` is BUS_Offensief_Dyn — the residual
         # is EUR 0.04, i.e. it IS the near-tie this test is named for, not a book that differs.
         # Asserting the opposite made the case indistinguishable from the exact-tie one below (both
         # `reconciles is True`), so the pair proved one thing twice and the misaligned-but-agreeing
@@ -267,7 +267,7 @@ class TestContributions:
         assert c["total_pct"] == pytest.approx(BOOK["cumulatief_rendement"], abs=1e-4)
 
     def test_the_denominator_is_the_books_opening_capital_not_the_held_positions(self):
-        # ⚠ THE WHOLE POINT. On the held book's own opening value (1,006,880.70) the held leg
+        #  The whole point. On the held book's own opening value (1,006,880.70) the held leg
         # would read 37.84% — the positions table's figure — and the sold leg could not be
         # expressed at all, because a sold position is not in that denominator.
         c = contributions(self._rec())
@@ -289,7 +289,7 @@ class TestContributions:
         assert c["legs"] == []
 
     def test_the_coverage_share_is_of_the_ABSOLUTE_movement(self):
-        # ⚠ A realised LOSS beside a held GAIN is not "negative coverage" — the question is how
+        #  A realised LOSS beside a held GAIN is not "negative coverage" — the question is how
         # much of the movement happened outside the holdings table, and a loss counts as much.
         c = contributions(self._rec(open_result_eur=75164.23, realised_ytd_eur=-28656.46,
                                     sold_income_eur=695.50))

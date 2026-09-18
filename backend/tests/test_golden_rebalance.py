@@ -39,7 +39,7 @@ RE-BASELINED 2026-08-02 — DELIBERATELY: THE ENTRY-STALENESS GUARD
     sessions behind the 2026-07-03 anchor — and it moved 6 of 24 holdings and swapped a whole
     sector (Technology → Capital Goods).
 
-    ⚠ THAT LEVERAGE IS THE FINDING, NOT A BUG IN THE GUARD. Scores are min-max normalized ACROSS
+     THAT LEVERAGE IS THE FINDING, NOT A BUG IN THE GUARD. Scores are min-max normalized ACROSS
     THE POOL and sector ranks are means of them, so one extreme outlier rescales every company's
     score. A stale, unbuyable name was setting the scale that chose the sectors. Note the anchor
     here is Fri 2026-07-03, the US Independence Day observance: the whole US market has gap=1 (921
@@ -62,7 +62,7 @@ RE-BASELINED 2026-07-31 — DELIBERATELY, AND HERE IS THE REASON
     (Capital Goods, Healthcare, Services, Technology -> Financial, Technology, Transportation,
     Utilities). That size IS the distortion that was being removed, not evidence of a mistake.
 
-    ⚠ `shipped_holdings_json` was NOT re-baselined and must not be. It is the record of what
+     `shipped_holdings_json` was NOT re-baselined and must not be. It is the record of what
     actually reached production under the old ranking; see `TestShippedSnapshot`.
 
 WHY A FIXTURE AND NOT THE DB
@@ -143,13 +143,13 @@ pytestmark = [
         reason=f"golden fixtures missing from {_FIXTURE_DIR} "
                "(regenerate with scripts/capture_golden_rebalance.py)",
     ),
-    # ⚠ TIERED `slow`, WHICH IS A STATEMENT ABOUT COST AND NOTHING ELSE — this module is the
+    #  TIERED `slow`, WHICH IS A STATEMENT ABOUT COST AND NOTHING ELSE — this module is the
     # suite's critical path at ~20s, and it is 20s of `run_current_portfolio` genuinely running
     # over 1,479 companies (profiled 2026-08-03: loading both 6.8MB .npz fixtures is 0.24s of
     # that; the rest is the engine). There is no I/O to remove and no assertion here has a
     # tolerance, so the only way to make it cheaper is to test less.
     #
-    # ⚠ IT IS STILL THE ONLY TEST THAT CATCHES SECTOR-AGGREGATION `mean()` -> `median()` — all
+    #  It is still the only test that catches sector-aggregation `mean()` -> `median()` — all
     # 2,076 others pass under that mutation. `-m fast` therefore runs WITHOUT the one check that
     # covers the engine end to end, which is exactly why the tier exists to speed the keystroke
     # loop and CI still runs everything. Never let a green fast tier stand in for this.
@@ -353,7 +353,7 @@ class TestStrictCutoff:
 class TestShippedSnapshot:
     """What actually reached the user, versus what the engine computes now.
 
-    ⚠ THESE NO LONGER MATCH, BY DESIGN (2026-07-31). Until then the engine reproduced the shipped
+     THESE NO LONGER MATCH, BY DESIGN (2026-07-31). Until then the engine reproduced the shipped
     snapshot exactly bar one explained drift (Bayer's late 2026-07-03 bar swapping its intra-sector
     rank with Sartorius), and that equivalence was this class's whole point.
 

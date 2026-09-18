@@ -10,7 +10,7 @@ THE SHEET, MEASURED ON AITopSelectie OFF DYN (2026-01-01..2026-08-05, 40 rows)
     Tt · Datum · Fonds · Koers · Aantal · Waarde · Waarde.1 · Kostprijs · Res. YtD · Fondskoers ·
     Res. in % · Waarde EUR · Waarde EUR.1 · Res. voorg. jr.
 
-⚠ THE HEADERS ARE GROUPED, WHICH IS WHY `Waarde` APPEARS TWICE. The report is laid out as a BUY
+ THE HEADERS ARE GROUPED, WHICH IS WHY `Waarde` APPEARS TWICE. The report is laid out as a BUY
     block beside a SELL block, so pandas suffixes the repeats (`Waarde.1`, `Waarde  EUR.1`). Which
     physical column carries a figure depends on `Tt`, and the unused side is a hard **0.0**, not a
     blank — so summing `Waarde` across the sheet silently adds buys to nothing and calls it
@@ -24,16 +24,16 @@ THE SHEET, MEASURED ON AITopSelectie OFF DYN (2026-01-01..2026-08-05, 40 rows)
         Tt='D' (1 row)              Aantal ONLY — every money column 0.0. NOT interpreted; see
                                     `UNKNOWN_TYPES` below.
 
-    ⚠ `Koers` AND `Fondskoers` ARE THE SAME QUANTITY ON OPPOSITE SIDES — the price — and each is
+     `Koers` AND `Fondskoers` ARE THE SAME QUANTITY ON OPPOSITE SIDES — the price — and each is
     0.0 on the other side. Reading "the price column" without asking `Tt` gets zero half the time.
 
-⚠ THE IDENTITY, VERIFIED ON ALL 8 SELL ROWS TO THE CENT:
+ THE IDENTITY, VERIFIED ON ALL 8 SELL ROWS TO THE CENT:
         Res. YtD  ==  Waarde EUR.1  -  Kostprijs
     Synopsys 2026-01-22: 1,778.516063896 - 1,647.5308636176 = 130.9852002784, and `Res. in %`
     7.9503943246797 == that over Kostprijs. `Waarde.1` is the same trade in its LOCAL currency
     (Koers 521.95 x Aantal 4 = 2,087.80 USD), so the EUR pair is the one that reconciles.
 
-⚠⚠ THE REALISED YTD IS `Res. YtD`, **NEVER** `Waarde EUR.1 - Kostprijs`, AND THIS BOOK CANNOT TELL
+ THE REALISED YTD IS `Res. YtD`, **NEVER** `Waarde EUR.1 - Kostprijs`, AND THIS BOOK CANNOT TELL
     YOU THAT. `Res. voorg. jr.` is the part of a realised gain that belongs to PREVIOUS years — a
     position bought in 2024 and sold in 2026 realises a result of which only some is this year's.
     On AITopSelectie every position was bought in 2026, so `Res. voorg. jr.` is 0.00 on all eight
@@ -42,23 +42,23 @@ THE SHEET, MEASURED ON AITopSelectie OFF DYN (2026-01-01..2026-08-05, 40 rows)
     book that carries positions across a year end. Same shape as the EBIT-vs-Operating-Income and
     Net-Income-vs-NCI traps: two figures that coincide on the company you happened to check.
 
-⚠ A SELL IS A REALISATION, NOT A CLOSURE. Synopsys was sold 4 shares on 2026-01-22 and is STILL
+ A SELL IS A REALISATION, NOT A CLOSURE. Synopsys was sold 4 shares on 2026-01-22 and is STILL
     HELD. So a name can legitimately appear in both the held list and the realised list, and
     calling this block "closed positions" would be wrong for most of it. Whether a name is
     genuinely closed out is decided by its ABSENCE from the holdings snapshot, not by its presence
     here.
 
-⚠ WHAT IS STILL NOT KNOWN, AND IS THEREFORE NOT USED. `Tt='D'` appeared once (KLA-Tencor,
+ WHAT IS STILL NOT KNOWN, AND IS THEREFORE NOT USED. `Tt='D'` appeared once (KLA-Tencor,
     2026-06-12, 369 shares, every money column 0.0). KLA split 9:1 in 2026, so a corporate action
     is the obvious reading — and "obvious" is not "measured". It carries no money, so excluding it
     from every sum costs nothing and assuming it would risk everything; it is COUNTED and named
     instead (`unknown_types`), so a `D` that one day carries a value cannot slip in unnoticed.
 
-⚠ AN EMPTY REPORT IS AN ANSWER. A book that has not traded this year has no transactions, which
+ AN EMPTY REPORT IS AN ANSWER. A book that has not traded this year has no transactions, which
     is a fact about the book — not a download that failed. The caller must be able to tell the two
     apart, so a legitimately empty sheet parses to zero rows rather than raising.
 
-⚠ A COLUMN IS TYPED BY ITS DTYPE, NEVER BY ITS NAME. A column called "Bedrag" that AIRS exported
+ A COLUMN IS TYPED BY ITS DTYPE, NEVER BY ITS NAME. A column called "Bedrag" that AIRS exported
     as text stays TEXT here and shows as text on screen, which is a visible fact about the export.
     Sniffing the name and coercing would hide it — and a number that only sometimes parses is how
     a total silently omits the rows that did not.
@@ -74,7 +74,7 @@ import pandas as pd
 # 'VOLK' (Vermogensoverzicht), 'MUT' (Mutaties) and 'MODEL'. Overridable via
 # AIRS_TRANSACTIES_RAPPORT_TYPE if AirSPMS ever renames it.
 #
-# ⚠ AN UNKNOWN CODE RETURNS ZERO BYTES, NOT AN ERROR — see `_download_report_sync`, whose length
+#  An unknown code returns zero bytes, not an error — see `_download_report_sync`, whose length
 # check is the only thing standing between a typo here and a silent "this book never traded".
 TRANSACTIES_RAPPORT_TYPE = "TRANS"
 
@@ -85,7 +85,7 @@ TRANSACTIES_RAPPORT_TYPE = "TRANS"
 # errors to propagate normally.
 _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
-# ⚠⚠ THE PAGE IS `/management-dashboard`. THERE IS NO `/portfolios` ROUTE — it 404s. Several
+#  The page is `/management-dashboard`. THERE IS NO `/portfolios` ROUTE — it 404s. Several
 # refusals tell a reader to go and load a book's transactions, and an instruction that lands on a
 # 404 is worse than none: it reads as "the feature is broken" rather than "there is a step to
 # take", and the reader has no way to tell which. Written ONCE and imported, because it was
@@ -118,7 +118,7 @@ class ParsedSheet:
 
 
 def _text(v: object) -> str | None:
-    """⚠ A BLANK CELL ARRIVES AS FLOAT NaN AND `str()` RENDERS IT `"nan"`, WHICH IS TRUTHY. That is
+    """ A BLANK CELL ARRIVES AS FLOAT NaN AND `str()` RENDERS IT `"nan"`, WHICH IS TRUTHY. That is
     the same trap that once counted a cash line as a holding, and the same one `airs_mutaties`
     guards. `None`, so an empty cell reads as empty everywhere downstream."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
@@ -133,14 +133,14 @@ def _num(v: object) -> float | None:
 
 
 def _day(v: object) -> str | None:
-    """ISO date. ⚠ The DATE, not the timestamp — AIRS books a transaction to a day, and rendering
+    """ISO date.  The DATE, not the timestamp — AIRS books a transaction to a day, and rendering
     `2026-03-12T00:00:00` would imply a precision the report does not carry."""
     d = pd.to_datetime(v, errors="coerce")
     return None if pd.isna(d) else d.date().isoformat()
 
 
 def _kind_of(s: pd.Series) -> str:
-    """⚠ FROM THE DTYPE ALONE. See the module docstring: a name sniff is how a text column becomes
+    """ FROM THE DTYPE ALONE. See the module docstring: a name sniff is how a text column becomes
     a silently-truncated number column."""
     if pd.api.types.is_datetime64_any_dtype(s):
         return KIND_DATE
@@ -154,12 +154,12 @@ def _kind_of(s: pd.Series) -> str:
 def parse_transacties(file_bytes: bytes) -> ParsedSheet:
     """Every row on the sheet, unfiltered and unsummed, with each column's own name and type.
 
-    ⚠ NO ROW WITH DATA IN IT IS DROPPED, AND NOTHING IS RENAMED. A filter here would need to know
+     NO ROW WITH DATA IN IT IS DROPPED, AND NOTHING IS RENAMED. A filter here would need to know
     what the rows MEAN, and that is precisely what has not been measured yet. `airs_mutaties`
     splits parse from `direct_result` for the same reason — a caller that wants to see what was
     ignored can only do so if the parser did not do the ignoring.
 
-    ⚠ THE ONE EXCEPTION IS THE WHOLLY EMPTY ROW (see below), and it is an exception because it
+     THE ONE EXCEPTION IS THE WHOLLY EMPTY ROW (see below), and it is an exception because it
     needs no knowledge of meaning: a row where every cell is blank cannot be a transaction under
     any reading. That is a different claim from "this row looks unimportant", which is the
     judgement this parser refuses to make.
@@ -172,7 +172,7 @@ def parse_transacties(file_bytes: bytes) -> ParsedSheet:
                            engine_kwargs={"logfile": StringIO()})
     else:
         df = pd.read_excel(BytesIO(file_bytes))
-    # ⚠ HEADERS ARRIVE WITH TRAILING SPACES ON SOME AIRS EXPORTS, and " Fonds" is a different key
+    #  Headers arrive with trailing spaces on some AIRS exports, and " Fonds" is a different key
     # from "Fonds" to every consumer downstream. Stripped once, here.
     df.columns = [str(c).strip() for c in df.columns]
     # A column with no header at all comes back as "Unnamed: 3". Keep it — an unnamed column with
@@ -191,7 +191,7 @@ def parse_transacties(file_bytes: bytes) -> ParsedSheet:
             row[c] = (_day(r[c]) if kind == KIND_DATE
                       else _num(r[c]) if kind == KIND_NUMBER
                       else _text(r[c]))
-        # ⚠ A WHOLLY EMPTY ROW IS A SPACER, NOT A TRANSACTION. AIRS pads some exports with blank
+        #  A wholly empty row is a spacer, not a transaction. AIRS pads some exports with blank
         # lines between sections; counting them would report trades that never happened.
         if any(v is not None for v in row.values()):
             sheet.rows.append(row)
@@ -207,7 +207,7 @@ TT = "Tt"
 TT_BUY = "A"       # Aankoop
 TT_SELL = "V"      # Verkoop
 
-# The sell block. ⚠ `Res.  YtD` and `Res.  voorg. jr.` carry TWO spaces after "Res." — that is
+# The sell block.  `Res.  YtD` and `Res.  voorg. jr.` carry TWO spaces after "Res." — that is
 # AIRS's own header, not a typo here, and a single-space lookup finds nothing.
 COL_FONDS = "Fonds"
 COL_DATE = "Datum"
@@ -218,7 +218,7 @@ COL_REALISED_YTD_EUR = "Res.  YtD"
 COL_REALISED_PRIOR_EUR = "Res.  voorg. jr."
 COL_BUY_VALUE_EUR = "Waarde  EUR"
 
-# ⚠ EVERY COLUMN THE REALISED FIGURE DEPENDS ON. If one is missing the sheet is not the sheet that
+#  Every column the realised figure depends on. If one is missing the sheet is not the sheet that
 # was measured, and the honest output is "we cannot read this", never a total of the columns that
 # happened to be present — which would be a confident EUR 0.00 realised.
 _REQUIRED = (TT, COL_FONDS, COL_SELL_PROCEEDS_EUR, COL_SELL_COST_EUR, COL_REALISED_YTD_EUR)
@@ -233,7 +233,7 @@ class RealisedLeg:
     quantity: float = 0.0
     proceeds_eur: float = 0.0
     cost_eur: float = 0.0
-    # ⚠ AIRS's OWN `Res. YtD`, summed — never `proceeds - cost`. See the module docstring: the two
+    #  AIRS's OWN `Res. YtD`, summed — never `proceeds - cost`. See the module docstring: the two
     # differ by `Res. voorg. jr.` on any position carried across a year end.
     realised_ytd_eur: float = 0.0
     prior_year_eur: float = 0.0
@@ -260,13 +260,13 @@ class RealisedSummary:
 def realised_results(sheet: ParsedSheet) -> RealisedSummary:
     """What this book REALISED this year, per instrument, from its sales.
 
-    ⚠ AGGREGATED BY `Fonds`, BECAUSE ONE POSITION IS SOLD IN PIECES. AITopSelectie sold Synopsys on
+     AGGREGATED BY `Fonds`, BECAUSE ONE POSITION IS SOLD IN PIECES. AITopSelectie sold Synopsys on
     two dates; two rows for one instrument would read as two positions on any list built from this.
     The name is AIRS's own string, matched to `airs_holding.holding_name` EXACTLY wherever it is
     joined — both are AIRS strings truncated at the same width, and nothing fuzzy belongs here
     (see `_airs_holding_isin` for what fuzzy matching costs).
 
-    ⚠ REFUSES ON AN UNRECOGNISED SHEET. A missing column means this is not the report that was
+     REFUSES ON AN UNRECOGNISED SHEET. A missing column means this is not the report that was
     measured, and a sum over the columns that survive is a plausible number rather than an error.
     """
     missing = [c for c in _REQUIRED if c not in sheet.columns]
@@ -283,7 +283,7 @@ def realised_results(sheet: ParsedSheet) -> RealisedSummary:
             s.buys_eur = round(s.buys_eur + _f(r.get(COL_BUY_VALUE_EUR)), 2)
             continue
         if tt != TT_SELL:
-            # ⚠ COUNTED, NOT DROPPED. A type we do not interpret is either a corporate action with
+            #  Counted, not dropped. A type we do not interpret is either a corporate action with
             # no money (harmless) or something new that belongs in the total (not harmless), and
             # only a visible count can ever tell the two apart.
             s.unknown_types[tt or "(blank)"] = s.unknown_types.get(tt or "(blank)", 0) + 1
@@ -309,7 +309,7 @@ def realised_results(sheet: ParsedSheet) -> RealisedSummary:
 
 
 def _f(v: object) -> float:
-    """A money cell as a number. ⚠ 0.0 for a blank, and here that IS right: the sheet writes a
+    """A money cell as a number.  0.0 for a blank, and here that IS right: the sheet writes a
     hard 0.0 in the block that does not apply, so an absent value and a zero mean the same thing
     on this report. (It is NOT right on a return — see `_mark_at` elsewhere — which is why this
     helper is local to the money sums and not exported.)"""
@@ -320,7 +320,7 @@ def _f(v: object) -> float:
 class Trade:
     """ONE transaction, normalised out of the grouped buy/sell blocks.
 
-    ⚠ THIS IS WHERE THE COLUMN NAMES STOP. Everything downstream works on `eur`, `quantity` and
+     THIS IS WHERE THE COLUMN NAMES STOP. Everything downstream works on `eur`, `quantity` and
     `datum` and never learns that a buy's value lives in `Waarde  EUR` while a sell's lives in
     `Waarde  EUR.1` — that grouped-header quirk is this module's problem, and leaking it would
     make every consumer re-learn which side of the sheet to read.
@@ -338,7 +338,7 @@ class Trade:
 def trades(sheet: ParsedSheet) -> list[Trade]:
     """Every buy and sell on the sheet, one object each, in the sheet's own order.
 
-    ⚠ EMPTY ON AN UNRECOGNISED SHEET, and the caller must check `realised_results(...).unreadable`
+     EMPTY ON AN UNRECOGNISED SHEET, and the caller must check `realised_results(...).unreadable`
     rather than reading emptiness as "this book never traded". Same refusal, one place to ask.
     """
     if any(c not in sheet.columns for c in _REQUIRED):

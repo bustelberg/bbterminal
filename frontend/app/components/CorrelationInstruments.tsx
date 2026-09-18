@@ -3,14 +3,14 @@
 /**
  * Every instrument behind the correlation matrix, with its price series.
  *
- * ⚠ THE SERIES IS THE ONE THE MATRIX CONSUMED, not a re-fetch. There IS an existing per-ISIN
+ *  The series is the one the matrix consumed, not a re-fetch. There IS an existing per-ISIN
  * price endpoint (`/api/asset-pipeline/price-series/isin/{isin}`) and using it here would have
  * been less code — but it returns MONTHLY closes on its own split-adjustment path, so the chart
  * under a correlation of DAILY returns would be a different series with a different shape, and
  * any disagreement between the table and the matrix would be unexplainable. The endpoint ships
  * the exact daily EUR levels it correlated; this only draws them.
  *
- * ⚠ SEPARATE <section> FROM THE MATRIX, deliberately. The matrix's section carries
+ *  SEPARATE <section> FROM THE MATRIX, deliberately. The matrix's section carries
  * `isolation: isolate` because its sticky diagonal headers run a z-index ladder that climbs with
  * the portfolio count, and it scrolls horizontally. An expandable chart row inside that
  * container would inherit both.
@@ -77,7 +77,7 @@ export default function CorrelationInstruments(
     [data.series],
   );
 
-  // ⚠ THE WINDOW IS SLICED HERE, NOT REFETCHED. The payload always carries the trailing year;
+  //  The window is sliced here, not refetched. The payload always carries the trailing year;
   // YTD is a left-trim of it. Switching the matrix's window must not re-run the price load.
   const from = win === 'ytd' ? ytdStart(data.as_of) : undefined;
 
@@ -146,7 +146,7 @@ export default function CorrelationInstruments(
         </span>
       </p>
 
-      {/* ⚠ SAID ONCE, IN PROSE, BECAUSE THE COLUMN CANNOT SAY IT. Every priced row reads
+      {/*  SAID ONCE, IN PROSE, BECAUSE THE COLUMN CANNOT SAY IT. Every priced row reads
           "yfinance", so the Source column proves the rule but never states WHY it matters: this
           app holds two price worlds, and a reader who knows /benchmarks is GuruFocus-priced has
           no way to tell which one a correlation came from. The two differ in adjustment
@@ -181,7 +181,7 @@ export default function CorrelationInstruments(
               + 'closes are stale against the real market, and a correlation of daily returns is '
               + 'the statistic that damages most.'}
           >
-            {thinOnly ? '✓ ' : ''}{counts.thin} thin {counts.thin === 1 ? 'listing' : 'listings'}
+            {thinOnly ? ' ' : ''}{counts.thin} thin {counts.thin === 1 ? 'listing' : 'listings'}
           </button>
         )}
         <span className="text-fg-faint text-sm">
@@ -247,7 +247,7 @@ export default function CorrelationInstruments(
                     {r.med_adv_eur === null || r.med_adv_eur === undefined
                       ? <span className="text-fg-faint" title="No liquidity figure recorded for this listing.">—</span>
                       : <span title={thin ? 'THIN — under EUR 250k/day. Its closes are stale against the real market.' : undefined}>
-                        {eur0.format(r.med_adv_eur)}{thin ? ' ⚠' : ''}
+                        {eur0.format(r.med_adv_eur)}{thin ? ' ' : ''}
                       </span>}
                   </td>
                   <td className={`px-3 py-2 text-right font-mono ${ret === null ? '' : ret >= 0 ? 'text-pos-500' : 'text-neg-500'}`}>
@@ -285,7 +285,7 @@ export default function CorrelationInstruments(
                             </span>
                             {thin && (
                               <span className="text-warn-500">
-                                ⚠ thin listing — median €{eur0.format(r.med_adv_eur as number)}/day
+                                 thin listing — median €{eur0.format(r.med_adv_eur as number)}/day
                               </span>
                             )}
                           </div>

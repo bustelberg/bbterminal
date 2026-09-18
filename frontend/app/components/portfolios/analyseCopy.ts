@@ -26,13 +26,13 @@ const en = {
   score: {
     returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return (YTD) €`, excess: 'Excess',
     portfolioWhat: 'What this portfolio returned year to date, in EUR.', portfolioNote: "the portfolio's return, year to date",
-    /** ⚠ THE CAVEAT ONLY. `where` names AIRS Rendementen (ATT) and `note` names the field, so
+    /**  THE CAVEAT ONLY. `where` names AIRS Rendementen (ATT) and `note` names the field, so
      *  repeating both here was two thirds of a sentence the reader had already had — and it read
      *  as a derivation because it sat under "A formula on the data:". What is left is the part
      *  nothing else says: why a deposit does not flatter this number. */
     portfolioHowBook: 'Flow-aware and includes income, over the calendar year — a deposit does not flatter it.',
     portfolioHowModel: 'Σ(weightᵢ × returnᵢ) over the model’s holdings, each priced from its yfinance closes and converted to EUR at each date’s own rate, so the currency leg is included. Price return: dividends are not.',
-    excessHint: "The portfolio's return minus the benchmark's, in percentage POINTS — the two figures to the left, subtracted. ⚠ It does NOT equal the Attribution table's total: that decomposes the index constituent by constituent, so it reconciles to the rebuilt index rather than to the ETF figure shown here.",
+    excessHint: "The portfolio's return minus the benchmark's, in percentage POINTS — the two figures to the left, subtracted.  It does NOT equal the Attribution table's total: that decomposes the index constituent by constituent, so it reconciles to the rebuilt index rather than to the ETF figure shown here.",
     attributionTitle: 'Why? — break the excess into allocation vs selection (Brinson-Fachler attribution).',
     riskTitle: 'Risk — how far the stock sleeve sits from the benchmark (active share), and how much that difference has actually moved (realised tracking error).',
   },
@@ -50,7 +50,7 @@ const en = {
   },
   axes: {
     sector: 'Sector', region: 'Region', currency: 'Currency',
-    // ⚠ THE CAVEAT CAME OFF (2026-09-07, on request). It was a STATIC restatement of
+    //  The caveat came off (2026-09-07, on request). It was a STATIC restatement of
     // `allocation.excludes`, which sits under the same chart and says the same thing with the
     // measured figure in it: "Excludes 17.8% in funds, bonds and cash — no sector to place". A
     // fixed sentence beside a live one is the weaker of two, and it appeared even at 0%.
@@ -85,7 +85,7 @@ const en = {
     contributionHow: (result: string, basis: string, pct: string) => `Result ÷ the book’s opening capital\n\n${result} ÷ ${basis} = ${pct}`,
   },
   /**
-   * ⚠ THE HEADLINE TILE FOR A NON-EQUITY SLEEVE HAD NO ⓘ (2026-09-07, on request, seen on
+   *  The headline tile for a non-equity sleeve had no ⓘ (2026-09-07, on request, seen on
    * Alternatives). It is the twin of the equity Scorecard's Return tile, which has one — so this
    * was the one class-level return in the modal that named neither its source nor its window.
    */
@@ -105,7 +105,7 @@ const en = {
     momentumMissing: 'A dash is not a zero — 0% would claim it went nowhere. Needs about 13 months of price history; the two risk columns beside it need four years, so a young listing can show momentum and a dash for volatility.',
     momentumMissingWhat: (name: string) => `${name} has under about 13 months of price history, so it has no 12-1 momentum.`,
     momentumWhat: (name: string) => `What ${name} returned over the 12 months ending one month ago.`,
-    // ⚠ THE POPULATION IS IN THE SENTENCE. A rank without its reference set is unreadable — "82nd"
+    //  The population is in the sentence. A rank without its reference set is unreadable — "82nd"
     //   of what, out of how many? — and the chip is glyphs, so this is the only place a reader can
     //   learn that `++` means a percentile against a named universe rather than a verdict.
     momentumRanked: (name: string, ordinal: string, benchmark: string, n: number) =>
@@ -187,21 +187,21 @@ const en = {
   reconciliation: {
     positions: (count: number) => `${count} positions, everything it held or sold`,
     compareHow: (contribution: string, book: string, agrees: boolean) => `AIRS's own cumulatief_rendement against the Contribution total\n\n${contribution} from these rows vs ${book} from AIRS — they ${agrees ? 'agree' : 'do NOT agree'}`,
-    success: (book: string) => `✓ These positions account for the whole year — Contribution adds exactly to AIRS's ${book}.`,
-    mismatch: (sum: string, book: string, residual: string) => `⚠ Contribution adds to ${sum} against AIRS's ${book}; ${residual} of the year is not explained by these rows.`,
+    success: (book: string) => ` These positions account for the whole year — Contribution adds exactly to AIRS's ${book}.`,
+    mismatch: (sum: string, book: string, residual: string) => ` Contribution adds to ${sum} against AIRS's ${book}; ${residual} of the year is not explained by these rows.`,
   },
-  /* ⚠⚠ IT NAMES THE COUNTRIES, AND THE OLD COPY NAMED THE WRONG CAUSE. It used to say "the rest
+  /*  IT NAMES THE COUNTRIES, AND THE OLD COPY NAMED THE WRONG CAUSE. It used to say "the rest
      have no price series yet" — measured on ACWI, exactly ONE of the members that reach the price
      world lacks a series. The real gap is the ISIN bridge, and it is not spread evenly: **India is
      2 priced of 161**, the UK 41 of 72, Hong Kong 152 of 182, while the United States is 474 of
      ~476 and Canada and Australia are whole. "Treat the tilts as indicative" told a reader the
      index was a bit noisy; what they were actually looking at was an ACWI with India removed, and
      the REGIONAL tilt against it is not approximate but wrong in a nameable direction.
-     ⚠ `missing` is empty when the server could not work out the breakdown — the sentence then
+      `missing` is empty when the server could not work out the breakdown — the sentence then
      stops after the count rather than claiming the gap is spread evenly. */
   coverageWarning: (priced: number, total: number, pct: string,
                     missing: { country: string; missing: number; members: number }[]) => {
-    const head = `⚠ This index is rebuilt from ${priced} of its ${total} constituents (${pct}); weights are renormalised over the remainder.`;
+    const head = ` This index is rebuilt from ${priced} of its ${total} constituents (${pct}); weights are renormalised over the remainder.`;
     if (!missing.length) return `${head} Treat the tilts as indicative.`;
     const where = missing.map((m) => `${m.country} (${m.members - m.missing} of ${m.members})`).join(', ');
     return `${head} The gap is NOT spread evenly — most of it is ${where}. Regional tilts against this benchmark are the least reliable part of the chart.`;
@@ -239,7 +239,7 @@ const nl: AnalyseCopy = {
     portfolioWhat: 'Wat deze portefeuille sinds het begin van het jaar in euro heeft gerendeerd.', portfolioNote: 'het rendement van de portefeuille sinds het begin van het jaar',
     portfolioHowBook: 'Houdt rekening met stortingen en onttrekkingen en bevat inkomsten, over het kalenderjaar — een storting vleit dit cijfer dus niet.',
     portfolioHowModel: 'Σ(gewichtᵢ × rendementᵢ) over de posities van het model. Elke positie gebruikt yfinance-slotkoersen en wordt op elke datum tegen de eigen koers naar EUR omgerekend, zodat het valuta-effect is inbegrepen. Koersrendement: dividenden zijn uitgesloten.',
-    excessHint: 'Het rendement van de portefeuille minus dat van de benchmark, in PROCENTPUNTEN — de twee cijfers links van elkaar afgetrokken. ⚠ Dit is NIET gelijk aan het totaal in de attributietabel: die ontleedt de index per constituent en sluit daarom aan op de herbouwde index in plaats van op het hier getoonde ETF-cijfer.',
+    excessHint: 'Het rendement van de portefeuille minus dat van de benchmark, in PROCENTPUNTEN — de twee cijfers links van elkaar afgetrokken.  Dit is NIET gelijk aan het totaal in de attributietabel: die ontleedt de index per constituent en sluit daarom aan op de herbouwde index in plaats van op het hier getoonde ETF-cijfer.',
     attributionTitle: 'Waarom? — splits het meerrendement uit in allocatie en selectie (Brinson-Fachler-attributie).',
     riskTitle: 'Risico — hoe ver het aandelendeel van de benchmark afwijkt (active share) en hoeveel die afwijking werkelijk heeft bewogen (gerealiseerde tracking error).',
   },
@@ -384,11 +384,11 @@ const nl: AnalyseCopy = {
   reconciliation: {
     positions: (count) => `${count} posities, alles wat werd aangehouden of verkocht`,
     compareHow: (contribution, book, agrees) => `AIRS' eigen cumulatief_rendement tegenover het totaal Bijdrage\n\n${contribution} uit deze rijen versus ${book} uit AIRS — ze ${agrees ? 'komen overeen' : 'komen NIET overeen'}`,
-    success: (book) => `✓ Deze posities verklaren het hele jaar — Bijdrage telt exact op tot AIRS' ${book}.`,
-    mismatch: (sum, book, residual) => `⚠ Bijdrage telt op tot ${sum} tegenover AIRS' ${book}; ${residual} van het jaar wordt niet door deze rijen verklaard.`,
+    success: (book) => ` Deze posities verklaren het hele jaar — Bijdrage telt exact op tot AIRS' ${book}.`,
+    mismatch: (sum, book, residual) => ` Bijdrage telt op tot ${sum} tegenover AIRS' ${book}; ${residual} van het jaar wordt niet door deze rijen verklaard.`,
   },
   coverageWarning: (priced, total, pct, missing) => {
-    const head = `⚠ Deze index is herbouwd uit ${priced} van de ${total} constituenten (${pct}); de wegingen zijn over het resterende deel herwogen.`;
+    const head = ` Deze index is herbouwd uit ${priced} van de ${total} constituenten (${pct}); de wegingen zijn over het resterende deel herwogen.`;
     if (!missing.length) return `${head} Beschouw de afwijkingen als indicatief.`;
     const where = missing.map((m) => `${m.country} (${m.members - m.missing} van ${m.members})`).join(', ');
     return `${head} Het gat is NIET gelijkmatig verdeeld — het zit vooral in ${where}. Regionale afwijkingen ten opzichte van deze benchmark zijn het minst betrouwbare deel van de grafiek.`;

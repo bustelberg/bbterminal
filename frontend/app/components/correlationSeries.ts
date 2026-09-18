@@ -16,7 +16,7 @@ export type SparkPoint = { date: string; value: number };
 
 /** Rows of the series for one key, from `from` (inclusive), gaps dropped.
  *
- * ⚠ A `null` IS A DAY THAT INSTRUMENT DID NOT TRADE, NOT A ZERO. The axis is the union of every
+ *  A `null` IS A DAY THAT INSTRUMENT DID NOT TRADE, NOT A ZERO. The axis is the union of every
  * instrument's trading days, so a Tokyo listing carries nulls on Japanese holidays that Paris
  * traded through. Coercing them (`?? 0`) draws a spike to the floor on each one; keeping them as
  * points with a null value makes most chart libraries do the same or break the line. They are
@@ -41,7 +41,7 @@ export function seriesPoints(block: SeriesBlock, key: string | null | undefined,
 
 /** The first day of `year` — the YTD window's left edge for the instrument table.
  *
- * ⚠ THE TABLE'S WINDOW IS NOT A PORTFOLIO'S ANCHOR. A portfolio's YTD opens at
+ *  The table's window is not a portfolio's anchor. A portfolio's YTD opens at
  * `max(1 Jan, its inception)` because pricing its weights before it held them is hindsight; an
  * INSTRUMENT has no inception to respect — it either traded on a day or it did not. So this is a
  * plain 1 January, and a row whose series starts later simply starts later, which its
@@ -53,7 +53,7 @@ export function ytdStart(asOf: string): string {
 
 /** `d` attribute for a sparkline polyline over `points`, in a `w`x`h` box.
  *
- * ⚠ SCALED PER ROW, min-to-max of its OWN series. These are absolute EUR prices (and, for a
+ *  Scaled per row, min-to-max of its OWN series. These are absolute EUR prices (and, for a
  * look-through row, an index based at 100), so one shared scale would flatten every cheap share
  * against Hermès at ~EUR 2,000 and show 240 straight lines. A sparkline answers "what shape",
  * never "how much" — the numeric columns beside it carry level.
@@ -74,7 +74,7 @@ export function sparkPath(points: SparkPoint[], w: number, h: number, pad = 1): 
 
 /** Percentage change across the window, or null when there is nothing to compare.
  *
- * ⚠ null RATHER THAN 0 ON A SINGLE POINT. One observation is not a 0% return, it is no return —
+ *  null RATHER THAN 0 ON A SINGLE POINT. One observation is not a 0% return, it is no return —
  * and a column of quiet zeros is how a thin listing passes for a stable one.
  */
 export function windowReturnPct(points: SparkPoint[]): number | null {
@@ -87,13 +87,13 @@ export function windowReturnPct(points: SparkPoint[]): number | null {
 
 /** The vendors behind one row, as a short label plus the long form for a tooltip.
  *
- * ⚠⚠ EVERY PRICED ROW HERE SAYS "yfinance", AND THAT SAMENESS IS THE ANSWER, NOT A BUG. This app
+ *  Every priced row here says "yfinance", AND THAT SAMENESS IS THE ANSWER, NOT A BUG. This app
  * holds TWO price worlds — GuruFocus (`metric_data`, keyed on company_id) prices the /benchmarks
  * index and the momentum engine; yfinance (`asset_price`, keyed on ISIN) prices the AIRS books —
  * and only the second one reaches this matrix. Someone reading a correlation has no way to know
  * that without being told, and the two vendors disagree on adjustment convention and FX.
  *
- * ⚠ AND THE PRICE IS ONLY HALF OF IT. A EUR level for a USD holding is a yfinance close TIMES an
+ *  And the price is only half of it. A EUR level for a USD holding is a yfinance close TIMES an
  * ECB rate — two vendors multiplied together — so the FX leg is named too. A EUR-quoted holding
  * has no second vendor because no conversion happens, which is why it reads plain "yfinance"
  * rather than being padded out to look like the others.
@@ -135,7 +135,7 @@ export type InstrumentSort = 'holdings' | 'weight' | 'name' | 'liquidity' | 'ret
 
 /** Sort comparator for the table.
  *
- * ⚠ ABSENT SORTS TO THE BOTTOM IN BOTH DIRECTIONS — the rule the /portfolios table already
+ *  Absent sorts to the bottom in both directions — the rule the /portfolios table already
  * follows for its own absent states. An instrument with no liquidity figure is not the least
  * liquid one, and an unpriced row has no return to be worst at; either would otherwise take the
  * top of a descending sort and read as a finding.

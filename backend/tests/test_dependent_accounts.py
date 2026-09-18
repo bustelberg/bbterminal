@@ -1,6 +1,6 @@
 """Refreshing a book must also refresh the books it is BUILT FROM.
 
-⚠ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq AMCs wrapping another strategy, and
+ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq AMCs wrapping another strategy, and
 everything shown through one — the looked-through holdings, their returns, the whole attribution —
 is read from the WRAPPED book's own scan. Re-scanning the parent alone re-reads the twelve lines it
 stores and leaves the forty instruments behind them dated to whenever those books were last
@@ -36,7 +36,7 @@ def graph(monkeypatch):
                 {"portefeuille": "A", "model_portfolio_id": 3},
                 {"portefeuille": "B", "model_portfolio_id": 4},
                 {"portefeuille": "LOOP", "model_portfolio_id": 9},
-                # ⚠ Paired with no model — it can never be a dependency, and must not crash the
+                #  Paired with no model — it can never be a dependency, and must not crash the
                 # lookup either.
                 {"portefeuille": "ORPHAN", "model_portfolio_id": None}]
     monkeypatch.setattr("routers._airs_account_links.list_account_links",
@@ -64,7 +64,7 @@ class TestItFollowsTheChain:
 
 
 class TestCycles:
-    """⚠ THE CYCLE IS REAL, NOT DEFENSIVE PROGRAMMING. `_airs_portfolio_links` documents it:
+    """ THE CYCLE IS REAL, NOT DEFENSIVE PROGRAMMING. `_airs_portfolio_links` documents it:
     TOPS_STS_L's best name match is the wrapper of the strategy it IS, and following that link
     walks back to the row you started from. Unguarded, a refresh recurses until the session dies."""
 
@@ -102,7 +102,7 @@ class TestItNeverBreaksTheRefresh:
         assert V.dependent_accounts("PARENT") == []
 
     def test_it_does_not_freshen(self, graph):
-        """⚠ `freshen=False`. Deciding what to scrape must not itself scrape — that would put a
+        """ `freshen=False`. Deciding what to scrape must not itself scrape — that would put a
         download in front of every download, on the very session the refresh is about to use."""
         import inspect
 

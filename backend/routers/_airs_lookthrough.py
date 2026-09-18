@@ -14,18 +14,18 @@ WHY THE UNEXPANDED COMPOSITION CANNOT BE ANALYSED
     is what spends it: replace the certificate with the holdings of the model behind it, scaled
     by the certificate's own weight, so the analysis sees the actual stocks.
 
-⚠ ONE HOP, AND A VISITED SET. A model can hold a certificate of a model that holds a certificate;
+ ONE HOP, AND A VISITED SET. A model can hold a certificate of a model that holds a certificate;
     `TOPS_STS_L` holds "Star Selection Index" at 100% and IS reachable as a link target elsewhere,
     so an unguarded expansion recurses until the stack ends. One hop is what the data needs today
     and it is bounded by construction; the visited set makes a cycle impossible rather than
     unlikely.
 
-⚠ A CERTIFICATE WHOSE TARGET HAS NO COMPOSITION IS LEFT ALONE. Looking through to nothing would
+ A CERTIFICATE WHOSE TARGET HAS NO COMPOSITION IS LEFT ALONE. Looking through to nothing would
     silently delete its weight from the portfolio — the total would still read 100% because
     everything else renormalises around it, so the loss would be invisible. It stays an opaque
     leg, exactly as before, and `opaque_pct` reports it.
 
-⚠ THE SAME STOCK REACHED TWICE IS ONE LEG. AITopSelectie and MomentumTopSelectie can both hold
+ THE SAME STOCK REACHED TWICE IS ONE LEG. AITopSelectie and MomentumTopSelectie can both hold
     NVIDIA; emitted as two legs, every downstream consumer either double-counts it or dedupes it
     by its own rule. Merged here, once, with the weights summed — the one place that knows both
     halves came from the same underlying.
@@ -79,7 +79,7 @@ def expand_positions(portfolio_id: int, datum: str | None,
     legs: list[dict] = []
     expanded: list[dict] = []
     looked_through = opaque = 0.0
-    # ⚠ The PARENT is already visited. A certificate that links back to the portfolio being
+    #  The PARENT is already visited. A certificate that links back to the portfolio being
     # analysed is the cycle this exists to stop, not a special case to notice later.
     visited = {portfolio_id}
 
@@ -103,7 +103,7 @@ def expand_positions(portfolio_id: int, datum: str | None,
             cw = float(c.get("percentage") or 0)
             if cw <= 0:
                 continue
-            # ⚠ Scaled by the child's OWN total, not by 100. A composition that sums to 98.7%
+            #  Scaled by the child's OWN total, not by 100. A composition that sums to 98.7%
             # (rounding, or a position AIRS dropped) would otherwise quietly shrink the parent's
             # weight in it and hand the difference to everything else.
             legs.append({**c, "percentage": w * cw / inner,
@@ -126,7 +126,7 @@ def merge_by_isin(legs: list[dict], fields: tuple[str, ...] = ("percentage",)) -
     """One leg per ISIN, `fields` summed. Legs with no ISIN (cash) are never merged — they are
     not the same instrument just because neither has an identifier.
 
-    ⚠ EVERY EXPANDED LIST MUST GO THROUGH THIS. AITopSelectie and MomentumTopSelectie both hold
+     EVERY EXPANDED LIST MUST GO THROUGH THIS. AITopSelectie and MomentumTopSelectie both hold
     NVIDIA, and a portfolio can hold a stock directly AND through two certificates — so an
     unmerged expansion emits the same ISIN three times. Downstream that is not a tidiness
     problem: React renders the drill-down keyed by ISIN and logs "Encountered two children with
@@ -151,7 +151,7 @@ def merge_by_isin(legs: list[dict], fields: tuple[str, ...] = ("percentage",)) -
             continue
         for f in fields:
             prev[f] = float(prev.get(f) or 0) + float(leg.get(f) or 0)
-        # ⚠ THE ROUTES IN ARE UNIONED, NOT OVERWRITTEN. A stock reached through three certificates
+        #  The routes in are unioned, not overwritten. A stock reached through three certificates
         # is ONE position, but "which of my strategies put me in NVIDIA" has three answers and
         # keeping the first (or collapsing to "several") throws away the only thing the merged row
         # could still tell you about where the exposure came from.
@@ -162,7 +162,7 @@ def merge_by_isin(legs: list[dict], fields: tuple[str, ...] = ("percentage",)) -
         # and the ledger can only be keyed by the second.
         prev["via_holding_names"] = sorted({*(prev.get("via_holding_names") or []),
                                             *(leg.get("via_holding_names") or [])})
-        # ⚠ AND THE ROUTES KEEP THEIR SIZE, not just their names. `via_names` says MasterCard
+        #  And the routes keep their size, not just their names. `via_names` says MasterCard
         # arrives through Star; it cannot say that EUR 50,489 of it is held outright and EUR 1,991
         # comes through the certificate — and a row labelled only "Star" reads as a position the
         # book does not hold itself. Concatenated, never summed here: each entry is one route in,

@@ -4,13 +4,13 @@
     uv run python scripts/close_benchmark_coverage.py --universe ACWI --universe SP500
     uv run python scripts/close_benchmark_coverage.py --universe ACWI --apply
 
-⚠⚠ IT MAKES NO VENDOR CALLS. `--apply` only UPSERTS rows into `asset_ingest_queue` as `pending`;
+ IT MAKES NO VENDOR CALLS. `--apply` only UPSERTS rows into `asset_ingest_queue` as `pending`;
    the existing worker (`asset_pipeline.queue.process_slice`) does the resolving, paced, one clean
    pass at a time. That split is deliberate and it is the safe one: Yahoo answers an overloaded
    caller with an EMPTY LIST rather than a 429, so a script that fanned out its own resolution
    would manufacture exactly the `not_found` rows this exists to clean up.
 
-⚠⚠ IT NEVER TOUCHES A ROW THAT ALREADY RESOLVED. `enqueue(skip_existing=True)` drops anything
+ IT NEVER TOUCHES A ROW THAT ALREADY RESOLVED. `enqueue(skip_existing=True)` drops anything
    already `ok`, and that guard is the whole safety story: re-resolving a good row is DESTRUCTIVE —
    Alphabet was once re-resolved onto a Vienna listing 75,000x thinner than Nasdaq. Only rows that
    have never resolved, or resolved to `not_found`/`error`, are ever queued here.
@@ -48,7 +48,7 @@ from deps import IN_CHUNK_SIZE, supabase  # noqa: E402
 def _universe_company_rows(label: str) -> list[dict]:
     """Every company in the universe, with its ISIN, country and asset-row state.
 
-    ⚠ PAGED. `universe_membership` is thousands of rows and PostgREST caps a page at 1,000 on the
+     PAGED. `universe_membership` is thousands of rows and PostgREST caps a page at 1,000 on the
     cloud — an unpaged read here would report a confident, wrong, and much rosier picture.
     """
     uni = (supabase.table("universe").select("universe_id")
@@ -127,7 +127,7 @@ def _report(label: str, apply: bool) -> int:
     for c, m, n in worst:
         print(f"    {c:24s} {m:4d} of {n:4d}")
 
-    # ⚠ QUEUEABLE = has an ISIN AND is not already `ok`. A `no ISIN` member cannot be queued at all
+    #  QUEUEABLE = has an ISIN AND is not already `ok`. A `no ISIN` member cannot be queued at all
     #   — there is nothing to queue — and saying so is the point of splitting the buckets.
     queueable: list[str] = []
     unpriceable = 0
@@ -156,7 +156,7 @@ def _report(label: str, apply: bool) -> int:
     if not queueable:
         print("\n  nothing to queue.")
         return 0
-    # ⚠ `skip_existing=True` — the guard that makes this safe to re-run. Never `False` here: that
+    #  `skip_existing=True` — the guard that makes this safe to re-run. Never `False` here: that
     #   is the flag that re-resolves rows which already work.
     res = enqueue(queueable, skip_existing=True)
     print(f"\n  queued {res['queued']} (skipped {res['skipped_existing']} already ok)")
@@ -171,7 +171,7 @@ def main() -> int:
                     help="actually queue the fixable ISINs (default: report only)")
     args = ap.parse_args()
 
-    # ⚠ A LIVE WORKER IS A REASON TO WAIT, NOT TO ABORT — queueing is a DB write and harmless, but
+    #  A LIVE WORKER IS A REASON TO WAIT, NOT TO ABORT — queueing is a DB write and harmless, but
     #   a worker draining a fresh backlog while another already runs is how Yahoo starts answering
     #   with empty lists and manufacturing `not_found`. Said out loud; the operator decides.
     if args.apply and is_worker_active():

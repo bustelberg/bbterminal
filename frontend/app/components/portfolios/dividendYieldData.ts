@@ -2,7 +2,7 @@
  *  the client from two raw lines so the plotted number and the drill-down can't disagree. Mirrors
  *  {@link ./fcfSbcYieldData}.
  *
- *  ⚠ THE YIELD, NOT DIVIDENDS PER SHARE — the per-share amount has no portfolio-level meaning.
+ *   The yield, not dividends per share — the per-share amount has no portfolio-level meaning.
  *  There is no portfolio share; the amounts are in different currencies; and a level series that
  *  legitimately starts at 0.00 cannot be rebased to a growth index, which is what left the
  *  portfolio's dividend card permanently empty while every holding carried the line. `DPS / price`
@@ -26,7 +26,7 @@ export type DividendYieldInputs = { years: string[]; rows: DividendYieldRow[] };
  * One company's dividend yield for a year (as a %), or null when it can't be computed: Dividends
  * per Share ÷ the fiscal year-end share price.
  *
- * ⚠ AN ABSENT DIVIDEND LINE IS NOT A ZERO. GuruFocus files an explicit `0.00` for a company that
+ *  An absent dividend line is not a zero. GuruFocus files an explicit `0.00` for a company that
  * pays nothing — a real answer that belongs in the average and drags the book's yield down
  * honestly. A MISSING line means we never ingested one, and reading that as zero would let
  * un-ingested holdings quietly deflate the portfolio's yield with a number nobody reported. The

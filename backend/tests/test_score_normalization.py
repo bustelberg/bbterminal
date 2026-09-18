@@ -1,6 +1,6 @@
 """Min-max normalization gives a fat-tailed signal a fraction of the weight it was assigned.
 
-⚠⚠ THE DEFECT IS IN THE BLEND, NOT IN THE RANKING, AND THAT IS WHY IT SURVIVED. Min-max is
+ THE DEFECT IS IN THE BLEND, NOT IN THE RANKING, AND THAT IS WHY IT SURVIVED. Min-max is
 MONOTONIC, so on a single signal it ranks identically to a percentile and nothing looks wrong —
 every by-hand check of "is this stock above that one" passes. The damage appears only when signals
 are SUMMED: the divisor is `max - min`, so one extreme name compresses everyone else into a sliver
@@ -17,11 +17,11 @@ Measured on ACWI (1,747 names, three equally-weighted price signals, all asked f
 Top-20 selection overlap against `rank` on identical weights: 6 of 20. The signal the strategy is
 named for was quietly worth half its stated weight.
 
-⚠ AND IT NEEDS NO DATA BUG. The real extremes were Kioxia (+1638%), SK Hynix, Micron, Western
+ AND IT NEEDS NO DATA BUG. The real extremes were Kioxia (+1638%), SK Hynix, Micron, Western
 Digital, SK Square — a memory/AI supercycle, a correlated CLUSTER rather than one rogue tick, so
 winsorizing "the outlier" would not have fixed it either.
 
-⚠⚠ THE FIX IS OPT-IN, AND THESE TESTS PIN THAT HARDEST OF ALL. `minmax` stays the DEFAULT because
+ THE FIX IS OPT-IN, AND THESE TESTS PIN THAT HARDEST OF ALL. `minmax` stays the DEFAULT because
 the 0-100 scale moves under any other mode — the median ACWI stock scores 5/100 under `minmax` and
 50/100 under `rank` — and `min_price_score` is read against that scale, with all three live
 scheduled strategies carrying a floor of 30. Flipping the default would silently turn "roughly the
@@ -74,7 +74,7 @@ class TestTheDefect:
         assert eff["mom_3_1"] > 0.40
 
     def test_and_it_is_the_outlier_doing_it(self):
-        """⚠ Same data, ordinary tail: min-max is fine. The mode is not wrong, its DIVISOR is."""
+        """ Same data, ordinary tail: min-max is fine. The mode is not wrong, its DIVISOR is."""
         eff = _effective_weights(_universe(60.0), "minmax")
         assert 0.25 < eff["mom_12_1"] < 0.42
 
@@ -94,11 +94,11 @@ class TestTheFix:
         eff = _effective_weights(_universe(1638.0), "robust_z")
         for k in _KEYS:
             assert eff[k] == pytest.approx(1 / 3, abs=0.02)
-        # ⚠ The distinction from `rank`: two names in the same decile stay APART under robust_z.
+        #  The distinction from `rank`: two names in the same decile stay APART under robust_z.
         s = pd.Series([1.0, 2.0, 3.0, 4.0, 100.0])
         z = _normalize(s, "robust_z")
         assert z.iloc[4] > z.iloc[3], "magnitude survives"
-        # ⚠ Rounded, not `nunique()`: equal-spaced ranks differ in the last float bit
+        #  Rounded, not `nunique()`: equal-spaced ranks differ in the last float bit
         # (0.6 - 0.4 != 0.4 - 0.2), so an exact comparison fails on arithmetic that is correct.
         gaps = _normalize(s, "rank").diff().dropna().round(9)
         assert gaps.nunique() == 1, "rank is equal-spaced — it discards magnitude by design"
@@ -112,7 +112,7 @@ class TestTheFix:
 
 
 class TestTheDefaultIsUnchanged:
-    """⚠⚠ Three live strategies and every saved run depend on this."""
+    """ Three live strategies and every saved run depend on this."""
 
     def test_the_default_is_still_minmax(self):
         assert DEFAULT_SCORE_NORMALIZATION == "minmax"
@@ -132,7 +132,7 @@ class TestTheDefaultIsUnchanged:
 
 
 class TestTheScaleMoves:
-    """⚠⚠ Why this could not simply be corrected in place: `min_price_score` reads this scale."""
+    """ Why this could not simply be corrected in place: `min_price_score` reads this scale."""
 
     def test_the_median_stock_scores_differently_under_each_mode(self):
         df = _universe(1638.0)
@@ -146,7 +146,7 @@ class TestTheScaleMoves:
 
 
 class TestDegenerateInputsAgreeAcrossModes:
-    """⚠ One convention for missing data, decided in `_normalize` rather than per mode."""
+    """ One convention for missing data, decided in `_normalize` rather than per mode."""
 
     @pytest.mark.parametrize("method", SCORE_NORMALIZATIONS)
     @pytest.mark.parametrize("values", [
@@ -159,7 +159,7 @@ class TestDegenerateInputsAgreeAcrossModes:
         assert (out == 0.5).all(), "a degenerate cross-section is neutral, never a rank of 1.0"
 
     def test_zero_mad_with_live_tails_falls_back_to_rank_not_to_neutral(self):
-        """⚠ A zero MAD means the MIDDLE is identical, not that the signal is flat.
+        """ A zero MAD means the MIDDLE is identical, not that the signal is flat.
 
         Returning neutral here would silently delete a signal that does carry information in its
         tails; dividing by the zero MAD would be ±inf.

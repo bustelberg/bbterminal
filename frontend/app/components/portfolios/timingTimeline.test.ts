@@ -29,7 +29,7 @@ describe('buildTimeline', () => {
   });
 
   it('anchors the ends to the window, not to the first and last trade', () => {
-    // ⚠ THE CLAIM THE CHART MAKES. An axis inferred from the trades would put the February sale at
+    //  The claim the chart makes. An axis inferred from the trades would put the February sale at
     // the very start of the year — exactly the thing a reader is meant to learn from the picture.
     const tl = buildTimeline(ADOBE.start, ADOBE.end, ADOBE.open, ADOBE.now, ADOBE.trades)!;
     expect(tl.points[0].x).toBeCloseTo(TL.padL, 5);
@@ -78,7 +78,7 @@ describe('what it refuses to draw', () => {
   });
 
   it('COUNTS an undated trade rather than dropping it', () => {
-    // ⚠ Omitted silently, the markers stop matching the table beside them and nothing says why.
+    //  Omitted silently, the markers stop matching the table beside them and nothing says why.
     const tl = buildTimeline(ADOBE.start, ADOBE.end, ADOBE.open, ADOBE.now,
       [{ datum: null, kind: 'buy', price_eur: 210, effect_eur: 5 }, ...ADOBE.trades])!;
     expect(tl.undated).toBe(1);
@@ -153,7 +153,7 @@ describe('shortDay', () => {
   });
 
   it('does not shift the date across a timezone', () => {
-    // ⚠ Parsed as UTC on purpose. `new Date('2026-02-03')` west of Greenwich renders "2 Feb",
+    //  Parsed as UTC on purpose. `new Date('2026-02-03')` west of Greenwich renders "2 Feb",
     // which puts a decision on the wrong day for no visible reason.
     expect(shortDay('2026-01-01')).toBe('1 Jan');
   });

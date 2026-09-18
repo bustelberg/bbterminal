@@ -5,14 +5,14 @@ import Image from 'next/image'
 /**
  * The frame every signed-out page sits in: login, `/auth/confirm`, `/set-password`.
  *
- * ⚠⚠ IT EXISTS BECAUSE THESE THREE PAGES WERE THE LAST DARK-THEME SURFACES IN THE APP. They were
+ *  It exists because these three pages were the last dark-theme surfaces in the app. They were
  * written before "Azure Blanc" and never converted, so they painted on `bg-scrim` (#0c1118, a
  * near-black) with `text-fg-strong` (#11161d, the LIGHT theme's darkest ink) — ink and ground four
- * points of luminance apart. ⚠ `bg-scrim` survives only where it is a BACKDROP and always with an
+ * points of luminance apart.  `bg-scrim` survives only where it is a BACKDROP and always with an
  * alpha (the mobile drawer's `bg-scrim/60`, a raw-payload block's `bg-scrim/30`); bare, as a page
  * ground, it is the same mistake the `bg-overlay` note in `CLAUDE.md` already records.
  *
- * ⚠ THE POINT OF ONE COMPONENT IS THAT THE THREE PAGES CANNOT DRIFT AGAIN. They are seen in
+ *  The point of one component is that the three pages cannot drift again. They are seen in
  * sequence — request a link, confirm it, choose a password — so a card that changes width, radius
  * or type between steps reads as three different products. Pages own their FIELDS and their
  * SENTENCES; the frame, the mark, the heading scale and the footnote live here.
@@ -77,7 +77,7 @@ export const authLabelClass = 'block text-xs font-medium text-fg-muted mb-1.5'
 /**
  * The primary action.
  *
- * ⚠ `text-white`, NOT `text-fg-strong`. `accent-600` is the button FILL in this theme and
+ *  `text-white`, NOT `text-fg-strong`. `accent-600` is the button FILL in this theme and
  * `fg-strong` is its darkest INK — the pairing the palette exists to prevent, and it was on the
  * login button.
  */
@@ -94,11 +94,11 @@ export const authSecondaryButtonClass =
 /**
  * An error or a confirmation, as a tinted block rather than a line of coloured text.
  *
- * ⚠ THE SENTENCES HERE ARE LONG BY DESIGN — every one of them names what to DO next
+ *  The sentences here are long by design — every one of them names what to DO next
  * (`lib/authError.ts`), and a two-line instruction set in 12px red on white reads as a validation
  * complaint rather than an answer. A block with its own ground is what makes it look like a reply.
  *
- * ⚠ `role="alert"` on the error only. An info block is the expected outcome of pressing the button
+ *  `role="alert"` on the error only. An info block is the expected outcome of pressing the button
  * the person just pressed; announcing it as an alert interrupts a screen reader to state the
  * obvious.
  */

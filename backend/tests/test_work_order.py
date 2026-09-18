@@ -1,12 +1,12 @@
 """The order companies are fetched in — least recently checked first, ties broken at random.
 
-⚠⚠ THE PROBLEM IS ABOUT RUNS THAT DO NOT FINISH. The work list came out in `company_id` order, so a
+ THE PROBLEM IS ABOUT RUNS THAT DO NOT FINISH. The work list came out in `company_id` order, so a
 press that is cancelled — or capped by `limit`, or killed by a deploy — always chewed through the
 same front of the list. Press it three times for five minutes each and you have fetched the same
 opening slice three times and never reached the tail: every call the `*_fetched_at` stamps saved on
 repeat presses was being spent again on re-treading known ground.
 
-⚠ RANDOM WAS THE ASK AND THIS IS STRICTLY BETTER AT IT. Shuffling gives coverage `N(1-(1-m/N)^k)`
+ RANDOM WAS THE ASK AND THIS IS STRICTLY BETTER AT IT. Shuffling gives coverage `N(1-(1-m/N)^k)`
 after k partial runs — it approaches everything and never arrives, and two consecutive presses still
 overlap by chance. Ordering on "when did we last look" makes the frontier ADVANCE, because a company
 just fetched is stamped and sorts to the back: full coverage in `ceil(N/m)` presses, zero overlap.
@@ -33,7 +33,7 @@ def _ids(rows):
     return [c["company_id"] for c in rows]
 
 
-# ⚠ THE DEFAULT IS `needs=("fin",)`, AND THE FIRST VERSION OF THIS FILE GOT IT WRONG. `order_work`
+#  The default is `needs=("fin",)`, AND THE FIRST VERSION OF THIS FILE GOT IT WRONG. `order_work`
 # keys on the OLDEST stamp among the feeds the run will fetch, so a fixture that declares all three
 # feeds while stamping only `financials_fetched_at` gives every company `min(fin, "", "") == ""` —
 # every key ties, the random tie-break decides, and four assertions about ordering fail against
@@ -50,7 +50,7 @@ class TestOldestFirst:
         assert _ids(order_work(work, FIXED)) == [2, 3, 1]
 
     def test_never_checked_comes_before_everything(self):
-        """⚠ A MISSING STAMP SORTS FIRST BY BEING THE EMPTY STRING — these are ISO timestamps, so
+        """ A MISSING STAMP SORTS FIRST BY BEING THE EMPTY STRING — these are ISO timestamps, so
         lexical order IS chronological and `""` precedes every real one. No special case needed."""
         work = [_co(1, fin="2020-01-01T00:00:00"), _co(2, fin=None), _co(3, fin="2019-01-01")]
         assert _ids(order_work(work, FIXED))[0] == 2
@@ -72,7 +72,7 @@ class TestOldestFirst:
 
 
 class TestItRanksOnTheFeedsTHISRunWillFetch:
-    """⚠ A company whose statements are due but whose estimates were checked an hour ago must be
+    """ A company whose statements are due but whose estimates were checked an hour ago must be
     ranked on the STATEMENTS stamp — the other one is not what this press is about."""
 
     def test_a_feed_we_are_not_fetching_is_ignored(self):
@@ -92,7 +92,7 @@ class TestItRanksOnTheFeedsTHISRunWillFetch:
 
 
 class TestTheRandomTieBreak:
-    """⚠ NOT DECORATION. Every never-asked company has the same key, and a company that FAILS is
+    """ NOT DECORATION. Every never-asked company has the same key, and a company that FAILS is
     never stamped — so without jitter the failures, and anything the vendor has no answer for, would
     sit at the identical front position press after press. It is what stops a deterministic order
     from becoming a deterministic rut."""

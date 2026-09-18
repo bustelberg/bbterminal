@@ -7,20 +7,20 @@ import { type Basis } from './quickValuation';
  * The Quick Valuation tab's RENDERED chrome, in both languages — headings, captions, tile labels,
  * chart legends, the basis switch and the empty states.
  *
- * ⚠⚠ THE ⓘ CARDS ARE NOT IN SCOPE AND STAY ENGLISH, deliberately, and this is the same line
+ *  THE ⓘ CARDS ARE NOT IN SCOPE AND STAY ENGLISH, deliberately, and this is the same line
  * `longEquityCopy` drew for the Graphs cards: what a reader scanning the tab reads is the headings,
  * the tile labels and the legends, and those are what say which number they are looking at. The
  * `AspectCard` prose behind each ⓘ is a much larger body of measured, caveat-heavy text (it names
  * GuruFocus line items, explains why a yield is not a multiple, and carries the SBC caveat) and
  * translating it half-way would be worse than not starting.
  *
- * ⚠⚠ SO THE ⓘ PROSE KEEPS USING `BASIS[...]`'s ENGLISH LABELS AND THE UI USES THESE. That split is
+ *  So the ⓘ PROSE KEEPS USING `BASIS[...]`'s ENGLISH LABELS AND THE UI USES THESE. That split is
  * the point, not an oversight: an English sentence with a Dutch metric name spliced into it —
  * "the cash the business threw off per share" under the heading `VKS per aandeel` — reads as a
  * rendering fault. Call sites hold `b` (English, for prose) and `bl` (translated, for what is
  * drawn), and the two are never mixed inside one string.
  *
- * ⚠ `BASIS[...].codes` AND `.estimateCodes` ARE DATA AND ARE NOT HERE. They are GuruFocus metric
+ *  `BASIS[...].codes` AND `.estimateCodes` ARE DATA AND ARE NOT HERE. They are GuruFocus metric
  * codes; a translated code matches nothing and the chart silently empties.
  */
 
@@ -44,7 +44,6 @@ export type QuickValuationCopy = {
   basis: Record<Basis, BasisLabels>;
   /** `Price vs FCF per share` — the primary chart. */
   priceVs: (perShare: string) => string;
-  indexedAt: (year: string) => string;
   notPlottable: (n: string, negativeYear: string) => string;
   priceCagr: string;
   perShareCagr: (perShare: string) => string;
@@ -74,7 +73,7 @@ export type QuickValuationCopy = {
   /**
    * The Price target card beside the chart.
    *
-   * ⚠ ITS ROW LABELS ARE BUILT FROM THE BASIS, so `Current FCF per share` and `Current EPS` are one
+   *  Its row labels are built from the basis, so `Current FCF per share` and `Current EPS` are one
    * template. Writing the seven rows out per basis would be fourteen strings that must agree with
    * the switch, which is the drift `BASIS` exists to prevent.
    */
@@ -119,9 +118,8 @@ const EN: QuickValuationCopy = {
     },
   },
   priceVs: (perShare) => `Price vs ${perShare}`,
-  indexedAt: (year) => `indexed to 100 at FY${year} · log scale`,
   notPlottable: (n, negativeYear) =>
-    `⚠ ${n} ${negativeYear} year${n === '1' ? '' : 's'} not plottable on a log axis`,
+    ` ${n} ${negativeYear} year${n === '1' ? '' : 's'} not plottable on a log axis`,
   priceCagr: 'Price CAGR',
   perShareCagr: (perShare) => `${perShare} CAGR`,
   currentSharePrice: 'Current share price',
@@ -169,9 +167,9 @@ const EN: QuickValuationCopy = {
 };
 
 /**
- * ⚠ TRANSLATED FROM THE ENGLISH ABOVE, never authored here — see the note on `Lang`.
+ *  Translated from the english above, never authored here — see the note on `Lang`.
  *
- * ⚠⚠ `FCF`, `EPS`, `P/FCF`, `P/E` AND `CAGR` STAY. They are what a Dutch wealth manager says out
+ *  `FCF`, `EPS`, `P/FCF`, `P/E` AND `CAGR` STAY. They are what a Dutch wealth manager says out
  * loud — the same exception `managementCopy` records for "active share", "tracking error" and
  * "Sharpe". Spelling `FCF per share` out as `vrije kasstroom per aandeel` in a chart legend would
  * be both longer than the plot and a term nobody uses; `per aandeel` is the part that is ordinary
@@ -199,12 +197,11 @@ const NL: QuickValuationCopy = {
     },
   },
   priceVs: (perShare) => `Koers vs ${perShare}`,
-  indexedAt: (year) => `geïndexeerd op 100 in FY${year} · logaritmische schaal`,
-  // ⚠ `jaar` → `jaren`, NOT `jaar` + `en`. The double vowel drops in the Dutch plural, so
+  //  `jaar` → `jaren`, NOT `jaar` + `en`. The double vowel drops in the Dutch plural, so
   // suffixing produces "jaaren" — which is what a naive port of the English `+ 's'` gives, and
   // what the first cut of this shipped as. The two forms are written out.
   notPlottable: (n, negativeYear) =>
-    `⚠ ${n} ${negativeYear}${n === '1' ? 'jaar' : 'jaren'} niet weer te geven op een logaritmische as`,
+    ` ${n} ${negativeYear}${n === '1' ? 'jaar' : 'jaren'} niet weer te geven op een logaritmische as`,
   priceCagr: 'Koers-CAGR',
   perShareCagr: (perShare) => `CAGR ${perShare}`,
   currentSharePrice: 'Huidige koers',
@@ -236,7 +233,7 @@ const NL: QuickValuationCopy = {
     title: 'Koersdoel',
     reset: 'herstellen',
     resetAria: 'Terug naar de berekende waarde',
-    // ⚠ `Huidige` / `Verwachte` AGREE WITH THE NOUN, and the noun differs per basis: `FCF per
+    //  `Huidige` / `Verwachte` AGREE WITH THE NOUN, and the noun differs per basis: `FCF per
     // aandeel` is de-woord ("de FCF per aandeel"), `EPS` likewise. Both take the -e form, so one
     // template is correct for every row here — which is why these stay templates rather than
     // fourteen written-out strings.

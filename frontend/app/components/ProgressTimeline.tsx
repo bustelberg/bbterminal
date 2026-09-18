@@ -35,9 +35,9 @@ export type ProgressTimelineProps = {
 };
 
 function StepIcon({ status }: { status: StepStatus }) {
-  if (status === 'done') return <span className="text-pos-400 mt-0.5">✓</span>;
+  if (status === 'done') return <span className="text-pos-400 mt-0.5"></span>;
   if (status === 'in_progress') return <span className="text-accent-400 animate-pulse mt-0.5">●</span>;
-  if (status === 'error') return <span className="text-neg-400 mt-0.5">✗</span>;
+  if (status === 'error') return <span className="text-neg-400 mt-0.5"></span>;
   return <span className="text-fg-faint mt-0.5">○</span>;
 }
 

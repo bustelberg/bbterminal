@@ -19,16 +19,16 @@ WHY THIS EXISTS BESIDE THE THREE REPOINTERS
     So the choice is between a wrong series and no series, and no series is the honest one: an
     unpriceable holding reads as unpriceable everywhere, while a wrong one reads as a price.
 
-⚠ IT REFUSES A ROW THAT IS NOT ALREADY FLAGGED. `identity_status='mismatch'` is the pipeline's own
+ IT REFUSES A ROW THAT IS NOT ALREADY FLAGGED. `identity_status='mismatch'` is the pipeline's own
   verdict, recorded at resolve time; requiring it means this script cannot be pointed at a healthy
   row by a typo. `--force` is there for a mismatch the flag missed, and says so in the output.
 
-⚠ IT DOES NOT DELETE THE PRICE ROWS. They are real bars for a real instrument, they are simply
+ IT DOES NOT DELETE THE PRICE ROWS. They are real bars for a real instrument, they are simply
   filed under the wrong ISIN, and once the execution row stops pointing at them nothing reads them.
   Deleting is a separate, irreversible decision — `--drop-prices` takes it deliberately, and only
   when no OTHER execution shares the analysis.
 
-⚠⚠ IT IS NOT DURABLE ON ITS OWN, AND THAT IS NOT THIS SCRIPT'S TO FIX. `queue.requeue_unmapped()`
+ IT IS NOT DURABLE ON ITS OWN, AND THAT IS NOT THIS SCRIPT'S TO FIX. `queue.requeue_unmapped()`
   re-queues any `not_found` row OpenFIGI identified, and `requeue_suspects()` re-queues every
   `mismatch` — so the next `asset_fix_mismaps.py` run hands this ISIN back to the worker, which can
   resolve it onto the same ticker again. The durable fix is a gate at the STORE (refuse to file a
@@ -70,7 +70,7 @@ def main() -> int:
     a = ap.parse_args()
 
     sb = deps.supabase
-    # ⚠ `*`, SO THE PATCH BELOW CAN BE FILTERED TO COLUMNS THAT REALLY EXIST. `sector` looks like
+    #  `*`, SO THE PATCH BELOW CAN BE FILTERED TO COLUMNS THAT REALLY EXIST. `sector` looks like
     # an `asset_execution` column because `asset_grid` has one — the view reads it off the ANALYSIS
     # — and PostgREST answers an update naming a column that is not there with a 42703, at the one
     # moment this script is halfway through a write.
@@ -96,7 +96,7 @@ def main() -> int:
               "wrong mapping; pass --force if you have checked it by hand.\n")
         return 1
 
-    # ⚠⚠ ALREADY UNMAPPED IS A SUCCESS, NOT AN ERROR — and it used to be a CRASH. A second run (or
+    #  Already unmapped is a success, not an error — and it used to be a CRASH. A second run (or
     # a run after the one-shot repair) finds `analysis_id` NULL, and passing that to `.eq()` makes
     # PostgREST answer `invalid input syntax for type bigint: "None"` — a stack trace where the
     # right answer is "nothing to do". These scripts get re-run precisely because nobody is sure
@@ -105,7 +105,7 @@ def main() -> int:
         print("    prices     none — this row is already unmapped, nothing to do\n")
         return 0
 
-    # ⚠ THE PRICE ROWS ARE ONLY ORPHANED IF NOBODY ELSE POINTS AT THE ANALYSIS. A share class or an
+    #  The price rows are only orphaned if nobody else points at the analysis. A share class or an
     #   ADR legitimately mapped to the same series must not lose its prices to this.
     others = [x for x in (sb.table("asset_execution").select("execution_id,isin")
                           .eq("analysis_id", r["analysis_id"]).execute().data or [])
@@ -120,16 +120,16 @@ def main() -> int:
         print("\n  dry run — re-run with --apply to persist\n")
         return 0
 
-    # ⚠⚠ THE WHOLE RESOLVED IDENTITY GOES, NOT JUST THE STATUS. `asset_grid` is a VIEW that joins
+    #  The whole resolved identity goes, not just the status. `asset_grid` is a VIEW that joins
     # the analysis and reads `asset_class` / `name` / `sector` off THIS row, so clearing the status
     # alone leaves every screen still calling an Abu Dhabi bank a First Trust ETF — and
     # `classify_holding` still reads `asset_class='etf'` and still says `fund`. Checked against
     # what a genuine `not_found` row looks like (`analysis_id`, `asset_class`, `sector`, venue and
     # liquidity all NULL, `is_default` false) rather than guessed field by field.
     #
-    # ⚠ `name` BECOMES THE OPENFIGI NAME, which is the instrument this ISIN actually is. Leaving
+    #  `name` BECOMES THE OPENFIGI NAME, which is the instrument this ISIN actually is. Leaving
     # the ETF's name would keep the wrong answer on screen with nothing pointing at it.
-    # ⚠ THE WRITE ITSELF LIVES IN `store.unmap_execution`, NOT HERE. The one-shot repair script
+    #  The write itself lives in `store.unmap_execution`, NOT HERE. The one-shot repair script
     # (`fix_mismapped_assets.py`) does the same thing to fifteen rows, and two copies of "which
     # columns make a row unmapped" is two places for `asset_class` — the field that keeps
     # `classify_holding` answering `fund` — to be forgotten. See that function for why the whole

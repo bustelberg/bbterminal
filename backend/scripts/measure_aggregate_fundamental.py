@@ -1,12 +1,12 @@
 """The index's fundamentals summed in EUR, against the growth-averaged line the app draws.
 
-⚠⚠ THE APP'S LEVEL LINE AVERAGES PER-MEMBER GROWTH RATES AND THEN CHAINS THEM. A growth rate is
+ THE APP'S LEVEL LINE AVERAGES PER-MEMBER GROWTH RATES AND THEN CHAINS THEM. A growth rate is
 bounded below at −100% and unbounded above, so averaging an asymmetric distribution is upward-biased
 and the bias scales with DISPERSION. Measured on ACWI (`scripts/diagnose_blend_steps.py`), lowering
 the accepted-growth cap from +10,000% to +1,000% costs `revenue` 0.03pp a year and `fcf_ps` 4.06pp:
 revenue's growth rates are tightly clustered and FCF/share's are not (p99 +706%, p99.9 +2,183%).
 
-⚠⚠ SUMMING EUROS HAS NO SUCH BIAS, AND NO GUARDS EITHER. `Σ FCF` is path-independent by
+ SUMMING EUROS HAS NO SUCH BIAS, AND NO GUARDS EITHER. `Σ FCF` is path-independent by
 construction — a member at −200 subtracts 200 and a later +200 adds it back, so a round trip through
 zero nets out instead of being floored at −100% one year and refused the next. It needs no growth
 cap, no minimum base and no floor, because it never takes a ratio of one member to itself.
@@ -14,12 +14,12 @@ cap, no minimum base and no floor, because it never takes a ratio of one member 
     total_i(t) = per_share_i(t) x shares_i(t) x fx(period end)
     index(t)   = Σ_i total_i(t)
 
-⚠ THE FX IS THE PERIOD'S OWN END, NOT TODAY'S — the same rule and the same helpers `period_caps_eur`
+ THE FX IS THE PERIOD'S OWN END, NOT TODAY'S — the same rule and the same helpers `period_caps_eur`
 uses. GuruFocus reports in the listing's trading currency per fiscal period; an ACWI cross-section is
 19 currencies, and converting Apple's September year-end at 31 December's rate applies a rate struck
 three months after the figure.
 
-⚠⚠ AND THE COMPOSITION MUST BE HELD FIXED, WHICH IS THE WHOLE DIFFICULTY. A sum changes when its
+ AND THE COMPOSITION MUST BE HELD FIXED, WHICH IS THE WHOLE DIFFICULTY. A sum changes when its
 members change, so a year where fewer constituents reported is a smaller index for that reason
 alone — the sawtooth `carry_forward` and the coverage floors exist to prevent on the averaged path.
 Here it is handled by intersecting: only members with BOTH inputs in BOTH endpoint years are summed,
@@ -77,7 +77,7 @@ def _by_year(ids: list[int], metric: str) -> dict[int, dict[str, float]]:
                 break
             for r in rows:
                 if r.get("numeric_value") is not None:
-                    # ⚠ LAST WINS WITHIN A YEAR. A company filing twice for one fiscal year (a
+                    #  Last wins within a year. A company filing twice for one fiscal year (a
                     # restatement) must contribute once, and the newer figure is the one the app
                     # would show.
                     out[r["company_id"]][str(r["target_date"])[:4]] = float(r["numeric_value"])
@@ -89,7 +89,7 @@ def _fx_by_company(ids: list[int]) -> tuple[dict[int, str], dict]:
     """Each company's reporting currency, and a rate table to convert it — as `period_caps_eur`."""
     from routers._benchmark_index import _fx_to_eur
 
-    # ⚠ THE CURRENCY IS THE EXCHANGE'S, VIA THE JOIN — `company` has no currency column of its
+    #  The currency is the exchange's, via the join — `company` has no currency column of its
     # own. Copied from `period_caps_eur`, which is the only other place that converts a
     # GuruFocus financial to EUR and therefore the only definition of "which currency is this
     # filed in" that can be trusted to match.
@@ -134,7 +134,7 @@ def main() -> int:
         vals = _by_year(ids, metric)
         per_share = metric in _PER_SHARE
 
-        # ⚠ THE INTERSECTION IS TAKEN FIRST AND THE COUNT PRINTED. Summing whoever happens to have
+        #  The intersection is taken first and the count printed. Summing whoever happens to have
         # each year compares two different baskets and calls the difference growth.
         usable = [c for c in ids
                   if y0 in vals.get(c, {}) and y1 in vals.get(c, {})
@@ -152,7 +152,7 @@ def main() -> int:
                     skipped_fx += 1
                     tot[y0] = tot[y0]  # no-op; the member is simply not added
                     break
-                # ⚠⚠ DIVIDE BY THE RATE AND SCALE BY 1e6 — `_rate` returns UNITS PER EUR (IDR
+                #  Divide by the rate and scale by 1e6 — `_rate` returns UNITS PER EUR (IDR
                 # 19,640.83), and GuruFocus financials are in millions. This script shipped with
                 # both wrong and still printed plausible CAGRs, because revenue and EPS are
                 # near-always positive so the error only inflated a positive sum. Its first
@@ -169,7 +169,7 @@ def main() -> int:
         print(f"            {y0}: EUR {tot[y0] / 1e9:>12,.1f}bn   "
               f"{y1}: EUR {tot[y1] / 1e9:>12,.1f}bn   ->  {cagr * 100:+6.2f}%/yr")
         if skipped_fx:
-            print(f"            ⚠ {skipped_fx} member-years had no FX rate and were left out")
+            print(f"             {skipped_fx} member-years had no FX rate and were left out")
 
     print("\nDone. Nothing was written.")
     return 0

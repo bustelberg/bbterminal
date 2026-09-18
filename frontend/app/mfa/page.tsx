@@ -18,11 +18,11 @@ import {
  * The second-factor gate. `proxy.ts` sends every session here that has a verified factor and has
  * not used it yet (`currentLevel aal1`, `nextLevel aal2` — see `lib/mfaGate`).
  *
- * ⚠⚠ IT WEARS `AuthShell`, THE SAME FRAME AS /login AND /auth/confirm, because it belongs to the
+ *  It wears `AuthShell`, THE SAME FRAME AS /login AND /auth/confirm, because it belongs to the
  * same sequence: password, code, in. Rendered as an ordinary page inside the app chrome it would
  * sit beside a nav rail full of links that all bounce straight back here.
  *
- * ⚠ THERE IS AN ESCAPE HATCH AND IT IS NOT DECORATION. Somebody who cannot produce a code — phone
+ *  There is an escape hatch and it is not decoration. Somebody who cannot produce a code — phone
  * flat, wrong device, travelling — is otherwise stuck on a screen with no exit and a session they
  * cannot use, which is the state people resolve by clearing site data or asking for a password
  * reset. Signing out is the honest way off this page.
@@ -50,7 +50,7 @@ function MfaChallenge() {
   const next = safeNext(params.get('next'))
 
   /**
-   * ⚠ THE SAME PRE-EMPTIVE CHECK AS THE ENROLMENT PAGE, for the same reason: GoTrue's acceptance
+   *  The same pre-emptive check as the enrolment page, for the same reason: GoTrue's acceptance
    * window is about 30 seconds and is not configurable, so a machine a minute out rejects every
    * code the reader can possibly produce. Here it matters more than on enrolment — somebody stuck
    * at this gate cannot reach ANY page to find out why.
@@ -79,7 +79,7 @@ function MfaChallenge() {
       }
       const verified = verifiedFactors((data?.all ?? []) as Factor[]);
       setFactors(verified);
-      // ⚠ ONE FACTOR IS THE NORMAL CASE, so it is preselected and the reader never sees a chooser
+      //  One factor is the normal case, so it is preselected and the reader never sees a chooser
       // with a single option — a control that asks a question with one answer.
       if (verified.length > 0) setFactorId(verified[0].id);
     })();
@@ -87,7 +87,7 @@ function MfaChallenge() {
   }, [supabase]);
 
   /**
-   * ⚠⚠ NO FACTORS MEANS LEAVE, and this is the one path that must never dead-end. `proxy.ts` only
+   *  No factors means leave, and this is the one path that must never dead-end. `proxy.ts` only
    * sends people here when GoTrue says they have one — but the two reads are moments apart, and
    * removing your last authenticator in another tab lands exactly in the gap. Without this the
    * reader is on a challenge page for a factor that does not exist, and the gate has stopped
@@ -111,7 +111,7 @@ function MfaChallenge() {
         setError(describeMfaError({ message: e.message }));
         return;
       }
-      // ⚠ A HARD NAVIGATION, NOT `router.push`. Verifying issues a NEW session at `aal2`, and the
+      //  A hard navigation, not `router.push`. Verifying issues a NEW session at `aal2`, and the
       // middleware reads the cookie on the next server request — a client-side transition would
       // arrive at the destination with the old cookie still in flight and be bounced straight back
       // here. The same reason the retired account switcher reloaded.
@@ -180,7 +180,7 @@ function MfaChallenge() {
           <p className="mt-1.5 text-xs text-fg-faint">{copy.codeHint}</p>
         </div>
 
-        {/* ⚠ ABOVE the error: when the clock is out every code fails, so this is the cause and
+        {/*  ABOVE the error: when the clock is out every code fails, so this is the cause and
             the rejection below it is only the symptom. */}
         {clockSkew != null && (
           <AuthNotice kind="error">

@@ -17,7 +17,7 @@ from routers._fundamental_ingest import (
 
 
 class TestOnlyOurOwnGapsAreIngestable:
-    """⚠ A FETCH FIXES A GAP ON OUR SIDE, NOT A PURCHASE DECISION. `unsubscribed` is the data we
+    """ A FETCH FIXES A GAP ON OUR SIDE, NOT A PURCHASE DECISION. `unsubscribed` is the data we
     cannot buy; `fund`/`not_equity`/`cash` are categories the question does not apply to. Offering
     an ingest button on any of them promises something a fetch can never deliver."""
 
@@ -34,7 +34,7 @@ class TestOnlyOurOwnGapsAreIngestable:
 
 
 class TestTheOutcomeIsWhatTheFetchRETURNED:
-    """⚠ NEVER GUESSED FROM THE INPUT. A `no_company` ISIN can resolve to an unsubscribed listing
+    """ NEVER GUESSED FROM THE INPUT. A `no_company` ISIN can resolve to an unsubscribed listing
     or one GuruFocus has no financials for — the status is whatever the fetch actually did."""
 
     def test_rows_loaded_is_ingested(self):
@@ -47,13 +47,13 @@ class TestTheOutcomeIsWhatTheFetchRETURNED:
         assert classify_fetch_outcome(0, 85, False, None)[0] == "ingested"
 
     def test_a_forbidden_fetch_is_unsubscribed_not_an_error(self):
-        """⚠ A 403 is an ANSWER ("you can't have it"), not a fault — a well-formed request the
+        """ A 403 is an ANSWER ("you can't have it"), not a fault — a well-formed request the
         subscription refused. Reading it as an error sends the reader chasing a bug."""
         status, detail = classify_fetch_outcome(0, 0, True, "403 unsubscribed region for X")
         assert status == "unsubscribed"
 
     def test_an_empty_load_with_no_error_is_no_data_not_an_error(self):
-        """⚠ GuruFocus simply has nothing for this listing. `no_data` is a gap, not a fault; only
+        """ GuruFocus simply has nothing for this listing. `no_data` is a gap, not a fault; only
         a real transport/parse error is an `error`."""
         assert classify_fetch_outcome(0, 0, False, None)[0] == "no_data"
 
@@ -68,7 +68,7 @@ class TestTheOutcomeIsWhatTheFetchRETURNED:
 
 
 class TestOnlyTheSameListingIsReused:
-    """⚠ THE "✓ INGESTED BUT NO GF EXCHANGE" BUG. A cross-exchange NAME match (Constellation on
+    """ THE " INGESTED BUT NO GF EXCHANGE" BUG. A cross-exchange NAME match (Constellation on
     TSX) is not the OTC line we resolved — reusing it corrupts that row and leaves the holding
     reading `no_company` because the ISIN stamp lands on the wrong (or a differently-keyed) row."""
 
@@ -123,7 +123,7 @@ class TestResolvingThePrimaryListing:
             assert refusal["company_id"] == 7   # threaded through so the row keeps its identity
 
     def test_a_transient_error_is_retriable_not_not_found(self, monkeypatch):
-        """⚠ A 500 must NOT read as `not_found`. `_resolve_listing` already returns an uncached
+        """ A 500 must NOT read as `not_found`. `_resolve_listing` already returns an uncached
         `error` on a bad spell; the ingest surfaces it as a retriable `error`, not a dead end."""
         from routers._fundamental_ingest import _resolve_primary
         self._patch(monkeypatch, {"status": "error", "gurufocus_ticker": None, "exchange_code": None})

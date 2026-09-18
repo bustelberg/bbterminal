@@ -1,16 +1,16 @@
 """Starting a job is idempotent per (kind, label) — and that is what makes Cancel believable.
 
-⚠⚠ THE BUG THIS PINS PRESENTED AS "CANCEL DOESN'T WORK". Nothing stopped a second press launching a
+ THE BUG THIS PINS PRESENTED AS "CANCEL DOESN'T WORK". Nothing stopped a second press launching a
 second identical job, so two fills ran over the same 1,712 constituents, sharing one global rate
 limiter — both crawling — and a Cancel stopped exactly one of them. The run visibly kept going,
 because a *different* run was still going.
 
-⚠ AND THE SECOND PRESS WAS NOT CARELESSNESS. `PortfolioFundamentalsRefresh` knew it had a job in
+ AND THE SECOND PRESS WAS NOT CARELESSNESS. `PortfolioFundamentalsRefresh` knew it had a job in
 flight only from its own React state, so reopening the modal or reloading the page brought the
 button back reading "Refresh benchmark" while the work was still running. Pressing it again was the
 obvious thing to do.
 
-⚠ ATTACH, DO NOT REFUSE. An error would be correct and useless — the reader wants the thing, and it
+ ATTACH, DO NOT REFUSE. An error would be correct and useless — the reader wants the thing, and it
 is already happening. Handing back the running job lets the second press adopt it, flip the button
 to Cancel, and heal the UI.
 """
@@ -45,7 +45,7 @@ class TestTheSameWorkTwice:
             release.set()
 
     def test_the_worker_body_runs_only_once(self):
-        """⚠ THE COST IS THE POINT — a duplicate is not a wasted handle, it is a second pass over
+        """ THE COST IS THE POINT — a duplicate is not a wasted handle, it is a second pass over
         every constituent, spending the quota twice and contending for the same rate limiter."""
         release = threading.Event()
         runs = []
@@ -66,7 +66,7 @@ class TestTheSameWorkTwice:
             release.set()
 
     def test_different_labels_are_different_work(self):
-        """⚠ (kind, label) IS WHAT "THE SAME WORK" MEANS. Two indices, two companies, two baskets —
+        """ (kind, label) IS WHAT "THE SAME WORK" MEANS. Two indices, two companies, two baskets —
         de-duplicating on `kind` alone would make the AEX press silently adopt the ACWI run."""
         release = threading.Event()
         try:
@@ -77,7 +77,7 @@ class TestTheSameWorkTwice:
             release.set()
 
     def test_a_FINISHED_job_does_not_block_a_new_one(self):
-        """⚠ ONLY A LIVE RUN DE-DUPLICATES. Finished jobs linger in the registry for 15 minutes so a
+        """ ONLY A LIVE RUN DE-DUPLICATES. Finished jobs linger in the registry for 15 minutes so a
         reader can still see how they ended — if those blocked too, the button would go dead for a
         quarter of an hour after every successful press."""
         done, _ = reg.start("test.finished", "ACWI", lambda ctx: "immediate")
@@ -94,7 +94,7 @@ class TestTheSameWorkTwice:
             release.set()
 
     def test_a_cancelled_job_does_not_block_a_new_one(self):
-        # ⚠ THE CANCEL IS THE ONLY THING THAT STOPS IT — `release` is never set. The first version
+        #  The cancel is the only thing that stops it — `release` is never set. The first version
         # set it right after cancelling and the worker raced out through `wait()` returning True
         # BEFORE its next `ctx.check()`, finishing normally: status `done`, and a test named for
         # cancellation that never cancelled anything.

@@ -4,39 +4,39 @@ import { useLang, type Lang } from '../../../lib/i18n';
 import { v } from '../../../lib/dynamicValue';
 
 /**
- * THE RISK PANEL'S COPY, IN BOTH LANGUAGES — the seven views behind the Analyse modal's Risk button.
+ * The risk panel's copy, in both languages — the seven views behind the Analyse modal's Risk button.
  *
- * ⚠⚠ ENGLISH IS THE SOURCE, DUTCH IS THE TRANSLATION, AND A MISSING DUTCH STRING IS A COMPILE
+ *  English is the source, dutch is the translation, and a missing dutch string is a compile
  * ERROR. `nl` is typed as `RiskCopy`, so a key added to `en` and forgotten here fails `tsc` rather
  * than falling back to English — a half-translated panel renders as a rendering bug, and nobody
  * reports one of those as an unfinished translation. Same rule `tablesCopy` and `managementCopy`
  * already set.
  *
- * ⚠ ONE SURFACE, COMPLETE. `managementCopy`'s own header explains why the guarantee is per surface
+ *  One surface, complete. `managementCopy`'s own header explains why the guarantee is per surface
  * rather than per page: the Analyse modal family is ~661 visible strings and requiring all of them
  * before any of them would be one change nobody can review. These seven views are a surface — they
  * are either fully Dutch or fully English, never half — and what is still English is listed in
  * `UNTRANSLATED_SURFACES`.
  *
- * ⚠⚠ THE ⓘ PROSE IS IN SCOPE HERE, WHICH REVERSES THE EARLIER DECISION (2026-08-21 had it out).
+ *  THE ⓘ PROSE IS IN SCOPE HERE, WHICH REVERSES THE EARLIER DECISION (2026-08-21 had it out).
  * These cards are not decoration: they carry the definition, the convention chosen, and the caveat
  * that stops a figure being misread — a Dutch reader who has to switch languages to find out that
  * `ā` was subtracted has not been given the number, only its digits.
  *
- * ⚠ SOME TERMS STAY ENGLISH ON PURPOSE, and they are the exception rather than laziness. "Active
+ *  Some terms stay english on purpose, and they are the exception rather than laziness. "Active
  * share", "tracking error", "drawdown", "Sharpe", "Sortino", "information ratio" and "HHI" are what
  * a Dutch wealth manager says out loud; "actief aandeel" is not a term, it is a translation of one.
  * Where a real Dutch word exists it is used — volatiliteit, correlatie, concentratie, rendement,
  * gewicht, positie, onderneming.
  *
- * ⚠ AIRS'S OWN FIELD NAMES ARE NOT IN HERE, same rule as `managementCopy`: `Beginwaarde`,
+ *  AIRS'S own field names are not in here, same rule as `managementCopy`: `Beginwaarde`,
  * `Huidige waarde` are the SOURCE's column names and appear identically in both languages.
  */
 
 /**
  * A ⓘ card: headline, where it comes from, over what window, and the caveat.
  *
- * ⚠ `how` IS OPTIONAL (2026-08-25). It used to be required, on the reasoning that every figure
+ *  `how` IS OPTIONAL (2026-08-25). It used to be required, on the reasoning that every figure
  * owes the reader a caveat — but a required field gets filled whether or not there is anything to
  * say, and a card whose How restates its What in different words teaches nothing while making the
  * one card that DOES carry a warning look like more of the same. Where a measure is explained by
@@ -45,7 +45,7 @@ import { v } from '../../../lib/dynamicValue';
 type Card = { what: string; where?: string; when?: string; how?: string };
 
 export type RiskCopy = {
-  /** The switch. ⚠ SHORT — six of these sit on one row inside a fixed dialog. */
+  /** The switch.  SHORT — six of these sit on one row inside a fixed dialog. */
   views: {
     active: string; te: string; corr: string; vol: string; dd: string; conc: string;
   };
@@ -60,9 +60,9 @@ export type RiskCopy = {
     measured: string;
     daily: string; weekly: string; monthly: string;
     dailyNote: string;
-    /** ⚠ THE NON-DAILY CADENCES' HOVER. `f` is an operand, not a word — a translation places it. */
+    /**  THE NON-DAILY CADENCES' HOVER. `f` is an operand, not a word — a translation places it. */
     freqNote: (f: number) => string;
-    /** ⚠ THE PRICE PROVENANCE, one sentence. The field and the vendor are operands — they come
+    /**  THE PRICE PROVENANCE, one sentence. The field and the vendor are operands — they come
      *  from `lib/provenance` and are names, never translated. */
     pricedFrom: (field: string, vendor: string) => string;
     computing: string;
@@ -75,19 +75,19 @@ export type RiskCopy = {
     activeShare: string; overlap: string; offBenchmark: string; stocks: string;
     heldOnly: (n: number) => string; everyName: (n: number) => string;
     colCompany: string; colBook: string; colActive: string; notHeld: string;
-    /** The footer row. ⚠ IT SAYS WHICH SET IT TOTALS — see the ⚠⚠ in `ActiveSharePanel`. */
+    /** The footer row.  IT SAYS WHICH SET IT TOTALS — see the  in `ActiveSharePanel`. */
     totalHeld: (n: number) => string;
     totalAll: (n: number) => string;
     totalCard: Card;
     totalCardHeld: Card;
     /**
-     * ⚠ A SENTENCE, NOT `20 / 1678`. Two bare numbers over a slash is not a `Where` — it was
+     *  A sentence, not `20 / 1678`. Two bare numbers over a slash is not a `Where` — it was
      * shortened to dodge a translation and the meaning went with it.
      *
-     * ⚠⚠ AND IT NAMES BOTH VENDORS, because the two sides of this comparison come from different
+     *  And it names both vendors, because the two sides of this comparison come from different
      * ones — the book from an AIRS scan, the index's weights from yfinance market caps — and a
      * `Where` that counted the rows without saying where they came from answered half its own
-     * question. ⚠ The labels come from `provenance.sourceLabel`, never typed here: a source is
+     * question.  The labels come from `provenance.sourceLabel`, never typed here: a source is
      * named once in this app, and a hand-written "AIRS" drifts the moment that table is made
      * more precise.
      */
@@ -99,19 +99,19 @@ export type RiskCopy = {
     /**
      * What each symbol in the active-share formula stands for — see `tipCard`'s `Legend`.
      *
-     * ⚠ THE SYMBOLS THEMSELVES ARE NOT IN HERE. `w_i^{\,p}` is LaTeX, identical in every language,
+     *  The symbols themselves are not in here. `w_i^{\,p}` is LaTeX, identical in every language,
      * and a translated copy of it is a second place for a superscript to go wrong. Only the prose
      * is translated; the call site owns the notation.
      */
     /**
-     * ⚠ BOTH WEIGHT ROWS NAME THEIR SIDE, and neither says "the book". A legend defining `wᵖ` and
+     *  Both weight rows name their side, and neither says "the book". A legend defining `wᵖ` and
      * `wᵇ` is defining which of two weightings a symbol refers to, so "the book's weight" makes
      * the reader carry the mapping themselves — on a screen that already shows the book's name.
      * The names go in badges (`v`), like every other live value in these cards.
      */
     legend: {
       issuer: string; wp: (bookName: string) => string; wb: (bench: string) => string;
-      /** ⚠ THE ROW THAT ANSWERS THE QUESTION THE OVERLAP TILE ACTUALLY PROVOKES — why the
+      /**  THE ROW THAT ANSWERS THE QUESTION THE OVERLAP TILE ACTUALLY PROVOKES — why the
        *  benchmark column can sum to more than the overlap. It is the min, and nothing else. */
       min: string;
       /** The condition under the Off-benchmark sum. */
@@ -122,29 +122,29 @@ export type RiskCopy = {
     /**
      * The active-share card's `When` — ONE LINE PER SIDE, each naming what it dates.
      *
-     * ⚠⚠ IT TAKES ALREADY-FORMATTED DAYS (`asOfLine`) AND NULLS, and the null is the whole point:
+     *  It takes already-formatted days (`asOfLine`) AND NULLS, and the null is the whole point:
      * the copy renders "no recorded date" rather than letting a missing stamp read as now. See the
-     * ⚠⚠ on `asOfLine` — the string this replaced asserted "Today's weights", which is an
+     *  on `asOfLine` — the string this replaced asserted "Today's weights", which is an
      * assumption printed as a fact.
      *
-     * ⚠⚠ TWO LINES AND NO EXPLANATION OF WHY THERE ARE TWO. An earlier version spent a sentence
+     *  Two lines and no explanation of why there are two. An earlier version spent a sentence
      * saying the book and the index are refreshed by different jobs, so judge for yourself — which
      * is what the two dated lines already say, at four times the length. A `When` is read at a
-     * glance; prose in it is prose nobody finishes. ⚠ `\n` is a real line break here: the tooltip
+     * glance; prose in it is prose nobody finishes.  `\n` is a real line break here: the tooltip
      * panel carries `whitespace-pre-line`.
      *
-     * ⚠ THE TWO PARENTHETICALS APPEAR ONLY WHEN THEY HAVE SOMETHING TO SAY — the read date only if
+     *  The two parentheticals appear only when they have something to say — the read date only if
      * it differs from the valuation date, the undated count only if it is not zero. That is what
      * keeps the normal case to one date per line without dropping a fact when the fact exists.
      *
-     * ⚠ DATES ARE NOT TRANSLATED. `2026-08-25` is the same in both languages; only the words are.
+     *  Dates are not translated. `2026-08-25` is the same in both languages; only the words are.
      */
     whenWeights: (bookName: string, book: string | null, read: string | null,
       bench: string, caps: string | null, unstamped: number) => string;
     /**
      * The BOOK's date alone — for a figure with no benchmark in it.
      *
-     * ⚠ THE STOCKS TILE IS ABOUT THE BOOK AND NOTHING ELSE, so printing the index's cap range
+     *  The stocks tile is about the book and nothing else, so printing the index's cap range
      * beside it would date a side that does not appear in the number. Two cards, two Whens,
      * because they genuinely measure different things.
      */
@@ -157,23 +157,23 @@ export type RiskCopy = {
     /**
      * The ā ± TE interval, prepended to the TE card's `how` — see `activeBand`.
      *
-     * ⚠ THE OPERANDS ARRIVE PRE-FORMATTED, SIGNS AND ALL (`signed2` in `TrackingErrorView`). A
+     *  The operands arrive pre-formatted, signs and all (`signed2` in `TrackingErrorView`). A
      * translation places numbers, it never renders them: a `toFixed` on this side would be a
      * second rounding convention, and the band's ends would stop matching the worked line above
      * them in the same card.
      */
-    /** ⚠ `bench` IS NULLABLE because the payload's is — `v()` renders the absence, and an
+    /**  `bench` IS NULLABLE because the payload's is — `v()` renders the absence, and an
      *  empty-string fallback at the call site would print "against " with nothing after it. */
     bandReading: (lo: string, hi: string, centre: string,
                   bench: string | null | undefined) => string;
     cards: { te: Card; activeReturn: Card; infoRatio: Card; observations: Card };
     /**
-     * ⚠⚠ FOUR CARDS SHARE `aₜ`, `T` AND `f`, WHICH IS WHY THE LEGEND IS ONE OBJECT AND NOT FOUR.
+     *  Four cards share `aₜ`, `T` AND `f`, WHICH IS WHY THE LEGEND IS ONE OBJECT AND NOT FOUR.
      * Written per tile the definitions drift on the first edit, and a view where `T` means "paired
      * periods" in one tooltip and "observations" in the next has taught the reader that the symbol
      * is decorative. It moved out of the view unchanged; the English is what was there.
      *
-     * ⚠ THE "the answer:" PREFIX MARKS THE SYMBOL THE TILE ACTUALLY PRINTS, so a reader scanning a
+     *  THE "the answer:" PREFIX MARKS THE SYMBOL THE TILE ACTUALLY PRINTS, so a reader scanning a
      * six-row legend can find the one that is the number in front of them. It is part of the
      * translated string, not glued on at the call site, or the Dutch card would read "the answer:
      * het antwoord".
@@ -188,8 +188,8 @@ export type RiskCopy = {
       prod: string;
       Ra: string; IR: string;
     };
-    /** ⚠ THE FREQUENCY IS AN OPERAND, so the card names the cadence it actually measured.
-     *  ⚠ NULLABLE, matching the payload: `v()` renders the absence, where a `?? ''` at the call
+    /**  THE FREQUENCY IS AN OPERAND, so the card names the cadence it actually measured.
+     *   NULLABLE, matching the payload: `v()` renders the absence, where a `?? ''` at the call
      *  site would print "The T in the formula —  periods" and read as a rendering fault. */
     observationsWhat: (freq: string | null | undefined) => string;
     /** The sentence under the tiles: the book, then the window, then `note`. */
@@ -200,7 +200,7 @@ export type RiskCopy = {
   corr: {
     rhoVs: (bench: string) => string; rSquared: string; meanPair: string; activeVol: string;
     betweenPositions: string; legend: string;
-    /** ⚠ THE COVERAGE SENTENCE, distinct from `thinPairs`: that one explains why a CELL is blank,
+    /**  THE COVERAGE SENTENCE, distinct from `thinPairs`: that one explains why a CELL is blank,
      *  this one says how much of the matrix was measurable at all. */
     pairsMeasured: (measured: string, possible: string, minObs: string, holdings: string) => string;
     leastTitle: string; mostTitle: string;
@@ -210,7 +210,7 @@ export type RiskCopy = {
   };
 
   vol: {
-    /** ⚠ THE TOOLBAR'S TRAILING NOTE. Every figure in this view is annualised and the cadence
+    /**  THE TOOLBAR'S TRAILING NOTE. Every figure in this view is annualised and the cadence
      *  buttons beside it choose the sampling, not the unit — which is the confusion it exists to
      *  head off. */
     shownAnnualised: string;
@@ -226,12 +226,12 @@ export type RiskCopy = {
   };
 
   dd: {
-    /** ⚠ BOTH OPERANDS ARE NULLABLE, matching the payload — `v()` renders the absence, where a
+    /**  BOTH OPERANDS ARE NULLABLE, matching the payload — `v()` renders the absence, where a
      *  `?? ''` at the call site would print "Max drawdown ()" and read as a rendering fault. */
     maxDrawdown: (freq: string | null | undefined) => string;
     benchMax: (bench: string | null | undefined) => string;
     today: string;
-    /** ⚠ THE THRESHOLD IS AN OPERAND — it is configurable, so a hardcoded "5%" would be a label
+    /**  THE THRESHOLD IS AN OPERAND — it is configurable, so a hardcoded "5%" would be a label
      *  that silently stops matching the rows under it. */
     episodes: (pct: string) => string;
     provenance: string;
@@ -294,15 +294,15 @@ const en: RiskCopy = {
       what: 'Both columns sum to 100%, so the Active column sums to exactly zero.',
       where: '½ · Σ |Active| is the active share in the tile above — the same number, from this '
         + 'table.',
-      how: '⚠ THAT ZERO IS THE REASON FOR THE ½. Every overweight has a matching underweight by '
+      how: ' THAT ZERO IS THE REASON FOR THE ½. Every overweight has a matching underweight by '
         + 'construction, so without halving it every difference would be counted twice.',
     },
     totalCardHeld: {
       what: 'The held names only, so the Active column does NOT sum to zero.',
       where: 'Book is 100% by construction; the benchmark column is what the index holds in these '
         + 'same names.',
-      how: '⚠ THE TOTAL IS THE BOOK\'S WHOLE OVERWEIGHT, and it is carried, name for name, by the '
-        + 'index constituents not shown here. Switch to every name to see it cancel. ⚠ ½ Σ |Active| '
+      how: ' THE TOTAL IS THE BOOK\'S WHOLE OVERWEIGHT, and it is carried, name for name, by the '
+        + 'index constituents not shown here. Switch to every name to see it cancel.  ½ Σ |Active| '
         + 'over this subset is NOT the active share — half the sum is missing.',
     },
     coverage: (pct, b) => `Priced ${pct} of ${b}'s members. The missing weight is redistributed `
@@ -310,7 +310,7 @@ const en: RiskCopy = {
     unmatched: (n, pct, names) => `${n} holding${n === 1 ? '' : 's'} (${pct} of the sleeve) could `
       + `not be matched to a company name and count as fully active: ${names}`,
     legend: {
-      // ⚠ IT SAYS WHAT `i` IS, then gives the case that makes the fold matter. The previous
+      //  It says what `i` IS, then gives the case that makes the fold matter. The previous
       // version — "both of its share classes are ONE i, not two" — presupposed two share classes,
       // which almost no company has, and never said that `i` is a term in the sum above.
       issuer: 'one company, and one term in the sum — Alphabet A and Alphabet C are folded into a '
@@ -354,7 +354,7 @@ const en: RiskCopy = {
       stocks: {
         what: 'How much of the whole book this comparison covers.',
         where: 'Funds, cash and bonds are excluded and the rest renormalised to 100%.',
-        how: '⚠ THE FIGURES ABOVE DESCRIBE THIS SLICE, NOT THE BOOK. Leaving cash in at its real '
+        how: ' THE FIGURES ABOVE DESCRIBE THIS SLICE, NOT THE BOOK. Leaving cash in at its real '
           + 'weight would count liquidity as an active bet against every index name at once — a '
           + 'defensible measure, but a different one.',
       },
@@ -367,14 +367,14 @@ const en: RiskCopy = {
     bandReading: (lo, hi, centre, bench) =>
       `A typical year lands ā ± TE — between ${v(lo)} and ${v(hi)} against ${v(bench)}, centred on the mean `
       + `active return of ${v(centre)} and NOT on zero. About two years in three; active returns are `
-      + 'fatter-tailed than normal, so read it as a scale rather than a promise. ⚠ THE CENTRE IS '
+      + 'fatter-tailed than normal, so read it as a scale rather than a promise.  THE CENTRE IS '
       + 'THE ARITHMETIC mean annualised, so it sits a little above the geometric Active return '
       + 'tile beside it — the gap is roughly TE²/2, and a ±σ band is only coherent around the '
       + 'arithmetic one.',
     cards: {
       te: {
         what: "How much the book's return has diverged from the benchmark's, annualised.",
-        how: '⚠ REALISED (ex-post), not the ex-ante forecast from a covariance matrix — those are '
+        how: ' REALISED (ex-post), not the ex-ante forecast from a covariance matrix — those are '
           + 'different numbers and routinely disagree. ā IS subtracted and the divisor is T−1 '
           + '(Bessel); some providers do neither — that version is symmetric about the benchmark, '
           + 'and larger.',
@@ -382,14 +382,14 @@ const en: RiskCopy = {
       activeReturn: {
         what: 'What the sleeve earned above or below the benchmark, per year.',
         where: 'The same active returns, compounded — not their spread.',
-        how: '⚠ THIS IS THE QUANTITY THE TILE BESIDE IT MEASURES THE VOLATILITY OF. They are '
+        how: ' THIS IS THE QUANTITY THE TILE BESIDE IT MEASURES THE VOLATILITY OF. They are '
           + 'constantly confused: a book can wander a long way from its index and end up exactly '
           + 'level, which is a large tracking error and no active return.',
       },
       infoRatio: {
         what: 'Active return per unit of tracking error.',
         where: 'Active return ÷ tracking error, both annualised.',
-        how: 'Whether the divergence was worth taking. ⚠ A dash means the tracking error is ~0 — '
+        how: 'Whether the divergence was worth taking.  A dash means the tracking error is ~0 — '
           + 'there is no risk to divide by, not that the ratio is zero.',
       },
       observations: {
@@ -429,7 +429,7 @@ const en: RiskCopy = {
     legend: 'Blue = diverging, amber = moving together. Ordered by weight.',
     leastTitle: 'Least correlated — what actually diversifies',
     mostTitle: 'Most correlated — one bet held twice',
-    identityBroken: (pp) => `⚠ σₐ measured and σₐ implied by ρ differ by ${pp}pp — the two series `
+    identityBroken: (pp) => ` σₐ measured and σₐ implied by ρ differ by ${pp}pp — the two series `
       + 'are no longer identical. This is a bug, not a market fact.',
     pairsMeasured: (measured, possible, minObs, holdings) =>
       `${v(measured)} of ${v(possible)} pairs with at least ${v(minObs)} shared returns, across `
@@ -440,7 +440,7 @@ const en: RiskCopy = {
     cards: {
       rho: {
         what: 'How closely the stock sleeve has moved with the benchmark.',
-        how: '⚠ THIS IS THE OTHER SIDE OF THE TRACKING ERROR, not a separate fact: '
+        how: ' THIS IS THE OTHER SIDE OF THE TRACKING ERROR, not a separate fact: '
           + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ. The lower this is, the more the book can diverge.',
       },
       rSquared: {
@@ -455,7 +455,7 @@ const en: RiskCopy = {
       activeVol: {
         what: 'The same tracking error the view beside this one reports.',
         where: 'Built from the same series, so the identity below is exact, not approximate.',
-        how: '⚠ THE IDENTITY IS SHOWN, NOT ASSERTED. The figure above is measured directly from '
+        how: ' THE IDENTITY IS SHOWN, NOT ASSERTED. The figure above is measured directly from '
           + 'the active returns; the worked line rebuilds it from ρ. They agree to floating-point '
           + 'noise, and would visibly diverge if the two views ever stopped reading the same series.',
       },
@@ -471,14 +471,14 @@ const en: RiskCopy = {
     cards: {
       volatility: {
         what: "How much the sleeve's own return has varied, annualised.",
-        how: '⚠⚠ NO CASH FLOWS IN IT, and not because they were chain-linked out — this is a '
+        how: ' NO CASH FLOWS IN IT, and not because they were chain-linked out — this is a '
           + 'weighted basket of instrument price returns, not an account value, so a deposit or '
-          + 'withdrawal is simply not in the series. ⚠ Same σₚ the Correlation view uses in '
+          + 'withdrawal is simply not in the series.  Same σₚ the Correlation view uses in '
           + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ.',
       },
       downside: {
         what: 'The same spread, counting only the periods that lost money.',
-        how: "⚠ SORTINO'S CONVENTION, not the semi-deviation (below-MEAN observations only, "
+        how: " SORTINO'S CONVENTION, not the semi-deviation (below-MEAN observations only, "
           + 'divided by how many there are), which reads higher. Both are called "downside '
           + 'deviation"; this is the one the Sortino below is built on. Volatility punishes a good '
           + 'month exactly as hard as a bad one; this does not, which is closer to how the loss is '
@@ -487,13 +487,13 @@ const en: RiskCopy = {
       benchVol: {
         what: "The index's own volatility, on the same periods.",
         where: 'Same function, same series, different input.',
-        how: '⚠ FOR SCALE, NOT AS A VERDICT. A sleeve more volatile than its index is not by '
+        how: ' FOR SCALE, NOT AS A VERDICT. A sleeve more volatile than its index is not by '
           + 'itself worse — that difference is what the Active share and Tracking error views are '
           + 'about.',
       },
       worst: {
         what: 'The single worst period in the window.',
-        how: '⚠ NOBODY HAS EVER EXPERIENCED "18% ANNUALISED VOLATILITY". They have experienced the '
+        how: ' NOBODY HAS EVER EXPERIENCED "18% ANNUALISED VOLATILITY". They have experienced the '
           + 'worst week. For a fat-tailed book the two are far apart, which is exactly when σ on '
           + 'its own misleads.',
       },
@@ -504,13 +504,13 @@ const en: RiskCopy = {
       },
       sharpe: {
         what: 'Return per unit of total volatility.',
-        how: '⚠ THE RISK-FREE RATE IS STATED because a Sharpe quoted without it is not comparable '
+        how: ' THE RISK-FREE RATE IS STATED because a Sharpe quoted without it is not comparable '
           + "with anybody else's, and at current rates that is not cosmetic.",
       },
       sortino: {
         what: 'The same ratio, over downside deviation instead of total volatility.',
         where: 'Return ÷ downside deviation, both annualised.',
-        how: '⚠ A DASH MEANS NOTHING EVER FELL BELOW THE TARGET — there is no downside to divide '
+        how: ' A DASH MEANS NOTHING EVER FELL BELOW THE TARGET — there is no downside to divide '
           + 'by. That is a measurement, not a missing number.',
       },
     },
@@ -538,26 +538,26 @@ const en: RiskCopy = {
     cards: {
       maxDrawdown: {
         what: 'The deepest peak-to-trough fall in the window.',
-        how: '⚠ THE CADENCE IS IN THE LABEL because it changes the answer: a fall that recovers '
+        how: ' THE CADENCE IS IN THE LABEL because it changes the answer: a fall that recovers '
           + 'inside a week is invisible to a weekly series. See the comparison below.',
       },
       benchMax: {
         what: "The index's own deepest fall, over the same periods.",
         where: 'Same formula, same window, different series.',
-        how: "For scale. ⚠ It carries none of this book's survivorship bias — the index kept its "
+        how: "For scale.  It carries none of this book's survivorship bias — the index kept its "
           + 'fallers — so the gap between the two flatters the book.',
       },
       today: {
         what: 'How far below its own high water mark the sleeve sits right now.',
         where: 'The window ended at a new high when this reads 0%.',
-        how: '⚠ "Worst ever −31%" and "down 28% right now" are very different conversations, and '
+        how: ' "Worst ever −31%" and "down 28% right now" are very different conversations, and '
           + 'the second is the one being had.',
       },
       episodes: {
         what: 'Distinct peak-to-trough episodes in the window.',
         where: 'An episode ends only when the previous high is regained.',
-        how: '⚠ ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four −25%s '
-          + 'share a maximum and are not the same risk. ⚠ A 40% fall that bounces 5% and falls '
+        how: ' ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four −25%s '
+          + 'share a maximum and are not the same risk.  A 40% fall that bounces 5% and falls '
           + 'further is ONE drawdown, not two — splitting on direction would report shallow dips '
           + 'and no crash.',
       },
@@ -580,26 +580,26 @@ const en: RiskCopy = {
     cards: {
       effective: {
         what: 'How many equally-sized positions this book behaves like.',
-        how: '⚠ THE BETTER NUMBER, and the reason it leads. A cut at exactly ten is arbitrary — '
+        how: ' THE BETTER NUMBER, and the reason it leads. A cut at exactly ten is arbitrary — '
           + 'two books with the same C₁₀ can be an even ten-name portfolio and one dominated by '
           + 'its top three. This has no cut-off. Forty names of which five dominate reads far '
           + 'below forty.',
       },
       top10: {
         what: 'The share of the stock sleeve in its ten largest companies.',
-        how: '⚠⚠ TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is what '
+        how: ' TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is what '
           + 'compares across books; the line beneath is of the whole book including cash and '
           + 'funds. A book that is 30% cash really is less concentrated in absolute terms.',
       },
       largest: {
         what: 'The single biggest company, as a share of the sleeve.',
-        how: '⚠ A BIG POSITION IS NOT AUTOMATICALLY A BIG BET. Apple at 6% against an index '
+        how: ' A BIG POSITION IS NOT AUTOMATICALLY A BIG BET. Apple at 6% against an index '
           + 'holding 5% is a 1pp bet; the same 6% in a name the index does not hold is a 6pp one. '
           + 'The table below carries both.',
       },
       benchEffective: {
         what: "The index's own effective position count, on the same measure.",
-        how: '⚠ A cap-weighted index is far more concentrated than its member count suggests, so '
+        how: ' A cap-weighted index is far more concentrated than its member count suggests, so '
           + 'this is usually a small fraction of it — which is the honest comparison, not the raw '
           + 'count.',
       },
@@ -632,7 +632,7 @@ const nl: RiskCopy = {
     activeShare: 'Active share', overlap: 'Overlap', offBenchmark: 'Buiten de benchmark',
     stocks: 'Aandelen',
     heldOnly: (n) => `Wat we houden (${n})`, everyName: (n) => `Alle namen (${n})`,
-    // ⚠ "Portfolio", NIET "Boek" (2026-09-07, op verzoek). Het is de kolomkop van de tabel in
+    //  "Portfolio", NIET "Boek" (2026-09-07, op verzoek). Het is de kolomkop van de tabel in
     // Risico, en de ⓘ eronder gebruikt hetzelfde woord — anders benoemt één paneel dezelfde kolom
     // op twee manieren.
     colCompany: 'Onderneming', colBook: 'Portfolio', colActive: 'Actief', notHeld: 'niet gehouden',
@@ -646,16 +646,16 @@ const nl: RiskCopy = {
       what: 'Beide kolommen tellen op tot 100%, dus de kolom Actief telt op tot precies nul.',
       where: '½ · Σ |Actief| is de active share in de tegel hierboven — hetzelfde getal, uit deze '
         + 'tabel.',
-      how: '⚠ DIE NUL IS DE REDEN VOOR DE ½. Elke overweging heeft per constructie een even grote '
+      how: ' DIE NUL IS DE REDEN VOOR DE ½. Elke overweging heeft per constructie een even grote '
         + 'onderweging, dus zonder halveren zou elk verschil dubbel worden geteld.',
     },
     totalCardHeld: {
       what: 'Alleen de gehouden namen, dus de kolom Actief telt niet op tot nul.',
       where: 'Portfolio is per constructie 100%; de benchmarkkolom is wat de index in diezelfde namen '
         + 'houdt.',
-      how: '⚠ HET TOTAAL IS DE VOLLEDIGE OVERWEGING VAN HET BOEK, en die wordt naam voor naam '
+      how: ' HET TOTAAL IS DE VOLLEDIGE OVERWEGING VAN HET BOEK, en die wordt naam voor naam '
         + 'gedragen door de indexposities die hier niet staan. Schakel naar alle namen om het te '
-        + 'zien wegvallen. ⚠ ½ Σ |Actief| over deze deelverzameling is NIET de active share — de '
+        + 'zien wegvallen.  ½ Σ |Actief| over deze deelverzameling is NIET de active share — de '
         + 'helft van de som ontbreekt.',
     },
     coverage: (pct, b) => `${pct} van de leden van ${b} geprijsd. Het ontbrekende gewicht wordt over `
@@ -705,7 +705,7 @@ const nl: RiskCopy = {
       stocks: {
         what: 'Welk deel van het hele boek deze vergelijking beslaat.',
         where: 'Fondsen, liquiditeiten en obligaties vallen eruit; de rest wordt geherweegd naar 100%.',
-        how: '⚠ DE CIJFERS HIERBOVEN BESCHRIJVEN DIT DEEL, NIET HET BOEK. Liquiditeiten op hun '
+        how: ' DE CIJFERS HIERBOVEN BESCHRIJVEN DIT DEEL, NIET HET BOEK. Liquiditeiten op hun '
           + 'werkelijke gewicht laten staan zou liquiditeit als actieve positie tegen elke '
           + 'indexnaam tegelijk tellen — verdedigbaar, maar een andere maatstaf.',
       },
@@ -719,7 +719,7 @@ const nl: RiskCopy = {
       `Een doorsnee jaar landt op ā ± TE — tussen ${v(lo)} en ${v(hi)} ten opzichte van ${v(bench)}, met `
       + `als midden het gemiddelde actieve rendement van ${v(centre)} en dus NIET nul. Ongeveer twee `
       + 'op de drie jaren; actieve rendementen hebben dikkere staarten dan een normale verdeling, '
-      + 'dus lees het als een orde van grootte en niet als een belofte. ⚠ HET MIDDEN IS HET '
+      + 'dus lees het als een orde van grootte en niet als een belofte.  HET MIDDEN IS HET '
       + 'REKENKUNDIG gemiddelde op jaarbasis en ligt daarmee iets boven de geometrische tegel '
       + 'Actief rendement ernaast — het verschil is ruwweg TE²/2, en een ±σ-band is alleen '
       + 'consistent rond het rekenkundige gemiddelde.',
@@ -727,7 +727,7 @@ const nl: RiskCopy = {
       te: {
         what: 'Hoeveel het rendement van het boek is afgeweken van dat van de benchmark, '
           + 'geannualiseerd.',
-        how: '⚠ GEREALISEERD (ex-post), niet de ex-ante voorspelling uit een covariantiematrix — '
+        how: ' GEREALISEERD (ex-post), niet de ex-ante voorspelling uit een covariantiematrix — '
           + 'dat zijn verschillende getallen en ze lopen structureel uiteen. ā WORDT afgetrokken en '
           + 'de noemer is T−1 (Bessel); sommige aanbieders doen geen van beide — die versie is '
           + 'symmetrisch rond de benchmark, en groter.',
@@ -735,14 +735,14 @@ const nl: RiskCopy = {
       activeReturn: {
         what: 'Wat de selectie boven of onder de benchmark verdiende, per jaar.',
         where: 'Dezelfde actieve rendementen, samengesteld — niet hun spreiding.',
-        how: '⚠ DIT IS DE GROOTHEID WAARVAN DE TEGEL ERNAAST DE VOLATILITEIT MEET. Ze worden '
+        how: ' DIT IS DE GROOTHEID WAARVAN DE TEGEL ERNAAST DE VOLATILITEIT MEET. Ze worden '
           + 'voortdurend verward: een boek kan ver van zijn index afdwalen en precies gelijk '
           + 'eindigen — een grote tracking error en geen actief rendement.',
       },
       infoRatio: {
         what: 'Actief rendement per eenheid tracking error.',
         where: 'Actief rendement ÷ tracking error, beide geannualiseerd.',
-        how: 'Of de afwijking het waard was. ⚠ Een streepje betekent dat de tracking error ~0 is — '
+        how: 'Of de afwijking het waard was.  Een streepje betekent dat de tracking error ~0 is — '
           + 'er is geen risico om door te delen, niet dat de ratio nul is.',
       },
       observations: {
@@ -785,7 +785,7 @@ const nl: RiskCopy = {
     legend: 'Blauw = tegengesteld, amber = beweegt mee. Gesorteerd op gewicht.',
     leastTitle: 'Laagst gecorreleerd — wat werkelijk spreidt',
     mostTitle: 'Hoogst gecorreleerd — één positie, twee keer gehouden',
-    identityBroken: (pp) => `⚠ De gemeten σₐ en de uit ρ afgeleide σₐ verschillen ${pp}pp — de twee `
+    identityBroken: (pp) => ` De gemeten σₐ en de uit ρ afgeleide σₐ verschillen ${pp}pp — de twee `
       + 'reeksen zijn niet langer identiek. Dit is een fout in de software, geen marktfeit.',
     pairsMeasured: (measured, possible, minObs, holdings) =>
       `${v(measured)} van ${v(possible)} paren met minstens ${v(minObs)} overlappende rendementen, `
@@ -796,7 +796,7 @@ const nl: RiskCopy = {
     cards: {
       rho: {
         what: 'Hoe nauw de aandelenselectie met de benchmark is meebewogen.',
-        how: '⚠ DIT IS DE ANDERE KANT VAN DE TRACKING ERROR, geen los feit: '
+        how: ' DIT IS DE ANDERE KANT VAN DE TRACKING ERROR, geen los feit: '
           + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ. Hoe lager dit is, hoe verder het boek kan afwijken.',
       },
       rSquared: {
@@ -812,7 +812,7 @@ const nl: RiskCopy = {
         what: 'Dezelfde tracking error die de weergave hiernaast rapporteert.',
         where: 'Uit dezelfde reeks opgebouwd, dus de identiteit hieronder is exact, niet bij '
           + 'benadering.',
-        how: '⚠ DE IDENTITEIT WORDT GETOOND, NIET BEWEERD. Het cijfer hierboven is rechtstreeks uit '
+        how: ' DE IDENTITEIT WORDT GETOOND, NIET BEWEERD. Het cijfer hierboven is rechtstreeks uit '
           + 'de actieve rendementen gemeten; de uitgewerkte regel bouwt het opnieuw op uit ρ. Ze '
           + 'komen tot op afrondingsruis overeen, en zouden zichtbaar uiteenlopen als de twee '
           + 'weergaven ooit niet meer dezelfde reeks zouden lezen.',
@@ -829,14 +829,14 @@ const nl: RiskCopy = {
     cards: {
       volatility: {
         what: 'Hoezeer het eigen rendement van de selectie heeft gevarieerd, geannualiseerd.',
-        how: '⚠⚠ ER ZITTEN GEEN KASSTROMEN IN, en niet omdat ze eruit zijn geketend — dit is een '
+        how: ' ER ZITTEN GEEN KASSTROMEN IN, en niet omdat ze eruit zijn geketend — dit is een '
           + 'gewogen mandje van koersrendementen van instrumenten, geen rekeningwaarde, dus een '
-          + 'storting of onttrekking zit er eenvoudigweg niet in. ⚠ Dezelfde σₚ die de '
+          + 'storting of onttrekking zit er eenvoudigweg niet in.  Dezelfde σₚ die de '
           + 'Correlatie-weergave gebruikt in σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ.',
       },
       downside: {
         what: 'Dezelfde spreiding, maar alleen over de perioden met verlies.',
-        how: '⚠ DE CONVENTIE VAN SORTINO, niet de semi-deviatie (alleen waarnemingen onder het '
+        how: ' DE CONVENTIE VAN SORTINO, niet de semi-deviatie (alleen waarnemingen onder het '
           + 'GEMIDDELDE, gedeeld door hun aantal), die hoger uitkomt. Beide heten "neerwaartse '
           + 'deviatie"; dit is degene waarop de Sortino hieronder is gebouwd. Volatiliteit straft '
           + 'een goede maand even hard af als een slechte; dit niet, en dat sluit dichter aan bij '
@@ -845,13 +845,13 @@ const nl: RiskCopy = {
       benchVol: {
         what: 'De eigen volatiliteit van de index, over dezelfde perioden.',
         where: 'Dezelfde functie, dezelfde reeks, andere invoer.',
-        how: '⚠ TER VERGELIJKING, NIET ALS OORDEEL. Een selectie die volatieler is dan haar index '
+        how: ' TER VERGELIJKING, NIET ALS OORDEEL. Een selectie die volatieler is dan haar index '
           + 'is daarmee niet slechter — dat verschil is precies waar Active share en Tracking error '
           + 'over gaan.',
       },
       worst: {
         what: 'De slechtste afzonderlijke week of maand in de gemeten periode.',
-        how: '⚠ NIEMAND HEEFT OOIT "18% GEANNUALISEERDE VOLATILITEIT" MEEGEMAAKT. Men heeft de '
+        how: ' NIEMAND HEEFT OOIT "18% GEANNUALISEERDE VOLATILITEIT" MEEGEMAAKT. Men heeft de '
           + 'slechtste week meegemaakt. Bij een boek met dikke staarten liggen die twee ver uiteen, '
           + 'en juist dan misleidt σ op zichzelf.',
       },
@@ -862,7 +862,7 @@ const nl: RiskCopy = {
       },
       sharpe: {
         what: 'Rendement per eenheid totale volatiliteit.',
-        how: '⚠ DE RISICOVRIJE VOET WORDT VERMELD, want een Sharpe zonder die voet is niet '
+        how: ' DE RISICOVRIJE VOET WORDT VERMELD, want een Sharpe zonder die voet is niet '
           + 'vergelijkbaar met die van anderen, en bij de huidige rente is dat verschil niet '
           + 'cosmetisch.',
       },
@@ -870,7 +870,7 @@ const nl: RiskCopy = {
         what: 'Dezelfde ratio, maar over de neerwaartse deviatie in plaats van de totale '
           + 'volatiliteit.',
         where: 'Rendement ÷ neerwaartse deviatie, beide geannualiseerd.',
-        how: '⚠ EEN STREEPJE BETEKENT DAT NIETS OOIT ONDER DE DREMPEL IS GEKOMEN — er is geen '
+        how: ' EEN STREEPJE BETEKENT DAT NIETS OOIT ONDER DE DREMPEL IS GEKOMEN — er is geen '
           + 'neerwaarts risico om door te delen. Dat is een meting, geen ontbrekend cijfer.',
       },
     },
@@ -899,27 +899,27 @@ const nl: RiskCopy = {
     cards: {
       maxDrawdown: {
         what: 'De diepste daling van piek naar dal binnen de periode.',
-        how: '⚠ DE FREQUENTIE STAAT IN HET LABEL omdat zij het antwoord verandert: een daling die '
+        how: ' DE FREQUENTIE STAAT IN HET LABEL omdat zij het antwoord verandert: een daling die '
           + 'binnen een week herstelt is onzichtbaar voor een weekreeks. Zie de vergelijking '
           + 'hieronder.',
       },
       benchMax: {
         what: 'De diepste daling van de index zelf, over dezelfde perioden.',
         where: 'Dezelfde formule, dezelfde periode, een andere reeks.',
-        how: 'Ter vergelijking. ⚠ De index draagt geen survivorship bias van dit boek — hij hield '
+        how: 'Ter vergelijking.  De index draagt geen survivorship bias van dit boek — hij hield '
           + 'zijn dalers — dus het verschil tussen beide vleit het boek.',
       },
       today: {
         what: 'Hoe ver de selectie op dit moment onder haar eigen hoogste stand staat.',
         where: 'Bij 0% eindigde de periode op een nieuwe hoogste stand.',
-        how: '⚠ "Ooit −31%" en "nu 28% onder water" zijn heel verschillende gesprekken, en het '
+        how: ' "Ooit −31%" en "nu 28% onder water" zijn heel verschillende gesprekken, en het '
           + 'tweede is het gesprek dat gevoerd wordt.',
       },
       episodes: {
         what: 'Afzonderlijke episodes van piek naar dal binnen de gemeten periode.',
         where: 'Een episode eindigt pas wanneer de vorige top weer is bereikt.',
-        how: '⚠ ÉÉN GETAL VERBERGT OF HET EEN PATROON WAS OF EEN GEBEURTENIS. Eén −30% en vier '
-          + '−25% delen hetzelfde maximum en zijn niet hetzelfde risico. ⚠ Een daling van 40% die '
+        how: ' ÉÉN GETAL VERBERGT OF HET EEN PATROON WAS OF EEN GEBEURTENIS. Eén −30% en vier '
+          + '−25% delen hetzelfde maximum en zijn niet hetzelfde risico.  Een daling van 40% die '
           + '5% opveert en verder zakt is ÉÉN drawdown, geen twee — splitsen op richting zou losse '
           + 'ondiepe dipjes rapporteren en geen crash.',
       },
@@ -943,27 +943,27 @@ const nl: RiskCopy = {
     cards: {
       effective: {
         what: 'Naar hoeveel even grote posities dit boek zich gedraagt.',
-        how: '⚠ HET BETERE GETAL, en daarom staat het vooraan. Een grens bij precies tien is '
+        how: ' HET BETERE GETAL, en daarom staat het vooraan. Een grens bij precies tien is '
           + 'willekeurig — twee boeken met dezelfde C₁₀ kunnen een gelijkmatige tiennamenportefeuille '
           + 'zijn en een die door zijn top drie wordt gedomineerd. Dit kent geen afkapping. Veertig '
           + 'namen waarvan er vijf domineren komt ver onder veertig uit.',
       },
       top10: {
         what: 'Het deel van de aandelenselectie dat in de tien grootste ondernemingen zit.',
-        how: '⚠⚠ TWEE NOEMERS, ALLEBEI WAAR. De kop gaat over de AANDELENSELECTIE, en dat is wat '
+        how: ' TWEE NOEMERS, ALLEBEI WAAR. De kop gaat over de AANDELENSELECTIE, en dat is wat '
           + 'tussen boeken vergelijkbaar is; de regel eronder gaat over het hele boek inclusief '
           + 'liquiditeiten en fondsen. Een boek dat voor 30% uit liquiditeiten bestaat is in '
           + 'absolute zin werkelijk minder geconcentreerd.',
       },
       largest: {
         what: 'De grootste enkele onderneming, als aandeel van de selectie.',
-        how: '⚠ EEN GROTE POSITIE IS NIET AUTOMATISCH EEN GROTE KEUZE. Apple op 6% tegenover een '
+        how: ' EEN GROTE POSITIE IS NIET AUTOMATISCH EEN GROTE KEUZE. Apple op 6% tegenover een '
           + 'index met 5% is een keuze van 1pp; dezelfde 6% in een naam die de index niet houdt is '
           + 'er een van 6pp. De tabel hieronder toont beide.',
       },
       benchEffective: {
         what: 'Het effectieve aantal posities van de index zelf, op dezelfde maatstaf.',
-        how: '⚠ Een naar marktkapitalisatie gewogen index is veel geconcentreerder dan zijn aantal '
+        how: ' Een naar marktkapitalisatie gewogen index is veel geconcentreerder dan zijn aantal '
           + 'leden doet vermoeden, dus dit is meestal een kleine fractie daarvan — en dat is de '
           + 'eerlijke vergelijking, niet het ruwe aantal.',
       },
@@ -976,7 +976,7 @@ export const RISK_COPY: Record<Lang, RiskCopy> = { en, nl };
 /**
  * The Risk panel's copy in the reader's language.
  *
- * ⚠ A HOOK, NOT A `t('some.key')` LOOKUP — the key path is checked by the compiler this way, where
+ *  A hook, not a `t('some.key')` LOOKUP — the key path is checked by the compiler this way, where
  * a string key is checked by nobody and fails at runtime as an empty cell. Same reason the tree is
  * nested: `t.vol.cards.downside` reads as the surface it belongs to, so one view cannot borrow
  * another's string by accident.

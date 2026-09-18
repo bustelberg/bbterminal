@@ -390,14 +390,14 @@ def fx_to_eur(ccy: str | None) -> float | None:
     """EUR per 1 unit of `ccy`, where `ccy` is a QUOTE currency — a minor unit stays a minor
     unit (GBp -> GBP/100), because that is what a PRICE is denominated in. Cached per run.
 
-    ⚠ THIS RATE IS FOR A PRICE, NOT FOR A MARKET CAP. Yahoo quotes a London listing in PENCE but
+     THIS RATE IS FOR A PRICE, NOT FOR A MARKET CAP. Yahoo quotes a London listing in PENCE but
     reports its `marketCap` in POUNDS — same payload, same `currency: "GBp"`, two different units.
     A caller converting a cap must normalise to the MAJOR unit first (`SUBUNIT[ccy][0]`) and ask
     for THAT rate; passing "GBp" here divides an already-major figure by 100 and yields a market
     cap 100x too small that still looks like a number (Shell: EUR 1.95bn for a EUR 195bn company).
     See `scripts/asset_backfill_marketcap.py`.
 
-    ⚠ The minor-unit map is `asset_pipeline.fx.SUBUNIT` — SHARED, never re-derived. This function
+     The minor-unit map is `asset_pipeline.fx.SUBUNIT` — SHARED, never re-derived. This function
     special-cased "GBp" inline until 2026-07-16 and therefore knew nothing of `ZAc` / `ILA`: it
     asked Yahoo for a nonexistent "ZAcEUR=X", got None, and every caller read that as "cannot be
     priced". That silently zeroed `med_adv_eur` for Johannesburg listings — a liquidity of zero

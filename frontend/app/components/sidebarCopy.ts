@@ -5,13 +5,13 @@ import { useLang, type Lang } from '../../lib/i18n';
 /**
  * The sidebar: its nav labels, the account block at its foot, and the language control between.
  *
- * ⚠⚠ THE NAV IS KEYED BY HREF, AND THE LABEL IS NO LONGER PART OF THE NAV STRUCTURE. `Sidebar.tsx`
+ *  The nav is keyed by href, and the label is no longer part of the nav structure. `Sidebar.tsx`
  * still owns the ORDER, the sections and the visibility rules — those are layout and permission,
  * neither of which is language — and looks every name up here. A page therefore cannot be called
  * one thing in the nav and another in its own copy module, and `Record<NavKey, string>` makes a
  * missing Dutch label a compile error rather than a blank row.
  *
- * ⚠ SOME LABELS ARE THE SAME WORD IN BOTH LANGUAGES AND THAT IS CORRECT, NOT AN OVERSIGHT:
+ *  Some labels are the same word in both languages and that is correct, not an oversight:
  * `Backtest`, `Benchmarks`, `API`, `AlphaLab`, `Signal Lab`, `Diversifier`, `Asset Pipeline`. They
  * are product and tool names — what the things are CALLED — and the index families (`ACWI`,
  * `LongEquity`, `Leonteq`, `S&P 500`, `GuruFocus`, `AIRS`) keep their names inside a translated
@@ -102,7 +102,7 @@ const EN: SidebarCopy = {
   cancel: 'Cancel',
 };
 
-/** ⚠ TRANSLATED FROM THE ENGLISH ABOVE, never authored here — English stays the source language
+/**  TRANSLATED FROM THE ENGLISH ABOVE, never authored here — English stays the source language
  *  even though Dutch is now the DEFAULT. See the note on `Lang`. */
 const NL: SidebarCopy = {
   nav: {

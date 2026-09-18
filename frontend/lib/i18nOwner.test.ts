@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 //
-// ⚠ THE ESCAPE HATCH `vitest.config.ts` DOCUMENTS, AND THE FIRST FILE TO NEED IT. The suite runs
+//  The escape hatch `vitest.config.ts` DOCUMENTS, AND THE FIRST FILE TO NEED IT. The suite runs
 // on `node` because booting a DOM per file cost 50.5s of worker time against 1.0s of assertions —
 // but `claimLangFor` reads and writes `window.localStorage`, which is the whole subject here, so
 // there is nothing left to test without one. Per-file, so the other 91 files pay nothing.
@@ -9,7 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 /**
  * `claimLangFor` — the half of "new users read Dutch" that the default value cannot deliver.
  *
- * ⚠ THE MODULE CACHES THE SNAPSHOT IN A LIVE `let`, so every case re-imports it (`resetModules` +
+ *  The module caches the snapshot in a live `let`, so every case re-imports it (`resetModules` +
  * a dynamic import). Sharing one import across cases would leak `current` between them and the
  * suite would pass or fail on ordering rather than on behaviour.
  */
@@ -39,7 +39,7 @@ describe('claimLangFor', () => {
   })
 
   it('leaves the reader who chose it alone, however often it is called', async () => {
-    // ⚠ THE COMMON PATH. The Sidebar claims on every auth-state change — a token refresh in
+    //  The common path. The Sidebar claims on every auth-state change — a token refresh in
     // another tab included — so a claim for the SAME reader has to be a no-op, or the preference
     // would be wiped by the app merely staying open.
     const { claimLangFor } = await fresh()
@@ -71,7 +71,7 @@ describe('claimLangFor', () => {
   })
 
   it('clears an unattributable choice exactly once, then honours the next one', async () => {
-    // ⚠ THE ONE-TIME RESET on browsers that predate the owner key — deliberate, not tolerated:
+    //  The one-time reset on browsers that predate the owner key — deliberate, not tolerated:
     // the preference cannot be attributed to anybody, and an unattributed reader gets Dutch.
     localStorage.setItem(KEY, 'en')
 

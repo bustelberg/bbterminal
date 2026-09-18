@@ -25,13 +25,13 @@ export type BreakdownTarget = {
 };
 
 /**
- * ⚠ IT RENDERS THE SHARED `BreakdownView`, NOT A SECOND EXPLANATION. Everything on screen —
+ *  It renders the shared `BreakdownView`, NOT A SECOND EXPLANATION. Everything on screen —
  * raw signal, universe min/max, the 0-100 normalisation, the weight, the category blend, the final
  * score — comes from `POST /api/momentum/signal-breakdown`, the same endpoint and the same
  * components the /backtest ticker timeline uses. Two renderers for one number is two answers to
  * "why", and they drift the moment a pillar is added.
  *
- * ⚠ IT RE-DERIVES THE SCORE AT THAT CUTOFF RATHER THAN READING THE ROW. That is deliberate and it
+ *  It re-derives the score at that cutoff rather than reading the row. That is deliberate and it
  * is also the one thing that can disagree: the row's score came out of the walk (possibly from
  * cache), this is computed live now. A mismatch is not a bug in either — it is the same
  * late-arriving-price effect the "vs stored" column shows, and the header states the cutoff so the
@@ -82,7 +82,7 @@ export default function BreakdownModal({ target, config, onClose }: {
           (raw) => {
             const evt = raw as { type?: string; message?: string; data?: BreakdownData };
             if (evt.type === 'progress' && evt.message) setState({ s: 'loading', msg: evt.message });
-            // ⚠ `result`, matching the endpoint (`routers/momentum/signals.py`) and the ticker
+            //  `result`, matching the endpoint (`routers/momentum/signals.py`) and the ticker
             // timeline's consumer. A wrong event name here fails SILENTLY — the stream completes,
             // nothing sets state, and the modal spins forever with no error.
             else if (evt.type === 'result' && evt.data) setState({ s: 'ok', data: evt.data });
@@ -99,7 +99,7 @@ export default function BreakdownModal({ target, config, onClose }: {
     return () => { ac.abort(); };
   }, [target, config]);
 
-  // ⚠ PORTALLED TO `document.body`, NOT RENDERED IN PLACE. This modal is opened from a row inside
+  //  Portalled to `document.body`, NOT RENDERED IN PLACE. This modal is opened from a row inside
   // `CollapsibleCard`, whose root is `overflow-hidden` — and the app's frosted chrome applies
   // `backdrop-filter`, which makes an ancestor the containing block for `position: fixed`. Either
   // one traps the overlay inside the card: it renders clipped, scrolled with the table, and sized
@@ -117,7 +117,7 @@ export default function BreakdownModal({ target, config, onClose }: {
           {/* The cutoff, always — the whole breakdown is "as of" this date and means nothing without it. */}
           <span className="text-[12px] font-mono text-accent-300">as of {target.date}</span>
           <button type="button" onClick={onClose}
-            className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+            className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
         <div className="flex-1 overflow-auto px-6 py-4 space-y-4">
           {state.s === 'loading' && (

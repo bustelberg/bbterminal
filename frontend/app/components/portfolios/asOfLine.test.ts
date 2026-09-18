@@ -1,5 +1,5 @@
 /**
- * ⚠⚠ THE CLAIM WORTH PINNING IS THAT AN ABSENT DATE STAYS ABSENT. The string this replaced read
+ *  The claim worth pinning is that an absent date stays absent. The string this replaced read
  * "Today's weights", which was an assumption printed as a fact; a helper that quietly substituted
  * today for a missing stamp would put the same lie back one layer down.
  */
@@ -13,8 +13,8 @@ describe('dayOf', () => {
     expect(dayOf('2026-08-25T01:30:00+02:00')).toBe('2026-08-25');
   });
 
-  it('⚠ does not move the date into the viewer\'s timezone', () => {
-    // ⚠⚠ THE REASON IT IS A STRING PREFIX AND NOT `new Date(...)`. Parsed and reformatted, this
+  it(' does not move the date into the viewer\'s timezone', () => {
+    //  The reason it is a string prefix and not `new Date(...)`. Parsed and reformatted, this
     // stamp reads as the 24th anywhere west of UTC — a date that changes with who is looking at
     // it is worse than no date, and this test fails the moment someone "improves" the parsing.
     expect(dayOf('2026-08-25T00:30:00Z')).toBe('2026-08-25');
@@ -41,7 +41,7 @@ describe('dayRange', () => {
   });
 
   it('still prints the one end it has', () => {
-    // ⚠ HALF A RANGE IS NOT NOTHING — refusing it would hide the only date there was.
+    //  Half a range is not nothing — refusing it would hide the only date there was.
     expect(dayRange('2026-08-22', null)).toBe('2026-08-22');
     expect(dayRange(null, '2026-08-25')).toBe('2026-08-25');
   });
@@ -53,7 +53,7 @@ describe('dayRange', () => {
   });
 
   it('does not reorder its ends', () => {
-    // ⚠ THE BACKEND SORTS THE STAMPS, so backwards ends mean a caller bug — visible here rather
+    //  The backend sorts the stamps, so backwards ends mean a caller bug — visible here rather
     // than tidied away into a plausible-looking range.
     expect(dayRange('2026-08-25', '2026-08-22')).toBe('2026-08-25 → 2026-08-22');
   });

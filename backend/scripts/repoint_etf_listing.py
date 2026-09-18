@@ -74,7 +74,7 @@ _FIGI_COLS = ("openfigi_figi", "openfigi_name", "openfigi_ticker", "openfigi_exc
 def _same_fund(candidate_name: str | None, anchor: str | None) -> bool:
     """Is this candidate the same FUND as the row we're repointing?
 
-    ⚠ DO NOT ANCHOR THIS ON OpenFIGI'S NAME. OpenFIGI abbreviates a fund past the point any
+     DO NOT ANCHOR THIS ON OpenFIGI'S NAME. OpenFIGI abbreviates a fund past the point any
     fuzzy matcher can recover — measured against Yahoo's name for the very same listing:
 
         iShares STOXX World Equity Multifactor UCITS ETF USD (Acc)
@@ -211,7 +211,7 @@ def main() -> int:
                   flush=True)
             continue
 
-        # PROBE FIRST, GATE SECOND. A queued row's anchor is the agreement among these very
+        # Probe first, gate second. A queued row's anchor is the agreement among these very
         # candidates, so it cannot be known until they have all been scored.
         probed: list[dict] = []
         for sym in symbols:
@@ -250,7 +250,7 @@ def main() -> int:
             print("      keep — no candidate validated\n", flush=True)
             continue
 
-        # THE INCUMBENT MUST SURVIVE ITS OWN COMPARISON. If it doesn't, we are not looking at
+        # The incumbent must survive its own comparison. If it doesn't, we are not looking at
         # a complete picture of this ISIN's venues, and every "keep" below would be a false
         # negative wearing a clean bill of health. Two distinct causes, and they are not the
         # same bug — say which. (A queued row has no incumbent, so there is nothing to survive:
@@ -305,7 +305,7 @@ def main() -> int:
                 "reason": (f"{'Repointed' if old else 'Resolved'} to {new} — most liquid "
                            f"listing of this ISIN (OpenFIGI-anchored)."),
                 "analysis_note": ai["analysis_note"],
-                # ⚠ NOT `analysis_asset_class` — see `sector_for`.
+                #  NOT `analysis_asset_class` — see `sector_for`.
                 "sector": sector_for(new, ai["analysis_asset_class"], r.get("sector")),
                 "candles": None, "ibkr": None,
             }

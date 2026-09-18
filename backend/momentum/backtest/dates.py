@@ -116,7 +116,7 @@ def is_decidable(
 ) -> bool:
     """Has `rebalance_date`'s deciding bar settled into the data we hold?
 
-    ⚠ THE TEST IS AGAINST THE TRADING CALENDAR, NEVER THE CALENDAR MONTH. "Do we
+     THE TEST IS AGAINST THE TRADING CALENDAR, NEVER THE CALENDAR MONTH. "Do we
     have a close dated inside the current month?" is unsatisfiable on the 1st and
     2nd of a month that opens on a weekend: August 2026 begins on a Saturday, so
     the newest close in existence on Sunday the 2nd is Friday 31 July — correct,

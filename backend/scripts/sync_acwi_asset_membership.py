@@ -3,7 +3,7 @@
 Run this after replacing `index_universe/iShares-MSCI-ACWI-ETF_fund.xls` — iShares blocks scripted
 downloads, so the file is committed and this is what turns it into membership.
 
-⚠ IT IS NOT THE COMPANY UNIVERSE. `universe_membership` (the GuruFocus-resolved company side) is
+ IT IS NOT THE COMPANY UNIVERSE. `universe_membership` (the GuruFocus-resolved company side) is
 untouched; this only writes `index_file_membership`, which the `universe_asset_membership` view
 unions in. See that migration for why the two are separate.
 

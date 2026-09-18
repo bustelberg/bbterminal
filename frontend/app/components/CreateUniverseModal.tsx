@@ -194,7 +194,7 @@ export default function CreateUniverseModal({ sectorOptions, universes, onDelete
                     <button type="button" onClick={() => void remove(u)} disabled={deletingId !== null}
                       title="Delete universe"
                       className="text-neg-400 hover:text-neg-300 disabled:opacity-40 disabled:cursor-not-allowed transition-colors opacity-0 group-hover:opacity-100">
-                      {deletingId === u.id ? '…' : '✕'}
+                      {deletingId === u.id ? '…' : ''}
                     </button>
                   </span>
                 </div>

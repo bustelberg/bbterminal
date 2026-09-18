@@ -5,13 +5,13 @@ import { subPct2, workedCagr } from './workedFormula';
 /**
  * ONE definition of CAGR, used by both surfaces that quote one.
  *
- * ⚠⚠ THERE WERE TWO. The Long Equity growth card reported the SLOPE OF A FITTED EXPONENTIAL
+ *  There were two. The Long Equity growth card reported the SLOPE OF A FITTED EXPONENTIAL
  * (`logLinearFit`) while the Tables tab measured endpoints, so the same book's FCF/share read
  * 29.7% on one screen and 30.1% two tabs away. Both were defensible; neither was checkable against
  * the other, and a reader has no way to tell a modelling difference from a data problem. The card
  * now calls `endpointCagr` and the table `lineCagr`, and the two share the arithmetic.
  *
- * ⚠ THE FIT DID NOT GO AWAY — R² and the drawn trend line are still it. "How steady" is a question
+ *  The fit did not go away — R² and the drawn trend line are still it. "How steady" is a question
  * about a model; "what was the rate" is a question about two reported numbers. Keeping both, and
  * keeping them clearly separate, is the point.
  */
@@ -26,7 +26,7 @@ describe('endpointCagr', () => {
     expect(got.pct != null && got.years).toBe(10);
   });
 
-  it('⚠ IGNORES EVERY POINT IN BETWEEN, which is the whole difference from a fit', () => {
+  it(' IGNORES EVERY POINT IN BETWEEN, which is the whole difference from a fit', () => {
     // The same endpoints with a wildly different path give the identical answer. That is the
     // definition, and it is why a single unrepresentative endpoint year moves this number.
     const a = endpointCagr(pts([2015, 100], [2020, 500], [2025, 200]));
@@ -41,7 +41,7 @@ describe('endpointCagr', () => {
     expect(got.pct).toBeCloseTo(100 * (2 ** (1 / 2.5) - 1), 6);
   });
 
-  it('⚠ REFUSES a non-positive endpoint rather than trimming inward to a positive one', () => {
+  it(' REFUSES a non-positive endpoint rather than trimming inward to a positive one', () => {
     // Trimming would answer over a window nobody chose and label it as the whole chart — the trap
     // `logLinearFit` fell into by DROPPING those points while the tile still said "over 9 years".
     const got = endpointCagr(pts([2015, -0.41], [2020, 0.3], [2025, 2.0]));
@@ -72,7 +72,7 @@ describe('endpointCagr', () => {
 
 describe('the two surfaces agree by construction', () => {
   /**
-   * ⚠⚠ THE INVARIANT THE WHOLE CHANGE EXISTS FOR. Given the same series and the same window, the
+   *  The invariant the whole change exists for. Given the same series and the same window, the
    * card's `endpointCagr` and the table's `lineCagr` must return the same number — not close, the
    * same. They take different shapes (points vs a period-keyed level map) because their callers
    * hold different shapes; the arithmetic is one definition.
@@ -88,7 +88,7 @@ describe('the two surfaces agree by construction', () => {
     expect(a.pct).toBeCloseTo(27.86, 2);
   });
 
-  it('⚠ AND THE WINDOWS MUST MATCH FOR THAT TO HOLD — the table pins 10 years, the card takes '
+  it(' AND THE WINDOWS MUST MATCH FOR THAT TO HOLD — the table pins 10 years, the card takes '
      + 'its whole drawn series, so a series reaching further back is a DIFFERENT window', () => {
     const years = [2013, 2014, 2015, 2020, 2025];
     const vals = [50, 60, 100, 300, 1167.75];
@@ -103,9 +103,9 @@ describe('the two surfaces agree by construction', () => {
 });
 
 /**
- * ONE PRECISION, FOR THE SAME REASON THERE IS ONE DEFINITION.
+ * One precision, for the same reason there is one definition.
  *
- * ⚠⚠ THE TWO SURFACES ARE IN THE SAME MODAL, so a reader who opens both tabs is comparing them
+ *  The two surfaces are in the same modal, so a reader who opens both tabs is comparing them
  * whether or not a comparison was offered — which is how this file came to exist (29.7% against
  * 30.1%, a modelling difference nothing on screen explained). Rounding is the cheap half of the
  * same failure: two spellings of one rate look like a data disagreement long before anyone
@@ -120,7 +120,7 @@ describe('how a rate is printed', () => {
   });
 
   /**
-   * ⚠⚠ AND THE ⓘ UNDER THE TILE PRINTS THE **SAME** RATE, so it has to round it the same way. A
+   *  And the ⓘ UNDER THE TILE PRINTS THE **SAME** RATE, so it has to round it the same way. A
    * worked line reading `= +4.5%` beneath a tile reading `+4.55%` is precisely the "are these the
    * same number?" doubt the worked lines exist to remove — the one-decimal `subPct` was deleted on
    * 2026-09-03 for having no correct call site left once the tiles moved.

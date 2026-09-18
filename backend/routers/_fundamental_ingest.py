@@ -17,7 +17,7 @@ Every other reason is REFUSED, and the refusal is the honest answer rather than 
     not_equity   a bond / future / FX line has no earnings stream.
     cash         no ISIN, nothing to look up.
 
-⚠ THE OUTCOME IS NEVER GUESSED FROM THE INPUT. A `no_company` ISIN can still turn out to be an
+ THE OUTCOME IS NEVER GUESSED FROM THE INPUT. A `no_company` ISIN can still turn out to be an
 unsubscribed listing (GuruFocus knows a Bombay line and we can't buy it) or one GuruFocus has no
 financials for; the outcome is whatever the fetch actually returns, reported per its OWN status,
 so a row that could not be ingested says why — it does not silently read as "done".
@@ -39,7 +39,7 @@ def classify_fetch_outcome(rows_loaded: int, metrics_found: int,
     """The (status, detail) a completed `fetch_financials` result maps to. Pure — so the mapping
     is unit-tested rather than discovered in production.
 
-    ⚠ `no_data` IS NOT `error`, AND `unsubscribed` IS NOT EITHER. A 403 means the exchange is out
+     `no_data` IS NOT `error`, AND `unsubscribed` IS NOT EITHER. A 403 means the exchange is out
     of subscription (the fetch was well-formed, the answer was "you can't have it"); an empty load
     with no error means GuruFocus simply has no fundamentals for that listing. Both are answers,
     not faults, and collapsing them into "error" would send the reader chasing a bug that isn't
@@ -57,13 +57,13 @@ def classify_fetch_outcome(rows_loaded: int, metrics_found: int,
 def reusable_same_listing(matches: list, exchange: str):
     """Of the pre-insert matches, the ONE that is the very listing we resolved — or None.
 
-    ⚠ THIS IS THE FIX FOR "✓ INGESTED BUT NO GF EXCHANGE". `find_canonical_match` returns two
+     THIS IS THE FIX FOR " INGESTED BUT NO GF EXCHANGE". `find_canonical_match` returns two
     buckets: same (canonical ticker, exchange) AND same NAME across any exchange. Only the first
     is the same security — a "Constellation Software" on TSX is a DIFFERENT listing from the OTC
     line we just resolved (different exchange, currency and ISIN). Reusing that cross-exchange
     name match, fetching the resolved listing's data into it, and stamping our ISIN corrupts that
     row — and because the stamp is exactly what coverage keys on, it silently fails and the holding
-    reads `no_company` for ever while showing a ✓. So we adopt a match ONLY when it sits on the
+    reads `no_company` for ever while showing a . So we adopt a match ONLY when it sits on the
     resolved exchange; everything else gets a clean new row keyed by its own ISIN.
     """
     ex = (exchange or "").strip().upper()
@@ -111,7 +111,7 @@ def _repoint_company(company_id: int, ticker: str, exchange: str) -> str | None:
     """Move a company onto a different GuruFocus listing (ticker + exchange). Returns an error
     string or None.
 
-    ⚠ THIS ALSO CHANGES WHERE ITS PRICES COME FROM. `close_price` refreshes read the company's
+     THIS ALSO CHANGES WHERE ITS PRICES COME FROM. `close_price` refreshes read the company's
     stored ticker/exchange, so repointing Shopify TSX→NASDAQ switches its future price feed from
     CAD to USD — a deliberate, accepted consequence (the alternative is leaving the whole company
     permanently unreachable on a leg we can't fetch). Only ever called for a company already on an

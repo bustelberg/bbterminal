@@ -199,7 +199,7 @@ def fetch_financials(
 
     result = EarningsResult(source="financials")
 
-    # ⚠ BEFORE ANYTHING ELSE, INCLUDING THE CACHE READ. An unsubscribed exchange must not
+    #  Before anything else, including the cache read. An unsubscribed exchange must not
     # reach the vendor, and must not resurrect a payload an earlier unguarded run cached.
     refusal = refuse_unsubscribed(exchange, "financials")
     if refusal is not None:
@@ -250,21 +250,21 @@ def fetch_financials(
                 result.error = api.log
                 return result
         elif not _extract_financials_dates(api.data or {}):
-            # ⚠⚠ A 200 CARRYING NO PERIODS IS AN OUTAGE, NOT AN ANSWER, AND IT MUST NOT BE CACHED.
+            #  A 200 CARRYING NO PERIODS IS AN OUTAGE, NOT AN ANSWER, AND IT MUST NOT BE CACHED.
             # Measured 2026-08-31: GuruFocus returned the full 15.7 KB template for EVERY symbol —
             # every section and every key present, every array EMPTY — for AAPL and ASML as much as
             # for the two ACWI names being investigated. `summary`, `keyratios` and `price` were
             # all healthy at the same moment and the monthly quota was barely half spent, so
             # nothing upstream said anything was wrong.
             #
-            # ⚠ `_parse_financials` was already safe (no `Fiscal Year` ⇒ no periods ⇒ no rows), so
+            #  `_parse_financials` was already safe (no `Fiscal Year` ⇒ no periods ⇒ no rows), so
             # this never wrote zeros into `metric_data`. The damage was the two lines BELOW it:
             # `_upload_to_storage` would replace a good cached raw JSON with the empty one, and
             # `_stamp_fetched` would mark the company freshly fetched — a company that now looks
             # current, reads as having no financials, and has lost the copy that proved otherwise.
             # One press of "Fetch financials" during a vendor outage, per company.
             #
-            # ⚠ THE TEST IS "DOES IT CARRY ANY PERIOD", the same question the freshness check asks
+            #  The test is "DOES IT CARRY ANY PERIOD", the same question the freshness check asks
             # of the cache — not a size or a key count, both of which this payload passes.
             result.cache_status = "api_empty"
             result.error = "GuruFocus did not provide financial statements. Please try again later."

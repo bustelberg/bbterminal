@@ -12,7 +12,7 @@ import { useDeepValuationCopy } from './deepValuationCopy';
  * from, the five years the median P/E is a median OF, and the dividend-yield observations one of
  * which was picked.
  *
- * ⚠ IT CALLS THE SAME FUNCTIONS THE HINTS DO (`…Working`, of which the scalar hint is the last
+ *  It calls the same functions the hints do (`…Working`, of which the scalar hint is the last
  * field). A drill-down that re-derives the number it explains is a second implementation, and the
  * copy is what drifts — leaving a table that disagrees with the figure it was opened from.
  *
@@ -49,10 +49,10 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
           <h2 className="text-fg-strong font-medium">{t.egmModal.title}</h2>
           {name && <span className="text-sm text-fg-soft truncate max-w-[28ch]" title={name}>{name}</span>}
           <span className="text-[12px] font-mono text-fg-faint">{isin}</span>
-          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
-        {/* ⚠ `min-w-0` + `break-words`: a long unbroken token (a metric code) is what forced the
+        {/*  `min-w-0` + `break-words`: a long unbroken token (a metric code) is what forced the
             horizontal scrollbar — a flex/grid child defaults to min-width:auto and will grow past
             its parent rather than wrap. */}
         <div className="flex-1 overflow-y-auto overflow-x-hidden px-6 py-4 space-y-6 min-w-0">
@@ -153,7 +153,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                           {n2(r.eps)}
                         </td>
                         <td className="px-3 py-1 text-right font-mono text-fg-soft">
-                          {/* ⚠ A loss year is SHOWN and excluded, not hidden: its negative multiple
+                          {/*  A loss year is SHOWN and excluded, not hidden: its negative multiple
                               would drag the median down and read as "historically cheap". */}
                           {r.pe == null
                             ? <span className="text-fg-faint" title={t.egmModal.excludedTitle}>{t.egmModal.excluded}</span>
@@ -222,7 +222,7 @@ export default function EgmAssumptionsModal({ metrics, today, currency, name, is
                   </table>
                 </div>
                 {dy.rows.length > MAX_YIELD_ROWS && (
-                  // ⚠ Said, not silently truncated — a table that stops at eight without saying so
+                  //  Said, not silently truncated — a table that stops at eight without saying so
                   // reads as the whole record.
                   <p className="text-[11px] text-fg-faint break-words whitespace-normal max-w-[80ch]">
                     {t.egmModal.showingMostRecent(String(MAX_YIELD_ROWS),

@@ -4,7 +4,7 @@
     uv run python scripts/ingest_index_file_symbols.py --limit 5 --apply  # prove the path
     uv run python scripts/ingest_index_file_symbols.py --apply            # the whole backlog
 
-⚠⚠ THIS IS WHAT CLOSES THE ACWI COVERAGE WARNING, AND THE REASON IT CAN EXIST IS THAT
+ THIS IS WHAT CLOSES THE ACWI COVERAGE WARNING, AND THE REASON IT CAN EXIST IS THAT
    `asset_analysis` IS KEYED ON `symbol`, NOT ON AN ISIN. The add-by-ISIN pipeline
    (`asset_execution.isin` is NOT NULL) is the usual door into the asset world, and for these names
    it is a locked one: the iShares export carries Ticker + Exchange and **no ISIN column**,
@@ -27,19 +27,19 @@ WHAT IT CLOSES, measured 2026-09-02 against the 15-Apr-2026 file:
         Korea Exchange                      28
         Johannesburg                        27
 
-⚠ IT DOES NOT LINK ANYTHING. Creating the assets is all this does; `index_universe.acwi.
+ IT DOES NOT LINK ANYTHING. Creating the assets is all this does; `index_universe.acwi.
   asset_membership.sync()` is what re-derives `index_file_membership`, and it should be run after.
   Two steps on purpose: the ingest is slow and interruptible, the link is fast and idempotent, and
   a half-ingested run should still leave a consistent membership.
 
-⚠⚠ PACED, AND IT STOPS ON A THROTTLE RATHER THAN PUSHING THROUGH. Yahoo answers an overloaded
+ PACED, AND IT STOPS ON A THROTTLE RATHER THAN PUSHING THROUGH. Yahoo answers an overloaded
   caller with an EMPTY LIST, not a 429 — so hammering it does not fail loudly, it silently writes
   assets with no bars and marks names as having no data when they have plenty. `asset_pipeline.
   yahoo` already paces every request and raises `YahooThrottled` after its cooldowns; that
   exception is deliberately allowed to end the run. Re-running resumes: anything already created is
   skipped by the symbol lookup.
 
-⚠ AND IT STANDS DOWN IF THE INGEST WORKER IS LIVE, for the same reason — two concurrent Yahoo
+ AND IT STANDS DOWN IF THE INGEST WORKER IS LIVE, for the same reason — two concurrent Yahoo
   consumers is exactly the load that produces the empty answers.
 """
 from __future__ import annotations
@@ -87,12 +87,12 @@ def _existing(symbols: list[str]) -> set[str]:
 def _create(symbol: str, row: dict) -> int:
     """Create the `asset_analysis` row, then pull its full series. Returns bars stored.
 
-    ⚠ THE ASSET IS ONLY KEPT IF IT HAS BARS. An asset row with no series is worse than no row: it
+     THE ASSET IS ONLY KEPT IF IT HAS BARS. An asset row with no series is worse than no row: it
     joins the index, contributes a name, and prices nothing — which is precisely the silent
     weight-redistribution the coverage warning exists to report. A symbol Yahoo will not price is
     deleted again and reported, not left behind looking ingested.
 
-    ⚠⚠ THE CURRENCY COMES FROM YAHOO'S CHART META, NEVER FROM THE FILE'S `Currency` COLUMN. That
+     THE CURRENCY COMES FROM YAHOO'S CHART META, NEVER FROM THE FILE'S `Currency` COLUMN. That
     column is the FUND's reporting currency — every row of the iShares export says `USD`, with the
     listing currency recoverable only via `FX Rate` — so taking it would have stamped **USD on
     every Indian stock**, which trade in INR at ~93 to the dollar. Nothing would have errored:
@@ -100,7 +100,7 @@ def _create(symbol: str, row: dict) -> int:
     would be wrong by the INR/USD rate while looking entirely plausible. Caught only by reading the
     rows back after the first three ingested. Yahoo's own `meta.currency` says `INR`.
 
-    ⚠ ONE CHART CALL, NOT TWO. `store_series(…, first_ts=None)` probes `rng=3mo` itself to find the
+     ONE CHART CALL, NOT TWO. `store_series(…, first_ts=None)` probes `rng=3mo` itself to find the
     first trade date; fetching that probe here and passing `first_ts` in means the currency costs
     no extra request.
     """

@@ -6,7 +6,7 @@ import { useLang, type Lang } from '../../../lib/i18n';
  * The bucket drill-down — the pane that opens under a composition or attribution bar and lists
  * your names in that bucket beside the index's.
  *
- * ⚠ THE TWO LONG COLUMN HINTS ARE NOT HERE. `WEIGHT_HINT` / `WEIGHT_NOW_HINT` are paragraph-length
+ *  The two long column hints are not here. `WEIGHT_HINT` / `WEIGHT_NOW_HINT` are paragraph-length
  * `title=` prose about which weight each column is and what Return and Contribution are built from;
  * they belong with the ⓘ-card body sweep, not with the labels. Same line `quickValuationCopy` and
  * `longEquityCopy` draw: what a reader SCANS is translated first.
@@ -53,9 +53,9 @@ const EN: BucketDetailCopy = {
 };
 
 /**
- * ⚠ TRANSLATED FROM THE ENGLISH ABOVE, never authored here.
+ *  Translated from the english above, never authored here.
  *
- * ⚠ `Contrib.` BECOMES `Bijdr.` AND STAYS ABBREVIATED. The column is `w-[3.6rem]` under
+ *  `Contrib.` BECOMES `Bijdr.` AND STAYS ABBREVIATED. The column is `w-[3.6rem]` under
  * `table-fixed`; the full `Bijdrage` is ~55px at 11px uppercase and would spill over the column
  * beside it, which is the exact failure the `Weight (Start of year)` header note in
  * `BucketDetailPanel` records.

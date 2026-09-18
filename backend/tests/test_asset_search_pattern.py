@@ -13,7 +13,7 @@ from routers.asset_pipeline import ilike_pattern
 
 
 class TestTheSeparatorsCannotSurvive:
-    """⚠ DROPPED, NOT ESCAPED. PostgREST has no escape for these inside `or=`."""
+    """ DROPPED, NOT ESCAPED. PostgREST has no escape for these inside `or=`."""
 
     @pytest.mark.parametrize("term", [
         "a,bars.gt.0",                 # a second filter smuggled in behind a comma
@@ -34,7 +34,7 @@ class TestTheSeparatorsCannotSurvive:
         assert "*" not in out[1:-1]
 
     def test_a_term_that_is_only_separators_searches_for_nothing(self):
-        # ⚠ None, NOT `"**"`. An empty pattern matches EVERY row, so a user typing `,,,` would be
+        #  None, NOT `"**"`. An empty pattern matches EVERY row, so a user typing `,,,` would be
         # served the first 25 instruments in the pipeline as though they were results.
         for term in [",", "()", "*", ",,,", "(,)"]:
             assert ilike_pattern(term) is None

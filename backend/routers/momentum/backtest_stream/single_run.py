@@ -40,7 +40,7 @@ from .benchmarks import fetch_benchmark_price_index
 def _load_cached_selections(hash_: str, start, months_back: int, force: bool):
     """Cached selections as `{date: DataFrame}` for the engine, plus the raw map.
 
-    ⚠ THE MOST RECENT `DAILY_HOLDINGS_TAIL_DAYS` ARE WITHHELD FROM THE CACHE even when
+     THE MOST RECENT `DAILY_HOLDINGS_TAIL_DAYS` ARE WITHHELD FROM THE CACHE even when
     stored — a late-arriving close can still change a recent day's selection, and a
     cache that never revisits its newest entries is a wrong answer that cannot correct
     itself. Those days are recomputed and re-stored every run; older days are settled.
@@ -56,7 +56,7 @@ def _load_cached_selections(hash_: str, start, months_back: int, force: bool):
     # recomputing one extra day costs a few seconds, erring the other way keeps a
     # stale selection on screen.
     cutoff = today - timedelta(days=DAILY_HOLDINGS_TAIL_DAYS * 2)
-    # ⚠ A CACHED DAY WITH NO SECTOR SCORES IS STALE, NOT COMPLETE. `sector_scores` was added after
+    #  A cached day with no sector scores is stale, not complete. `sector_scores` was added after
     # the cache shipped, so every day stored by an earlier run carries the column's `'[]'` default.
     # Serving those produces a day whose holdings are right and whose sector ranks are silently
     # empty — measured: 58 of 150 cached days, drawing the rank chart as flat gaps across May, June
@@ -83,7 +83,7 @@ def _load_cached_selections(hash_: str, start, months_back: int, force: bool):
 def _selections_to_store(daily_picks: list[dict], already: dict) -> dict[str, dict]:
     """The freshly computed days, in the shape the cache stores.
 
-    ⚠ THE NEWEST DAY IS NOT STORED. Its holdings still have blank exit prices and no
+     THE NEWEST DAY IS NOT STORED. Its holdings still have blank exit prices and no
     forward return — the next trading day has not happened — and it is also the day
     most likely to move when a late close lands. Storing it would cache the least
     settled answer in the window.
@@ -120,14 +120,14 @@ def _selections_to_store(daily_picks: list[dict], already: dict) -> dict[str, di
 def _attach_exchanges(daily_picks: list[dict]) -> None:
     """Stamp `exchange` onto every holding of every day, in place.
 
-    ⚠ A GURUFOCUS LINK WITHOUT THE EXCHANGE IS A 404 FOR MOST OF THIS UNIVERSE.
+     A GURUFOCUS LINK WITHOUT THE EXCHANGE IS A 404 FOR MOST OF THIS UNIVERSE.
     `guruFocusUrl` falls back to a BARE ticker when no exchange is supplied, which
     is correct for a US listing and wrong for everything else — and this universe
     is mostly everything else (Nestle resolves as `XSWX:NESN`, not `NESN`). A link
     that lands on a 404 is worse than no link: it reads as "we do not have this
     company" rather than "we did not tell the URL builder where it trades".
 
-    ⚠ ENRICHED HERE, NOT ADDED TO `PeriodHolding`. That dataclass is what gets
+     ENRICHED HERE, NOT ADDED TO `PeriodHolding`. That dataclass is what gets
     persisted into `current_picks_snapshot.holdings` and what the golden-master
     test asserts on exactly; widening it to carry a display field would change a
     stored shape for the sake of a hyperlink. Same reasoning — and the same
@@ -168,7 +168,7 @@ def _attach_exchanges(daily_picks: list[dict]) -> None:
 def _daily_from(months_back: int):
     """First day of the month `months_back` months ago, or None for "this period".
 
-    ⚠ WHOLE MONTHS, ANCHORED TO A MONTH START — not `today - 60 days`. The picks
+     WHOLE MONTHS, ANCHORED TO A MONTH START — not `today - 60 days`. The picks
     are a monthly-rebalanced strategy's, so a window that opens mid-month starts
     the chain-linked return partway through a holding period and reads as a
     different strategy. `months_back=2` on 31 July opens 1 June.
@@ -350,7 +350,7 @@ async def run_single(
         hash_ = _strategy_hash(req)
         payload["strategy_hash"] = hash_
         cfg_dump = req.model_dump()
-        # ⚠ A RETROSPECTIVE WALK IS AN ANSWER, NOT A DECISION — SO IT WRITES NOTHING.
+        #  A retrospective walk is an answer, not a decision — so it writes nothing.
         # `current_picks_day` records what the pipeline decided each day on the data
         # it had at the time; `current_picks_snapshot` records the basket it locked.
         # Recomputing a closed month on today's prices and upserting it would replace
@@ -366,7 +366,7 @@ async def run_single(
             except Exception:
                 pass  # a missing hyperlink is not worth failing a computed walk over
             # Store the newly computed selections so the next run only pays for the
-            # days that are actually new. ⚠ `daily_holdings_cache`, NEVER
+            # days that are actually new.  `daily_holdings_cache`, NEVER
             # `current_picks_day` — the two are keyed identically and hold different
             # facts; see the migration.
             fresh = _selections_to_store(payload.get("daily_picks") or [], _cached_raw)

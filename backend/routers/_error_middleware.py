@@ -10,7 +10,7 @@ THE PROBLEM IT SOLVES
     sails straight past CORS to `ServerErrorMiddleware`, which is OUTSIDE it and answers with a
     bare 500 carrying no CORS headers at all.
 
-⚠ THE BROWSER THEN REPORTS THE WRONG FAULT, AND IT POINTS AT THE WRONG FILE. A missing header on a
+ THE BROWSER THEN REPORTS THE WRONG FAULT, AND IT POINTS AT THE WRONG FILE. A missing header on a
     cross-origin response is a CORS block, so the console says:
 
         No 'Access-Control-Allow-Origin' header is present on the requested resource
@@ -25,12 +25,12 @@ THE PROBLEM IT SOLVES
     but ordering cannot help here, since the failure is the ABSENCE of a response, not a response
     without headers. The only fix is to catch the exception INSIDE CORS and return a real one.
 
-⚠ `app.add_exception_handler(Exception, …)` IS NOT THIS, AND IS THE OBVIOUS WRONG ANSWER. Starlette
+ `app.add_exception_handler(Exception, …)` IS NOT THIS, AND IS THE OBVIOUS WRONG ANSWER. Starlette
     installs that handler on `ServerErrorMiddleware` itself — the layer that is already outside
     CORS. It produces a prettier body with the identical missing header, i.e. it changes nothing a
     browser can see.
 
-⚠ IT DOES NOT — AND MUST NOT — RESCUE A FAILURE MID-STREAM. `call_next` returns as soon as the
+ IT DOES NOT — AND MUST NOT — RESCUE A FAILURE MID-STREAM. `call_next` returns as soon as the
     response STARTS, so an SSE generator that dies on its tenth frame raises during body iteration,
     long after this returned. That is correct: the status line is already on the wire and cannot be
     rewritten into a 500. This layer is for failures that happen BEFORE a byte is sent, which is
@@ -65,7 +65,7 @@ async def cors_safe_errors(
     try:
         return await call_next(request)
     except Exception:
-        # ⚠ `logging.exception`, and the traceback is the entire point. This response is
+        #  `logging.exception`, and the traceback is the entire point. This response is
         # deliberately opaque to the caller — an internal traceback is not something to ship to a
         # browser — so the deploy log is now the ONLY place the real cause exists. Losing it here
         # would trade a misleading CORS error for a truthful but equally uninformative 500.

@@ -16,7 +16,7 @@ from routers.momentum.backtest_stream import single_run, stream
 class TestTheWindowIsWholeMonths:
     """`months_back=2` on 31 July means 1 June, not 1 June-ish.
 
-    ⚠ NOT `today - 60 days`. These picks come from a MONTHLY-rebalanced strategy, so a window that
+     NOT `today - 60 days`. These picks come from a MONTHLY-rebalanced strategy, so a window that
     opens mid-month starts the chain-linked return partway through a holding period — the figure
     that comes out is not this strategy's over any period it ever held.
     """
@@ -48,7 +48,7 @@ class TestTheWindowIsWholeMonths:
 
 
 class TestTheFloorNeverMovesForward:
-    """⚠ `min(daily_from, month_start)`, AND THE `min` IS THE POINT.
+    """ `min(daily_from, month_start)`, AND THE `min` IS THE POINT.
 
     A `daily_from` inside the current period would otherwise TRUNCATE the live daily-picks panel
     that the /schedule card reads — a read-only question quietly changing what the pipeline
@@ -68,7 +68,7 @@ class TestTheFloorNeverMovesForward:
 
 
 class TestARetrospectiveWalkWritesNothing:
-    """⚠ THE FAILURE THIS PREVENTS IS IRREVERSIBLE AND SILENT.
+    """ THE FAILURE THIS PREVENTS IS IRREVERSIBLE AND SILENT.
 
     `current_picks_day` is the record of what the pipeline DECIDED each day, on the data available
     at the time. The upsert is keyed `(strategy_hash, target_date)` — so recomputing a closed month
@@ -96,7 +96,7 @@ class TestARetrospectiveWalkWritesNothing:
         assert any("_fetch_daily_picks_history" in ln for ln in lines[guard:ret])
 
     def test_it_caches_into_its_OWN_table_not_the_pipelines(self):
-        """⚠ THE ONE THAT MATTERS. The walk DOES persist now — its selections, so a re-run only
+        """ THE ONE THAT MATTERS. The walk DOES persist now — its selections, so a re-run only
         pays for new days. Both tables are keyed (strategy_hash, target_date), so pointing this
         write at `current_picks_day` would replace the pipeline's decision with a recalculation and
         the original would be unrecoverable."""
@@ -123,7 +123,7 @@ class TestARetrospectiveWalkWritesNothing:
 
 
 class TestTheCacheCannotAnswerIt:
-    """⚠ THE CACHE HOLDS THE CURRENT MONTH, AND THAT LOOKS LIKE A COMPLETE ANSWER.
+    """ THE CACHE HOLDS THE CURRENT MONTH, AND THAT LOOKS LIKE A COMPLETE ANSWER.
 
     Served from it, a two-month request comes back with this month's days under a two-month
     heading — no error, no gap, just a shorter list nobody counts.
@@ -142,7 +142,7 @@ class TestTheCacheCannotAnswerIt:
 
 
 class TestTheCacheCannotServeAStaleSelection:
-    """⚠ THE NEWEST DAYS ARE NEVER REUSED, AND THAT IS WHAT MAKES THIS A CACHE RATHER THAN A WRONG
+    """ THE NEWEST DAYS ARE NEVER REUSED, AND THAT IS WHAT MAKES THIS A CACHE RATHER THAN A WRONG
     ANSWER. A day's selection is a function of the closes known before it, and closes keep
     arriving: GuruFocus publishes some late and `ingest/prices.py` writes them with their true
     (earlier) target_date. A cache that never revisits its newest entries can never correct itself.
@@ -160,7 +160,7 @@ class TestTheCacheCannotServeAStaleSelection:
         assert single_run._load_cached_selections("h", None, 2, True) == ({}, {}, {})
 
     def test_a_day_cached_without_sector_scores_is_treated_as_STALE(self, monkeypatch):
-        """⚠ THE REGRESSION THIS EXISTS FOR. `sector_scores` was added after the cache shipped, so
+        """ THE REGRESSION THIS EXISTS FOR. `sector_scores` was added after the cache shipped, so
         every day stored by an earlier run carries the column's `'[]'` default. Serving those gave
         a day with correct holdings and silently empty sector ranks — 58 of 150 cached days,
         drawing the rank chart as flat gaps across three months while the rest looked fine. Nothing
@@ -213,7 +213,7 @@ class TestTheCacheCannotServeAStaleSelection:
         assert "ticker" not in row and "score" not in row
 
     def test_the_per_company_PILLAR_scores_are_cached(self):
-        """⚠ Otherwise a REUSED day renders blank price/volume columns while a freshly computed
+        """ Otherwise a REUSED day renders blank price/volume columns while a freshly computed
         one fills them — which reads as "we only score some days", not as a cache dropping two
         fields."""
         out = single_run._selections_to_store([
@@ -261,7 +261,7 @@ class TestTheEngineSkipsOnlyTheExpensiveStep:
 class TestTheSectorScoresExplainTheSelection:
     """Per-sector price/volume scores for a day, shown beside the picks.
 
-    ⚠ THEY ARE ONLY WORTH SHOWING IF THEY DESCRIBE THE SAME COMPUTATION THE SELECTION MADE. Two
+     THEY ARE ONLY WORTH SHOWING IF THEY DESCRIBE THE SAME COMPUTATION THE SELECTION MADE. Two
     things guarantee that and neither is optional: the aggregation goes through
     `aggregate_to_sector` (the function the ranking itself uses — it is a MEAN, and the golden
     master exists partly because switching it to a median silently changes which sectors get
@@ -308,7 +308,7 @@ class TestTheSectorScoresExplainTheSelection:
         assert len(sector_pool_scores(self._scored())) == 2   # top_n_sectors is not applied here
 
     def test_the_floor_filters_COMPANIES_not_the_sector_ranking(self):
-        """⚠ 2026-07-31: sectors are ranked over EVERY scored company; `min_price_score` only
+        """ 2026-07-31: sectors are ranked over EVERY scored company; `min_price_score` only
         decides which companies get bought inside the chosen sectors.
 
         Ranking on the survivors was survivorship-biased in the worst direction — a sector's

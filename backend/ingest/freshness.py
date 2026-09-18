@@ -18,7 +18,7 @@ report's `to_fetch` to pick which names to FETCH before it computes, then
 re-probes and WARNS about whatever is still behind — it never blocks the
 rebalance on freshness.
 
-⚠ THE REPORT IS RELATIVE, SO IT NEEDS AN ABSOLUTE PARTNER. Every judgement here
+ THE REPORT IS RELATIVE, SO IT NEEDS AN ABSOLUTE PARTNER. Every judgement here
 is "behind your peers" / "behind the global latest" — a universe uniformly a week
 old is unanimously `fresh`, because nobody is behind anybody. The caller
 therefore also compares `global_latest` against the date it actually needs (the

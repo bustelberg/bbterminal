@@ -1,6 +1,6 @@
 """`fx_rate` is widened at BOTH ends now — it used to grow forward only.
 
-⚠⚠ THE FAILURE THIS CLOSES PRODUCES A NUMBER, NOT A BLANK. `sync_fx_rates_to_db` read the stored
+ THE FAILURE THIS CLOSES PRODUCES A NUMBER, NOT A BLANK. `sync_fx_rates_to_db` read the stored
 MAX and fetched from max+1, so a currency whose history simply STARTED too late was never repaired
 by anything, in any environment, for ever. And the reader hides it: `load_fx_rates` does
 `.reindex(daily).ffill().bfill()`, and the BACK-fill extends the earliest stored rate to whatever
@@ -8,7 +8,7 @@ by anything, in any environment, for ever. And the reader hides it: `load_fx_rat
 converts that whole stretch at ONE wrong rate — no empty cell, no error, a return wrong by however
 much the currency moved beforehand.
 
-⚠ AND THE SHORT-CIRCUIT IS WHY IT WAS UNREACHABLE. The forwards leg returned `cached` from the
+ AND THE SHORT-CIRCUIT IS WHY IT WAS UNREACHABLE. The forwards leg returned `cached` from the
 FUNCTION the moment the stored max reached `end_date` — which is every currency, most days — so
 nothing ever got as far as looking at where the history began. The two legs are independent now,
 which is the behaviour these tests exist to hold.
@@ -50,7 +50,7 @@ def wired(monkeypatch):
 
 class TestTheBackwardsLeg:
     def test_a_head_gap_is_filled(self, wired):
-        """⚠ THE MEASURED SHAPE: the currencies actually in use (USD, CZK, GBP, JPY, CHF) started
+        """ THE MEASURED SHAPE: the currencies actually in use (USD, CZK, GBP, JPY, CHF) started
         at 2024-03-07 while ISK/THB/IDR reached back to 2000 — so a 1998 window had almost no EUR
         line for the ones that mattered."""
         fake, asked, served = wired
@@ -66,7 +66,7 @@ class TestTheBackwardsLeg:
         assert {r["rate_date"] for r in fake.tables["fx_rate"]} >= {"2000-01-03", "2000-01-04"}
 
     def test_it_runs_even_when_the_forward_end_is_already_covered(self, wired):
-        """⚠⚠ THE ACTUAL BUG. Current-to-today is the normal state, and the old code returned
+        """ THE ACTUAL BUG. Current-to-today is the normal state, and the old code returned
         `cached` from the function on exactly that condition — before anything looked at the head.
         """
         fake, asked, served = wired
@@ -89,7 +89,7 @@ class TestTheBackwardsLeg:
         assert asked == [], "a covered currency must cost no request at either end"
 
     def test_an_empty_table_is_the_forward_leg_s_job(self, wired):
-        """⚠ ONE REQUEST, NOT TWO. With nothing stored the forwards leg already fetches from
+        """ ONE REQUEST, NOT TWO. With nothing stored the forwards leg already fetches from
         `start_date`; running the backwards leg too would be the identical call twice."""
         fake, asked, served = wired
         served["2000-01-01"] = [{"date": "2000-01-03", "rate": 1.0}]
@@ -103,7 +103,7 @@ class TestTheBackwardsLeg:
 
 class TestOneLegNeverCostsTheOther:
     def test_a_failed_backfill_still_gets_today_s_rate(self, wired, monkeypatch):
-        """⚠ A LONG-STANDING HEAD GAP MUST NOT BECOME A FRESH TAIL GAP. The head repair is
+        """ A LONG-STANDING HEAD GAP MUST NOT BECOME A FRESH TAIL GAP. The head repair is
         best-effort; the day's rate is not."""
         fake, asked, served = wired
         fake.tables["fx_rate"] = _rows(["2024-03-07"])
@@ -129,7 +129,7 @@ class TestOneLegNeverCostsTheOther:
         assert asked == []
 
     def test_it_reports_the_coverage_it_GOT_not_the_one_it_asked_for(self, wired):
-        """⚠ A currency whose published history begins in 2005 does not gain a 2000 start by being
+        """ A currency whose published history begins in 2005 does not gain a 2000 start by being
         asked for one. This table's entire failure mode is coverage read as wider than it is."""
         fake, _asked, served = wired
         fake.tables["fx_rate"] = _rows(["2024-03-07"])

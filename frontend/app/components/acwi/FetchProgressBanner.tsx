@@ -33,7 +33,7 @@ export default function FetchProgressBanner() {
         <div className={`${fetchSummary.errors > 0 ? 'bg-warn-500/10 border-warn-500/20' : 'bg-pos-500/10 border-pos-500/20'} border rounded-lg px-4 py-3 text-sm space-y-2`}>
           <div className="flex items-center justify-between">
             <span className={fetchSummary.errors > 0 ? 'text-warn-400' : 'text-pos-400'}>
-              {fetchSummary.errors > 0 ? '⚠' : '✓'} {fetchSummary.message}
+              {fetchSummary.errors > 0 ? '' : ''} {fetchSummary.message}
             </span>
             <button
               onClick={() => acwiFetchStore.set({ summary: null })}
@@ -50,7 +50,7 @@ export default function FetchProgressBanner() {
               <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                 {fetchSummary.errorList.map((e, i) => (
                   <div key={i} className="flex gap-2 text-fg-muted">
-                    <span className="text-neg-400 shrink-0">✗</span>
+                    <span className="text-neg-400 shrink-0"></span>
                     <span className="truncate">{e.title}</span>
                     <span className="text-fg-faint shrink-0">— {e.error}</span>
                   </div>

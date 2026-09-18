@@ -20,19 +20,19 @@ import { isUniverseTarget, type BenchTarget } from './benchSeries';
  * Everything behind one growth chart: the per-company figures its line was built from, and — when
  * a benchmark is active — the same for the index it is drawn against.
  *
- * ⚠ TWO TABLES, ONE VIEW SWITCH. `Reported | Rebased | YoY %` is owned here and passed to both, so
+ *  Two tables, one view switch. `Reported | Rebased | YoY %` is owned here and passed to both, so
  * the book and the index are always on the same basis; per-table switches would let a reader
  * compare a rebased index against reported euros and take the gap for a finding. `Rebased` is the
  * one the chart actually weights, and each table's footer carries the weighted result.
  *
- * ⚠ NO "PLOTTED SERIES" TABLE. There was one, listing the chart's own points. It is gone: on a
+ *  NO "PLOTTED SERIES" TABLE. There was one, listing the chart's own points. It is gone: on a
  * single company it repeated the reported figures three ways, and on a portfolio it repeated the
  * Rebased footer — the same numbers in a second place, which is one more place for them to
  * disagree. The footer row IS the line.
  */
 
 /**
- * ⚠ THE PAYLOAD SHAPE AND THE PERIOD HELPERS MOVED TO `fundamentalBlend.ts`, with the blend maths
+ *  The payload shape and the period helpers moved to `fundamentalBlend.ts`, with the blend maths
  * that is their only real consumer. Re-exported here because two dozen cards import `Target` (and a
  * few import the period helpers) from this module, and moving a type should not move a call site.
  */
@@ -44,7 +44,7 @@ import { buildBlend, isEstimatePeriod, periodOrder, type Resp, type Row } from '
  * `2026-08-04T09:12:00Z` → `4 August 2026`. The date we concluded something, in the form a person
  * reads rather than the one a database stores.
  *
- * ⚠ FORMATTED IN UTC, NOT THE VIEWER'S ZONE. The stamp is written in UTC; rendered locally, a
+ *  Formatted in utc, not the viewer's zone. The stamp is written in UTC; rendered locally, a
  * fetch at 22:30Z becomes "5 August" for anyone east of London and "4 August" for anyone west —
  * the same event, two dates, in a tooltip whose whole job is to pin down when we looked.
  */
@@ -55,13 +55,13 @@ export const longDate = (iso: string): string =>
 /**
  * The placeholder a three-line period cell uses for a line it has no value for.
  *
- * ⚠⚠ A NO-BREAK SPACE, NOT `' '`, AND WRITTEN AS AN ESCAPE. A block box whose only content is
+ *  A no-break space, not `' '`, AND WRITTEN AS AN ESCAPE. A block box whose only content is
  * COLLAPSIBLE whitespace generates no line box and is zero pixels tall — so a company with a gap
  * period gets a two-line cell among three-line ones, the `<td>` centres its content, and every
  * figure in that row sits half a line off its neighbours. It reads as a CSS problem and it is a
  * missing character.
  *
- * ⚠ IT IS THE LITERAL U+00A0 BYTE AND IT IS INVISIBLE HERE — nothing on screen distinguishes it
+ *  It is the literal U+00A0 BYTE AND IT IS INVISIBLE HERE — nothing on screen distinguishes it
  * from the plain space it must not be. Centralising it IS the mitigation: one occurrence to
  * protect instead of three scattered through the cell markup, and a NAME at each use site saying
  * what is meant. If a bulk rewrite normalises whitespace this is the line to check; the symptom is
@@ -75,14 +75,14 @@ const NBSP = ' ';
  *  the only reason a cell can tell "we asked and there is nothing" from "nobody has asked yet": a
  *  fetch covers a period only if the period had already ENDED when the fetch ran. */
 export const periodEndDate = (period: string): string => {
-  // ⚠ `LTM` IS NOT A DATE AND MUST NOT BE PARSED AS ONE. Split on `-Q` it yields the string
+  //  `LTM` IS NOT A DATE AND MUST NOT BE PARSED AS ONE. Split on `-Q` it yields the string
   // `LTM-12-31`, which compares against real ISO dates as garbage — `'L' > '2'`, so every date
   // test it feeds silently takes the wrong branch. The trailing twelve months end at the company's
   // newest filing, which is by definition on or before today, so today is the honest bound: a
   // company fetched since then reads `No data` for a missing LTM (we asked, nothing newer), and
   // one not fetched since reads `—`.
   if (period === 'LTM') return new Date().toISOString().slice(0, 10);
-  // ⚠ AND `2026e` IS NOT A DATE EITHER — split as-is it yields the string `2026e-12-31`, which is
+  //  AND `2026e` IS NOT A DATE EITHER — split as-is it yields the string `2026e-12-31`, which is
   // not garbage that throws but garbage that COMPARES: `'2026e-12-31' > '2026-12-31'` is true, so
   // every date test it feeds quietly takes a branch nobody chose. The forecast for a fiscal year
   // ends when that year does; the `e` says who published it, not when it falls.
@@ -96,7 +96,7 @@ export type Target = {
   holdings?: { isin: string; name?: string; weight: number }[];
   /** Set INSTEAD of the two above to read an index's constituents — see `benchSeries`. */
   universe?: string;
-  /** ⚠ `'daily'` IS A REAL THIRD VALUE, not a typo — the two yield cards send it (a daily market
+  /**  `'daily'` IS A REAL THIRD VALUE, not a typo — the two yield cards send it (a daily market
    *  cap off the daily close). Narrowing this to the tab's two would reject them at the type
    *  level, so it stays a string here and the tab-level toggle owns the other two. */
   cadence?: string;
@@ -114,7 +114,7 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
 /**
  * The per-company matrix — one row per constituent, one column per period.
  *
- * ⚠ ONE COMPONENT FOR THE BOOK AND FOR THE INDEX. They are the same payload from the same
+ *  One component for the book and for the index. They are the same payload from the same
  * endpoint, and a second copy for the benchmark is how the two tables come to format a number, or
  * sort a null, differently — on a screen whose whole purpose is comparing them. Only the ingest
  * action differs, so it arrives as an optional callback rather than as a separate table.
@@ -122,7 +122,7 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
 /**
  * What the period columns show.
  *
- * ⚠ `rebased` IS THE ONE THE CHART ACTUALLY WEIGHTS, and `yoy` — the obvious thing to ask for — is
+ *  `rebased` IS THE ONE THE CHART ACTUALLY WEIGHTS, and `yoy` — the obvious thing to ask for — is
  * NOT. The blend rebases each member to 100 at its own first period and takes a weighted average
  * of those LEVELS; it never averages growth rates. The two are different constructions and give
  * different lines whenever membership changes mid-series, so both are offered and the footer says
@@ -130,7 +130,7 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
  */
 /**
 /**
- * ⚠⚠ `contrib` IS THE ONLY ONE OF THE FOUR CELL VIEWS THAT IS **ADDITIVE**, and that is what it is
+ *  `contrib` IS THE ONLY ONE OF THE FOUR CELL VIEWS THAT IS **ADDITIVE**, and that is what it is
  * for. Reported, Rebased and YoY are each a transform of ONE company's own figures, so a column of
  * them ranks companies by size or by their own growth — neither of which is impact on the line.
  * `contrib` is that company's share of the LINE's move, in percentage points of it: weight × its own
@@ -143,7 +143,7 @@ type View = 'reported' | 'rebased' | 'yoy' | 'contrib';
 /**
  * A period cell's contents, at a WIDTH THAT DOES NOT DEPEND ON THE STRING.
  *
- * ⚠ A `w-*` ON THE `<td>` IS NOT ENOUGH, AND THAT WAS THE FIRST ATTEMPT. In an auto-layout table a
+ *  A `w-*` ON THE `<td>` IS NOT ENOUGH, AND THAT WAS THE FIRST ATTEMPT. In an auto-layout table a
  * cell's width is a suggestion: once the sticky Company column is capped (`max-w-0`, which is what
  * lets it truncate), the browser has no percentage column left to absorb slack and distributes it
  * across the rest in proportion to their CONTENT widths. So "6.3B" (reported), "108.6" (rebased)
@@ -152,7 +152,7 @@ type View = 'reported' | 'rebased' | 'yoy' | 'contrib';
  * Fixing the CONTENT width fixes the layout under any algorithm: the base widths are identical in
  * all three views, so whatever the browser distributes, it distributes the same way.
  */
-/** `sum` → `+`, `mean` → `·`, `last` → `→`. ⚠ THE OPERATOR IS THE EXPLANATION, not decoration: a
+/** `sum` → `+`, `mean` → `·`, `last` → `→`.  THE OPERATOR IS THE EXPLANATION, not decoration: a
  *  share count is the MEAN of its quarters (it is already an average over each one), so a `+`
  *  between them would say the figure is four times what it is. */
 const LTM_JOIN: Record<string, string> = { sum: '+', mean: '·', last: '→' };
@@ -166,12 +166,12 @@ const LTM_RULE_TEXT: Record<string, string> = {
 /**
  * The arithmetic behind one LTM cell.
  *
- * ⚠ THE WINDOW IS NOT "THE LAST FOUR QUARTERS", which is why the dates are listed rather than
+ *  The window is not "THE LAST FOUR QUARTERS", which is why the dates are listed rather than
  * implied: it is `k` consecutive filings — two for a semi-annual filer — refused outright when they
  * span more than a year, and a quarter dropped as implausible is absent from it. What is printed is
  * what the number was computed from, which is deliberately not everything the vendor filed.
  *
- * ⚠ ALWAYS THE REPORTED FIGURE, whatever the view switch says. Rebased and YoY transform the cell
+ *  Always the reported figure, whatever the view switch says. Rebased and YoY transform the cell
  * AFTER the roll-up, so filings that reconciled to an index of 118.4 would be arithmetic the reader
  * cannot check. The tip names the reported value it does add to.
  */
@@ -200,12 +200,12 @@ const Cell = ({ children }: { children: React.ReactNode }) => (
 /**
  * The same trick for the IDENTITY columns — exchange, ticker, currency, cap.
  *
- * ⚠⚠ THIS IS WHAT MAKES VIRTUALIZATION SAFE ON AN AUTO-LAYOUT TABLE, and without it the table
+ *  This is what makes virtualization safe on an auto-layout table, and without it the table
  * visibly rebuilds as you scroll. `table-auto` sizes a column from the content it can SEE, and a
  * virtualized body only mounts ~40 rows — so a window containing `NASDAQ` and `GOOGL` gives wider
  * columns than one containing `NYSE` and `A`, and every column to the right of them slides as the
  * rows recycle. It is the same defect the period columns were already fixed for ("A FIXED WIDTH,
- * SO THE VIEW SWITCH MOVES NUMBERS AND NOTHING ELSE"), arriving by a different route: there the
+ * So the view switch moves numbers and nothing ELSE"), arriving by a different route: there the
  * content changed under a fixed row set, here the row set changes under fixed content.
  *
  * Fixing the CONTENT width fixes it under any layout algorithm, which is why this is a span rather
@@ -227,11 +227,11 @@ const VIEWS: [View, string, string][] = [
     + 'it really took: a recovery through zero reads as its true rate instead of +1,348%. A company '
     + 'that turned negative and never came back reads NEGATIVE rather than a number — there is no '
     + 'rate across a sign change, and the two levels are the only true statement. Hover a '
-    + 'cell for the base, the span and anything skipped. ⚠ The chart does NOT average these: it '
+    + 'cell for the base, the span and anything skipped.  The chart does NOT average these: it '
     + 'averages the Rebased levels. The footer is the plotted line’s own period-on-period change, '
     + 'not the average of the column above it.'],
   ['contrib', 'Contribution', 'How many percentage points of the LINE’s own move each company '
-    + 'accounts for — its weight in that period × its own growth over the interval. ⚠ The column '
+    + 'accounts for — its weight in that period × its own growth over the interval.  The column '
     + 'SUMS to the footer, which is what makes it a decomposition rather than a ranking: sort a '
     + 'period column here and you get most-to-least impact, the drivers at the top and the '
     + 'detractors at the bottom. This is the one view whose sort does NOT rank on the figure.'],
@@ -240,7 +240,7 @@ const VIEWS: [View, string, string][] = [
 function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRefresh,
   metric }: {
   data: Resp;
-  /** ⚠ THE METRIC KEY, ONLY SO THE FOOTER CAN APPLY THE SAME MEMBER RULE THE LINE DID —
+  /**  THE METRIC KEY, ONLY SO THE FOOTER CAN APPLY THE SAME MEMBER RULE THE LINE DID —
    *  `fcf_ps` is drawn from the positives-only set. See `fundamentalBlend`. */
   metric?: string;
   fmt: (v: number | null | undefined) => string;
@@ -254,7 +254,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * Whether this metric's figures are MONEY — `millions` / `per_share`, never `percent` or
    * `shares`.
    *
-   * ⚠ DECIDED FROM THE DECLARED UNIT, NEVER SNIFFED FROM THE NAME. Same rule and same two members
+   *  Decided from the declared unit, never sniffed from the name. Same rule and same two members
    * as the backend's `_benchmark_fundamental_grid._CURRENCY_UNITS`: a share COUNT is a plain
    * number in millions like the currency lines around it, and `EPS (Diluted)` does not contain the
    * words "per share". Getting it wrong here only mislabels a column — getting it wrong there
@@ -262,7 +262,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * from the same place.
    */
   valueIsCurrency: boolean;
-  /** ⚠ OWNED BY THE MODAL, NOT HERE — one switch drives the book's table and the index's together.
+  /**  OWNED BY THE MODAL, NOT HERE — one switch drives the book's table and the index's together.
    *  Two independent switches would let a reader compare a rebased index against reported euros
    *  and read the gap as a finding. */
   view: View;
@@ -270,7 +270,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * Re-fetch ONE company as a cancellable JOB, keyed on `company_id`. Returns the handle so the row
    * can offer the Cancel; the caller reloads the table when it lands.
    *
-   * ⚠ IT FORCES, AND WITHOUT THAT IT IS A NO-OP THAT LOOKS LIKE A BUTTON. `is_cache_fresh` calls
+   *  It forces, and without that it is a no-op that looks like a button. `is_cache_fresh` calls
    * the stored GuruFocus blob fresh for months, so an un-forced "refresh" of an already-loaded
    * company rewrites identical rows, spends nothing and changes nothing on screen.
    */
@@ -279,13 +279,13 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   /**
    * The sort, AND THE VIEW IT WAS CHOSEN UNDER.
    *
-   * ⚠⚠ `basis` EXISTS SO SWITCHING VIEW DOES NOT REORDER THE TABLE. A period column ranks on the
+   *  `basis` EXISTS SO SWITCHING VIEW DOES NOT REORDER THE TABLE. A period column ranks on the
    * reported figure in three views and on the contribution in `contrib`, so `view` in the
    * comparator meant every switch into or out of `contrib` silently reshuffled every row — while
    * the reader was looking at it, having asked for none of it. Freezing the basis at the moment
    * the sort is CHOSEN keeps the order until they choose again, which is what a sort is.
    *
-   * ⚠ IT IS NOT THE SAME AS DROPPING `contrib`'s OWN RULE. Click a period column while in
+   *  It is not the same as dropping `contrib`'s OWN RULE. Click a period column while in
    * `contrib` and it still ranks by impact; the rule now applies at click time rather than at
    * render time, so it decides the order once instead of re-deciding it on every switch.
    */
@@ -309,13 +309,13 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   /**
    * Every row's rebased series + the weight it carries, and the blend's own denominator.
    *
-   * ⚠ THE DENOMINATOR IS THE **CONTRIBUTING** WEIGHT, NOT THE TABLE'S. `blend_series` is handed
+   *  The denominator is the **CONTRIBUTING** WEIGHT, NOT THE TABLE'S. `blend_series` is handed
    * only the members that carry the metric, and `_prepare` then drops any whose base is ≤ 0
    * (100 × v/0 is undefined; a negative base inverts the curve). Using the table's full weight
    * would put SP500's 264 contributors over its 489 listed rows and every coverage figure — and
    * the floor decision that rides on it — would be wrong by that ratio.
    */
-  // ⚠ THE METRIC IS PASSED so the footer applies the same member rule the server's line did —
+  //  The metric is passed so the footer applies the same member rule the server's line did —
   // `fcf_ps` is drawn from the positives-only set. Without it the table reconciles to a line
   // nobody is looking at. See `fundamentalBlend.POSITIVE_ONLY_METRICS`.
   const blend = useMemo(() => buildBlend(data, metric), [data, metric]);
@@ -323,14 +323,14 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   /**
    * Per-row facts that every one of that row's period cells would otherwise re-derive.
    *
-   * ⚠⚠ `Object.keys(r.revenue).filter(…).sort(periodOrder)` USED TO RUN PER CELL, and a row has as
+   *  `Object.keys(r.revenue).filter(…).sort(periodOrder)` USED TO RUN PER CELL, and a row has as
    * many cells as the table has periods. `cellState` wants the newest period a row reported;
    * `cellOf` wants the ordered list, because the Rebased base is its FIRST period and the YoY
    * comparison its PREVIOUS one. On an index that is an allocate-filter-sort per cell — ~500 of them
    * to draw one screenful of ACWI, repeated on every scroll step that mounts a row, for an answer
    * that depends on the ROW alone and cannot change between two cells of it.
    *
-   * ⚠ KEYED ON THE ROW OBJECT, NOT ON THE ISIN — the same rule as `blend.partOf` above. A payload
+   *  Keyed on the row object, not on the ISIN — the same rule as `blend.partOf` above. A payload
    * can carry one ISIN twice (a model listing an instrument at two weights), and an ISIN key would
    * hand both rows the first one's periods.
    */
@@ -343,11 +343,11 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       m.set(r, {
         reported,
         newest: reported[reported.length - 1],
-        // ⚠ THE ROW'S OWN TYPICAL SIZE, for the YoY skip rule — see `positiveChain`. It is a
+        //  The row's own typical size, for the YoY skip rule — see `positiveChain`. It is a
         // property of the whole series, so it belongs here and not in a cell: computing it per
         // cell would sort the row's values once per period column to get one constant.
         scale: medianAbs(reported.map((p) => r.revenue[p])),
-        // ⚠ WHETHER THE ROW CARRIES A CONSENSUS FOR **ANY** YEAR — what separates "analysts do not
+        //  Whether the row carries a consensus for **ANY** YEAR — what separates "analysts do not
         // forecast this far" from "the estimates feed has never been fetched for this company".
         // `reported` is already filtered to non-null, so this is the same test `stateTitle` made.
         hasEstimate: reported.some(isEstimatePeriod),
@@ -371,11 +371,11 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * One row's share of the plotted line IN THAT PERIOD — the number the second line of each cell
    * shows.
    *
-   * ⚠ IT IS READ OFF `blend`, NEVER RECOMPUTED. Same `w`, same per-period denominator, so the
+   *  It is read off `blend`, NEVER RECOMPUTED. Same `w`, same per-period denominator, so the
    * weights shown are the weights the footer actually used. A second derivation "the same way" is
    * how a table comes to disagree with the line it exists to explain.
    *
-   * ⚠ NULL WHERE THE ROW DID NOT CONTRIBUTE, never 0. Three ways that happens and all of them mean
+   *  Null where the row did not contribute, never 0. Three ways that happens and all of them mean
    * "this row is not in this period's average": it has no value that period, it has no weight, or
    * `_prepare` dropped it for a non-positive base (100 × v/0 is undefined). A 0% would read as a
    * holding so small it did not matter, which is a different claim.
@@ -394,7 +394,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
 
   const weightAt = (r: Row, y: string): number | null => {
     const d = blend.denom[y];
-    // ⚠ A CARRIED ROW HAS A WEIGHT, because its figure is in the average. Testing `p.idx[y]` here
+    //  A carried row has a weight, because its figure is in the average. Testing `p.idx[y]` here
     // (its OWN value) left carried rows blank in the weight column while they sat in the
     // denominator — so the column added to less than 100% and the Total row would have said so.
     if (!d || !sourceOf(r, y)) return null;
@@ -405,19 +405,19 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   /** The value a period column shows for one row, under the current view. */
   const cellOf = (r: Row, y: string): number | null => {
     /**
-     * ⚠⚠ READ OFF `blend`, NEVER DERIVED FROM THE CELLS AROUND IT — the same rule as `weightAt`, and
+     *  Read off `blend`, NEVER DERIVED FROM THE CELLS AROUND IT — the same rule as `weightAt`, and
      * here it is the whole feature. The honest denominator is the weight that spans the INTERVAL,
      * which is not `blend.denom[y]` and is not visible from this row (see `fundamentalBlend`'s
      * `step`); anything computed here from this row's two figures and its weight would look right,
      * sort plausibly, and not add up to the line's move.
      *
-     * ⚠ IT DOES NOT FOLLOW THE CARRY BELOW. A carried row IS in the step — with the same value at
+     *  It does not follow the carry below. A carried row IS in the step — with the same value at
      * both ends, so its contribution is exactly 0.00pp, which is the true statement "it was in the
      * average and it did not move". Recursing to the source period would instead print the pp of a
      * DIFFERENT interval in this column.
      */
     if (view === 'contrib') return blend.contrib.get(r)?.[y]?.pp ?? null;
-    // ⚠ A CARRIED PERIOD SHOWS THE FIGURE THE LINE USED, from the period it came from. Leaving it
+    //  A carried period shows the figure the line used, from the period it came from. Leaving it
     // blank while its weight sits in the column below would show a share of a number that is not
     // on screen. `yoy` is the exception: nothing new was reported, so there is no growth to state.
     const src = sourceOf(r, y);
@@ -430,10 +430,10 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       const base = r.revenue[periods[0]] as number;
       return base > 0 ? 100 * v / base : null;
     }
-    // ⚠ THE PREVIOUS PERIOD **THIS ROW REPORTED**, not the previous column. A company that skipped
+    //  The previous period **THIS ROW REPORTED**, not the previous column. A company that skipped
     // a year would otherwise show its two-year growth in the same ink as everyone's one-year.
     const s = yoyStep(r, y);
-    // ⚠ `annualised` NULL IS NOT "NO DATA" — it is a multi-period step ending at or below zero, for
+    //  `annualised` NULL IS NOT "NO DATA" — it is a multi-period step ending at or below zero, for
     // which no real rate exists. The tooltip names it; see `positiveChain.Step.annualised`.
     return s && s.annualised != null ? 100 * s.annualised : null;
   };
@@ -441,7 +441,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   /**
    * The YoY step behind a cell — the base it grew from, over how many periods, annualised.
    *
-   * ⚠⚠ IT IS NOT `v / previous − 1`, AND THAT IS THE POINT. A ratio needs a base that is positive
+   *  It is not `v / previous − 1`, AND THAT IS THE POINT. A ratio needs a base that is positive
    * AND big enough to divide by. This column used to take whichever figure sat behind the cell and
    * refuse only the non-positive ones, so Eli Lilly's `5.085 → −3.489 → 0.458 → 6.632` printed a
    * −100%, a blank and then **+1,348%**, and the +30.4% the company actually managed over those
@@ -449,12 +449,12 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * annualises over the span, so Lilly reads **+9.3%/yr** and the column stays comparable row to
    * row. See `positiveChain` for why the floor is not optional.
    *
-   * ⚠ IT GUARDS THE DIVISOR, NOT THE NUMERATOR, and the difference is worth knowing before reading
+   *  It guards the divisor, not the numerator, and the difference is worth knowing before reading
    * a cell as fixed. Japan Post Bank's **+25,147,989.7%** had two causes: a base of 4.998 (gone —
    * that one is a divisor artefact) and an FY2025 figure 1,000x too large, because its `shares`
    * cell is 1,000x too small and GuruFocus divides by it. The remaining ~+25,000% is a real vendor
    * defect in the value itself; no growth rule can mend it, and the tooltip now shows both ends so
-   * it reads as the data problem it is. ⚠ It does NOT reach the aggregate index line, which
+   * it reads as the data problem it is.  It does NOT reach the aggregate index line, which
    * multiplies `per_share × shares` and cancels the two errors exactly — see `acwi_fcf_growth.py`.
    */
   const yoyStep = (r: Row, y: string) => {
@@ -464,7 +464,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   };
 
   /** Whether this YoY cell is the "turned negative and stayed there" case — a step that exists and
-   *  has no rate. ⚠ IT GETS A WORD, NOT A DASH: the figures are present and correct, and a blank
+   *  has no rate.  IT GETS A WORD, NOT A DASH: the figures are present and correct, and a blank
    *  in a column of numbers is read as missing data every time. See `Step.annualised`. */
   const yoyHasNoRate = (r: Row, y: string) =>
     view === 'yoy' && yoyStep(r, y)?.annualised === null;
@@ -473,7 +473,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * What the FIRST of a cell's stacked numbers is called — in the `Line` column and in the footer's
    * copy of it.
    *
-   * ⚠ IT CANNOT BE THE METRIC'S NAME IN `contrib`. Reported, Rebased and YoY are all statements
+   *  It cannot be the metric's name in `contrib`. Reported, Rebased and YoY are all statements
    * about the metric (its level, its index, its growth), so naming the line `Revenue` is right in
    * each; a pp contribution is a share of the LINE's move and naming it `Revenue` would label the
    * one number here that is not a revenue figure after one. Same reason the total row carries no
@@ -485,7 +485,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     v == null ? '—'
       : view === 'reported' ? fmt(v)
         : view === 'rebased' ? v.toFixed(1)
-          // ⚠ `pp`, NOT `%`, AND TWO DECIMALS. A percentage point of a line's move and a percent of
+          //  `pp`, NOT `%`, AND TWO DECIMALS. A percentage point of a line's move and a percent of
           // a company's own revenue are different quantities that would otherwise wear the same
           // sign; and on a 1,500-name index most contributions are hundredths, so 1dp would round
           // the whole tail to +0.0 and make the sort look broken where it is working.
@@ -493,9 +493,9 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
             : `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`);
 
   /**
-   * WHAT ONE PERIOD CELL IS, and there are exactly four possibilities.
+   * What one period cell is, and there are exactly four possibilities.
    *
-   * ⚠⚠ THE TWO EMPTY ONES ARE OPPOSITE FACTS AND USED TO RENDER IDENTICALLY. A blank period is
+   *  The two empty ones are opposite facts and used to render identically. A blank period is
    * either "our imported GuruFocus data has nothing for this period" or "no fetch has ever
    * covered a period this recent" — the first is about the stored import, the second about us, and
    * only one of them is fixed by pressing Refresh. `financials_fetched_at` is what separates them: a
@@ -506,7 +506,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    *   not_tried    the period ends after our last fetch — or we have never fetched at all
    *   unsubscribed the exchange is outside the GuruFocus subscription, so it cannot be asked
    *
-   * ⚠ `unsubscribed` IS A ROW FACT RENDERED PER CELL, deliberately. It is true of every period, and
+   *  `unsubscribed` IS A ROW FACT RENDERED PER CELL, deliberately. It is true of every period, and
    * saying so in each one costs a little repetition and buys the ability to read a row the same
    * way everywhere — the alternative (one cell spanning the row) meant a row was either all
    * figures or all prose, and a period could not be read at all.
@@ -515,7 +515,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * What an empty cell says, in one place — the badge and the cell around it read from this, so
    * hovering anywhere in the cell gives the same sentence as hovering the chip.
    *
-   * ⚠ THE DATE IS THE POINT OF `No data`. It describes the last import rather than making a claim
+   *  The date is the point of `No data`. It describes the last import rather than making a claim
    * about what GuruFocus currently publishes; the vendor may have added the period since.
    * With no stamp it says so rather than implying a recent check: the row's figures prove a fetch
    * happened, they just cannot say when.
@@ -525,13 +525,13 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
                         | 'reported_actual',
                       y: string): string => {
     /**
-     * ⚠⚠ IT STATES WHAT IS STORED, NOT WHY — because the two candidate reasons are not
+     *  It states what is stored, not why — because the two candidate reasons are not
      * distinguishable from here. Either analysts do not cover this company (most of a broad index:
      * measured 2026-08-14, 351 of ACWI's 1,715 charted names carry a consensus), or the estimates
      * feed has never been fetched for it. Unlike the reported statements there is NO per-feed
      * timestamp to separate them — `needs()` probes for a sentinel row, so an absence is an absence.
      *
-     * ⚠ AN EARLIER WORDING ASSERTED THE FIRST AND SAID "Refresh cannot fill it". That was wrong
+     *  An earlier wording asserted the first and said "Refresh cannot fill it". That was wrong
      * twice: the cause was never established, and the row Refresh was at the time narrowed to
      * `feeds=statements` and did not even ask for estimates. Both halves are fixed — the button
      * now asks (`refreshRow`) and this sentence points at it instead of ruling it out.
@@ -543,7 +543,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
         + 'table while a June filer beside it has already closed that year. Nothing is missing.';
     }
     if (state === 'not_covered') {
-      // ⚠⚠ TWO SENTENCES, BECAUSE ONE OF THEM IS ACTIONABLE AND THE OTHER IS NOT. A row that
+      //  Two sentences, because one of them is actionable and the other is not. A row that
       // carries a consensus for ANY year proves the estimates feed was fetched for it, so an
       // empty year is analysts not forecasting that far — pressing Refresh again cannot help. A
       // row with none at all is genuinely ambiguous (never asked, or asked and uncovered), and
@@ -559,7 +559,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
           + 'companies in a broad index are not covered at all, in which case an empty cell after '
           + 'that is the answer rather than a gap.';
     }
-    // ⚠⚠ A PERIOD THAT HAS NOT ENDED IS NOT "NOT TRIED" — nobody can have reported it, and no
+    //  A period that has not ended is not "NOT TRIED" — nobody can have reported it, and no
     // number of presses will change that. Both sentences are arithmetically true ("this period
     // ends after our last fetch"), but one sends the reader to press Refresh for a fiscal year
     // that is still running. Measured: Adyen's FY2026 ends 31 December, we fetched 12 August, and
@@ -593,11 +593,11 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   'value' | 'no_data' | 'not_tried' | 'unsubscribed' | 'not_covered' | 'reported_actual' => {
     if (r.revenue[y] != null) return 'value';
     /**
-     * ⚠⚠ AN EMPTY FORECAST CELL IS NOT ONE FACT BUT THREE, and `No data` / `—` would misdescribe
+     *  An empty forecast cell is not one fact but three, and `No data` / `—` would misdescribe
      * all of them. There is no "did we fetch this period" question for a year that has not
      * happened, so the ordinary two states do not apply.
      *
-     * ⚠ THE FIRST ONE IS THE SURPRISE: THE COMPANY HAS ALREADY REPORTED THAT YEAR. The estimate
+     *  The first one is the surprise: the company has already reported that year. The estimate
      * columns are the UNION across holdings, so a December filer whose newest filing is 2025 puts a
      * `2026e` column on the table — and a JUNE filer sitting beside it has already closed FY2026.
      * Measured on KLA Corp: actual FY2026 = 3.76 filed 2026-06-30, with a consensus running
@@ -608,12 +608,12 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     if (isEstimatePeriod(y)) {
       return r.revenue[y.slice(0, -1)] != null ? 'reported_actual' : 'not_covered';
     }
-    // ⚠ A CARRIED PERIOD IS A VALUE, NOT A GAP. The line used a number here — this row's latest —
+    //  A carried period is a value, not a gap. The line used a number here — this row's latest —
     // so badging it `No data` would deny a figure that is visibly in the average, and the weight
     // column beneath it would be a share of nothing. The tooltip says where it came from.
     if (sourceOf(r, y)) return 'value';
     if (r.status === 'unsubscribed') return 'unsubscribed';
-    // ⚠⚠ A ROW WITH ANY FIGURE HAS BEEN FETCHED — THE PROOF IS THE FIGURE. GuruFocus returns the
+    //  A row with any figure has been fetched — the proof is the figure. GuruFocus returns the
     // whole history in one blob, so every period up to the newest one we hold was covered by that
     // fetch: a blank there is GuruFocus publishing nothing, not us never asking. Universal Music
     // is the case that made this obvious — nine annual rows from 2018, nothing for 2015/2016
@@ -624,13 +624,13 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
     // Lexical order is chronological for both vocabularies — `2015` < `2018`, `2025-Q1` < `2025-Q3`
     // — and every period in one table shares one vocabulary.
     if (newest && y <= newest) return 'no_data';
-    // ⚠ ONLY THE TRAILING EDGE IS GENUINELY AMBIGUOUS, and only there does the timestamp decide.
+    //  Only the trailing edge is genuinely ambiguous, and only there does the timestamp decide.
     // The period's own END vs the fetch date: `2025-Q3` ends 2025-09-30, and a fetch on 2025-08-01
     // could not have seen it — calling that "no data" would blame GuruFocus for our own gap.
     const asked = r.financials_fetched_at;
     return asked && periodEndDate(y) <= asked.slice(0, 10) ? 'no_data' : 'not_tried';
   };
-  // ⚠ `basis: view` ON BOTH BRANCHES — a re-click in a different view is a NEW sort and must
+  //  `basis: view` ON BOTH BRANCHES — a re-click in a different view is a NEW sort and must
   // re-rank on what is on screen now, not on whatever was showing when the column was first
   // picked. Only an untouched sort survives a view switch.
   const toggle = (key: string) => setSort((s) => (s.key === key
@@ -640,16 +640,16 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   const caret = (k: string) => (sort.key === k ? (sort.dir === 'desc' ? ' ▾' : ' ▴') : '');
 
   /**
-   * ⚠⚠ A PERIOD COLUMN SORTS ON THE **REPORTED** FIGURE IN EVERY VIEW BUT ONE, and that is a promise
+   *  A period column sorts on the **REPORTED** FIGURE IN EVERY VIEW BUT ONE, and that is a promise
    * the header makes in writing. Rebased and YoY are per-company transforms, so ranking a column of
    * them answers "who is biggest / who grew fastest", not "what moved this line" — and switching
    * view under a reader is not the moment to also switch what their sort means.
    *
-   * ⚠ `contrib` IS THE EXCEPTION BECAUSE IT IS THE POINT OF IT: the pp column is additive, so its
+   *  `contrib` IS THE EXCEPTION BECAUSE IT IS THE POINT OF IT: the pp column is additive, so its
    * order IS the impact ranking. Sorting it by the reported figure instead would rank a
    * decomposition by company size — the exact thing this view exists to stop doing.
    *
-   * ⚠ SIGNED, NOT `Math.abs`. Descending puts the drivers at the top and the detractors at the
+   *  Signed, not `Math.abs`. Descending puts the drivers at the top and the detractors at the
    * bottom, so one column read top-and-bottom answers both halves; ranking on magnitude interleaves
    * a +5pp driver with a −5pp drag and the sign — which is the finding — stops being visible in the
    * order at all. One click flips it. Rows with no contribution stay NULL and `cmp` keeps nulls last
@@ -666,12 +666,12 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
                   : sort.basis === 'contrib' ? (blend.contrib.get(r)?.[sort.key]?.pp ?? null)
                     : r.revenue[sort.key]);    // a period column
     return [...data.rows].sort((a, b) => cmp(get(a), get(b), sort.dir));
-    // ⚠ `view` IS DELIBERATELY NOT A DEPENDENCY. It used to be, and that is precisely what made
+    //  `view` IS DELIBERATELY NOT A DEPENDENCY. It used to be, and that is precisely what made
     // the table reorder on a tab switch — see `sort.basis`.
   }, [data, sort, blend]);
 
   /**
-   * ⚠⚠ ROW VIRTUALIZATION — AND THIS TABLE HAS ITS OWN SCROLL BOX BECAUSE OF IT.
+   *  Row virtualization — and this table has its own scroll box because of it.
    *
    * It used to scroll inside the modal BODY, which holds the book's matrix and the index's
    * stacked together. Virtualizing against a shared scroll parent means each table's offsets are
@@ -683,7 +683,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * Measured on ACWI revenue: 1,514 rows x 12 periods is **45,420 cells** with the weight line
    * added (27,252 before it). ~40 rows mounted turns that into ~1,200.
    *
-   * ⚠ `measureElement` RATHER THAN A FIXED ESTIMATE, because the rows here are genuinely NOT all
+   *  `measureElement` RATHER THAN A FIXED ESTIMATE, because the rows here are genuinely NOT all
    * the same height — an `unsubscribed` or `no_data` row spans the period columns with a single
    * line of text and no weight beneath it, so it is shorter than a normal two-line row. That is
    * the case a hardcoded `estimateSize` gets wrong, and on an index it is hundreds of rows.
@@ -702,7 +702,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   const padBottom = vItems.length
     ? rowVirtualizer.getTotalSize() - vItems[vItems.length - 1].end
     : 0;
-  /** ⚠ MUST TRACK THE HEADER EXACTLY — a spacer one short leaves the table free to re-fit its
+  /**  MUST TRACK THE HEADER EXACTLY — a spacer one short leaves the table free to re-fit its
    *  columns around the gap, which is the jitter `Ident` exists to prevent. #, Company, [Refresh],
    *  GF exch, Ticker, [Mkt cap], Ccy, Line, then one per period. */
   const colCount = 6 + (onRefresh ? 1 : 0) + (hasCap ? 1 : 0) + data.years.length;
@@ -710,26 +710,26 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   /**
    * The per-row refresh, as a JOB.
    *
-   * ⚠ A JOB RATHER THAN A BLOCKING FETCH, FOR THE CANCEL — not for the progress bar. A plain
+   *  A job rather than a blocking fetch, for the cancel — not for the progress bar. A plain
    * request holds the connection open for as long as GuruFocus takes and gives the reader no way
    * to stop it: abort the fetch and the server carries on, having already decided to spend the
    * quota. Through `startJob` the row gets the generic toast (its outcome, the running quota spend,
    * a Cancel that outlives this modal) and several rows can run at once.
    *
-   * ⚠ `jobId` IS KEPT SO THE ROW ITSELF CAN CANCEL. Losing it would leave the toast as the only
+   *  `jobId` IS KEPT SO THE ROW ITSELF CAN CANCEL. Losing it would leave the toast as the only
    * way to stop a fetch the reader started from here, which on a 1,500-row table means hunting for
    * the right card.
    */
   const refreshOne = async (r: Row) => {
     if (!onRefresh || r.company_id == null) return;
-    // ⚠ `busy` FROM THE CLICK, NOT FROM THE JOB ID. The button has exactly TWO states — Refresh and
+    //  `busy` FROM THE CLICK, NOT FROM THE JOB ID. The button has exactly TWO states — Refresh and
     // Cancel — so it must flip on the press, before the id exists. A third "Refreshing…" state for
     // the ~200 ms `startJob` takes is a label nobody can act on that flickers past on every press.
     setRefresh((s) => ({ ...s, [r.isin]: { busy: true } }));
     try {
       const { id, done } = await onRefresh(r);
       setRefresh((s) => ({ ...s, [r.isin]: { busy: true, jobId: id } }));
-      // ⚠ A CANCEL PRESSED DURING THAT GAP IS HONOURED HERE, or the two-state button is a lie: the
+      //  A cancel pressed during that gap is honoured here, or the two-state button is a lie: the
       // reader pressed Cancel, the label said Cancel, and the fetch would have run to completion
       // anyway because there was nothing to cancel yet. A ref, not state — this closure captured
       // its `refresh` on the way in and would never see a later press.
@@ -739,7 +739,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
         ? { msg: job.summary || 'the fetch failed — see the console' } : {} }));
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // The row gets one short line (a ⚠ with the text in its tooltip, where there is no room for
+      // The row gets one short line (a  with the text in its tooltip, where there is no room for
       // more); the console gets it in full, as everywhere else here.
       console.warn(`[bb:fundamentals] refresh ${r.name} (${r.isin}): ${msg}`, e);
       pendingCancel.current.delete(r.isin);
@@ -750,14 +750,14 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   /**
    * How much room the Company column gets, before truncation.
    *
-   * ⚠ AN EXPLICIT FLOOR, BECAUSE `w-full` + `max-w-0` GIVES IT NONE. That pair is what makes this
+   *  An explicit floor, because `w-full` + `max-w-0` GIVES IT NONE. That pair is what makes this
    * column take the slack AND truncate instead of stretching the table — but on a wide matrix (a
    * dozen period columns, each with three stacked numbers) there is no slack left, so its
    * min-content width is the truncation point: near zero. Every name ended up clipped to a few
    * characters. `min-width` beats `max-width` when the two conflict, so this widens it without
    * touching the truncation.
    *
-   * ⚠ ONE CONSTANT, THREE CELLS. The header, the row and the footer are the same column; declaring
+   *  One constant, three cells. The header, the row and the footer are the same column; declaring
    * the width in three string literals is how a sticky column comes to have three widths, and the
    * pinned cells then misalign against each other as you scroll.
    */
@@ -769,7 +769,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * 3.5rem, close to the `#` column on the /benchmarks fundamentals grid (`fixedWidthsRem`), so the
    * two tables that list the same constituents indent about the same.
    *
-   * ⚠⚠ ONE NUMBER, USED TWICE, AND THAT IS THE WHOLE POINT. Two frozen columns only line up while
+   *  One number, used twice, and that is the whole point. Two frozen columns only line up while
    * the first one's WIDTH and the second one's `left` OFFSET are identical; expressed as `w-14` +
    * `left-14` they were two separate Tailwind rules, and a table's auto layout is free to overrule
    * a cell width — the `w-full` Company column claimed the slack, squeezed the number column to its
@@ -780,18 +780,18 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * other side.
    */
   const NUM_W = '3.5rem';
-  /** ⚠ A STYLE ATTRIBUTE, NOT A UTILITY CLASS — the one place in this file that earns it. The
+  /**  A STYLE ATTRIBUTE, NOT A UTILITY CLASS — the one place in this file that earns it. The
    *  agreement is between two cells and is a MEASUREMENT, not a token; inline it is applied
    *  directly and both sides read the same constant. */
   const numCell = { width: NUM_W, minWidth: NUM_W, maxWidth: NUM_W };
   /**
-   * ⚠⚠ THE COMPANY COLUMN IS NOW A FIXED WIDTH, AND IT HAD TO BECOME ONE. A third frozen column
+   *  The company column is now a fixed width, and it had to become one. A third frozen column
    * pins at `first + second`, so the second's width has to be a NUMBER — and `w-full` made it
    * whatever slack the table had left, which is a different value on every screen and on every
    * cadence (twelve period columns or forty). Pinned against a guess, the Refresh column would sit
    * over the names on a wide table and leave a gap on a narrow one.
    *
-   * ⚠ THE TABLE STILL FILLS: `<table className="w-full">` distributes what is left across the
+   *  The table still fills: `<table className="w-full">` distributes what is left across the
    * period columns instead. They are the ones that should absorb it — a wider window shows more of
    * the figures, not more whitespace under a company name.
    */
@@ -803,18 +803,18 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
 
   const cancelRow = async (isin: string) => {
     const id = refresh[isin]?.jobId;
-    // ⚠ NO INLINE MESSAGE — `cancelJob` puts "cancelling…" on the job's own card the instant it is
+    //  No inline message — `cancelJob` puts "cancelling…" on the job's own card the instant it is
     // pressed, and that card carries the outcome. Two places reporting one job is two to keep in
     // step.
     if (id) { await cancelJob(id); return; }
     // Pressed before the job id came back. Remembered, and `refreshOne` cancels the moment it has
-    // something to cancel — see the ⚠ there.
+    // something to cancel — see the  there.
     pendingCancel.current.add(isin);
   };
 
   /**
-   * ⚠⚠ RENDERED ROWS, KEPT BY INDEX — THIS IS WHAT MAKES SCROLLING CHEAP, AND WITHOUT IT
-   * VIRTUALIZATION ONLY HALF WORKS.
+   *  Rendered rows, kept by index — this is what makes scrolling cheap, and without it
+   * Virtualization only half works.
    *
    * The virtualiser re-renders this component on every scroll step while the window moves by one or
    * two rows — but the map below rebuilt ALL ~40 of them each time. A row here is not cheap markup:
@@ -828,7 +828,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * props — which on this row would mean `useCallback`-ing every one of `cellOf`, `cellState`,
    * `stateTitle`, `weightAt`… and any one of them missed silently disables the memo again.
    *
-   * ⚠⚠ THE DEPENDENCY LIST IS THE CORRECTNESS ARGUMENT, NOT AN OPTIMISATION HINT. A cached element
+   *  The dependency list is the correctness argument, not an optimisation hint. A cached element
    * holds the closures it was built with, so EVERY value those closures read has to invalidate this
    * map. They read `data`, `view`, `blend`, `rowFacts`, `refresh`, `fmt`, `noun`, `metricLabel`,
    * `valueIsCurrency`, `onRefresh`, `hasCap`, `hasPeriodCap` and the sorted `rows` — all listed. The
@@ -836,10 +836,10 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
    * listing them would clear the cache on every frame and undo the whole thing. That is safe
    * precisely because each is a pure closure over the values above.
    *
-   * ⚠ SO ARE `numCell` / `nameStick` / `refreshStick` — fresh object literals every render, over
+   *  So are `numCell` / `nameStick` / `refreshStick` — fresh object literals every render, over
    * constants that never change. Listing them would also clear the cache every frame.
    *
-   * ⚠ IT IS PRUNED TO THE WINDOW, or it would retain 1,949 element trees for a table showing forty.
+   *  It is pruned to the window, or it would retain 1,949 element trees for a table showing forty.
    * That is not a regression against `React.memo`: a row scrolled out of range is unmounted there
    * too, and rebuilt on the way back.
    */
@@ -850,7 +850,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
       onRefresh, hasCap, hasPeriodCap, todayISO],
   );
   if (vItems.length && rowCache.size > vItems.length * 4) {
-    // ⚠ ONLY WHEN IT HAS GROWN WELL PAST THE WINDOW, not every frame — walking the map on each
+    //  Only when it has grown well past the window, not every frame — walking the map on each
     // scroll step to delete two entries is the kind of tidying that costs more than it saves.
     const lo = vItems[0].index;
     const hi = vItems[vItems.length - 1].index;
@@ -858,7 +858,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
   }
 
   return (
-    /* ⚠ `max-h-`, NOT `h-`. The grid's own note argues the opposite ("a fixed height means the box
+    /*  `max-h-`, NOT `h-`. The grid's own note argues the opposite ("a fixed height means the box
        is the same size before and after"), and the reason it does not apply here is that this
        modal stacks TWO of these: a fixed 46vh each would leave the AEX's 22 rows sitting in a
        half-empty box above another half-empty box, in a dialog that is only 84vh tall. A book of
@@ -867,15 +867,15 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
        inside a modal that opened on a loading line anyway. */
     <div ref={scrollRef} className="overflow-auto max-h-[46vh] rounded-lg border border-neutral-800/40">
       <table className="w-full text-xs">
-        {/* ⚠ STICKY, NOW THAT THE BOX SCROLLS ITSELF. Scrolling 1,514 constituents past a header
+        {/*  STICKY, NOW THAT THE BOX SCROLLS ITSELF. Scrolling 1,514 constituents past a header
             that has left the screen makes the period columns unreadable — and the footer IS the
             plotted line, which is the one row you want in view while reading any other. */}
         <thead className="bg-page sticky top-0 z-20">
           <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th]:select-none [&>th:hover]:text-fg-soft">
             {/* Company takes the slack so the table fills the width; periods keep natural size.
-                ⚠ z ABOVE ITS OWN ROW: this cell pins in BOTH directions, so it has to outrank the
+                 z ABOVE ITS OWN ROW: this cell pins in BOTH directions, so it has to outrank the
                 sticky header beside it and the sticky name cells below it. */}
-            {/* ⚠ NOT SORTABLE, and `cursor-default!` opts it out of the row-level rule that makes
+            {/*  NOT SORTABLE, and `cursor-default!` opts it out of the row-level rule that makes
                 every other header a sort toggle. There is nothing to sort BY: the number is the
                 position, so "sort by position" is whatever sort you are already in. */}
             <th className={`px-2 py-1.5 font-medium text-right sticky left-0 bg-page z-30
@@ -883,7 +883,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
               title="Row number in the current sort — it renumbers when you re-sort.">#</th>
             <th className={`px-3 py-1.5 font-medium text-left sticky bg-page z-30 ${nameCol}`} style={nameStick}
               onClick={() => toggle('name')}>Company{caret('name')}</th>
-            {/* ⚠ ITS OWN COLUMN, AND NOT SORTABLE — every other header here toggles a sort, so this
+            {/*  ITS OWN COLUMN, AND NOT SORTABLE — every other header here toggles a sort, so this
                 one carries `cursor-default` explicitly to opt out of the row-level rule above. The
                 buttons under it are self-labelling, so the heading only has to name the column. */}
             {onRefresh && (
@@ -900,34 +900,34 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
                 Mkt cap €bn{caret('cap')}
               </th>
             )}
-            {/* ⚠ THE `Weight` COLUMN WAS REMOVED (2026-08-10, on request) — the weight now lives
+            {/*  THE `Weight` COLUMN WAS REMOVED (2026-08-10, on request) — the weight now lives
                 inside every period cell, on the basis that period actually used. Keeping both put
                 two different percentages under one word on one screen: this one was today's cap
                 over the table's total, the cell's is that period's cap over that period's
                 reporters. For an index the column was simply the wrong one of the two.
 
-                ⚠ WHAT WENT WITH IT, ON THE **BOOK'S** TABLE ONLY: its total was the share of the
+                 WHAT WENT WITH IT, ON THE **BOOK'S** TABLE ONLY: its total was the share of the
                 whole book these companies make up — under 100%, because cash, bonds and anything
                 unpriceable are in that denominator and are not listed here. The per-cell weight
                 cannot say that: it renormalises over whoever reported, so it sums to 100% by
                 construction. If "these holdings are 87% of the portfolio" is wanted back, it
                 belongs as a line under the table, not as a column that looks like the cell weight.
 
-                ⚠ `sort.key` STILL DEFAULTS TO `'weight'` AND THAT IS DELIBERATE, not a leftover.
+                 `sort.key` STILL DEFAULTS TO `'weight'` AND THAT IS DELIBERATE, not a leftover.
                 It is the order the server already returns (`rows.sort` by weight desc), so the
                 table opens biggest-first; it is simply no longer reachable from a header, because
                 there is no header for it to be wrong about. */}
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ccy')}>Ccy{caret('ccy')}</th>
-            {/* ⚠ THE LINE-LABEL COLUMN — names the three numbers stacked in every period cell.
+            {/*  THE LINE-LABEL COLUMN — names the three numbers stacked in every period cell.
                 It sits LAST of the identity columns so it is adjacent to the figures it names.
 
-                ⚠ IT IS NOT STICKY, AND IT CANNOT BE. Company is the only pinned column because it
+                 IT IS NOT STICKY, AND IT CANNOT BE. Company is the only pinned column because it
                 is also the `w-full`/`max-w-0` slack absorber — its rendered width is decided by
                 layout, so nothing after it has a left offset CSS could be given. Scrolled right to
                 2024 these labels are off screen; the three lines keep a fixed ORDER
                 (figure, cap, weight) for exactly that reason, and the footer repeats the names.
 
-                ⚠ NOT SORTABLE — it holds no data. Every other header here toggles a sort, so this
+                 NOT SORTABLE — it holds no data. Every other header here toggles a sort, so this
                 one deliberately drops the pointer/hover affordance rather than looking dead. */}
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap
                            cursor-default hover:!text-fg-faint"
@@ -935,7 +935,7 @@ function MatrixTable({ data, fmt, noun, metricLabel, valueIsCurrency, view, onRe
 market cap it was weighted by in that period, and the weight that produced.">
               Line
             </th>
-            {/* ⚠ A FIXED WIDTH, SO THE VIEW SWITCH MOVES NUMBERS AND NOTHING ELSE. "6.3B", "108.6"
+            {/*  A FIXED WIDTH, SO THE VIEW SWITCH MOVES NUMBERS AND NOTHING ELSE. "6.3B", "108.6"
                 and "+8.6%" are different lengths, and on an auto-layout table every column
                 re-measures on each switch — the row you were reading slides sideways, which is
                 exactly what makes two views hard to compare. 6rem holds the longest of the three
@@ -960,7 +960,7 @@ market cap it was weighted by in that period, and the weight that produced.">
         <tbody>
           {padTop > 0 && <tr aria-hidden><td colSpan={colCount} style={{ height: padTop }} /></tr>}
           {vItems.map((vi) => {
-            // ⚠ THE SAME ELEMENT OBJECT FOR AN UNCHANGED ROW — see `rowCache`. This is the line
+            //  The same element object for an unchanged row — see `rowCache`. This is the line
             // that tells React to skip the row's whole subtree; building it again would be
             // indistinguishable on screen and is the cost this exists to remove.
             const cached = rowCache.get(vi.index);
@@ -969,7 +969,7 @@ market cap it was weighted by in that period, and the weight that produced.">
             const i = vi.index;
             const el = (
             <tr key={`${r.isin}-${i}`} data-index={i} ref={rowVirtualizer.measureElement}
-              // ⚠⚠ THE RULE IS ON THE CELLS, NOT THE ROW. A `border-b` on a `<tr>` is drawn by the
+              //  The rule is on the cells, not the row. A `border-b` on a `<tr>` is drawn by the
               // TABLE under `border-collapse: collapse` (Preflight sets it), and a `position:
               // sticky` cell paints its own background in a later stacking context — so the two
               // frozen columns, and any cell whose height the virtualiser has re-measured, can
@@ -978,21 +978,21 @@ market cap it was weighted by in that period, and the weight that produced.">
               // continuous whatever is pinned or re-measured above it.
               className="group [&>td]:border-b [&>td]:border-neutral-800/20
                          hover:bg-overlay/[0.02]">
-              {/* ⚠ THE POSITION IN THE SORTED LIST, NOT AN ID. It renumbers 1..n when you re-sort,
+              {/*  THE POSITION IN THE SORTED LIST, NOT AN ID. It renumbers 1..n when you re-sort,
                   which is the point: it answers "how far down is this" and "how many are there",
                   and it gives two people looking at the same screen a way to say which row they
                   mean. `vi.index` is the index in `rows` — the sorted array — so the virtualiser's
                   windowing cannot make it skip. */}
               <td className={`px-2 py-1.5 text-right font-mono text-fg-faint tabular-nums
                               sticky left-0 bg-card z-10`} style={numCell}>{i + 1}</td>
-              {/* ⚠ THE BADGE LIVES IN THE PINNED NAME CELL, like the fundamentals grid's. The
+              {/*  THE BADGE LIVES IN THE PINNED NAME CELL, like the fundamentals grid's. The
                   moment you are asking "why is this row's weight empty?" you are scrolled right
                   looking at the empty cells, and a badge in any other column has gone with them.
                   `shrink-0` + `truncate` so a long name yields space to it rather than pushing it
                   out. */}
               <td className={`px-3 py-1.5 text-fg-soft sticky bg-card z-10 ${nameCol}`} style={nameStick}>
                 <span className="flex items-center gap-1.5 min-w-0">
-                  {/* ⚠ THE `NOT IN LINE` BADGE WAS REMOVED (2026-08-12, on request) — THE EXCLUSION
+                  {/*  THE `NOT IN LINE` BADGE WAS REMOVED (2026-08-12, on request) — THE EXCLUSION
                       IT ANNOUNCED WAS NOT. `_prepare` still drops a member whose first reported
                       period is <= 0 (a level series is indexed to 100 at its own first point, and
                       dividing by zero is undefined), so such a row still contributes nothing to the
@@ -1001,7 +1001,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                       reason. The REASON survives in the period cells' tooltips (`blend.excluded`,
                       below) — it is no longer announced, only available. */}
                   <span className="truncate" title={r.name}>{r.name}</span>
-                  {/* ⚠⚠ AND THIS ONE IS BACK, FOR THE OTHER KIND OF EXCLUSION (2026-08-31, on
+                  {/*  AND THIS ONE IS BACK, FOR THE OTHER KIND OF EXCLUSION (2026-08-31, on
                       request). The badge above was removed because it announced the REBASE's drop
                       — mechanical, unactionable, and true of a quarter of a book. `excludedByRule`
                       is the metric's own stated member rule: on EPS and FCF/share the line is
@@ -1009,10 +1009,10 @@ market cap it was weighted by in that period, and the weight that produced.">
                       and a company it withheld is otherwise indistinguishable from one it used —
                       every figure on the row is real, correctly formatted, and counted nowhere.
                       That is precisely what has to be visible.
-                      ⚠ IT SITS IN THE PINNED NAME CELL for the same reason the other badges do:
+                       IT SITS IN THE PINNED NAME CELL for the same reason the other badges do:
                       when you are asking why a row's weights are empty you are scrolled right, and
                       a badge in any other column has scrolled away with them.
-                      ⚠ `StateBadge`, NOT A COLOURED WORD OF ITS OWN. This table already speaks
+                       `StateBadge`, NOT A COLOURED WORD OF ITS OWN. This table already speaks
                       that vocabulary (UNSUBSCRIBED, NO DATA below), and a second hand-rolled badge
                       is a second thing the reader has to learn to mean "this cell is not a
                       number". Same component, same tone scale. */}
@@ -1028,32 +1028,32 @@ market cap it was weighted by in that period, and the weight that produced.">
                       and in the console. */}
                   {refresh[r.isin]?.msg && r.status !== 'no_data' && (
                     <span className="shrink-0 text-[11px] text-warn-300 cursor-help"
-                      title={refresh[r.isin]?.msg}>⚠</span>
+                      title={refresh[r.isin]?.msg}></span>
                   )}
                 </span>
               </td>
-              {/* ⚠ ONE COMPANY, ONE API CALL — the whole point of a per-row control. The two
+              {/*  ONE COMPANY, ONE API CALL — the whole point of a per-row control. The two
                   table-level buttons above are bulk: the book's re-asks every holding, and the
                   index's fills only the constituents missing the feed ENTIRELY, so it can never
                   touch one that already carries the sentinel. This is the only way to move a single
                   row, and on a 1,900-constituent index it is the difference between one call and a
                   four-figure spend.
 
-                  ⚠ NOT ON AN `unsubscribed` ROW — that exchange is outside the GuruFocus
+                   NOT ON AN `unsubscribed` ROW — that exchange is outside the GuruFocus
                   subscription, so the call is spent and nothing comes back. The cell already says
                   so, and a control that can only fail is worse than no control.
 
-                  ⚠ NOR WITHOUT A `company_id`. The job is keyed on it; rendering a button that
+                   NOR WITHOUT A `company_id`. The job is keyed on it; rendering a button that
                   cannot be wired up would be a control that does nothing when pressed. */}
               {onRefresh && (
                 <td className="px-2 py-1.5 text-center align-top sticky bg-card z-10" style={refreshStick}>
-                  {/* ⚠ EXACTLY TWO STATES: Refresh, or Cancel. Not three — a "Refreshing…" label
+                  {/*  EXACTLY TWO STATES: Refresh, or Cancel. Not three — a "Refreshing…" label
                       for the ~200 ms `startJob` takes is a state nobody can act on that flickers
                       past on every press. The flip is driven by `busy`, set on the CLICK, and a
                       Cancel pressed before the job id exists is honoured the moment it does (see
                       `refreshOne`), so the label never promises something it cannot do.
 
-                      ⚠ ONE CONTROL, as the two bulk buttons above the tables are. The toast carries
+                       ONE CONTROL, as the two bulk buttons above the tables are. The toast carries
                       a Cancel too and both are correct — the reader who wants to stop it is looking
                       at the row they just pressed. */}
                   {r.status !== 'unsubscribed' && r.company_id != null && (
@@ -1095,11 +1095,11 @@ market cap it was weighted by in that period, and the weight that produced.">
               <td className="px-3 py-1.5 font-mono text-[12px] text-fg-subtle whitespace-nowrap">
                 <Ident w="w-9">{r.currency ?? '—'}</Ident>
               </td>
-              {/* ⚠ ONLY ON A ROW THAT HAS THE LINES. An `unsubscribed` / `no_data` row spans the
+              {/*  ONLY ON A ROW THAT HAS THE LINES. An `unsubscribed` / `no_data` row spans the
                   period columns with a single line of text, so labelling lines it does not have
                   would make it taller than the answer it carries. The cell still renders, because
                   a skipped `<td>` would shift every period column left on that row. */}
-              {/* ⚠⚠ THE CURRENCY IS ONLY SHOWN WHERE THE NUMBER IS ACTUALLY MONEY, which is what
+              {/*  THE CURRENCY IS ONLY SHOWN WHERE THE NUMBER IS ACTUALLY MONEY, which is what
                   makes it worth showing at all. Three tests, and each excludes a real case here:
                     * the UNIT — `percent` (ROIC) and `shares` are not currency amounts, and a
                       share count is a plain number in millions exactly like the money lines;
@@ -1127,7 +1127,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                 )}
               </td>
               {(
-                /* ⚠⚠ EVERY PERIOD CELL ANSWERS FOR ITSELF — there are no row-spanning states any
+                /*  EVERY PERIOD CELL ANSWERS FOR ITSELF — there are no row-spanning states any
                    more. `Unsubscribed` and `no data ingested` used to be ONE cell stretched across
                    every column, which said the fact once but cost the reader the ability to read
                    any single period: a row was either all numbers or all prose. Each cell is now
@@ -1136,7 +1136,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                    asked about yet. The ACTION moved with it: the `Fetch financials` button lives in
                    the Refresh column, so the state and the thing you do about it are separated. */
                 data.years.map((y) => {
-                  // ⚠ THE WEIGHT SITS UNDER THE VALUE IT WEIGHTS, not in a column of its own,
+                  //  The weight sits under the value it weights, not in a column of its own,
                   // because the two are only meaningful as a pair: the line is Σ(weight × value)
                   // and reading a company's contribution means multiplying two numbers that have
                   // to be adjacent. It is the second line rather than the first because the value
@@ -1149,7 +1149,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                   const src = sourceOf(r, y);
                   const carried = src != null && src !== y ? src : null;
                   return (
-                    // ⚠ THE REASON MUST BE THE ACTUAL ONE. This tooltip used to assert "no cap
+                    //  The reason must be the actual one. This tooltip used to assert "no cap
                     // filed for it" for every empty weight — true for an index constituent missing
                     // a period cap, and flatly WRONG for a row the rebase excluded (AMD on
                     // FCF/share), which is the more common case on a book. A confident wrong
@@ -1158,11 +1158,11 @@ market cap it was weighted by in that period, and the weight that produced.">
                     <td key={y} className={`px-3 py-1.5 text-right font-mono whitespace-nowrap ${
                       state === 'unsubscribed' ? 'text-warn-300'
                         : state === 'not_tried' ? 'text-fg-faint'
-                          // ⚠ A CARRIED FIGURE IS DIMMED — it is in the average and it is not this
+                          //  A carried figure is dimmed — it is in the average and it is not this
                           // period's news. Same ink as a real figure would say the company reported
                           // twice; a blank would deny the number its own weight column divides.
                           : carried ? 'text-fg-faint italic' : 'text-fg-soft'}`}
-                      // ⚠ NO NATIVE TITLE ON A STATE CELL — its `InfoTip` owns the explanation and
+                      //  No native title on a state cell — its `InfoTip` owns the explanation and
                       // two tooltips for one cell is how the first version came to show a slow,
                       // different sentence over the fast one. The `value` cells keep theirs: they
                       // explain the WEIGHT, not the state, and there is no badge to hang a tip on.
@@ -1182,7 +1182,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                                     + 'period ÷ the Σ cap on the total row' : '')}`
                                 + (view === 'reported' ? '' : ` · ${fmt(r.revenue[y])} as reported`)
                                 /**
-                                 * ⚠ THE MULTIPLICATION, SPELLED OUT — `share × growth = pp`, exact,
+                                 *  The multiplication, spelled out — `share × growth = pp`, exact,
                                  * so the impact ranking can be checked on any row rather than
                                  * trusted. `sharePct` and not the weight on the line below it: that
                                  * one is over the whole period, this one over the members that span
@@ -1193,7 +1193,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                                   const c = view === 'contrib'
                                     ? blend.contrib.get(r)?.[y] : null;
                                   if (!c) {
-                                    // ⚠ TWO DIFFERENT DASHES, AND THEY ARE NOT THE SAME FACT. A
+                                    //  Two different dashes, and they are not the same fact. A
                                     // whole column of them is "there is no move here to divide up"
                                     // (the line's first drawn period, or one the coverage floor
                                     // omits); a single one is about THIS row.
@@ -1208,7 +1208,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                                   }
                                   const st = blend.step[y];
                                   /**
-                                   * ⚠⚠ THE FACTORS ARE OPTIONAL AND THE pp IS NOT. On the euro-sum
+                                   *  The factors are optional and the pp IS NOT. On the euro-sum
                                    * construction a member's contribution is `(Fᵢ(d) − Fᵢ(a)) ÷
                                    * ΣFᵢ(a)` — exact for every member, INCLUDING one whose base is
                                    * at or below zero. That member has no growth RATE and no share
@@ -1234,7 +1234,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                                       : '');
                                 })()
                                 /**
-                                 * ⚠⚠ THE YoY CELL MUST SAY WHAT IT DIVIDED BY. Its base is not
+                                 *  THE YoY CELL MUST SAY WHAT IT DIVIDED BY. Its base is not
                                  * always the period to its left — `usableStep` walks back past any
                                  * that is non-positive or too small to divide by (see
                                  * `positiveChain`), and the number shown is then ANNUALISED over
@@ -1242,7 +1242,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                                  * one-year step are the same ink, and the reader has no way to tell
                                  * that a company went through zero in between.
                                  *
-                                 * ⚠ AND A BLANK GETS A SENTENCE TOO. "No usable base" and "no data"
+                                 *  And a blank gets a sentence too. "No usable base" and "no data"
                                  * are different facts and were the same empty cell.
                                  */
                                 + (() => {
@@ -1258,8 +1258,8 @@ market cap it was weighted by in that period, and the weight that produced.">
                                         + 'rather than the business.';
                                   }
                                   /**
-                                   * ⚠⚠ A MULTI-PERIOD STEP ENDING BELOW ZERO HAS NO RATE, AND THIS
-                                   * IS THE ONE CASE THE SKIP RULE CANNOT REACH. It bridges a dip
+                                   *  A multi-period step ending below zero has no rate, and this
+                                   * Is the one case the skip rule cannot reach. It bridges a dip
                                    * BETWEEN two positive years; a company that turned negative and
                                    * never came back has nothing on the far side to bridge to. The
                                    * honest output is the two levels and the date it turned — a
@@ -1291,23 +1291,23 @@ market cap it was weighted by in that period, and the weight that produced.">
                                     + (skipped ? ` · stepped over ${skipped}, unusable as a base`
                                       : '');
                                 })()}>
-                      {/* ⚠ THE SAME BADGES AS THE /asset-pipeline GRID, from `StateBadge`. The two
+                      {/*  THE SAME BADGES AS THE /asset-pipeline GRID, from `StateBadge`. The two
                           tables answer the same question about the same instruments, so the same
                           word has to look the same in both — `UNSUBSCRIBED` there and here is one
                           fact, and two hand-rolled spans is how it becomes two.
-                          ⚠ THE BARE DASH IS RESERVED FOR "NOT TRIED": the only state that says
+                           THE BARE DASH IS RESERVED FOR "NOT TRIED": the only state that says
                           nothing about the company gets the mark that says nothing, and it is
                           deliberately NOT a badge — a badge is an answer, and this one is the
                           absence of one. */}
-                      {/* ⚠ `InfoTip`, NOT `title=`. The native tooltip sits for a second or two
+                      {/*  `InfoTip`, NOT `title=`. The native tooltip sits for a second or two
                           before appearing and the delay is not configurable — long enough for a
                           reader to conclude the badge means nothing and move on. `className="block"`
                           makes the whole line the trigger rather than the 10px chip, which is the
                           other half of why the old one felt broken: you had to aim at it.
-                          ⚠ AND NO `title` ON THE BADGE HERE, or both tooltips fire. */}
+                           AND NO `title` ON THE BADGE HERE, or both tooltips fire. */}
                       <span className="block">{
                         state === 'value'
-                          // ⚠ THE ⓘ ONLY WHERE THERE IS ARITHMETIC TO SHOW — this column, this row,
+                          //  THE ⓘ ONLY WHERE THERE IS ARITHMETIC TO SHOW — this column, this row,
                           // and only when the company actually has a trailing year. Every other
                           // cell is a filed figure with nothing underneath it, and an icon there
                           // would promise a derivation that does not exist.
@@ -1320,12 +1320,12 @@ market cap it was weighted by in that period, and the weight that produced.">
                               </span>
                             )
                             : yoyHasNoRate(r, y)
-                              // ⚠ THE BADGE VOCABULARY OF THIS TABLE, not a hand-rolled span — the
+                              //  The badge vocabulary of this table, not a hand-rolled span — the
                               // reader already knows a chip here is a state rather than a figure.
                               ? <StateBadge label="Negative" tone={BADGE_TONE.warnSoft} />
                               : <Cell>{cellText(cellOf(r, y))}</Cell>)
                           : (
-                            // ⚠ `cursor-default` — the badge already reads as a state, so the help
+                            //  `cursor-default` — the badge already reads as a state, so the help
                             // cursor adds nothing but a question mark dragged across the table.
                             // Naming a cursor drops `InfoTip`'s default; see its `className` note.
                             <InfoTip text={stateTitle(r, state, y)} className="block cursor-default">
@@ -1333,14 +1333,14 @@ market cap it was weighted by in that period, and the weight that produced.">
                                 ? <StateBadge label="Unsubscribed" tone={BADGE_TONE.warn} />
                                 : state === 'no_data'
                                   ? <StateBadge label="No data" tone={BADGE_TONE.warnSoft} />
-                                  /* ⚠⚠ A FORECAST CELL NEVER RENDERS A BARE DASH. After pressing
+                                  /*  A FORECAST CELL NEVER RENDERS A BARE DASH. After pressing
                                      Refresh on a row, a dash is unreadable: it cannot say whether
                                      the request landed, whether the year is covered, or whether
                                      the company simply filed it already. Each of those is a
                                      different next step, so each gets a word. The dash stays for
                                      `not_tried` alone — the one state that really is "we have not
                                      asked", and the only one where saying nothing is honest. */
-                                  /* ⚠ "Already filed", NOT "Reported" — measured on a reader, which
+                                  /*  "Already filed", NOT "Reported" — measured on a reader, which
                                      is the only test a label has. In a column headed `2026e` the
                                      word "Reported" reads as a statement about the ESTIMATE ("the
                                      estimate has been reported"), which is the opposite of what it
@@ -1354,7 +1354,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                             </InfoTip>
                           )
                       }</span>
-                      {/* ⚠ THE CAP THAT PERIOD, NOT TODAY'S — the numerator of the percentage
+                      {/*  THE CAP THAT PERIOD, NOT TODAY'S — the numerator of the percentage
                           under it, so the division can be checked against the total row rather
                           than trusted. Only on an index; a book's holding weight has no market
                           cap behind it and the row stays two lines. Dimmer than the weight
@@ -1364,14 +1364,14 @@ market cap it was weighted by in that period, and the weight that produced.">
                           <Cell>{cap == null || w == null ? NBSP : capBn(cap)}</Cell>
                         </span>
                       )}
-                      {/* ⚠ ` `, NOT `''` AND NOT A PLAIN `' '`. A block box whose only content
+                      {/*  ` `, NOT `''` AND NOT A PLAIN `' '`. A block box whose only content
                           is COLLAPSIBLE whitespace generates no line box and is zero pixels tall,
                           so a company with a gap year would get a one-line cell among two-line
                           ones — and a `<td>` centres its content, so every figure in that row
                           would sit half a line off from its neighbours. A no-break space is not
                           collapsible.
 
-                          ⚠ IT IS A LITERAL U+00A0 IN THIS FILE AND IT IS INVISIBLE HERE. Written
+                           IT IS A LITERAL U+00A0 IN THIS FILE AND IT IS INVISIBLE HERE. Written
                           as `' '` it reads back as the character, so there is nothing on
                           screen to distinguish it from the plain space it must not be. If a bulk
                           rewrite of this file ever normalises whitespace, this is the byte that
@@ -1391,14 +1391,14 @@ market cap it was weighted by in that period, and the weight that produced.">
           })}
           {padBottom > 0 && <tr aria-hidden><td colSpan={colCount} style={{ height: padBottom }} /></tr>}
         </tbody>
-        {/* ⚠ PINNED TO THE BOTTOM OF THE BOX. In `rebased` this row IS the plotted line, so it is
+        {/*  PINNED TO THE BOTTOM OF THE BOX. In `rebased` this row IS the plotted line, so it is
             the one thing a reader checks every other row against — scrolling it out of view is
             what made the old unbounded table hard to use on an index. */}
         <tfoot className="sticky bottom-0 z-20">
           {/* Sum of the shown companies' weights — under 100% because cash / bonds / any holding
               we can't price aren't listed. */}
           <tr className="border-t border-neutral-800/40 bg-page font-semibold text-fg-strong">
-            {/* ⚠ PINNED AND EMPTY, NOT ABSENT. The totals row is not a row of the list, so it has
+            {/*  PINNED AND EMPTY, NOT ABSENT. The totals row is not a row of the list, so it has
                 no number — but the cell has to exist and has to be `sticky left-0` like the ones
                 above it, or the label beside it slides over the numbers as you scroll right. */}
             <td className={`px-2 py-1.5 sticky left-0 bg-page z-10`} style={numCell} />
@@ -1407,11 +1407,11 @@ market cap it was weighted by in that period, and the weight that produced.">
                 ? `Weighted average of the ${blend.contributors} contributing rows — this row IS the plotted line.`
                 : view === 'yoy'
                   ? 'The plotted line’s own period-on-period change. NOT the average of the column above: the chart averages rebased levels, never growth rates.'
-                  /* ⚠⚠ THE ONE VIEW WHERE THE FOOTER IS THE **SUM** OF THE COLUMN, and saying so is
+                  /*  THE ONE VIEW WHERE THE FOOTER IS THE **SUM** OF THE COLUMN, and saying so is
                      the whole guarantee: every pp above is a share of THIS move, taken over the same
                      denominator, so they add to it exactly. If a column ever does not add up here,
                      the decomposition is wrong — not the display.
-                     ⚠ AND IT IS THE MOVE FROM THE LAST **DRAWN** PERIOD, which is the previous
+                      AND IT IS THE MOVE FROM THE LAST **DRAWN** PERIOD, which is the previous
                      column only while every column is drawn. Under the coverage floor the interval
                      is longer, so it is named per cell rather than assumed to be one period. */
                   : view === 'contrib'
@@ -1424,14 +1424,14 @@ market cap it was weighted by in that period, and the weight that produced.">
                 : view === 'yoy' ? 'Line YoY'
                   : view === 'contrib' ? 'Line move (= Σ pp)' : 'Total'}
             </td>
-            {/* ⚠ THE FOOTER TRACKS THE HEADER COLUMN FOR COLUMN. A cell short here and every period
+            {/*  THE FOOTER TRACKS THE HEADER COLUMN FOR COLUMN. A cell short here and every period
                 figure in this row sits under the wrong year — a totals line that is quietly one
                 column out is worse than no totals line. (`colCount` guards the virtualiser's
                 spacers for the same reason.) */}
             {onRefresh && <td className="px-2 py-1.5 sticky bg-page z-10" style={refreshStick} />}
             <td className="px-3 py-1.5" />
             <td className="px-3 py-1.5" />
-            {/* Σ of the Mkt cap column — TODAY's caps, matching the column above it. ⚠ It is NOT
+            {/* Σ of the Mkt cap column — TODAY's caps, matching the column above it.  It is NOT
                 the denominator of any weight on this table any more: those divide by the `Σ cap`
                 line inside each period, which is that period's own total and a different number
                 in every column. */}
@@ -1446,7 +1446,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
             {/* The line-label column, for the total row — same order and the same dim inks as the
                 per-company labels above, so the whole column reads as one list of names.
 
-                ⚠⚠ THE THIRD LINE MEANS SOMETHING DIFFERENT HERE, AND THE LABEL IS WHAT MAKES THAT
+                 THE THIRD LINE MEANS SOMETHING DIFFERENT HERE, AND THE LABEL IS WHAT MAKES THAT
                 SAFE. A company's third line is its WEIGHT; this row's is COVERAGE — deliberately
                 not the sum of the weights above, which is 100% by construction and would tell a
                 reader nothing. Scanning down a period column you therefore pass a run of weights
@@ -1458,7 +1458,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                 IS that line, weight-averaged. What KIND of average is on the sticky cell at the
                 far left (`Weighted (= the line)`), which stays in view when this column does
                 not. */}
-            {/* ⚠ THE TOTAL ROW CARRIES NO CURRENCY ON ITS FIRST LINE, AND THE ASYMMETRY IS THE
+            {/*  THE TOTAL ROW CARRIES NO CURRENCY ON ITS FIRST LINE, AND THE ASYMMETRY IS THE
                 POINT. Every row above says e.g. `Revenue (USD)` in Reported view; this one cannot,
                 because there is nothing here to put a currency on — Reported has no total at all
                 (the columns are different currencies, which is exactly why the chart rebases), and
@@ -1471,7 +1471,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
               )}
               <span className="block text-[11px] leading-tight text-fg-faint">covered</span>
             </td>
-            {/* ⚠ THE ROW THAT MAKES THE TABLE CHECKABLE — and it is only a sum in one of the three
+            {/*  THE ROW THAT MAKES THE TABLE CHECKABLE — and it is only a sum in one of the three
                 views. Reported: nothing to total, the columns are different currencies. Rebased:
                 the weighted average IS the plotted line. YoY: the plotted line's own change, NOT
                 the average of the column above it (the chart averages levels, never growth rates)
@@ -1483,7 +1483,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
               const prevY = data.years[data.years.indexOf(y) - 1];
               const prev = prevY ? blend.level[prevY] : undefined;
               /**
-               * ⚠ THE pp TOTAL IS READ FROM `blend.step`, NOT FROM THE RATIO OF TWO DRAWN LEVELS.
+               *  THE pp TOTAL IS READ FROM `blend.step`, NOT FROM THE RATIO OF TWO DRAWN LEVELS.
                * The two agree whenever the previous column is drawn — and where it is not, the
                * ratio has nothing to divide by while the STEP still exists (the chain measures from
                * the last drawn period). Deriving it here would leave the one column whose cells sum
@@ -1493,7 +1493,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                 : view === 'rebased' ? lv?.value ?? null
                   : view === 'contrib' ? blend.step[y]?.growthPct ?? null
                     : (lv && prev && prev.value > 0) ? 100 * (lv.value / prev.value - 1) : null;
-              // ⚠ BOTH FLOORS, as the chart applies them: half the weight AND half the names must
+              //  Both floors, as the chart applies them: half the weight AND half the names must
               // have REPORTED. Weight alone let one giant draw a period (AEX 2026-Q2: two
               // constituents, 53.8% of cap); names alone would let ten tiny ones outvote a missing
               // giant. A carried figure counts toward neither.
@@ -1512,14 +1512,14 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                   <span className="block">
                     <Cell>
                       {value == null ? ' ' : view === 'rebased' ? value.toFixed(1)
-                        // ⚠ 2dp AND `pp`, MATCHING THE CELLS IT IS THE SUM OF. At 1dp a column of
+                        //  2dp AND `pp`, MATCHING THE CELLS IT IS THE SUM OF. At 1dp a column of
                         // hundredths visibly fails to add up to its own total, which reads as the
                         // decomposition being broken rather than as rounding.
                         : view === 'contrib' ? `${value >= 0 ? '+' : ''}${value.toFixed(2)}pp`
                           : `${value >= 0 ? '+' : ''}${value.toFixed(1)}%`}
                     </Cell>
                   </span>
-                  {/* ⚠⚠ THE DENOMINATOR, SPELLED OUT — Σ of the caps this period's weights were
+                  {/*  THE DENOMINATOR, SPELLED OUT — Σ of the caps this period's weights were
                       each divided by. Every weight in the column above is that row's cap ÷ this
                       number, so the table is checkable rather than asserted. It also makes the
                       per-period basis visible at a glance: this figure GROWS down the years
@@ -1530,7 +1530,7 @@ divide by that period's own Σ cap instead, on the line directly below this row'
                       <Cell>{blend.denom[y] == null ? NBSP : capBn(blend.denom[y])}</Cell>
                     </span>
                   )}
-                  {/* ⚠ COVERAGE, PROMOTED OUT OF THE TOOLTIP — it is what the weights above are
+                  {/*  COVERAGE, PROMOTED OUT OF THE TOOLTIP — it is what the weights above are
                       shares OF. The column of weights sums to 100% within a period by
                       construction; this says what share of the index that 100% actually is. A
                       period under the floor is greyed with the rest of the cell. */}
@@ -1563,7 +1563,7 @@ export default function HoldingsRevenueModal({
   /** Set when a benchmark is active — lets the modal load the INDEX's constituents on demand. */
   benchTarget?: BenchTarget | null;
 }) {
-  /** Is this metric MONEY? ⚠ Declared once, from the unit, and read by both tables — the rule that
+  /** Is this metric MONEY?  Declared once, from the unit, and read by both tables — the rule that
    *  `shares` is a plain count and `percent` is already a ratio is easy to state and easy to get
    *  backwards, and two copies of it is how one table comes to label a share count "(USD)". Same
    *  two members as the backend's `_CURRENCY_UNITS`. */
@@ -1585,7 +1585,7 @@ export default function HoldingsRevenueModal({
    * What a "Refresh fundamentals" press here would fill — DERIVED FROM THE TABLE IT SITS OVER, not
    * from how the modal was opened.
    *
-   * ⚠ A CONTROL'S SCOPE MUST MATCH ITS SCREEN. This modal is opened from ONE card, over one
+   *  A control's scope must match its screen. This modal is opened from ONE card, over one
    * portfolio (or one company, or an index) — a button that quietly refetched something else would
    * spend quota on rows the reader cannot see. The three shapes map straight onto `Target`'s three:
    * a stored model, an ad-hoc basket, and — on the single-company cards, which send a basket of one
@@ -1607,7 +1607,7 @@ export default function HoldingsRevenueModal({
       name: portfolioName || 'this portfolio' };
   }, [target, portfolioName]);
   /**
-   * ⚠ ONE SWITCH FOR BOTH TABLES. The book above and the index below are here to be read against
+   *  One switch for both tables. The book above and the index below are here to be read against
    * each other; per-table switches would let someone compare a rebased index with reported euros
    * and take the gap for a finding. It is a view over rows already in hand — no refetch — so
    * flipping it cannot land the two tables on different vintages of the same accounts either.
@@ -1617,7 +1617,7 @@ export default function HoldingsRevenueModal({
   /**
 
   /**
-   * ⚠ A ZERO ON A MONEY LINE IS A PLACEHOLDER, NOT A MEASUREMENT — AND IT READS AS A FACT.
+   *  A zero on a money line is a placeholder, not a measurement — and it reads as a fact.
    *
    * GuruFocus returns a company's whole history as one rectangular block, so a period that predates
    * the company's separate accounts comes back as `0` rather than being left out. Universal Music
@@ -1631,7 +1631,7 @@ export default function HoldingsRevenueModal({
    * one edit rather than four: `cellState`, the carry, the rebased view and the sort all read
    * `revenue`, so a gap declared once is a gap everywhere.
    *
-   * ⚠ MONEY ONLY, AND EXACTLY ZERO. A margin of `0%` is a real reading and a share count is a plain
+   *  Money only, and exactly zero. A margin of `0%` is a real reading and a share count is a plain
    * count; blanking those would hide measurements instead of placeholders. Negative figures are
    * untouched — a loss is a fact, and the whole point is to stop inventing ones.
    */
@@ -1679,14 +1679,14 @@ export default function HoldingsRevenueModal({
    * The index's constituents — every one, with its weight and its reported figures, so the line
    * can be checked by hand.
    *
-   * ⚠ IT LOADS WITH THE MODAL, NOT BEHIND A BUTTON, AND THAT ONLY BECAME REASONABLE ONCE THE READ
-   * WAS FIXED. It used to be one metric read per company: the S&P's 489 constituents took **64.5
+   *  It loads with the modal, not behind a button, and that only became reasonable once the read
+   * Was fixed. It used to be one metric read per company: the S&P's 489 constituents took **64.5
    * s**, which is why it was gated. Prefetched it is one chunked, paged query — **0.19 s**
    * measured — so hiding the table now costs a click and buys nothing.
    */
   const [bench, setBench] = useState<Resp | null>(null);
   const [benchErr, setBenchErr] = useState<string | null>(null);
-  /** ⚠ ITS OWN RELOAD KEY, NOT `reloadKey`. Filling the index moves the table below; filling the
+  /**  ITS OWN RELOAD KEY, NOT `reloadKey`. Filling the index moves the table below; filling the
    *  book moves the one above. One key would make each button re-read both tables — twice the wait
    *  for half a reason, and on ACWI the constituent read is the expensive one. */
   const [benchReload, setBenchReload] = useState(0);
@@ -1714,21 +1714,21 @@ export default function HoldingsRevenueModal({
   /**
    * Re-fetch ONE row's company from GuruFocus as a cancellable job, then reload that row's table.
    *
-   * ⚠ A JOB, SO PROGRESS AND CANCEL BELONG TO THE TOAST STACK — the same generic system the two
+   *  A job, so progress and cancel belong to the toast stack — the same generic system the two
    * bulk buttons above use. It outlives this modal, which matters: three feeds against GuruFocus
    * is not instant, and a reader who closes the drill-down has not cancelled anything.
    *
-   * ⚠⚠ `feeds=smart`: EVERY FEED, BUT ONLY WHERE A CALL CAN BUY SOMETHING. Per feed it fetches
+   *  `feeds=smart`: EVERY FEED, BUT ONLY WHERE A CALL CAN BUY SOMETHING. Per feed it fetches
    * what we are MISSING or what can plausibly have changed — statements when a new fiscal period
    * is due (`period_due`), the consensus and the weekly forward-P/E series when our copy is over a
    * week old. A company with nothing new costs nothing; one that has just filed is picked up.
    *
-   * ⚠ THE TWO OBVIOUS SETTINGS ARE BOTH WRONG HERE. `all` spends three calls every press on data
+   *  The two obvious settings are both wrong here. `all` spends three calls every press on data
    * we may already hold; an un-forced run tests PRESENCE (`needs()`), which is a no-op on exactly
    * the company a reader pressed Refresh for — KLA holds financials, so presence skips it and the
    * FY2026 figures it just filed are never fetched. See `smart_flags`.
    *
-   * ⚠ AND AN UNSUBSCRIBED EXCHANGE COSTS NOTHING EITHER, already: `eligible()` refuses the
+   *  And an unsubscribed exchange costs nothing either, already: `eligible()` refuses the
    * company before any feed is considered, so no probe and no call is spent on a venue GuruFocus
    * cannot answer for.
    *
@@ -1740,15 +1740,15 @@ export default function HoldingsRevenueModal({
    * pressed it for still empty — a refresh that cannot fill a visible column is a broken
    * affordance, and the cost is two calls on ONE deliberately-pressed row.
    *
-   * ⚠ THE BULK PATHS STAY ON `statements`, and the distinction is the whole point:
+   *  The bulk paths stay on `statements`, and the distinction is the whole point:
    * `FundamentalGridPane` and `BenchmarksPanel` fill hundreds to ~1,700 constituents at a time, so
    * tripling them is a quota event, not a rounding error — and the grid those two draw genuinely
    * does not show estimates. One row, pressed on purpose, is the only place the extra calls buy
    * something the reader asked for.
    *
-   * ⚠ `force` is what makes it able to change a row that already has figures (see `onRefresh`).
+   *  `force` is what makes it able to change a row that already has figures (see `onRefresh`).
    *
-   * ⚠ AND THE READ CACHES ARE DROPPED WHEN IT LANDS, not when it started. `apiFetch` invalidates on
+   *  And the read caches are dropped when it lands, not when it started. `apiFetch` invalidates on
    * the request that STARTS a job, which is minutes before the data moves; without this the reload
    * below would be served from entries cached during the fetch and the row would come back exactly
    * as it was — a refresh that visibly does nothing. Same rule as `PortfolioFundamentalsRefresh`.
@@ -1756,11 +1756,11 @@ export default function HoldingsRevenueModal({
   /**
    * Replace ONE row in a loaded table, keeping everything else — including the columns.
    *
-   * ⚠⚠ THE NARROWED RESPONSE IS NOT A TABLE. Its `years` describe the one company, so taking
+   *  The narrowed response is not a table. Its `years` describe the one company, so taking
    * them would collapse a twelve-column table to whatever that constituent reports. The columns
    * belong to the union and are already on screen; only the row is news.
    *
-   * ⚠ MATCHED ON `company_id`, NOT ON THE ARRAY INDEX. The table is sorted by whatever the
+   *  Matched on `company_id`, NOT ON THE ARRAY INDEX. The table is sorted by whatever the
    * reader last clicked, and a job that lands after a re-sort would otherwise overwrite a
    * different company with these figures — silently, since every row looks alike in shape.
    */
@@ -1785,19 +1785,19 @@ export default function HoldingsRevenueModal({
       `${row.name} fundamentals`);
     void started.done.then(async (job) => {
       if (job.status === 'failed' || row.company_id == null) return;
-      // ⚠ THE CACHE DROP STAYS, AND IT STAYS FIRST. `apiFetch` invalidates on the request that
+      //  The cache drop stays, and it stays first. `apiFetch` invalidates on the request that
       // STARTS a job, which is minutes before the data moves; without this the re-read below is
       // served from entries cached during the fetch and the row comes back exactly as it was.
       invalidateReadCache(`fundamentals refetched for ${row.name}`);
       try {
-        // ⚠⚠ ONE ROW, NOT THE TABLE. This used to bump a reload key, which re-POSTed the whole
+        //  One row, not the table. This used to bump a reload key, which re-POSTed the whole
         // matrix — on ACWI every constituent's series, every period cap and every LTM window, the
         // most expensive read on the tab, to update a line already on screen. Exactly one company's
         // `metric_data` changed; `only_company_id` reads exactly that.
         const fresh = await load(target_, row.company_id);
         apply((p) => patchRow(p, fresh, row.company_id as number));
       } catch (e) {
-        // ⚠ A FAILED PATCH LEAVES THE OLD ROW, WHICH IS STALE BUT TRUE. The fetch succeeded, so the
+        //  A failed patch leaves the old row, which is stale but true. The fetch succeeded, so the
         // data IS newer than what is shown; saying so beats silently implying the table is current.
         console.warn('[bb:matrix] row patch failed — the table still shows the pre-refresh figures'
           + ' for this company; reopen the drill-down to pick them up', e);
@@ -1808,7 +1808,7 @@ export default function HoldingsRevenueModal({
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
   /**
-   * ⚠ A ONE-ROW MATRIX IS THE PLOTTED TABLE AGAIN. On a single company the line IS that company's
+   *  A one-row matrix is the plotted table again. On a single company the line IS that company's
    * reported figures, so the "as reported" table repeats every number above it and adds a 100.00%
    * weight column and a Total row over one row — noise that makes the modal look like it holds two
    * findings when it holds one. It stays the moment there is a second row to compare against.
@@ -1825,7 +1825,7 @@ export default function HoldingsRevenueModal({
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
           <h2 className="text-fg-strong font-medium">{seriesLabel ?? noun} — everything behind the chart</h2>
           {portfolioName && <span className="text-sm text-fg-soft truncate max-w-[24ch]" title={portfolioName}>{portfolioName}</span>}
-          {/* ⚠ THE PROVENANCE SURVIVES THE TABLE IT LIVED IN. Dropping the one-row matrix would
+          {/*  THE PROVENANCE SURVIVES THE TABLE IT LIVED IN. Dropping the one-row matrix would
               otherwise take the GuruFocus listing + reporting currency with it, and those are how
               a reader checks the figures against the source. */}
           {only ? (
@@ -1840,7 +1840,7 @@ export default function HoldingsRevenueModal({
             </span>
           ) : data && <span className="text-[12px] text-fg-faint">{data.rows.length} companies</span>}
           {benchLabel && <span className="text-[12px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
-          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2">✕</button>
+          <button type="button" onClick={onClose} className="ml-auto text-fg-muted hover:text-fg-strong px-2"></button>
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
@@ -1870,7 +1870,7 @@ export default function HoldingsRevenueModal({
 
           {/* 1 — the book (or the single company), on the same three views as the index below it. */}
           <div className="space-y-1.5">
-            {/* ⚠ THE FILL SITS ON THE TABLE IT FILLS, and there are two of them. A `no_data` row
+            {/*  THE FILL SITS ON THE TABLE IT FILLS, and there are two of them. A `no_data` row
                 here has a per-row Fetch already; this is the same action over every company at
                 once, which is what you want when the table is half empty rather than missing one
                 name. The index has its own button below — same component, different endpoint and a
@@ -1882,7 +1882,7 @@ export default function HoldingsRevenueModal({
               {scope && (
                 <span className="ml-auto shrink-0">
                   <PortfolioFundamentalsRefresh scope={scope} everything
-                    // ⚠ "portfolio" WOULD BE A LIE ON THE SINGLE-COMPANY CARDS, which open this
+                    //  "portfolio" WOULD BE A LIE ON THE SINGLE-COMPANY CARDS, which open this
                     // modal with a basket of one and title it with that company's listing. Named
                     // for what it acts on, as its neighbour below is.
                     label={scope.kind === 'company' ? 'Refresh company' : 'Refresh portfolio'}
@@ -1907,23 +1907,23 @@ export default function HoldingsRevenueModal({
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
                 <h3 className={section}>{benchLabel} constituents — {noun} by period</h3>
-                {/* ⚠ SEPARATE FROM THE BOOK'S, AND IT MUST BE. The two fills are different work
+                {/*  SEPARATE FROM THE BOOK'S, AND IT MUST BE. The two fills are different work
                     over different companies with wildly different quota costs — ACWI is ~1,900
                     constituents against a book's twenty — so one button doing both would make the
                     cheap press unavailable. It fills only the constituents we are MISSING, which is
                     what raises this table's row count and the line's coverage with it. */}
                 {isUniverseTarget(benchTarget) && <span className="ml-auto shrink-0">
                   <PortfolioFundamentalsRefresh
-                    /* ⚠⚠ `smart` — THE PER-ROW REFRESH, RUN ACROSS THE INDEX, AND THE NAME IS NOW
+                    /*  `smart` — THE PER-ROW REFRESH, RUN ACROSS THE INDEX, AND THE NAME IS NOW
                        HONEST BECAUSE THE BEHAVIOUR IS. It fetches per constituent exactly the feeds
                        that are missing or that can plausibly have changed, so a name with nothing
                        new costs nothing — which is what makes "refresh the whole benchmark" an
                        affordable thing for a button to promise.
-                       ⚠ IT IS THE SAME RULE THE ROW BUTTON USES (`smart_flags` / `smart_flags_bulk`,
+                        IT IS THE SAME RULE THE ROW BUTTON USES (`smart_flags` / `smart_flags_bulk`,
                        sharing `_is_stale`), pinned that way on purpose: the moment the two diverge,
                        the big button stops being N presses of the small one and this label goes back
                        to being a claim rather than a description.
-                       ⚠ MEASURED COST, ACWI 2026-08-14: ~5,701 calls on a FIRST press — nearly
+                        MEASURED COST, ACWI 2026-08-14: ~5,701 calls on a FIRST press — nearly
                        everything has something new, so smart ≈ all until the index is current. The
                        saving is on the second press, not the first. `feeds: 'estimates'` is the
                        cheaper, narrower fill (~1,597) if only the forecast columns are wanted. */
@@ -1939,7 +1939,7 @@ export default function HoldingsRevenueModal({
               {benchErr && <p className="text-xs text-neg-300">{benchErr}</p>}
               {bench && (
                 <>
-                  {/* ⚠ EVERY CAVEAT IS STILL HERE — IT MOVED TO THE `title`, IT DID NOT GO. Each is
+                  {/*  EVERY CAVEAT IS STILL HERE — IT MOVED TO THE `title`, IT DID NOT GO. Each is
                       a thing a reader would otherwise assume, and each is false: the weight is
                       CURRENT full cap (not backed out to the start of the window the way the price
                       index does, and not float-adjusted or 15%-capped like the published AEX); it
@@ -1957,13 +1957,13 @@ export default function HoldingsRevenueModal({
                         value != null && !isEstimatePeriod(period))).length} with reported {noun} feed the historical line,
                     renormalised each period
                   </p>
-                  {/* ⚠ THE EXCLUDED-CONSTITUENT LINE WAS REMOVED ON REQUEST (2026-08-10). It named
+                  {/*  THE EXCLUDED-CONSTITUENT LINE WAS REMOVED ON REQUEST (2026-08-10). It named
                       every dropped constituent inline — `470/1998 excluded, weights renormalised:
                       BANCO ESPIRITO SANTO CLASS N SA (delisted) · …` — which is fine for the AEX's
                       three and unreadable for ACWI's 470, where it buried the table under a wall of
                       names.
 
-                      ⚠ THE FACT IT REPORTED IS STILL TRUE AND IS NOW UNSTATED ON THIS SCREEN: a
+                       THE FACT IT REPORTED IS STILL TRUE AND IS NOW UNSTATED ON THIS SCREEN: a
                       constituent with no stored market cap is not in the index at ANY weight, so
                       the weights shown are renormalised over the survivors and every one of them
                       is larger than that constituent's share of the real index. Measured on ACWI,

@@ -61,7 +61,7 @@ _VALID_JOB_NAMES = {
     # concurrently. See `ingest.phases.pipeline` + `scheduler.py`.
     "price_update",  # re-price the ~24 held companies + MTD snapshot
     "rebalance",     # rebalance the due strategies from a fresh universe
-    # ⚠ MANUAL NOW, NOT SCHEDULED. The month-end tick that used to fire this was replaced by
+    #  MANUAL NOW, NOT SCHEDULED. The month-end tick that used to fire this was replaced by
     # `price_slice` (2026-09-02) — one pass a month and a 30-day staleness guard are the same
     # period, so the system sat a few days from a cliff and spent them there. This stays as the
     # right tool for "re-price everything NOW" after a bulk import or a vendor correction.
@@ -244,7 +244,7 @@ _JOB_META: dict[str, dict[str, str]] = {
         "description": "re-prices the most-stale companies each day so the whole book cycles in ~19 days, well inside the 30-day staleness guard",
         "cadence": "Daily 12:00 UTC",
     },
-    # ⚠ HISTORICAL — the JobSpec is gone (replaced by `daily_price_slice` 2026-09-02); kept so
+    #  HISTORICAL — the JobSpec is gone (replaced by `daily_price_slice` 2026-09-02); kept so
     # existing `ingest_run` rows still render with a name rather than a humanized id.
     "month_end_price_refresh": {
         "label": "Month-end full price refresh",

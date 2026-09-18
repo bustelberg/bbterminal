@@ -16,11 +16,11 @@ not, and it was short in two independent places:
                        forced run without `refresh_cache` re-writes identical rows from the same
                        bytes, spends zero API calls and changes nothing on screen.
 
-⚠ THE TWO ARE ONE LAYER APART AND LOOK ALIKE FROM ABOVE — both present as "the press did nothing"
+ THE TWO ARE ONE LAYER APART AND LOOK ALIKE FROM ABOVE — both present as "the press did nothing"
 — which is why they are pinned together here rather than left to be re-derived. Either one alone
 reproduces the original complaint.
 
-⚠ AND `force` MUST NOT WIDEN THE FEEDS. `ingest_company(force=True)` runs all THREE GuruFocus
+ AND `force` MUST NOT WIDEN THE FEEDS. `ingest_company(force=True)` runs all THREE GuruFocus
 feeds; the index fill under `feeds="statements"` wants ONE (the statements blob carries every
 column the fundamentals grid draws, market cap included). So the callers express force as the
 `need_*` flags and pass only `refresh_cache` — a test is the cheapest way to stop that being
@@ -48,7 +48,7 @@ class _Result:
 def calls(monkeypatch):
     """Record every feed call as `(tag, force_refresh)`.
 
-    ⚠ PATCHED ON `ingest.earnings`, NOT ON THIS MODULE. `ingest_company` imports the three
+     PATCHED ON `ingest.earnings`, NOT ON THIS MODULE. `ingest_company` imports the three
     functions INSIDE its body (a deliberate lazy import — pandas and the GuruFocus client are
     expensive), so there is no module-level name here to replace.
     """
@@ -85,7 +85,7 @@ class TestForceDoesNotWidenTheFeeds:
         assert [t for t, _ in calls] == ["fin"]
 
     def test_the_force_argument_would_have_run_all_three(self, calls):
-        """⚠ THIS IS THE TRAP, PINNED AS BEHAVIOUR. `force=True` ignores the flags entirely — it is
+        """ THIS IS THE TRAP, PINNED AS BEHAVIOUR. `force=True` ignores the flags entirely — it is
         the right switch for "load this company properly" and the wrong one for a statements-scoped
         fill, where it costs two extra API calls per constituent for nothing on screen."""
         ingest_company(_company(need_fin=True, need_est=False, need_ind=False), force=True)
@@ -102,7 +102,7 @@ class TestTheStorageCacheIsOnlyBypassedWhenAsked:
         assert calls == [("fin", False)]
 
     def test_refresh_cache_reaches_the_fetcher(self, calls):
-        # ⚠ THE WHOLE POINT. Without this the forced run re-writes the same rows from the same
+        #  The whole point. Without this the forced run re-writes the same rows from the same
         # bytes: zero API calls, no change, and a button that reads as broken.
         ingest_company(_company(need_fin=True, need_est=False, need_ind=False),
                        refresh_cache=True)
@@ -120,7 +120,7 @@ class TestASelectedCompanyIsStillReportedHonestly:
         r = ingest_company(_company(need_fin=True, need_est=False, need_ind=False),
                            refresh_cache=True)
         assert r["rows"] == 5
-        # ⚠ WHAT WAS SPENT, NOT WHAT WAS ASKED FOR — a feed served from a fresh cache reports zero.
+        #  What was spent, not what was asked for — a feed served from a fresh cache reports zero.
         assert r["calls"] == 1
         assert r["error"] is None
         assert r["done"] == ["fin 5"]

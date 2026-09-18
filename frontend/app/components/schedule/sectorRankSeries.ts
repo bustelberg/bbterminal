@@ -5,12 +5,12 @@
  * the rank the strategy gave it that day. This reshapes that into one series per sector so each
  * can be drawn as a timeseries.
  *
- * ⚠ A DAY WITH NO `sector_scores` IS A HOLE, NOT A RANK. Days cached before sector scores existed
+ *  A day with no `sector_scores` IS A HOLE, NOT A RANK. Days cached before sector scores existed
  * carry none. Emitting `rank: null` keeps the gap visible (the chart draws a break); dropping the
  * day instead would slide the neighbouring points together and draw a continuous line across a
  * period we have no ranking for — a shape the reader would take as evidence.
  *
- * ⚠ AND A SECTOR MISSING FROM ONE DAY IS ALSO A HOLE. A sector can leave the pool entirely (every
+ *  And a sector missing from one day is also a hole. A sector can leave the pool entirely (every
  * one of its companies fails the price floor that day). That is not "rank last" — it is "not
  * ranked", and forcing it to the bottom of the axis would draw a dramatic collapse that never
  * happened.
@@ -22,7 +22,7 @@ export type RankDay = {
 };
 
 /**
- * Why a day has no rank. ⚠ THE TWO NON-RANKED STATES ARE DIFFERENT FACTS AND MUST NOT RENDER ALIKE.
+ * Why a day has no rank.  THE TWO NON-RANKED STATES ARE DIFFERENT FACTS AND MUST NOT RENDER ALIKE.
  *
  *   dropped  the day WAS ranked — this sector just wasn't in the pool. With a `min_price_score`
  *            floor and no backfill, a name below it is dropped outright, so a sector whose every

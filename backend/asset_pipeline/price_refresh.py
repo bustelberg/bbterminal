@@ -17,13 +17,13 @@ WHY THIS EXISTS
     Meta Platforms — correctly mapped to META, 3,556 bars — showed nothing in BUS_2.0_NEU_FX
     (window opens 2026-07-09; Meta's last close was 2026-07-02). The mapping was never the problem.
 
-⚠ STALENESS IS MEASURED AGAINST THE FRESHEST CLOSE WE HOLD, NEVER AGAINST TODAY.
+ STALENESS IS MEASURED AGAINST THE FRESHEST CLOSE WE HOLD, NEVER AGAINST TODAY.
     Anchoring on the calendar flags every row every weekend, calls a bank holiday a fleet-wide
     failure, and — worst — turns a total Yahoo outage into "refresh all 6,000 instruments". The
     global-latest anchor is the same one the delisting sweep uses, and it self-corrects: if
     nothing anywhere has published, nothing is stale.
 
-⚠ THE GAP, NOT THE HISTORY.
+ THE GAP, NOT THE HISTORY.
     `store.store_series` re-downloads every bar an instrument has ever had (KO: 16,239, back to
     1962) — correct for a first load, absurd for a refresh, and over ~200 rows the difference
     between minutes and seconds. `store.extend_series` fetches only the window after the last
@@ -72,7 +72,7 @@ def held_isins() -> set[str]:
     """Every ISIN an AIRS model portfolio NAMES or an AIRS account actually HOLDS — the instruments
     whose staleness surfaces to a reader.
 
-    ⚠ BOTH TABLES, BECAUSE THEY ARE NOT THE SAME SET, AND THE SECOND ONE IS WHERE THE PRICE CHECK
+     BOTH TABLES, BECAUSE THEY ARE NOT THE SAME SET, AND THE SECOND ONE IS WHERE THE PRICE CHECK
     LOOKS. `airs_model_portfolio_position` is what a strategy SAYS to hold; `airs_holding` is what a
     book DOES hold — a legacy position the model has since dropped, an instrument bought between
     rebalances, a line the model never named. Refreshing only the first left exactly those
@@ -160,7 +160,7 @@ def latest_close_by_analysis(ids: list[int]) -> dict[int, str]:
 def global_latest_close() -> str | None:
     """The freshest close ANYWHERE. THE anchor everything else is measured against.
 
-    ⚠ NOT `SELECT target_date FROM asset_price ORDER BY target_date DESC LIMIT 1`.
+     NOT `SELECT target_date FROM asset_price ORDER BY target_date DESC LIMIT 1`.
         That reads like one indexed row and is not. `asset_price`'s ONLY index is the primary
         key `(analysis_id, target_date)`; nothing leads with `target_date`, so Postgres has no
         ordered path to the newest date and falls back to a full scan + top-N sort over 14M+
@@ -200,7 +200,7 @@ def global_latest_close() -> str | None:
 def market_latest_close() -> str | None:
     """The freshest close YAHOO has, from one probe of a symbol that trades every session.
 
-    ⚠ THIS EXISTS BECAUSE A FLEET CANNOT SEE ITS OWN DRIFT. `global_latest_close` anchors on the
+     THIS EXISTS BECAUSE A FLEET CANNOT SEE ITS OWN DRIFT. `global_latest_close` anchors on the
     newest close WE HOLD, which is right for a weekend, a holiday and a Yahoo outage — and blind to
     the one failure that matters most, because in it every row ages TOGETHER. Measured 2026-07-29
     on the local DB: the newest close anywhere was 2026-07-23, six days earlier; AMD's own last
@@ -210,11 +210,11 @@ def market_latest_close() -> str | None:
     wrong. The mapping was perfect: NasdaqGS, USD, `AMD`, every stored bar matching Yahoo to the
     cent. The series had simply stopped, and nothing inside the database could tell.
 
-    ⚠ IT IS AN ANCHOR, NEVER A PRICE. Nothing is stored from this call and no instrument is priced
+     IT IS AN ANCHOR, NEVER A PRICE. Nothing is stored from this call and no instrument is priced
     off the canary; it answers exactly one question — "has the market published since we last
     looked?" — and `find_stale` takes the LATER of this and our own maximum.
 
-    ⚠ FAILURE MUST MEAN "USE OUR OWN MAXIMUM", NOT "EVERYTHING IS STALE". A throttled or dead probe
+     FAILURE MUST MEAN "USE OUR OWN MAXIMUM", NOT "EVERYTHING IS STALE". A throttled or dead probe
     returning None leaves the previous behaviour intact. Returning, say, today's date on failure
     would turn a Yahoo outage into a 6,000-instrument stampede at the one moment fetching cannot
     work — the exact stampede the self-anchoring rule was written to prevent.
@@ -236,7 +236,7 @@ def market_latest_close() -> str | None:
 def newest_dated_close(chart_result: dict | None) -> str | None:
     """The date of the newest bar in a Yahoo chart result that actually HAS a close.
 
-    ⚠ THE NEWEST BAR CAN BE TODAY'S UNFINISHED SESSION. Yahoo returns today's bar with
+     THE NEWEST BAR CAN BE TODAY'S UNFINISHED SESSION. Yahoo returns today's bar with
     `close: null` until the bell (and it returned a null bar for 2026-07-28 mid-session, a
     real hole, not the last row). Anchoring on a null bar claims a close the market has not
     printed, which makes every series in the fleet read one day stale every single morning —
@@ -269,7 +269,7 @@ def find_stale(held_only: bool = True,
     fact about the market, not about the subset being asked, and computing it from the subset would
     let a handful of instruments that all stopped together look current.
 
-    ⚠ THE ANCHOR IS THE LATER OF WHAT WE HOLD AND WHAT THE MARKET HAS PUBLISHED (see
+     THE ANCHOR IS THE LATER OF WHAT WE HOLD AND WHAT THE MARKET HAS PUBLISHED (see
     `market_latest_close`). Our own maximum alone cannot detect a fleet that stopped updating as a
     block, because every row stays within `stale_days` of every other one.
     """

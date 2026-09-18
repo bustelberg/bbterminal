@@ -13,7 +13,7 @@ TWO STORES, AND THE SECOND IS WHY OPENING A *DIFFERENT* PORTFOLIO GOT FASTER
     complaint was never that: it was that every one of the 26 paired books costs the full load the
     first time it is opened, one after another.
 
-    ⚠ MOST OF THAT LOAD IS NOT ABOUT THE PORTFOLIO. Profiled on BUS_Bep_offensief_FX
+     MOST OF THAT LOAD IS NOT ABOUT THE PORTFOLIO. Profiled on BUS_Bep_offensief_FX
     (`scripts/profile_analysis_modal.py`), of 2.9s local:
 
         _holding_risk        950 ms   per-ISIN 5y vol / beta / 12-1 momentum
@@ -31,11 +31,11 @@ TWO STORES, AND THE SECOND IS WHY OPENING A *DIFFERENT* PORTFOLIO GOT FASTER
     payload), which is why it is a second store rather than a bigger first one — 4,096 payloads
     would be half a gigabyte.
 
-⚠ ONE FINGERPRINT GOVERNS BOTH, and that is the point: a leg cannot outlive the payload cache's
+ ONE FINGERPRINT GOVERNS BOTH, and that is the point: a leg cannot outlive the payload cache's
     notion of "current", so there is no window in which a fresh payload is assembled out of stale
     legs. Everything below about staleness applies unchanged to both stores.
 
-⚠⚠ A TTL WOULD BE THE WRONG MECHANISM HERE, AND IT IS THE OBVIOUS ONE. This page's entire
+ A TTL WOULD BE THE WRONG MECHANISM HERE, AND IT IS THE OBVIOUS ONE. This page's entire
     discipline is that a figure is either current or ABSENT — `n/a` when unpriceable, `—` when the
     window is too short, a refusal under `MIN_COVERAGE_PCT` rather than a renormalised guess. A
     time-based cache breaks exactly that: press "Refresh" or repoint a holding, reopen Analyse,
@@ -61,32 +61,32 @@ HOW THE FINGERPRINT IS CHEAP ENOUGH TO PAY ON EVERY HIT
     property that makes this safe on Railway, where `invalidate()` from one worker cannot reach
     another.
 
-⚠ THE STAMP CARRIES `pg_postmaster_start_time()` AND `stats_reset` FOR A REASON. Those counters
+ THE STAMP CARRIES `pg_postmaster_start_time()` AND `stats_reset` FOR A REASON. Those counters
     are NOT durable: a restart or `pg_stat_reset()` sets them back to zero, so a fingerprint could
     go BACKWARD and match an entry computed against newer data. Folding both timestamps in means a
     reset produces a *different* stamp rather than an earlier one, so the worst case is a
     recompute.
 
-⚠ IT COUNTS TUPLE OPERATIONS, NOT LOGICAL CHANGE, AND THAT ERRS THE SAFE WAY. An UPDATE that sets
+ IT COUNTS TUPLE OPERATIONS, NOT LOGICAL CHANGE, AND THAT ERRS THE SAFE WAY. An UPDATE that sets
     a column to the value it already held still bumps `n_tup_upd`, so we recompute for nothing.
     Over-invalidation costs one recompute; under-invalidation serves a wrong number on a screen
     people trade against. The asymmetry is the whole reason for this design.
 
-⚠ `_WATCHED` MUST LIST EVERY TABLE THE ENDPOINT READS — a table missing from it is a table whose
+ `_WATCHED` MUST LIST EVERY TABLE THE ENDPOINT READS — a table missing from it is a table whose
     changes are INVISIBLE to the cache. The list below was derived by instrumenting a real call
     (wrapping `postgrest.session._c.request` and `common.pg._run_copy_uncached`), not by reading
-    the code. ⚠ If you add a read to the analysis path, add its table here. Views do not appear in
+    the code.  If you add a read to the analysis path, add its table here. Views do not appear in
     `pg_stat_user_tables`, so `asset_grid` is covered by its BASE tables (`asset_execution`,
     `asset_analysis`).
 
-⚠ NOT A `Cache-Control` HEADER, EVER — same rule as `_blend_cache`. A header hands the browser a
+ NOT A `Cache-Control` HEADER, EVER — same rule as `_blend_cache`. A header hands the browser a
     copy we can no longer reach, so no invalidation can take effect. Server-side only.
 
-⚠ THE CACHED VALUE IS SHARED BY REFERENCE AND MUST BE TREATED AS IMMUTABLE. Nothing downstream
+ THE CACHED VALUE IS SHARED BY REFERENCE AND MUST BE TREATED AS IMMUTABLE. Nothing downstream
     mutates the payload after it is returned, and nothing should start; a deep copy of a 137KB
     dict on every hit would give back a slice of the win for a hazard that does not exist today.
 
-⚠⚠ AND THAT RULE GOT SHARPER WITH THE LEG STORE, BECAUSE A LEG IS THE KIND OF THING SOMEBODY
+ AND THAT RULE GOT SHARPER WITH THE LEG STORE, BECAUSE A LEG IS THE KIND OF THING SOMEBODY
     ENRICHES. A payload is assembled and shipped; a leg is an `asset_grid` row, a constituent list,
     a risk dict — objects a future caller could plausibly stamp a field onto, which would then be
     on that row for every book opened afterwards. Audited at the time of writing: `_buckets`,
@@ -112,7 +112,7 @@ _WATCHED = (
     "airs_holding", "airs_holding_isin_override", "airs_mutatie", "airs_model_weight",
     "airs_allocation_band", "airs_account_model_link", "airs_account_display_name",
     "airs_transactie_snapshot", "airs_performance",
-    # ⚠ ADDED WITH `holdings_fetched_at` (2026-08-18) — the modal now reads `reports_at` from here
+    #  Added with `holdings_fetched_at` (2026-08-18) — the modal now reads `reports_at` from here
     # to say WHOSE lag a stale date is. A refresh writes this table, and a fingerprint blind to it
     # would serve the pre-refresh "we last read it ..." beside post-refresh figures, which is the
     # exact confusion the field exists to remove. It would have been covered by accident today
@@ -120,7 +120,7 @@ _WATCHED = (
     "airs_account_roster",
     "asset_price", "asset_execution", "asset_analysis", "asset_bucket_override",
     "asset_isin_alias",
-    # ⚠⚠ ADDED WITH THE MOMENTUM STATE CHIP. `_holding_risk` reads this to place each holding's
+    #  Added with the momentum state chip. `_holding_risk` reads this to place each holding's
     # 12-1 return in the benchmark universe's distribution, and that distribution is REWRITTEN
     # every day by the precompute. Without this line the daily rewrite would be invisible to the
     # fingerprint and a warm process would keep bucketing today's holdings against a distribution
@@ -134,7 +134,7 @@ _WATCHED = (
 # source) combinations and there are ~56 portfolios, so this holds a working set, not all of them.
 _MAX_ENTRIES = 48
 
-# ⚠ A BACKSTOP, NOT THE MECHANISM. Correctness comes entirely from the fingerprint; this only
+#  A backstop, not the mechanism. Correctness comes entirely from the fingerprint; this only
 # bounds how long a cached payload can sit on a heap if something about the stamp ever goes wrong.
 # Generous on purpose: shortening it would not make anything more correct, only slower.
 _TTL_SECONDS = 60 * 60
@@ -144,7 +144,7 @@ _TTL_SECONDS = 60 * 60
 # call), never a user action and a later one.
 _STAMP_TTL_SECONDS = 2.0
 
-# ⚠ MANY MORE, AND MUCH SMALLER. A leg is one benchmark window or one ISIN's three risk numbers,
+#  Many more, and much smaller. A leg is one benchmark window or one ISIN's three risk numbers,
 # so 4,096 of them is a few megabytes — where 4,096 PAYLOADS would be ~560MB. The budget is sized
 # for the working set this page actually has: ~26 books x ~60 holdings is ~1,600 distinct ISINs
 # (heavily overlapping between the variants of a strategy) plus a handful of benchmark windows.
@@ -155,7 +155,7 @@ _leg_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_LEG_MAX_ENTRIES, ttl_seco
 _stamp_lock = threading.Lock()
 _stamp: tuple[float, str] | None = None   # (expires_monotonic, fingerprint)
 
-# ⚠ The two timestamps are NOT decoration — see the module note: the tuple counters reset to zero
+#  The two timestamps are NOT decoration — see the module note: the tuple counters reset to zero
 # on a restart or `pg_stat_reset()`, and without these the fingerprint could go BACKWARD and match
 # an entry built from newer data.
 _STAMP_SQL = (
@@ -184,7 +184,7 @@ def _fingerprint_uncached() -> str | None:
         # behaviour rather than to a guess.
         return None
     try:
-        # ⚠ `_run_copy`, not `_run_copy_uncached`: inside a `read_cache()` block the identical
+        #  `_run_copy`, not `_run_copy_uncached`: inside a `read_cache()` block the identical
         # fingerprint COPY is served from the first one, so the modal and the attribution call
         # that follows it do not each pay for it.
         buf = _run_copy(_STAMP_SQL, (list(_WATCHED),))
@@ -217,7 +217,7 @@ def fingerprint() -> str | None:
 
 
 def get(key: tuple, fp: str | None) -> Any | None:
-    """A cached payload, or `None`. ⚠ `fp is None` ALWAYS misses — a fingerprint we could not read
+    """A cached payload, or `None`.  `fp is None` ALWAYS misses — a fingerprint we could not read
     is not evidence that nothing changed."""
     if fp is None:
         return None
@@ -237,7 +237,7 @@ def put(key: tuple, fp: str | None, value: Any) -> None:
 def cached(key: tuple, compute: Callable[[], Any]) -> Any:
     """`compute()`, memoized against the current data fingerprint.
 
-    ⚠ WITH NO FINGERPRINT THIS IS A PLAIN CALL. That is the honest failure mode: if we cannot tell
+     WITH NO FINGERPRINT THIS IS A PLAIN CALL. That is the honest failure mode: if we cannot tell
     whether the data moved, we must not answer from a copy.
     """
     fp = fingerprint()
@@ -262,7 +262,7 @@ def leg(key: tuple, compute: Callable[[], Any]) -> Any:
     instrument's risk numbers. Same fingerprint, same staleness guarantee, different entry budget;
     see the module note for why it is a second store and not a bigger first one.
 
-    ⚠ WITH NO FINGERPRINT THIS IS A PLAIN CALL, exactly as `cached` is.
+     WITH NO FINGERPRINT THIS IS A PLAIN CALL, exactly as `cached` is.
     """
     fp = fingerprint()
     if fp is None:
@@ -279,7 +279,7 @@ def leg(key: tuple, compute: Callable[[], Any]) -> Any:
 def leg_get_many(keys: list[tuple]) -> tuple[dict[tuple, Any], list[tuple]]:
     """Split `keys` into what the leg store already has and what is still missing.
 
-    ⚠ THE BATCHED FORM EXISTS BECAUSE THE MISS PATH IS BATCHED. `_holding_risk` loads five years of
+     THE BATCHED FORM EXISTS BECAUSE THE MISS PATH IS BATCHED. `_holding_risk` loads five years of
     daily closes for EVERY holding in ONE `COPY`; asking `leg()` per ISIN would serve the hits and
     then run that COPY once per miss. The caller wants "which of these do I still have to compute",
     computes exactly those together, and files them with `leg_put_many`.

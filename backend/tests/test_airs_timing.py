@@ -23,7 +23,7 @@ Adobe is the case worth keeping: doing nothing LOST money, and two correctly-tim
 turned it positive. That is the whole reason this exists — the holdings table can say the trading
 helped, and cannot say which trade or by how much.
 
-⚠ AGAINST DOING NOTHING, NEVER AGAINST A PERFECT DECISION. A lucky call and a good one produce
+ AGAINST DOING NOTHING, NEVER AGAINST A PERFECT DECISION. A lucky call and a good one produce
 the same number. Nothing here is a skill claim.
 """
 from __future__ import annotations
@@ -68,7 +68,7 @@ class TestTheIdentityHolds:
         assert a.reconciles
 
     def test_trading_can_rescue_a_position_that_buy_and_hold_would_have_lost(self):
-        # ⚠ THE CASE THE PANEL EXISTS FOR. Adobe: doing nothing loses, the decisions win.
+        #  The case the panel exists for. Adobe: doing nothing loses, the decisions win.
         a = analyse_timing("ADBE", 115, 244.20 * 115, 223.61 * 115,
                            [_sell(78, 78 * 246.14), _buy(66, 66 * 204.36)])
         assert a.buy_hold_eur < 0
@@ -85,7 +85,7 @@ class TestTheIdentityHolds:
 
 class TestSplits:
     def test_a_pre_split_trade_is_converted_before_it_is_compared(self):
-        """⚠ WITHOUT THIS THE COMPARISON IS NONSENSE — `q x (price_now − p)` against a quantity ten
+        """ WITHOUT THIS THE COMPARISON IS NONSENSE — `q x (price_now − p)` against a quantity ten
         times too small and a price ten times too large. It is the same defect that put 17 points
         on KLA's money-weighted return."""
         a = analyse_timing("KLA", 310, 110.152 * 310, 169.735 * 310,
@@ -115,7 +115,7 @@ class TestSplits:
 
 class TestTheRestatementGap:
     def test_it_names_the_difference_from_the_tables_own_result(self):
-        """⚠ AIRS prices shares bought later at JANUARY's price, so its result exceeds the economic
+        """ AIRS prices shares bought later at JANUARY's price, so its result exceeds the economic
         one by q_bought x (p_buy − price_open) — EUR 1,146 on KLA. Two correct answers to different
         questions, and the modal must not leave a reader to find the second one."""
         airs = 169.735 * 310 - 110.152 * 310          # Huidige waarde − restated Beginwaarde
@@ -145,7 +145,7 @@ class TestTheTwoNormalisations:
         assert a.trades[0].move_pct == pytest.approx(9.15, abs=0.05)
 
     def test_a_sell_before_a_RISE_scores_negative(self):
-        # ⚠ SIGNED SO FAVOURABLE IS POSITIVE IN BOTH DIRECTIONS. Measured on AITopSelectie's KLA:
+        #  Signed so favourable is positive in both directions. Measured on AITopSelectie's KLA:
         # the price rose 31% after the January sale, so the sale cost 31% of its proceeds.
         a = analyse_timing("X", 100, 100.0 * 100, 200.0 * 100, [_sell(50, 50 * 100.0)])
         assert a.trades[0].move_pct == pytest.approx(-100.0, abs=0.01)
@@ -159,7 +159,7 @@ class TestTheTwoNormalisations:
         assert abs(small.trades[0].effect_pp) < abs(large.trades[0].effect_pp)
 
     def test_every_line_divides_by_the_SAME_base_so_the_identity_carries_through(self):
-        """⚠ One denominator is the whole reason the percentages add up. Give each line its own
+        """ One denominator is the whole reason the percentages add up. Give each line its own
         and the 'decomposition' silently stops being one."""
         a = analyse_timing("ADBE", 115, 244.20 * 115, 223.61 * 115,
                            [_sell(78, 78 * 246.14), _buy(66, 66 * 204.36)])
@@ -168,7 +168,7 @@ class TestTheTwoNormalisations:
         assert a.timing_pp == pytest.approx(sum(t.effect_pp for t in a.trades), abs=0.01)
 
     def test_the_base_is_what_was_HELD_not_AIRSs_restated_opening_value(self):
-        """⚠ THE RESTATEMENT BUG WEARING A PERCENT SIGN. `start_value_eur` prices TODAY's 310
+        """ THE RESTATEMENT BUG WEARING A PERCENT SIGN. `start_value_eur` prices TODAY's 310
         shares at January's price; only 170 were held. Dividing by it would report a buy-and-hold
         return on shares that were never there."""
         a = analyse_timing("KLA", 310, 110.152 * 310, 169.735 * 310, [_buy(140, 140 * 118.336)])
@@ -178,7 +178,7 @@ class TestTheTwoNormalisations:
         assert a.buy_hold_pct == pytest.approx((169.735 / 110.152 - 1) * 100, abs=0.05)
 
     def test_percentages_are_withheld_where_nothing_was_held_at_the_open(self):
-        """⚠ MEASURED: AITopSelectie bought its whole KLA position on 5 January. A 0.00pp there
+        """ MEASURED: AITopSelectie bought its whole KLA position on 5 January. A 0.00pp there
         reads as 'this decision did not matter' when the decisions were the entire result."""
         a = analyse_timing("KLA", 410, 100.0 * 410, 155.0 * 410,
                            [_buy(460, 460 * 100.0), _sell(50, 50 * 100.0)])
@@ -186,7 +186,7 @@ class TestTheTwoNormalisations:
         assert a.open_value_eur is None
         assert a.buy_hold_pct is None and a.actual_pct is None and a.timing_pp is None
         assert all(t.effect_pp is None for t in a.trades)
-        # ⚠ ...but the per-trade % survives, because it needs no opening position — only the trade.
+        #  ...but the per-trade % survives, because it needs no opening position — only the trade.
         assert all(t.move_pct is not None for t in a.trades)
 
     def test_the_euro_reconcile_flag_is_never_asserted_on_the_percentages(self):

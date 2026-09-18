@@ -15,12 +15,12 @@ WHAT THE BUTTON DOES, IN THE ORDER IT DOES IT
     Nothing else. No queue to watch, no second pass, no bounded slice that leaves the job half
     done and asks to be pressed again.
 
-⚠ IT STREAMS BECAUSE IT CANNOT NOT. Step 3 is one Yahoo call per constituent — 491 for the S&P,
+ IT STREAMS BECAUSE IT CANNOT NOT. Step 3 is one Yahoo call per constituent — 491 for the S&P,
     1,684 for ACWI. Even several at a time that is minutes, which is not a POST, and a button that
     hangs with no output is indistinguishable from a broken one. Every step emits a line; the
     console shows the run as it happens.
 
-⚠ THE PACING IS `asset_pipeline.yahoo`'s, NOT THIS MODULE'S — steps 2 and 3 run on a small pool
+ THE PACING IS `asset_pipeline.yahoo`'s, NOT THIS MODULE'S — steps 2 and 3 run on a small pool
     (`_PRICE_WORKERS`) and let the shared governor decide the request rate: a token bucket on
     request starts, a semaphore on requests in flight, a canary probe and a cooldown on a ban.
     This module used to hold ONE of those slots and sleep 0.4s per constituent on top, which is
@@ -28,13 +28,13 @@ WHAT THE BUTTON DOES, IN THE ORDER IT DOES IT
     Concurrency here is safe for a reason that does not generalise: fetching a KNOWN symbol is not
     resolution — see `_PRICE_WORKERS`.
 
-⚠ PRICES ARE FETCHED BY SYMBOL, NEVER BY RE-RESOLVING. `extend_series(analysis_id, symbol, …)`
+ PRICES ARE FETCHED BY SYMBOL, NEVER BY RE-RESOLVING. `extend_series(analysis_id, symbol, …)`
     asks Yahoo for an instrument we have already identified. Re-resolution asks *which listing
     is this*, and Yahoo answers an overloaded caller with an EMPTY search rather than a 429 —
     which is how Alphabet moved from GOOGL to a Vienna line 75,000x thinner. Step 1 is the only
     place identity is ever decided, and there it goes through the single paced queue worker.
 
-⚠ A PRESS ALWAYS FETCHES. EVERY CONSTITUENT. NO STALENESS TOLERANCE.
+ A PRESS ALWAYS FETCHES. EVERY CONSTITUENT. NO STALENESS TOLERANCE.
     This briefly skipped any constituent whose newest close was within `DEFAULT_STALE_DAYS` of
     the market anchor, to save throttled calls. It was wrong, and wrong in the way that costs
     trust: ING sat at its 2026-07-30 close of 30.215 while the AEX's `as_of` read 2026-07-31, the
@@ -46,7 +46,7 @@ WHAT THE BUTTON DOES, IN THE ORDER IT DOES IT
     last stored close, so a constituent with nothing new costs one small windowed request, and it
     comes back with an honest answer instead of an assumed one.
 
-⚠ WHAT DOES NOT MOVE IS REPORTED AS SUCH, WITH THE REASON. "unchanged" is an ANSWER — the vendor
+ WHAT DOES NOT MOVE IS REPORTED AS SUCH, WITH THE REASON. "unchanged" is an ANSWER — the vendor
     has no closed bar after the one we hold — and it is a different fact from "we skipped it".
     Measured on the AEX, 2026-08-03: Yahoo's 2026-07-31 bar is NULL for every Amsterdam listing
     (INGA.AS, AD.AS — the venue has no close that day) while ASML's US line and the London lines
@@ -54,7 +54,7 @@ WHAT THE BUTTON DOES, IN THE ORDER IT DOES IT
     vendor gap, not a stale fetch, and no amount of refreshing will close it. The log says so per
     row rather than leaving a reader to suspect the button.
 
-⚠ AND TODAY'S UNFINISHED SESSION IS NEVER STORED. Amsterdam was open when the above was measured
+ AND TODAY'S UNFINISHED SESSION IS NEVER STORED. Amsterdam was open when the above was measured
     and Yahoo happily returned an 08-03 bar at 30.13 — a live quote, not a close. `store.
     extend_series` drops any bar failing `yahoo.is_closed_bar`, so fetching mid-session is safe:
     it cannot write an intraday price that would move the index and then be overwritten at the
@@ -88,19 +88,19 @@ _log = logging.getLogger(__name__)
 
 # How many constituents are priced at once — and, in `_caps`, how many cap writes are in flight.
 #
-# ⚠⚠ THE POOL IS NOT THE RATE LIMIT. `asset_pipeline.yahoo` is, and always was: it paces every
+#  The pool is not the rate limit. `asset_pipeline.yahoo` is, and always was: it paces every
 # request START through a token bucket (`YAHOO_RPS`, default 10/s), caps in-flight requests with a
 # semaphore (`YAHOO_CONCURRENCY`, default 4), then detects a ban with a canary probe and cools
 # down. This loop used to run strictly serially AND sleep 0.4s per constituent on top of that — so
 # it held one of the four permitted slots, paced itself twice, and spent ~3 minutes of the S&P's
 # price step asleep before counting a single round trip.
 #
-# ⚠ TWICE THE SEMAPHORE, CAPPED AT 8. A constituent is one Yahoo call plus real database work (the
+#  Twice the semaphore, capped at 8. A constituent is one Yahoo call plus real database work (the
 # COPY inside `extend_series`, then its marks), so a pool the size of the semaphore leaves Yahoo
 # slots idle whenever a thread is talking to Postgres. Twice keeps the governor saturated without
 # pretending the pool is what decides the request rate — raise `YAHOO_CONCURRENCY` for that.
 #
-# ⚠⚠ AND THIS IS NOT RESOLUTION, WHICH IS THE ONLY REASON IT MAY BE CONCURRENT AT ALL. The hazard
+#  And this is not resolution, which is the only reason it may be concurrent at all. The hazard
 # that makes this repo a single Yahoo consumer — an overloaded caller gets an EMPTY search rather
 # than a 429, and an empty candidate set hands the win to a thin foreign listing (NVDA on
 # Stuttgart, Alphabet on Vienna) — belongs to `resolve()`. `extend_series` asks about a symbol we
@@ -148,7 +148,7 @@ def _marks(aid: int, lookback: str, anchor: str) -> tuple[tuple[str, float] | No
 def _market_anchor(emit) -> str | None:
     """The freshest close there is: ours, or the market's if it has published since.
 
-    ⚠ NEVER THE CALENDAR. Anchoring on today flags every instrument every weekend, calls a bank
+     NEVER THE CALENDAR. Anchoring on today flags every instrument every weekend, calls a bank
     holiday a fleet-wide failure and — worst — turns a Yahoo outage into "re-fetch all 1,684
     constituents" at the one moment fetching cannot work. Both halves come from
     `price_refresh`, which owns this definition; a second copy here would be free to drift from
@@ -172,7 +172,7 @@ def _constituents(label: str, emit) -> tuple[list[dict], dict, dict]:
     no `universe` row at all — a different fault from "constituents unpriced" with the identical
     symptom, 0 members) and resolves a bounded slice of whatever is not yet in the grid.
 
-    ⚠ RESOLUTION GOES THROUGH THE QUEUE'S OWN SLICE, NOT A SECOND RESOLVER. `_drain_now` runs
+     RESOLUTION GOES THROUGH THE QUEUE'S OWN SLICE, NOT A SECOND RESOLVER. `_drain_now` runs
     the single paced worker's unit of work and stands down if something else is already draining
     — two concurrent Yahoo consumers is exactly how a constituent lands on a thin foreign
     listing.
@@ -188,7 +188,7 @@ def _constituents(label: str, emit) -> tuple[list[dict], dict, dict]:
             ids = _universe_company_ids(label)
             emit("progress", message=f"  built {label}: {len(ids)} members")
         else:
-            emit("progress", message=f"  ⚠ nothing can build {label}'s universe")
+            emit("progress", message=f"   nothing can build {label}'s universe")
     if not ids:
         return [], {}, {_USABLE: [], _NEEDS_CAP: [], _NEEDS_RESOLVE: [], _NO_ISIN: []}
 
@@ -242,12 +242,12 @@ def _constituents(label: str, emit) -> tuple[list[dict], dict, dict]:
 def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
     """Step 2 — a market cap for EVERY constituent, from Yahoo, now.
 
-    ⚠ ALL OF THEM, NOT ONLY THE UNCAPPED ONES. The cap IS the weight, and it moves every day —
+     ALL OF THEM, NOT ONLY THE UNCAPPED ONES. The cap IS the weight, and it moves every day —
     an index re-weighted from caps quoted three weeks ago is a three-week-old index wearing
     today's prices. It is also nearly free: `yahoo.quote` is batched at 100 symbols per call, so
     the S&P is five requests.
 
-    ⚠ THE CAP CURRENCY IS NORMALISED TO ITS MAJOR UNIT, AND THE RATE IS ASKED FOR *THAT*. Yahoo
+     THE CAP CURRENCY IS NORMALISED TO ITS MAJOR UNIT, AND THE RATE IS ASKED FOR *THAT*. Yahoo
     quotes a London listing in PENCE but reports its `marketCap` in POUNDS — same payload, same
     `currency: "GBp"`, two different units. Passing "GBp" to `fx_to_eur` divides an already-major
     figure by 100 and yields a cap 100x too small that still looks like a number (Shell as a
@@ -275,7 +275,7 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
     def _write(item: tuple[str, dict]) -> bool:
         """Store one constituent's cap. True when it came out weighable.
 
-        ⚠ THE QUOTE IS PASSED IN, NOT CLOSED OVER. `quotes` is rebound once per batch inside the
+         THE QUOTE IS PASSED IN, NOT CLOSED OVER. `quotes` is rebound once per batch inside the
         loop below; a closure would read whichever batch happened to be current when the thread
         got there — which is the right answer only because the pool is joined before the next
         batch, i.e. correct by accident.
@@ -287,7 +287,7 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
         if native and ccy:
             fx = yahoo.fx_to_eur(ccy) or 0.0
             eur = round(float(native) * fx, 2) if fx else None
-        # ⚠ WRITTEN EVEN WHEN NULL, with the timestamp — otherwise every run re-asks Yahoo
+        #  Written even when null, with the timestamp — otherwise every run re-asks Yahoo
         # about the same names it already knows have no cap (an ETF, a delisted line).
         supabase.table("asset_analysis").update({
             "market_cap_native": native, "market_cap_currency": ccy,
@@ -303,13 +303,13 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
         chunk = syms[i:i + _QUOTE_BATCH]
         quotes = yahoo.quote(chunk)
         quoted += len(quotes)
-        # ⚠⚠ THE QUOTES ARE BATCHED AND THE WRITES WERE NOT — WHICH IS WHERE THIS STEP'S TIME WENT.
+        #  The quotes are batched and the writes were not — which is where this step's time went.
         # One Yahoo call answers 100 symbols; storing them was 100 separate PostgREST round trips,
         # serially, so the S&P spent five requests learning the caps and ~490 writing them down.
         # They are independent single-row updates against distinct primary keys, so they overlap
         # cleanly — the same client the fundamentals fill already drives from eight threads.
         #
-        # ⚠ NOT AN `upsert` OF THE BATCH, WHICH IS THE OBVIOUS FASTER THING. PostgREST would turn
+        #  Not an `upsert` OF THE BATCH, WHICH IS THE OBVIOUS FASTER THING. PostgREST would turn
         # that into INSERT … ON CONFLICT, so a constituent whose `asset_analysis` row is missing
         # would be CREATED here from four cap columns — a junk row that then looks like an
         # instrument. An UPDATE that matches nothing is the honest no-op.
@@ -323,7 +323,7 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
         # A constituent with no cap weighs nothing, so it is invisible in a cap-weighted index
         # while looking perfectly healthy in the asset grid. Name them.
         emit("progress", message=(
-            f"  ⚠ {len(no_cap)} with no market cap (they weigh nothing): "
+            f"   {len(no_cap)} with no market cap (they weigh nothing): "
             + ", ".join(no_cap[:15])
             + (f" … +{len(no_cap) - 15} more" if len(no_cap) > 15 else "")))
     return {"quoted": quoted, "capped": capped, "no_cap": len(no_cap)}
@@ -333,12 +333,12 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
             anchor: str | None, emit, should_stop=None) -> dict:
     """Step 3 — the start-of-year price and the current price, per constituent.
 
-    ⚠ THE ONLY CANCELLATION POINT THAT MATTERS IS IN HERE, and it is between constituents. This
+     THE ONLY CANCELLATION POINT THAT MATTERS IS IN HERE, and it is between constituents. This
     loop IS the run — 491 Yahoo calls for the S&P, 1,684 for ACWI, minutes either way, while steps
     1 and 2 are seconds. A Cancel that could only land between the three steps would, in practice,
     never land at all.
 
-    ⚠ BETWEEN CONSTITUENTS, NEVER MID-ONE. Each unit fetches a gap and reads its two marks back;
+     BETWEEN CONSTITUENTS, NEVER MID-ONE. Each unit fetches a gap and reads its two marks back;
     stopping inside that would leave the series written and the marks unread. The boundary here is
     where the database is consistent, which is the same rule the fundamentals fill follows
     (`ctx.check()` first thing in `_one`).
@@ -346,7 +346,7 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     `should_stop` is an optional predicate rather than an exception so this module keeps knowing
     nothing about `jobs.py` — the SSE caller passes nothing and behaves exactly as before.
 
-    ⚠ ON A POOL (`_PRICE_WORKERS`), NOT IN A `for`, AND THE PACING LIVES IN `yahoo.py` — see that
+     ON A POOL (`_PRICE_WORKERS`), NOT IN A `for`, AND THE PACING LIVES IN `yahoo.py` — see that
     constant. What changes here as a consequence:
 
       * `[n/total]` COMES FROM AN ATOMIC COUNTER, NOT THE ITEM'S POSITION. Threads finish out of
@@ -388,12 +388,12 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
         f"3/3 Start-of-year and current price for {total} constituent(s) — "
         f"window opens {start_anchor}, {_PRICE_WORKERS} at a time"))
 
-    # ⚠ THE "WHAT DID WE HOLD BEFORE?" READ IS ONE GROUPED COPY FOR THE WHOLE INDEX. It used to be
+    #  THE "WHAT DID WE HOLD BEFORE?" READ IS ONE GROUPED COPY FOR THE WHOLE INDEX. It used to be
     # a `_marks` call per constituent — two indexed round trips each, on the critical path, purely
     # to learn ONE date: the newest close we already had, which is what tells `moved` from
     # `unchanged` afterwards. On the S&P that was ~980 round trips to read 490 dates.
     #
-    # ⚠ `latest_close_by_analysis` IS THE FLEET'S OWN DEFINITION, IMPORTED, NOT RE-DERIVED — the
+    #  `latest_close_by_analysis` IS THE FLEET'S OWN DEFINITION, IMPORTED, NOT RE-DERIVED — the
     # same `max(target_date) WHERE close IS NOT NULL` the daily staleness sweep anchors on. A
     # second copy here would be free to disagree with the tick about what "our newest close" means.
     before = latest_close_by_analysis([aid for _, aid, _ in todo]) if todo else {}
@@ -403,7 +403,7 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     # open) and is why it is counted apart from a failure.
     out = {"total": total, "fetched": 0, "moved": 0, "unchanged": 0,
            "failed": 0, "no_start": 0, "no_end": 0}
-    # ⚠ ONE LOCK OVER THE TALLY *AND* THE COUNTER. They are read together to build a line, and a
+    #  One lock over the tally *AND* THE COUNTER. They are read together to build a line, and a
     # count that is incremented outside the lock can be reported twice under the same `n`.
     tally = threading.Lock()
     counter = itertools.count(1)
@@ -412,7 +412,7 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     def _one(item: tuple[str, int, str]) -> None:
         isin, aid, sym = item
         if should_stop and should_stop():
-            # ⚠ SAID ONCE, BY WHICHEVER THREAD SEES IT FIRST. Every queued constituent passes
+            #  Said once, by whichever thread sees it first. Every queued constituent passes
             # through here after a Cancel, and one line each would be hundreds of them.
             with tally:
                 first = not stopped.is_set()
@@ -460,7 +460,7 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
             chg = _pct(start[1], end[1])
             marks = (f"{start[0]} {start[1]:.4g} → {end[0]} {end[1]:.4g}"
                      + (f" ({chg:+.2f}%)" if chg is not None else ""))
-            # ⚠ DID IT ACTUALLY MOVE? Printing the marks alone cannot answer the question the
+            #  Did it actually MOVE? Printing the marks alone cannot answer the question the
             # press was asking. A row that comes back on the same date it went in is the vendor
             # saying "there is nothing after this" — and when that date trails the index's own
             # `as_of`, that gap is a property of the LISTING, not of our fetch. Measured on the
@@ -484,7 +484,7 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
             # executor's lazy iterator.
             list(pool.map(_one, todo))
     if stopped.is_set():
-        # ⚠ REPORTED, AND THE COUNTS SO FAR ARE KEPT. Everything already fetched is written and
+        #  Reported, and the counts so far are kept. Everything already fetched is written and
         # real; returning the tally is what lets the summary say "stopped after 140 of 491" rather
         # than implying the whole step was lost.
         ran = out["fetched"] + out["failed"]
@@ -504,7 +504,7 @@ def refresh_benchmark(label: str, emit, should_stop=None) -> dict:
     (see there — that loop is the whole runtime). Absent, nothing changes: the plain SSE caller
     passes nothing and this behaves exactly as it always did.
 
-    ⚠ A CANCELLED RUN STILL RETURNS ITS SUMMARY, and `stopped` says so. Raising here instead would
+     A CANCELLED RUN STILL RETURNS ITS SUMMARY, and `stopped` says so. Raising here instead would
     throw away the counts for work that really happened — a run stopped after 300 of 491 has 300
     constituents freshly priced, and reporting that as nothing would invite pressing the button
     again from scratch.

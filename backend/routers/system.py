@@ -71,13 +71,13 @@ async def latest_price_date(response: Response):
     /backtest page uses this as the default end-date — "test up to
     however current our data is."
 
-    ⚠ BOTH constants are load-bearing, and they must match
+     BOTH constants are load-bearing, and they must match
     `idx_metric_data_close_price_date`'s predicate EXACTLY
     (`metric_code='close_price' AND source_code='gurufocus'`) or the partial
     index does not apply and prod seq-scans a 70M-row table into the 8s
     statement timeout (57014).
 
-    ⚠ The previous index here was `(source_code, target_date)`, and the comment
+     The previous index here was `(source_code, target_date)`, and the comment
     claiming it "stops at the first close_price row" was wrong: `metric_code`
     was not in it, so it was a FILTER and the scan walked every row dated after
     the last close — 188,286 of them, ALL `is_prediction` estimates carrying

@@ -3,7 +3,7 @@ import { SECTOR_CODES, inkForBackground, sectorCode } from './sectorCodes';
 import { SECTOR_COLORS, colorForSector } from './sectorColors';
 
 describe('sectorCode — the secondary encoding', () => {
-  it('⚠ every mapped code is UNIQUE per colour', () => {
+  it(' every mapped code is UNIQUE per colour', () => {
     // The code exists because two colour pairs are indistinguishable. If two sectors that carry
     // DIFFERENT colours shared a code, the chip would be ambiguous on both channels at once.
     const byCode = new Map<string, Set<string>>();
@@ -16,7 +16,7 @@ describe('sectorCode — the secondary encoding', () => {
     expect(clashes).toEqual([]);
   });
 
-  it('⚠ one letter would NOT have been enough', () => {
+  it(' one letter would NOT have been enough', () => {
     // Technology/Transportation, and Communication/Consumer*/Capital Goods, collide on letter 1.
     const firsts = Object.keys(SECTOR_CODES).map((s) => s[0]);
     expect(new Set(firsts).size).toBeLessThan(firsts.length);
@@ -47,7 +47,7 @@ describe('sectorCode — the secondary encoding', () => {
 });
 
 describe('inkForBackground — text on a filled chip', () => {
-  it('⚠ picks DARK ink on the light half of the palette', () => {
+  it(' picks DARK ink on the light half of the palette', () => {
     // Utilities (#fbbf24) and Materials (#84cc16) are the two the validator flags at 1.63 and
     // 1.92 contrast against white — white text on them is unreadable.
     expect(inkForBackground(SECTOR_COLORS.Utilities)).toBe('#111827');

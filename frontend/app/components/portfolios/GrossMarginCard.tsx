@@ -26,22 +26,22 @@ import CardHeading from './CardHeading';
  * compounding series — no log / exponential trend). What is left of each sale after the direct
  * cost of making it — the cleanest read on pricing power. Click through to the two base lines.
  *
- * ⚠ A BANK HAS NO GROSS MARGIN, AND THE CARD MUST SHOW A HOLE RATHER THAN A ZERO. GuruFocus's 'B'
+ *  A bank has no gross margin, and the card must show a hole rather than a zero. GuruFocus's 'B'
  * industry template has no cost of goods sold, so the line is absent (JPMorgan) — the concept does
  * not apply. A 0 would draw a company selling at cost. Where too much of a book is like that the
  * year is dropped entirely (`MIN_YEAR_COVERAGE_PCT`), rather than publishing a "gross margin" that
  * silently describes only the half that has one.
  *
- * ⚠ DERIVED, THOUGH GURUFOCUS ALSO PUBLISHES `Ratios__Gross Margin %`. It reproduces their figure
+ *  Derived, though gurufocus also publishes `Ratios__Gross Margin %`. It reproduces their figure
  * exactly (ASML 2025: 17,258/32,667.3 = 52.83% vs published 52.83; Apple 46.91 vs 46.905) and
  * leaves two lines the drill-down can show — a published ratio has no workings to check.
  *
- * ⚠ THE RATIO IS DERIVED HERE from the raw lines (`grossMarginByYear`), so the line, the tiles and
+ *  The ratio is derived here from the raw lines (`grossMarginByYear`), so the line, the tiles and
  * the drill-down are one computation. Aggregation is a weight-weighted average of per-company
  * ratios — currency-safe, unlike summing mixed-currency amounts. Mirrors {@link ./SbcOcfCard}.
  */
 
-/** ⚠ `String.raw`, or every backslash in the expressions below is eaten before KaTeX
+/**  `String.raw`, or every backslash in the expressions below is eaten before KaTeX
  *  sees it. */
 const R = String.raw;
 
@@ -88,7 +88,7 @@ export default function GrossMarginCard({ holdingsTarget, holdingsName, benchTar
   const own = holdingsName ?? 'Gross margin';
   /**
    * The book's figures and the benchmark's, over the ONE window both lines cover — see
-   * `CardStats`/`sharedSpan`. ⚠ COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
+   * `CardStats`/`sharedSpan`.  COMPUTED ONCE: `own.avg` is BOTH the tile and the dashed average
    * line on the chart below, so the card cannot plot a mean it does not print.
    */
   const stats = useMemo(() => pairedSpan(marginByYr, benchByYr), [marginByYr, benchByYr]);
@@ -116,7 +116,7 @@ export default function GrossMarginCard({ holdingsTarget, holdingsName, benchTar
               worked={withWorked(
                 R`\text{gross margin} = \dfrac{\text{gross profit}}{\text{revenue}}`,
                 workedMean(stats.own.values))}
-              // ⚠ THIS LINE USED TO BE THE CAPEX CARD'S, PASTED IN — "the share of each sales-euro
+              //  This line used to be the capex card's, pasted in — "the share of each sales-euro
               // reinvested in property, plant & intangibles. Lower = more capital-light". That is
               // capital intensity, and it reads the metric BACKWARDS: on gross margin, higher is
               // better. It survived because the sentence is fluent and plausible, which is exactly

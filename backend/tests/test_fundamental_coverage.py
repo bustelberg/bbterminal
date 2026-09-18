@@ -1,6 +1,6 @@
 """Which holdings a portfolio-level fundamentals view can actually reach.
 
-⚠ EVERY UNREACHED HOLDING IS WEIGHT THAT DROPS OUT OF THE BLEND. A blended figure over 40% of a
+ EVERY UNREACHED HOLDING IS WEIGHT THAT DROPS OUT OF THE BLEND. A blended figure over 40% of a
 book, presented as the book's, is the same fabrication the AIRS return coverage floors already
 guard against: the number looks entirely normal and describes something else.
 """
@@ -16,7 +16,7 @@ from routers._fundamental_coverage import classify_holding, coverage_for
 def _no_alias_lookup(monkeypatch):
     """Neutralise the ISIN-alias hop, which reaches its OWN Supabase handle.
 
-    ⚠ PATCHING `fc.supabase` IS NOT ENOUGH AND THE GAP IS INVISIBLE LOCALLY. `coverage_for` opens
+     PATCHING `fc.supabase` IS NOT ENOUGH AND THE GAP IS INVISIBLE LOCALLY. `coverage_for` opens
     with `canonical_map(...)` -> `asset_pipeline.isin_alias.load_aliases()`, a different module
     with a different handle; a test that patches only the coverage module's one still builds a
     REAL client for the alias lookup. On a developer machine `backend/.env.local` supplies the
@@ -36,7 +36,7 @@ def _grid(asset_class=None, product=None):
 
 
 class TestTheReasonsAreNotInterchangeable:
-    """⚠ `unsubscribed` and `no_company` look identical on screen and have OPPOSITE remedies:
+    """ `unsubscribed` and `no_company` look identical on screen and have OPPOSITE remedies:
     one is a purchase decision, the other a five-minute ingest. Merging them turns an actionable
     gap into a shrug."""
 
@@ -53,7 +53,7 @@ class TestTheReasonsAreNotInterchangeable:
                                 has_metrics=True) == "covered"
 
     def test_a_company_with_NO_metrics_is_not_covered(self):
-        """⚠ THE DEFECT THIS REPLACED. `covered` promised "fundamentals can be fetched" on the
+        """ THE DEFECT THIS REPLACED. `covered` promised "fundamentals can be fetched" on the
         strength of a company row alone. Measured 2026-07-23: 2,776 company rows, SEVEN carrying
         any annual metric — so a portfolio read 100% covered and would have charted nothing."""
         assert classify_holding("NL0010273215", _grid("equity"), True, True,
@@ -67,7 +67,7 @@ class TestTheReasonsAreNotInterchangeable:
         assert classify_holding("X00000000003", _grid("equity"), True, True) == "no_metrics"
 
     def test_a_company_on_an_unsubscribed_exchange_is_still_no_metrics_not_unsubscribed(self):
-        """⚠ THE SHOPIFY / BROOKFIELD CASE. A company pinned to an exchange we don't subscribe to
+        """ THE SHOPIFY / BROOKFIELD CASE. A company pinned to an exchange we don't subscribe to
         (Shopify on TSX) is NOT pre-classified `unsubscribed` — GuruFocus often lists a subscribed
         primary (NASDAQ:SHOP) that the ingest resolves and repoints to. Whether a subscribed
         listing exists needs an API call, so the cheap classifier leaves it `no_metrics`
@@ -81,7 +81,7 @@ class TestTheReasonsAreNotInterchangeable:
 
 
 class TestOrderIsTheRule:
-    """⚠ A bond on an unsubscribed exchange is NOT an unsubscribed company. Reporting it as one
+    """ A bond on an unsubscribed exchange is NOT an unsubscribed company. Reporting it as one
     puts it on the list of things a subscription would fix, and it never would."""
 
     def test_a_bond_is_not_equity_even_with_no_company_and_no_subscription(self):
@@ -105,7 +105,7 @@ class TestOrderIsTheRule:
 
 
 class TestCoverageIsMeasuredInWEIGHT:
-    """⚠ A COUNT IS THE WRONG UNIT. Nine covered minnows and one uncovered giant is not 90%
+    """ A COUNT IS THE WRONG UNIT. Nine covered minnows and one uncovered giant is not 90%
     coverage, and the count would say it is."""
 
     def test_one_big_gap_dominates_nine_small_hits(self, monkeypatch):
@@ -172,7 +172,7 @@ class TestCoverageIsMeasuredInWEIGHT:
 
 
 class TestAnAliasedIsinIsCoveredByItsCanonical:
-    """⚠ `company` and `gurufocus_listing` are keyed on the RAW ISIN, so an aliased row reads as
+    """ `company` and `gurufocus_listing` are keyed on the RAW ISIN, so an aliased row reads as
     "not ingested" while its canonical sits there fully covered. Measured on the TSMC ADR:
     US8740391003 showed 5.0% of a book as uncovered while TW0002330008 was company 3223."""
 
@@ -222,7 +222,7 @@ class TestAnAliasedIsinIsCoveredByItsCanonical:
         assert out["covered_pct"] == 100.0
 
     def test_it_says_WHICH_isin_served_it(self, monkeypatch):
-        """⚠ Otherwise an ISIN a reader knows we have no company for silently reads as covered,
+        """ Otherwise an ISIN a reader knows we have no company for silently reads as covered,
         and there is nothing on screen to explain it."""
         assert self._wire(monkeypatch, aliased=True)["rows"][0]["served_by"] == self.ORD
 
@@ -231,7 +231,7 @@ class TestAnAliasedIsinIsCoveredByItsCanonical:
 
 
 class TestLookThroughLinkedCertificates:
-    """⚠ A LINKED CERTIFICATE IS NOT A DEAD ROW. `Star Selection Index` (a CH structured product no
+    """ A LINKED CERTIFICATE IS NOT A DEAD ROW. `Star Selection Index` (a CH structured product no
     vendor prices) IS `StarTopSelectie OFF FX`, 24 real stocks. Looking through it lets those
     stocks feed the coverage + blend instead of dropping 4.70% of the book on the floor."""
 
@@ -248,7 +248,7 @@ class TestLookThroughLinkedCertificates:
             [{"isin": "CH_CERT", "name": "Star Selection Index", "weight": 10.0}],
             positions, self._through("CH_CERT", "Star Selection Index", 7))
         assert [m["isin"] for m in out] == ["US1", "US2"]
-        # ⚠ WEIGHT IS CONSERVED AND SPLIT BY THE UNDERLYING FRACTIONS: 10% -> 6% + 4%.
+        #  Weight is conserved and split by the underlying fractions: 10% -> 6% + 4%.
         assert [round(m["weight"], 4) for m in out] == [6.0, 4.0]
         # And every constituent names the certificate it came from.
         assert {m["via"] for m in out} == {"Star Selection Index"}
@@ -267,7 +267,7 @@ class TestLookThroughLinkedCertificates:
         assert out == [{"isin": "CH_CERT", "name": "Cert", "weight": 10.0}]
 
     def test_a_cycle_is_not_expanded_for_ever(self):
-        """⚠ A wrapper holds the very certificate it links from. A portfolio already on the path is
+        """ A wrapper holds the very certificate it links from. A portfolio already on the path is
         left as a row rather than re-expanded — the honest outcome, and it terminates."""
         # pid 7 links to pid 8, and pid 8 links back to pid 7.
         positions = {
@@ -331,7 +331,7 @@ class TestCoverageCarriesTheLookThroughLabel:
 
 
 class TestTheEmptyAnswerHasTheSameShapeAsARealOne:
-    """⚠ An early return that drops `by_reason_pct` crashes every consumer that iterates it — and
+    """ An early return that drops `by_reason_pct` crashes every consumer that iterates it — and
     it does so on the emptiest input, the one least likely to be tried by hand. Measured: a model
     portfolio with no positions threw `KeyError: 'by_reason_pct'`."""
 

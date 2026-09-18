@@ -4,26 +4,26 @@
 row onto the named symbol, exactly as `scripts/repoint_to_symbol.py` does by hand — same probe,
 same store path, same refusal on a symbol with no bars.
 
-⚠ RE-APPLIED AFTER EVERY RESOLUTION, OR IT IS NOT AN OVERRIDE. `fast_resolve`, the queue worker,
+ RE-APPLIED AFTER EVERY RESOLUTION, OR IT IS NOT AN OVERRIDE. `fast_resolve`, the queue worker,
     both repointers and the per-row Resolve action all write `asset_execution.yahoo_symbol`, and
     each of them would hand an overridden ISIN a listing of its own again — by NAME, which is how
     the wrong one was chosen in the first place. `apply_symbol_overrides()` runs after them and
     puts it back. Idempotent: a no-op once the row already names the right symbol, and in that
     case it costs one query and NOT a Yahoo call.
 
-⚠ IT IS NOT `asset_isin_alias`. An alias means "this ISIN is deliberately served by ANOTHER
+ IT IS NOT `asset_isin_alias`. An alias means "this ISIN is deliberately served by ANOTHER
     ISIN's instrument" — an ADR priced off its ordinary, two securities sharing one series on
     purpose, which is why the alias inherits the canonical's `analysis_id`. This says the
     opposite: the ISIN has its own listing and the automatic path picked the wrong one. Recording
     a wrong-listing fix as an alias would assert a relationship between two securities that does
     not exist, and would then quietly price one off the other for ever.
 
-⚠ THE TWO MUST NOT BOTH CLAIM ONE ISIN. An alias points the row at another ISIN's instrument and
+ THE TWO MUST NOT BOTH CLAIM ONE ISIN. An alias points the row at another ISIN's instrument and
     this points it at a named symbol; applied in either order they fight, and which one wins would
     depend on call order rather than on intent. `apply_symbol_overrides` refuses an ISIN that is
     also aliased and says so, rather than picking a winner.
 
-⚠ A ZERO-BAR SYMBOL IS REFUSED, EVEN THOUGH A HUMAN NAMED IT. Naming a symbol by hand does not
+ A ZERO-BAR SYMBOL IS REFUSED, EVEN THOUGH A HUMAN NAMED IT. Naming a symbol by hand does not
     make it a listing — the GODE.DE incident wrote ten structured products onto one empty series
     with `status='ok'`. The override is stored; it is simply not applied, and the reason is logged.
 """
@@ -37,7 +37,7 @@ from deps import supabase
 
 _log = logging.getLogger(__name__)
 
-# ⚠⚠ THE CHECKED-IN HALF OF THE OVERRIDES, AND IT EXISTS BECAUSE A DB ROW DOES NOT DEPLOY.
+#  The checked-in half of the overrides, and it exists because a db row does not deploy.
 #
 # A repoint is a fix to ONE ROW OF DATA, so `git push` + `supabase db push` carry none of it:
 # migrations move schema, and `asset_symbol_override` rows entered locally stay local. That is how a
@@ -53,7 +53,7 @@ _FILE = Path(__file__).with_name("symbol_overrides.json")
 def load_file_overrides() -> dict[str, str]:
     """`symbol_overrides.json` -> {isin: symbol}. Never raises.
 
-    ⚠ A MALFORMED FILE IS LOGGED AT `error` AND YIELDS NOTHING, rather than taking the DB overrides
+     A MALFORMED FILE IS LOGGED AT `error` AND YIELDS NOTHING, rather than taking the DB overrides
     down with it — one broken bracket must not un-pin every other ISIN. The cost of that choice is
     that a typo here disables these fixes silently at RUNTIME, which is why the shape is asserted in
     a unit test (`tests/test_symbol_overrides_file.py`): CI is the place that catches it, not a
@@ -78,7 +78,7 @@ def load_file_overrides() -> dict[str, str]:
 def load_symbol_overrides() -> dict[str, str]:
     """{isin: the Yahoo symbol it must resolve to} — the file merged over the table.
 
-    ⚠ THE FILE WINS, AND A DISAGREEMENT IS AN `error`. The file is the reviewed, deployed decision
+     THE FILE WINS, AND A DISAGREEMENT IS AN `error`. The file is the reviewed, deployed decision
     and it is the same in every environment; a table row that contradicts it is invisible in a code
     review and would make local and production price a constituent off different venues. Whichever
     is wrong, silence is the one outcome that hides it — so the loser is named in the log.
@@ -100,7 +100,7 @@ def load_symbol_overrides() -> dict[str, str]:
 def _needs_repoint(isin: str, symbol: str) -> bool:
     """True when the execution row does not already name `symbol`.
 
-    ⚠ CHECKED BEFORE ANY NETWORK CALL. This runs after every resolution, and the overwhelmingly
+     CHECKED BEFORE ANY NETWORK CALL. This runs after every resolution, and the overwhelmingly
     common case is that nothing changed — probing Yahoo to discover that would put a call per
     override on every pipeline tick, which is how Yahoo starts answering with empty results.
     """
@@ -128,7 +128,7 @@ def apply_symbol_overrides(only_isin: str | None = None) -> int:
     if not overrides:
         return 0
 
-    # ⚠ An ISIN cannot be both aliased and symbol-overridden — see the module docstring.
+    #  An ISIN cannot be both aliased and symbol-overridden — see the module docstring.
     from .isin_alias import load_aliases  # noqa: PLC0415
 
     aliased = load_aliases()
@@ -174,7 +174,7 @@ def _repoint(isin: str, symbol: str) -> bool:
         _log.warning("[symbol_override] %s is not in the grid; skipped", isin)
         return False
 
-    # ⚠ PROBE BEFORE STORING. A named symbol is a claim, not a listing.
+    #  Probe before storing. A named symbol is a claim, not a listing.
     sc = _score_retry(symbol)
     if not sc or not float(sc.get("med_adv_eur") or 0):
         _log.warning("[symbol_override] %s -> %s: no price series. NOT applied — a symbol with "
@@ -197,7 +197,7 @@ def _repoint(isin: str, symbol: str) -> bool:
         "chosen": ai["analysis"], "underlying": None,
         "reason": f"asset_symbol_override: pinned to {symbol} by hand, not a ranked pick.",
         "analysis_note": ai["analysis_note"],
-        # ⚠ NOT `analysis_asset_class` — see `sector_for`.
+        #  NOT `analysis_asset_class` — see `sector_for`.
         "sector": sector_for(symbol, ai["analysis_asset_class"], row[0].get("sector")),
         "candles": None, "ibkr": None,
     }

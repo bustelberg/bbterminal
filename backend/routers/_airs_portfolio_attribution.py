@@ -13,7 +13,7 @@ what makes ALLOCATION mean "overweighting a bucket that beat the INDEX", not mer
 that went up". Overweighting a sector that rose 5% while the index rose 10% is a BAD allocation
 call, and plain Brinson would score it positive.
 
-⚠ THE IDENTITY IS THE WHOLE POINT — AND IT IS ASSERTED, NOT ASSUMED.
+ THE IDENTITY IS THE WHOLE POINT — AND IT IS ASSERTED, NOT ASSUMED.
 
     sum_i (allocation_i + selection_i + interaction_i)  ==  R_p - R_b
 
@@ -21,7 +21,7 @@ If that does not hold, the decomposition is not a decomposition — it is three 
 that happen to sit next to each other. `reconciles` carries the residual, and it is returned, not
 swallowed.
 
-⚠ FUNDS AND CASH ARE EXCLUDED, AND THE EXCLUDED SHARE IS STATED.
+ FUNDS AND CASH ARE EXCLUDED, AND THE EXCLUDED SHARE IS STATED.
     An ETF has no sector. Bucketed as `Fund (not looked through)`, the benchmark's weight there
     is ZERO — so Brinson would assign the fund's ENTIRE return to "allocation", i.e. it would
     report that holding a diversified world tracker was a *sector bet*. That is arithmetically
@@ -32,7 +32,7 @@ swallowed.
     as their own line (weight + return, undecomposed), and `attributable_pct` says how much of
     the model the table below actually explains.
 
-    ⚠ Consequence, stated rather than hidden: the attributed excess is the excess OF THAT SLEEVE,
+     Consequence, stated rather than hidden: the attributed excess is the excess OF THAT SLEEVE,
     and it does NOT equal the headline excess (which includes the fund/cash drag). A reader who
     assumes it does will misread the table, so the payload carries both and the UI shows both.
 """
@@ -56,7 +56,7 @@ from routers._airs_portfolio_perf import ytd_anchor_for
 
 from routers._asset_benchmark import index_rows
 
-# ⚠ THE WEIGHTING BASIS IS SHARED WITH THE COMPOSITION CHARTS, NOT DUPLICATED HERE. Both read
+#  The weighting basis is shared with the composition charts, not duplicated here. Both read
 # `portfolio_legs` + `split_legs`, which is what makes a sector bar and its Brinson row the same
 # number. See `_airs_attribution_basis` for what that basis is and what it excludes.
 from ._airs_attribution_basis import portfolio_legs, split_legs  # noqa: E402
@@ -85,7 +85,7 @@ def _display_name(row: dict | None, source_name: str | None) -> str | None:
     asks about. Both sides already join `asset_grid` by ISIN, so both can simply say the same
     thing; the source label rides along (`airs_name`) rather than being thrown away.
 
-    ⚠ DISPLAY ONLY — this is NOT what makes the overlap match work, and must never become that.
+     DISPLAY ONLY — this is NOT what makes the overlap match work, and must never become that.
     See `_overlaps`: the ISIN is the key, and a LABEL must not be load-bearing for correctness.
     """
     return (row or {}).get("name") or source_name
@@ -94,7 +94,7 @@ def _display_name(row: dict | None, source_name: str | None) -> str | None:
 def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
     """Is this holding held on the OTHER side too? ISIN first (exact), name as the fallback.
 
-    ⚠ THE TWO MATCHERS ARE COMPLEMENTARY AND NEITHER ALONE IS ENOUGH.
+     THE TWO MATCHERS ARE COMPLEMENTARY AND NEITHER ALONE IS ENOUGH.
 
       ISIN  catches ONE ISIN under TWO NAMES — the model's "AMD" is the index's "Advanced Micro
             Devices Inc". `same_company` scores that pair **16.0**: the roots reduce to 'amd' vs
@@ -105,7 +105,7 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
             the model. No ISIN comparison can ever see that. But the name test is EXACT ROOT
             EQUALITY, not `same_company`'s fuzzy floor — see below.
 
-    ⚠ THE NAME TEST MUST BE EXACT ROOT EQUALITY, NOT `same_company`. `same_company` is right for
+     THE NAME TEST MUST BE EXACT ROOT EQUALITY, NOT `same_company`. `same_company` is right for
     matching a listing to ITS OWN issuer ("NVIDIA CORP" ↔ "NVIDIA Corporation") — a loose floor
     that tolerates noise. Here it is catastrophic: `_company_root("S&P Global Inc")` reduces to the
     single generic token 'global' (the initials S, P drop as single letters), and token_set_ratio
@@ -115,7 +115,7 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
     A share class (Alphabet A vs C, different ISINs) shares the SAME root; an unrelated company that
     merely shares a word does not. Exact equality is the line between them.
 
-    ⚠ Do NOT re-route this through a shared display name to make a fuzzy match succeed. The ISIN is
+     Do NOT re-route this through a shared display name to make a fuzzy match succeed. The ISIN is
     already in both dicts; deriving a name FROM it only to match the names is strictly lossier, and
     it would make correctness depend on a LABEL — a rename (the /companies "GF name" correction, a
     Yahoo refresh) would silently break the match. Structural, not incidental.
@@ -163,7 +163,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     codes = _country_by_code()
 
     # --- the portfolio: split into attributable and not ---------------------------------
-    # ⚠ THE LADDER LIVES IN `_airs_attribution_basis`, NOT HERE. The composition charts build their
+    #  The ladder lives in `_airs_attribution_basis`, NOT HERE. The composition charts build their
     # bars from the SAME call, which is the only reason the two panels agree — see that module's
     # header for what "attributable" means and what it costs.
     attributable, excluded, total_w = split_legs(holdings, idx, grid, codes)
@@ -193,7 +193,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "ticker": b.get("ticker"),
             "weight_pct": b["weight_pct"], "return_pct": b["return_eur_pct"],
             "contribution_pct": b["weight_pct"] / 100.0 * b["return_eur_pct"],
-            # ⚠ TODAY'S CAP, FOR THE SECOND WEIGHT COLUMN ONLY — `market_cap_eur` is the current
+            #  Today's cap, for the second weight column only — `market_cap_eur` is the current
             # figure `start_cap_eur` was rolled BACK from, so the two columns are the same cap at
             # two dates rather than two different measurements. Nothing below divides by it.
             "_cap_now": float(b.get("market_cap_eur") or 0.0),
@@ -237,37 +237,37 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         k: [(w / b_w_total * 100.0, r) for w, r in rows] for k, rows in b_by_bucket.items()
     }
 
-    # ⚠ THE HOLDINGS LISTS MUST BE ON THE SAME BASE AS THE BUCKET WEIGHT THEY SIT UNDER.
+    #  The holdings lists must be on the same base as the bucket weight they sit under.
     # `w_p`/`w_b` are renormalised over what each side can attribute (the identity below needs
     # weights summing to 1), but the per-holding lists were left as raw shares of the WHOLE
     # portfolio. Measured on ToppenbergBeheer Defensief: the drill-down said Technology 34.38%
     # and its own holdings added to 9.11% — out by exactly 100/attributable_pct (3.77x), on every
     # bucket. A reader who adds up the list gets a different number from the heading above it,
     # and neither is wrong on its own, which is the worst kind of disagreement to debug.
-    # ⚠⚠ A SECOND WEIGHT, ON TODAY'S VALUES, RENORMALISED OVER THE SAME SET (2026-09-03, on
+    #  A second weight, on today's values, renormalised over the same set (2026-09-03, on
     # request). The composition bars moved to current weights that day, so a bucket reading 36% on
     # the chart opened a drill-down whose names added to 39.1% — the two were on different dates
     # and neither was wrong. This column is the bridge: same members, same denominator rule, today's
     # figures instead of the window's open.
-    # ⚠ IT IS A COLUMN, NOT A REPLACEMENT. `weight_pct` still drives Return and Contribution, and
+    #  It is a column, not a replacement. `weight_pct` still drives Return and Contribution, and
     # `Σ weight × return / 100 == contribution` is still exact — a return is earned by what was
     # held while it was earned, so re-weighting the decomposition on today's values would make it
     # decompose a portfolio nobody held (the same argument the endpoint's own docstring makes about
     # design weights).
-    # ⚠ ZERO TOTAL MEANS NO COLUMN, NOT A DIVISION BY ZERO: `None` renders as a dash, which is the
+    #  Zero total means no column, not a division by zero: `None` renders as a dash, which is the
     # honest answer for a side whose current values we do not have (the `model` source has none).
-    # ⚠⚠ THE DENOMINATOR IS EVERY LEG, NOT JUST THE ATTRIBUTABLE ONES — which is what makes this
+    #  The denominator is every leg, not just the attributable ones — which is what makes this
     # column equal the bar (2026-09-03, reported: "43.69% is weight now, 39.66% is weight start,
     # but the sector card shows 36.33% which is neither"). Measured on BUS_Offensief: the bar reads
     # 36.33% and the drill-down read 43.69%, exactly 36.33 x 1.2025 — and 1.2025 is 1/(1 - 0.1684),
     # the book's Unclassified weight. The composition chart counts Unclassified as its own BUCKET;
     # the attribution basis throws it out and renormalises the rest to 100. Same numerator, two
     # denominators, and the ratio was the excluded weight every time.
-    # ⚠ SO THIS COLUMN NO LONGER SUMS TO 100 ACROSS BUCKETS, AND MUST NOT. It is a share of the
+    #  So this column no longer sums to 100 ACROSS BUCKETS, AND MUST NOT. It is a share of the
     # whole sleeve, exactly as the bars are; the missing remainder is the weight that has no bucket
     # to drill into. `weight_pct` beside it still renormalises, because the Brinson identity needs
     # weights summing to 1 over what it can attribute.
-    # ⚠⚠ THE ATTRIBUTABLE SET, AND NOTHING ADDED BACK — because the composition bars now exclude
+    #  The attributable set, and nothing added back — because the composition bars now exclude
     # funds too (2026-09-03; see `_airs_portfolio_analysis`'s sector sleeve). This briefly added
     # the excluded weight back in, to reach a bar that still counted funds as `Unclassified`. That
     # was a correction applied at the wrong end: two membership rules, kept in step by arithmetic.
@@ -301,7 +301,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         R_p = _weighted(pr)
         R_b = _weighted(br)
 
-        # ⚠ `R_b - r_b_total`, not `R_b`. This is the Fachler refinement: overweighting a bucket
+        #  `R_b - r_b_total`, not `R_b`. This is the Fachler refinement: overweighting a bucket
         # that rose 5% while the INDEX rose 10% is a bad call, and plain Brinson scores it +.
         allocation = (w_p - w_b) * (R_b - r_b_total)
         # A bucket the benchmark does not hold has w_b = 0, so selection is 0 and the whole
@@ -315,7 +315,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                         key=lambda h: -h["weight_pct"])
         b_hold_all = sorted(bench_holdings_by_bucket.get(bucket, []),
                             key=lambda h: -h["weight_pct"])
-        # HELD ON BOTH SIDES — ISIN first, name as the share-class fallback. See `_overlaps` for
+        # Held on both sides — ISIN first, name as the share-class fallback. See `_overlaps` for
         # why both matchers are needed and why a shared display name is NOT the fix. Marked so the
         # overlap between what you hold and what the index holds is visible at a glance — and, by
         # contrast, so are the genuinely different bets. Both sides carry the FULL index bucket, so
@@ -349,7 +349,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
 
     attributed = sum(r["total_pct"] for r in rows_out)
     excess = r_p_total - r_b_total
-    # THE IDENTITY. Returned, never assumed: three columns that do not sum to the excess are not
+    # The identity. Returned, never assumed: three columns that do not sum to the excess are not
     # a decomposition of it.
     residual = excess - attributed
 
@@ -359,7 +359,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     contrib.sort(key=lambda c: -c["contribution_pct"])
     held_isins = {i["isin"] for i in attributable if i.get("isin")}
 
-    # ⚠ "DID NOT OWN" IS A STATEMENT ABOUT THE COMPANY, NOT ABOUT THE ISIN — and equally, not
+    #  "DID NOT OWN" IS A STATEMENT ABOUT THE COMPANY, NOT ABOUT THE ISIN — and equally, not
     # about the NAME. Alphabet is GOOGL (class A) in the index and "Alphabet - C" (class C) in
     # this model — two ISINs, one business — and matching on the ISIN alone reported GOOGL as a
     # winner they MISSED, at +3.23pp, while they were holding it and it was their single largest
@@ -390,7 +390,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
               for b in bench if not _held(b)]
     missed.sort(key=lambda m: -m["contribution_pct"])
 
-    # ⚠ THE HEADLINE EXCESS, CARRIED HERE SO THE TWO SCREENS RECONCILE INSTEAD OF DISAGREEING.
+    #  The headline excess, carried here so the two screens reconcile instead of disagreeing.
     #
     # The Analyse tile and this panel both say "Excess" and both are right, over DIFFERENT
     # portfolios. Measured on AITopSelectie OFF DYN, same benchmark (12.3768%) on both sides:
@@ -462,13 +462,13 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "account_return_pct": account_return,
         "account_excess_pct": account_excess,
         "unattributed_excess_pct": unattributed,
-        # ⚠ How much of the model the table above explains. The rest is funds and cash, which are
+        #  How much of the model the table above explains. The rest is funds and cash, which are
         # not a sector bet and are NOT decomposed.
         "attributable_pct": (p_w_total / total_w * 100.0) if total_w > 0 else 0.0,
         "excluded_pct": (excl_w / total_w * 100.0) if total_w > 0 else 0.0,
         "excluded_return_pct": (_weighted([(e["weight_pct"], e["return_pct"])
                                            for e in excl_priced]) if excl_priced else None),
-        # ⚠ NOT the same as `excluded_pct`. A fund is excluded because it is not a sector bet; an
+        #  NOT the same as `excluded_pct`. A fund is excluded because it is not a sector bet; an
         # UNPRICED equity is excluded because we failed to price it — and its sector then reads as
         # UNOWNED in the table, so the allocation effect there is a FALSE finding. Surfaced with
         # the buckets it corrupts, so a reader can discount exactly those rows.

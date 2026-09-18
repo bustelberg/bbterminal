@@ -9,7 +9,7 @@ vendor correction to the PAST is therefore invisible to the normal pipeline.
         173 companies had wrong CLOSE history    46,969 bars
         887 companies had wrong VOLUME history   68,311 bars
 
-⚠ AND THE BIG ONES ARE NOT THE DANGEROUS ONES. Worldline's 1-for-40 is a 40×
+ AND THE BIG ONES ARE NOT THE DANGEROUS ONES. Worldline's 1-for-40 is a 40×
 overnight jump — a detector finds it (and it had put a stock that fell 69% into
 the live book on a +1142% momentum). Air Liquide's 1-for-10 free share attribution
 re-scales the whole history by 10/11 and reads as a −9.1% day. No threshold
@@ -67,14 +67,14 @@ class TestTheMonthGuard:
         assert "max(recorded_at)" in src
 
     def test_recorded_at_is_stamped_explicitly(self):
-        """⚠ `recorded_at` defaults on INSERT only. An upsert that resolves to an
+        """ `recorded_at` defaults on INSERT only. An upsert that resolves to an
         UPDATE keeps the original timestamp, so a corrected 2015 bar would still
         read 'first seen 2026-06' and the guard would never advance."""
         src = inspect.getsource(refetch_history.refetch_full_history)
         assert '"recorded_at": _now_iso' in src
 
     def test_a_clean_run_still_counts_as_asking(self):
-        """⚠ THE COMMON CASE. Only changed bars are written, so a universe that is
+        """ THE COMMON CASE. Only changed bars are written, so a universe that is
         already correct leaves no trace — and a weekly strategy would then re-ask
         every single week precisely BECAUSE the data was fine."""
         src = inspect.getsource(refetch_history.refetch_full_history)

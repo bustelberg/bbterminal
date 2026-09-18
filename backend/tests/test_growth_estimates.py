@@ -20,13 +20,13 @@ class TestExtract:
         }
 
     def test_they_are_strings_on_the_wire(self):
-        """⚠ GuruFocus files these as STRINGS. Passed through unparsed they reach the UI as text
+        """ GuruFocus files these as STRINGS. Passed through unparsed they reach the UI as text
         and every comparison against a number silently fails."""
         out = extract({"Growth": {"Future 3-5Y EPS Growth Rate Estimate": "13.14"}})
         assert isinstance(out["eps_3_5y"], float)
 
     def test_an_uncovered_company_is_null_not_zero(self):
-        """⚠ `float("")` RAISES rather than returning a falsy number, and an analyst rate of 0% is
+        """ `float("")` RAISES rather than returning a falsy number, and an analyst rate of 0% is
         a real forecast — collapsing "nobody covers this" into "they expect nothing" is a claim."""
         out = extract({"Growth": {
             "Future 3-5Y EPS Growth Rate Estimate": "",
@@ -46,7 +46,7 @@ class TestExtract:
 
 
 class TestFreshness:
-    """⚠ READ OFF OUR OWN STAMP. `keyratios` carries no date at all — no fiscal period, no as-of —
+    """ READ OFF OUR OWN STAMP. `keyratios` carries no date at all — no fiscal period, no as-of —
     so there is nothing in the payload to age against."""
 
     def _stamped(self, age: timedelta):

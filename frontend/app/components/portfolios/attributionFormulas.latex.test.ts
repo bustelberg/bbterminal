@@ -9,7 +9,7 @@ import {
 /**
  * Every attribution expression must PARSE AS LaTeX — in strict mode — and keep its tail.
  *
- * ⚠⚠ THE FAILURE THIS EXISTS FOR IS INVISIBLE ON SCREEN. An unescaped `%` starts a LaTeX COMMENT,
+ *  The failure this exists for is invisible on screen. An unescaped `%` starts a LaTeX COMMENT,
  * so `= +0.45%` renders as everything up to the first figure and STOPS — a shorter formula that
  * looks finished. The app renders with `throwOnError: false`, so nothing tells anybody. Every
  * figure on this panel is a percentage or a percentage point, which makes it the densest place in
@@ -29,7 +29,7 @@ const renderLikeApp = (tex: string) =>
 /**
  * The text a READER would see — the `katex-html` half only.
  *
- * ⚠ STRIPPING TAGS FROM THE WHOLE OUTPUT DOES NOT WORK: KaTeX also emits a `katex-mathml` tree
+ *  Stripping tags from the whole output does not work: KaTeX also emits a `katex-mathml` tree
  * whose `<annotation>` holds the ORIGINAL TeX verbatim, so a naive strip finds the truncated tail
  * there and concludes nothing was lost.
  */
@@ -44,7 +44,7 @@ describe('pctTex makes a formatted figure safe for maths mode', () => {
   });
 
   it('sets pp as text, not as two italic variables', () => {
-    /** ⚠ `pp` IN MATHS MODE IS `p × p`. It renders as a product of two italics beside a number,
+    /**  `pp` IN MATHS MODE IS `p × p`. It renders as a product of two italics beside a number,
      *  which looks like algebra in a cell that is reporting percentage points. */
     expect(pctTex('+0.45pp')).toBe('+0.45\\,\\text{pp}');
   });
@@ -77,7 +77,7 @@ describe('every expression parses in strict mode', () => {
 
 describe('the figures survive to the screen', () => {
   /**
-   * ⚠⚠ THIS IS THE WHOLE POINT. Written as `= +0.45%` the line renders up to `+0.45` and the `%`
+   *  This is the whole point. Written as `= +0.45%` the line renders up to `+0.45` and the `%`
    * swallows everything after it. Asserting on the VISIBLE half is what catches that; a strict
    * parse does not, because a comment is legal LaTeX.
    */
@@ -107,7 +107,7 @@ describe('a missing operand yields the rule alone, never half a substitution', (
   ])('%s still parses and states its rule', (_name, tex) => {
     expect(tex).not.toBe('');
     expect(() => render(tex)).not.toThrow();
-    /** ⚠ NO `=` MEANS NO HALF-SUBSTITUTION — the rule is shown and no numbers are, rather than
+    /**  NO `=` MEANS NO HALF-SUBSTITUTION — the rule is shown and no numbers are, rather than
      *  some numbers and a dangling operator. */
     expect(tex).not.toContain('undefined');
   });

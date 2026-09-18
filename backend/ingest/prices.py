@@ -232,7 +232,7 @@ def _fetch_indicator_from_api(
     Cloudflare TLS-fingerprint check (urllib's fingerprint gets
     blocked). Falls back to urllib only when curl_cffi can't import.
 
-    ⚠ `start_date`/`end_date` USE THE ONE SPELLING THAT ACTUALLY FILTERS.
+     `start_date`/`end_date` USE THE ONE SPELLING THAT ACTUALLY FILTERS.
     Undocumented, verified 2026-08-02 against AAPL / XPAR:WLN / WBO:VER on both
     the price and volume endpoints: `?start_date=&end_date=` returns exactly that
     range and the values are identical to the unfiltered series. It is a real
@@ -240,13 +240,13 @@ def _fetch_indicator_from_api(
     and an empty `[]` for a non-trading day, which is also the cheapest phantom
     detector there is.
 
-    ⚠ EVERY OTHER SPELLING IS SILENTLY IGNORED. `?from=&to=`, `?start=&end=`,
+     EVERY OTHER SPELLING IS SILENTLY IGNORED. `?from=&to=`, `?start=&end=`,
     `?date=`, `?limit=`, `?period=`, `?days=` all return HTTP 200 and the FULL
     series — no error, no hint. Sending one and trusting the result gives you an
     11,501-bar answer to a one-day question, which parses fine and is wrong about
     what you asked. Do not "simplify" these parameter names.
 
-    ⚠ IT DOES NOT SAVE QUOTA. `api_usage` counts REQUESTS, not bytes
+     IT DOES NOT SAVE QUOTA. `api_usage` counts REQUESTS, not bytes
     (`MONTHLY_API_LIMIT` = 20,000/region), so a one-day fetch and a full-history
     fetch cost exactly the same one call. The win is time and bandwidth. Where
     the whole series is genuinely needed, ask for it in ONE unfiltered request —
@@ -320,7 +320,7 @@ def _fetch_price_from_api(ticker: str, exchange: str, timeout: int = 30) -> tupl
 def _settled_through(data_cutoff: date | None = None) -> date:
     """The last date a windowed fetch may ask for: YESTERDAY, never today.
 
-    ⚠ `end_date = today` MAKES THE API INVENT A BAR. Measured 2026-08-02 (a
+     `end_date = today` MAKES THE API INVENT A BAR. Measured 2026-08-02 (a
     Sunday) on AAPL:
 
         ?start_date=2026-07-29&end_date=2026-07-31  → 3 real bars
@@ -338,7 +338,7 @@ def _settled_through(data_cutoff: date | None = None) -> date:
     05:00 UTC hunting the PRIOR session's close, and a same-day close published
     later is simply picked up by tomorrow's run — one request later, never wrong.
     """
-    # ⚠ CLAMPED TO THE REAL TODAY. `data_cutoff` is the caller's notion of "now"
+    #  Clamped to the real today. `data_cutoff` is the caller's notion of "now"
     # (a backfill replaying a past date, a test); the synthesised live row is tied
     # to GuruFocus's clock, not ours. Trusting a cutoff in the FUTURE would ask
     # for a window that still contains the real today and reinstate the phantom —
@@ -851,13 +851,13 @@ def ensure_prices_for_company(
                 return result
 
     # ── GAP FETCH ──────────────────────────────────────────────────
-    # ⚠ WE HOLD EVERYTHING UP TO `db_max`, SO ASK FOR WHAT COMES AFTER IT. The
+    #  We hold everything up to `db_max`, SO ASK FOR WHAT COMES AFTER IT. The
     # unfiltered endpoint hands back the entire history to add one bar — 268,703
     # bytes of Apple for 23 bytes of news. `?start_date=` costs the same single
     # API request (the quota counts requests, not bytes) but turns the daily
     # refresh from hundreds of megabytes into a rounding error.
     #
-    # ⚠ AND IT DELIBERATELY BYPASSES STORAGE. The cached blob is the FULL series;
+    #  And it deliberately bypasses storage. The cached blob is the FULL series;
     # merging a window into it, or worse overwriting it with the window, would
     # quietly truncate the one copy of the history we keep outside the DB. A gap
     # fetch therefore reads no cache and writes none — the cache stays a valid

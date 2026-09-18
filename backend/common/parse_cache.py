@@ -12,7 +12,7 @@ THE COST THIS REMOVES, MEASURED 2026-08-11 ON THE ANALYSE MODAL
     65 HTTP requests produced 196 parses, so roughly two thirds of that work is re-parsing
     bytes we had already turned into dicts.
 
-⚠ THE ORIGINAL DESIGN WAS RIGHT TO REFUSE A `deepcopy`, AND THE MEASUREMENT SAYS SO. `read_cache`'s
+ THE ORIGINAL DESIGN WAS RIGHT TO REFUSE A `deepcopy`, AND THE MEASUREMENT SAYS SO. `read_cache`'s
     docstring rejected caching parsed rows because a deep copy is "not obviously cheaper than the
     query it replaces". On the real payloads:
 
@@ -26,7 +26,7 @@ THE COST THIS REMOVES, MEASURED 2026-08-11 ON THE ANALYSE MODAL
     ~25x cheaper than the full pydantic parse. (`json.loads` is only part of a re-parse; the
     profile's 4-6 ms per call is the whole thing.)
 
-⚠⚠ A SHALLOW COPY IS ONLY SAFE WHEN EVERY VALUE IS A SCALAR, AND THAT IS CHECKED, NOT ASSUMED.
+ A SHALLOW COPY IS ONLY SAFE WHEN EVERY VALUE IS A SCALAR, AND THAT IS CHECKED, NOT ASSUMED.
     `dict(row)` shares nested values by reference, so a caller mutating `row["config"]["x"]` would
     reach into the cached master. Most rows here are flat — none of the six largest payloads on
     this path contains a single nested value — but the schema has `jsonb` columns and array
@@ -35,17 +35,17 @@ THE COST THIS REMOVES, MEASURED 2026-08-11 ON THE ANALYSE MODAL
     the scalar-safe path, which deep-copies ONLY the non-scalar values and is still 2-3x cheaper
     than re-parsing.
 
-⚠ CALLERS DO MUTATE THE ROWS THEY GET BACK — this is not a hypothetical. `_benchmark_index._members`
+ CALLERS DO MUTATE THE ROWS THEY GET BACK — this is not a hypothetical. `_benchmark_index._members`
     runs `r["currency"] = ccy_by_exch.get(...)` over its result. That is exactly why the rows are
     copied out rather than shared, and why the FIRST caller also gets a copy: the pristine parsed
     list is kept as the master and never handed to anyone.
 
-⚠ THE CACHE LIVES ON THE RESPONSE OBJECT ITSELF, not in a dict keyed by `id()`. `read_cache`
+ THE CACHE LIVES ON THE RESPONSE OBJECT ITSELF, not in a dict keyed by `id()`. `read_cache`
     returns the SAME `httpx.Response` instance on a hit, so an attribute on it is exactly as
     long-lived as the cached response and cannot be aliased to a different one — whereas an
     `id()`-keyed map silently hands back another object's rows after a garbage collection.
 
-⚠ IT DEGRADES TO EXACTLY TODAY'S BEHAVIOUR. A response with no marker parses normally; if
+ IT DEGRADES TO EXACTLY TODAY'S BEHAVIOUR. A response with no marker parses normally; if
     postgrest's internals move, `install()` fails loudly at import rather than silently caching
     nothing.
 """
@@ -108,7 +108,7 @@ def install() -> bool:
         hit = getattr(request_response, _ATTR, None)
         if hit is not None:
             rows, flat, count = hit
-            # ⚠ `model_construct`, NOT `APIResponse(...)`. The normal constructor runs pydantic
+            #  `model_construct`, NOT `APIResponse(...)`. The normal constructor runs pydantic
             # validation over the whole payload — profiled at 197 calls / 0.338s of
             # `validate_python`, which would have eaten most of what skipping the JSON parse just
             # saved. These rows came out of a validated parse and were copied, not built, so
@@ -123,7 +123,7 @@ def install() -> bool:
         if isinstance(data, list) and data:
             try:
                 flat = _is_flat(data)
-                # ⚠ THE MASTER IS A COPY, AND THE CALLER KEEPS THE ORIGINAL. Storing `data`
+                #  The master is a copy, and the caller keeps the original. Storing `data`
                 # itself would hand the first caller the master — and `_members` mutates its
                 # rows in place, so the second caller would inherit those edits.
                 setattr(request_response, _ATTR, (_copy_rows(data, flat), flat, resp.count))

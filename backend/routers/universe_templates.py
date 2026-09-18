@@ -448,7 +448,7 @@ def _freeze_done_message(result: dict) -> str:
         names = ", ".join(m.get("company_name") or str(m.get("company_id")) for m in missing[:8])
         more = f" +{len(missing) - 8} more" if len(missing) > 8 else ""
         msg += (
-            f" ⚠ {len(missing)} subscribed compan{'y' if len(missing) == 1 else 'ies'} "
+            f"  {len(missing)} subscribed compan{'y' if len(missing) == 1 else 'ies'} "
             f"dropped for a MISSING market cap (refresh market caps, then re-freeze): {names}{more}."
         )
     return msg

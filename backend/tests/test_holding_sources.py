@@ -6,7 +6,7 @@ of the book's OWN shares against EUR 1,991 (3.8%) reached through the Star Selec
 certificate — and a row chipped only "StarTopSelectie Offensief" reads as a position the book does
 not hold itself. Three of that book's 52 rows have more than one route in.
 
-⚠ THE PERCENTAGES ARE SHARES OF THE BOOK, NOT OF THE ROW, so they add up to the holding's
+ THE PERCENTAGES ARE SHARES OF THE BOOK, NOT OF THE ROW, so they add up to the holding's
 `weight_now_pct` — the column printed beside them. A share of the row ("3.8% of this position") is
 a different question that ties to nothing else on screen; it belongs in a tooltip, not in a figure
 sitting next to a weight it does not reconcile with.
@@ -58,7 +58,7 @@ class TestWeighSources:
         assert out[0]["start_value_eur"] == pytest.approx(40.0)
 
     def test_two_DIFFERENT_strategies_stay_apart_even_under_one_name(self):
-        # ⚠ Keyed by (label, model). Two models can share a display name, and merging them would
+        #  Keyed by (label, model). Two models can share a display name, and merging them would
         # ask ONE book to answer for a leg that came through the other.
         out = pa._weigh_sources(
             [{"label": "Top", "model_id": 1, "value_eur": 30.0},
@@ -113,7 +113,7 @@ class TestBlendRoutes:
         assert sum(r["blend_weight_pct"] for r in rows) == pytest.approx(100.0)
 
     def test_a_leg_with_no_return_leaves_BOTH_sides_of_the_average(self):
-        # ⚠ Not counted as 0%. Dropping it from the numerator alone would dilute the answer toward
+        #  Not counted as 0%. Dropping it from the numerator alone would dilute the answer toward
         # zero by exactly the weight of the leg we could not value — a plausible, wrong number.
         rows = [{"label": None, "start_value_eur": 100.0, "return_pct": 10.0, "book": "A"},
                 {"label": "Star", "start_value_eur": 100.0, "return_pct": None, "book": None}]
@@ -194,7 +194,7 @@ class TestTheExpansionStampsTheRoute:
         assert mc["sources"] == [{"label": "StarTopSelectie Offensief", "model_id": 99,
                                   "value_eur": pytest.approx(49763.68 * 0.04),
                                   "start_value_eur": pytest.approx(52974.24 * 0.04)}]
-        # ⚠ Value is conserved on BOTH ends: the routes across every leg still add to the
+        #  Value is conserved on BOTH ends: the routes across every leg still add to the
         # certificate. The opening value has to travel too, or the leg's return is computed
         # against a base that does not exist.
         assert sum(s["value_eur"] for r in out for s in r["sources"]) == pytest.approx(49763.68)

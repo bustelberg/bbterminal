@@ -30,7 +30,7 @@ _MESSAGE_THROTTLE_SECONDS = 1.0
 # The step log is the other half: an append-only, cursor-readable transcript of a
 # run that the /schedule Run-now buttons tail into the browser console.
 #
-# IN MEMORY, ON PURPOSE. Per-company detail is thousands of rows per run and it
+# In memory, on purpose. Per-company detail is thousands of rows per run and it
 # is interesting for minutes — persisting it would put a write on the hot path of
 # every fetch to keep a transcript nobody reads twice. It dies with the process
 # (single-instance, same assumption as `_PIPELINE_LOCK`); the durable record of
@@ -44,7 +44,7 @@ _log_state: dict[int, dict] = {}   # run_id → {"seq": int, "dropped": int}
 
 # The transcript is ALSO mirrored here, so a run has a console trail wherever it
 # executes — not only in the process that happens to hold the ring buffer.
-# ⚠ AND THAT MATTERS MORE THAN IT SOUNDS: the buffer is per-process, so a job run
+#  And that matters more than it sounds: the buffer is per-process, so a job run
 # from a script (or a backend that has since restarted) leaves NOTHING behind for
 # the /log endpoint to serve. Mirroring at INFO costs nothing in production —
 # uvicorn leaves the root logger at WARNING, so these are invisible until you ask
@@ -143,7 +143,7 @@ def _now_utc_iso() -> str:
 
 
 def _create_run(job_name: str, triggered_by: str) -> int:
-    # ⚠⚠ THE ONE INSERT THAT TAKES THE WHOLE APP DOWN WITH IT. Every pipeline tick and every
+    #  The one insert that takes the whole app down with it. Every pipeline tick and every
     # /schedule "Run now" opens a run row here first, so when `ingest_run`'s sequence drifted in
     # production on 2026-09-07 the symptom was not "one insert failed" — it was the scheduler
     # unable to start anything AND every button flashing "Starting…" and doing nothing, with

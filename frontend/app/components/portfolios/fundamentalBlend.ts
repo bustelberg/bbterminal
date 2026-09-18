@@ -1,19 +1,19 @@
 /**
- * THE BLENDED LINE, AND THE ARITHMETIC UNDER EVERY CELL THAT EXPLAINS IT.
+ * The blended line, and the arithmetic under every cell that explains it.
  *
- * ⚠⚠ IT LIVED INSIDE `MatrixTable`, WHICH MEANT THE BOOK'S LINE AND THE INDEX'S COULD NEVER MEET.
+ *  It lived inside `MatrixTable`, WHICH MEANT THE BOOK'S LINE AND THE INDEX'S COULD NEVER MEET.
  * Each table computed its own `blend` in its own `useMemo`, so nothing above them held both — and
  * anything that COMPARES the two (the CAGR table, and whatever comes after it) had no way to ask.
  * The maths never depended on the component: the memo's only dependency was `data`. So it is a pure
  * function of one payload, which is also what makes it testable without rendering anything.
  *
- * ⚠ THE BODY IS MOVED VERBATIM. Every ⚠ below was paid for by a wrong number on screen — the
+ *  The body is moved verbatim. Every  below was paid for by a wrong number on screen — the
  * per-period cap weighting (NVIDIA at 0.63% of FY2018, not 7.46%), the chained growth rather than
  * averaged levels (which drew a 388 → 285 crash no constituent experienced), the carry-forward
  * bound, the coverage floor. Re-deriving any of it "the same way" somewhere else is how this file
  * comes to disagree with the chart it exists to explain.
  *
- * ⚠ `Row` / `Resp` AND THE PERIOD HELPERS CAME WITH IT, because they are the shape of the payload
+ *  `Row` / `Resp` AND THE PERIOD HELPERS CAME WITH IT, because they are the shape of the payload
  * rather than anything about a modal. `HoldingsRevenueModal` re-exports the ones it used to own, so
  * no call site moved.
  */
@@ -34,7 +34,7 @@ export type Row = {
   /**
    * The FILINGS this row's `LTM` cell was rolled from, and the rule that rolled them.
    *
-   * ⚠⚠ THE LTM COLUMN IS THE ONLY ONE THIS APP ASSEMBLED. Every other cell is a figure the company
+   *  The ltm column is the only one this app assembled. Every other cell is a figure the company
    * filed for that fiscal period; the LTM is `k` consecutive filings combined under a declared
    * rule, and those quarters reach the browser NOWHERE else — the tab's "Quarterly" toggle looks
    * like the place to check and is not, because the server rolls those too, so it shows more
@@ -46,25 +46,25 @@ export type Row = {
    *  Absent on a portfolio, where the weight is a holding weight and no cap is involved. */
   market_cap_eur?: number | null;
   /**
-   * WAS THIS ROW IN THE MEMBER LIST THE CHART'S LINE WAS BLENDED OVER — the server's own answer,
+   * Was this row in the member list the chart's line was blended over — the server's own answer,
    * from `portfolio-revenue-matrix`.
    *
-   * ⚠⚠ IT REPLACES A RECONSTRUCTION THAT COULD ONLY EVER BE PARTIAL. This payload lists every
+   *  It replaces a reconstruction that could only ever be partial. This payload lists every
    * constituent; the line is blended over `_blend_inputs`, which is `_members(require_market_cap)`
-   * AND THEN `classify_holding`. `market_cap_eur > 0` reproduces the first half only, so every
+   * And then `classify_holding`. `market_cap_eur > 0` reproduces the first half only, so every
    * member the classifier dropped — `fund`, `no_metrics`, `not_equity`, `unsubscribed`,
    * `no_company` — was silently in the client's blend and out of the server's. Measured on ACWI
    * `eps_nri`: 1,073 members here against 1,071 there, worth 0.01pp/yr on a 10-year CAGR that the
    * `Graphs` tab prints beside this one to two decimals.
    *
-   * ⚠ OPTIONAL, AND ABSENT MEANS "OLD PAYLOAD", NOT "NOT IN THE LINE" — see `inLine`.
+   *  Optional, and absent means "OLD PAYLOAD", NOT "NOT IN THE LINE" — see `inLine`.
    */
   in_line?: boolean;
   /**
-   * INDEX ROWS ONLY — the market cap as at each fiscal period, in EUR, converted at that
+   * Index rows only — the market cap as at each fiscal period, in EUR, converted at that
    * period's own end date (`period_caps_eur`).
    *
-   * ⚠ THIS, NOT `market_cap_eur`, IS WHAT WEIGHTS EACH PERIOD. Weighting 2018's revenue by today's
+   *  This, not `market_cap_eur`, IS WHAT WEIGHTS EACH PERIOD. Weighting 2018's revenue by today's
    * cap is look-ahead bias: measured on the S&P, NVIDIA is carried at 7.46% of a year it was 0.63%
    * of. Absent for a portfolio (a holding weight has no market cap behind it), and SPARSE within
    * an index — a period with no filed cap is missing rather than padded, because the company is
@@ -72,16 +72,16 @@ export type Row = {
    */
   market_cap_by_period?: Record<string, number>;
   /**
-   * THE EUROS THIS ROW CONTRIBUTES TO THE METRIC, per fiscal period — `per_share × shares`,
+   * The euros this row contributes to the metric, per fiscal period — `per_share × shares`,
    * converted at that period's own end rate (index form), or `wᵢ·Fᵢ/capᵢ` (portfolio form).
    *
-   * ⚠⚠ ITS PRESENCE IS THE SWITCH BETWEEN TWO CONSTRUCTIONS. Where rows carry it, the line is
+   *  Its presence is the switch between two constructions. Where rows carry it, the line is
    * `ΣFᵢ(d)/ΣFᵢ(a) − 1` — growth of a SUM — and the Contribution column is the exact
    * decomposition of that. Where they do not, both fall back to the cap-weighted growth chain.
    * The two differ by a lot and neither is obviously wrong on screen: measured on ACWI revenue,
    * ~9.95%/yr averaged against +4.60%/yr summed, and on FCF/share +19.1% against +7.56%.
    *
-   * ⚠ ABSENT, NOT `{}`, WHEN THE BACKEND HAS NO EUROS FOR THE ROW — an empty map would claim the
+   *  Absent, not `{}`, WHEN THE BACKEND HAS NO EUROS FOR THE ROW — an empty map would claim the
    * aggregate and have nothing to sum. Sparse WITHIN a row is fine and expected (a period with no
    * share count or no FX rate simply has no figure), and the per-step intersection handles it.
    */
@@ -105,7 +105,7 @@ export const isEstimatePeriod = (p: string) => p.endsWith('e');
  * Period order: reported, then `LTM`, then the forecast years — the client twin of the backend's
  * `_period_sort_key`.
  *
- * ⚠⚠ A PLAIN SORT IS WRONG IN A WAY THAT LOOKS LIKE DATA. `'LTM' > '2026e'` lexically, so the
+ *  A plain sort is wrong in a way that looks like data. `'LTM' > '2026e'` lexically, so the
  * trailing twelve months — the newest thing actually known — would sit AFTER five forecast years.
  * That is not only a column order: the per-row sorts feed the Rebased base (the FIRST period) and
  * the YoY comparison (the PREVIOUS period), so an estimate would become the thing a reported year
@@ -126,7 +126,7 @@ export type Blend = ReturnType<typeof buildBlend>;
  * Pure: same payload in, same answer out, no React. See the module header for why it is out here.
  */
 /**
- * ⚠⚠ METRICS DRAWN FROM MEMBERS POSITIVE IN EVERY PERIOD — the client twin of
+ *  Metrics drawn from members positive in every period — the client twin of
  * `earnings._POSITIVE_ONLY_METRICS`, and it MUST stay one.
  *
  * The chart's line is computed on the server; this footer reproduces it from the same rows. A rule
@@ -134,10 +134,10 @@ export type Blend = ReturnType<typeof buildBlend>;
  * has already done once (it dropped rows `_prepare` KEEPS, and the comment claimed they matched),
  * so the failure mode is documented rather than hypothetical.
  */
-/** ⚠ EXPORTED so a surface can SAY which rows it filtered without keeping a second list of
+/**  EXPORTED so a surface can SAY which rows it filtered without keeping a second list of
  *  them — `TablesTab`'s footnote names the affected rows off this set. */
 /**
- * ⚠⚠ EMPTY SINCE 2026-09-04, AND THE SERVER'S SET EMPTIED IN THE SAME EDIT. `fcf_ps` and then
+ *  Empty since 2026-09-04, AND THE SERVER'S SET EMPTIED IN THE SAME EDIT. `fcf_ps` and then
  * `eps_nri` both went back onto the euro aggregate, where the filter buys nothing: the rule exists
  * because a year-on-year chain divides a member by itself, and a SUM never does — a bad year is
  * just a smaller number in the total. Keeping it would have left the survivorship half of the bias
@@ -145,10 +145,10 @@ export type Blend = ReturnType<typeof buildBlend>;
  * reason. Measured: FCF +33.93%/yr as a rate average against +7.52% summed, EPS +26.50% against
  * +8.31%, with the median constituent at +8.90% and +8.82%.
  *
- * ⚠ IT MUST NOT BE DELETED FOR BEING EMPTY. The rule, its badge, its copy and its counts are all
+ *  It must not be deleted for being empty. The rule, its badge, its copy and its counts are all
  * still correct and are what a future growth-chain metric joins.
  *
- * ⚠ IF THESE TWO SETS EVER DIFFER, THE DRILL-DOWN EXPLAINS A LINE IT CANNOT REACH — which this
+ *  If these two sets ever differ, the drill-down explains a line it cannot reach — which this
  * file has already done once. Change one, change the other, in the same commit.
  */
 export const POSITIVE_ONLY_METRICS = new Set<string>([]);
@@ -159,16 +159,16 @@ export type BlendMetricRow = {
 };
 
 /**
- * THE SERVER'S OWN LINE, KEYED BY PERIOD — read, never recomputed.
+ * The server's own line, keyed by period — read, never recomputed.
  *
- * ⚠⚠ THIS EXISTS SO THE `Tables` TAB STOPS ANSWERING FROM A RECONSTRUCTION. `Graphs` asks
+ *  This exists so the `Tables` TAB STOPS ANSWERING FROM A RECONSTRUCTION. `Graphs` asks
  * `/fundamental-blend-metrics` for the blended line; `Tables` used to ask
  * `/portfolio-revenue-matrix` for the RAW per-company figures and rebuild the line with
  * `buildBlend`. Two tabs of one modal, one series, two sources — and they disagreed four times in
  * one day: share price 10.91 against 10.89, EPS 15.95 against 16.82, FCF/share 18.85 against 18.90,
  * EPS again 8.31 against 8.32.
  *
- * ⚠⚠ AND THE RECONSTRUCTION COULD NEVER HAVE BEEN EXACT, WHICH IS THE REAL ARGUMENT. The matrix is
+ *  And the reconstruction could never have been exact, which is the real argument. The matrix is
  * specified as "the ground data behind the chart" — the filed figures — NOT as "everything the
  * blend used. So it is a strict subset of the server's inputs, and each divergence was a different
  * missing input: the `LTM` point and a period carried past the coverage floor (both absent from the
@@ -180,11 +180,11 @@ export type BlendMetricRow = {
  * screen, which is what makes that table a check on the chart rather than a restatement of it.
  * What it is no longer is a source for a figure rendered elsewhere as the answer.
  *
- * ⚠ `LTM` IS DELIBERATELY DROPPED. It ships under its own `ltm__` code, and every consumer here
+ *  `LTM` IS DELIBERATELY DROPPED. It ships under its own `ltm__` code, and every consumer here
  * (`lineCagr`, `forwardCagr`, `commonEndPeriod`) filters to periods `periodYear` can parse — so
  * carrying it would add a key nothing reads and one more thing to keep in step.
  *
- * ⚠ A FORECAST BECOMES `2026e`, because that is the period vocabulary the rest of this file and
+ *  A forecast becomes `2026e`, because that is the period vocabulary the rest of this file and
  * `lineCagr` speak. The server ships it under a separate metric code with an ordinary date, so the
  * suffix is the only thing that distinguishes a consensus from a filed year downstream.
  */
@@ -195,7 +195,7 @@ export function levelFromBlend(
 ): Record<string, { value: number }> {
   const filed = new Set(codes);
   const forecast = new Set(forecastCodes);
-  // ⚠ LATEST DATE WINS PER PERIOD, mirroring `MetricGrowthCard.extractPoints`. A metric with two
+  //  Latest date wins per period, mirroring `MetricGrowthCard.extractPoints`. A metric with two
   // section spellings can carry one period twice (the vendor renamed its sections), and taking
   // whichever arrived first would make the line depend on row order.
   const best: Record<string, { date: string; value: number }> = {};
@@ -216,12 +216,12 @@ export function levelFromBlend(
 
 export function buildBlend(data: Resp, metric?: string) {
     /**
-     * ⚠ THE SAME FILTER THE SERVER APPLIES, over the same window. A member with any negative value
+     *  The same filter the server applies, over the same window. A member with any negative value
      * is out of the line entirely — see `POSITIVE_ONLY_METRICS`. It stays in `data.rows`, so the
      * table still LISTS it; what it loses is its vote in the footer.
      *
-     * ⚠⚠ AND IT SPANS THE FORECAST COLUMNS, WHICH IS WHY IT READS THE WHOLE ROW RATHER THAN THE
-     * FILED PERIODS. `eps_nri` is eligible only where the actuals AND the consensus are positive
+     *  And it spans the forecast columns, which is why it reads the whole row rather than the
+     * Filed periods. `eps_nri` is eligible only where the actuals AND the consensus are positive
      * (the server's `_positive_only_groups`), and `portfolio-revenue-matrix` splices the estimate
      * periods into this same map — so "every value in the row" IS the joint rule, and narrowing
      * this to filed years would silently make the footer a different member set from the line
@@ -229,7 +229,7 @@ export function buildBlend(data: Resp, metric?: string) {
      */
     const eligible = (r: Row): boolean => {
       if (!metric || !POSITIVE_ONLY_METRICS.has(metric)) return true;
-      // ⚠ `revenue` IS THE FIELD NAME FOR "THE SERIES", whatever metric it holds.
+      //  `revenue` IS THE FIELD NAME FOR "THE SERIES", whatever metric it holds.
       const vals = Object.values(r.revenue ?? {}).filter((v): v is number => v != null);
       return vals.length > 0 && vals.every((v) => v >= 0);
     };
@@ -248,7 +248,7 @@ export function buildBlend(data: Resp, metric?: string) {
       if (per) {
         const v = per[y];
         if (v && v > 0) return v;
-        // ⚠ AS-OF, mirroring `_weight_at` and `marginData.weightAt`. A cap is a stock: the last
+        //  AS-OF, mirroring `_weight_at` and `marginData.weightAt`. A cap is a stock: the last
         // one filed stands until a newer one exists.
         const earlier = Object.keys(per).filter((k) => k <= y && per[k] > 0);
         return earlier.length ? per[earlier.reduce((a, b) => (a > b ? a : b))] : null;
@@ -259,7 +259,7 @@ export function buildBlend(data: Resp, metric?: string) {
     /**
      * Why a row contributes NOTHING to the line — row-level, so it holds for every period.
      *
-     * ⚠⚠ THIS EXISTS BECAUSE THE ABSENCE LOOKED LIKE A BUG. Measured on AITopSelectie OFF FX:
+     *  This exists because the absence looked like a bug. Measured on AITopSelectie OFF FX:
      * Advanced Micro Devices is a 5% holding whose FCF/share the table happily lists, and whose
      * weight line was simply blank in every period. The reason is real and one line up — its first
      * reported period (2015) is **−0.411**, and a LEVEL series is rebased to 100 at its own first
@@ -275,18 +275,18 @@ export function buildBlend(data: Resp, metric?: string) {
     /**
      * The rows the metric's own MEMBER RULE withheld — `POSITIVE_ONLY_METRICS`, not the rebase.
      *
-     * ⚠ A SUBSET OF `excluded`, kept apart so a surface can mark THESE without re-announcing the
+     *  A subset of `excluded`, kept apart so a surface can mark THESE without re-announcing the
      * mechanical drops. See the note at the `eligible` gate below.
      */
     const byRule = new Set<Row>();
     const parts: { r: Row; idx: Record<string, number> }[] = [];
-    // ⚠ KEYED ON THE ROW OBJECT, NOT ON THE ISIN. A payload can carry the same ISIN twice (a model
+    //  Keyed on the row object, not on the ISIN. A payload can carry the same ISIN twice (a model
     // listing one instrument at two weights — VTopSelectie holds CapitaLand at 2% and 3%), and an
     // ISIN key would give both rows the first one's weight. `rows` below is a sort of these same
     // objects, so identity is stable for the render.
     const partOf = new Map<Row, { r: Row; idx: Record<string, number> }>();
     /**
-     * ⚠⚠ COVERAGE IS MEASURED ON THE **STABLE** WEIGHT, NOT THE PER-PERIOD CAP — mirroring
+     *  Coverage is measured on the **STABLE** WEIGHT, NOT THE PER-PERIOD CAP — mirroring
      * `_fundamental_blend.blend_series`, and it is the difference between the floor working
      * and doing nothing at all.
      *
@@ -305,13 +305,13 @@ export function buildBlend(data: Resp, metric?: string) {
       return w && w > 0 ? w : 0;
     };
     /**
-     * ⚠⚠ IS THIS ROW ONE THE **LINE** WAS EVER HANDED? An index payload lists EVERY constituent
+     *  Is this row one the **LINE** WAS EVER HANDED? An index payload lists EVERY constituent
      * (`all_constituents=True`), including the ones with no stored market cap — they arrive at
      * weight 0 so the drill-down can say "in the index, not in the line" instead of silently
      * showing 22 of the AEX's 25. The CHART is blended one member list up, over
      * `_members(universe, require_market_cap=True)`, and never sees them at all.
      *
-     * ⚠⚠ WITHOUT THIS THEY DILUTED THE NAMES FLOOR, AND ONLY THE NAMES FLOOR. `stableW` is 0 for
+     *  Without this they diluted the names floor, and only the names floor. `stableW` is 0 for
      * such a row, so the WEIGHT side was already right; `wAt` returns null for it, so it was
      * already out of every average. What was left was `parts.length` — the denominator of
      * `coverN[y] / parts.length` in `drawn()` — counting members the server's `total_n =
@@ -323,52 +323,52 @@ export function buildBlend(data: Resp, metric?: string) {
      * to 21/25 and change which periods the CHART draws") — the flag protects the server and the
      * protection did not travel with the payload.
      *
-     * ⚠ REPORTED 2026-09-03 as the Fundamental modal disagreeing with itself on ACWI: share price
+     *  REPORTED 2026-09-03 as the Fundamental modal disagreeing with itself on ACWI: share price
      * +10.9%/yr on `Graphs` against +10.8% in `Tables`, revenue +4.5% against +4.6%. The MECHANISM
      * is pinned by `fundamentalBlend.parity.test.ts` + `tests/test_blend_client_parity.py` over one
      * shared fixture; that those particular ACWI figures are this and nothing else is NOT measured.
      *
-     * ⚠ THE TEST IS `market_cap_eur`, WHICH IS THE SERVER'S OWN. It ships only on the index path
+     *  The test is `market_cap_eur`, WHICH IS THE SERVER'S OWN. It ships only on the index path
      * and it IS `require_market_cap`'s subject (`weight_by[ci]` is `company.market_cap_eur`), so
      * `== null` — a portfolio row, or any payload that omits the field — leaves this a no-op. A
      * book's 0-weight holding is still counted, exactly as `blend_series` counts it.
      *
-     * ⚠ NO BADGE AND NO `excluded` REASON. Such a row already shows a blank weight in every
+     *  No badge and no `excluded` REASON. Such a row already shows a blank weight in every
      * period, the response's `weight_basis` names them in a footnote, and the 2026-08-12 request
      * was to stop announcing mechanical drops on these rows.
      */
     /**
-     * ⚠⚠ THE SERVER'S ANSWER WHEN IT SHIPS ONE (`in_line`), AND THE CAP TEST ONLY AS A FALLBACK.
+     *  The server's answer when it ships one (`in_line`), AND THE CAP TEST ONLY AS A FALLBACK.
      * The cap test reproduces `_members(require_market_cap=True)` and stops there; the blend's
      * member list is that AND `classify_holding == "covered"`, and no field on this row could
      * stand in for the second half (`status` is a different question and reads `ok` for the rows
      * that differ). So the verdict now travels with the payload — see `Row.in_line`.
      *
-     * ⚠ `?? ` ON THE FIELD, NOT `||` — `false` is the meaningful value here and `||` would fall
+     *  `?? ` ON THE FIELD, NOT `||` — `false` is the meaningful value here and `||` would fall
      * through to the cap test for exactly the rows the flag exists to exclude.
      */
     const inLine = (r: Row): boolean =>
       r.in_line ?? (r.market_cap_eur == null || r.market_cap_eur > 0);
     for (const r of data.rows) {
-      // ⚠⚠ BEFORE THE DENOMINATOR, UNLIKE THE BASE TEST BELOW — and the difference is real. The
+      //  Before the denominator, unlike the base test below — and the difference is real. The
       // base test mirrors `_prepare`, which runs INSIDE `blend_series` on members it was already
       // handed, so its drops belong in the coverage denominator. This filter runs one level up, in
       // `_blend_rows`, BEFORE `blend_series` is called at all: an excluded member was never handed
       // over, so counting it here would report a coverage the server never computed.
       if (!eligible(r)) {
-        // ⚠⚠ RECORDED SEPARATELY FROM THE REBASE'S DROPS, AND THE DISTINCTION IS THE WHOLE REASON
-        // THIS SET EXISTS. The `NOT IN LINE` badge was removed from the drill-down on request
+        //  Recorded separately from the rebase's drops, and the distinction is the whole reason
+        // This set exists. The `NOT IN LINE` badge was removed from the drill-down on request
         // (2026-08-12) because it announced `_prepare`'s non-positive-BASE drop — a mechanical
         // consequence of indexing to 100 that the reader can do nothing about. A member the
-        // METRIC'S OWN RULE withheld is the opposite: it is a stated policy about which companies
+        // Metric's own rule withheld is the opposite: it is a stated policy about which companies
         // the line speaks for, the reader asked for it, and it is the one exclusion that must be
         // visible on the row. Marking both again would undo that request.
         byRule.add(r);
-        // ⚠⚠ WITH A REASON, BECAUSE A ROW THE FOOTER SILENTLY IGNORES IS A BLANK THE READER
-        // CANNOT ACCOUNT FOR — the same failure the base-test exclusion below was given a reason
+        //  With a reason, because a row the footer silently ignores is a blank the reader
+        // Cannot account for — the same failure the base-test exclusion below was given a reason
         // for. It matters more since `eps_nri` joined the rule: a profitable holding forecast to
         // lose money in one year vanishes from the line while every cell on its row looks fine.
-        // ⚠ IT POINTS AT THE CELLS RATHER THAN NAMING THE PERIOD — the negative one is on screen,
+        //  It points at the cells rather than naming the period — the negative one is on screen,
         // estimates included, and naming it here would be a second place to keep true.
         excluded.set(r, 'it reports a negative figure in at least one period below, and this line '
           + 'is drawn only from companies positive in every one');
@@ -379,24 +379,24 @@ export function buildBlend(data: Resp, metric?: string) {
         // Nothing filed at all — the row already says so via `status`, so no second badge.
         continue;
       }
-      // ⚠ AND BEFORE THE DENOMINATOR TOO, FOR THE SAME REASON AS `eligible` ABOVE: this row was
+      //  And before the denominator too, for the same reason as `eligible` ABOVE: this row was
       // never handed to `blend_series`, so counting it here reports a coverage the server never
       // computed. See `inLine`.
       if (!inLine(r)) continue;
-      // ⚠ COUNTED IN THE DENOMINATOR **BEFORE** THE BASE TEST, because that is the order
+      //  Counted in the denominator **BEFORE** THE BASE TEST, because that is the order
       // `blend_series` uses: it takes the total over every member handed to it, and `_prepare`
       // drops the non-positive bases afterwards. Filtering first would shrink the denominator,
       // lift every coverage figure, and let a period slip over the floor that the chart omits.
       coverTotal += stableW(r);
       /**
-       * ⚠⚠ THE FIRST **POSITIVE** PERIOD, NOT THE FIRST REPORTED ONE — and this line used to claim
+       *  The first **POSITIVE** PERIOD, NOT THE FIRST REPORTED ONE — and this line used to claim
        * in a comment that it matched `_prepare` while doing something stricter (2026-08-25). The
        * server skips forward to the first positive figure and keeps the member; this dropped it
        * outright, so any company whose earliest year happens to be negative was in the CHART and
        * missing from the drill-down that explains it — a footer that cannot reach the line above
        * it, and a Contribution column silently short by that company.
        *
-       * ⚠ A leading zero or negative on a flow line is usually not a measurement. GuruFocus
+       *  A leading zero or negative on a flow line is usually not a measurement. GuruFocus
        * back-fills the years before a company existed: Universal Music sits inside Vivendi until
        * the 2021 spin-off and its 2017 revenue is stored as `0`. Anchoring on that throws away
        * every good year after it; skipping to the first positive period starts the curve where
@@ -410,9 +410,9 @@ export function buildBlend(data: Resp, metric?: string) {
         continue;
       }
       const base = r.revenue[basePeriod] as number;
-      // ⚠ AND ITS PRE-BASE PERIODS GO WITH IT, exactly as `_prepare` truncates them. A zero before
+      //  And its pre-base periods go with it, exactly as `_prepare` truncates them. A zero before
       // the anchor would rebase to 0 and read as a company that lost everything rather than one
-      // that had not started. ⚠ The EUROS are not truncated — see the `fund` fill below, which is
+      // that had not started.  The EUROS are not truncated — see the `fund` fill below, which is
       // the whole reason it is a separate pass.
       const idx: Record<string, number> = {};
       for (const p of periods.slice(periods.indexOf(basePeriod))) {
@@ -423,28 +423,28 @@ export function buildBlend(data: Resp, metric?: string) {
       partOf.set(r, part);
     }
     const level: Record<string, { value: number; covered: number }> = {};
-    // ⚠⚠ THE DENOMINATOR IN FORCE FOR EACH PERIOD, AND IT IS WHY A PER-YEAR WEIGHT EXISTS AT ALL.
+    //  The denominator in force for each period, and it is why a per-year weight exists at all.
     // Two things move it: the constituents that REPORTED that period, and — now that the basis is
     // the period's own market cap — what each of them was worth at the time. NVIDIA is 0.63% of
     // FY2018 and 7.46% by today's cap; only the first is a fact about 2018.
     const denom: Record<string, number> = {};
     const coverN: Record<string, number> = {};
     /**
-     * ⚠⚠ EACH ROW'S LATEST FIGURE STANDS UNTIL IT REPORTS AGAIN — the client twin of
+     *  Each row's latest figure stands until it reports again — the client twin of
      * `_fundamental_blend.carry_forward`, and the reason this table's figures reconcile with the
      * line above it. Without the carry a semi-annual filer simply left Q1/Q3, the contributor set
      * alternated, and the index sawtoothed ±20% on composition alone.
      *
-     * ⚠ A CARRIED VALUE IS NOT COVERAGE. `coverW`/`coverN` count only the periods a row actually
+     *  A carried value is not coverage. `coverW`/`coverN` count only the periods a row actually
      * reported, so the floor still sees the newest period for what it is.
      *
-     * ⚠ BOUNDED to ~a year (in periods: 4 quarters or 1 year), so a holding that stops reporting
+     *  BOUNDED to ~a year (in periods: 4 quarters or 1 year), so a holding that stops reporting
      * falls out rather than being held flat for the rest of the axis.
      */
     const isQuarterly = data.years.some((y) => y.includes('-Q'));
     const maxCarry = isQuarterly ? 4 : 1;
     /**
-     * ⚠⚠ WHICH PERIOD EACH ROW'S FIGURE CAME FROM — `{}` for its own, the source period when it was
+     *  Which period each row's figure came from — `{}` for its own, the source period when it was
      * carried. Without this the weight column CANNOT sum to 100%: a carried row is in the
      * denominator (its figure is in the average) but showed no weight, so the shares silently added
      * to less than the whole. The Total row totals that column, so the gap would have been visible
@@ -452,7 +452,7 @@ export function buildBlend(data: Resp, metric?: string) {
      */
     const from: Record<string, Record<string, string>> = {};
     /**
-     * ⚠⚠ COVERAGE IS COUNTED FIRST, IN ITS OWN PASS, SO THE CARRY CAN BE GATED ON IT. A carried
+     *  Coverage is counted first, in its own pass, so the carry can be gated on it. A carried
      * figure exists to hold the basket still in a period the chart DRAWS — at AEX Q1/Q3 only twelve
      * of twenty-two constituents file, and without it the index alternates between two baskets and
      * sawtooths ±20% on composition alone. In a period the chart REFUSES it does nothing at all:
@@ -476,20 +476,20 @@ export function buildBlend(data: Resp, metric?: string) {
      *  takes ratios between periods that need not be adjacent, so the values have to be kept. */
     const at = new Map<typeof parts[number], Record<string, number>>();
     /**
-     * ⚠⚠ THE EUROS, CARRIED ON THEIR OWN CLOCK — the client twin of the second `carry_forward` in
+     *  The euros, carried on their own clock — the client twin of the second `carry_forward` in
      * `_fundamental_blend.blend_series`. A row's euros are a filing like its value, so a
      * semi-annual filer's trailing figure stands in the quarters it does not file; uncarried it
      * would drop out of them, the per-step intersection would shrink to the quarterly filers, and
      * the aggregate would sawtooth on composition alone.
      *
-     * ⚠ ITS OWN `lastF`/`sinceF`, NOT THE VALUE'S. A row can have a value at a period and no
+     *  Its own `lastF`/`sinceF`, NOT THE VALUE'S. A row can have a value at a period and no
      * euros there (no share count, no FX rate for that date), and reusing the value's carry state
      * would then look the euros up at a period that has none and silently drop the row from the
      * step. Same bound, same gate, separate clock — which is what the server does by calling
      * `carry_forward` twice.
      */
     const fund = new Map<typeof parts[number], Record<string, number>>();
-    // ⚠ THE CARRY IS UNROLLED ONCE AGAIN. It was unrolled TWICE while the materiality bar existed —
+    //  The carry is unrolled once again. It was unrolled TWICE while the materiality bar existed —
     // gated on `drawn(y)` for the line and the table, ungated for the bar — because the bar was a
     // median over the member's periods and the server's period set was not this one's. The bar went
     // on 2026-09-04 (see `stepGrowth`), and the second pass went with it.
@@ -503,7 +503,7 @@ export function buildBlend(data: Resp, metric?: string) {
       for (const y of data.years) {
         const own = p.idx[y];
         /**
-         * ⚠⚠ THE CARRY MUST NOT CROSS BETWEEN REPORTED AND FORECAST PERIODS. This walks the union
+         *  The carry must not cross between reported and forecast periods. This walks the union
          * axis — actuals, then `LTM`, then the `…e` columns — so without this reset a company's
          * newest REPORTED figure is carried straight into the forecast columns: it takes a weight
          * there, joins the footer's blended `2026e`, and renders in carried italics. Measured:
@@ -520,13 +520,13 @@ export function buildBlend(data: Resp, metric?: string) {
         if (last && isEstimatePeriod(y) !== isEstimatePeriod(last.y)) { last = null; since = 0; }
         if (own != null) { last = { idx: own, y }; since = 0; } else if (last) { since += 1; }
         /**
-         * ⚠⚠ THE EUROS' CARRY CLOCK ADVANCES HERE, BEFORE ANY `continue` BELOW — otherwise a
+         *  The euros' carry clock advances here, before any `continue` BELOW — otherwise a
          * period this row is not in at all (no value, or no cap) would not age the carry, and the
          * euros would be held further than the server holds them. On the server the two carries
          * are two independent `carry_forward` passes over the whole axis, so neither can be
          * shortened by the other's gaps; this is that, unrolled.
          *
-         * ⚠ Same forecast reset, same reason: a filed figure must not be carried into a column
+         *  Same forecast reset, same reason: a filed figure must not be carried into a column
          * that claims to be a forecast.
          */
         const ownF = p.r.fund_by_period?.[y];
@@ -534,7 +534,7 @@ export function buildBlend(data: Resp, metric?: string) {
         if (ownF != null) { lastF = { v: ownF, y }; sinceF = 0; } else if (lastF) { sinceF += 1; }
         const w = wAt(p.r, y);
         /**
-         * ⚠⚠ THE EUROS ARE WRITTEN BEFORE THE VALUE'S GATE, ON THE WEIGHT ALONE — the client twin
+         *  The euros are written before the value's gate, on the weight alone — the client twin
          * of the separate `fund` loop in `blend_series`. A sum never divides a member by itself,
          * so none of the rebase's preconditions apply to it, and hanging the euros off `v` would
          * make a member's presence in the SUM depend on whether its rebased LEVEL exists. It is
@@ -542,7 +542,7 @@ export function buildBlend(data: Resp, metric?: string) {
          */
         const fv = ownF ?? (lastF && sinceF <= maxCarry && drawn(y) ? lastF.v : null);
         if (fv != null && w) fund.get(p)![y] = fv;
-        // ⚠ ONLY INTO A PERIOD THE CHART DRAWS — see the ⚠⚠ on `drawn`. Elsewhere a carried figure
+        //  Only into a period the chart draws — see the  on `drawn`. Elsewhere a carried figure
         // holds up nothing and reads as a projection.
         const carried = own == null && last && since <= maxCarry && drawn(y) ? last : null;
         const v = own ?? carried?.idx ?? null;
@@ -554,7 +554,7 @@ export function buildBlend(data: Resp, metric?: string) {
       }
     }
     /**
-     * ⚠⚠ THE LINE IS CHAINED FROM WEIGHTED GROWTH, NOT AVERAGED FROM REBASED LEVELS — the client
+     *  The line is chained from weighted growth, not averaged from rebased levels — the client
      * twin of `_fundamental_blend.blend_series`'s level path, and the Total row must equal what the
      * chart draws or this table explains a number that is not on it.
      *
@@ -565,17 +565,17 @@ export function buildBlend(data: Resp, metric?: string) {
      * average toward 100 and the index "moves" on composition alone. Measured on the AEX annual
      * revenue line, that drew a 388 → 285 crash into 2023 that no constituent experienced.
      *
-     * ⚠ THE ANCHOR IS THE LAST DRAWN PERIOD, not the previous one: a period under the floor is not
+     *  The anchor is the last drawn period, not the previous one: a period under the floor is not
      * drawn, and measuring the next step from it would compound a move nobody could see.
      */
     /**
-     * ⚠⚠ THE LINE'S OWN MOVE, DECOMPOSED BY MEMBER, IN PERCENTAGE POINTS OF THAT MOVE — and it is
+     *  The line's own move, decomposed by member, in percentage points of that move — and it is
      * computed HERE, inside the loop that chains the line, for the reason everything else in this
      * file is: `pp_i = 100 · w_i·g_i ÷ Σw` sums to `100 · Σw·g ÷ Σw`, which IS the step the next
      * line multiplies into the index. So the column adds up to the footer exactly, and "who moved
      * this line" stops being a guess read off two adjacent figures.
      *
-     * ⚠⚠ THE DENOMINATOR IS **NEITHER** `denom[y]` NOR THE TABLE'S WEIGHT — it is Σw over the
+     *  The denominator is **NEITHER** `denom[y]` NOR THE TABLE'S WEIGHT — it is Σw over the
      * members that SPAN THIS INTERVAL. A row present at `y` but absent (or refused: a non-positive
      * anchor, an immaterial base, an implausible step — see `stepGrowth`) at the anchor sits in
      * `denom[y]` and is not in this move at all. Dividing by `denom[y]` would scale every
@@ -583,30 +583,30 @@ export function buildBlend(data: Resp, metric?: string) {
      * column would land short of the footer by exactly that — a decomposition that does not add up
      * to its own total is not one, it is a pile of plausible numbers.
      *
-     * ⚠ `from` IS PART OF THE ANSWER, NOT METADATA. The anchor is the last DRAWN period, which is
+     *  `from` IS PART OF THE ANSWER, NOT METADATA. The anchor is the last DRAWN period, which is
      * the previous column only while every column is drawn; under the coverage floor the move spans
      * two years (or five quarters), and a pp figure whose interval is unstated reads as one period's
      * contribution. `spanPct` is how much of the period's line weight the decomposition covers.
      *
-     * ⚠ KEYED ON THE ROW OBJECT, NOT THE ISIN — the same rule as `partOf` above: one payload can
+     *  Keyed on the row object, not the ISIN — the same rule as `partOf` above: one payload can
      * carry an ISIN twice at two weights, and an ISIN key hands both rows the first one's figures.
      */
     const step: Record<string, { from: string; growthPct: number; spanPct: number }> = {};
     /**
-     * ⚠⚠ BOTH FACTORS, NOT JUST THE PRODUCT — `pp === sharePct × growthPct ÷ 100`, exactly, so the
+     *  Both factors, not just the product — `pp === sharePct × growthPct ÷ 100`, exactly, so the
      * cell can show a reader the multiplication it is looking at instead of asserting a number.
      *
-     * ⚠ `sharePct` IS NOT THE WEIGHT THE CELL PRINTS UNDER IT, and since 2026-08-21 it is not even
+     *  `sharePct` IS NOT THE WEIGHT THE CELL PRINTS UNDER IT, and since 2026-08-21 it is not even
      * measured at the same period. The printed weight divides this period's cap by `denom[y]` — the
      * composition of the index NOW, which is what a weight column should say. This one is the
      * member's share of the weight AT THE ANCHOR, because that is the denominator the contribution
-     * was actually taken over (see the ⚠⚠ on `w` above). Quoting the printed weight as the factor
+     * was actually taken over (see the  on `w` above). Quoting the printed weight as the factor
      * gives a multiplication that does not reach the pp.
      */
     const contrib = new Map<Row,
       Record<string, { pp: number; growthPct: number | null; sharePct: number | null }>>();
     /**
-     * ⚠⚠ WHICH CONSTRUCTION THIS IS — and it decides the line AND its decomposition together.
+     *  Which construction this is — and it decides the line AND its decomposition together.
      * `true` when any row shipped `fund_by_period`, matching the server's
      * `any(p["fund"] for p in prepared)`. Splitting the two would put a chart drawn one way over a
      * table that decomposes the other, and the table is the thing people check.
@@ -618,7 +618,7 @@ export function buildBlend(data: Resp, metric?: string) {
       if (!denom[y] || !drawn(y)) continue;
       if (aggregate && anchor != null) {
         /**
-         * ⚠⚠ GROWTH OF A SUM, AND ITS DECOMPOSITION IS AN IDENTITY RATHER THAN AN APPROXIMATION:
+         *  Growth of a sum, and its decomposition is an identity rather than an approximation:
          *
          *     G   = ΣFᵢ(y)/ΣFᵢ(a) − 1 = Σ(Fᵢ(y) − Fᵢ(a)) / ΣFᵢ(a)
          *     ppᵢ = 100 · (Fᵢ(y) − Fᵢ(a)) / ΣFᵢ(a)        so   Σppᵢ = 100·G, exactly
@@ -626,11 +626,11 @@ export function buildBlend(data: Resp, metric?: string) {
          * The column adds to the footer because the algebra says so, not because it nearly does —
          * and no row is dropped for crossing zero: −200 → +300 contributes +500/ΣFᵢ(a), cleanly.
          *
-         * ⚠ `sharePct × growthPct ÷ 100 = pp` still holds and is still what the cell shows, but
+         *  `sharePct × growthPct ÷ 100 = pp` still holds and is still what the cell shows, but
          * only where `Fᵢ(a) > 0`. Below zero there is no rate and no share of a negative base to
          * quote; the pp is exact regardless, so both factors go null and the pp stands alone.
          *
-         * ⚠⚠ INTERSECTED PER STEP. A sum changes when its members change, so `Σ(everyone at y)`
+         *  Intersected per step. A sum changes when its members change, so `Σ(everyone at y)`
          * over `Σ(everyone at a)` would report composition as growth. Only rows with euros at
          * BOTH ends are in it — the same discipline the growth path gets for free, since a row
          * that cannot span a step has no `g`.
@@ -640,7 +640,7 @@ export function buildBlend(data: Resp, metric?: string) {
           (p) => fund.get(p)?.[a] != null && fund.get(p)?.[y] != null);
         const sA = spanning.reduce((s, p) => s + fund.get(p)![a], 0);
         const sD = spanning.reduce((s, p) => s + fund.get(p)![y], 0);
-        // ⚠ NO RATIO WITHOUT A POSITIVE BASE, and no line past a non-positive numerator — the same
+        //  No ratio without a positive base, and no line past a non-positive numerator — the same
         // two guards, and for the same reasons, as the server's aggregate branch. A negative
         // aggregate makes every later point a sign-flipped value a log axis cannot draw, so the
         // series STOPS (visible) rather than continuing into points that vanish (not).
@@ -650,7 +650,7 @@ export function buildBlend(data: Resp, metric?: string) {
         step[y] = {
           from: a,
           growthPct: 100 * (sD / sA - 1),
-          // ⚠ COVERAGE IN THE UNIT THE LINE IS BUILT FROM — what share of this period's euros the
+          //  Coverage in the unit the line is built from — what share of this period's euros the
           // decomposition speaks for. The growth path asks the same question in weight; asking it
           // in weight here would mix two bases and could exceed 100%.
           spanPct: 100 * sD / (parts.reduce(
@@ -682,7 +682,7 @@ export function buildBlend(data: Resp, metric?: string) {
         let den = 0;
         let spanAtY = 0;
         /**
-         * ⚠ HELD, NOT WRITTEN STRAIGHT INTO `contrib`. Each term's share is over the FINAL `den`,
+         *  Held, not written straight into `contrib`. Each term's share is over the FINAL `den`,
          * which is not known until every part has been asked — and both guards below can still
          * discard the whole step, so writing as we go would leave contributions behind for a period
          * that ends up with no line point for them to be a share of.
@@ -690,24 +690,24 @@ export function buildBlend(data: Resp, metric?: string) {
         const terms: { r: Row; w: number; g: number }[] = [];
         for (const p of parts) {
           /**
-           * ⚠⚠ THE WEIGHT IS THE **ANCHOR'S**, NOT THIS PERIOD'S — the client twin of the ⚠⚠ in
+           *  The weight is the **ANCHOR'S**, NOT THIS PERIOD'S — the client twin of the  in
            * `_fundamental_blend.blend_series`, and it was worth 9 percentage points a year
            * (2026-08-21). `g` spans anchor -> y, so weighting it by the cap at `y` weights each
            * constituent's growth by a number that already contains that growth (cap = price x
            * shares). Measured on ACWI's share price 2015->2025: +20.21%/yr end-weighted against
            * +11.14%/yr anchor-weighted, where the index really did ~10-11%.
            *
-           * ⚠ IT MUST MATCH THE SERVER EXACTLY. This function exists to reproduce the plotted line
+           *  It must match the server exactly. This function exists to reproduce the plotted line
            * in the drill-down's footer; weighted differently it would print a `Rebased` total that
            * disagrees with the chart it was opened from, and both would look reasonable.
            */
           const w = wAt(p.r, anchor);
-          // ⚠ THE SHARED RULE, NOT AN INLINE `prev > 0` — one definition, here and on the server.
+          //  The shared rule, not an inline `prev > 0` — one definition, here and on the server.
           const g = stepGrowth(at.get(p)?.[anchor], at.get(p)?.[y]);
           if (!w || g == null) continue;
           num += w * g;
           den += w;
-          // ⚠⚠ THE SPANNING MEMBERS' WEIGHT **AT THIS PERIOD**, kept alongside the anchor-weighted
+          //  The spanning members' weight **AT THIS PERIOD**, kept alongside the anchor-weighted
           // `den` and used for `spanPct` alone. Those are two different questions and they need
           // two different bases: the MOVE is weighted at the anchor (see above — it was worth 9pp
           // a year), while COVERAGE asks what share of the line drawn at `y` the decomposition
@@ -717,14 +717,14 @@ export function buildBlend(data: Resp, metric?: string) {
           terms.push({ r: p.r, w, g });
         }
         if (den <= 0) continue;               // nothing spans this interval — no honest move
-        // ⚠ EVERY ROW WIPED OUT. `stepGrowth` floors each at −100%, so this is an exact −1 and the
+        //  Every row wiped out. `stepGrowth` floors each at −100%, so this is an exact −1 and the
         // index is 0 from here on — values a log axis cannot draw. It stops rather than emitting
         // points that would vanish silently, which is the failure this whole rule exists to end.
         if (1 + num / den <= 0) break;
         chained *= 1 + num / den;
         step[y] = { from: anchor,
                     growthPct: 100 * num / den,
-                    // ⚠⚠ COVERAGE OF **THIS PERIOD'S** LINE, and it is `spanAtY`, not `den`. The
+                    //  Coverage of **THIS PERIOD'S** LINE, and it is `spanAtY`, not `den`. The
                     // move is anchor-weighted (rightly); coverage asks a different question — what
                     // share of the line drawn at `y` this decomposition speaks for — and the line
                     // at `y` is made of this period's weights. So both sides of this ratio are
@@ -732,14 +732,14 @@ export function buildBlend(data: Resp, metric?: string) {
                     // and it matches what the tooltip beside it claims ("of this period's weight
                     // that spans the interval").
                     //
-                    // ⚠ I SHIPPED `den / denom[anchor]` HERE while fixing the anchor weighting and
+                    //  I SHIPPED `den / denom[anchor]` HERE while fixing the anchor weighting and
                     // it was wrong twice: it answers "how much of the ANCHOR's weight survived",
                     // which is not the sentence next to it, and on the pinned case it read 100%
                     // where half the period's weight could not be measured over the interval.
                     spanPct: 100 * spanAtY / (denom[y] || 1) };
         for (const t of terms) {
           const byPeriod = contrib.get(t.r) ?? {};
-          // ⚠ A ZERO HERE IS A MEASUREMENT, NOT AN ABSENCE — the opposite of the weight line's rule,
+          //  A zero here is a measurement, not an absence — the opposite of the weight line's rule,
           // and the two sit in the same cell. This member was in the move and did not move (a
           // carried figure is the common case: same value at both ends, so `g` is exactly 0). "Not
           // in this step" is the MISSING key, which the reader sees as a dash.

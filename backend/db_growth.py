@@ -1,18 +1,18 @@
 """HOW FAST THE DATABASE IS GROWING, AND WHICH TABLES ARE DOING IT.
 
-⚠⚠ IT MEASURES BYTES ON DISK, NOT ROWS WRITTEN, AND THAT CHOICE INVERTS THE ANSWER. The intuitive
+ IT MEASURES BYTES ON DISK, NOT ROWS WRITTEN, AND THAT CHOICE INVERTS THE ANSWER. The intuitive
     instrumentation is "have each job count what it inserts", and it would rank the AIRS model
     scan — which delete-then-inserts every portfolio's positions, thousands of rows written and
     zero growth — above the month-end price refresh. Several of these jobs are delete-then-insert snapshots or upserts, so
     rows written and disk used are different quantities. A row count also cannot see INDEXES or
     BLOAT, which on an 18 GB table are most of the cost.
 
-⚠ MEASURED FROM OUTSIDE EVERY JOB. Nothing here asks a job to report anything, so no job can forget
+ MEASURED FROM OUTSIDE EVERY JOB. Nothing here asks a job to report anything, so no job can forget
     to, none can drift out of step, and a job added next month is covered the day it ships. The
     trade is that this says WHAT grew, never WHO grew it — per-job attribution is a separate and
     lossier measurement.
 
-⚠ POSTGRES ONLY. Supabase STORAGE (the `gurufocus-raw` bucket of cached vendor JSON) is not in the
+ POSTGRES ONLY. Supabase STORAGE (the `gurufocus-raw` bucket of cached vendor JSON) is not in the
     database. Anyone reconciling this against the hosting's disk figure will find a gap, and that
     is the gap.
 """
@@ -32,14 +32,14 @@ _CHUNK = 200
 def sample_table_sizes() -> dict:
     """Take one size snapshot of every public table. Returns a summary for the run record.
 
-    ⚠ THE SAMPLE IS ONE `now()` FOR THE WHOLE SET — the default on `sampled_at` fires per row, so
+     THE SAMPLE IS ONE `now()` FOR THE WHOLE SET — the default on `sampled_at` fires per row, so
     a slow insert would stamp the same snapshot across two timestamps and `distinct on (table_name)`
     in `table_growth` would then compare a table against a different moment than its neighbour.
     Stamped once, here, so a snapshot is a snapshot.
     """
     rows = (supabase.rpc("table_sizes").execute().data) or []
     if not rows:
-        # ⚠ AN ANSWER, NOT AN ERROR — but a strange one: a database with no public tables. Recorded
+        #  An answer, not an error — but a strange one: a database with no public tables. Recorded
         # rather than raised so the job's own row shows it happened and found nothing.
         return {"tables": 0, "total_bytes": 0, "note": "table_sizes() returned nothing"}
 
@@ -71,11 +71,11 @@ def sample_table_sizes() -> dict:
 def growth(days: int = 7) -> dict:
     """Per-table growth over `days`, newest-first by bytes added.
 
-    ⚠ ONE ROW PER TABLE, COMPUTED IN POSTGRES (`table_growth`). Reading the raw samples and reducing
+     ONE ROW PER TABLE, COMPUTED IN POSTGRES (`table_growth`). Reading the raw samples and reducing
     them here would be ~50 tables x N days of rows — past PostgREST's silent 1,000-row cap within a
     fortnight — and the growth figure would quietly start being computed over a partial window.
 
-    ⚠ A TABLE WITH NO BASELINE REPORTS `None`, NEVER 0. Until the history reaches back `days`, there
+     A TABLE WITH NO BASELINE REPORTS `None`, NEVER 0. Until the history reaches back `days`, there
     is nothing to subtract from; a 0 there would present a database that has not been measured yet
     as one that has not grown.
     """
@@ -91,7 +91,7 @@ def growth(days: int = 7) -> dict:
             "mb": round(latest / 1_048_576, 2),
             "delta_bytes": delta,
             "delta_mb": round(delta / 1_048_576, 2) if delta is not None else None,
-            # ⚠ PER DAY IS THE FIGURE THAT EXTRAPOLATES, and it is divided by the window ACTUALLY
+            #  Per day is the figure that extrapolates, and it is divided by the window ACTUALLY
             # measured rather than by `days` — the baseline is the newest sample at-or-before the
             # cutoff, which on a sparse history can be older than asked for. Dividing by the
             # requested window would understate growth by however far off the baseline sits.
@@ -110,7 +110,7 @@ def growth(days: int = 7) -> dict:
         "total_mb": round(total / 1_048_576, 1),
         "total_delta_mb": (round(sum(x["delta_bytes"] for x in measured) / 1_048_576, 2)
                            if measured else None),
-        # ⚠ SAID OUT LOUD. With one sample the whole page is sizes and no growth, and a reader who
+        #  Said out loud. With one sample the whole page is sizes and no growth, and a reader who
         # does not know that reads every "—" as "this table is not growing".
         "has_baseline": bool(measured),
         "rows": out,

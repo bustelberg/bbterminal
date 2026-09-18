@@ -144,7 +144,7 @@ class BacktestConfig:
     # How each signal is mapped to [0,1] before the weighted blend: "minmax" | "rank" |
     # "robust_z". See `momentum.scoring._normalize` for the measurement behind this.
     #
-    # ⚠⚠ DEFAULTS TO THE LEGACY `minmax` ON PURPOSE, AND MUST KEEP DOING SO. `minmax` gives the
+    #  Defaults to the legacy `minmax` ON PURPOSE, AND MUST KEEP DOING SO. `minmax` gives the
     # signal with the fattest tail HALF the influence its weight asks for (measured on ACWI:
     # mom_12_1 got 16.6% of a requested 33.3%), so `rank` is the better answer — but it also moves
     # the whole 0-100 scale: the median stock scores 5/100 under `minmax` and 50/100 under `rank`.
@@ -222,7 +222,7 @@ class BacktestConfig:
             strategy_type=d.get("strategy_type", _DEFAULT_STRATEGY),
             min_price_score=d.get("min_price_score"),
             backfill_below_min_score=bool(d.get("backfill_below_min_score", False)),
-            # ⚠ An unknown value falls back to the legacy default rather than raising: this reads
+            #  An unknown value falls back to the legacy default rather than raising: this reads
             #   STORED configs, and a strategy saved by a newer build must not break this one.
             score_normalization=(
                 d.get("score_normalization") if d.get("score_normalization") in SCORE_NORMALIZATIONS

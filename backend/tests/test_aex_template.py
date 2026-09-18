@@ -77,7 +77,7 @@ class TestTheTableIsFoundByItsHeaders:
 
 
 class TestTier2IsStructuralNotAName:
-    """⚠ THE TRAP THIS GATE EXISTS FOR. Three of the 25 (Shell, RELX, Unilever) carry a GB ISIN
+    """ THE TRAP THIS GATE EXISTS FOR. Three of the 25 (Shell, RELX, Unilever) carry a GB ISIN
     and our pipeline resolved each to its LONDON listing, so ticker AND exchange both differ. The
     obvious fallback — match on the company name — enlists an Indian company:
 
@@ -146,7 +146,7 @@ class TestTheTemplateNeverInventsACompany:
         assert before < write
 
 
-# ⚠ There was a `TestAgainstTheLivePage` here that called `scrape_aex()` for real — it hit
+#  There was a `TestAgainstTheLivePage` here that called `scrape_aex()` for real — it hit
 # Wikipedia and OpenFIGI, so it was permanently `@pytest.mark.skip`ed and never ran. Removed
 # 2026-07-23: this repo is unit tests only, and a network test that is always skipped is not a
 # test, it is a comment that costs a collection. Check the page shape by hand when in doubt.

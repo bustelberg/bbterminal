@@ -13,19 +13,19 @@ import { startLocalJob } from '../../../lib/stores/jobs';
  * THE drill-down table behind every ratio card on the Long Equity tab — one component, eleven
  * callers, and the book and the index both render through it.
  *
- * ⚠⚠ IT EXISTS BECAUSE THERE WERE ELEVEN COPIES OF IT. Same six columns, same status rows, same
+ *  It exists because there were eleven copies of it. Same six columns, same status rows, same
  * `LINES` loop, same derived row, same footer — differing only in which lines they list and which
  * ratio they derive, both of which are already per-card constants. Eleven copies is eleven places
  * for the BOOK's table and the INDEX's to come to format a figure, sort a null or hide a status
  * differently, on the one screen whose entire purpose is comparing them. It is also why adding the
  * cap/weight lines was a ten-file edit and why the benchmark only ever got built into one of them.
  *
- * ⚠ THE DERIVED ROW CALLS THE CARD'S OWN FUNCTION. `derived.of` is the same `marginOf` /
+ *  The derived row calls the card's own function. `derived.of` is the same `marginOf` /
  * `debtRatioOf` / … the chart aggregates, so a drill-down cannot recompute the formula its own way
  * and quietly disagree with the line it is explaining. `periodDenoms` is fed that same function,
  * which is what makes the `weight` line sum to exactly 100% of what the chart drew.
  *
- * ⚠ EACH LINE CARRIES A GETTER, NOT A KEY. `{ key: 'revenue' }` would need an index-signature cast
+ *  Each line carries a getter, not a key. `{ key: 'revenue' }` would need an index-signature cast
  * to read `r[key]`, which throws away the row type and would happily accept a key the row does not
  * have. `of: (r, y) => r.revenue[y]` is checked.
  */
@@ -52,7 +52,7 @@ export type InputsLine<R> = {
  * What the period columns show — the sibling of `HoldingsRevenueModal`'s `View`, and offered ONLY
  * on a card whose derived line is an AMOUNT.
  *
- * ⚠⚠ REBASING A RATIO IS NOT REBASING AN AMOUNT, AND THE DIFFERENCE IS NOT COSMETIC. Invested
+ *  Rebasing a ratio is not rebasing an amount, and the difference is not cosmetic. Invested
  * capital is a currency level: the chart CANNOT plot it directly (mixed reporting currencies do not
  * sum), so it rebases each company to 100 at its own first period and weight-averages the indices —
  * `rebased` is literally what that chart draws. A MARGIN is already a ratio, and the same two
@@ -68,21 +68,21 @@ export type InputsLine<R> = {
 export type InputsView = SeriesView;
 
 const VIEWS: [InputsView, string, string][] = [
-  ['reported', 'Reported', 'The figures as filed, in each company’s own reporting currency. ⚠ The '
+  ['reported', 'Reported', 'The figures as filed, in each company’s own reporting currency.  The '
     + 'only view in which the component lines still ADD to the derived line.'],
   ['rebased', 'Rebased', 'Every line indexed to 100 at ITS OWN first period. The derived line is '
     + 'exactly what the chart weight-averages — mixed reporting currencies cannot be summed, so a '
-    + 'rebase is how the chart exists at all. ⚠ Indices do not add: the components no longer sum '
+    + 'rebase is how the chart exists at all.  Indices do not add: the components no longer sum '
     + 'to the derived line here.'],
   ['yoy', 'YoY %', 'Growth on that company’s previous reported period — its own, not the previous '
     + 'column, so a skipped period does not show two years of growth in the same ink as everyone '
-    + 'else’s one. ⚠ The chart does NOT average these: it averages the Rebased levels.'],
+    + 'else’s one.  The chart does NOT average these: it averages the Rebased levels.'],
 ];
 
 /**
  * The switch itself.
  *
- * ⚠ THE STATE BELONGS TO THE MODAL, NOT TO THE TABLE — which is why this is a separate export
+ *  The state belongs to the modal, not to the table — which is why this is a separate export
  * rather than a `useState` inside `RatioInputsTable`. Every one of these modals renders the table
  * TWICE (the book, then the index), and a switch per table would let a reader set one to Rebased
  * and the other to Reported and read the gap between an index and a pile of euros as a finding.
@@ -116,7 +116,7 @@ export function InputsViewSwitch({ view, onChange }: {
 /**
  * The fixed columns, plus `impact:<period>` — one key per period column.
  *
- * ⚠ IMPACT IS WHAT THE READER ACTUALLY WANTS, AND IT IS NEITHER OF THE TWO THINGS THE TABLE SHOWED.
+ *  Impact is what the reader actually wants, and it is neither of the two things the table showed.
  * Sorted by weight you get the big names, which move the line only if they also moved; sorted by
  * the period's value you get the extremes, which move the line only if they are also big. The
  * question behind every one of these drill-downs — "who made the line do that?" — is the PRODUCT,
@@ -147,7 +147,7 @@ export function RatioInputsTable<R extends InputsRow>({
     of: (r: R, y: string) => number | null;
     fmt?: (v: number | null | undefined) => string;
     /**
-     * ⚠ REQUIRED, AND NOT INFERRED FROM `fmt`. It decides two things a wrong answer renders
+     *  Required, and not inferred from `fmt`. It decides two things a wrong answer renders
      * plausibly for: whether the view switch applies at all (see `InputsView`), and — the quieter
      * one — what the impact ranking is computed on. An `amount` card's chart plots a REBASED
      * index, so its steps are steps in index points; ranking it on Δ millions would rank by
@@ -167,11 +167,11 @@ export function RatioInputsTable<R extends InputsRow>({
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(
     { key: 'weight', dir: 'desc' });
   const [ingest, setIngest] = useState<Record<string, { busy?: boolean; msg?: string }>>({});
-  // ⚠ Memoised: it is a dependency of `denoms`, and `?? []` mints a fresh array every render.
+  //  Memoised: it is a dependency of `denoms`, and `?? []` mints a fresh array every render.
   const years = useMemo(() => data.years ?? [], [data]);
   const derivedFmt = derived.fmt ?? fmtRatioPct;
   const rebasable = derived.kind === 'amount';
-  /** ⚠ A `ratio` CARD IS PINNED TO `reported` HERE, not merely un-switched. The switch is already
+  /**  A `ratio` CARD IS PINNED TO `reported` HERE, not merely un-switched. The switch is already
    *  withheld from those callers, but a view arriving by any other route would silently render the
    *  two transforms this card exists to refuse. */
   const v: InputsView = rebasable ? view : 'reported';
@@ -184,7 +184,7 @@ export function RatioInputsTable<R extends InputsRow>({
    * The derived line as the CHART constructs it — every period the row cannot be weighted in
    * removed first.
    *
-   * ⚠⚠ THE REBASE'S BASE IS DECIDED BY THIS, WHICH IS THE WHOLE Vertiv BUG. A period with no usable
+   *  The rebase's base is decided by this, which is the whole Vertiv BUG. A period with no usable
    * market cap is one `weightedByYear` skips outright, so the company is not in that period's
    * average — and a period it is not in cannot be the base of the index it is averaged into.
    * Vertiv's cap is 0 through 2016–17 (a pre-IPO SPAC shell holding $24k of founder capital), so
@@ -207,7 +207,7 @@ export function RatioInputsTable<R extends InputsRow>({
   /**
    * The figure the CHART actually plots for each row — independent of the view switch.
    *
-   * ⚠⚠ FOR AN AMOUNT THAT IS THE REBASED INDEX, NOT THE REPORTED LEVEL, and this is what the
+   *  For an amount that is the rebased index, not the reported level, and this is what the
    * impact ranking and the weight denominators must both be built on. The invested-capital line is
    * a weighted average of per-company indices precisely because mixed-currency levels cannot be
    * summed; ranking its moves on Δ millions would sort by reporting currency, and a denominator
@@ -221,7 +221,7 @@ export function RatioInputsTable<R extends InputsRow>({
       m.set(r.isin, Object.fromEntries(years.map((y, i) => [y, s[i]])));
     }
     return m;
-    // ⚠ `derived` is an object literal in every caller, so a fresh identity each render — listing
+    //  `derived` is an object literal in every caller, so a fresh identity each render — listing
     // it would defeat the memo entirely. `data` is what actually changes the values.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, years, rebasable]);
@@ -230,12 +230,12 @@ export function RatioInputsTable<R extends InputsRow>({
   /**
    * This row's contribution to the line's MOVE into `y`, in the plotted unit: `weight × Δvalue`.
    *
-   * ⚠ THE CHANGE, NOT THE LEVEL. The blended line is a weighted average, so its step from one
+   *  The change, not the level. The blended line is a weighted average, so its step from one
    * period to the next is `Σ w·Δ` — a company sitting still contributes nothing to the move however
    * heavy it is, and a small name that doubled can outrank a mega-cap that drifted. Ranking on
    * `w × value` instead would just reproduce the weight order with extra steps.
    *
-   * ⚠ NULL, NOT ZERO, WHEN EITHER END IS MISSING. A row that cannot be compared across the step did
+   *  Null, not zero, when either end is missing. A row that cannot be compared across the step did
    * not contribute nothing — we do not know what it contributed, and `cmp` puts nulls last in both
    * directions so an unknown never ranks as a small number. The first period has no predecessor and
    * is therefore all nulls, which is correct: nothing has moved yet.
@@ -301,7 +301,7 @@ export function RatioInputsTable<R extends InputsRow>({
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('exchange')}>GF exch{caret('exchange')}</th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ticker')}>Ticker{caret('ticker')}</th>
             <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap" onClick={() => toggle('weight')}
-              title="Share of this table. ⚠ NOT the weight used in any single period — a period renormalises over the companies that reported it, which is the `weight` line inside each company's block.">
+              title="Share of this table.  NOT the weight used in any single period — a period renormalises over the companies that reported it, which is the `weight` line inside each company's block.">
               Weight{caret('weight')}
             </th>
             <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ccy')}>Ccy{caret('ccy')}</th>
@@ -314,11 +314,11 @@ export function RatioInputsTable<R extends InputsRow>({
                     + `${years[i - 1]}. This is what moved the line, not what is biggest — a large `
                     + 'holding that did not change contributes nothing to the step. Rows we cannot '
                     + 'compare across the step sort last in both directions.'
-                    + (rebasable ? ' ⚠ Measured on the REBASED index, which is what the chart '
+                    + (rebasable ? '  Measured on the REBASED index, which is what the chart '
                       + 'plots — a change in millions would rank by reporting currency.' : '')
                   : `${y} is the first period drawn, so nothing has moved into it yet — there is no `
                     + 'impact to rank.'}>
-                {/* ⚠ Sized in `em`, not px — this table sits inside the tab-wide rem scale, and a
+                {/*  Sized in `em`, not px — this table sits inside the tab-wide rem scale, and a
                     hardcoded size would stop tracking the header it belongs to at other densities.
                     `leading-none` keeps the taller glyph from adding a row of header height. */}
                 {y}<span className="text-[1.5em] leading-none align-middle">
@@ -379,7 +379,7 @@ export function RatioInputsTable<R extends InputsRow>({
                       <td className={`px-3 py-1 whitespace-nowrap ${ln.muted ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
                       {years.map((y, yi) => (
                         <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft"
-                          // ⚠ THE FIGURE AS FILED STAYS REACHABLE IN EVERY VIEW. An index point or
+                          //  The figure as filed stays reachable in every view. An index point or
                           // a growth % with no way back to the number it came from is a claim the
                           // reader cannot check, which is the opposite of what a drill-down is for.
                           title={v === 'reported' ? undefined
@@ -392,7 +392,7 @@ export function RatioInputsTable<R extends InputsRow>({
                 })}
                 {/* The plotted figure, from the lines above it. */}
                 {(() => {
-                  // ⚠ THE REBASED VIEW IS THE CHART'S CONSTRUCTION, so it masks the periods the
+                  //  The rebased view is the chart's construction, so it masks the periods the
                   // chart excludes; Reported and YoY show the figure as filed.
                   const shown = v === 'rebased' ? plotSeries(r, v) : viewed(r, derived.of);
                   return (

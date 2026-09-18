@@ -5,10 +5,10 @@ import { xToPeriod } from './marginData';
 import { sharedSpan, spanNarrows, tileStats, type Span, type TileStats } from './windowStats';
 
 /**
- * One stat tile. ⚠ EVERY TILE IN THE PORTFOLIOS CARD FAMILY IS THIS COMPONENT AND EVERY ONE IN A ROW
- * IS THE SAME SIZE (2026-08-18) — thirteen cards import it.
+ * One stat tile.  EVERY TILE IN THE PORTFOLIOS CARD FAMILY IS THIS COMPONENT AND EVERY ONE IN A ROW
+ * Is the same size (2026-08-18) — thirteen cards import it.
  *
- * ⚠⚠ THE WIDTH IS AN EQUAL SHARE OF THE ROW, NOT A FIXED `8rem` (2026-08-21). It was fixed, and
+ *  The width is an equal share of the row, not a fixed `8rem` (2026-08-21). It was fixed, and
  * before that `min-w-[6.5rem]` with content-sized growth — which came out as a ragged set of
  * different widths (`+18.4%` narrow, `EUR 1,240` wide) and different heights the moment one label
  * wrapped and its neighbours did not. Five tiles of five shapes read as five unrelated readouts
@@ -21,32 +21,32 @@ import { sharedSpan, spanNarrows, tileStats, type Span, type TileStats } from '.
  * own, four tiles at 8rem wanted ~636px inside a card that is ~444px at a 1920px viewport and
  * ~316px at 1440px — so they wrapped, and a pair meant to be read side by side ended up stacked.
  *
- * ⚠ `max-w-[8rem]` IS THE OLD CONSTANT, KEPT AS A CEILING. Without it a row of TWO tiles in a wide
+ *  `max-w-[8rem]` IS THE OLD CONSTANT, KEPT AS A CEILING. Without it a row of TWO tiles in a wide
  * container would stretch each to half the card — an enormous readout of one number
  * (`AccountTotalReturn` is exactly that shape). So: never wider than it used to be, narrower when
  * the row needs it. `min-w-0` is what actually permits the shrink — without it the flex base is the
  * content and nothing gives.
  *
- * ⚠ THE NUMBER GOT BIGGER AS THE BOX GOT SMALLER, AND THAT IS THE POINT OF THE EXERCISE. The value
+ *  The number got bigger as the box got smaller, and that is the point of the exercise. The value
  * is the only thing on a tile anybody reads at a glance; the label and the padding are scaffolding.
  * So the label dropped hard, the padding to `px-1.5 py-1` and the box to a fixed height, while the
  * value went UP (`text-base` → `text-lg`). Shrinking everything uniformly would have made the tile
  * tidier and harder to read, which is the opposite of what a smaller tile is for.
  *
- * ⚠⚠ THE LABEL IS NOW `text-[0.7rem]` (13.3px), NOT `text-[9px]`, AND THE UNIT IS HALF THE POINT.
+ *  The label is now `text-[0.7rem]` (13.3px), NOT `text-[9px]`, AND THE UNIT IS HALF THE POINT.
  * It was the last absolute-px size in this family, and `globals.css` puts the whole UI on a `19px`
  * rem base with a responsive ladder (19 → 17.5 → 16 → 15) — so an absolute size opts out of that
  * ladder, reading relatively smaller on a desktop and larger on a phone. 9px against a 14.25px
  * `text-xs` was also simply too far: reported as "maybe we can make the text in these tiles a bit
  * bigger", then again after a first pass to 0.6rem, both on the Quick Valuation card.
  *
- * ⚠ STILL SHORT OF `text-xs` (14.25px), AND THE LAST HALF-STEP IS NOT FREE. An uppercase label is
+ *  Still short of `text-xs` (14.25px), AND THE LAST HALF-STEP IS NOT FREE. An uppercase label is
  * the widest text in the app per character, and these tiles are ~55–82px of inner width now that
  * the Quick Valuation row runs all five across (see the sizing note above). Every point of label
  * size buys legibility and spends characters-per-line against a two-line clamp — `EST. CAGR TO
  * FY2036` is the label that runs out first, and it is the one people open this card for.
  *
- * ⚠⚠ THE LABEL GETS **TWO** LINES, ALWAYS RESERVED, AND THAT IS WHAT MAKES THE HEIGHT CONSTANT.
+ *  The label gets **TWO** LINES, ALWAYS RESERVED, AND THAT IS WHAT MAKES THE HEIGHT CONSTANT.
  * One line was tried first and it is the obvious answer: truncate, hang the full text on `title`,
  * done. But at this width a single 10px line holds ~13 characters, and FOUR of the Quick Valuation
  * card's five labels are longer than that — `CURRENT SHARE PRICE`, `PRICE TARGET FY2035`,
@@ -55,12 +55,12 @@ import { sharedSpan, spanNarrows, tileStats, type Span, type TileStats } from '.
  * the labels stop differing. Two clamped lines fit every label in the family, and reserving the
  * space whether or not it is used is what keeps a one-line tile the same height as a two-line one.
  *
- * ⚠ THE VALUE STILL TRUNCATES, on purpose, and now it does so sooner — a 1440px viewport with
+ *  The value still truncates, on purpose, and now it does so sooner — a 1440px viewport with
  * four tiles leaves ~58px of inner width, which is about five monospace glyphs at `text-lg`.
  * `title` carries the full figure, exactly as it always has for `EUR 124,000`. The alternative is
  * letting one wide value resize the tile it sits in, which is the raggedness above.
  *
- * ⚠ THE ⓘ IS `shrink-0`. Without it a long label truncates by eating its own info icon first, which
+ *  THE ⓘ IS `shrink-0`. Without it a long label truncates by eating its own info icon first, which
  * removes the explanation from precisely the tiles whose labels were too long to be self-evident.
  *
  * `color` (a chart hex) ties the tile to its line — a coloured left bar + matching value ink — and
@@ -74,10 +74,10 @@ export function Stat({ label, value, tone, color, info }: {
                     flex-1 basis-0 min-w-0 max-w-[8rem]
                     flex flex-col justify-between overflow-hidden shadow-sm"
       style={color ? { borderLeft: `3px solid ${color}` } : undefined}>
-      {/* ⚠ THE HEIGHT IS ON THE ROW, NOT LEFT TO THE TEXT — two lines’ worth at the label size and
+      {/*  THE HEIGHT IS ON THE ROW, NOT LEFT TO THE TEXT — two lines’ worth at the label size and
           `leading-tight`, reserved whether the label uses them or not. `items-start` keeps the ⓘ
           beside the FIRST line rather than floating to the middle of a two-line label.
-          ⚠⚠ THE THREE NUMBERS MOVE TOGETHER OR THE LABEL CLIPS. `h-[1.8rem]` is 2 × 0.7rem ×
+           THE THREE NUMBERS MOVE TOGETHER OR THE LABEL CLIPS. `h-[1.8rem]` is 2 × 0.7rem ×
           leading-tight (1.25) = 1.75rem, plus a hair; the tile's own `h-[3.9rem]` is that row plus
           the value's line (1.125rem × 1.25), plus `py-1` and the border. Raising the font without
           raising both heights silently crops the SECOND line of every two-line label — and this
@@ -95,40 +95,40 @@ export function Stat({ label, value, tone, color, info }: {
 }
 
 /**
- * THE STAT TILES ABOVE EVERY LONG EQUITY CHART — the book's figure and, beside it, THE SAME FIGURE
- * FOR THE BENCHMARK.
+ * The stat tiles above every long equity chart — the book's figure and, beside it, THE SAME FIGURE
+ * For the benchmark.
  *
- * ⚠⚠ THE BENCHMARK TILE IS NOT A SECOND CALCULATION, IT IS THE SAME ONE OVER THE OTHER LINE. That
+ *  The benchmark tile is not a second calculation, it is the same one over the other line. That
  * is the whole design, and it is the same argument `benchSeries` makes about the lines themselves:
  * a chart with two series on one axis is only honest if both were computed identically, and the
  * surest way to guarantee that is for there to be exactly one computation. `tileStats` runs twice,
  * over two maps. There is no "benchmark average" anywhere in this codebase to drift from the
  * portfolio's.
  *
- * ⚠⚠ AND BOTH SIDES ARE MEASURED OVER THE SPAN THE TWO LINES SHARE — see the ⚠⚠ block above
+ *  And both sides are measured over the span the two lines share — see the  block above
  * `sharedSpan`. Two tiles side by side are a subtraction waiting to happen; over different windows
  * that subtraction means nothing and nothing on screen would say so.
  *
- * ⚠ THE COLOUR IS THE LINE'S, AND THE LABEL SAYS IT TOO. Green is the benchmark on every chart in
+ *  The colour is the line's, and the label says it too. Green is the benchmark on every chart in
  * this family without exception (`benchSeries`' palette note), so the tile is tied to its line by
  * ink — but the tiles WRAP at this card width, so position cannot be relied on to pair them, and
  * colour alone is not an encoding this repo accepts. Hence `Avg · AEX`: the label carries it.
  *
- * ⚠ `Stat` MOVED HERE FROM `MetricGrowthCard` AND IS RE-EXPORTED FROM THERE. Thirteen cards import
+ *  `Stat` MOVED HERE FROM `MetricGrowthCard` AND IS RE-EXPORTED FROM THERE. Thirteen cards import
  * it from that file and always have; it had to move because the row below builds tiles and
  * `MetricGrowthCard` builds this row, which was an import cycle. The re-export is what keeps those
  * thirteen call sites untouched — see the note on it there.
  */
 
 /** Both lines' figures over the one window they share, plus whether that window took anything off
- *  the book's own line. ⚠ COMPUTED ONCE PER CARD AND PASSED DOWN, because several cards also draw
+ *  the book's own line.  COMPUTED ONCE PER CARD AND PASSED DOWN, because several cards also draw
  *  their average as a `ReferenceLine` — a second `tileStats` call for the line under the tile is
  *  how a card comes to plot a mean it does not print. */
 export type PairedStats = {
   span: Span | null; own: TileStats; bench: TileStats | null; narrowed: boolean;
 };
 
-/** ⚠ THE ONE WINDOW RULE FOR THE WHOLE TAB — the growth cards call this too, for a fit and a
+/**  THE ONE WINDOW RULE FOR THE WHOLE TAB — the growth cards call this too, for a fit and a
  *  point-to-point rate rather than a mean. Pure; see `windowStats` for the reasoning. */
 export function pairedSpan(
   own: ReadonlyMap<number, number | null>, bench?: ReadonlyMap<number, number | null> | null,
@@ -137,7 +137,7 @@ export function pairedSpan(
   return {
     span,
     own: tileStats(own, span),
-    // ⚠⚠ NO SHARED SPAN MEANS NO BENCHMARK TILE, NOT A TILE OVER THE INDEX'S OWN YEARS. A null
+    //  No shared span means no benchmark tile, not a tile over the index's own years. A null
     // span has two causes and they must not be conflated: no benchmark selected (nothing to draw),
     // and a benchmark that overlaps this line in NOTHING. In the second case both sides would fall
     // back to their own full histories — two figures from two disjoint periods, printed as a pair,
@@ -148,7 +148,7 @@ export function pairedSpan(
   };
 }
 
-/** `Avg` → `Avg · AEX`. ⚠ ONE SEPARATOR, DEFINED ONCE — the tile labels are uppercased by `Stat`'s
+/** `Avg` → `Avg · AEX`.  ONE SEPARATOR, DEFINED ONCE — the tile labels are uppercased by `Stat`'s
  *  own styling and clamp to two lines, so a long index or company name wraps rather than truncating
  *  the word that says WHICH statistic it is. */
 export const benchTileLabel = (base: string, label: string | null | undefined) =>
@@ -164,7 +164,7 @@ export function spanText(span: Span): string {
 /**
  * The little line beside a narrowed tile row, naming the window both figures were measured over.
  *
- * ⚠⚠ IT IS THE ONLY THING THAT SAYS THE TILES MOVED. Selecting a benchmark can shorten the span the
+ *  It is the only thing that says the tiles moved. Selecting a benchmark can shorten the span the
  * figures cover — that is deliberate and it is what makes them comparable — but a number that
  * changes because of an unrelated control, silently, is indistinguishable from a bug. Rendered ONLY
  * when the span actually took something off the book's own line, so the common case (both lines
@@ -172,7 +172,7 @@ export function spanText(span: Span): string {
  */
 export function SpanNote({ span, narrowed, benchLabel }: {
   span: Span | null;
-  /** ⚠ PASSED IN, NOT RE-DERIVED. Only the caller knows which series the tiles are ABOUT — the
+  /**  PASSED IN, NOT RE-DERIVED. Only the caller knows which series the tiles are ABOUT — the
    *  growth cards clip a point array, the ratio cards a map — and asking this component to work it
    *  out would mean it guessing at a series it was never handed. */
   narrowed: boolean;
@@ -180,7 +180,7 @@ export function SpanNote({ span, narrowed, benchLabel }: {
 }) {
   if (!span || !narrowed) return null;
   return (
-    // ⚠ `basis-full` PUTS IT ON ITS OWN LINE. The tiles are `flex-1 basis-0` and share what
+    //  `basis-full` PUTS IT ON ITS OWN LINE. The tiles are `flex-1 basis-0` and share what
     // the row has left, so a note sitting among them would take its content width off the top
     // and squeeze four tiles into the remainder — the note explaining a narrowing would have
     // caused one.
@@ -197,7 +197,7 @@ export function SpanNote({ span, narrowed, benchLabel }: {
 /**
  * `Avg` + `Latest` for a RATIO card, book and benchmark — the tile row ten cards on this tab share.
  *
- * ⚠ TEN CARDS, ONE ROW COMPONENT, BECAUSE THEY WERE TEN COPIES OF THE SAME SIX LINES. Each one
+ *  Ten cards, one row component, because they were ten copies of the same six lines. Each one
  * computed `meanOf([...byYr.values()])` and a `Math.max(-Infinity, ...keys())` latest of its own;
  * adding a benchmark tile to each by hand would have been ten more chances for one card to average
  * over a window its neighbour does not.
@@ -221,7 +221,7 @@ export function RatioStats({
   const b = stats.bench;
   return (
     <div className="flex flex-wrap gap-2">
-      {/* ⚠ PAIRED ADJACENTLY — own, then its benchmark twin. At this card width four tiles wrap to
+      {/*  PAIRED ADJACENTLY — own, then its benchmark twin. At this card width four tiles wrap to
           two rows, so ordering them own/own/bench/bench would split each pair across the break and
           leave the reader matching by colour across a line. */}
       <Stat label={avgLabel} value={fmt(stats.own.avg)} color={chartTheme.accent} info={avgInfo} />

@@ -18,7 +18,7 @@ describe('trimStop', () => {
   });
 
   it('leaves interior periods alone', () => {
-    // ⚠ A `how` is often several sentences, and a formula is full of them.
+    //  A `how` is often several sentences, and a formula is full of them.
     expect(trimStop("Now ÷ Start − 1 = €1.50 ÷ €1.00 − 1. Priced rows only."))
       .toBe("Now ÷ Start − 1 = €1.50 ÷ €1.00 − 1. Priced rows only");
   });
@@ -31,7 +31,7 @@ describe('trimStop', () => {
 
 
 /**
- * ⚠⚠ THE `copied` BRANCH SUPPLIES ITS OWN PERIOD TOO, SINCE 2026-09-01. It used to ignore `how`
+ *  THE `copied` BRANCH SUPPLIES ITS OWN PERIOD TOO, SINCE 2026-09-01. It used to ignore `how`
  * entirely — a copied figure has no arithmetic to explain — which left nowhere to put the caveat a
  * reader still needs about a number we did NOT compute, and the only way to surface one was to
  * mis-tag the field as a formula. The Return tile did exactly that: "A formula on the data: AIRS's

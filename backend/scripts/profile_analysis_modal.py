@@ -5,7 +5,7 @@ milliseconds to the browser. What it has never reported is the SHAPE of the work
 how many PostgREST round trips, against which tables, how many of those are byte-identical repeats
 the per-request memo already collapses, and how many `COPY` transfers ride alongside them.
 
-⚠ WHY BOTH NUMBERS MATTER, AND WHY THE LOCAL TIMING ALONE MISLEADS. Local Postgres answers in
+ WHY BOTH NUMBERS MATTER, AND WHY THE LOCAL TIMING ALONE MISLEADS. Local Postgres answers in
 single-digit milliseconds; production is eu-west-3 with the backend elsewhere, so a round trip is
 ~40-80ms of pure latency. A phase that is 200ms locally over 30 requests is ~2s in production, and
 a phase that is 800ms locally over 2 requests is still ~900ms there. **Request COUNT is the
@@ -91,7 +91,7 @@ def install_probes():
     return uninstall
 
 
-# ⚠ FUNCTION-LEVEL TIMING, BECAUSE A PHASE IS NOT AN ANSWER. `returns_and_benchmark` is one
+#  Function-level timing, because a phase is not an answer. `returns_and_benchmark` is one
 # reported phase and TWO unrelated loads inside it (this portfolio's own performance, and the whole
 # benchmark index) — a 2s phase says nothing about which. Each name below is wrapped where it is
 # DEFINED, so the count is calls-per-request and the time is inclusive of everything it calls.
@@ -101,7 +101,7 @@ CALLS: dict[str, list] = {}
 # late `from x import y` inside a function still reaches the wrapper.
 _TARGETS = [
     ("routers._airs_portfolio_perf", "compute_portfolio_performance"),
-    # ⚠ PATCHED AT EVERY BINDING, NOT ONLY THE DEFINITION. `_airs_portfolio_analysis` does
+    #  Patched at every binding, not only the definition. `_airs_portfolio_analysis` does
     # `from routers._asset_benchmark import index_returns` at module level, so the name it calls is
     # its OWN — wrapping only the source module leaves the hottest loader invisible, which is
     # exactly how it went unmeasured in the first pass.
@@ -127,7 +127,7 @@ _TARGETS = [
 
 
 # Leg-cache hits/misses by key prefix, so "the cache is warm" is a measurement rather than an
-# assumption. ⚠ A CROSS-PORTFOLIO CACHE IS ONLY WORTH WHAT THE NEXT PORTFOLIO SHARES, and that is
+# assumption.  A CROSS-PORTFOLIO CACHE IS ONLY WORTH WHAT THE NEXT PORTFOLIO SHARES, and that is
 # exactly what these counters answer: the benchmark legs are shared by every book, a holding's risk
 # row only by books that hold it.
 LEGS: dict[str, list] = collections.defaultdict(lambda: [0, 0])   # prefix -> [hit, miss]
@@ -319,7 +319,7 @@ def pick_portfolio(explicit: int | None, show_list: bool) -> int:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--id", default=None,
-                    help="model portfolio id, or a comma-separated list. ⚠ SEVERAL IDS IN ONE "
+                    help="model portfolio id, or a comma-separated list.  SEVERAL IDS IN ONE "
                          "PROCESS IS THE REALISTIC MEASUREMENT: the caches are cross-portfolio, "
                          "so profiling one id twice measures the best case and profiling one id "
                          "once measures a cold server. A reader opens books in turn.")
@@ -352,7 +352,7 @@ def main() -> None:
             for _v in CALLS.values():
                 _v.clear()
             LEGS.clear()
-            # ⚠ THE MEMO IS OPENED HERE, exactly as `compute_portfolio_analysis_async` opens it at
+            #  The memo is opened here, exactly as `compute_portfolio_analysis_async` opens it at
             # the request boundary. Profiling the bare sync function would count repeats the real
             # endpoint never makes and send the optimisation after a bug that does not exist.
             from common.read_cache import read_cache  # noqa: PLC0415

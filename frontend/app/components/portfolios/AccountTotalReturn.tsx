@@ -7,9 +7,9 @@ import type { AirsAccountReconciliation } from '../../../lib/types/api';
 import { useMgmtCopy } from '../management/managementCopy';
 
 /**
- * THE YEAR, BUILT FROM THE POSITIONS — held AND sold — and set against the book's own figure.
+ * The year, built from the positions — held AND sold — and set against the book's own figure.
  *
- * ⚠ THE TWO NUMBERS ALREADY ON THIS SCREEN DISAGREE, AND NOTHING SAID WHY. The positions table
+ *  The two numbers already on this screen disagree, and nothing said why. The positions table
  * reports a start-weighted return over what the book still HOLDS; the account row reports AIRS's
  * own `cumulatief_rendement`. Measured 2026-08-05 across 39 accounts, **23 disagree by more than
  * 1pp** — AITopSelectie +37.84% against +38.73%, BUS_FTS_BEPOFF_DYN by +3.27pp. Both are correct
@@ -22,16 +22,16 @@ import { useMgmtCopy } from '../management/managementCopy';
  *
  * and 387,293.79 / 1,000,000 = 38.7294%, against AIRS's own 38.729375%.
  *
- * ⚠ THE RESIDUAL IS THE PRODUCT, NOT A FOOTNOTE. A total assembled from three legs and never set
+ *  The residual is the product, not a footnote. A total assembled from three legs and never set
  * against the book's own is an assertion; set against it, it is a reconciliation. It is shown
  * every time, including when it is four cents.
  *
- * ⚠ EUROS ADD, PERCENTAGES DO NOT. Every line of the waterfall is a euro amount measured on the
+ *  Euros add, percentages do not. Every line of the waterfall is a euro amount measured on the
  * same basis; the two percentages are shown at the top and never subtracted into each other.
  * `gap_pp` is in POINTS for the same reason.
  */
 export default function AccountTotalReturn({ portefeuille }: { portefeuille: string }) {
-  // ⚠ THE COPY MODULE, NOT LITERALS — see `managementCopy`. A missing Dutch string is a
+  //  The copy module, not literals — see `managementCopy`. A missing Dutch string is a
   // compile error there, which is what keeps this panel from rendering half-translated.
   const t = useMgmtCopy().accountReturn;
   const [open, setOpen] = useState(false);
@@ -57,19 +57,19 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
     }
   }, [portefeuille]);
 
-  // ⚠ NULL IS NOT ZERO. No Transacties sheet cached means the realised leg is UNKNOWN, so there is
+  //  Null is not zero. No Transacties sheet cached means the realised leg is UNKNOWN, so there is
   // no total to show — and showing the held-only figure as "the total" would understate the year
   // by exactly the amount nobody had looked up.
   const needsTx = !!d && d.realised_ytd_eur == null && !d.realised_note;
 
-  // ⚠ AN INCOMPLETE ANSWER IS RE-FETCHED ON RE-OPEN, AND WITHOUT THIS THE PANEL CONTRADICTED
+  //  An incomplete answer is re-fetched on re-open, and without this the panel contradicted
   // ITSELF. It told the reader to load the Transactions above "then re-open this" — and re-opening
   // did nothing, because the first answer was already in state and the effect only fired when
   // there was none. Measured on Bustelberg Offensief: the transactions were sitting in the cache,
   // fully readable (+3.94%, reconciling to EUR 0.05), while this panel kept insisting they had not
   // been fetched. An instruction that does not work is worse than no instruction.
   //
-  // ⚠ ONLY ON THE OPEN TRANSITION, or this loops: `load` replaces `d`, which re-runs the effect,
+  //  Only on the open transition, or this loops: `load` replaces `d`, which re-runs the effect,
   // which would find it still incomplete and fetch again for ever. `wasOpen` makes the re-fetch a
   // one-shot per open. And only when INCOMPLETE — a finished reconciliation is not re-fetched just
   // because the reader collapsed and expanded it.
@@ -107,7 +107,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                 title={d.reconciles
                   ? `Reconciles with AIRS's own figure to €${Math.abs(d.residual_vs_book_eur ?? 0).toFixed(2)}.`
                   : `€${(d.residual_vs_book_eur ?? 0).toFixed(2)} of the book's result is not explained by its positions.`}>
-                {d.reconciles ? '✓' : '⚠'}
+                {d.reconciles ? '' : ''}
               </span>
             )}
           </span>
@@ -124,7 +124,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                 {t.needsTx}
                 <strong> {t.openTransactions}</strong>{' '}{t.needsTxTail}
               </p>
-              {/* ⚠ A CONTROL, NOT JUST AN INSTRUCTION. Re-opening now re-fetches too, but a reader
+              {/*  A CONTROL, NOT JUST AN INSTRUCTION. Re-opening now re-fetches too, but a reader
                   who has just loaded the transactions in the panel above should not have to
                   discover that by collapsing this one. */}
               <button type="button" disabled={loading} onClick={() => void load()}
@@ -168,7 +168,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                       {eur(d.book_result_eur)}
                     </td>
                   </tr>
-                  {/* ⚠ ALWAYS SHOWN, even at four cents. The check is the product. */}
+                  {/*  ALWAYS SHOWN, even at four cents. The check is the product. */}
                   <tr>
                     <td className="px-3 py-2 text-fg-muted">
                       Residual
@@ -191,7 +191,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                 tone={d.total_return_pct != null ? tone(d.total_return_pct) : 'text-fg-faint'}
                 note={d.return_basis === 'opening_capital'
                   ? `total result over the year's opening capital ${eur(d.book_start_eur)}`
-                  /* ⚠⚠ A RESULT OVER AN OPENING CAPITAL IS ONLY A RETURN WHEN NOTHING WAS PAID IN
+                  /*  A RESULT OVER AN OPENING CAPITAL IS ONLY A RETURN WHEN NOTHING WAS PAID IN
                      OR OUT. Refused rather than fudged — AIRS's own figure is flow-aware. */
                   : d.return_basis === 'flows'
                     ? `refused: ${eur(d.deposits_eur)} in / ${eur(d.withdrawals_eur)} out this year — read AIRS’s flow-aware figure instead`
@@ -202,7 +202,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
             </div>
           )}
 
-          {/* ⚠ NAMED, NOT ASSUMED HARMLESS. A transaction type nothing interprets is either a
+          {/*  NAMED, NOT ASSUMED HARMLESS. A transaction type nothing interprets is either a
               corporate action carrying no money or something new that belongs in the total, and
               only a visible count can ever tell the two apart. */}
           {d && Object.keys(d.unknown_transaction_types ?? {}).length > 0 && (
@@ -236,7 +236,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                     <tr key={l.fonds} className="hover:bg-overlay/[0.02]">
                       <td className="px-3 py-1.5 text-fg-soft">
                         {l.fonds}
-                        {/* ⚠ A SALE IS A REALISATION, NOT A CLOSURE. Most of these names are still
+                        {/*  A SALE IS A REALISATION, NOT A CLOSURE. Most of these names are still
                             held — they were trimmed. Only a name absent from the positions table
                             is genuinely out, and that is what this badge means. */}
                         {l.closed_out && (
@@ -245,7 +245,7 @@ export default function AccountTotalReturn({ portefeuille }: { portefeuille: str
                             closed
                           </span>
                         )}
-                        {/* ⚠ THE WHOLE REASON `Res. YtD` IS USED RATHER THAN proceeds − cost. */}
+                        {/*  THE WHOLE REASON `Res. YtD` IS USED RATHER THAN proceeds − cost. */}
                         {!!l.prior_year_eur && (
                           <span className="ml-2 text-[10px] text-warn-500"
                             title={`${eur(l.prior_year_eur)} of this gain was made in earlier years and is correctly NOT in this year's total.`}>
@@ -299,7 +299,7 @@ function Stat({ label, value, note, tone: t }: {
   );
 }
 
-/** ⚠ A DASH, NEVER A €0. "We could not compute this" and "it came to nothing" are different
+/**  A DASH, NEVER A €0. "We could not compute this" and "it came to nothing" are different
  *  facts, and on a reconciliation the second is a claim. */
 const eur = (v?: number | null) =>
   (v == null ? '—' : `€${v.toLocaleString('en-US', { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`);

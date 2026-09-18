@@ -9,43 +9,43 @@ WHY THIS MODULE EXISTS
     the first did in one.
 
     Measured on the Analyse modal (2026-08-11): `fx_rate` was **17 HTTP round trips and 13,617 of
-    the request's 22,416 rows** -- and ⚠ **14 of those 17 were the SAME query differing only by
+    the request's 22,416 rows** -- and  **14 of those 17 were the SAME query differing only by
     `offset`**. The benchmark side, on the identical table in the identical request, used 4 COPYs.
     Two implementations of one idea, one of them a generation behind, and nothing to make that
     visible.
 
-⚠ THE DUPLICATION WAS THE REAL BUG, NOT THE MISSING FAST PATH. Every rule below is a correctness
+ THE DUPLICATION WAS THE REAL BUG, NOT THE MISSING FAST PATH. Every rule below is a correctness
     rule with an incident behind it, and each one had to be right in two places at once. That is
     the arrangement that produced the silent-truncation bug in the first place. One definition.
 
 THE RULES, ALL OF THEM LOAD-BEARING
 
-⚠ ASK FOR THE **MAJOR** CURRENCY. `fx_rate` has `GBP`; it has never had `GBp`, because pence is a
+ ASK FOR THE **MAJOR** CURRENCY. `fx_rate` has `GBP`; it has never had `GBp`, because pence is a
     quoting convention and not a currency -- and 343 of our rows are quoted in it. Requesting the
     literal code returns zero rows and the holding reads as unpriceable with every bar present.
     Resolution is `asset_pipeline.fx.SUBUNIT`, shared, never re-derived; the DIVISOR is applied by
     each caller's `_rate`, not here, so there is one place for the pence rule and one for the map.
 
-⚠ THE READ MUST PAGE, AND TRUNCATION HERE IS INVISIBLE TWICE OVER. PostgREST silently caps a
+ THE READ MUST PAGE, AND TRUNCATION HERE IS INVISIBLE TWICE OVER. PostgREST silently caps a
     response at 1,000 rows (cloud) / 10,000 (local). A currency whose early rows are cut has no EUR
     series before the cut, so `_eur_series` drops every close without a rate on or before it, the
     holding has no mark at the anchor, it is classed unpriceable, it **silently leaves the basket**,
     and the return renormalises over what survived. No error, no gap -- a confident number computed
     over a different portfolio. Measured: TWD came back as 20 rows starting 2026-05-27 (real
     history 2014), so Taiwan Semiconductor -- 5% of AITopSelectie OFF FX, 6,606 bars, correctly
-    resolved -- vanished from its own book. ⚠ **The two caps differ tenfold, so each environment cut
+    resolved -- vanished from its own book.  **The two caps differ tenfold, so each environment cut
     different currencies and reported a different number off identical code**: 36.64% local vs
     44.14% production, and 49 of 56 models changed once paged.
 
-⚠ SORT ON A UNIQUE KEY -- `(rate_date, currency_code)`. Postgres promises nothing about tied rows
+ SORT ON A UNIQUE KEY -- `(rate_date, currency_code)`. Postgres promises nothing about tied rows
     across separate LIMIT/OFFSET queries, so a page boundary inside a tie serves a row twice or
     never.
 
-⚠ ADVANCE BY WHAT CAME BACK (`off += len(rows)`), and stop on an EMPTY page. "A short page is the
+ ADVANCE BY WHAT CAME BACK (`off += len(rows)`), and stop on an EMPTY page. "A short page is the
     last page" is only true while the server's cap is at least the page size -- which is precisely
     the assumption that failed. Correct under any cap, at the cost of one empty request per chunk.
 
-⚠ A FALSY RATE IS DROPPED, on both paths. Not because zero is implausible but because the rate is
+ A FALSY RATE IS DROPPED, on both paths. Not because zero is implausible but because the rate is
     the DENOMINATOR of every conversion (`eur = native / rate`), and dividing by it raises.
 """
 from __future__ import annotations
@@ -56,7 +56,7 @@ import logging
 
 from asset_pipeline.fx import SUBUNIT
 from common.pg import _db_url, _run_copy
-# ⚠ `deps.supabase` IS RESOLVED AT CALL TIME, NOT BOUND AT IMPORT. `from deps import
+#  `deps.supabase` IS RESOLVED AT CALL TIME, NOT BOUND AT IMPORT. `from deps import
 # supabase` captures the object once, so a test (or anything else) that swaps
 # `deps.supabase` afterwards cannot reach this module — and because this module is a
 # SHARED loader, the reads it performs used to live in the routers where the tests patch.
@@ -84,7 +84,7 @@ def _via_copy(major: list[str], start: str, end: str) -> FxRates | None:
     `major` is already resolved, so this takes no view on minor units -- that would be a second
     place for the pence rule to live.
 
-    ⚠ `None` ON ANY FAILURE, NEVER A PARTIAL DICT. A currency missing from this map has no EUR
+     `None` ON ANY FAILURE, NEVER A PARTIAL DICT. A currency missing from this map has no EUR
     series, so its holdings silently leave the basket and the weights renormalise -- the exact
     failure described above. Falling back to the pager is slow; returning half the currencies
     would be wrong AND would look like a number.

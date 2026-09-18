@@ -1,11 +1,11 @@
 """ρ as a risk measure, and the identity that ties it to the tracking error.
 
-⚠⚠ THE TEST THAT MATTERS IS `σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ`. The Risk panel shows the active volatility
+ THE TEST THAT MATTERS IS `σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ`. The Risk panel shows the active volatility
 measured directly from the active returns, and beside it the same figure rebuilt from ρ. That is a
 claim the screen makes, so it is a claim a test has to hold to — and it only holds while both views
 read the SAME series, which is why `build_paired_series` is shared rather than duplicated.
 
-⚠ NOTHING HERE TOUCHES ATTRIBUTION, deliberately. Correlation does not appear in a Brinson
+ NOTHING HERE TOUCHES ATTRIBUTION, deliberately. Correlation does not appear in a Brinson
 decomposition and does not sum to the active return; the two are separate panels precisely so that
 no test ever needs to reconcile them.
 """
@@ -65,21 +65,21 @@ class TestTheIdentityThatLinksItToTrackingError:
     def test_the_variance_identity_closes(self, book, freq):
         got = C.compute_risk_correlation(book, "ACWI", frequency=freq)
         assert got["available"], got.get("reason")
-        # ⚠ FLOATING-POINT NOISE OR NOTHING. Anything a reader could see on screen means the two
+        #  Floating-point noise or nothing. Anything a reader could see on screen means the two
         # series stopped being the same two series — which is a bug, not a market fact, and the
         # panel says so in those words.
         assert got["identity_gap_pp"] == pytest.approx(0.0, abs=1e-9)
 
     @pytest.mark.parametrize("freq", ["daily", "weekly", "monthly"])
     def test_the_active_vol_IS_the_tracking_error_view_figure(self, book, freq):
-        """⚠ THE TWO VIEWS SIT ONE CLICK APART. A reader who switches and finds 14.09% become
+        """ THE TWO VIEWS SIT ONE CLICK APART. A reader who switches and finds 14.09% become
         14.11% has learned that one of them is wrong and no way to tell which."""
         corr = C.compute_risk_correlation(book, "ACWI", frequency=freq)
         te = T.compute_tracking_error(book, "ACWI", frequency=freq)
         assert corr["active_vol_pct"] == pytest.approx(te["tracking_error_pct"], abs=1e-9)
 
     def test_r_squared_is_the_square_of_the_rho_on_screen(self, book):
-        """⚠ ρ IS RETURNED UNROUNDED for exactly this reason — rounding it in the payload while
+        """ ρ IS RETURNED UNROUNDED for exactly this reason — rounding it in the payload while
         squaring the full-precision value puts a ρ on screen that does not square to its own R²."""
         got = C.compute_risk_correlation(book, "ACWI")
         assert got["r_squared"] == pytest.approx(got["benchmark_corr"] ** 2, abs=1e-12)
@@ -108,7 +108,7 @@ class TestTheMatrix:
                 assert m[i][j] == pytest.approx(m[j][i], abs=1e-9)
 
     def test_it_is_ordered_by_weight_not_by_isin(self, book):
-        """⚠ A MATRIX ORDERED BY IDENTIFIER PUTS THE TWO POSITIONS THAT MATTER AT OPPOSITE CORNERS.
+        """ A MATRIX ORDERED BY IDENTIFIER PUTS THE TWO POSITIONS THAT MATTER AT OPPOSITE CORNERS.
         The reader is looking for concentration, so the largest holdings lead."""
         heavy = [dict(h, weight_pct=w) for h, w in zip(book, [10.0, 70.0, 20.0])]
         assert C.compute_risk_correlation(heavy, "ACWI")["labels"] == ["N1", "N2", "N0"]
@@ -125,7 +125,7 @@ class TestTheMatrix:
         assert got["least_correlated"][0]["rho"] <= got["most_correlated"][0]["rho"]
 
     def test_a_thin_pair_is_null_rather_than_faintly_coloured(self):
-        """⚠ OVER TEN WEEKS A CORRELATION IS NOISE WITH A SIGN — its standard error is ~1/√n, so
+        """ OVER TEN WEEKS A CORRELATION IS NOISE WITH A SIGN — its standard error is ~1/√n, so
         0.30 at n=10 is indistinguishable from 0.0 and from 0.6 alike. Rendered as a tinted cell it
         looks exactly as authoritative as one measured over five years."""
         assert C.MIN_PAIR_OBS >= 30

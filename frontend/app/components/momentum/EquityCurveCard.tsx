@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { memo, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
@@ -531,7 +531,7 @@ function EquityCurveCardInner({ result, loadedRunId, savedRuns, activeStrategyLa
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
               </svg>
             ) : (
-              <span aria-hidden className="shrink-0">{benchStatus.tone === 'ok' ? '✓' : '⚠'}</span>
+              <span aria-hidden className="shrink-0">{benchStatus.tone === 'ok' ? '' : ''}</span>
             )}
             <span>{benchStatus.msg}</span>
           </div>

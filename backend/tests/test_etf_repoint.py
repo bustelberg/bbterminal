@@ -163,7 +163,7 @@ class TestTheConstructedSymbolCannotReachEveryVenue:
     """
 
     def test_yahoo_isin_is_a_candidate_source_never_an_answer(self):
-        """⚠ THE LOAD-BEARING ONE. Yahoo resolves an ISIN to *a* listing, not the *liquid* one,
+        """ THE LOAD-BEARING ONE. Yahoo resolves an ISIN to *a* listing, not the *liquid* one,
         and its pick is routinely the wrong end of that — it answers Alphabet's ISIN with
         `1GOOGL.MI` (Milan) and this momentum ETF with the thinner London line:
 

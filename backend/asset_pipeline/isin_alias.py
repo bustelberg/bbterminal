@@ -5,21 +5,21 @@ row's instrument onto the aliased execution row — the same `analysis_id` (so l
 price series, not a copy of it), the same Yahoo symbol, currency, exchange and listing country, and
 the same GuruFocus listing.
 
-⚠ THE SAME `analysis_id`, NOT A DUPLICATE SERIES. `asset_execution` is many-to-one on
+ THE SAME `analysis_id`, NOT A DUPLICATE SERIES. `asset_execution` is many-to-one on
     `asset_analysis` by design — one instrument, several venues that trade it. Pointing the alias
     at the canonical's analysis row means there is ONE series and it cannot drift; copying the
     symbol alone would leave two rows that agree today and diverge at the next price refresh.
 
-⚠ RE-APPLIED AFTER EVERY RESOLUTION, OR IT IS NOT AN OVERRIDE. `fast_resolve`, the repointers and
+ RE-APPLIED AFTER EVERY RESOLUTION, OR IT IS NOT AN OVERRIDE. `fast_resolve`, the repointers and
     the queue worker all write `asset_execution` per ISIN and would each hand the aliased ISIN a
     listing of its own again. `apply_aliases()` runs after them and puts it back. Idempotent — a
     no-op once the row already matches.
 
-⚠ IT DOES NOT TOUCH THE CANONICAL ROW. The alias is one-directional on purpose: the canonical is
+ IT DOES NOT TOUCH THE CANONICAL ROW. The alias is one-directional on purpose: the canonical is
     an ordinary instrument that other things depend on, and an override that edited both ends would
     make "which one is authoritative" unanswerable.
 
-⚠ THE OPENFIGI IDENTITY STAYS THE ALIAS'S OWN. `openfigi_figi`/`_name`/`_type` describe the
+ THE OPENFIGI IDENTITY STAYS THE ALIAS'S OWN. `openfigi_figi`/`_name`/`_type` describe the
     SECURITY, and the two are genuinely different securities (`Depositary Receipt` vs
     `Common Stock`). Overwriting them would erase the only record that this row is an ADR, which is
     exactly what a reader needs to interpret the shared price.
@@ -85,7 +85,7 @@ def apply_aliases(only_isin: str | None = None) -> int:
             supabase.table("gurufocus_listing").upsert({**row, "isin": isin},
                                                        on_conflict="isin").execute()
         else:
-            # ⚠ DELETED, NOT LEFT BEHIND. The canonical has no GuruFocus listing, so the alias
+            #  Deleted, not left behind. The canonical has no GuruFocus listing, so the alias
             # must not keep its own — that is the exact drift this function exists to prevent.
             supabase.table("gurufocus_listing").delete().eq("isin", isin).execute()
     return changed
@@ -94,7 +94,7 @@ def apply_aliases(only_isin: str | None = None) -> int:
 def canonical(isin: str | None) -> str | None:
     """The ISIN whose instrument actually serves `isin` — itself when it is not aliased.
 
-    ⚠ EVERY LOOKUP KEYED ON AN ISIN NEEDS THIS, NOT JUST THE PRICE PATH. An alias points
+     EVERY LOOKUP KEYED ON AN ISIN NEEDS THIS, NOT JUST THE PRICE PATH. An alias points
     `asset_execution` at the canonical's instrument, but `company`, `gurufocus_listing` and the
     earnings metrics are all still keyed on the RAW ISIN — so an aliased row reads as having no
     company, no fundamentals and no coverage while its canonical has all three. Measured: the TSMC

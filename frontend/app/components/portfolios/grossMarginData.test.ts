@@ -14,14 +14,14 @@ describe('grossMarginOf', () => {
     expect(grossMarginOf(195201, 416161)).toBeCloseTo(46.91, 2);    // Apple 2025, published 46.905
   });
 
-  it('⚠ a missing gross profit is NULL, never 0 — a bank has no such line', () => {
+  it(' a missing gross profit is NULL, never 0 — a bank has no such line', () => {
     // GuruFocus's 'B' template has no cost of goods sold, so the key is absent for JPMorgan. The
     // concept does not apply; a 0 would draw a company selling at cost, which is a claim.
     expect(grossMarginOf(null, 100000)).toBeNull();
     expect(grossMarginOf(undefined, 100000)).toBeNull();
   });
 
-  it('⚠ KEEPS a negative gross profit — selling below cost is a real observation', () => {
+  it(' KEEPS a negative gross profit — selling below cost is a real observation', () => {
     expect(grossMarginOf(-20, 100)).toBeCloseTo(-20);
   });
 
@@ -34,7 +34,7 @@ describe('grossMarginOf', () => {
 
 describe('grossMarginByYear', () => {
   it('weights each company\'s RATIO, never sums the amounts', () => {
-    // ⚠ The amounts are in each company's own reporting currency; adding them would be adding
+    //  The amounts are in each company's own reporting currency; adding them would be adding
     // euros to yen. A ratio is currency-free, so the average is safe.
     const rows = [
       row({ weight_pct: 75, gross_profit: { 2025: 50 }, revenue: { 2025: 100 } }),   // 50%
@@ -53,11 +53,11 @@ describe('grossMarginByYear', () => {
     expect(grossMarginByYear(rows).get(2025)).toBeCloseTo(40, 6);   // NOT 0.9 * 40 = 36
   });
 
-  it('⚠ refuses the year entirely once too much of the book has no gross margin', () => {
+  it(' refuses the year entirely once too much of the book has no gross margin', () => {
     // `MIN_YEAR_COVERAGE_PCT` is the shared floor every card on this tab honours. A book that is
     // mostly banks would otherwise print a confident "gross margin" describing the rest — the same
     // renormalise-over-what-we-can-price fabrication the AIRS coverage floor guards.
-    // ⚠ 40/60, NOT 50/50: the floor moved to 50 (2026-08-12) and an even split now clears it by
+    //  40/60, NOT 50/50: the floor moved to 50 (2026-08-12) and an even split now clears it by
     // design, so the refusal has to be tested below half.
     const rows = [
       row({ weight_pct: 40, gross_profit: { 2025: 40 }, revenue: { 2025: 100 } }),

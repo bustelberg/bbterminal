@@ -5,7 +5,7 @@ import {
   type ReverseDcfAssumptions, type ReverseDcfInputs,
 } from './reverseDcf';
 
-// ⚠ THE BASELINE LIVES HERE NOW. It was `REVERSE_DCF_DEFAULTS`, exported from the module — but
+//  The baseline lives here now. It was `REVERSE_DCF_DEFAULTS`, exported from the module — but
 // nothing in production ever read it, so it was a test fixture wearing a module export's clothes
 // and the dead-code sweep (2026-08-03) removed it. Assembled from the module's own constants
 // rather than hard-coded, so a change to the forecast horizon or terminal growth still reaches
@@ -21,7 +21,7 @@ const INPUTS: ReverseDcfInputs = {
 };
 
 describe('modelValue', () => {
-  it('⚠ handles g = r, where the closed form is 0/0', () => {
+  it(' handles g = r, where the closed form is 0/0', () => {
     // Every discounted term is fcf/(1+r), so the explicit leg is n·fcf/(1+r). Without the limit the
     // solver hits ±Infinity mid-bracket and the sign test decides on a non-number.
     const atLimit = modelValue(1000, 0.10, 0.10, 10, 0.03) as number;
@@ -31,7 +31,7 @@ describe('modelValue', () => {
   });
 
   it('is continuous either side of that band', () => {
-    // ⚠ RELATIVE, not absolute: these are values in the tens of thousands, and the closed form
+    //  RELATIVE, not absolute: these are values in the tens of thousands, and the closed form
     // genuinely moves ~1.5 per 1e-5 of g. An absolute tolerance tests the units, not the continuity.
     const at = modelValue(1000, 0.10, 0.10, 10, 0.03) as number;
     for (const d of [-1e-5, 1e-5]) {
@@ -74,7 +74,7 @@ describe('solveGrowth — the round trip', () => {
     }
   });
 
-  it('⚠ SOLVES ABOVE THE DISCOUNT RATE — a 10-year annuity is not a perpetuity', () => {
+  it(' SOLVES ABOVE THE DISCOUNT RATE — a 10-year annuity is not a perpetuity', () => {
     // The bracket used to stop at r, on the perpetuity rule that g < r. Over a FINITE horizon the
     // sum converges for any g: at g > r the closed form's numerator and denominator both go
     // negative and it stays correct. Capping there made every richly-priced company read "out of
@@ -95,7 +95,7 @@ describe('solveGrowth — the round trip', () => {
 });
 
 describe('solveGrowth — when there is no answer', () => {
-  it('⚠ returns null rather than the bracket end', () => {
+  it(' returns null rather than the bracket end', () => {
     // A price beyond even 1000%/yr for a decade. Clamping to the ceiling would render as a real
     // figure — the one wrong answer worse than "out of range".
     const absurd = (modelValue(9500, 10.0, 0.10, 10, 0.03) as number) * 10;
@@ -122,7 +122,7 @@ describe('solveGrowth — when there is no answer', () => {
 
 describe('impliedGrowth', () => {
   it('solves against the market cap the inputs imply', () => {
-    // ⚠ RELATIVE: the solver converges to 1e-8 on g, which on a six-figure valuation is ~0.0015
+    //  RELATIVE: the solver converges to 1e-8 on g, which on a six-figure valuation is ~0.0015
     // absolute. An absolute tolerance here would be testing the units, not the solve.
     const g = impliedGrowth(INPUTS, A)[0].impliedGrowth as number;
     const v = modelValue(9500, g, 0.10, 10, 0.03) as number;
@@ -136,7 +136,7 @@ describe('impliedGrowth', () => {
     for (let i = 1; i < gs.length; i++) expect(gs[i]).toBeGreaterThan(gs[i - 1]);
   });
 
-  it('⚠ a negative implied growth is a real answer and is never clamped', () => {
+  it(' a negative implied growth is a real answer and is never clamped', () => {
     // The market pricing in decline. Clamping at zero would hide exactly the case worth seeing.
     expect(impliedGrowth({ ...INPUTS, price: 20 }, A)[0].impliedGrowth as number).toBeLessThan(0);
   });
@@ -167,7 +167,7 @@ describe('defaultDiscountRate', () => {
     expect(defaultDiscountRate(0.082)).toBeCloseTo(0.082, 9);
   });
 
-  it('⚠ falls back when the WACC is at or near the perpetuity growth', () => {
+  it(' falls back when the WACC is at or near the perpetuity growth', () => {
     // The Gordon leg divides by (r − gp): a 2.5% WACC against 3% terminal growth is a NEGATIVE
     // denominator and a negative valuation, and the panel would read "no solution" for a company
     // whose only sin is a low cost of capital.
@@ -203,7 +203,7 @@ describe('the target market cap can be overridden', () => {
 });
 
 describe('the ceiling does not refuse answerable questions', () => {
-  it('⚠ solves a market cap that the old 100%/yr cap turned into "no solution"', () => {
+  it(' solves a market cap that the old 100%/yr cap turned into "no solution"', () => {
     // Measured: ~3,643M of free cash flow behind a multi-trillion market cap. At the old bound the
     // panel said "no answer"; the honest reply is a figure so large it settles the question.
     const g = solveGrowth(3643, 15_000_000, 0.10, 10, 0.03);

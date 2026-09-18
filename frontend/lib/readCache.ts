@@ -6,19 +6,19 @@ import { trace } from './debugTrace';
  * An in-memory cache for the FUNDAMENTAL READS — the requests behind the Fundamental modal's tabs
  * (Long Equity · Tables · Quick Valuation · Deep Valuation) and their drill-downs.
  *
- * WHY IT EXISTS. Switching tabs inside one open modal was already free (`OwnerEarningsModal` keeps
+ * Why it exists. Switching tabs inside one open modal was already free (`OwnerEarningsModal` keeps
  * a visited tab MOUNTED), but everything else about those screens re-paid full price: closing the
  * modal and opening the same holding again, opening a drill-down whose card had just fetched the
  * identical body, flipping the cadence to quarterly and back, ticking a benchmark off and on. Each
  * of those is the same request with the same answer, and the Long Equity tab alone is ~14 of them.
  *
- * ⚠ IT IS AN ALLOWLIST, NEVER "CACHE EVERY GET". Half this app is a live dashboard — usage badges,
+ *  It is an allowlist, never "CACHE EVERY GET". Half this app is a live dashboard — usage badges,
  * run status, price coverage, the schedule stream — and serving those from memory would show a
  * finished job as still running. Only the paths below are cached, all of them derived from
  * `metric_data`, which changes ONLY by an ingest. Missing a new read endpoint here costs a
  * speed-up; it can never cost correctness. Adding a live one would.
  *
- * ⚠ EVERY SUCCESSFUL WRITE DROPS THE WHOLE CACHE, and that rule lives in `apiFetch` rather than at
+ *  Every successful write drops the whole cache, and that rule lives in `apiFetch` rather than at
  * the ingest sites. There are ~15 "Fetch financials" buttons across the cards and drill-downs, each
  * with its own reload path; a cache that depends on fifteen callers remembering to invalidate it is
  * a cache that will serve a chart saying "No revenue ingested" straight after the ingest that
@@ -38,7 +38,7 @@ export type CachedRead = {
 /**
  * How long an answer is trusted.
  *
- * ⚠ THE BACKSTOP, NOT THE MECHANISM. Invalidation is what keeps this correct; the TTL only bounds
+ *  The backstop, not the mechanism. Invalidation is what keeps this correct; the TTL only bounds
  * how long a read can lag an ingest that happened somewhere this tab cannot see (the scheduler, a
  * second browser tab, a colleague). Ten minutes is longer than a modal session and shorter than
  * anyone's memory of what they were looking at.
@@ -48,14 +48,14 @@ export const READ_TTL_MS = 10 * 60_000;
 /**
  * The memory ceiling, over the stored bodies.
  *
- * ⚠ THESE PAYLOADS ARE NOT SMALL — one company's `/metrics` is 12,375 rows for ASML — so an
+ *  These payloads are not small — one company's `/metrics` is 12,375 rows for ASML — so an
  * unbounded map here is a tab that grows for as long as it is open. Eviction is oldest-first, which
  * is right for this access pattern: the reader moves through holdings and rarely comes back past
  * the last few.
  */
 export const READ_MAX_BYTES = 32 * 1024 * 1024;
 
-/** Statuses worth keeping. ⚠ A 404 IS AN ANSWER HERE — "this ISIN has no company record", which is
+/** Statuses worth keeping.  A 404 IS AN ANSWER HERE — "this ISIN has no company record", which is
  *  true for ~87% of the grid and is what the modal renders as its empty state. A 5xx or a 401 is
  *  NOT: those are transient, and remembering one would keep a page broken after the cause is gone. */
 const STORABLE = new Set([200, 404]);
@@ -67,7 +67,7 @@ const CACHEABLE: RegExp[] = [
   /^\/api\/earnings\/by-isin\/[^/]+\/growth-estimates$/,
   // The eleven derived Long Equity cards + their drill-down modals, which POST the identical body.
   /^\/api\/earnings\/[a-z0-9-]+-inputs$/,
-  // ⚠ THE CAP TABLE THE TEN BENCHMARK CARDS NOW SHARE, and it does NOT match the `-inputs` line
+  //  The cap table the ten benchmark cards now share, and it does NOT match the `-inputs` line
   // above — it needs its own entry. Ten cards ask for it in the same instant, so what actually
   // saves the nine extra requests is `apiFetch` storing the in-flight PROMISE; being here is what
   // keeps re-opening the modal free. A miss here is not a wrong answer, it is ten identical
@@ -81,24 +81,24 @@ const CACHEABLE: RegExp[] = [
   /^\/api\/asset-pipeline\/fundamentals\/isin\/[^/]+$/,
 
   /**
-   * THE ANALYSE MODAL'S RISK AND ATTRIBUTION PANELS.
+   * The analyse modal's risk and attribution panels.
    *
-   * ⚠⚠ EVERY ONE OF THESE IS RE-PAID ON EVERY OPEN, and the panels are opened, read, closed and
+   *  Every one of these is re-paid on every open, and the panels are opened, read, closed and
    * reopened constantly — each view unmounts on close (deliberately: mounting the tracking-error
    * side costs a five-year daily price load for every holding), so its state goes with it and
    * the next open recomputes an answer that cannot have changed. Switching cadence weekly →
    * daily → weekly pays three times for two answers.
    *
-   * ⚠ SAFE TO CACHE FOR THE SAME REASON THE FUNDAMENTAL READS ARE: each is a pure function of
+   *  Safe to cache for the same reason the fundamental reads are: each is a pure function of
    * the posted holdings, the benchmark and the cadence over `asset_price` and `asset_analysis`,
    * both of which move only by an ingest or a refresh — and a refresh is a write, so it clears
    * everything here on its way through `apiFetch`. None of them is a live figure.
    *
-   * ⚠ THE BODY IS THE KEY, NOT THE URL. All six POST the holdings list and differ only by it
+   *  The body is the key, not the URL. All six POST the holdings list and differ only by it
    * plus a query string, which is exactly the case `readKey` already folds the body in for.
    */
   /^\/api\/airs\/portfolio\/(active-share|tracking-error|risk-correlation|volatility|drawdown|concentration)$/,
-  // ⚠ A PLAIN GET, and its four selectors (benchmark, window, axis, source) live in the query —
+  //  A plain get, and its four selectors (benchmark, window, axis, source) live in the query —
   // so flipping the axis and back is two requests for one answer without this.
   /^\/api\/airs\/model-portfolios\/\d+\/attribution$/,
 ];
@@ -106,14 +106,14 @@ const CACHEABLE: RegExp[] = [
 /**
  * POSTs that are reads but cannot be cached — the SSE streams.
  *
- * ⚠ WITHOUT THIS THE BLEND WOULD WIPE THE CACHE EVERY TIME IT RAN. `fundamental-blend-metrics/
+ *  Without this the blend would wipe the cache every time it ran. `fundamental-blend-metrics/
  * stream` is a POST, so the "any write invalidates" rule would fire on the single most expensive
  * read on the page, clearing the twelve entries the tab beside it had just filled. A stream is
  * never stored (the body is consumed incrementally by `runSSE`), only exempted.
  */
 const NON_MUTATING: RegExp[] = [
   /^\/api\/earnings\/fundamental-blend-metrics\/stream$/,
-  // ⚠ THE ANALYSE MODAL'S OWN READ, AND IT IS THE SCREEN THE FUNDAMENTAL MODAL OPENS FROM. An
+  //  The analyse modal's own read, and it is the screen the fundamental modal opens from. An
   // ad-hoc basket cannot be named in a URL, so its analysis is POSTed (the model-portfolio twin is
   // a plain GET) — and it is re-POSTed on every benchmark switch. Treated as a write, the parent
   // screen would wipe the child's cache each time the reader touched it. Not cached either: it is
@@ -131,7 +131,7 @@ export function pathOf(url: string): string {
   }
 }
 
-/** Can this request be served from, and stored in, the cache? ⚠ A non-string body (FormData, a
+/** Can this request be served from, and stored in, the cache?  A non-string body (FormData, a
  *  Blob, a stream) is refused rather than keyed on `[object Object]`, which would collide two
  *  different uploads into one answer. */
 export function isCacheableRead(method: string, url: string, body?: BodyInit | null): boolean {
@@ -152,11 +152,11 @@ export function isMutation(method: string, url: string): boolean {
 /**
  * The identity of a request.
  *
- * ⚠ THE BODY IS PART OF IT, AND IT IS THE WHOLE POINT for the `*-inputs` endpoints: every card
+ *  The body is part of it, and it is the whole point for the `*-inputs` endpoints: every card
  * POSTs to the same URL and the holdings/universe/cadence in the body is the only thing telling
  * `margin-inputs` for this book from `margin-inputs` for the S&P.
  *
- * ⚠ SO IS THE "view as user" PREVIEW. Role-filtered endpoints answer an admin and a previewed user
+ *  So is the "view as user" PREVIEW. Role-filtered endpoints answer an admin and a previewed user
  * differently, and a cache that ignored the header would serve one to the other — the exact bug
  * `X-View-As` was added to prevent, replayed from memory.
  */
@@ -181,7 +181,7 @@ export function readGeneration(): number {
 /**
  * A cached (or in-flight) answer, or null.
  *
- * ⚠ IT RETURNS THE PROMISE, NOT THE VALUE, so twelve cards firing the same request in the same
+ *  It returns the promise, not the value, so twelve cards firing the same request in the same
  * render share ONE fetch instead of twelve. That is the dedupe the Long Equity tab needed most:
  * every card and its drill-down ask for the same benchmark body at the same moment.
  */
@@ -205,7 +205,7 @@ export function putRead(key: string, read: Promise<CachedRead>): void {
   store.set(key, entry);
   void read.then(
     (v) => {
-      // ⚠ AN INVALIDATION THAT LANDED WHILE THIS WAS IN FLIGHT MUST WIN. Otherwise an ingest that
+      //  An invalidation that landed while this was in flight must win. Otherwise an ingest that
       // finishes mid-read is undone by the read: the pre-ingest answer arrives afterwards and
       // installs itself as current.
       if (gen !== generation || store.get(key) !== entry) return;
@@ -239,7 +239,7 @@ export function dropRead(key: string): void {
 /**
  * Forget everything.
  *
- * ⚠ TRACED, ALWAYS. A cache is invisible when it works and invisible when it is wrong, so the one
+ *  Traced, always. A cache is invisible when it works and invisible when it is wrong, so the one
  * line that says "these 14 answers were dropped because you ingested Fortinet" is the only way the
  * next reader can tell a stale chart from a fresh one. `reason` is not optional for that reason.
  */

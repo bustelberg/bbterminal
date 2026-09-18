@@ -5,7 +5,7 @@ import { type CashReturnRow } from './cashReturnData';
 /**
  * The invested-capital blend, and the SPAC-shell row it has to survive.
  *
- * ⚠ THE FIXTURE IS REAL. These are Vertiv Holdings' stored figures (company 2852, `VRT`), which
+ *  The fixture is real. These are Vertiv Holdings' stored figures (company 2852, `VRT`), which
  * listed via SPAC in Feb 2020 — so the pre-2020 fiscal years under that ticker belong to the
  * blank-cheque shell: $24–25k of founder capital, then the June 2018 IPO trust, then the actual
  * business in 2020. `base > 0` waved 0.024 through and put a single row into the S&P 500 line at an
@@ -32,12 +32,12 @@ const VERTIV = (caps: Record<string, number> | undefined): CashReturnRow => ({
 const CAPS = { '2016': 0, '2017': 0, '2018': 845.25, '2020': 6385.607 };
 
 /**
- * ⚠⚠ THIS LINE IS NOW CHAINED FROM WEIGHTED GROWTH (2026-08-21) — it goes through `buildBlend`,
+ *  This line is now chained from weighted growth (2026-08-21) — it goes through `buildBlend`,
  * the same rule as every other level series on the tab, having previously averaged each member's
- * REBASED LEVEL. Measured on ACWI 2015→2025: the old construction read +18.14%/yr against the
+ * Rebased level. Measured on ACWI 2015→2025: the old construction read +18.14%/yr against the
  * chain's +10.81%/yr.
  *
- * ⚠ THE FIRST TWO CASES BELOW ARE UNCHANGED BY THAT, AND THAT IS THE POINT OF KEEPING THEM. A
+ *  The first two cases below are unchanged by that, and that is the point of keeping them. A
  * zero-cap period is excluded from the average either way (`wAt` returns null), so the shell years
  * are still absent and the first DRAWN period is still the index's 100. What changed is what
  * happens to a member whose base is a rounding artefact — see the third case.
@@ -60,8 +60,8 @@ describe('investedCapitalIndexByYear', () => {
     expect(idx.get(2018)).not.toBeCloseTo(2_784_248, -2);
   });
 
-  it('⚠⚠ a PORTFOLIO row is NO LONGER protected — the step guards were removed on request', () => {
-    // ⚠⚠⚠ THIS FIXTURE NOW PINS WHAT WAS GIVEN UP, AND IT IS THE CLEAREST STATEMENT OF IT ANYWHERE.
+  it(' a PORTFOLIO row is NO LONGER protected — the step guards were removed on request', () => {
+    //  This fixture now pins what was given up, and it is the clearest statement of it anywhere.
     // Both magnitude heuristics were removed on 2026-09-04, on request — `MIN_STEP_BASE_FRACTION`
     // (a member's anchor under 10% of its own median) and `MAX_STEP_GROWTH` (a step over 100x). A
     // portfolio row has no per-period cap, so nothing excludes Vertiv's SPAC-shell years, and the
@@ -70,7 +70,7 @@ describe('investedCapitalIndexByYear', () => {
     // The result is EXACTLY the number the guards were built to stop: an index of 2,784,248 at
     // 2018 off $24k of founder capital — three different legal entities in one ticker's column.
     //
-    // ⚠ IT IS NOT A REGRESSION, IT IS THE AGREED TRADE. The rules that caught this also refused 44
+    //  It is not a regression, it is the agreed trade. The rules that caught this also refused 44
     // steps that were flat, falling or under 2x across ACWI's five lines, and cost 6.72pp/yr on
     // FCF/share; a threshold on the answer cannot tell a shell year from a trough year. Catching
     // this case belongs in a STRUCTURAL test — an entity discontinuity at the listing date, which
@@ -84,7 +84,7 @@ describe('investedCapitalIndexByYear', () => {
   });
 
   it('chains from weighted growth, so the base cancels out of the answer', () => {
-    // ⚠ THE SAME ROW AT TEN TIMES THE SCALE MUST DRAW THE IDENTICAL INDEX. That is the property
+    //  The same row at ten times the scale must draw the identical index. That is the property
     // that makes a base irrelevant, and it is what the old average-of-rebased-levels rule could
     // not offer — there the base decided where a member sat in the average.
     const scaled = (k: number): CashReturnRow => ({

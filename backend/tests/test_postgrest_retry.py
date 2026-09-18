@@ -5,7 +5,7 @@ of `_year_perf`. That read is `airs_performance` — **1,815 rows, 608 kB, two p
 never a slow query, and optimising it would have fixed nothing. One stall against the 30s PostgREST
 timeout, on a client with no retry, took the whole page down.
 
-⚠⚠ THE ASYMMETRY IS THE ONLY THING HERE THAT CAN CAUSE DAMAGE. A read that times out may safely be
+ THE ASYMMETRY IS THE ONLY THING HERE THAT CAN CAUSE DAMAGE. A read that times out may safely be
 repeated. A POST or PATCH that times out MAY ALREADY HAVE BEEN APPLIED — the timeout describes the
 missing RESPONSE, not the write — so replaying it risks a duplicate with nothing afterwards able to
 tell. That is the same rule the clone script's retry follows, and it is why these tests exist.
@@ -60,7 +60,7 @@ class TestAReadSurvivesOneStall:
         assert stub.calls == ["GET", "GET"], "one stall should cost one retry, not zero and not two"
 
     def test_two_stalls_still_raise(self):
-        """⚠ ONE EXTRA ATTEMPT, NOT FIVE. The timeout is 30s, so retries are expensive: two
+        """ ONE EXTRA ATTEMPT, NOT FIVE. The timeout is 30s, so retries are expensive: two
         attempts cover stall-and-recover while capping the worst case near 60s. A dependency that
         is genuinely down must surface as an error, not as a page that hangs for minutes first."""
         stub = _Boom(httpx.ReadTimeout("x"), fail_times=2)
@@ -70,7 +70,7 @@ class TestAReadSurvivesOneStall:
 
 
 class TestAWriteIsNeverReplayed:
-    """⚠⚠ THE ONE THAT MATTERS. A timed-out write may have landed."""
+    """ THE ONE THAT MATTERS. A timed-out write may have landed."""
 
     @pytest.mark.parametrize("method", ["POST", "PATCH", "DELETE", "PUT"])
     def test_a_timed_out_write_raises_on_the_first_attempt(self, method):

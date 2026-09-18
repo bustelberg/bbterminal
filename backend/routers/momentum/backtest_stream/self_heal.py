@@ -151,7 +151,7 @@ async def run_self_heal(
     recovered_price: set[int] = set()
     recovered_vol: set[int] = set()
     processed_cids: set[int] = set()
-    status_icons = {"ok": "✓", "noop": "—", "skipped": "—", "forbidden": "✗", "error": "✗"}
+    status_icons = {"ok": "", "noop": "—", "skipped": "—", "forbidden": "", "error": ""}
 
     def _live_warning(scope_label: str, gap_set: set[int], recovered_set: set[int]) -> str:
         still_missing = len(gap_set) - len(recovered_set)

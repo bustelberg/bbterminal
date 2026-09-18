@@ -1,13 +1,13 @@
 """Repair price/volume history the vendor RE-SCALED and we never re-read.
 
-⚠ THE BUG THIS FIXES IS SILENT, AND IT REACHES THE LIVE BOOK.
+ THE BUG THIS FIXES IS SILENT, AND IT REACHES THE LIVE BOOK.
 
 When a split or reverse split happens, GuruFocus rewrites the WHOLE series to the
 new share basis. Our ingest only ever asks for dates NEWER than what we hold
 (`ingest/prices.py::_upsert_metric_rows` filters `d > existing_max`), so the
 rewrite is never read: the old bars keep the old scale, the new ones arrive on
 the new one, and the seam between them is a price move no market ever made.
-⚠ `force_refresh=True` does NOT fix it — it re-downloads the full series and then
+ `force_refresh=True` does NOT fix it — it re-downloads the full series and then
 still writes only the newer rows. Nothing in the normal pipeline can repair this.
 
 Measured 2026-08-02, Worldline SA (`XPAR:WLN`, 1-for-40 reverse split):
@@ -29,7 +29,7 @@ already have: we compare stored vs live for bars BEFORE the seam. If the vendor'
 history matches ours, the jump was real and the row is left alone (reported as
 `real-move`). Only a consistent ratio across sampled pre-seam dates is a rewrite.
 
-⚠ VOLUME IS RE-SCALED TOO, INVERSELY. A 1:40 reverse split multiplies price by 40
+ VOLUME IS RE-SCALED TOO, INVERSELY. A 1:40 reverse split multiplies price by 40
 and divides volume by 40, so `vol_20d_vs_60d` and `vol_trend_3m` are corrupted by
 the same event. Both metrics are repaired; repairing only price would leave half
 the signals wrong while the obvious symptom disappeared.
@@ -189,7 +189,7 @@ def main() -> int:
             skipped += 1
             continue
         if not consistent:
-            print(f"  {label:44s} ⚠ INCONSISTENT ratios {lo:.3f}–{hi:.3f} at {seam_date} "
+            print(f"  {label:44s}  INCONSISTENT ratios {lo:.3f}–{hi:.3f} at {seam_date} "
                   "— NOT repaired, inspect by hand")
             failed += 1
             continue
@@ -200,7 +200,7 @@ def main() -> int:
             repaired += 1
             continue
 
-        # Rewrite BOTH metrics from the vendor's current series. ⚠ Straight
+        # Rewrite BOTH metrics from the vendor's current series.  Straight
         # upserts of the full payload — `load_prices_into_db` would drop every
         # row at-or-before our stored max, which is precisely the history that
         # needs replacing.

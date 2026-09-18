@@ -10,14 +10,14 @@
  *     means higher tracking error, mechanically, and the panel prints both sides of that so it can
  *     be checked instead of believed.
  *
- * ⚠⚠ THIS IS NOT ATTRIBUTION AND IS DELIBERATELY NOT IN THE SAME PANEL AS IT. Attribution
+ *  This is not attribution and is deliberately not in the same panel as it. Attribution
  * (Brinson-Fachler) DECOMPOSES the active return — allocation, selection, interaction — into terms
  * that sum to it exactly. Correlation appears nowhere in that decomposition and sums to nothing.
  * Attribution says where the excess came FROM; correlation says how far the book can diverge AT
  * ALL. Putting them in one view would imply they reconcile, and they are not that kind of number —
  * so Attribution keeps its own dialog and this stays here, beside the other two risk measures.
  *
- * ⚠ THE CELL PALETTE IS `CorrelationMatrix`'s, NOT A NEW ONE. Blue (accent) for NEGATIVE, amber
+ *  The cell palette is `CorrelationMatrix`'s, NOT A NEW ONE. Blue (accent) for NEGATIVE, amber
  * (warn) for POSITIVE, magnitude driving the tint — chosen there because red↔green is exactly the
  * pair that collapses under deuteranopia (the app's palette note measures blue+amber at ΔE 103
  * against that pair's 4.9). A second convention on a second matrix in the same app would be worse
@@ -42,7 +42,7 @@ import type { ActiveShareHolding } from './ActiveSharePanel';
 const rho2 = (v: number | null | undefined) =>
   (v == null ? '—' : v.toFixed(2));
 
-/** ⚠ THE SAME FUNCTION AS `CorrelationMatrix.cellStyle`, kept in step deliberately — see header. */
+/**  THE SAME FUNCTION AS `CorrelationMatrix.cellStyle`, kept in step deliberately — see header. */
 function cellStyle(v: number | null, isDiag: boolean): CSSProperties {
   const base: CSSProperties = { border: '1px solid var(--color-card)' };
   if (isDiag) return { ...base, background: 'var(--color-inset)' };
@@ -54,9 +54,9 @@ function cellStyle(v: number | null, isDiag: boolean): CSSProperties {
 }
 
 /**
- * EVERY SYMBOL THIS VIEW USES, DEFINED ONCE — same rule as `TrackingErrorView`'s own table.
+ * Every symbol this view uses, defined once — same rule as `TrackingErrorView`'s own table.
  *
- * ⚠ `rho` APPEARS ON THREE OF THE FOUR CARDS (ρ itself, R² which squares it, and σₐ which is
+ *  `rho` APPEARS ON THREE OF THE FOUR CARDS (ρ itself, R² which squares it, and σₐ which is
  * built from it). Three hand-written definitions of one symbol inside one view is how a reader
  * learns the legend is decorative.
  */
@@ -131,15 +131,15 @@ export default function CorrelationView({
   }, [key]);
 
   const labels = data?.labels ?? [];
-  /** Every pair the matrix COULD have — n(n−1)/2. ⚠ Printed beside the measured count so a
+  /** Every pair the matrix COULD have — n(n−1)/2.  Printed beside the measured count so a
    *  book whose thin pairs were dropped shows the gap instead of hiding it in the divisor. */
   const pairsPossible = (labels.length * (labels.length - 1)) / 2;
   const matrix = data?.matrix ?? [];
 
   /**
-   * WHAT EVERY CARD HERE IS MEASURED FROM, AND OVER WHAT WINDOW — built once.
+   * What every card here is measured from, and over what window — built once.
    *
-   * ⚠ THE SAME TWO STRINGS THE TRACKING-ERROR VIEW BUILDS, from the same fields of the same
+   *  The same two strings the tracking-error view builds, from the same fields of the same
    * `build_paired_series` payload. These two panels claim an identity between their headline
    * figures (σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ); quoting different windows or different sources for it
    * would undermine the one claim they exist to let a reader check.
@@ -150,7 +150,7 @@ export default function CorrelationView({
       + `${v(sourceLabel(portfolioSource))}, against ${v(data.benchmark)}'s tracker.`
     : '';
 
-  /** ⚠ TWO CLOCKS — a price window and a weights date. See the ⚠⚠ in `TrackingErrorView`. */
+  /**  TWO CLOCKS — a price window and a weights date. See the  in `TrackingErrorView`. */
   const when = data?.available
     ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
       + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
@@ -189,7 +189,7 @@ export default function CorrelationView({
                   { sym: String.raw`\sigma_p,\; \sigma_b`, is: LEGEND.sigmas },
                   { sym: String.raw`\rho`, is: LEGEND.rhoAnswer },
                 ]}
-                /* ⚠ NO `how`. It carried the σₐ identity written out in Unicode — which the
+                /*  NO `how`. It carried the σₐ identity written out in Unicode — which the
                    Active-vol tile two along now sets properly in its own `worked`, from the same
                    numbers. One formula, typeset once, on the card whose figure it produces. */
                 />} />} />
@@ -213,13 +213,13 @@ export default function CorrelationView({
                 what={t.corr.cards.meanPair.what}
                 where={`${t.corr.pairsMeasured(String(data.pairs_measured), String(pairsPossible), String(data.min_pair_observations), String(labels.length))} ${t.common.pricedFrom(sourceField('yfinance'), sourceVendor('yfinance'))}`}
                 when={when}
-                /* ⚠⚠ THE SUM IS THE NUMERATOR IN BOTH HALVES. Written as `(1/m) Σ` the symbolic
+                /*  THE SUM IS THE NUMERATOR IN BOTH HALVES. Written as `(1/m) Σ` the symbolic
                    line has a coefficient beside a sum while the substituted line is one
                    fraction — the same arithmetic, but a reader matching them finds 255.53
                    where the 1 should be and no Σ anywhere. Reported as not making sense, and
                    it did not: a worked line has to sit position-for-position under its
                    formula or it is two expressions, not one checked twice.
-                   ⚠ AND `m` PRINTS AS AN INTEGER. `workedRatio` gives both operands two
+                    AND `m` PRINTS AS AN INTEGER. `workedRatio` gives both operands two
                    decimals, which is right for money and wrong for a count — "946.00 pairs"
                    reads as a measurement, so the division is built here instead. */
                 worked={data.pair_rho_sum == null || !data.pairs_measured ? '' : withWorked(
@@ -231,19 +231,19 @@ export default function CorrelationView({
                   { sym: 'm', is: LEGEND.m },
                   { sym: String.raw`\bar{\rho}`, is: LEGEND.rhoBar },
                 ]}
-                /* ⚠ NO `how`. The one fact it carried — that the mean is UNWEIGHTED, so this is a
+                /*  NO `how`. The one fact it carried — that the mean is UNWEIGHTED, so this is a
                    question about the names rather than the sizes — is already the `rhoBar` legend
                    row, attached to the symbol it qualifies. */
                 />} />} />
           </div>
 
           {data.cadence_note && <p className="text-[11px] text-warn-300">{data.cadence_note}</p>}
-          {/* ⚠ THE RECONCILIATION, IN PUBLIC. It is ~1e-13 when all is well; a visible number here
+          {/*  THE RECONCILIATION, IN PUBLIC. It is ~1e-13 when all is well; a visible number here
               means the two views stopped measuring the same thing, which is exactly the failure a
               shared series exists to prevent and the last thing that should be silent. */}
           {(data.identity_gap_pp ?? 0) > 0.005 && (
             <p className="text-[11px] text-neg-300">
-              {`⚠ σₐ measured and σₐ implied by ρ differ by ${data.identity_gap_pp!.toFixed(3)}pp — `}
+              {` σₐ measured and σₐ implied by ρ differ by ${data.identity_gap_pp!.toFixed(3)}pp — `}
               the two series are no longer identical. This is a bug, not a market fact.
             </p>
           )}
@@ -256,36 +256,36 @@ export default function CorrelationView({
                   Blue = diverging, amber = moving together. Ordered by weight.
                 </span>
               </div>
-              {/* ⚠ ITS OWN horizontal scroll — a 49-name matrix must never widen the dialog.
-                  ⚠ THE RIGHT PADDING IS THE TILT'S OVERHANG, not spacing. A 45° label anchored to
+              {/*  ITS OWN horizontal scroll — a 49-name matrix must never widen the dialog.
+                   THE RIGHT PADDING IS THE TILT'S OVERHANG, not spacing. A 45° label anchored to
                   the LAST column extends up and to the RIGHT of the table box; without room for it
                   the scroll container clips the final holding's name, which is the one a reader is
                   most likely to be hunting for. 7.5rem of text at 45° projects ~5.3rem across. */}
               <div className="overflow-auto pr-[5.5rem]">
                 <table className="border-separate" style={{ borderSpacing: 0 }}>
-                  {/* ⚠⚠ THE COLUMN NAMES, ROTATED — added on request 2026-08-31. A cell is 16px
+                  {/*  THE COLUMN NAMES, ROTATED — added on request 2026-08-31. A cell is 16px
                       wide, so horizontal labels were never an option and the matrix shipped with
                       one axis unlabelled: every column had to be counted off against the rows to
                       be identified, which on a 49-name book is not something anybody does.
-                      ⚠⚠ TILTED 45°, NOT VERTICAL — changed on request 2026-09-01 ("tilt the names a
+                       TILTED 45°, NOT VERTICAL — changed on request 2026-09-01 ("tilt the names a
                       little so we can read those better"). They were `vertical-rl` + `rotate-180`,
                       i.e. a full 90°, which is legible only one word at a time: the eye has no
                       baseline to run along, so reading a column meant tilting your head. 45° is the
                       angle the rest of the app already tilts at (`lib/chartAxis.ts`, where it was
                       measured as the point at which returns stop), so this is the house angle
                       rather than a new one.
-                      ⚠⚠ AND THE TILT COSTS THE OLD GEOMETRIC GUARANTEE, which is why the cap
+                       AND THE TILT COSTS THE OLD GEOMETRIC GUARANTEE, which is why the cap
                       matters more now than it did. At 90° a label occupied exactly its own 16px
                       column and could never touch its neighbour however long the name was. At 45°
                       the labels are parallel lines 16·sin45° = 11.3px apart — clear of one another
                       at 10px type, but each one now extends beyond its own column, so the length
                       has to be bounded in CSS instead of by the geometry.
-                      ⚠ `max-w-[7.5rem]` + `truncate` IS THAT BOUND, and it is set FROM the header
+                       `max-w-[7.5rem]` + `truncate` IS THAT BOUND, and it is set FROM the header
                       height: 5.5rem of height admits 5.5/sin45° = 7.8rem of text, so a longer name
                       would be clipped by the header box at an arbitrary point rather than
                       ellipsised at a deliberate one. It shows ~40% more of each name than the
                       vertical version did in the same height. The full name stays on `title`.
-                      ⚠ THE PIVOT IS THE CELL'S OWN CENTRE (`left-1/2` + `origin-bottom-left`), so a
+                       THE PIVOT IS THE CELL'S OWN CENTRE (`left-1/2` + `origin-bottom-left`), so a
                       name starts at the column it belongs to and rises away from it. Anchoring the
                       END of the text at the column instead would put the first characters — the
                       ones that identify a holding — furthest from it, AND would tilt the names out
@@ -294,7 +294,7 @@ export default function CorrelationView({
                       scroll. Leaning right is the only side of this table that is free. */}
                   <thead>
                     <tr>
-                      {/* The corner. ⚠ Sticky like the row labels AND above them (`z-20`), or it
+                      {/* The corner.  Sticky like the row labels AND above them (`z-20`), or it
                           slides under them the moment the matrix is scrolled sideways. */}
                       <th className="sticky left-0 z-20 bg-card" />
                       {labels.map((name) => (

@@ -34,7 +34,7 @@ describe('what may be cached', () => {
     }
   });
 
-  it('⚠ NEVER caches a live dashboard read — the whole reason this is an allowlist', () => {
+  it(' NEVER caches a live dashboard read — the whole reason this is an allowlist', () => {
     for (const url of [
       'http://x/api/usage',
       'http://x/api/schedule/stream',
@@ -46,7 +46,7 @@ describe('what may be cached', () => {
     }
   });
 
-  it('⚠ tells the coverage READ from the coverage INGEST — one path is a prefix of the other', () => {
+  it(' tells the coverage READ from the coverage INGEST — one path is a prefix of the other', () => {
     expect(isCacheableRead('POST', 'http://x/api/earnings/fundamental-coverage', '{}')).toBe(true);
     expect(isCacheableRead('POST', 'http://x/api/earnings/fundamental-coverage/ingest', '{}')).toBe(false);
     expect(isMutation('POST', 'http://x/api/earnings/fundamental-coverage/ingest')).toBe(true);
@@ -72,7 +72,7 @@ describe('what invalidates', () => {
     expect(isMutation('POST', 'http://x/api/earnings/margin-inputs')).toBe(false);
   });
 
-  it('⚠ nor does the blend STREAM — it is a POST, and it is the most expensive read on the page', () => {
+  it(' nor does the blend STREAM — it is a POST, and it is the most expensive read on the page', () => {
     expect(isMutation('POST', 'http://x/api/earnings/fundamental-blend-metrics/stream')).toBe(false);
     // …but it is not cacheable either: an SSE body is consumed frame by frame and cannot be replayed.
     expect(isCacheableRead('POST', 'http://x/api/earnings/fundamental-blend-metrics/stream', '{}')).toBe(false);
@@ -82,12 +82,12 @@ describe('what invalidates', () => {
 describe('request identity', () => {
   const url = 'http://x/api/earnings/margin-inputs';
 
-  it('⚠ the BODY separates two cards posting to the same URL', () => {
+  it(' the BODY separates two cards posting to the same URL', () => {
     expect(readKey('POST', url, '{"universe":"SP500"}', false))
       .not.toBe(readKey('POST', url, '{"portfolio_id":3}', false));
   });
 
-  it('⚠ so does the view-as-user preview', () => {
+  it(' so does the view-as-user preview', () => {
     expect(readKey('GET', url, undefined, true)).not.toBe(readKey('GET', url, undefined, false));
   });
 
@@ -117,7 +117,7 @@ describe('the store', () => {
     expect(getRead('b')).not.toBeNull();
   });
 
-  it('⚠ never keeps a 500 or a 401 — those are about the last minute, not about the data', async () => {
+  it(' never keeps a 500 or a 401 — those are about the last minute, not about the data', async () => {
     putRead('a', Promise.resolve(ok('boom', 500)));
     putRead('b', Promise.resolve(ok('nope', 401)));
     await settle();
@@ -133,7 +133,7 @@ describe('the store', () => {
     expect(getRead('k')).toBeNull();
   });
 
-  it('⚠ an invalidation mid-flight WINS — the pre-ingest answer must not install itself after', async () => {
+  it(' an invalidation mid-flight WINS — the pre-ingest answer must not install itself after', async () => {
     let resolve: (v: CachedRead) => void = () => {};
     putRead('k', new Promise<CachedRead>((r) => { resolve = r; }));
     invalidateReadCache('ingest finished while that was in flight');
@@ -172,14 +172,14 @@ describe('the store', () => {
     putRead('three', Promise.resolve(ok(big)));
     await settle();
     expect(getRead('one')).toBeNull();
-    // ⚠ The entry that triggered the eviction is never the one evicted.
+    //  The entry that triggered the eviction is never the one evicted.
     expect(getRead('three')).not.toBeNull();
     expect(readCacheStats().bytes).toBeLessThanOrEqual(READ_MAX_BYTES);
   });
 });
 
 /**
- * ⚠⚠ THE RISK PANEL'S SIX READS AND THE ATTRIBUTION READ. Each view unmounts when its panel closes
+ *  The risk panel's six reads and the attribution read. Each view unmounts when its panel closes
  * — deliberately, because mounting the tracking-error side costs a five-year daily price load per
  * holding — so without these entries every reopen recomputes an answer that cannot have changed.
  *
@@ -195,7 +195,7 @@ describe('the Analyse modal\'s risk and attribution reads', () => {
     for (const name of RISK) {
       const url = `http://x/api/airs/portfolio/${name}?benchmark=ACWI&frequency=weekly`;
       expect(isCacheableRead('POST', url, '{"holdings":[]}'), url).toBe(true);
-      // ⚠ AND NONE OF THEM COUNTS AS A WRITE. Treated as one, opening the Risk panel would wipe
+      //  And none of them counts as a write. Treated as one, opening the Risk panel would wipe
       // the twelve fundamental entries the tab behind it had just filled.
       expect(isMutation('POST', url), url).toBe(false);
     }
@@ -207,8 +207,8 @@ describe('the Analyse modal\'s risk and attribution reads', () => {
     expect(isCacheableRead('GET', url)).toBe(true);
   });
 
-  it('⚠ keys the six on the BODY, so two books are two entries', () => {
-    // ⚠⚠ THE URL IS IDENTICAL FOR EVERY PORTFOLIO — the holdings are the only thing distinguishing
+  it(' keys the six on the BODY, so two books are two entries', () => {
+    //  The URL is identical for every portfolio — the holdings are the only thing distinguishing
     // them. A key that ignored the body would serve one book's active share for another's, which
     // is a wrong number rendered with total confidence.
     const url = 'http://x/api/airs/portfolio/active-share?benchmark=ACWI';
@@ -217,7 +217,7 @@ describe('the Analyse modal\'s risk and attribution reads', () => {
     expect(a).not.toBe(b);
   });
 
-  it('⚠ does not cache anything else under the portfolio prefix', () => {
+  it(' does not cache anything else under the portfolio prefix', () => {
     // A prefix match here would hand every future POST under `/portfolio/` a cached answer.
     expect(isCacheableRead('POST', 'http://x/api/airs/portfolio/exposure', '{}')).toBe(false);
     expect(isCacheableRead('POST', 'http://x/api/airs/portfolio/drawdown/refresh', '{}')).toBe(false);

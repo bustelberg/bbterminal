@@ -1,6 +1,6 @@
 """When a smart press re-asks for a feed — "when did WE ask", never "when did a row appear".
 
-⚠⚠ THE MEASUREMENT (ACWI, 2026-08-17). `smart_flags` decides per feed with "missing OR stale", and
+ THE MEASUREMENT (ACWI, 2026-08-17). `smart_flags` decides per feed with "missing OR stale", and
 stale used to mean `max(metric_data.recorded_at)` on the feed's sentinel row. A row only appears
 when GuruFocus HAS something, so for a company it publishes no consensus for BOTH halves stayed
 true for ever and the feed was re-asked on every single press:
@@ -39,7 +39,7 @@ TODAY = date(2026, 8, 17)
 
 
 class TestNeverAskedIsAlwaysDue:
-    """⚠ EVERY COMPANY READS `None` THE FIRST TIME, which is the strongest reason to fetch there is.
+    """ EVERY COMPANY READS `None` THE FIRST TIME, which is the strongest reason to fetch there is.
     Reading it as "not stale" would make a feed we have never fetched look permanently up to date —
     and after the migration lands, that is every row."""
 
@@ -56,14 +56,14 @@ class TestAFeedWeHoldIsReAskedWeekly:
         assert not _is_stale(date(2026, 8, 16), TODAY, has_rows=True)
 
     def test_the_boundary_day_is_due(self):
-        # ⚠ `>=`, not `>`. An off-by-one costs a day of staleness on every company, every week.
+        #  `>=`, not `>`. An off-by-one costs a day of staleness on every company, every week.
         asked = date(2026, 8, 17 - SMART_REFRESH_AFTER_DAYS)
         assert _is_stale(asked, TODAY, has_rows=True)
         assert not _is_stale(date(asked.year, asked.month, asked.day + 1), TODAY, has_rows=True)
 
 
 class TestAFeedThatCameBackEMPTYIsLeftAloneForLonger:
-    """⚠⚠ THIS IS THE HOUR. Most of a broad index carries no analyst consensus at all, and whether a
+    """ THIS IS THE HOUR. Most of a broad index carries no analyst consensus at all, and whether a
     company GAINS coverage is a slow, rare event — a different question from "has the consensus been
     revised", with a very different answer rate. Asking those weekly buys nothing; asking them every
     press (which is what happened) buys less than nothing."""
@@ -85,7 +85,7 @@ class TestAFeedThatCameBackEMPTYIsLeftAloneForLonger:
 class TestTheStampIsReadPerFeed:
 
     def test_each_feed_has_its_own_column(self):
-        """⚠ ONE COLUMN PER FEED, NOT ONE PER COMPANY. They are three separate GuruFocus calls with
+        """ ONE COLUMN PER FEED, NOT ONE PER COMPANY. They are three separate GuruFocus calls with
         three separate answers; a single "fundamentals_fetched_at" would let a statements fetch
         silence the estimates question."""
         assert FEED_FETCHED_AT["fin"] == "financials_fetched_at"
@@ -99,7 +99,7 @@ class TestTheStampIsReadPerFeed:
         assert got == {7: date(2026, 8, 16)}
 
     def test_a_null_stamp_is_absent_not_epoch(self):
-        """⚠ ABSENT MEANS NEVER ASKED, and `_is_stale(None)` is True — so a NULL must not become a
+        """ ABSENT MEANS NEVER ASKED, and `_is_stale(None)` is True — so a NULL must not become a
         parsed date. Defaulting it to an old date would be the same answer by luck; defaulting it to
         `today` would silence a company we have never fetched, for ever."""
         rows = [{"company_id": 1, "estimates_fetched_at": None},

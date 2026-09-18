@@ -4,17 +4,17 @@ What each portfolio actually holds is measured elsewhere (`_airs_portfolio_analy
 band it is SUPPOSED to hold, written down once per (risk profile, asset class) so the two can be
 compared at all.
 
-⚠ THE GRID IS ALWAYS COMPLETE, THE TABLE IS NOT. The reader edits a fixed 4x4 — four profiles the
+ THE GRID IS ALWAYS COMPLETE, THE TABLE IS NOT. The reader edits a fixed 4x4 — four profiles the
 app already classifies portfolios into, four classes it already buckets holdings into — so the API
 returns all sixteen cells whether or not a row exists. A grid that renders only the cells somebody
 has already filled in cannot be used to fill in the rest.
 
-⚠ NULL IS NOT ZERO, AND THIS IS THE WHOLE REASON THE COLUMNS ARE NULLABLE. "No policy recorded" and
+ NULL IS NOT ZERO, AND THIS IS THE WHOLE REASON THE COLUMNS ARE NULLABLE. "No policy recorded" and
 "hold none of this" are the same for a minimum and OPPOSITE for a default and a maximum. Seeding
 the grid with zeros would publish a policy nobody wrote — one that reads "this profile may hold no
 equities". Unset cells come back null and the editor shows them empty.
 
-⚠ THE CLASSES ARE THE STORED KEYS, NOT THE LABELS. `Equity`, not `Stocks` — the display name lives
+ THE CLASSES ARE THE STORED KEYS, NOT THE LABELS. `Equity`, not `Stocks` — the display name lives
 in ONE place (`allocationColors.bucketLabel`) and everything else in the app keys off the stored
 value. A policy table spelling them its own way is a join waiting to break.
 """
@@ -37,25 +37,25 @@ _log = logging.getLogger(__name__)
 # order the Analyse modal's allocation bar uses, so a band and the bar it is drawn over cannot be
 # read in two sequences.
 #
-# ⚠⚠ CASH IS ONE OF THEM AS OF 2026-08-18, HAVING BEEN DELIBERATELY EXCLUDED BEFORE. The old
+#  Cash is one of them as of 2026-08-18, HAVING BEEN DELIBERATELY EXCLUDED BEFORE. The old
 # reasoning was that cash is the REMAINDER — whatever the invested classes do not take — so it
 # could not be targeted. That is true of the DEFAULT and false of the bounds, which is where it
 # broke down: "hold at most 10% cash" is a real mandate, it is the one most likely to be breached
 # by drift rather than by decision, and with no band there was no line for the bar to breach. A
 # fully-liquidated book showed 100% cash against no policy at all.
 #
-# ⚠ CONSEQUENCE, AND IT IS THE REASON THE SUM NOTE ON THE EDITOR CHANGED: the defaults may now
+#  Consequence, and it is the reason the sum note on the editor changed: the defaults may now
 # legitimately reach 100, where before a total of 95 was ordinary. They are still not ENFORCED to —
-# see the ⚠ in `AllocationBandsModal`.
+# see the  in `AllocationBandsModal`.
 #
-# ⚠ `Unclassified` REMAINS ABSENT, and for a different reason than cash ever was: it is not a
+#  `Unclassified` REMAINS ABSENT, and for a different reason than cash ever was: it is not a
 # holding decision at all, it is our own inability to see inside an instrument. Nobody can set a
 # target for how much of a book we fail to classify.
 #
-# ⚠⚠ WAS FOUR UNTIL 2026-08-18, when `Equity ETF` was retired as a bucket (see `BUCKET_EQUITY`).
+#  Was four until 2026-08-18, when `Equity ETF` was retired as a bucket (see `BUCKET_EQUITY`).
 # The stored bands were folded into `Equity` by migration `20260818120000` — SUMMED, because a
 # separate 0-10-25 ETF band beside a 60-70-80 equity band expressed one intent about equity
-# exposure written across two rows. ⚠ THE SUMMED MAXIMA WERE CAPPED AT 100 AND THAT IS A REAL
+# exposure written across two rows.  THE SUMMED MAXIMA WERE CAPPED AT 100 AND THAT IS A REAL
 # EDIT, not arithmetic: Offensief's 80 + 25 is 105, which is not a policy. Those cells are flagged
 # in the migration for review rather than left to look deliberate.
 POLICY_BUCKETS: tuple[str, ...] = (BUCKET_EQUITY, BUCKET_BONDS, BUCKET_ALTS, BUCKET_CASH)
@@ -108,7 +108,7 @@ def load_bands() -> list[dict]:
             .select("variant,bucket,min_pct,default_pct,max_pct,updated_at,is_override").execute().data or [])
     stored = {(r["variant"], r["bucket"]): r for r in rows if r.get("is_override")}
     defaults = _default_bands()
-    # ⚠ Rows for a variant or bucket we no longer recognise are LOGGED, not silently dropped and
+    #  Rows for a variant or bucket we no longer recognise are LOGGED, not silently dropped and
     # not silently shown: the grid is fixed, so an orphan is invisible in the editor and would be
     # deleted by the next save without anyone seeing it go.
     orphans = [k for k in stored if k[0] not in VARIANTS or k[1] not in POLICY_BUCKETS]
@@ -132,7 +132,7 @@ def load_bands() -> list[dict]:
 def validate_band(cell: dict) -> str | None:
     """The one rule, stated once: each bound in 0..100 and min <= default <= max WHERE BOTH ARE SET.
 
-    ⚠ A HALF-FILLED ROW IS LEGAL. The grid is filled in over time, and refusing to store a maximum
+     A HALF-FILLED ROW IS LEGAL. The grid is filled in over time, and refusing to store a maximum
     until its minimum exists makes the editor unusable on the way there. Only pairs that are BOTH
     present are compared — the same rule the table's CHECK constraints enforce, so the API refuses
     with a sentence rather than letting Postgres refuse with a constraint name.
@@ -154,7 +154,7 @@ def validate_band(cell: dict) -> str | None:
 def save_bands(cells: list[dict]) -> int:
     """Apply `cells` to the policy — a PARTIAL update. Returns how many rows were written.
 
-    ⚠ A CELL NOT IN THE LIST IS NOT TOUCHED, and that is load-bearing rather than an implementation
+     A CELL NOT IN THE LIST IS NOT TOUCHED, and that is load-bearing rather than an implementation
     detail. An all-null cell means "clear this row", so a caller that helpfully sends the whole
     grid is sending fifteen "clear that" instructions alongside its one edit — and if its view of
     the grid is stale, they land. Measured 2026-08-04: the seed migration wrote all 16 bands, an
@@ -162,11 +162,11 @@ def save_bands(cells: list[dict]) -> int:
     screen out of place. The editor now sends only what the reader touched; this docstring is the
     reason it must keep doing so.
 
-    ⚠ AN ALL-NULL CELL IS A DELETE, NOT AN UPSERT OF NULLS. Clearing a row in the editor means "no
+     AN ALL-NULL CELL IS A DELETE, NOT AN UPSERT OF NULLS. Clearing a row in the editor means "no
     policy here"; storing three nulls would leave a row whose `updated_at` claims somebody set
     something. Same end state, honest provenance.
 
-    ⚠ VALIDATED BEFORE ANY WRITE, NOT PER ROW AS WE GO. A grid save is one intent; letting the
+     VALIDATED BEFORE ANY WRITE, NOT PER ROW AS WE GO. A grid save is one intent; letting the
     first eight cells land and then rejecting the ninth leaves a policy half-updated, which is
     worse than refusing the lot — the reader believes what they typed, and half of it is true.
     """
@@ -183,7 +183,7 @@ def save_bands(cells: list[dict]) -> int:
         if all(v is None for v in vals.values()):
             deletes.append((variant, bucket))
         else:
-            # ⚠ An ISO timestamp, not the string "now()" — PostgREST sends the payload as JSON, so
+            #  An ISO timestamp, not the string "now()" — PostgREST sends the payload as JSON, so
             # a SQL expression arrives as six literal characters and the insert fails on the type.
             upserts.append({"variant": variant, "bucket": bucket, **vals, "is_override": True,
                             "updated_at": datetime.now(UTC).isoformat()})

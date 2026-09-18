@@ -78,17 +78,17 @@ def _parse_att_excel(content: bytes) -> list[dict]:
         Opbrengsten · Kosten · Mutatie opgelopen rente · Beleggingsresultaat ·
         Eindvermogen · Rendement · Cumulatief rendement
 
-    ⚠ EVERY ROW IS ONE MONTH, AND EVERY MONEY COLUMN IS THAT MONTH'S. The sheet is a
+     EVERY ROW IS ONE MONTH, AND EVERY MONEY COLUMN IS THAT MONTH'S. The sheet is a
     chain — each row's `Beginvermogen` is the previous row's `Eindvermogen` — so the year
     is the SUM of these rows, not the last of them. `_airs_accounts._year_perf` is the only
     place that assembly happens; read its docstring before using anything here.
 
-    ⚠ `Stortingen`/`Onttrekkingen` are the flows, and they are the term that closes the
+     `Stortingen`/`Onttrekkingen` are the flows, and they are the term that closes the
     year: eind - begin - stortingen + onttrekkingen == sum(beleggingsresultaat), to -0.00
     on AITopSelectie. They are NOT why `rendement` and `cumulatief_rendement` differ — that
     is the month-vs-year thing above, and AITopSelectie has zero flows all year.
 
-    ⚠ `Mutatie opgelopen rente` closes the per-row result:
+     `Mutatie opgelopen rente` closes the per-row result:
 
         beleggingsresultaat = koersresultaat + opbrengsten + mutatie_opgelopen_rente
 
@@ -96,7 +96,7 @@ def _parse_att_excel(content: bytes) -> list[dict]:
     it is 0 the shorter form holds exactly too (23343.756055 + 1706.29 = 25050.05), which
     is how checking a single portfolio talks you into the wrong rule.
 
-    ⚠ `Kosten` is 0.00 on every portfolio read so far, so its SIGN is unverified — the
+     `Kosten` is 0.00 on every portfolio read so far, so its SIGN is unverified — the
     identity cannot tell `- kosten` from `+ kosten` while the term is zero. Parsed and
     stored; kept out of arithmetic until a book with real costs turns up.
     """
@@ -253,7 +253,7 @@ async def airs_model_portfolios_scan_job(force: bool = False):
     """The model-portfolio scan as a CANCELLABLE JOB — phase two of the portfolios page's
     "Refresh all".
 
-    ⚠⚠ THIS IS THE HALF OF THAT BUTTON THAT RAN BLIND. Phase one (the account scan) has been a job
+     THIS IS THE HALF OF THAT BUTTON THAT RAN BLIND. Phase one (the account scan) has been a job
     since 2026-08-13: a toast with `i/n`, the account in flight, a working Cancel, and it survives a
     reload. Phase two — this — was `runSSE` straight into `console.warn`, so for the MINUTES it runs
     (an edit-page GET plus an XLS download for each of ~58 fixed portfolios) the only thing on
@@ -261,17 +261,17 @@ async def airs_model_portfolios_scan_job(force: bool = False):
     work was invisible; reload and it was unrecoverable; there was no way to stop it. One button
     reporting two ways, and the slower way was the silent one.
 
-    ⚠ THE SCAN ITSELF IS UNCHANGED — the same `fetch_model_portfolios_sync` +
+     THE SCAN ITSELF IS UNCHANGED — the same `fetch_model_portfolios_sync` +
     `count_model_portfolio_holdings_sync` the SSE endpoint above and the scheduler both call, with
     two optional hooks. A streaming copy for the job path is exactly the drift `scan_one`'s
     docstring warns about.
 
-    ⚠ CANCEL STOPS BETWEEN PORTFOLIOS, and the summary says where. A portfolio's XLS is downloaded,
+     CANCEL STOPS BETWEEN PORTFOLIOS, and the summary says where. A portfolio's XLS is downloaded,
     counted and persisted as a unit; everything already counted is kept.
 
-    ⚠ `busy` IS AN ANSWER, NOT AN ERROR — and here it guards a REAL hazard rather than a
+     `busy` IS AN ANSWER, NOT AN ERROR — and here it guards a REAL hazard rather than a
     bookkeeping one: this shares ONE authenticated AirSPMS session with the account scan, which
-    must not be driven by two threads at once. ⚠ IT IS A PARTIAL GUARD AND SAYING SO IS THE POINT:
+    must not be driven by two threads at once.  IT IS A PARTIAL GUARD AND SAYING SO IS THE POINT:
     `_LOCK` is held by `run_airs_vermogen_refresh_sync` and `refresh_one_portfolio`, so this cannot
     collide with either — but the scheduler's own model-scan ticks (`scheduler.py`) do not take it,
     and neither does the SSE endpoint above, so those two can still overlap this. Non-blocking, so
@@ -285,7 +285,7 @@ async def airs_model_portfolios_scan_job(force: bool = False):
     def _work(ctx) -> str:
         if not _LOCK.acquire(blocking=False):
             return "Another AIRS scan is already running — nothing was re-read"
-        # ⚠ THE BAR'S POSITION IS CARRIED, NOT RE-DERIVED PER EVENT. `ctx.progress` writes
+        #  The bar's position is carried, not re-derived per event. `ctx.progress` writes
         # `done`/`total` onto the job every time, so a narration line emitted mid-count with a
         # freshly-zeroed pair would blank a bar that is genuinely at 40/58 — and the next `count`
         # would snap it back. The list phase legitimately has no denominator; 0 renders as
@@ -294,7 +294,7 @@ async def airs_model_portfolios_scan_job(force: bool = False):
 
         def on_event(kind: str, **kw) -> None:
             msg = str(kw.get("message") or "")
-            # ⚠ `n` ARRIVES ONE LINE BEFORE THE FIRST `i`. The count phase announces its
+            #  `n` ARRIVES ONE LINE BEFORE THE FIRST `i`. The count phase announces its
             # denominator ("counting holdings for 58 fixed portfolios") before it downloads
             # anything, so adopting it from ANY event that carries it puts a real 0/58 on the bar
             # for the ~10s of the first XLS instead of an indeterminate one.
@@ -305,7 +305,7 @@ async def airs_model_portfolios_scan_job(force: bool = False):
             elif kind == "portfolios":
                 # It carries the whole roster as a payload; the job wants the one number.
                 msg = f"{kw.get('count') or 0} portfolios listed — counting holdings…"
-            # ⚠ NO `error` BRANCH, AND THAT IS NOT AN OVERSIGHT. Neither of these two scanners
+            #  NO `error` BRANCH, AND THAT IS NOT AN OVERSIGHT. Neither of these two scanners
             # reports a fault as an EVENT — they raise, which the job runner already turns into a
             # `failed` card. (The Front-Office scraper elsewhere in `airs_scanner` does emit one;
             # this path does not, and handling a kind that never arrives reads as coverage.)
@@ -313,13 +313,13 @@ async def airs_model_portfolios_scan_job(force: bool = False):
                 ctx.progress(at["done"], at["total"], msg)
 
         try:
-            # ⚠ SAME REASON AS THE ACCOUNT SCAN'S FIRST LINE. `_session.get_response` logs in
+            #  Same reason as the account scan's first line. `_session.get_response` logs in
             # lazily, so the first narrated event is the first LIST PAGE — everything before it
             # (launching the browser, signing in) would sit under "starting…". Naming the slow
             # thing up front is what separates "this takes a minute" from "this is stuck".
             ctx.progress(0, 0, "signing in to AirSPMS and reading the model-portfolio list…")
             rows = fetch_model_portfolios_sync(on_event)
-            # ⚠ STORED BEFORE THE SLOW HALF, exactly as the SSE path does it. The list is complete
+            #  Stored before the slow half, exactly as the SSE path does it. The list is complete
             # work in its own right — it is what gives every account its readable name — and a
             # cancel during the count must not throw it away.
             store.save_portfolios(rows)
@@ -345,7 +345,7 @@ async def airs_model_portfolios_scan_job(force: bool = False):
 
         counted = sum(1 for p in to_count if p.get("holdings") is not None)
         if ctx.cancelled:
-            # ⚠ RAISED, NOT RETURNED — a returned string is a `done` job, and `done` is a word other
+            #  Raised, not returned — a returned string is a `done` job, and `done` is a word other
             # code ACTS ON. See the same fix on the account job: returning here would paint a green
             # card over a run that stopped early. `JobCancelled`'s message becomes the summary, so
             # nothing is lost by raising it.
@@ -453,7 +453,7 @@ class PortfolioPerfSources(BaseModel):
 class ModelPortfolioPerformance(BaseModel):
     """One model portfolio's performance, in EUR: YTD, since-inception, Sharpe, Sortino.
 
-    ⚠ `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,
+     `ytd_pct` IS NOT ALWAYS A FULL YEAR. It is a buy-and-hold of the composition WE HOLD,
     which is the CURRENT one — AIRS keeps only 2-3 snapshot dates and no monthly history, so
     January's composition is not recoverable. The window therefore opens at
     `max(Jan 1, inception)`, never before the weights existed, and `ytd_from` is that date:
@@ -508,7 +508,7 @@ class ModelPortfolioPerformance(BaseModel):
     # two lines. So `resolved + unresolved == holdings`, exactly.
     resolved_holdings: int = 0
     unresolved_holdings: int = 0
-    # ⚠ How many holdings were marked at an INTERPOLATED opening price rather than a real close.
+    #  How many holdings were marked at an INTERPOLATED opening price rather than a real close.
     # Non-zero means part of this return is an estimate — it is 23.6% of BUS_OBL_HighY, whose
     # iShares Euro HY line is mapped to a US OTC listing that trades a handful of times a year.
     interpolated_holdings: int = 0
@@ -548,16 +548,16 @@ async def _portfolio_refresh_stream(portfolio_id: int):
 
     def run():
         try:
-            # ⚠⚠ THE BENCHMARK LEG IS BROUGHT CURRENT BY THE SAME PRESS (2026-09-03, on request:
+            #  The benchmark leg is brought current by the same press (2026-09-03, on request:
             # the `vs ACWI` tile "should always be simultaneously updated with the Return tile and
             # the graph"). Those three all sit in one row of one screen, and until now this button
             # moved two of them: it re-acquires the BOOK's inputs, while the index ETF's own price
             # series was left to the 05:00 pass — so on any box where that has not run, the
             # comparison leg stayed put while the book advanced, and both figures looked current.
-            # ⚠ HERE AND NOT IN `refresh_portfolio_fully`, WHICH IS SHARED WITH THE FLEET PASS.
+            #  Here and not in `refresh_portfolio_fully`, WHICH IS SHARED WITH THE FLEET PASS.
             # This is one global series, so calling it per portfolio would spend a vendor call on
             # each of ~40 books at 05:00 to fetch the same two tickers.
-            # ⚠ IT MUST NOT BE ABLE TO FAIL THE REFRESH. A GuruFocus wobble costs the benchmark
+            #  It must not be able to fail the refresh. A GuruFocus wobble costs the benchmark
             # leg its freshness; it says nothing about the composition, the FX or the prices this
             # press is really about.
             emit("phase", message="benchmark index prices")
@@ -568,11 +568,11 @@ async def _portfolio_refresh_stream(portfolio_id: int):
             except Exception as e:  # noqa: BLE001
                 emit("progress",
                      message=f"  index proxies not refreshed: {type(e).__name__}: {e}")
-            # ⚠ BOTH HALVES, THROUGH THE ONE FUNCTION. This stream used to run the model half only
+            #  Both halves, through the one function. This stream used to run the model half only
             # (composition -> instruments -> FX -> prices -> recompute) while /management-dashboard's
             # button ran the book half only, so "Refresh" meant different work on the two pages and
             # the Analyse modal inherited whichever one opened it.
-            # ⚠ THE LINES ARE THE SAME LINES. `refresh_portfolio_fully` relays each half's own
+            #  The lines are the same lines. `refresh_portfolio_fully` relays each half's own
             # narration, so the five model phases still arrive one SSE frame each and the book's
             # per-report lines join them — nothing here had to learn a second vocabulary.
             emit("done", summary=refresh_portfolio_fully(None, portfolio_id, on_event=emit))
@@ -601,12 +601,12 @@ async def airs_model_portfolio_refresh(portfolio_id: int):
         4. prices        Yahoo                   each holding's series brought current
         5. recompute     ours                    the YTD, with the per-leg arithmetic
 
-    ⚠ WHICH IS WHY "REFRESH FROM AIRS" ALONE CANNOT FIX A WRONG RETURN. The per-row button
+     WHICH IS WHY "REFRESH FROM AIRS" ALONE CANNOT FIX A WRONG RETURN. The per-row button
     re-scrapes step 1 and nothing else, so a disagreement caused by a missing price series or a
     short FX history survives any number of presses. This runs all four fetchable steps and then
     prints the arithmetic, so the input that differs is visible rather than inferred.
 
-    ⚠ STEP 3 IS THE ONE NOTHING ELSE DOES. `sync_fx_rates_to_db` only extends FORWARD, so a
+     STEP 3 IS THE ONE NOTHING ELSE DOES. `sync_fx_rates_to_db` only extends FORWARD, so a
     currency whose stored history STARTS after the window opens is never repaired — and a
     holding with no rate on or before its opening bar is dropped, silently, which renormalises
     the return over the survivors and reads HIGH.
@@ -650,7 +650,7 @@ async def airs_model_portfolio_ytd_explain(portfolio_id: int, year: int | None =
 class CorrelationInstrument(BaseModel):
     """One instrument that fed the correlation matrices, and how it was priced.
 
-    ⚠ THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
+     THREE STATES, AND COLLAPSING ANY TWO WOULD MISREAD THE MATRIX. Measured 2026-08-10 over the
     44 listed models and their 245 distinct ISINs:
 
         direct       230   an `asset_execution` with a yfinance series, EUR-converted per date
@@ -681,16 +681,16 @@ class CorrelationInstrument(BaseModel):
     # "wraps AI-TopSelectie, which is itself under-covered" is a different fact from "unknown".
     linked_portfolio_id: int | None = None
     linked_label: str | None = None
-    # ⚠ EUR for a real listing, an INDEX BASED AT 100 for a look-through — not the same kind of
+    #  EUR for a real listing, an INDEX BASED AT 100 for a look-through — not the same kind of
     # number, so the chart must label them differently. `null` when there is nothing to plot.
     unit: str | None = None
-    # ⚠ THE VENUE'S MEDIAN DAILY TRADED VALUE, IN EUR — the column that tells you whether to
+    #  The venue's median daily traded value, in EUR — the column that tells you whether to
     # believe the row above it. A near-untraded listing still yields 251 bars a year, so nothing
     # else here would look wrong; its closes are simply stale against the real market, and a
     # correlation of DAILY RETURNS is the statistic that damages most. See `_median_adv` for the
     # measured case (Hermès on Hanover, EUR 4,946/day, held by 19 of 44 models).
     med_adv_eur: float | None = None
-    # ⚠ WHERE THE NUMBERS CAME FROM — TWO VENDORS, NOT ONE. `price_source` is yfinance for every
+    #  Where the numbers came from — two vendors, not one. `price_source` is yfinance for every
     # priced row on this page: GuruFocus (`metric_data`) prices the /benchmarks index and the
     # momentum engine and NEVER enters this path, because the AIRS books live in the ISIN/asset
     # world. `fx_source` is the second vendor a "which source?" question usually forgets — a EUR
@@ -711,7 +711,7 @@ class CorrelationSeries(BaseModel):
     that chose this encoding over the obvious `[[date, value], …]` (452 KB raw against 1,270 KB).
 
     `values[key][i]` is the level on `dates[i]`, or `null` for a day that instrument did not
-    trade. ⚠ A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
+    trade.  A null is a foreign holiday, NOT a zero: the axis is the union of every instrument's
     trading days, so rendering nulls as 0 draws a spike to the floor on every one of them.
     """
 
@@ -763,7 +763,7 @@ async def airs_model_portfolio_correlations(request: Request, year: int | None =
     """YTD + trailing-12m return-correlation matrices over the listed (> 5-holding) models,
     plus every instrument that fed them and its price series.
 
-    ⚠ GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
+     GZIPPED HERE RATHER THAN BY A `GZipMiddleware`, for the reason `/api/benchmarks/…/grid`
     records: this app is SSE-heavy, and compression sits between a stream and its client and
     buffers. The instrument series are ~450 KB of JSON and compress to ~207 KB; the matrices
     alone are a few KB. `Accept-Encoding` is honoured, not assumed — `/documentation` publishes
@@ -774,7 +774,7 @@ async def airs_model_portfolio_correlations(request: Request, year: int | None =
     )
 
     payload = await compute_portfolio_correlations_async(year)
-    # ⚠ THE MODEL STILL VALIDATES. Returning a `Response` skips FastAPI's `response_model` check,
+    #  The model still validates. Returning a `Response` skips FastAPI's `response_model` check,
     # and this schema is what `npm run gen:types` builds the frontend's types from.
     body = PortfolioCorrelationMatrix.model_validate(payload).model_dump_json().encode()
     if "gzip" in (request.headers.get("accept-encoding") or "").lower():
@@ -786,12 +786,12 @@ async def airs_model_portfolio_correlations(request: Request, year: int | None =
 class CompositionHolding(BaseModel):
     """One holding behind a composition bar, at the weight that bar counted it at.
 
-    ⚠ `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
+     `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
     bucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other
     two by every long position, so the SAME holding carries different weights on different axes and
     that is correct. See `_airs_portfolio_analysis._axis_holdings`.
 
-    ⚠ IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
+     IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
     funds, cash and anything it could not price, then renormalises what remains to 100% and weights
     it by the position's value when the window OPENED. Measured on Bustelberg Offensief:
     Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong —
@@ -824,7 +824,7 @@ class PortfolioAnalysisRow(BaseModel):
 class CompositionExcluded(BaseModel):
     """A holding this axis does not weigh, and why. `cash` · `unpriced` · `unclassified`.
 
-    ⚠ TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by
+     TWO OF THESE THREE ARE ANSWERS, NOT GAPS. A fund, a bond and a cash line have no sector by
     definition — they are not Stocks in our own classification and already have their own slice of
     the allocation chart. Only `unpriced` is a real hole: a stock we hold, in a real sector, that
     we cannot price, so its bucket reads lower than it is. `asset_class` rides along precisely so
@@ -843,18 +843,18 @@ class CompositionExcluded(BaseModel):
 class PortfolioAnalysisAxis(BaseModel):
     axis: str                          # sector | region | currency
     rows: list[PortfolioAnalysisRow]
-    # ⚠ THE DENOMINATOR, IN WORDS — and it is now the ATTRIBUTION basis (start-of-window value over
+    #  The denominator, in words — and it is now the ATTRIBUTION basis (start-of-window value over
     # the attributable holdings), so a bar equals its own Brinson row. Stated rather than implied,
     # because a percentage whose base is unstated is how two correct numbers read as a
     # contradiction. Says so explicitly when a portfolio falls back to the current-value basis.
     basis: str | None = None
     # How many positions that denominator spans.
     positions: int | None = None
-    # ⚠ HOW MUCH OF THE BOOK THESE BARS SPEAK FOR. Never assumed to be 100. Most of the remainder
+    #  How much of the book these bars speak for. Never assumed to be 100. Most of the remainder
     # is normally funds, bonds and cash, which have no sector BY DEFINITION — informative, not a
     # fault. None on the fallback basis, where nothing is excluded.
     attributable_pct: float | None = None
-    # ⚠ THE PART THAT IS ACTUALLY A GAP: real holdings, in real buckets, that we cannot price — so
+    #  The part that is actually a gap: real holdings, in real buckets, that we cannot price — so
     # their bucket reads lower than it is. This is what deserves a warning; `attributable_pct`
     # alone made a routine 13% in ETFs look like the same kind of problem.
     unpriced_pct: float | None = None
@@ -865,7 +865,7 @@ class PortfolioAnalysisAxis(BaseModel):
 class PortfolioAnalysisReturns(BaseModel):
     """The model's EUR return beside the benchmark's — over the SAME windows, both times.
 
-    ⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's
+     A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER. A model's
     "YTD" opens at `max(1 Jan, its inception)`, and for the 27 models younger than the year that
     is NOT 1 January. Putting a 9-day portfolio return beside the index's full-year return and
     calling the gap out-performance would be nonsense that looks exactly like a finding. So the
@@ -876,7 +876,7 @@ class PortfolioAnalysisReturns(BaseModel):
     """
 
     # Where the PRIMARY portfolio numbers come from: "model" (yfinance reconstruction) or "book"
-    # (AIRS's own cumulatief_rendement). ⚠ The BENCHMARK no longer follows it: since 2026-08-19 the
+    # (AIRS's own cumulatief_rendement).  The BENCHMARK no longer follows it: since 2026-08-19 the
     # headline benchmark is the index ETF's own price series from GuruFocus where one exists —
     # see `benchmark_source` below.
     source: str = "model"
@@ -888,11 +888,11 @@ class PortfolioAnalysisReturns(BaseModel):
     portfolio_ytd_pct: float | None = None
     # As-of dates behind the numbers, for the per-value provenance ⓘ. `portfolio_as_of` is the
     # yfinance close date (model source) or the AIRS book snapshot date (book source).
-    # ⚠ `benchmark_as_of` describes the ATTRIBUTION panel's benchmark legs (still the yfinance
+    #  `benchmark_as_of` describes the ATTRIBUTION panel's benchmark legs (still the yfinance
     # reconstruction), NOT the headline tile — that one is `benchmark_ytd_as_of`.
     portfolio_as_of: str | None = None
     benchmark_as_of: str | None = None
-    # ⚠ WHERE THE HEADLINE BENCHMARK FIGURE COMES FROM, which is no longer the same place as the
+    #  Where the headline benchmark figure comes from, which is no longer the same place as the
     # attribution's legs. `benchmark_source` is "etf" (the index ETF's own price series, converted
     # to EUR at each mark's own rate — see `_benchmark_etf`) or "rebuild" (the constituent
     # reconstruction, which is all the AEX and any pre-inception window can have). The tile has to
@@ -902,11 +902,11 @@ class PortfolioAnalysisReturns(BaseModel):
     benchmark_ticker: str | None = None
     benchmark_ytd_from: str | None = None       # the close it OPENED on, not the 1-Jan anchor
     benchmark_ytd_as_of: str | None = None      # the ETF's last bar; None on the rebuild path
-    # ⚠ When WE last asked the vendor, so the ⓘ can say "read today = current" instead of comparing
+    #  When WE last asked the vendor, so the ⓘ can say "read today = current" instead of comparing
     # the bar date to the calendar and warning about the vendor's own lag. None on the rebuild path.
     benchmark_fetched_at: str | None = None
     # The four numbers the ETF return is made of, so the tile's ⓘ can print the formula and then
-    # the same formula with these filled in. ⚠ `*_fx` is the ETF currency PER EUR (1.1750 USD/EUR)
+    # the same formula with these filled in.  `*_fx` is the ETF currency PER EUR (1.1750 USD/EUR)
     # — the direction the formula divides by. All None on the rebuild path.
     benchmark_ytd_open_price: float | None = None
     benchmark_ytd_close_price: float | None = None
@@ -927,7 +927,7 @@ class PortfolioAnalysisReturns(BaseModel):
     # DYNAMIC book (real positions, AIRS). `book_gap_pct` = strategy − book is the drift between
     # them, and it is the whole reason the two-table split exists.
     #
-    # ⚠ `book_comparable` GUARDS THE SUBTRACTION. The book is always the calendar year; the
+    #  `book_comparable` GUARDS THE SUBTRACTION. The book is always the calendar year; the
     # model's YTD is partial for 9 of 28. Where the windows differ, `book_gap_pct` is None and
     # `book_reason` says why — a gap across two windows is not drift.
     book_portefeuille: str | None = None
@@ -949,16 +949,16 @@ class PortfolioAllocationSlice(BaseModel):
     bucket: str
     pct: float
     # The bucket's own return — its euro Result over what it was worth when the year opened.
-    # Null when no book. ⚠ A RATE ON ITS OWN DENOMINATOR, so these do NOT add across classes.
+    # Null when no book.  A RATE ON ITS OWN DENOMINATOR, so these do NOT add across classes.
     return_pct: float | None = None
-    # ⚠ THE SAME EUROS ON THE BOOK'S DENOMINATOR, in POINTS — this one DOES add.
-    # ⚠ BUT NOT TO THE WHOLE BOOK: a position sold out during the year has no asset class, so no
+    #  The same euros on the book's denominator, in POINTS — this one DOES add.
+    #  But not to the whole book: a position sold out during the year has no asset class, so no
     # slice can carry it. Measured on BUS_Offensief_Dyn the classes come to +8.211pp against a
     # book that made +5.827%, the missing -2.384pp being eight names it no longer holds
     # (`realised.positions`). The UI states that remainder rather than letting the parts quietly
     # miss the total.
     contribution_pct: float | None = None
-    # ⚠ How many INDIVIDUAL holdings sit in this class, counted AFTER the certificates are looked
+    #  How many INDIVIDUAL holdings sit in this class, counted AFTER the certificates are looked
     # through. A weight alone cannot tell "66% in one bond ETF" from "66% across sixty names" —
     # they draw the same slice and are not the same portfolio. On ToppenbergBeheer Defensief the
     # Stocks sleeve is nine lines in AIRS and ~160 real companies underneath.
@@ -991,7 +991,7 @@ class HoldingSource(BaseModel):
     return_pct: float | None = None
     book: str | None = None                # the AIRS account that valued this route
     as_of: str | None = None               # ...and the snapshot it valued it at
-    # ⚠ THAT BOOK'S OWN VALUATION — the numerator and denominator behind `return_pct`, so the card
+    #  That book's own valuation — the numerator and denominator behind `return_pct`, so the card
     # can print the division instead of asserting its result. NOT this route's slice of our book:
     # on a split row the two diverge, and showing the slice beside the direct position's return
     # would put two numbers on screen whose ratio is not the third.
@@ -1007,7 +1007,7 @@ class HoldingSource(BaseModel):
 class BookHoldingDetail(BaseModel):
     """One paired-book position — every LONG line, priced or not.
 
-    ⚠ TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.
+     TWO WEIGHTS ON PURPOSE, AND THEY ARE NOT INTERCHANGEABLE.
 
     `weight_pct` is the holding's OPENING value (beginwaarde) as a share of the PRICED book, so that
     within ANY asset class, Σ (weight_pct / Σ_class weight_pct) · return_pct reproduces that class's
@@ -1021,7 +1021,7 @@ class BookHoldingDetail(BaseModel):
     with the chart above it is read as a bug in both.
 
     `weight_start_pct` is the THIRD weight, and it is the one that reconciles this table with the
-    composition charts. ⚠ THREE WEIGHTS, ONE POSITION, ALL CORRECT:
+    composition charts.  THREE WEIGHTS, ONE POSITION, ALL CORRECT:
 
       weight_now_pct    current EUR value ÷ the WHOLE book — what is held today.
       weight_start_pct  Beginwaarde ÷ the WHOLE book at the window's open. It is GRAFTED ON from
@@ -1034,7 +1034,7 @@ class BookHoldingDetail(BaseModel):
     bar. Dividing the FIRST by the Stocks slice and expecting the THIRD is the trap this column
     closes — ASML outgrew the book by ~40% over the window, so its current share is much the larger.
 
-    ⚠ `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`
+     `weight_start_pct` IS NOT `weight_pct`. Same numerator, different denominator: `weight_pct`
     divides by the PRICED book (so a class's contribution reconciles), this divides by the whole
     book (so it sits honestly beside `weight_now_pct`). A `0.0` is a fact — bought after the window
     opened; `None` means no ISIN to join on (cash), never "zero".
@@ -1045,14 +1045,14 @@ class BookHoldingDetail(BaseModel):
     name: str | None = None
     isin: str | None = None
     bucket: str
-    # ⚠⚠ IS THIS A FUND, RATHER THAN A COMPANY — AND IT IS ON THE ROW BECAUSE THE BUCKET NO LONGER
+    #  Is this a fund, rather than a company — and it is on the row because the bucket no longer
     # SAYS. Until 2026-08-18 an equity ETF sat in its own `Equity ETF` bucket, so "bucket ==
     # Equity" doubled as "an operating company", and the Analyse modal gates owner-earnings
     # blending on exactly that. With the two merged into Stocks the guarantee is gone from the
     # bucket, so it travels here instead — otherwise the blender would be handed ETFs, which have
     # no earnings and which this app deliberately does not look through.
     is_fund: bool | None = None
-    # ⚠ THE SECTOR CHART'S OWN BUCKET, NOT `asset_grid.sector` RAW. It runs through the identical
+    #  The sector chart's own bucket, not `asset_grid.sector` RAW. It runs through the identical
     # `_buckets` the bars and the benchmark use — canonicalised ("Financial Services" -> Financials,
     # the two Yahoo vocabularies), the ETF/asset-class leftovers ("etf", "Equity") stripped back to
     # Unclassified, a fund folded to Unclassified because its listing says nothing about what it
@@ -1064,7 +1064,7 @@ class BookHoldingDetail(BaseModel):
     # looked through to reach it. Empty when the position is held directly. More than one is
     # normal: NVIDIA arrives through three of ToppenbergBeheer Defensief's certificates.
     via_names: list[str] = []
-    # ⚠ HOW MUCH CAME EACH WAY — `via_names` names the routes but cannot size them, and unsized
+    #  How much came each way — `via_names` names the routes but cannot size them, and unsized
     # they mislead: MasterCard is EUR 50,489 of BUS_Offensief_Dyn's own shares against EUR 1,991
     # (3.8%) through the Star certificate, and a row chipped only "Star" reads as a position the
     # book does not hold itself. `label` is null for the book's own shares. The percentages are
@@ -1075,11 +1075,11 @@ class BookHoldingDetail(BaseModel):
     weight_start_pct: float | None = None
     return_pct: float | None = None
     # ── WHAT THIS POSITION ACTUALLY MADE, in euros, and its share of the book's year.
-    # ⚠ THESE ADD UP AND THE WEIGHTS DO NOT, which is why they exist. `unrealised + realised +
+    #  These add up and the weights do not, which is why they exist. `unrealised + realised +
     # income = result`, and Σ `contribution_pct` over every row — these plus the sold-out positions
     # in `realised.positions` — IS the book's own return (measured: 0.0000pp residual).
     #
-    # ⚠ A EURO AMOUNT MAY BE SPLIT ACROSS A CERTIFICATE'S LEGS; A PERCENTAGE MAY NOT. A
+    #  A euro amount may be split across a certificate's legs; a percentage may not. A
     # looked-through row's `unrealised_eur` is its share of the certificate's value change — real
     # money, really this row's share — while its `return_pct` would be the WRAPPER's rate, which is
     # the documented lie (NVIDIA +0.08% against its own +2.82%). That is why the result columns are
@@ -1087,7 +1087,7 @@ class BookHoldingDetail(BaseModel):
     start_value_eur: float | None = None
     current_value_eur: float | None = None
     unrealised_eur: float | None = None
-    # ⚠ Only on a position TRIMMED but still held. A name sold out entirely has no row here at all
+    #  Only on a position TRIMMED but still held. A name sold out entirely has no row here at all
     # — it is in `realised.positions` — and a looked-through leg is never sold on its own, because
     # AIRS trades the certificate. Null, never 0: "nothing was sold" and "the sale broke even" are
     # different facts.
@@ -1096,7 +1096,7 @@ class BookHoldingDetail(BaseModel):
     result_eur: float | None = None
     # ── AIRS's OWN split of the HELD leg: `Fondsresultaat` (price) and `Valutaresultaat` (FX),
     # both in EUR, plus what the split does not reach (the realised leg and the dividends).
-    # ⚠ NULL TOGETHER on a snapshot older than 2026-07-18 (AIRS published neither column before
+    #  Null together on a snapshot older than 2026-07-18 (AIRS published neither column before
     # then), on cash, and on a leg inside a certificate. Never 0 in those cases: "the currency did
     # nothing" is a claim about the position, and this is an absence in our data.
     fund_result_eur: float | None = None
@@ -1104,24 +1104,24 @@ class BookHoldingDetail(BaseModel):
     unsplit_result_eur: float | None = None
     contribution_pct: float | None = None
     # ── WHAT THE MONEY MADE, as against what the instrument did.
-    # ⚠ `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
+    #  `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
     # priced in January — which erases your timing ON PURPOSE so the figure describes the stock.
     # This one is the cumulative cash-flow return: Result divided by capital actually committed
     # (opening value plus purchases). It has no capital-days weighting and is never annualised;
     # dividends net of withholding and anything realised on a mid-year sale remain in the numerator.
     #
-    # ⚠ NULL FOR A LEG INSIDE A CERTIFICATE, and that is not a gap to fill. AIRS trades the
+    #  Null for a leg inside a certificate, and that is not a gap to fill. AIRS trades the
     # WRAPPER, so a stock reached through one has no buys or sells of its own — there is no "money
     # you put in" to divide by. 24 of BUS_Offensief_Dyn's 52 rows are in this position.
     avg_capital_eur: float | None = None
     money_weighted_return_pct: float | None = None
-    # ⚠ WHICH of the two reasons the two fields above are blank. True = this position carries a
+    #  WHICH of the two reasons the two fields above are blank. True = this position carries a
     # `Tt = D` (Deponering) row, so shares arrived without a purchase and its trade quantities and
     # its holding quantity are on different bases. False with a blank value = it is a leg inside a
     # certificate, which has no flows of its own at all. Same `None`, different facts.
     capital_unknown: bool = False
     # ── THE CERTIFICATE'S OWN INVESTED-CAPITAL FIGURES, for a leg that can never have its own.
-    # ⚠⚠ THIS IS NOT THE LEG'S RETURN AND MUST NOT BE SHOWN IN THE LEG'S COLUMN. AIRS bought ONE
+    #  This is not the leg's return and must not be shown in the leg's column. AIRS bought ONE
     # certificate, so every leg inside it shares a single flow history: put it in the column and
     # all 22 StarTopSelectie legs read −3.86%, which looks like 22 per-stock measurements and is
     # one measurement copied 22 times. Shopify did not return −3.86% on the money; the wrapper did.
@@ -1130,7 +1130,7 @@ class BookHoldingDetail(BaseModel):
     via_holding_name: str | None = None
     # ── "lookthrough" means `money_weighted_return_pct` was measured in `capital_book` — the child
     # book that ACTUALLY bought this stock — rather than in the book being viewed, which only ever
-    # bought the certificate. ⚠ It is therefore the STRATEGY's return on its money, not this book's:
+    # bought the certificate.  It is therefore the STRATEGY's return on its money, not this book's:
     # this book's own experience depends on when IT bought the wrapper. Same compromise the Return
     # column already makes, so the two agree instead of each being wrong differently. The euro
     # capital is scaled to this book's slice of the child's position; the rate is not scaled.
@@ -1138,7 +1138,7 @@ class BookHoldingDetail(BaseModel):
     capital_book: str | None = None
     via_money_weighted_return_pct: float | None = None
     via_avg_capital_eur: float | None = None
-    # ⚠ THE INSTRUMENT'S OWN EUR RETURN — NOT `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
+    #  The instrument's own EUR return — not `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
     # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows
     # what the CERTIFICATE holding NVIDIA did. Splitting that certificate's start and current value
     # by the same composition share hands every instrument behind it the wrapper's return — 135
@@ -1148,7 +1148,7 @@ class BookHoldingDetail(BaseModel):
     # marks that produce the arithmetic behind a portfolio's YTD elsewhere. Use THIS one per row;
     # `return_pct` only aggregates correctly, and only over a whole class.
     #
-    # ⚠ BUT ONLY WHERE THE BOOK CANNOT ANSWER. The wrapper argument above is about LOOK-THROUGH
+    #  But only where the book cannot answer. The wrapper argument above is about LOOK-THROUGH
     # rows and was being applied to every row, including the ones AIRS values directly — and for
     # those AIRS knows the answer exactly. Fortinet in AITopSelectie OFF DYN is +111.74% by AIRS's
     # own Beginwaarde -> Huidige waarde plus its net dividend, and +108.65% off our yfinance
@@ -1164,42 +1164,42 @@ class BookHoldingDetail(BaseModel):
     own_return_estimated: bool = False
     # Annualised volatility of this instrument's DAILY EUR close over the trailing 5 years.
     #
-    # ⚠ null WHERE THERE IS NOT ENOUGH HISTORY, and that is not the same as low volatility — a
+    #  null WHERE THERE IS NOT ENOUGH HISTORY, and that is not the same as low volatility — a
     # stock that listed last year has no five-year figure, and 0.0 in the column would read as
     # remarkably stable. See `_holding_risk`; the column renders a dash.
     vol_5y_pct: float | None = None
     # Beta of the same daily EUR returns against the SELECTED benchmark's investable tracker, over
     # the same 5 years and the dates both series share.
     #
-    # ⚠⚠ IT MOVES WITH THE BENCHMARK PICKER. A beta is meaningless without naming what it is
+    #  It moves with the benchmark picker. A beta is meaningless without naming what it is
     # against, so this is not a property of the instrument — request the modal with a different
     # `benchmark` and every value here changes.
     #
-    # ⚠ null RATHER THAN 0. Beta 0 means "moves independently of the market", which is a strong
+    #  null RATHER THAN 0. Beta 0 means "moves independently of the market", which is a strong
     # claim about a stock we simply could not measure.
     beta_5y: float | None = None
     # 12-1 momentum: the 12-month EUR price return EXCLUDING the most recent month, in %.
     #
-    # ⚠⚠ NOT the strategy's `momentum_score`. That is a min-max normalisation ACROSS the universe
+    #  NOT the strategy's `momentum_score`. That is a min-max normalisation ACROSS the universe
     # it was scored over, so the same stock scores differently against the S&P than against ACWI
     # and a holding in no universe has none at all — a ranking within a run, not a property of the
     # stock. This is absolute and needs no universe, which is what makes a column of them
     # comparable between stocks.
     #
-    # ⚠ SKIPPING THE LAST MONTH IS THE DEFINITION, not a refinement: the most recent month
+    #  Skipping the last month is the definition, not a refinement: the most recent month
     # mean-REVERTS, so including it is what makes a raw 12-month return a poor momentum signal.
     # From `signal_engine.daily.compute_single_company_signals` — one definition, shared with
     # /signal-lab and the backtester.
     #
-    # ⚠ IT NEEDS ONLY ~13 MONTHS, unlike the risk columns' four years, so a young listing can have
+    #  It needs only ~13 MONTHS, unlike the risk columns' four years, so a young listing can have
     # momentum and a dash for vol.
     mom_12_1_pct: float | None = None
-    # ⚠ THE TWO PRICES BEHIND IT (EUR), so the ⓘ can show `from ÷ to − 1 = result` instead of
+    #  The two prices behind it (EUR), so the ⓘ can show `from ÷ to − 1 = result` instead of
     # asserting the result. Null together with the figure, and null when the legs could not be
     # read even though it could — the tooltip then states the formula without substituting it.
     mom_12_1_from: float | None = None
     mom_12_1_to: float | None = None
-    # ⚠⚠ WHERE THAT RETURN SITS IN THE BENCHMARK UNIVERSE, as a seven-state bucket
+    #  Where that return sits in the benchmark universe, as a seven-state bucket
     # (-3 = weakest decile .. +3 = strongest) plus the exact percentile behind it. It is the ROW'S
     # OWN return placed in the universe's distribution, never a lookup of this company's stored
     # rank — only 61% of held ISINs are constituents at all. Null when no `relative_momentum`
@@ -1208,7 +1208,7 @@ class BookHoldingDetail(BaseModel):
     mom_pct_rank: float | None = None
     mom_rank_n: int | None = None
     own_return_source: str | None = None      # "airs" | "yfinance" | None
-    # ⚠ WHICH AIRS BOOK THE FIGURE CAME FROM, because it is no longer always this one. A leg held
+    #  Which AIRS book the figure came from, because it is no longer always this one. A leg held
     # only inside a certificate is valued by the account behind that certificate — the book that
     # actually holds the shares — and its answer can differ sharply from this book's for the same
     # instrument, because AIRS's Beginwaarde is the year-open value OR the PURCHASE value for a
@@ -1217,7 +1217,7 @@ class BookHoldingDetail(BaseModel):
     # different questions — so the column names its source rather than leaving it inferable.
     # None on a yfinance row.
     own_return_book: str | None = None
-    # ⚠ THE DATE THIS ROW'S RETURN IS AS-OF, PER ROW, because the two bases have different
+    #  The date this row's return is as-of, per row, because the two bases have different
     # clocks: an `airs` row is as-of the BOOK SNAPSHOT, a `yfinance` row as-of that instrument's
     # own last close, which can trail it by weeks. The payload's `as_of` is neither — it is the
     # model composition's effective date, and stamping the cards with it reported the row's own
@@ -1232,11 +1232,11 @@ class BookHoldingDetail(BaseModel):
 class AllocationBand(BaseModel):
     """One cell of the allocation policy: what share this class may take in this risk profile.
 
-    ⚠ EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
+     EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. "No policy recorded" and "hold none of this"
     are the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset
     cell comes back null rather than 0 — a zeroed grid would publish a policy nobody wrote.
 
-    ⚠ DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
+     DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over
     the allocation bars). Pydantic resolves the annotation when the class is built, so a definition
     further down the file is a NameError at import, not a forward reference.
     """
@@ -1252,7 +1252,7 @@ class AllocationBand(BaseModel):
 class RealisedContributionLeg(BaseModel):
     """One name the book SOLD this year, and what that sale contributed to the year.
 
-    ⚠ THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
+     THERE IS NO WEIGHT HERE, AND ITS ABSENCE IS THE HONEST STATEMENT. A sold parcel's opening
     value is not recoverable from AIRS's data: `proceeds − Res. YtD` yields its COST BASIS, which
     for a parcel bought in February is real capital that did not exist on 1 January — feeding it
     in made the opening-capital gap WORSE (EUR 55,427 → EUR 377,776 on BUS_Offensief_Dyn), and
@@ -1265,7 +1265,7 @@ class RealisedContributionLeg(BaseModel):
     realised_ytd_eur: float | None = None
     # Share of the BOOK's year, in points, on its own opening capital.
     contribution_pct: float | None = None
-    # ⚠ Decided by ABSENCE from the holdings, not by presence here — a sale is a realisation, not
+    #  Decided by ABSENCE from the holdings, not by presence here — a sale is a realisation, not
     # a closure, and most sold names are still held (trimmed).
     closed_out: bool | None = None
     # Non-zero means part of this gain was made in earlier years and is correctly NOT in the year.
@@ -1277,7 +1277,7 @@ class RealisedContributionLeg(BaseModel):
 class LedgerPosition(BaseModel):
     """One instrument's whole year — whether the book still holds it or not.
 
-    ⚠ `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
+     `contribution_pct` IS THE COLUMN THAT ADDS UP. Its sum over every position IS the book's own
     YTD (measured exactly: 5.8267 against AIRS's 5.826704, and 44.4624 against 44.462408).
     `weight_pct` is DESCRIPTIVE — how much of the year's capital this position occupied — so
     `contribution ≈ weight × return` holds only approximately, and the identity the table asserts
@@ -1290,12 +1290,12 @@ class LedgerPosition(BaseModel):
 
     name: str
     held: bool = False
-    # ⚠ Decided by ABSENCE from the holdings, not by having sold — most sold names are trims.
+    #  Decided by ABSENCE from the holdings, not by having sold — most sold names are trims.
     closed_out: bool = False
     # Value at the year's open. For a held row, `Beginwaarde` de-restated back to the quantity
     # actually owned then; for a sold-out row, `proceeds − Res. YtD` scaled to the shares held at
     # the open (AIRS does not publish its parcel matching, so that split is proportional).
-    # ⚠⚠ NULLABLE, AND THE NULL IS THE POINT — a 0.0 here would be a claim that the position
+    #  Nullable, and the null is the point — a 0.0 here would be a claim that the position
     # opened at nothing and tied up nothing, which is exactly the false statement the refusal
     # exists to avoid. `None` means "its share count moved for a reason we do not interpret
     # (`Tt = D`, Deponering), so no quantity arithmetic on it is trustworthy". Typed as plain
@@ -1311,7 +1311,7 @@ class LedgerPosition(BaseModel):
     realised_result_eur: float = 0.0
     income_eur: float = 0.0
     result_eur: float = 0.0
-    # ⚠ ALWAYS NULL ON A SOLD-OUT POSITION, and declared anyway so the column renders a blank
+    #  Always null on a sold-out position, and declared anyway so the column renders a blank
     # rather than vanishing from these rows: AIRS's split lives on the Vermogensoverzicht, which
     # lists what is HELD, and the transacties sheet it was realised through has no currency column.
     fund_result_eur: float | None = None
@@ -1323,17 +1323,17 @@ class LedgerPosition(BaseModel):
     first_sale: str | None = None
     last_sale: str | None = None
     prior_year_eur: float = 0.0
-    # ⚠⚠ THE INSTRUMENT'S OWN RISK FIGURES, ON A ROW THE BOOK NO LONGER HOLDS — and they are
+    #  The instrument's own risk figures, on a row the book no longer holds — and they are
     # meaningful precisely because they are properties of the INSTRUMENT, not of the position.
     # Momentum, volatility and beta are computed from our own daily EUR close series, which does
     # not stop when a book sells; the same three columns therefore say the same thing on a sold row
     # as on a held one, which is what makes the table readable straight down.
     #
-    # ⚠ AS OF TODAY, NOT AS OF THE SALE. That is the same basis as every held row above — which is
+    #  As of today, not as of the sale. That is the same basis as every held row above — which is
     # the point, since a column comparable down its own length is worth more here than one that
     # answers "what was its beta the day I sold it". The UI says so on the cells.
     #
-    # ⚠ `isin` IS RESOLVED, NOT CARRIED. A closed-out position has no holdings row and therefore no
+    #  `isin` IS RESOLVED, NOT CARRIED. A closed-out position has no holdings row and therefore no
     # ISIN of its own; this is what `_sold_position_isins` recovered, and it is on the wire so the
     # reader can see WHICH instrument the three numbers describe. Null when it could not be
     # resolved, and then the three are null too — never a figure for an instrument we cannot name.
@@ -1341,12 +1341,12 @@ class LedgerPosition(BaseModel):
     vol_5y_pct: float | None = None
     beta_5y: float | None = None
     mom_12_1_pct: float | None = None
-    # ⚠ THE TWO PRICES BEHIND IT (EUR), so the ⓘ can show `from ÷ to − 1 = result` instead of
+    #  The two prices behind it (EUR), so the ⓘ can show `from ÷ to − 1 = result` instead of
     # asserting the result. Null together with the figure, and null when the legs could not be
     # read even though it could — the tooltip then states the formula without substituting it.
     mom_12_1_from: float | None = None
     mom_12_1_to: float | None = None
-    # ⚠⚠ WHERE THAT RETURN SITS IN THE BENCHMARK UNIVERSE, as a seven-state bucket
+    #  Where that return sits in the benchmark universe, as a seven-state bucket
     # (-3 = weakest decile .. +3 = strongest) plus the exact percentile behind it. It is the ROW'S
     # OWN return placed in the universe's distribution, never a lookup of this company's stored
     # rank — only 61% of held ISINs are constituents at all. Null when no `relative_momentum`
@@ -1366,12 +1366,12 @@ class LedgerPosition(BaseModel):
 class RealisedBlock(BaseModel):
     """What the paired book realised on sales this year — the leg the holdings table cannot show.
 
-    ⚠ EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
+     EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so
     `held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights
     by each position's share of the PRICED HELD book, which is right for a class return and cannot
     carry a sold position at all — different question, different denominator.
 
-    ⚠ `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
+     `available: false` IS NOT "SOLD NOTHING". No pairing, no cached Transacties sheet, or a
     sheet we could not read — each has its own `note`, and an empty list presented as an answer
     would hide EUR 28,656 of realised loss on the book this was measured against.
     """
@@ -1380,7 +1380,7 @@ class RealisedBlock(BaseModel):
     portefeuille: str | None = None
     note: str | None = None
     basis_eur: float | None = None
-    # ⚠⚠ False on a book with deposits or withdrawals: `result ÷ opening capital` is not a return
+    #  False on a book with deposits or withdrawals: `result ÷ opening capital` is not a return
     # there, so the percentages are withheld and only the euro amounts stand. Contributions that
     # do not add to the figure they decompose are worse than none — each looks reasonable alone.
     comparable: bool | None = None
@@ -1401,7 +1401,7 @@ class RealisedBlock(BaseModel):
     book_as_of: str | None = None
     dates_aligned: bool | None = None
     residual_reason: str | None = None
-    # ⚠ WHAT THE WEIGHT-BASED VIEWS CANNOT SEE, on the ABSOLUTE result — a realised −28,656 against
+    #  What the weight-based views cannot see, on the ABSOLUTE result — a realised −28,656 against
     # a held +75,164 is not "negative coverage"; the question is how much of the movement happened
     # outside the holdings table. Measured 41% on BUS_Offensief_Dyn, which alone can reverse a
     # sector's verdict in an attribution built only on what is left.
@@ -1409,14 +1409,14 @@ class RealisedBlock(BaseModel):
     legs: list[RealisedContributionLeg] = []
 
     # ── EVERY POSITION THE BOOK TOUCHED, held and sold, in ONE list.
-    # ⚠ `weight_pct` is AVERAGE INVESTED CAPITAL (Modified Dietz), not a 1-January snapshot — the
+    #  `weight_pct` is AVERAGE INVESTED CAPITAL (Modified Dietz), not a 1-January snapshot — the
     # only weight a sold position can carry, and the only one that describes a book that changed
     # during the year. AITopSelectie's equities were worth EUR 40,319 on 1 January against a
     # EUR 1,000,000 opening capital (it began the year in cash and deployed on 5 January), so a
     # start-weighted table would have called it 96% cash.
     positions: list[LedgerPosition] = []
     avg_capital_eur: float | None = None
-    # ⚠ Σ average capital ÷ `beginvermogen`. REPORTED, never assumed to be 1: Modified Dietz
+    #  Σ average capital ÷ `beginvermogen`. REPORTED, never assumed to be 1: Modified Dietz
     # ignores the price path within a position and the de-restatement is its own approximation.
     # Measured 0.980 (BUS_Offensief) and 1.023 (AITopSelectie).
     capital_coverage_ratio: float | None = None
@@ -1431,7 +1431,7 @@ class ModelPortfolioAnalysis(BaseModel):
     different sector taxonomies in one chart invents differences that are not there. (All 493
     SP500 members are present in `asset_grid` with a sector, so nothing is lost.)
 
-    ⚠ FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
+     FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
     listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
     literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
     quoted in EUR it still holds mostly USD assets. So every fund folds into "Unclassified" on ALL
@@ -1441,7 +1441,7 @@ class ModelPortfolioAnalysis(BaseModel):
 
     portfolio_id: int | None = None    # null for an ad-hoc basket (a stock / group has no id)
     name: str | None = None
-    # ⚠ THE COMPOSITION'S EFFECTIVE DATE — when the MODEL declared these weights. It is NOT the
+    #  The composition's effective date — when the MODEL declared these weights. It is NOT the
     # date any figure on this screen is valued at, and using it as one is how the modal came to
     # report the portfolios row's own +111.74% as 216 days old while the row called it 2 days.
     as_of: str | None = None
@@ -1449,13 +1449,13 @@ class ModelPortfolioAnalysis(BaseModel):
     # `own_return_source == "airs"` row. Null in model mode, where each row carries its own
     # `own_return_as_of` instead.
     holdings_as_of: str | None = None
-    # ⚠⚠ WHEN *WE* LAST READ THAT BOOK — the second date, and the one that decides whether an old
+    #  WHEN *WE* LAST READ THAT BOOK — the second date, and the one that decides whether an old
     # `holdings_as_of` is AIRS's lag or ours. The modal wraps its whole subtree in
     # `ProvenanceFetchedAt` with it, so its ⓘ badges reach the same verdict as the row that opened
     # it. Without it every badge in here went amber on a book the row called current, and no
     # refresh could clear the warning because the fact that clears it was not in the payload.
     holdings_fetched_at: str | None = None
-    # ⚠ WHICH BOOK IS "THIS" BOOK. Needed the moment a holding's Return could come from ANOTHER
+    #  Which book is "THIS" BOOK. Needed the moment a holding's Return could come from ANOTHER
     # account: a leg held only inside a certificate is valued by the book behind that certificate,
     # which reports its own `own_return_book`. Without this to compare against, either every AIRS
     # row has to be labelled with its source or none of them can be.
@@ -1485,7 +1485,7 @@ class ModelPortfolioAnalysis(BaseModel):
     # stores — measured on ToppenbergBeheer Defensief, 9 of 12 positions and 44.56% of the
     # weight. Unexpanded it charted "Unclassified 100%" over 1% classified weight.
     #
-    # ⚠ REPORTED, NOT SILENT. The composition table still shows the unexpanded rows, so without
+    #  Reported, not silent. The composition table still shows the unexpanded rows, so without
     # this a reader cannot reconcile 168 holdings against the twelve in front of them, and cannot
     # tell a portfolio that genuinely holds 22 names from one holding three certificates.
     looked_through_pct: float = 0.0
@@ -1498,7 +1498,7 @@ class ModelPortfolioAnalysis(BaseModel):
     # bug, surfaced rather than absorbed. 40 of the S&P's 491 sit on European/Canadian lines.
     foreign_listings: int = 0
     benchmark_foreign_listings: int = 0
-    # ⚠ How much of the INDEX we could price. ACWI's missing names go a whole country at a time
+    #  How much of the INDEX we could price. ACWI's missing names go a whole country at a time
     # (GuruFocus sells no UK/India; yfinance has them, but some were never ingested), and a
     # cap-weighted index renormalised over the rest does not lose that weight — it redistributes
     # it into everything else. Stated, never assumed to be 100%.
@@ -1523,13 +1523,13 @@ class ModelPortfolioAnalysis(BaseModel):
     # Equity ISINs whose resolver/price data is not in asset_grid yet. The Analyse modal uses this
     # to kick the existing async asset worker without putting a slow Yahoo call on the read path.
     asset_data_missing_isins: list[str] = []
-    # ⚠ WHY `book_holdings` IS EMPTY, WHEN IT IS. Three different faults rendered as one
+    #  WHY `book_holdings` IS EMPTY, WHEN IT IS. Three different faults rendered as one
     # sentence — "No positions to show for this portfolio" — beside a portfolios list that
     # visibly HAS rows: the model is not paired with a book, the paired book has never been
     # scanned, or it was opened as an unpaired basket. Different remedies, and none of them was
     # on screen. Null when there IS a book view.
     book_note: str | None = None
-    # ⚠ THE HALF OF THE YEAR THE HOLDINGS TABLE CANNOT SHOW. Everything above is built from
+    #  The half of the year the holdings table cannot show. Everything above is built from
     # positions the book STILL HOLDS; a name sold in March has no row and its result is invisible
     # (BUS_Offensief_Dyn: EUR -28,656, 41% of the year's movement).
     realised: RealisedBlock | None = None
@@ -1570,7 +1570,7 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
 class HoldingTradeEffect(BaseModel):
     """One decision, and what it was worth against not having made it.
 
-    ⚠ AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
+     AGAINST DOING NOTHING, NOT AGAINST A PERFECT DECISION. A buy gains if the price rose after
     it; a sell gains if the price fell after it. A lucky call and a good one produce the same
     number — this makes no claim about skill.
     """
@@ -1594,11 +1594,11 @@ class HoldingTradeEffect(BaseModel):
 class HoldingTiming(BaseModel):
     """One held position's year: what doing nothing would have made, and what each trade changed.
 
-    ⚠ THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
+     THE IDENTITY IS EXACT AND IS ASSERTED: `buy_hold_eur + timing_eur == actual_eur`. Measured
     2026-08-05, residual 0.00 on every position tried. Three lines that do not add up are not a
     decomposition, and `reconciles` is how the UI knows not to present them as one.
 
-    ⚠⚠ `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
+     `actual_eur` IS THE ECONOMIC RESULT AND IS NOT THE TABLE'S `Result` COLUMN. That column is
     AIRS's restated figure — `Huidige waarde − Beginwaarde`, where Beginwaarde prices TODAY's share
     count at the 1 January price, valuing shares bought later at January's price rather than what
     was paid. `restatement_eur` is the difference, named rather than left for a reader to find.
@@ -1618,7 +1618,7 @@ class HoldingTiming(BaseModel):
     # ── The same three lines in percent, over ONE base: what the position held on 1 January was
     #    worth. Because it is one base the identity survives the division —
     #    `buy_hold_pct + timing_pp == actual_pct`. Null where nothing was held at the open.
-    #    ⚠ `actual_pct` is NOT the `Money-weighted` column: that is Modified Dietz over the
+    #     `actual_pct` is NOT the `Money-weighted` column: that is Modified Dietz over the
     #    TIME-WEIGHTED average capital, a different denominator.
     open_value_eur: float | None = None
     buy_hold_pct: float | None = None
@@ -1675,12 +1675,12 @@ class BookValuePoint(BaseModel):
 
     date: str
     value_eur: float
-    #: How many lines were summed. ⚠ ON THE POINT, because a day the scrape only half-completed
+    #: How many lines were summed.  ON THE POINT, because a day the scrape only half-completed
     #: would otherwise be a dip in the line with nothing to explain it. NULL on an `airs` point:
     #: AIRS reports a total, and inventing a count for it would be the one thing this field is for.
     holdings: int | None = None
     #: `holdings` = summed from our own snapshot. `airs` = AIRS's own month-end `eindvermogen`,
-    #: used only for the stretch BEFORE our first snapshot. ⚠ ON EVERY POINT rather than as one
+    #: used only for the stretch BEFORE our first snapshot.  ON EVERY POINT rather than as one
     #: cutover date on the envelope, so a chart cannot draw a segment under the wrong provenance.
     source: str = "holdings"
 
@@ -1696,7 +1696,7 @@ class BookValueFlow(BaseModel):
 class BookReturnPoint(BaseModel):
     """AIRS's own year-to-date return on one date, and what the book was worth that day.
 
-    ⚠⚠ `cum_pct` IS READ FROM `airs_performance.cumulatief_rendement`, NEVER DERIVED FROM
+     `cum_pct` IS READ FROM `airs_performance.cumulatief_rendement`, NEVER DERIVED FROM
     `value_eur`. It is FLOW-AWARE and the value is not: AzTopSelectie's 0 → EUR 1,000,000 on
     2026-06-30 is a funding, and this series correctly stays at 0.00% straight through it. Two
     values cannot tell that apart from a gain.
@@ -1714,7 +1714,7 @@ class BookReturnPoint(BaseModel):
 class BookValueSeries(BaseModel):
     """The book's value through time, and the return that value earned.
 
-    ⚠⚠ TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding
+     TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding
     is a step in it and is not a gain, which is why the flows ride along. `returns` is AIRS's own
     flow-aware `cumulatief_rendement`, the same column `_airs_accounts._year_perf` reads for the
     Scorecard — so the chart and the tile beside it cannot disagree.
@@ -1726,7 +1726,7 @@ class BookValueSeries(BaseModel):
     #: The cumulative-return curve, starting at exactly 0.0% on `return_from`.
     returns: list[BookReturnPoint] = []
     #: The curve's origin — the opening of the first period AIRS has published a return for, which
-    #: is the start of the year on a book funded before it. ⚠ REPORTED rather than left to the
+    #: is the start of the year on a book funded before it.  REPORTED rather than left to the
     #: caller to spot, because it is the one date on the series nobody measured.
     return_from: str | None = None
     #: The last point of the FULL curve, so a display resolution cannot move a reported figure.
@@ -1745,16 +1745,16 @@ class BookValueSeries(BaseModel):
 async def airs_model_portfolio_value_series(portfolio_id: int):
     """The paired book's cumulative return through the year, and its value on every date we hold.
 
-    ⚠⚠ THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
+     THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
     and that is what lets a curve be drawn at all: AzTopSelectie is funded EUR 1,000,000 on
     2026-06-30 and its return line stays at 0.00% straight through it, where a value line has a
     vertical. It is the same column the Scorecard's YTD tile reads.
 
-    ⚠ THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro
+     THE VALUE IS OURS, summed from `airs_holding`. It reproduces AIRS's `eindvermogen` to the euro
     on 21 of AzTopSelectie's 24 snapshots, holds two dates AIRS has no row for, and starts
     2026-06-23 — when we began keeping snapshots. See `routers/_airs_value_series`.
 
-    ⚠ ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
+     ITS OWN REQUEST, DELIBERATELY. The Analyse modal is ONE payload with no partial paint, so its
     wall clock is the reader's wait; a series nobody has scrolled to yet does not belong in it. The
     chart fetches this itself, exactly as the Risk panels do.
     """
@@ -1807,7 +1807,7 @@ async def airs_basket_analysis(req: BasketRequest, benchmark: str = "SP500"):
 
 
 class ActiveShareRow(BaseModel):
-    """One ISSUER, on both sides. ⚠ NOT one holding and not one listing — a book holding two share
+    """One ISSUER, on both sides.  NOT one holding and not one listing — a book holding two share
     classes of the same company contributes ONE of these, with the weights summed. See
     `_active_share._issuer_key`."""
 
@@ -1822,7 +1822,7 @@ class ActiveShareRow(BaseModel):
 class ActiveShareUnmatched(BaseModel):
     """A stock we hold that could not be resolved to an issuer name, so it can only be ACTIVE.
 
-    ⚠ IT IS IN THE FIGURE, AND IT IS LISTED BECAUSE IT IS. Dropping it would renormalise the rest
+     IT IS IN THE FIGURE, AND IT IS LISTED BECAUSE IT IS. Dropping it would renormalise the rest
     upward and quietly LOWER active share — the flattering direction — so the honest choice is to
     count it and show what could not be matched.
     """
@@ -1845,11 +1845,11 @@ class ActiveShare(BaseModel):
     #: derived on the client so the identity a reader checks holds to the digit.
     overlap_pct: float | None = None
 
-    #: How much of the WHOLE book the compared sleeve is. ⚠ The comparison assumes the individual
+    #: How much of the WHOLE book the compared sleeve is.  The comparison assumes the individual
     #: stocks are 100%; this is the number that stops that assumption being silent.
     stocks_pct: float | None = None
     #: The two sums behind `stocks_pct`, so the card can print the division rather than assert its
-    #: answer. ⚠ Weights as the caller sent them — the book's own, before any renormalisation.
+    #: answer.  Weights as the caller sent them — the book's own, before any renormalisation.
     stocks_weight: float | None = None
     total_weight: float | None = None
     n_holdings: int = 0
@@ -1859,11 +1859,11 @@ class ActiveShare(BaseModel):
     off_benchmark_pct: float | None = None
 
     benchmark_members: int = 0
-    #: ⚠ How much of the index we could price. A missing constituent does not lose its weight, it
+    #:  How much of the index we could price. A missing constituent does not lose its weight, it
     #: redistributes it — so an unpriceable name we do not hold makes active share read LOW.
     benchmark_covered_pct: float | None = None
 
-    #: ⚠⚠ WHEN THE INDEX'S CAPS WERE READ — the OLDEST and NEWEST stamp across its constituents,
+    #:  WHEN THE INDEX'S CAPS WERE READ — the OLDEST and NEWEST stamp across its constituents,
     #: because a cap-weighted index is exactly as current as the caps under it and those are
     #: refreshed per name, not per index. Reported as a range rather than a single "as of": one
     #: date would describe the freshest constituent and imply it of all of them.
@@ -1881,18 +1881,18 @@ class ActiveShareHolding(BaseModel):
     isin: str | None = None
     name: str | None = None
     weight_pct: float = 0.0
-    #: ⚠ THE SERVER'S OWN CLASSIFICATION, ROUND-TRIPPED. It was set by `_is_fund` when the payload
+    #:  THE SERVER'S OWN CLASSIFICATION, ROUND-TRIPPED. It was set by `_is_fund` when the payload
     #: was built; sending it back is what keeps ONE definition of "this is a fund, not a stock"
     #: rather than a second one here that could drift from the Stocks bucket on screen.
     is_fund: bool = False
     #: The position's EUR value — AIRS's own `current_value_eur`, not a `q·P·X` of ours.
     #:
-    #: ⚠ OPTIONAL, because an ad-hoc basket has weights and no euros. Every euro figure in the
+    #:  OPTIONAL, because an ad-hoc basket has weights and no euros. Every euro figure in the
     #: exposure view is then absent rather than zero: zero would claim the position is worthless.
-    #: ⚠ IGNORED BY THE OTHER SIX VIEWS, which are all scale-free — sent once on one body so the
+    #:  IGNORED BY THE OTHER SIX VIEWS, which are all scale-free — sent once on one body so the
     #: seven views cannot end up describing seven slightly different portfolios.
     value_eur: float | None = None
-    #: ⚠ THE LISTING'S currency, which is the FX exposure actually borne. NOT the company's
+    #:  THE LISTING'S currency, which is the FX exposure actually borne. NOT the company's
     #: reporting currency — a different and softer claim. See `_portfolio_exposure`.
     currency: str | None = None
 
@@ -1900,7 +1900,7 @@ class ActiveShareHolding(BaseModel):
 class ActiveShareRequest(BaseModel):
     """The holdings the Analyse modal is ALREADY showing.
 
-    ⚠⚠ THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL
+     THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL
     RULE. Everywhere else a weight is computed server-side precisely so two surfaces cannot
     disagree — but this panel sits one click from the Holdings table, and its whole job is to
     describe THAT book. Re-deriving the weights here would give the risk figure a second
@@ -1908,7 +1908,7 @@ class ActiveShareRequest(BaseModel):
     anybody asks of a 71% active share is which rows produced it. So it consumes the displayed
     numbers, and cannot disagree with the table by construction.
 
-    ⚠ IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach
+     IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach
     this with the same body, so unlike Attribution there is no `portfolio_id` variant to keep in
     step — one route serves both, the same way `basket/analysis` does for the composition.
     """
@@ -1920,12 +1920,12 @@ class ActiveShareRequest(BaseModel):
 async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = "ACWI"):
     """How much of the book's stock sleeve is NOT the benchmark.
 
-    ⚠ ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
+     ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
     (`_asset_benchmark.members` — 1,700 rows and their caps for ACWI), and the Analyse modal is ONE
     request with no partial paint, so folding this in would put that read on the critical path of
     every open for a panel most opens never look at. Same bargain Attribution already strikes.
 
-    ⚠ THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO. Funds, cash and bonds are
+     THE INDIVIDUAL STOCKS ARE TREATED AS 100% OF THE PORTFOLIO. Funds, cash and bonds are
     dropped and the rest renormalised — otherwise liquidity counts as an active bet against every
     index name at once, which is a different (and much less comparable) measure. `stocks_pct` says
     what fraction of the book that sleeve actually is.
@@ -1939,33 +1939,33 @@ async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = 
 class TrackingError(BaseModel):
     """Realised (ex-post) tracking error of the stock sleeve — see `routers/_tracking_error.py`.
 
-    ⚠⚠ `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
+     `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
     picks one and routes it through `annualized_stats`, the same function every other volatility on
     the screen goes through.
 
-    ⚠ EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
+     EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
     disagree — so every label says "realised" rather than leaving the reader to assume.
     """
 
     available: bool = True
     reason: str | None = None
     benchmark: str
-    #: daily | weekly | monthly. ⚠ Weekly is the DEFAULT and the honest one — see `cadence_note`.
+    #: daily | weekly | monthly.  Weekly is the DEFAULT and the honest one — see `cadence_note`.
     frequency: str = "monthly"
     #: The `f` in the formula: 252 / 52 / 12.
     periods_per_year: float | None = None
     #: `T` — how many active returns the spread was taken over.
     observations: int = 0
     years: int | None = None
-    #: The first and last period-end the paired grid actually reached. ⚠ NOT simply `years` back
+    #: The first and last period-end the paired grid actually reached.  NOT simply `years` back
     #: from today: a recently-listed holding shortens the grid and a stale series ends it early, so
     #: the card states real dates rather than asserting a trailing window.
     window_from: str | None = None
     window_to: str | None = None
 
     tracking_error_pct: float | None = None
-    #: ⚠ THE QUANTITY TE IS THE SPREAD **OF**, returned beside it because the two are constantly
+    #:  THE QUANTITY TE IS THE SPREAD **OF**, returned beside it because the two are constantly
     #: confused. A book can have a large tracking error and no active return whatsoever.
     mean_active_per_period_pct: float | None = None
     active_return_ann_pct: float | None = None
@@ -1991,12 +1991,12 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
                                         frequency: str = "weekly", years: int = 5):
     """Volatility of the active return, annualised — the Risk panel's second view.
 
-    ⚠ THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
+     THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
     individual stocks, renormalised to 100%), and sharing the request model is what stops them
     drifting into describing two — an active share over the stock sleeve beside a tracking error
     over the whole book would be two answers to two questions under one heading.
 
-    ⚠ SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
+     SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
     every holding plus the tracker, and most opens of the Risk panel never switch to it.
     """
     from routers._tracking_error import compute_tracking_error  # noqa: PLC0415
@@ -2015,7 +2015,7 @@ class CorrelationPair(BaseModel):
 class RiskCorrelation(BaseModel):
     """ρ as a RISK measure — see `routers/_portfolio_correlation_risk.py`.
 
-    ⚠⚠ NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
+     NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
     return into allocation + selection + interaction, terms that SUM to it exactly. Correlation
     appears nowhere in that decomposition and sums to nothing: it says how far the book CAN diverge,
     where attribution says where the divergence came from. A combined view would imply they
@@ -2029,7 +2029,7 @@ class RiskCorrelation(BaseModel):
     periods_per_year: float | None = None
     observations: int = 0
     years: int | None = None
-    #: The window the paired grid actually reached. ⚠ THE SAME TWO DATES THE TRACKING-ERROR
+    #: The window the paired grid actually reached.  THE SAME TWO DATES THE TRACKING-ERROR
     #: response carries, because both come from one `build_paired_series` — two panels quoting
     #: different windows for one series is what the shared builder exists to prevent.
     window_from: str | None = None
@@ -2044,7 +2044,7 @@ class RiskCorrelation(BaseModel):
     benchmark_vol_pct: float | None = None
     #: The SAME figure the tracking-error view reports, from the same series.
     active_vol_pct: float | None = None
-    #: ⚠ THE OTHER SIDE OF `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`, recomputed from ρ so the identity can be
+    #:  THE OTHER SIDE OF `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`, recomputed from ρ so the identity can be
     #: SEEN to hold rather than asserted. It is what links this view to the tracking-error one.
     implied_active_vol_pct: float | None = None
     #: How far the two sides miss, in pp. Floating-point noise when all is well; anything visible
@@ -2053,13 +2053,13 @@ class RiskCorrelation(BaseModel):
 
     #: Position labels, ordered by weight descending — `matrix[i][j]` is ρ(labels[i], labels[j]).
     labels: list[str] = []
-    #: ⚠ `null` FOR A PAIR WITH TOO LITTLE OVERLAP, never a faint colour. See `MIN_PAIR_OBS`.
+    #:  `null` FOR A PAIR WITH TOO LITTLE OVERLAP, never a faint colour. See `MIN_PAIR_OBS`.
     matrix: list[list[float | None]] = []
     #: Mean off-diagonal ρ — the one number that summarises a matrix. Unweighted on purpose: it is
     #: a question about the NAMES, not about the sizing.
     mean_pair_corr: float | None = None
     #: Σ of the measured pair correlations — the numerator, so the card prints the division
-    #: rather than asserting its result. ⚠ Not derivable client-side: `mean_pair_corr` is
+    #: rather than asserting its result.  Not derivable client-side: `mean_pair_corr` is
     #: rounded, and rebuilding an operand from a rounded answer drifts in the digits the worked
     #: line exists to justify.
     pair_rho_sum: float | None = None
@@ -2079,10 +2079,10 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
                                           frequency: str = "monthly", years: int = 5):
     """Correlation to the benchmark, and between the positions — the Risk panel's third view.
 
-    ⚠ THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` holds
+     THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` holds
     between the two views rather than approximately holding. See `build_paired_series`.
 
-    ⚠ SEPARATE FROM ATTRIBUTION BY DESIGN. That lives in its own dialog and decomposes the active
+     SEPARATE FROM ATTRIBUTION BY DESIGN. That lives in its own dialog and decomposes the active
     return; this one measures dispersion. Merging them would imply a reconciliation that does not
     exist.
     """
@@ -2096,11 +2096,11 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
 class PortfolioVolatility(BaseModel):
     """σ of the stock sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
 
-    ⚠ SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
+     SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
     correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
     disagreed would tell the reader one of them is wrong and nothing about which.
 
-    ⚠⚠ NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an
+     NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an
     account-value series — it is a weighted basket of instrument price returns — so a deposit or a
     withdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost
     is the other caveat: the weights are TODAY'S, carried backwards.
@@ -2113,14 +2113,14 @@ class PortfolioVolatility(BaseModel):
     periods_per_year: float | None = None
     observations: int = 0
     years: int | None = None
-    #: The window the paired grid reached. ⚠ The same two dates the tracking-error and
+    #: The window the paired grid reached.  The same two dates the tracking-error and
     #: correlation responses carry — one shared `build_paired_series`, one window.
     window_from: str | None = None
     window_to: str | None = None
 
     volatility_pct: float | None = None
     benchmark_volatility_pct: float | None = None
-    #: ⚠ SORTINO'S CONVENTION: `√(mean(min(R,0)²))·√f` — divided by ALL n, against a target of 0.
+    #:  SORTINO'S CONVENTION: `√(mean(min(R,0)²))·√f` — divided by ALL n, against a target of 0.
     #: The semi-deviation (below-MEAN observations only, divided by how many there are) is also
     #: called downside deviation and reads higher. This one is what `sortino` below is built on.
     downside_dev_pct: float | None = None
@@ -2130,10 +2130,10 @@ class PortfolioVolatility(BaseModel):
     benchmark_return_ann_pct: float | None = None
     sharpe: float | None = None
     sortino: float | None = None
-    #: ⚠ STATED, because a Sharpe without its risk-free rate is not comparable with anybody else's.
+    #:  STATED, because a Sharpe without its risk-free rate is not comparable with anybody else's.
     risk_free_pct: float = 0.0
 
-    #: ⚠ WHAT A CLIENT ACTUALLY FELT. Nobody has experienced "18% annualised volatility"; they
+    #:  WHAT A CLIENT ACTUALLY FELT. Nobody has experienced "18% annualised volatility"; they
     #: have experienced the worst week. For a fat-tailed book the two are far apart, which is
     #: precisely when σ alone misleads.
     worst_period_pct: float | None = None
@@ -2157,7 +2157,7 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
                                     frequency: str = "weekly", years: int = 5):
     """Standard deviation of the sleeve's own returns, and its downside half.
 
-    ⚠ `benchmark` IS NOT WHAT IS MEASURED HERE — volatility is a single-series statistic. It is
+     `benchmark` IS NOT WHAT IS MEASURED HERE — volatility is a single-series statistic. It is
     carried so the index's own σ can sit beside the book's for scale, and so this view uses the
     identical series the other three do.
     """
@@ -2170,7 +2170,7 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
 class DrawdownEpisode(BaseModel):
     """One peak → trough → recovery.
 
-    ⚠ AN EPISODE ENDS WHEN THE OLD PEAK IS REGAINED, not when the series turns up. A 40% fall that
+     AN EPISODE ENDS WHEN THE OLD PEAK IS REGAINED, not when the series turns up. A 40% fall that
     bounces 5% and then falls further is ONE drawdown; splitting on direction would report a set of
     shallow dips and no crash.
     """
@@ -2178,7 +2178,7 @@ class DrawdownEpisode(BaseModel):
     depth_pct: float
     peak_date: str | None = None
     trough_date: str | None = None
-    #: ⚠ NULL WHILE STILL UNDERWATER. Inventing today's date here would report a recovery that has
+    #:  NULL WHILE STILL UNDERWATER. Inventing today's date here would report a recovery that has
     #: not happened — which is the one thing a drawdown panel must never do.
     recovery_date: str | None = None
     recovered: bool = False
@@ -2191,7 +2191,7 @@ class DrawdownEpisode(BaseModel):
 class PortfolioDrawdown(BaseModel):
     """Max drawdown of the RECONSTRUCTED sleeve — see `routers/_portfolio_drawdown.py`.
 
-    ⚠⚠ NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
+     NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
     series from the holdings as they stand TODAY: look-ahead bias (those weights were chosen with
     hindsight) and survivorship bias (names since sold are absent, and the sold ones skew towards
     the fallers). The client's own figure comes from the AIRS returns, with real trades, real costs
@@ -2201,7 +2201,7 @@ class PortfolioDrawdown(BaseModel):
     available: bool = True
     reason: str | None = None
     benchmark: str
-    #: ⚠ DEFAULTS TO **DAILY**, unlike the other risk views. They compare two series whose closes
+    #:  DEFAULTS TO **DAILY**, unlike the other risk views. They compare two series whose closes
     #: are hours apart and default to weekly to remove that bias; a drawdown compares a series with
     #: itself, so the bias does not exist — and coarsening hides any dip that recovers inside the
     #: period. Monthly MDD is structurally shallower by percentage points.
@@ -2226,12 +2226,12 @@ class PortfolioDrawdown(BaseModel):
     #: and four −25%s have the same maximum and are not the same risk.
     episodes: list[DrawdownEpisode] = []
     episodes_total: int = 0
-    #: How many of those were at least `episode_threshold_pct` deep. ⚠ The tile counts THESE —
+    #: How many of those were at least `episode_threshold_pct` deep.  The tile counts THESE —
     #: `episodes_total` includes every one-session dip that recovered, which is not a risk fact.
     episodes_over_threshold: int = 0
     episode_threshold_pct: float | None = None
 
-    #: ⚠⚠ THE SAME MDD AT ALL THREE CADENCES, MEASURED IN THE SAME REQUEST. The gap between them
+    #:  THE SAME MDD AT ALL THREE CADENCES, MEASURED IN THE SAME REQUEST. The gap between them
     #: is the thing this view has to be honest about, and a reader cannot compare figures they must
     #: re-request one at a time. `null` for a cadence with too little overlap to measure.
     by_frequency: dict[str, float | None] = {}
@@ -2245,7 +2245,7 @@ async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACW
                                   frequency: str = "daily", years: int = 5):
     """Peak-to-trough falls of the reconstructed stock sleeve, with their dates.
 
-    ⚠ ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
+     ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
     is free, so the frequency comparison costs no extra round trips.
     """
     from routers._portfolio_drawdown import compute_drawdown  # noqa: PLC0415
@@ -2261,7 +2261,7 @@ class ConcentrationRow(BaseModel):
     name: str
     weight_pct: float
     cumulative_pct: float
-    #: ⚠ THE INDEX'S WEIGHT IN THE SAME ISSUER, so a large position reads as a large BET or merely
+    #:  THE INDEX'S WEIGHT IN THE SAME ISSUER, so a large position reads as a large BET or merely
     #: as a large company. Apple at 6% is not concentration when the index holds 5%.
     benchmark_pct: float = 0.0
 
@@ -2269,10 +2269,10 @@ class ConcentrationRow(BaseModel):
 class PortfolioConcentration(BaseModel):
     """`C₁₀ = Σ w₍ᵢ₎` and `HHI = Σ wᵢ²` — see `routers/_portfolio_concentration.py`.
 
-    ⚠⚠ ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would
+     ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would
     understate concentration exactly at the top, where the ten largest are decided.
 
-    ⚠⚠ BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the
+     BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the
     stock sleeve (comparable across books, the panel's convention) and `top10_of_book_pct` is of
     everything including cash and funds (true in absolute terms). Choosing one silently would be
     picking a side of a real question.
@@ -2294,11 +2294,11 @@ class PortfolioConcentration(BaseModel):
     #: What fraction of the whole book the measured sleeve is — the scale between the two above.
     stocks_pct: float | None = None
 
-    #: ⚠ ON FRACTIONS, NOT PERCENTAGES. `Σw²` over percentages is 10,000× larger (the antitrust
+    #:  ON FRACTIONS, NOT PERCENTAGES. `Σw²` over percentages is 10,000× larger (the antitrust
     #: convention) and `N_eff = 1/HHI` only inverts cleanly on fractions.
     hhi: float | None = None
     #: `1/HHI` — the "effective number of positions". An equal-weight book of N names returns
-    #: exactly N; forty names dominated by five returns far fewer. ⚠ A better measure than C₁₀,
+    #: exactly N; forty names dominated by five returns far fewer.  A better measure than C₁₀,
     #: which cuts at an arbitrary ten: two books with the same C₁₀ can be an even ten-name
     #: portfolio and one dominated by its top three.
     effective_positions: float | None = None
@@ -2321,10 +2321,10 @@ class PortfolioConcentration(BaseModel):
 async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str = "ACWI"):
     """How much of the book sits in how few issuers, beside the index's own concentration.
 
-    ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot
+     SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot
     disagree about how many positions the book has.
 
-    ⚠ NO PRICE SERIES AT ALL — this is a weights-only measure, so it is much cheaper than the
+     NO PRICE SERIES AT ALL — this is a weights-only measure, so it is much cheaper than the
     other risk views and needs no cadence.
     """
     from routers._portfolio_concentration import compute_concentration  # noqa: PLC0415
@@ -2340,7 +2340,7 @@ class ExposurePosition(BaseModel):
     weight_pct: float
     value_eur: float | None = None
     lines: int = 1
-    #: ⚠ NAMED WHEN ONE ISSUER SPANS SEVERAL CURRENCIES — two listings of one company is a single
+    #:  NAMED WHEN ONE ISSUER SPANS SEVERAL CURRENCIES — two listings of one company is a single
     #: position and two FX exposures, which the issuer fold would otherwise hide by design.
     currencies: list[str] = []
 
@@ -2355,13 +2355,13 @@ class CurrencyExposure(BaseModel):
 class PortfolioExposure(BaseModel):
     """Effective positions — `Eᵢ = qᵢ·Pᵢ·Xᵢ` — see `routers/_portfolio_exposure.py`.
 
-    ⚠⚠ WE DO NOT COMPUTE THAT PRODUCT. `airs_holding` carries a quantity, but it also carries
+     WE DO NOT COMPUTE THAT PRODUCT. `airs_holding` carries a quantity, but it also carries
     `current_value_eur`: AIRS's OWN valuation, already in euros, already struck on its own date.
     That is the number on the client's statement. Re-deriving it from our close and our FX rate
     would produce a second figure disagreeing with the statement on most rows, with nothing on
     screen able to say which was right. `Eᵢ` here IS that valuation, folded per issuer.
 
-    ⚠ TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION AND WE CANNOT VERIFY IT FROM HERE. The
+     TRADE DATE vs SETTLEMENT DATE IS AIRS'S CONVENTION AND WE CANNOT VERIFY IT FROM HERE. The
     Vermogensoverzicht exposes no flag saying which basis it used, so a book with a very recent
     trade may differ from a trade-date view by that trade's value with nothing in our data showing
     it. Stated rather than assumed away.
@@ -2375,7 +2375,7 @@ class PortfolioExposure(BaseModel):
     has_values: bool = False
     issuers: int = 0
     lines: int = 0
-    #: ⚠ `lines − issuers`, the fold made visible. It is the one-line answer to "why does this
+    #:  `lines − issuers`, the fold made visible. It is the one-line answer to "why does this
     #: panel count differently from the Holdings table".
     folded_lines: int = 0
 
@@ -2386,7 +2386,7 @@ class PortfolioExposure(BaseModel):
 
     positions: list[ExposurePosition] = []
     currencies: list[CurrencyExposure] = []
-    #: ⚠ WEIGHT WITH NO CURRENCY WE COULD ASSIGN. Folding it into EUR is the flattering default —
+    #:  WEIGHT WITH NO CURRENCY WE COULD ASSIGN. Folding it into EUR is the flattering default —
     #: it makes a book look more domestic than it is — so it is reported separately.
     currency_unknown_pct: float = 0.0
     unresolved: int = 0
@@ -2396,7 +2396,7 @@ class PortfolioExposure(BaseModel):
 async def airs_portfolio_exposure(req: ActiveShareRequest, benchmark: str = "ACWI"):
     """The euros behind the weights, per issuer, and the currency split of the sleeve.
 
-    ⚠ SAME ISSUER FOLDING AS ACTIVE SHARE AND CONCENTRATION (`build_issuer_weights`) — built once
+     SAME ISSUER FOLDING AS ACTIVE SHARE AND CONCENTRATION (`build_issuer_weights`) — built once
     and read by all three, which is what stops three panels showing three sets of weights for one
     portfolio.
     """
@@ -2418,7 +2418,7 @@ class AttributionName(BaseModel):
     ticker: str | None = None
     weight_pct: float = 0.0
     #: TODAY's share, on the same members and the same denominator rule as `weight_pct`.
-    #: ⚠ A SECOND COLUMN, NOT A CORRECTION. `weight_pct` is the window's open and is what Return
+    #:  A SECOND COLUMN, NOT A CORRECTION. `weight_pct` is the window's open and is what Return
     #: and Contribution are built from; this one is what the composition bars are weighed on, so
     #: the drill-down reconciles with the bar it opened from. Null where the source has no current
     #: values (`source=model`, whose weights are design percentages).
@@ -2473,15 +2473,15 @@ class ModelPortfolioAttribution(BaseModel):
         selection   =  w_b        x (R_p,bucket - R_b,bucket)  the right names inside them?
         interaction = the cross term
 
-    ⚠ THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.
+     THE IDENTITY IS ASSERTED, NOT ASSUMED: sum(allocation + selection + interaction) == excess.
     `residual_pct` and `reconciles` carry the proof. Three columns that do not sum to the excess
     are not a decomposition of it.
 
-    ⚠ FUNDS AND CASH ARE EXCLUDED. An ETF has no sector — the benchmark's weight in the fund
+     FUNDS AND CASH ARE EXCLUDED. An ETF has no sector — the benchmark's weight in the fund
     bucket is zero, so Brinson would report holding a world tracker as a *sector bet*.
     `attributable_pct` says how much of the model the table explains.
 
-    ⚠ `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is
+     `unpriced_pct` IS NOT THE SAME AS `excluded_pct`, AND IT IS THE DANGEROUS ONE. A fund is
     excluded because it is not a sector bet. An UNPRICED equity is excluded because we failed to
     price it — and its sector then reads as UNOWNED, so the allocation effect on that row is a
     FALSE finding. (Measured: a model holding 6% Healthcare, unpriceable, was credited +1.73pp of
@@ -2511,7 +2511,7 @@ class ModelPortfolioAttribution(BaseModel):
     attributed_pct: float = 0.0
     residual_pct: float = 0.0
     reconciles: bool = False
-    # ⚠ TWO DIFFERENT "EXCESS" FIGURES LIVE ON THIS SCREEN AND BOTH ARE RIGHT — the payload
+    #  Two different "EXCESS" FIGURES LIVE ON THIS SCREEN AND BOTH ARE RIGHT — the payload
     # carries both so the panel can reconcile them instead of contradicting the tile.
     #   `excess_pct`         the ATTRIBUTABLE SLEEVE's: the holdings that have a bucket at all,
     #                        renormalised once cash and funds come out (cash has no sector, so
@@ -2545,7 +2545,7 @@ async def airs_model_portfolio_attribution(
 ):
     """Brinson-Fachler attribution of one model against a benchmark, over one window.
 
-    ⚠ THE DEFAULT IS `book` — THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.
+     THE DEFAULT IS `book` — THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.
     An attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody
     held: it assumes every position opened the year at its target weight and never drifted. Only
     the start weights reproduce the book's realised return, because
@@ -2572,7 +2572,7 @@ class ModelPortfolioPosition(BaseModel):
     is bought at its last close on or before `ytd_from` and held to its latest close, and
     `return_pct` is exactly the quantity the portfolio figure weights together.
 
-    ⚠ `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because
+     `start_price_eur` / `end_price_eur` are in EUR, not the listing's currency, because
     `return_pct` is an EUR return and carries the FX leg. Printing the native closes as the
     arithmetic would show two numbers whose ratio is not the third — a USD holding can rise in
     dollars and fall in euros. The native closes ride along (`*_price_local`, `currency`) for a
@@ -2601,7 +2601,7 @@ class ModelPortfolioPosition(BaseModel):
     start_date: str | None = None      # last close on or before the window opened
     start_price_eur: float | None = None
     start_price_local: float | None = None
-    # ⚠ The opening price is an ESTIMATE, not a close: this holding's series has no price near
+    #  The opening price is an ESTIMATE, not a close: this holding's series has no price near
     # the anchor (it trades rarely, or is pointed at a listing that does), so the value was
     # linearly interpolated between the two real closes bracketing the date — `start_gap_days`
     # apart. `start_price_local` is NULL for these: there was no trade that day, and printing a
@@ -2674,7 +2674,7 @@ def _shape_positions(raw: dict) -> ModelPortfolioPositions:
     _lrows = [{"isin": (str(r["ISINCode"]).strip() if r.get("ISINCode") else None),
                "fonds": (str(r["Fonds"]).strip() if r.get("Fonds") else "")} for r in rows]
     links = resolve_links(supabase, raw["portfolio_id"], _lrows)
-    # ⚠ Use the reviewed TopSelectie nickname before a saved model/AIRS name.  These labels feed
+    #  Use the reviewed TopSelectie nickname before a saved model/AIRS name.  These labels feed
     # the default, folded certificate view, so a book holding `EuropaTopSelectie Index` must say
     # `EuropaTopSelectie` — the same reader-facing strategy name used on Management Dashboard.
     # The certificate's own AIRS name remains separately available as `fonds`.
@@ -2768,7 +2768,7 @@ def _shape_book_positions(portfolio_id: int) -> ModelPortfolioPositions:
     brows = res.get("rows") or []
     as_of = res.get("as_of")
     jan1 = f"{dt_date.today().year}-01-01"
-    # ⚠ START-of-window (Beginwaarde) weights, not current. This table's contract is that weighting
+    #  START-of-window (Beginwaarde) weights, not current. This table's contract is that weighting
     # the Return column by the percentages reproduces the portfolio return exactly — and that only
     # holds with start weights: current-value weights overweight the winners (a holding that
     # doubled now carries ~2x its starting share), reading +58.75% against the book's true +44.99%
@@ -2881,7 +2881,7 @@ async def airs_model_portfolio_positions(
 
 class LinkablePortfolio(BaseModel):
     id: int
-    # ⚠ THE NAME WE GAVE IT, not AIRS's. `display_name` is the readable strategy name
+    #  The name we gave it, not AIRS's. `display_name` is the readable strategy name
     # ("MerkenTopSelectie Beperkt Offensief"); `code` below is AIRS's own `Portefeuille`, capped
     # at 24 characters ("BUS_MTS_BEPOFF_AFS"). The code is what you search AirSPMS for and the
     # wrong thing to pick from a list. Only 42 of 95 portfolios have a display name, so `name`
@@ -3195,7 +3195,7 @@ async def airs_vermogen_refresh(force: bool = False):
     the live portfolio list, then downloads + stores the four reports for each account that needs
     them. Runs in a daemon thread and returns immediately; poll `/api/airs/vermogen/status`.
 
-    ⚠ INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is
+     INCREMENTAL. An account whose last pass got all four reports within `AIRS_FRESH_HOURS` is
     skipped — 44 accounts × 4 downloads takes minutes, and re-fetching a report AIRS has not
     republished buys nothing. Discovery itself is never skipped, so an account that is missing
     (deleted, or new in AIRS) is always scanned. `?force=true` re-scans everything.
@@ -3217,7 +3217,7 @@ async def airs_vermogen_refresh(force: bool = False):
 async def airs_vermogen_refresh_job(force: bool = False):
     """The fleet re-scan as a CANCELLABLE JOB — the "Refresh all" button.
 
-    ⚠ WHY THIS EXISTS BESIDE THE PLAIN POST ABOVE. That one fires a daemon thread and returns
+     WHY THIS EXISTS BESIDE THE PLAIN POST ABOVE. That one fires a daemon thread and returns
     immediately; the caller then polls `/api/airs/vermogen/status` every 2.5s and paints its own
     banner. Three things follow from that and all three are why this page kept feeling broken:
     the work is INVISIBLE after a route change or a reload, there is NO WAY TO STOP IT once
@@ -3227,16 +3227,16 @@ async def airs_vermogen_refresh_job(force: bool = False):
     As a job it reports into the shared toast stack, survives navigation, re-attaches via
     `attachRunningJobs`, and the toast's Cancel actually reaches the scan.
 
-    ⚠ THE SCAN ITSELF IS UNCHANGED — `run_airs_vermogen_refresh_sync` with two optional hooks, not
+     THE SCAN ITSELF IS UNCHANGED — `run_airs_vermogen_refresh_sync` with two optional hooks, not
     a streaming copy of it. A second implementation for the job path is exactly the drift its own
     docstring warns about, and this is the function the 05:00 scheduler tick also calls.
 
-    ⚠ CANCEL STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the result is a real outcome rather than
+     CANCEL STOPS BETWEEN ACCOUNTS, NOT INSIDE ONE, and the result is a real outcome rather than
     a failure: everything already downloaded is stored and the summary says where it stopped. An
     account's four reports are a unit — stopping midway would leave a book with two fresh reports
     and two stale ones and nothing on the row to say which.
 
-    ⚠ `busy` IS AN ANSWER, NOT AN ERROR. `_LOCK` already serialises the scan (the scheduler holds
+     `busy` IS AN ANSWER, NOT AN ERROR. `_LOCK` already serialises the scan (the scheduler holds
     it too), so a second press returns a sentence instead of painting a red toast beside real
     failures — the same rule the per-row refresh follows.
     """
@@ -3250,7 +3250,7 @@ async def airs_vermogen_refresh_job(force: bool = False):
             triggered_by="manual-force" if force else "manual",
             force=force,
             on_step=lambda done, total, msg: ctx.progress(done, total, msg),
-            # ⚠ `ctx.check()` RAISES to unwind a job; here we only need the FLAG, because the scan
+            #  `ctx.check()` RAISES to unwind a job; here we only need the FLAG, because the scan
             # has to run its own finalisation (write the status, release `_LOCK`) before returning.
             # `cancelled` is the registry's own view of whether Cancel was pressed.
             should_stop=lambda: ctx.cancelled,
@@ -3259,7 +3259,7 @@ async def airs_vermogen_refresh_job(force: bool = False):
             return "Another AIRS refresh is already running — nothing was re-read"
         stopped = res.get("cancelled_at")
         errs = res.get("errors") or []
-        # ⚠ THE DATA'S OWN DATE RIDES ALONG. The counts are about what WE fetched; the row
+        #  The data's own date rides along. The counts are about what WE fetched; the row
         # badges measure AIRS's valuation date, and without this the two read as contradictory
         # ("44 accounts" against "3 trading days old"). See `format_run_message`.
         summary = (f"{res.get('complete_accounts', 0)}/{res.get('portfolios_found', 0)} accounts, "
@@ -3267,7 +3267,7 @@ async def airs_vermogen_refresh_job(force: bool = False):
                    + (f" · newest AIRS valuation {res['newest_as_of']}"
                       if res.get('newest_as_of') else ''))
         if stopped:
-            # ⚠⚠ RAISED, NOT RETURNED, AND THAT IS A BUG FIX RATHER THAN A TIDY-UP. A worker that
+            #  Raised, not returned, and that is a bug fix rather than a tidy-up. A worker that
             # RETURNS is `done` — and `done` is not decoration here, the button ACTS on it: the
             # frontend runs phase two (the minutes-long model scan) only `if (job.status ===
             # 'done')`, precisely so a Cancel does not buy the reader minutes more of exactly what
@@ -3297,11 +3297,11 @@ async def airs_portfolio_delete(portefeuille: str):
     """Delete ONE account's scraped rows — returns, holdings, mutations, model weights, its roster
     entry and its model pairing — so a refresh can be watched rebuilding them.
 
-    ⚠ NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,
+     NOT THE WAY TO REMOVE AN UNWANTED ACCOUNT. The next scrape re-creates everything it can see,
     so a delete achieves nothing there and costs history; `airs_account_hidden` records that
     decision instead. This exists to prove the refresh refills a gap.
 
-    ⚠ IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
+     IT LOSES ANYTHING OLDER THAN 1 JANUARY. A scan fetches `1 Jan → today`, so `airs_performance`
     months before that are gone permanently — the UI says so before asking. The hidden-account
     decision is deliberately NOT touched (see `_DELETABLE_TABLES`).
     """
@@ -3320,14 +3320,14 @@ class AirsAccountName(BaseModel):
 async def airs_account_set_display_name(portefeuille: str, body: AirsAccountName):
     """Name one AIRS account, or clear the name.
 
-    ⚠ THE NAME BELONGS TO THE ACCOUNT, NOT TO THE MODEL IT RUNS. `display_name` on
+     THE NAME BELONGS TO THE ACCOUNT, NOT TO THE MODEL IT RUNS. `display_name` on
     `airs_model_portfolio` names a strategy, and an account borrowed it through its pairing — so a
     book paired with no model could not be named at all, which is exactly backwards: those are the
     books still wearing AIRS's own code (`BUS_Ris_bepOff_Kl_AFS_Dy`) and most in need of one. Two
     accounts running one model may also deserve different names, and renaming a model must not
     silently rename every book paired with it.
 
-    ⚠ CLEARING IS A DELETE, NOT AN EMPTY STRING. A stored "" would be a name that renders as
+     CLEARING IS A DELETE, NOT AN EMPTY STRING. A stored "" would be a name that renders as
     nothing, indistinguishable on screen from an un-named row and invisible to the fallback chain.
     """
     def _run() -> dict:
@@ -3351,18 +3351,18 @@ async def airs_account_set_display_name(portefeuille: str, body: AirsAccountName
 async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
     """Re-scan ONE portfolio's AIRS reports — and the books it is BUILT FROM.
 
-    ⚠ A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
+     A HOLDING CAN BE ANOTHER BOOK. Some positions are Leonteq certificates wrapping another
     strategy, and everything shown through one — the looked-through holdings, their returns, the
     attribution — is read from the WRAPPED book's own scan. Refreshing the parent alone re-reads
     the twelve lines it stores and leaves the instruments behind them as stale as they were.
     Measured: BUS_Offensief_Dyn is built on one other account, TOPS_BEOFF_BEH_DYN on NINE.
 
-    ⚠ SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is FIVE downloads per account in the
+     SO THIS IS NOT ALWAYS "a few seconds" ANY MORE — it is FIVE downloads per account in the
     chain (Rendement, Vermogensoverzicht, Mutaties, Transacties, Model). Each one's outcome comes back in `cascaded` rather than being folded into a single
     status, because a parent refreshed against a child that failed is not fresh. `cascade=false`
     refreshes only the named account.
 
-    ⚠ AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO — the AIRS book AND the model it is paired
+     AND IT REFRESHES BOTH HALVES OF THE PORTFOLIO — the AIRS book AND the model it is paired
     with — through `refresh_portfolio_fully`, like every other refresh button. It used to run the
     book alone, which is why the same portfolio could read differently depending on which page's
     Refresh you had last pressed. The book half is still what the response's top level describes
@@ -3373,7 +3373,7 @@ async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
     from routers._airs_full_refresh import refresh_portfolio_fully  # noqa: PLC0415
 
     full = await asyncio.to_thread(refresh_portfolio_fully, portefeuille, None, cascade=cascade)
-    # ⚠ THE BOOK HALF STAYS AT THE TOP LEVEL — this is a documented response shape that scripts and
+    #  The book half stays at the top level — this is a documented response shape that scripts and
     # `AirsPortfolioUpload` read by key. Nesting it under `book` to make room for the model would
     # be a silent breaking change to callers we do not control; the model rides alongside instead.
     return {**(full.get("book") or {}), "model": full.get("model"),
@@ -3384,18 +3384,18 @@ async def airs_portfolio_refresh(portefeuille: str, cascade: bool = True):
 async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     """The same re-scan as above, as a CANCELLABLE JOB that reports progress.
 
-    ⚠ WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
+     WHY A JOB FOR A "few seconds" REFRESH. It is not a few seconds any more: with the cascade it
     is five downloads per account over a chain that reaches NINE (TOPS_BEOFF_BEH_DYN). Held open as
     one POST, the caller gets a disabled button and no line moving — indistinguishable from a hung
     one — and navigating away abandons work that carries on invisibly. As a job it reports into the
     shared toast stack, survives the route change, and re-attaches on reload (`attachRunningJobs`).
 
-    ⚠ THE SAME `refresh_one_portfolio`, WITH A LISTENER — not a streaming copy of it. That function
+     THE SAME `refresh_one_portfolio`, WITH A LISTENER — not a streaming copy of it. That function
     is already the one body the fleet scan and the per-row refresh share; a second version for the
     job path is exactly the drift its own docstring exists to prevent. The plain POST above stays
     for scripts and for anything that wants one blocking answer.
 
-    ⚠⚠ IT IS CANCELLABLE BETWEEN ACCOUNTS, AND THAT REVERSES WHAT THIS DOCSTRING USED TO SAY
+     IT IS CANCELLABLE BETWEEN ACCOUNTS, AND THAT REVERSES WHAT THIS DOCSTRING USED TO SAY
     (2026-08-13). It passed no `should_stop` and argued that a half-cascade leaves a parent fresh
     against stale children, so the job "reports, it does not stop". The cost of that was a Cancel
     button — on the row, in the Analyse modal and on the toast itself — that changed nothing for
@@ -3404,7 +3404,7 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     account boundary and NAMES the books it left stale (`cancelled_at`, `stale_books`), which is the
     honest version of the same compromise. `_LOCK` still refuses a second one.
 
-    ⚠ AND THE JOB ENDS `cancelled`, NOT `done`. `_work` returning a string — however carefully it is
+     AND THE JOB ENDS `cancelled`, NOT `done`. `_work` returning a string — however carefully it is
     worded — is a `done` job to the registry, so the toast would go green and the summary would be
     the only thing saying otherwise. `JobCancelled` is what makes the card amber, and it carries the
     detail as its message so the summary still names the books left stale.
@@ -3417,11 +3417,11 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
     )
 
     def _work(ctx) -> str:
-        # ⚠⚠ THE BENCHMARK LEG, SAME PRESS — see the twin note in `_portfolio_refresh_stream`.
+        #  The benchmark leg, same press — see the twin note in `_portfolio_refresh_stream`.
         # The Analyse modal opens from either page and its Refresh is whichever of these two the
         # page passed in, so a guarantee that holds on one of them and not the other is not a
         # guarantee. Line only (`0, 0`): this is one call, not a phase with a denominator.
-        # ⚠ SKIPPED IF THE CANCEL IS ALREADY IN. This is two GuruFocus round trips (~3s) before
+        #  Skipped if the cancel is already in. This is two GuruFocus round trips (~3s) before
         #   the scan starts, and spending them on a job the reader has already stopped is the
         #   whole of a Cancel that appears to do nothing. `refresh_portfolio_fully` sees the same
         #   flag at its own first boundary and returns cancelled, which `job_verdict` reports.
@@ -3435,11 +3435,11 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
         full = refresh_portfolio_fully(
             portefeuille=portefeuille, cascade=cascade,
             on_step=lambda done, total, msg: ctx.progress(done, total, msg),
-            # ⚠ THE FLAG, NOT `ctx.check()`. The scan has to reach its own `finally` to release
+            #  The flag, not `ctx.check()`. The scan has to reach its own `finally` to release
             # `_LOCK`; unwinding it with an exception from the inside would leave the AirSPMS
             # session locked against every later refresh. Same reason the fleet job gives.
             should_stop=lambda: ctx.cancelled)
-        # ⚠ THE WORDING LIVES IN `job_verdict`, NOT HERE. It was a closure, so nothing could test
+        #  The wording lives in `job_verdict`, NOT HERE. It was a closure, so nothing could test
         # it — and it read the BOOK's cancel flag alone while `refresh_portfolio_fully` also
         # cancels at two boundaries where there is no book result to carry one, which turned a
         # pressed Cancel into a red "AIRS scan failed — no reports returned". See its docstring.
@@ -3531,15 +3531,15 @@ async def parse_portfolio(file: UploadFile = File(...)):
 class AirsAccount(BaseModel):
     """One AIRS account's YEAR, on AIRS's own numbers.
 
-    ⚠ EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is
+     EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is
     one MONTH — reading the freshest as "the year" served AITopSelectie's July price result of
     -130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.
     `_airs_accounts._year_perf` does the assembly; read it before adding a field here.
 
-    ⚠ `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware, and never
+     `ytd_pct` IS `cumulatief_rendement` — AIRS's own, flow-aware, and never
     `end_value_eur / begin_value_eur - 1`.
 
-    ⚠ `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the
+     `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the
     latest month's return. It was once served as `value_ratio_pct` and described as "the wrong
     number", on the theory that deposits inflated it — but AITopSelectie has zero deposits in
     every month of 2026 and still reads -5.85% there against +46.12% for the year. Different
@@ -3570,7 +3570,7 @@ class AirsAccount(BaseModel):
     # Which of the four AIRS reports the last scan did NOT retrieve for this account
     # (`att` / `volk` / `mut` / `model`); empty when it is whole.
     #
-    # ⚠ THE ROW IS MARKED, NOT WITHHELD. These accounts were briefly filtered OUT of this list
+    #  The row is marked, not withheld. These accounts were briefly filtered OUT of this list
     # entirely — so a scan that reached all 44 portfolios returned 22, and nobody could see which
     # report was short or for whom. The figures here are all real; they just do not all describe
     # the same date, and that is a caveat to display, not a reason to delete the row.
@@ -3589,7 +3589,7 @@ class AirsAccountHolding(BaseModel):
     start_value_eur: float | None = None       # Beginwaarde lopend jaar EUR
     current_value_eur: float | None = None     # Huidige waarde EUR
     ytd_return_eur: float | None = None
-    # ⚠ None = UNDEFINED, not 0%. A position not held at the year's open (or a cash line) has a
+    #  None = UNDEFINED, not 0%. A position not held at the year's open (or a cash line) has a
     # Beginwaarde of 0; dividing by it is infinite and calling it flat is a claim.
     ytd_return_pct: float | None = None
     ytd_return_local_pct: float | None = None
@@ -3601,10 +3601,10 @@ class AirsAccountHolding(BaseModel):
     fx_result_eur: float | None = None         # Valutaresultaat — the FX leg (EUR)
     airs_result_pct: float | None = None       # Resultaat in % (a PERCENT, not a fraction)
     # ── The DIRECT result: what the instrument PAID, from the Mutaties journal (`MUT`) ──────────
-    # ⚠ TWO COLUMNS, NOT A NET. `dividend_eur` is GROSS; `dividend_tax_eur` is the withholding,
+    #  Two columns, not a net. `dividend_eur` is GROSS; `dividend_tax_eur` is the withholding,
     # NEGATIVE as AIRS books it, so net is their sum. They are separate because "this US name lost
     # 15% and this Dutch one lost nothing" is a fact about the holding, not a rounding detail.
-    # ⚠ None, never 0.0 — "paid nothing" and "this book's journal has not been scanned" are
+    #  None, never 0.0 — "paid nothing" and "this book's journal has not been scanned" are
     # different claims and only one of them is safe to make.
     dividend_eur: float | None = None
     dividend_tax_eur: float | None = None
@@ -3614,7 +3614,7 @@ class AirsAccountHolding(BaseModel):
     # not name this holding (drift), never 0%.
     model_pct: float | None = None
     # AIRS's own `Werkelijk percentage` from the same sheet — what the book ACTUALLY holds, as the
-    # model report computes it. ⚠ Not the same field as `weight`/`airs_weight`, which come from the
+    # model report computes it.  Not the same field as `weight`/`airs_weight`, which come from the
     # Vermogensoverzicht: two reports, two dates, so they can legitimately differ.
     model_actual_pct: float | None = None
     model_drift_pct: float | None = None
@@ -3623,7 +3623,7 @@ class AirsAccountHolding(BaseModel):
 class AirsAccountDetail(BaseModel):
     """One account's freshest snapshot.
 
-    ⚠ THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS
+     THE ROWS DO NOT SUM TO `ytd_pct`, AND THAT IS CORRECT. Each row is a PRICE return (AIRS
     restates `Beginwaarde lopend jaar` to the current quantity, so a purchase does not contaminate
     it). The account's figure is flow-aware AND includes `income_eur`, which no price return
     contains. The /portfolios MODEL view has the opposite property — its holdings weight exactly
@@ -3632,7 +3632,7 @@ class AirsAccountDetail(BaseModel):
 
     portefeuille: str
     as_of: str | None = None
-    # ⚠ `as_of` IS AIRS'S VALUATION DATE; THIS IS WHEN **WE** LAST READ THE BOOK, and the pair is
+    #  `as_of` IS AIRS'S VALUATION DATE; THIS IS WHEN **WE** LAST READ THE BOOK, and the pair is
     # what lets the panel's ⓘ say whose lag an old date is. Without it every icon in the expanded
     # view went amber on a book we had read that same afternoon — an alarm nobody could clear, on
     # the surface with the most room to explain itself. See `_airs_accounts._fetched_at`.
@@ -3640,7 +3640,7 @@ class AirsAccountDetail(BaseModel):
     ytd_pct: float | None = None
     price_result_eur: float | None = None
     income_eur: float | None = None
-    # ⚠ INCOME THE TABLE CANNOT SHOW. A position sold during the year paid real dividends and has
+    #  Income the table cannot show. A position sold during the year paid real dividends and has
     # no holding row left to carry them — measured, 3 of 27 funds and EUR 1,010 of
     # BUS_Neutraal_Dyn's EUR 12,031. Summing the Direct result column and calling it the book's
     # income understates it, so the difference is stated instead of hidden.
@@ -3714,7 +3714,7 @@ class AirsAccountLinkRequest(BaseModel):
 class AirsPortfolioOverview(BaseModel):
     """A portfolio: your name for it, AIRS's numbers for it.
 
-    ⚠ `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
+     `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
     book is paired with, and 27 of 28 pairings are an unconfirmed name match. A wrong pairing
     puts a real book's money under another strategy's name, and — because the risk variants of a
     strategy hold the SAME instruments — nothing else on the row would look wrong.
@@ -3730,7 +3730,7 @@ class AirsPortfolioOverview(BaseModel):
     fixed_name: str | None = None
     fixed_portfolio_id: int | None = None
     fixed_type: str | None = None
-    # ⚠ THE BOOK'S OWN DISTINCT ISINs, not the paired model's position count. It was the latter,
+    #  The book's own distinct ISINs, not the paired model's position count. It was the latter,
     # so an unpaired book showed "—" beside 22 holdings you could see on expanding it, and a paired
     # book's number described a different object. None = no snapshot stored; NOT 0.
     isins: int | None = None
@@ -3753,7 +3753,7 @@ class AirsPortfolioOverview(BaseModel):
     residual_eur: float | None = None
     # Which of the four AIRS reports the last scan did NOT retrieve (`att`/`volk`/`mut`/`model`).
     #
-    # ⚠ THE ROW IS MARKED, NOT WITHHELD. These accounts were briefly filtered out of the list — so
+    #  The row is marked, not withheld. These accounts were briefly filtered out of the list — so
     # a scan that reached all 44 portfolios showed 22, and nobody could see which report was short
     # or for whom. Every figure here is real; they just do not all describe the same date, which is
     # a caveat to display rather than a reason to delete the row.
@@ -3775,7 +3775,7 @@ async def airs_portfolios_overview():
 
     from routers._airs_overview import list_overview_async  # noqa: PLC0415
 
-    # ⚠ THE MEMO IS WORTH FAR MORE THAN THE CALL COUNT SUGGESTS. It removes only 3 of 17 round
+    #  The memo is worth far more than the call count suggests. It removes only 3 of 17 round
     # trips here — but those three are repeats of the whole `airs_performance` history (912KB), so
     # measured locally the endpoint goes 1,109ms -> 277ms. A request is exactly the scope over
     # which "the database did not change under us" is safe; see `common/read_cache.py`.
@@ -3786,7 +3786,7 @@ async def airs_portfolios_overview():
 class AirsHoldingIsin(BaseModel):
     """One account holding, with the ISIN we believe it is — and how much to believe it.
 
-    ⚠ `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.
+     `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.
       ok             the implied price agrees with that ISIN's own close (FX-converted)
       price_mismatch it does NOT — the ISIN is not what the book holds, or the book drifted
       unpriced       we have no series for it, so there is NOTHING confirming the name match
@@ -3798,7 +3798,7 @@ class AirsHoldingIsin(BaseModel):
     `unpriced` is not a pass. The name matched and nothing checked it — which for a fund is
     exactly where the Acc/Inc share-class trap lives.
 
-    ⚠ `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means
+     `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means
     the row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) — a finding
     about the model. `unmatched` means the pairing itself was refused: the name says a different
     instrument and the price independently agrees, which is what a STALE model snapshot looks like
@@ -3809,14 +3809,14 @@ class AirsHoldingIsin(BaseModel):
     holding_name: str
     lines: int = 1                 # >1 = AIRS billed this instrument on several rows
     # The asset-class label — Equity | Bonds | Alternatives | Cash | Unclassified
-    # (Unclassified = genuinely unsure). ⚠ From the ASSET GRID and the name only: AIRS's own
+    # (Unclassified = genuinely unsure).  From the ASSET GRID and the name only: AIRS's own
     # `categorie` came from the paired model position and went with the pairing (2026-07-23).
     bucket: str | None = None
     # True when the bucket above came from a MANUAL override (asset_bucket_override), not the
     # calculated class — so the UI can badge it and offer "revert to Auto".
     bucket_overridden: bool | None = None
     # Geography straight from the execution instrument's yfinance fields (asset_grid), joined by
-    # ISIN. `region` is the MSCI ACWI region. ⚠ For an ETF these describe its LISTING, not what it
+    # ISIN. `region` is the MSCI ACWI region.  For an ETF these describe its LISTING, not what it
     # holds — the grid cannot look inside a fund.
     sector: str | None = None
     country: str | None = None
@@ -3844,7 +3844,7 @@ class AirsHoldingIsin(BaseModel):
     our_price_eur: float | None = None
     price_ratio: float | None = None
     # ok | price_mismatch | stale_price | cross_listed | unpriced.
-    # ⚠ `stale_price` IS NOT A SOFTER `price_mismatch`. The ratio is out of tolerance, but our close
+    #  `stale_price` IS NOT A SOFTER `price_mismatch`. The ratio is out of tolerance, but our close
     # is more than a week from the day AIRS valued the book — and the refresh has already tried to
     # fetch the gap, so Yahoo has nothing newer for this line. The two numbers describe different
     # days, which makes the gap TIME and not identity: calling it a mismatch says "our listing is
@@ -3857,7 +3857,7 @@ class AirsHoldingIsin(BaseModel):
     our_price_date: str | None = None
     price_lag_days: int | None = None
     # Set when this ISIN is deliberately served by ANOTHER ISIN's instrument (an ADR priced from
-    # the main company's listing). ⚠ The two do not trade at the same number — TSMC is 1 ADR = 5
+    # the main company's listing).  The two do not trade at the same number — TSMC is 1 ADR = 5
     # ordinary shares — so a price difference on such a row is expected, not a finding.
     served_by: str | None = None
     # ── The model portfolio this holding IS, when it is one ────────────────────────────────
@@ -3867,7 +3867,7 @@ class AirsHoldingIsin(BaseModel):
     # sit here as dead rows whose weight leaves the coverage denominator. The link is what lets a
     # reader see through the wrapper to the strategy behind it.
     #
-    # ⚠ SAME STORE AS THE MODEL-PORTFOLIO POSITIONS TABLE (`airs_model_portfolio_link`), which is
+    #  Same store as the model-portfolio positions table (`airs_model_portfolio_link`), which is
     # keyed on the HOLDING and not on (parent, holding). One certificate is the same portfolio
     # whichever account or model holds it, so a link decided on either screen is the same
     # decision — and the two screens cannot come to disagree.
@@ -3881,12 +3881,12 @@ class AirsHoldingIsin(BaseModel):
 class AirsHoldingSegment(BaseModel):
     """One asset class within a portfolio: the exposure, and what it returned.
 
-    ⚠ `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening
+     `return_pct` AND `weight_pct` DO NOT COVER THE SAME HOLDINGS. A holding with no opening
     value has an undefined return but real exposure, so it counts in the weight and not in the
     return — otherwise its whole value reads as gain (cash is exactly this, and so is a short:
     Nestle India at -3,504 shares). `priced_value_eur` states how much the return spans.
 
-    ⚠ It is a PRICE return, like the rows it is built from: no income, not flow-aware. The
+     It is a PRICE return, like the rows it is built from: no income, not flow-aware. The
     segments do not sum to the portfolio's own figure.
     """
 
@@ -3947,7 +3947,7 @@ async def airs_account_isins(portefeuille: str):
 class AirsAccountTransactions(BaseModel):
     """One account's AIRS Transacties, as the SHEET — no schema imposed on it.
 
-    ⚠ THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
+     THE COLUMNS ARE DATA HERE, NOT A CONTRACT. `rapport_types=TRANS` returns an XLS (probed
     2026-07-23) and no column of it has ever been measured, so this endpoint reports the report:
     `columns` in the sheet's own order, `kinds` giving each one's pandas-inferred type, and `rows`
     keyed by column name. Naming fields against a sheet nobody has read is how `Bedrag` gets
@@ -3955,7 +3955,7 @@ class AirsAccountTransactions(BaseModel):
     rather than an error. See `airs_transacties` for the full reasoning and for what replaces this
     once the sheet has been seen.
 
-    ⚠ `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
+     `source` AND `note` ARE THE ANSWER'S OWN PROVENANCE. An empty `rows` means one of three very
     different things — the book did not trade, AIRS has no such report for it, or we could not ask
     — and an empty table with nothing beside it asserts the first.
     """
@@ -3966,7 +3966,7 @@ class AirsAccountTransactions(BaseModel):
     columns: list[str] = []
     # column -> 'number' | 'date' | 'text'
     kinds: dict[str, str] = {}
-    # ⚠ Values are float | str | null and NEVER NaN — a blank Excel cell is float NaN, which is not
+    #  Values are float | str | null and NEVER NaN — a blank Excel cell is float NaN, which is not
     # JSON and which `str()` renders as the TRUTHY string "nan".
     rows: list[dict[str, float | str | None]] = []
     # When the stored snapshot was fetched. Null on a live answer — the UI says "cached" only when
@@ -4000,7 +4000,7 @@ async def airs_account_transactions(portefeuille: str, refresh: bool = False):
 class AirsRealisedLeg(BaseModel):
     """One instrument's realised result this year, summed over its sales.
 
-    ⚠ `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
+     `closed_out` IS DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY PRESENCE HERE. A sale is a
     REALISATION, not a closure — Synopsys was trimmed on 2026-01-22 and is still held — so a name
     can legitimately appear both here and in the positions table above.
     """
@@ -4010,7 +4010,7 @@ class AirsRealisedLeg(BaseModel):
     quantity: float = 0.0
     proceeds_eur: float = 0.0
     cost_eur: float = 0.0
-    # ⚠ AIRS's own `Res. YtD`, never `proceeds − cost`: the two differ by `prior_year_eur` on any
+    #  AIRS's own `Res. YtD`, never `proceeds − cost`: the two differ by `prior_year_eur` on any
     # position carried across a year end, and they coincide on every book bought entirely this
     # year — so the account this was validated on could not have told them apart.
     realised_ytd_eur: float = 0.0
@@ -4023,12 +4023,12 @@ class AirsRealisedLeg(BaseModel):
 class AirsAccountReconciliation(BaseModel):
     """The book's own YTD, lined up against what its positions — held AND sold — explain.
 
-    ⚠ THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
+     THE TWO NUMBERS ARE ALREADY ON SCREEN A FEW LINES APART AND THEY DISAGREE. Measured
     2026-08-05 over 39 accounts, **23 disagree by more than 1pp** (BUS_FTS_BEPOFF_DYN: the book
     made -4.57%, its open positions +3.27pp more than that). Both are correct answers to different
     questions, and a reader given both with no arithmetic between them cannot arbitrate.
 
-    ⚠ EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
+     EVERY COMPONENT IS A EURO AMOUNT. The two percentages are measured on different opening
     capitals, so they do not subtract into anything meaningful — `gap_pp` is reported for
     orientation and is deliberately named in POINTS, never divided into.
     """
@@ -4041,7 +4041,7 @@ class AirsAccountReconciliation(BaseModel):
 
     # ── The book's own year, from AIRS. Authoritative; never recomputed here.
     book_return_pct: float | None = None
-    # ⚠ `beleggingsresultaat`, NOT end − begin: the difference is deposits, and a book that took
+    #  `beleggingsresultaat`, NOT end − begin: the difference is deposits, and a book that took
     # EUR 1m mid-year would report the deposit as profit.
     book_result_eur: float | None = None
     book_start_eur: float | None = None
@@ -4064,7 +4064,7 @@ class AirsAccountReconciliation(BaseModel):
     sold_funds: list[str] = []
 
     # ── What the sales realised this year, from the cached Transacties sheet.
-    # ⚠ None is NOT zero. No sheet cached means the realised result is UNKNOWN; publishing 0 would
+    #  None is NOT zero. No sheet cached means the realised result is UNKNOWN; publishing 0 would
     # hand the open positions' figure to the reader as the year's total.
     realised_ytd_eur: float | None = None
     realised_names: int = 0
@@ -4073,7 +4073,7 @@ class AirsAccountReconciliation(BaseModel):
     buys_eur: float | None = None
     buy_count: int | None = None
 
-    # ⚠ THE NET OF TWO OPPOSITE EFFECTS, and labelled as such rather than as "closed positions":
+    #  The net of two opposite effects, and labelled as such rather than as "closed positions":
     # a position sold outright leaves opening value in the book with no row to carry it, while
     # AIRS restating `Beginwaarde` to the CURRENT quantity inflates the rows for anything bought
     # into during the year. On AITopSelectie the net is NEGATIVE.
@@ -4081,16 +4081,16 @@ class AirsAccountReconciliation(BaseModel):
 
     # ── The year, built from the positions: held + realised + income from names no longer held.
     total_result_eur: float | None = None
-    # ⚠⚠ ONLY ON A FLOW-FREE BOOK. `result ÷ opening capital` reproduces `cumulatief_rendement`
+    #  Only on a flow-free book. `result ÷ opening capital` reproduces `cumulatief_rendement`
     # exactly (measured: 38.729379% against AIRS's 38.729375%) when nothing was paid in or out,
     # and is undefined the moment something was — AzTopSelectie opened at ZERO and took EUR 1m.
     # `return_basis` says which case the reader is in: 'opening_capital' | 'flows' | 'unavailable'.
     total_return_pct: float | None = None
     return_basis: str | None = None
-    # ⚠ ASSERTED, NEVER ASSUMED — a total never set against the book's own is an assertion, not a
+    #  Asserted, never assumed — a total never set against the book's own is an assertion, not a
     # reconciliation. Measured residual EUR 0.04 on a EUR 387,293.75 year.
     residual_vs_book_eur: float | None = None
-    # ⚠ None is UNKNOWN, not False. The held leg is the VOLK holdings snapshot and the result is
+    #  None is UNKNOWN, not False. The held leg is the VOLK holdings snapshot and the result is
     # the ATT report — two downloads, routinely a day apart — and one day of market movement on a
     # EUR 1.4m book reads as tens of thousands of "unexplained" residual. See `dates_aligned`.
     reconciles: bool | None = None
@@ -4100,7 +4100,7 @@ class AirsAccountReconciliation(BaseModel):
     residual_reason: str | None = None
 
     # The gap BEFORE the sales are counted, kept so the reader can see how much they closed.
-    # ⚠ NOT distributed across the components above.
+    #  NOT distributed across the components above.
     unexplained_eur: float | None = None
     gap_pp: float | None = None
     # Cached Transacties rows. None = never fetched.
@@ -4131,7 +4131,7 @@ async def airs_account_linkable_portfolios(portefeuille: str):
     """What an ACCOUNT's holdings may be linked to — the same dropdown the model-portfolio
     positions table uses, and the same gates.
 
-    ⚠ "SELF" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a
+     "SELF" FOR AN ACCOUNT IS THE MODEL IT RUNS. `linkable_context` excludes the owner so a
     portfolio cannot be its own holding; an account is not a model, so its analogue is the model
     it is paired with on `/account-model-links`. A certificate of the account's own strategy is
     exactly the wrapper cycle the gate exists to stop. An unpaired account excludes nothing,
@@ -4151,7 +4151,7 @@ async def airs_set_account_holding_link(portefeuille: str, body: SetLinkRequest)
     """Point one of an ACCOUNT's holdings at the model portfolio it IS (or, with a null target,
     record that it is not one).
 
-    ⚠ THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the
+     THE SAME ROW THE MODEL-PORTFOLIO SCREEN WRITES. `airs_model_portfolio_link` is keyed on the
     holding, not on (parent, holding) — one certificate is the same portfolio wherever it is held
     — so this is not a second store for the same fact, and the two screens cannot disagree.
     """
@@ -4191,7 +4191,7 @@ async def set_holding_isin_override(body: HoldingIsinOverride):
     """Pin (or clear) the ISIN of an account holding the model has no position for.
 
     Keyed by holding NAME, so one entry fixes every book that holds it (the measured case appears
-    in four). ⚠ It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a
+    in four).  It decides IDENTITY ONLY: the pinned ISIN is price-checked like any other, so a
     wrong one comes back `price_mismatch` rather than being trusted because a human typed it.
     """
     name = (body.holding_name or "").strip()
@@ -4327,12 +4327,12 @@ def _fundamentals_scope(isins: list[str]) -> tuple[list[int], int, int, int]:
     Shared by the two entry points — a model portfolio names its positions, an account-derived
     basket names its holdings, and from here they are the same question.
 
-    ⚠ RESOLVE THE ALIAS BEFORE THE LOOKUP. `company` is keyed on the RAW ISIN, so an issuer we hold
+     RESOLVE THE ALIAS BEFORE THE LOOKUP. `company` is keyed on the RAW ISIN, so an issuer we hold
     under one ISIN and ingested under another is invisible to a direct match — the ADR-vs-home-line
     split (`company_override` kind `alias`). Measured: without this, AITopSelectie reads 19 of 20
     and the "missing" one is Taiwan Semiconductor, whose alias we already had.
 
-    ⚠⚠ THE REMAINDER IS TWO DIFFERENT ABSENCES AND THE CALLER MUST BE ABLE TO TELL THEM APART. An
+     THE REMAINDER IS TWO DIFFERENT ABSENCES AND THE CALLER MUST BE ABLE TO TELL THEM APART. An
     ETF, a bond or a cash line HAS no company fundamentals by definition; a missing `company` row
     for an operating company is a real gap worth fixing. Measured on BUS_Neutraal_FX: 24 of 40
     reachable, of which eleven are funds/bonds and only five are gaps. One number for both makes a
@@ -4367,7 +4367,7 @@ def _fundamentals_scope(isins: list[str]) -> tuple[list[int], int, int, int]:
 class PortfolioFundamentalsJob(BaseModel):
     """The job handle, plus the two counts that keep the button honest.
 
-    ⚠ `holdings` AND `reachable` ARE BOTH RETURNED BECAUSE THEY DIFFER. The gap is holdings whose
+     `holdings` AND `reachable` ARE BOTH RETURNED BECAUSE THEY DIFFER. The gap is holdings whose
     ISIN has no `company` row — an ADR held under a different ISIN from the one we ingested, a
     structured product, an in-house fund. Returning only the number fetched would let the UI imply
     it covered the portfolio.
@@ -4377,7 +4377,7 @@ class PortfolioFundamentalsJob(BaseModel):
     label: str
     holdings: int
     reachable: int
-    # ⚠ THE UNREACHABLE REMAINDER IS TWO DIFFERENT THINGS AND THE UI MUST NOT MERGE THEM.
+    #  The unreachable remainder is two different things and the ui must not merge them.
     # Measured: AITopSelectie is 19 of 20 (Taiwan Semiconductor, held under its US ADR ISIN — a
     # real GAP, fixable), while BUS_Neutraal_FX is 24 of 40 and every one of the missing 16 is an
     # ETF, fund, bond or certificate — instruments that HAVE no company fundamentals by definition.
@@ -4393,27 +4393,27 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
                                             limit: int = 0, prices: bool = False):
     """Refresh GuruFocus fundamentals for every company this model portfolio holds.
 
-    The portfolio-scoped twin of the benchmark fill. ⚠ IT IS THE SAME FILL, not a copy — see
+    The portfolio-scoped twin of the benchmark fill.  IT IS THE SAME FILL, not a copy — see
     `routers/_fundamental_fill.py`. Only the selector differs: an index names its constituents,
     a portfolio names its holdings.
 
-    ⚠⚠ THE ISIN -> company BRIDGE IS PARTIAL, AND THE COUNT MUST SAY SO. A model holds instruments
+     THE ISIN -> company BRIDGE IS PARTIAL, AND THE COUNT MUST SAY SO. A model holds instruments
     by ISIN; GuruFocus fundamentals hang off `company`, joined on `company.isin`. Measured on
     AITopSelectie OFF FX: 19 of 20 holdings resolve, and the missing one is Taiwan Semiconductor,
     held via its US ADR ISIN (US8740391003) while the company world carries the Taiwan line
     (TW0002330008). "Refreshed 19 holdings" is true; implying the portfolio is covered is not, so
     `holdings` and `reachable` are both returned and the caller shows `n of m`.
 
-    ⚠ CERTIFICATES ARE NOT LOOKED THROUGH. A Leonteq AMC that IS another model contributes no
+     CERTIFICATES ARE NOT LOOKED THROUGH. A Leonteq AMC that IS another model contributes no
     company of its own; refresh that model from its own row. Expanding here would make one press
     fan out across portfolios without saying so.
 
-    ⚠ `force=True` BY DEFAULT, AND IT HAS TO BE. Without it `needs()` sees the sentinel row and
+     `force=True` BY DEFAULT, AND IT HAS TO BE. Without it `needs()` sees the sentinel row and
     runs nothing, and even selected, `is_cache_fresh` replays the Storage blob for months — the
     two caches that make the fundamentals grid's per-row Fetch a no-op for a company that already
     has data. This button exists precisely to get data we do not yet have.
 
-    ⚠ `only_due=True` IS WHAT MAKES IT CHEAP. The detector (`ingest.earnings.due`) drops the
+     `only_due=True` IS WHAT MAKES IT CHEAP. The detector (`ingest.earnings.due`) drops the
     holdings whose next fiscal period cannot plausibly have been filed yet, so a press costs one
     API call per company that might actually have something — and zero when none do.
     """
@@ -4435,7 +4435,7 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
     ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
 
     def _work(ctx) -> str:
-        # ⚠ `prices` IS OFF BY DEFAULT so every existing caller is unchanged. The Fundamental modal
+        #  `prices` IS OFF BY DEFAULT so every existing caller is unchanged. The Fundamental modal
         # asks for it because its own tabs price things — Quick Valuation shows today's share price
         # and charts the multiple off the daily closes, neither of which is one of the three
         # GuruFocus fundamentals feeds. See `_refresh_prices`.
@@ -4455,7 +4455,7 @@ async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
                                          limit: int = 0, prices: bool = False):
     """The same fill, for a basket of holdings rather than a stored model portfolio.
 
-    ⚠⚠ IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
+     IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
     `PortfolioOverviewPanel` only carries a `fixed_portfolio_id` when the account is PAIRED with
     one; otherwise it resolves the account's own ISINs into a basket and opens the same Analyse
     view. Scoping the refresh to a model portfolio id therefore hid the button on exactly the rows
@@ -4474,9 +4474,9 @@ async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
     ids, holdings, no_fundamentals, no_company = _fundamentals_scope(isins)
 
     def _work(ctx) -> str:
-        # ⚠ `prices` FORWARDED, and it was not. This route DECLARED the parameter and then dropped
+        #  `prices` FORWARDED, and it was not. This route DECLARED the parameter and then dropped
         # it on the floor, so the Quick Valuation refresh silently skipped the price leg on every
-        # un-paired book — which, per the ⚠⚠ above, is most books on /management-dashboard. The
+        # un-paired book — which, per the  above, is most books on /management-dashboard. The
         # model-portfolio twin had the opposite half of the same mistake: it passed `prices=prices`
         # without declaring it, so that path raised `NameError` instead. One feature, two routes,
         # neither working, and in opposite directions — a loud 500 on the rarer path and a silent

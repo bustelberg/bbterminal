@@ -12,7 +12,7 @@ was wrong twice over on the measured book (BUS_Offensief_Dyn -> model 1935):
     question and diverged wildly: Shopify -25.54% against AIRS's +18.24%, Fair Isaac -32.04%
     against +15.33%, BE Semiconductor +47.66% against -32.54%.
 
-⚠ AN AIRS FIGURE IS A POSITION RESULT, NOT A PRICE RETURN. Beginwaarde is the year-open value OR
+ AN AIRS FIGURE IS A POSITION RESULT, NOT A PRICE RETURN. Beginwaarde is the year-open value OR
 the PURCHASE value for a position opened during the year, so ONE instrument can legitimately read
 differently in two books — MasterCard is +2.14% in BUS_Offensief_Dyn and +17.62% in
 StarTopSelectie's. That is why every figure names the book it came from instead of leaving it
@@ -65,7 +65,7 @@ class TestTheLadder:
 
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": [{"portefeuille": "X_DYN", "model_portfolio_id": 7}]})
-        # ⚠ `**_kw` BECAUSE `resolve_account_isins` GREW A `freshen` KEYWORD (default True) and this
+        #  `**_kw` BECAUSE `resolve_account_isins` GREW A `freshen` KEYWORD (default True) and this
         # caller passes False. A positional-only stub raises TypeError the moment production starts
         # naming the argument — which is what took these nine tests, and five more in
         # `test_airs_portfolio_analysis`, red. `TestWrappedBookMarks` below pins the VALUE, so
@@ -75,7 +75,7 @@ class TestTheLadder:
         # The wrapped books are stubbed here; they have their own tests below and their own DB hops.
         monkeypatch.setattr(pa, "_wrapped_book_marks", lambda ids: dict(wrapped or {}))
         monkeypatch.setattr(accounts, "_direct_result", lambda pf, names: ({}, {}))
-        # ⚠ THE LAST DATABASE HOP IN AN OTHERWISE PURE FUNCTION. Unstubbed it reads `airs_holding`
+        #  The last database hop in an otherwise pure function. Unstubbed it reads `airs_holding`
         # for the book's snapshot date — which passes on a developer machine (dotenv supplies
         # credentials, and the test reads PRODUCTION) and raises `KeyError: 'SUPABASE_URL'` in CI.
         # That asymmetry is the one `tests/conftest.py` exists to convert into a hard failure.
@@ -129,7 +129,7 @@ class TestTheLadder:
                 {"isin": "CH1", "holding_name": "Cert", "start_value_eur": 106.0,
                  "current_value_eur": 100.0, "asset_class": "Equity", "linked_portfolio_id": 99},
             ],
-            # ⚠ the merged row: direct + the certificate's proportional slice, whose half carries
+            #  the merged row: direct + the certificate's proportional slice, whose half carries
             # the CERTIFICATE's -5.7%. Reading the instrument's return off THIS is the trap.
             post=[{"isin": "US1", "holding_name": "MasterCard", "start_value_eur": 596.0,
                    "current_value_eur": 600.0, "asset_class": "Equity", "bucket": "Equity",
@@ -146,7 +146,7 @@ class TestTheLadder:
         assert h["own_return_pct"] != pytest.approx(direct_ret)      # not the direct leg alone
         assert h["own_return_pct"] != pytest.approx(17.62)           # nor the wrapped one
         assert h["own_return_source"] == "airs"
-        # ⚠ NO SINGLE BOOK OWNS A BLEND. Naming one would credit the whole figure to a book that
+        #  No single book owns a blend. Naming one would credit the whole figure to a book that
         # produced 82% of it; the per-leg attribution is on the routes.
         assert h["own_return_book"] is None
         legs = {s["label"]: s for s in h["sources"]}
@@ -172,12 +172,12 @@ class TestTheLadder:
         assert h["own_return_pct"] == pytest.approx(18.24)
         assert h["own_return_source"] == "airs"
         assert h["own_return_book"] == "Star_DYN"
-        # ⚠ THE WRAPPED BOOK'S OWN SNAPSHOT, which trails this one (measured 5 days apart).
+        #  The wrapped book's own snapshot, which trails this one (measured 5 days apart).
         # Stamping it with the parent's would age-check a number against a scan it never came from.
         assert h["own_return_as_of"] == "2026-07-30"
 
     def test_two_certificates_each_ask_their_OWN_book(self, monkeypatch):
-        # ⚠ The marks are keyed by model, not flattened to one ISIN map: two strategies can both
+        #  The marks are keyed by model, not flattened to one ISIN map: two strategies can both
         # hold NVIDIA, each with its own purchase date and its own result.
         self._wire(
             monkeypatch,
@@ -199,7 +199,7 @@ class TestTheLadder:
         assert h["own_return_pct"] == pytest.approx(20.0)      # equal opening values -> the mean
         legs = {s["label"]: s["return_pct"] for s in h["sources"]}
         assert legs == {"A": pytest.approx(10.0), "B": pytest.approx(30.0)}
-        # ⚠ A BLEND IS ONLY AS FRESH AS ITS STALEST LEG.
+        #  A blend is only as fresh as its stalest leg.
         assert h["own_return_as_of"] == "2026-07-29"
 
     def test_the_price_series_survives_where_no_airs_book_values_the_row(self, monkeypatch):
@@ -240,7 +240,7 @@ class TestWrappedBookMarks:
     """The AIRS account behind a certificate — loaded only when something is actually wrapped."""
 
     def test_an_unwrapped_book_costs_nothing(self):
-        # ⚠ NO ARGUMENT, NO QUERY. Most books hold no certificate, and this runs on every open of
+        #  No argument, no query. Most books hold no certificate, and this runs on every open of
         # the modal; an unconditional account load would put two round-trips on all of them.
         assert pa._wrapped_book_marks(set()) == {}
 
@@ -254,7 +254,7 @@ class TestWrappedBookMarks:
         assert pa._wrapped_book_marks({99}) == {}
 
     def test_each_model_keeps_its_own_map(self, monkeypatch):
-        # ⚠ Keyed by model. Flattened to one ISIN map, whichever book was read first would answer
+        #  Keyed by model. Flattened to one ISIN map, whichever book was read first would answer
         # for a leg that came through the other — two positions, two purchase dates, one figure.
         import routers._airs_account_links as links
         import routers._airs_holding_isin as hisin
@@ -275,7 +275,7 @@ class TestWrappedBookMarks:
         monkeypatch.setattr(hisin, "resolve_account_isins", _resolve)
         monkeypatch.setattr(accounts, "account_holdings", lambda pf: {"rows": []})
         out = pa._wrapped_book_marks({1, 2})
-        # ⚠ `freshen=False` IS LOAD-BEARING HERE IN A WAY IT IS NOT ELSEWHERE. This path reads ONE
+        #  `freshen=False` IS LOAD-BEARING HERE IN A WAY IT IS NOT ELSEWHERE. This path reads ONE
         # book PER WRAPPED MODEL, so the default (True) would fire a live AIRS scrape per
         # certificate — a chart with three wrapped models becomes three scrapes on every open.
         assert all(c["freshen"] is False for c in seen), seen
@@ -320,7 +320,7 @@ class TestWrappedBookMarks:
                       "current_value_eur": 110.0}]})
         monkeypatch.setattr(accounts, "account_holdings", lambda pf: {
             "rows": [{"holding_name": "Shell", "dividend_eur": 10.0,
-                      "dividend_tax_eur": -1.5}]})       # ⚠ AIRS books the withholding negative
+                      "dividend_tax_eur": -1.5}]})       #  AIRS books the withholding negative
         out = pa._wrapped_book_marks({1})
         assert out[1]["US1"]["return_pct"] == pytest.approx(18.5)
         assert out[1]["US1"]["income_eur"] == pytest.approx(8.5)

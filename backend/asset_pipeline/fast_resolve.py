@@ -152,7 +152,7 @@ def _from_yahoo_isin(isin: str) -> list[str]:
         (EUR 94,776/day). Asking Yahoo to resolve the ISIN returns `ISPA.DE` directly, with no
         ticker guess in the middle.
 
-    ⚠ IT IS A CANDIDATE SOURCE, NEVER AN ANSWER. Yahoo resolves an ISIN to *a* listing, not to
+     IT IS A CANDIDATE SOURCE, NEVER AN ANSWER. Yahoo resolves an ISIN to *a* listing, not to
     the *liquid* one, and its pick is regularly the wrong end of that:
 
         US02079K3059  Alphabet Class A            -> 1GOOGL.MI   (Milan. Not GOOGL.)

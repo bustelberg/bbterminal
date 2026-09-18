@@ -102,7 +102,7 @@ def _resolve_exchange_id(exchange_code: str) -> int | None:
 def _distinct_options(table: str, column: str) -> list[str]:
     """The distinct values of one column, as a dropdown's option list.
 
-    ⚠⚠ THE AGGREGATE HAPPENS IN THE DATABASE, AND THAT IS A CORRECTNESS FIX, NOT A SPEED ONE.
+     THE AGGREGATE HAPPENS IN THE DATABASE, AND THAT IS A CORRECTNESS FIX, NOT A SPEED ONE.
     This used to be `select(column).limit(N)` reduced to a set in Python, and `.limit()` does not
     decide how many rows come back — PostgREST's `db-max-rows` does, and it is **1,000 on the
     cloud project** against 10,000 locally. `universe_membership` holds 8,444 rows, so production
@@ -114,7 +114,7 @@ def _distinct_options(table: str, column: str) -> list[str]:
     A `SELECT DISTINCT` cannot truncate — the aggregate runs before the row limit, not after — so
     43 rows leave the server and they are all of them.
 
-    ⚠ THE POSTGREST FALLBACK PAGES rather than re-reading `.limit()` as a bound, because a
+     THE POSTGREST FALLBACK PAGES rather than re-reading `.limit()` as a bound, because a
     fallback that is quietly wrong is worse than no fallback: it is the path that runs exactly
     when the fast one is unavailable, i.e. when nobody is looking.
     """

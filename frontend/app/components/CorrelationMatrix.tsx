@@ -61,7 +61,7 @@ function cellStyle(v: number | null, isDiag: boolean): CSSProperties {
 
 /** A label that bolds on hover WITHOUT changing width.
  *
- * ⚠ THE BUG THIS EXISTS FOR: A HOVER THAT RESIZES THE TABLE.
+ *  The bug this exists for: a hover that resizes the table.
  *
  * Semibold text is wider than normal text. The row-header column is `sticky left-0` and
  * auto-width — a table column is as wide as its widest cell — so bolding the hovered label grew
@@ -106,7 +106,7 @@ const _MAX_HEADER_PX = 340;
  *  which is what the old flat `z-20` bought. */
 const _Z_HEADER = 20;
 
-/** ⚠ THE STACKING ORDER IS LOAD-BEARING, NOT COSMETIC.
+/**  THE STACKING ORDER IS LOAD-BEARING, NOT COSMETIC.
  *
  * Every header cell is an OPAQUE `bg-card` box — it has to be, because body rows scroll under it.
  * But a 45° label ascends OUT of its own cell and across every header to its RIGHT. At a shared
@@ -140,7 +140,7 @@ export function diagonalExtentPx(labels: string[]): number {
  * `min_overlap_days` common returns — a model defined last week has nothing to correlate yet.
  */
 export default function CorrelationMatrix() {
-  // ⚠ THE SHARED PREFERENCE, read through one hook so this panel and the sidebar switch that
+  //  The shared preference, read through one hook so this panel and the sidebar switch that
   // sets it cannot disagree. Missing Dutch is a compile error, not a fallback — see the file.
   const t = useMgmtCopy();
   const [data, setData] = useState<PortfolioCorrelationMatrix | null>(null);
@@ -157,7 +157,7 @@ export default function CorrelationMatrix() {
         const r = await apiFetch(`${API_URL}/api/airs/model-portfolios/correlations`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         const d = (await r.json()) as PortfolioCorrelationMatrix;
-        // ⚠ THREE WAYS THIS PANEL COMES BACK EMPTY AND THEY NEED DIFFERENT ACTIONS. A correlation
+        //  Three ways this panel comes back empty and they need different actions. A correlation
         // needs two portfolios that BOTH have a daily return series over the same days, so a
         // fresh database yields no ids, a partly-populated one yields ids whose cells are all
         // null, and a healthy one yields a matrix. On screen the first two look identical — a
@@ -247,7 +247,7 @@ export default function CorrelationMatrix() {
     : null;
 
   return (
-    // ⚠ `isolate` — THIS TABLE'S STACKING ORDER MUST NOT ESCAPE IT. `headerZ`/`cornerZ` climb
+    //  `isolate` — THIS TABLE'S STACKING ORDER MUST NOT ESCAPE IT. `headerZ`/`cornerZ` climb
     // with the COLUMN COUNT (`20 + n - j`, corner `20 + n + 1`), so at ~56 portfolios the sticky
     // headers reach z≈77 and painted straight over the Analyse modal's `z-50` — the modal opened
     // *underneath* the correlation grid. Raising the modal would only move the collision to
@@ -255,7 +255,7 @@ export default function CorrelationMatrix() {
     // stacking context so every z-index in here is compared only against its siblings, and the
     // table can rank its own headers however it likes without competing with the page.
     //
-    // ⚠ THE INSTRUMENTS TABLE IS A SIBLING SECTION, NOT A CHILD OF THIS ONE — it must not inherit
+    //  The instruments table is a sibling section, not a child of this one — it must not inherit
     // either the z-index band above or the horizontal `overflow-auto` the matrix scrolls in.
     <div className="space-y-4">
     <section className="isolate bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
@@ -359,7 +359,7 @@ export default function CorrelationMatrix() {
 
           {/* NO inner scroll: the matrix shows whole and the PAGE scrolls, rather than a chart
               inside a chart-sized window. `max-h-[75vh]` is what forced that; it is gone.
-              ⚠ `overflow-auto` STAYS, and is not the same thing. It is the narrow-screen safety
+               `overflow-auto` STAYS, and is not the same thing. It is the narrow-screen safety
               the design system mandates ("keep new dense tables wrapped in an overflow-auto
               container") — without it a 1,240px matrix stretches the whole page sideways on a
               laptop. With no height cap it never overflows vertically, so no scrollbar appears
@@ -383,7 +383,7 @@ export default function CorrelationMatrix() {
                     // content does not affect layout, so the height is set explicitly (`diag`)
                     // and `overflow` stays visible — a clipping header is what we just removed.
                     //
-                    // ⚠ DESCENDING z-index, AND IT IS LOAD-BEARING. Each header is an OPAQUE
+                    //  DESCENDING z-index, AND IT IS LOAD-BEARING. Each header is an OPAQUE
                     // `bg-card` box (it must be: body rows scroll under it), but a 45° label
                     // ascends OUT of its own box and across every header to its right. At equal
                     // z-index the paint order is DOM order — so each header's white background
@@ -408,7 +408,7 @@ export default function CorrelationMatrix() {
                       quirk, and getting it wrong silently clips the very names this change is
                       about. A column cannot be argued with.
 
-                      ⚠ It is the LOWEST header layer. It is last in DOM order and opaque, so at a
+                       It is the LOWEST header layer. It is last in DOM order and opaque, so at a
                       shared z-index it painted over every label that reaches into it — i.e. the
                       longest ones, the whole reason it exists. */}
                   <th aria-hidden style={{ width: diag, minWidth: diag, zIndex: spacerZ() }}
@@ -420,7 +420,7 @@ export default function CorrelationMatrix() {
                   <tr key={i}>
                     {/* Full name, no clip. The column is sticky, so a long name costs horizontal
                         room in the scroll area but never stops you reading which row you are on.
-                        ⚠ THE BOLD WIDTH IS RESERVED, ALWAYS — see `<BoldStable>`. */}
+                         THE BOLD WIDTH IS RESERVED, ALWAYS — see `<BoldStable>`. */}
                     <th title={tip(i)}
                       className="sticky left-0 z-10 bg-card text-right pr-2 pl-1 whitespace-nowrap font-normal">
                       <BoldStable text={l} bold={hover?.i === i}

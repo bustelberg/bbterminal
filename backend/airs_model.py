@@ -18,18 +18,18 @@ THE SHEET, MEASURED ON BUS_Neutraal_Dyn (42 rows)
     `Model percentage` sums to EXACTLY 100.000 on every book tried — so it is the full model, not
     a subset, and a sum that is not ~100 means the download was partial.
 
-⚠ THERE IS NO ISIN ON THIS SHEET EITHER, AND IT NO LONGER MATTERS. The identity now comes from
+ THERE IS NO ISIN ON THIS SHEET EITHER, AND IT NO LONGER MATTERS. The identity now comes from
     the Vermogensoverzicht's own `ISIN-code` column (live since 2026-07-23), so this report only
     has to supply a WEIGHT. The join is `Fondsomschrijving` -> `airs_holding.holding_name`, and
     unlike the old cross-portfolio match these two strings come from the SAME portfolio in the
     SAME system: measured, 40 of 42 match byte-for-byte.
 
-⚠ THE CASH LINE IS RENAMED, AND IT IS THE ONLY SYSTEMATIC MISMATCH. This sheet calls it
+ THE CASH LINE IS RENAMED, AND IT IS THE ONLY SYSTEMATIC MISMATCH. This sheet calls it
     `Effectenrekening Liquiditeiten`; the Vermogensoverzicht calls it `Effectenrekening`. One row,
     both books, every time — so it is aliased explicitly rather than fuzzy-matched. Everything
     else that fails to match is drift worth seeing, not a matching problem to paper over.
 
-⚠ A NAME IN THE MODEL AND NOT IN THE BOOK IS A FINDING, NOT A MISS. Measured on BUS_Neutraal_Dyn:
+ A NAME IN THE MODEL AND NOT IN THE BOOK IS A FINDING, NOT A MISS. Measured on BUS_Neutraal_Dyn:
     `iShares Global Select Dividend 100` is in the model and NOT held. That is the strategy saying
     buy something the book has not bought — exactly the drift this view exists to show — and it is
     returned in `unheld` rather than dropped.
@@ -69,7 +69,7 @@ def _num(v: object) -> float | None:
 
 
 def _text(v: object) -> str:
-    """⚠ A blank cell is float NaN, `str()` renders it "nan", and "nan" is TRUTHY."""
+    """ A blank cell is float NaN, `str()` renders it "nan", and "nan" is TRUTHY."""
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return ""
     s = str(v).strip()
@@ -111,7 +111,7 @@ def parse_model(file_bytes: bytes) -> list[ModelWeight]:
 
 
 def model_total_pct(rows: list[ModelWeight]) -> float:
-    """Σ `Model percentage`. ⚠ Measured at EXACTLY 100.000 on every book — anything far from it
+    """Σ `Model percentage`.  Measured at EXACTLY 100.000 on every book — anything far from it
     means the sheet is partial, and a partial model silently understates every weight."""
     return round(sum(r.model_pct or 0 for r in rows), 3)
 
@@ -120,7 +120,7 @@ def attach_model(rows: list[ModelWeight], holding_names: set[str]) -> tuple[dict
                                                                            list[ModelWeight]]:
     """`(by_holding_name, in_the_model_but_not_held)`.
 
-    ⚠ The second half is DRIFT, not leftovers — the strategy says hold something the book does
+     The second half is DRIFT, not leftovers — the strategy says hold something the book does
     not. It is the whole reason to look at a model beside a book, so it is returned, never dropped.
     """
     by_name = {r.fonds: r for r in rows if r.fonds in holding_names}

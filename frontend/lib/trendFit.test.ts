@@ -12,7 +12,7 @@ describe('logLinearFit', () => {
     expect(fit.n).toBe(10);
   });
 
-  it('⚠ drops a cash-burn year rather than failing — a loss has no logarithm', () => {
+  it(' drops a cash-burn year rather than failing — a loss has no logarithm', () => {
     const fit = logLinearFit([...series(2016, 10, 0.12, 5), { year: 2021, value: -3 }]);
     expect(fit.dropped).toBe(1);
     expect(fit.n).toBe(5);
@@ -36,7 +36,7 @@ describe('trendValueAt', () => {
     expect(trendValueAt(fit, 2027)).toBeCloseTo(10 * Math.pow(1.12, 11), 6);
   });
 
-  it('⚠ is invariant to the base the caller indexed on', () => {
+  it(' is invariant to the base the caller indexed on', () => {
     // The chart fits the INDEX, not the raw amounts: ln(k·v) = ln k + ln v shifts the intercept and
     // leaves slope and R² alone. So R² describes the cash flow, not the base year chosen.
     const raw = logLinearFit(series(2016, 7.3, 0.09, 8));

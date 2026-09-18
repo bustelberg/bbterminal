@@ -1,6 +1,6 @@
 """The loader behind /portfolios → expand an account → "Total return".
 
-⚠ IT READS THE FIGURES THE OTHER PANELS SHOW; IT DOES NOT RECOMPUTE THEM. The book's side comes
+ IT READS THE FIGURES THE OTHER PANELS SHOW; IT DOES NOT RECOMPUTE THEM. The book's side comes
 from `_year_perf` (the same aggregation the account row's YTD column is drawn from) and the open
 side from `account_holdings` (the same rows the positions table renders). A reconciliation that
 derived either side "the same way" would be a third number, free to disagree with both of the ones
@@ -18,12 +18,12 @@ _log = logging.getLogger(__name__)
 def _realised(portefeuille: str):
     """This book's realised result this year, from its CACHED Transacties sheet.
 
-    ⚠ IT DOES NOT FETCH. A reconciliation panel that silently drove a headless AIRS session would
+     IT DOES NOT FETCH. A reconciliation panel that silently drove a headless AIRS session would
     turn a read into a multi-second scrape, and — worse — would do it while a fleet scan may hold
     the lock. The Transactions panel above is where a fetch is asked for; this reads what that
     produced.
 
-    ⚠ NO SHEET IS **NOT** ZERO REALISED. Returning 0 here would publish the open positions' figure
+     NO SHEET IS **NOT** ZERO REALISED. Returning 0 here would publish the open positions' figure
     as the year's total, understating it by exactly the amount nobody had looked up — silently,
     and with a total that still reconciles against nothing. `None` propagates all the way to the
     UI, which says "fetch the transactions first" instead of showing a number.
@@ -55,15 +55,15 @@ def account_return_reconciliation(portefeuille: str) -> dict:
     detail = account_holdings(portefeuille)
     rows = detail.get("rows") or []
     side = open_side_from_rows(rows)
-    # ⚠ NET, and the tax is ADDED because AIRS books withholding negative. This is the income of
+    #  NET, and the tax is ADDED because AIRS books withholding negative. This is the income of
     # funds the book no longer holds — already measured by the Mutaties join, which is why it can
     # leave the residual instead of sitting inside it unnamed.
     sold_income = ((detail.get("dividend_sold_eur") or 0.0)
                    + (detail.get("dividend_sold_tax_eur") or 0.0))
 
     sheet, realised = _realised(portefeuille)
-    # ⚠ THE NAMES THAT ARE GENUINELY CLOSED OUT ARE DECIDED BY ABSENCE FROM THE HOLDINGS, NOT BY
-    # PRESENCE IN THE SALES. A partial sale leaves the position open — Synopsys was sold on
+    #  The names that are genuinely closed out are decided by absence from the holdings, not by
+    # Presence in the sales. A partial sale leaves the position open — Synopsys was sold on
     # 2026-01-22 and is still held — so labelling every sold name "closed" would be wrong for most
     # of them. Matched on AIRS's own string, EXACTLY: both sides are AIRS names truncated at the
     # same width, and nothing fuzzy belongs here.
@@ -78,7 +78,7 @@ def account_return_reconciliation(portefeuille: str) -> dict:
         realised_names=len(legs),
         realised_note=(realised.unreadable if realised else None),
         unknown_transaction_types=(realised.unknown_types if realised else {}),
-        # ⚠ THE HELD LEG'S OWN CLOCK. It is the VOLK snapshot date and the book's result is the ATT
+        #  The held leg's own clock. It is the VOLK snapshot date and the book's result is the ATT
         # report's — two downloads, routinely a day apart, and one day of market movement on a
         # EUR 1.4m book is tens of thousands of euros of "unexplained" residual. Passed so the
         # check can say "the calendar" rather than "a missing position".
@@ -93,7 +93,7 @@ def account_return_reconciliation(portefeuille: str) -> dict:
             "proceeds_eur": leg.proceeds_eur,
             "cost_eur": leg.cost_eur,
             "realised_ytd_eur": leg.realised_ytd_eur,
-            # ⚠ SURFACED, because it is the whole reason `Res. YtD` is used rather than
+            #  SURFACED, because it is the whole reason `Res. YtD` is used rather than
             # proceeds − cost. Non-zero means part of this gain was made in an earlier year and is
             # correctly NOT in this year's total.
             "prior_year_eur": leg.prior_year_eur,

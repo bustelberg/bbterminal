@@ -8,14 +8,14 @@ import LoadingDots from '../components/LoadingDots';
 import { API_URL } from '../../lib/apiUrl';
 
 /**
- * ⚠⚠ THERE IS NO PASSWORD FIELD HERE AND THERE WILL NOT BE ONE, hash included. Asked for
+ *  There is no password field here and there will not be one, hash included. Asked for
  * (2026-09-08) and declined in `routers/auth.py::_user_detail`: a bcrypt hash is not information
  * about a person, it is an offline cracking target, and putting one on a screen puts it in
  * screenshots and in the DOM of a page anybody can shoulder-read. `has_password` answers the
  * question that actually has an action behind it — an invited user who never chose one signs in
  * by link, and that is worth seeing.
  *
- * ⚠ THE DETAIL FIELDS ARE NULLABLE ON PURPOSE. They come from a direct-Postgres read that needs
+ *  The detail fields are nullable on purpose. They come from a direct-Postgres read that needs
  * `SUPABASE_DB_URL`; without it they are `null`, which is a statement about US. `0` would be a
  * statement about the ACCOUNT — "no authenticators" — and rendering "unknown" as "off" is the one
  * direction a two-factor column must never be wrong in.
@@ -27,7 +27,7 @@ type User = {
   created_at: string;
   last_sign_in_at: string;
   mfa_verified: number | null;
-  /** Abandoned enrolments. ⚠ Counted apart from `mfa_verified` — a pending factor protects nothing. */
+  /** Abandoned enrolments.  Counted apart from `mfa_verified` — a pending factor protects nothing. */
   mfa_pending: number | null;
   mfa_since: string | null;
   has_password: boolean | null;
@@ -42,7 +42,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  /** ⚠ THE CALLER'S OWN id. The reset endpoint refuses self-service (see its docstring), so
+  /**  THE CALLER'S OWN id. The reset endpoint refuses self-service (see its docstring), so
    *  without this the page would draw a button that always 403s — the one thing the house rule
    *  about admin controls says never to do. */
   const [meId, setMeId] = useState<string | null>(null);
@@ -189,11 +189,11 @@ export default function UsersPage() {
   /**
    * Clear another person's authenticators after they lose their phone.
    *
-   * ⚠⚠ IT IS THE WHOLE RECOVERY STORY, because Supabase TOTP has no backup codes and two-factor
+   *  It is the whole recovery story, because Supabase TOTP has no backup codes and two-factor
    * is mandatory: without a way to do this, a lost phone is a permanent lockout that only hand-
    * written SQL against production could undo.
    *
-   * ⚠ THE CONFIRMATION NAMES BOTH CONSEQUENCES. Removing the factor is half of it — the endpoint
+   *  The confirmation names both consequences. Removing the factor is half of it — the endpoint
    * also evicts their sessions, so anyone signed in on that account is thrown out. Somebody
    * pressing this to help a colleague should know it will also end that colleague's live session
    * on their laptop, and it is the point rather than a side effect: a phone stolen WITH the app
@@ -221,7 +221,7 @@ export default function UsersPage() {
 ${r.status}: ${body?.detail ?? ''}`);
         return;
       }
-      // ⚠ REPORT WHAT ACTUALLY HAPPENED, including the case where there was nothing to remove —
+      //  Report what actually happened, including the case where there was nothing to remove —
       // "done" over a no-op sends somebody away believing a problem is fixed.
       const n = body?.factors_removed ?? 0;
       await dialog.alert(
@@ -230,7 +230,7 @@ ${r.status}: ${body?.detail ?? ''}`);
           : `Removed ${n} authenticator${n === 1 ? '' : 's'} for ${u.email}.`
             + (body?.sessions_cleared
               ? ' They have been signed out everywhere.'
-              : ' ⚠ Their existing sessions could NOT be cleared — a device already signed in '
+              : '  Their existing sessions could NOT be cleared — a device already signed in '
                 + 'keeps working until it expires.'),
       );
       await refresh();
@@ -358,7 +358,7 @@ ${r.status}: ${body?.detail ?? ''}`);
               <tr key={u.id} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
                 <td className="px-5 py-2 text-fg font-mono">
                   <span>{u.email ?? '—'}</span>
-                  {/* ⚠ EXCEPTIONS ONLY, NOT COLUMNS. Every one of these is false for a healthy
+                  {/*  EXCEPTIONS ONLY, NOT COLUMNS. Every one of these is false for a healthy
                       account, so a column would be four mostly-empty cells on every row; as
                       badges they appear exactly when there is something to notice. */}
                   {u.email_confirmed === false && (
@@ -391,7 +391,7 @@ ${r.status}: ${body?.detail ?? ''}`);
                 </td>
                 <td className="px-3 py-2">
                   {u.mfa_verified == null ? (
-                    // ⚠ NOT "off". We could not read it — see the type's note.
+                    //  NOT "off". We could not read it — see the type's note.
                     <span className="text-xs text-fg-faint" title="Needs SUPABASE_DB_URL on the backend to read.">unknown</span>
                   ) : u.mfa_verified > 0 ? (
                     <span className="text-xs text-pos-400"
@@ -402,7 +402,7 @@ ${r.status}: ${body?.detail ?? ''}`);
                     <span className="text-xs text-warn-300"
                       title="No authenticator. They will be sent to /account/security and cannot use the app until they enrol.">
                       off
-                      {/* ⚠ A PENDING FACTOR IS NOT PROTECTION — it is an abandoned enrolment, and
+                      {/*  A PENDING FACTOR IS NOT PROTECTION — it is an abandoned enrolment, and
                           saying so is the difference between "they are half done" and "they gave
                           up". Shown beside `off`, never folded into the count. */}
                       {!!u.mfa_pending && (
@@ -442,7 +442,7 @@ ${r.status}: ${body?.detail ?? ''}`);
                         Demote
                       </button>
                     )}
-                    {/* ⚠ NOT ON YOUR OWN ROW. The endpoint refuses it — /account/security is
+                    {/*  NOT ON YOUR OWN ROW. The endpoint refuses it — /account/security is
                         where you manage your own, and it asks for a current code first. */}
                     {u.id !== meId && (
                       <button

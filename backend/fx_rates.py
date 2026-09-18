@@ -204,7 +204,7 @@ def _fetch_twd_latest() -> dict | None:
 def _fetch_twd_history(start_date: str | None = None) -> list[dict]:
     """TWD-per-EUR daily history from Yahoo.
 
-    ⚠⚠ THE PAIR IS `EURTWD=X`, NOT `TWDEUR=X`, AND THE WRONG SIDE FAILS SILENTLY WITH HTTP 200.
+     THE PAIR IS `EURTWD=X`, NOT `TWDEUR=X`, AND THE WRONG SIDE FAILS SILENTLY WITH HTTP 200.
         Yahoo carries deep history only for the conventionally-quoted direction. Measured
         2026-07-23 over an identical 10-year request:
 
@@ -218,7 +218,7 @@ def _fetch_twd_history(start_date: str | None = None) -> list[dict]:
         the Technology bucket of every book holding it — reported as "unpriced", which reads as a
         missing price series rather than a missing exchange rate.
 
-    ⚠ AND THIS DIRECTION IS NOT INVERTED. `EURTWD=X` already quotes TWD per EUR, which is what
+     AND THIS DIRECTION IS NOT INVERTED. `EURTWD=X` already quotes TWD per EUR, which is what
         `fx_rate.rate` stores. The old code divided because `TWDEUR=X` is the reciprocal; carrying
         that `1/close` over to this pair would store ~0.027 where 36.8 belongs — a 1,350x error
         that still looks like a plausible number in a column of exchange rates.

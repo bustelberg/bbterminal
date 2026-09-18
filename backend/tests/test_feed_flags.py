@@ -1,6 +1,6 @@
 """Which GuruFocus feeds one press pays for.
 
-⚠⚠ `force` MEANS "IGNORE WHAT WE HOLD", NOT "RUN EVERYTHING", AND THE DIFFERENCE IS THE BILL.
+ `force` MEANS "IGNORE WHAT WE HOLD", NOT "RUN EVERYTHING", AND THE DIFFERENCE IS THE BILL.
 `ingest_company` gates each feed with `if force or c.get(flag, True)` — so passing `force=True`
 THERE short-circuits the flags and runs all three feeds whatever they say. The /benchmarks index
 fill always expressed force as flags and never passed it down; the per-COMPANY job passed both, so
@@ -24,7 +24,7 @@ ALL = ("need_fin", "need_est", "need_ind")
 
 class TestForceSetsTheFlagsAndStatementsNarrowsThem:
     def test_force_with_statements_is_ONE_feed(self):
-        # ⚠ THE REGRESSION. Three trues here is a tripled bill on data the caller cannot draw.
+        #  The regression. Three trues here is a tripled bill on data the caller cannot draw.
         assert feed_flags(True, "statements") == {
             "need_fin": True, "need_est": False, "need_ind": False}
 
@@ -44,7 +44,7 @@ class TestTheProbedPath:
         assert got == {"need_fin": False, "need_est": True, "need_ind": False}
 
     def test_a_company_missing_nothing_runs_nothing(self):
-        # ⚠ AND NOT "everything", which is what an ABSENT flag means to `ingest_company`
+        #  And not "everything", which is what an ABSENT flag means to `ingest_company`
         # (`c.get(flag, True)`). A missing `needs()` row is "nothing due", not "fetch it all".
         assert feed_flags(False, "all", None) == dict.fromkeys(ALL, False)
 
@@ -58,7 +58,7 @@ class TestTheFlagsAreAlwaysExplicit:
     @pytest.mark.parametrize("force", [True, False])
     @pytest.mark.parametrize("feeds", ["statements", "all"])
     def test_every_flag_is_present_and_boolean(self, force, feeds):
-        """⚠ AN ABSENT FLAG MEANS "FETCH IT" to `ingest_company`, so a partial dict is not a
+        """ AN ABSENT FLAG MEANS "FETCH IT" to `ingest_company`, so a partial dict is not a
         narrower instruction — it is a wider one. Every path returns all three, explicitly."""
         got = feed_flags(force, feeds, dict.fromkeys(ALL, True))
         assert set(got) == set(ALL)

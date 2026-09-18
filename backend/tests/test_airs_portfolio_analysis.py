@@ -25,7 +25,7 @@ class TestOneVocabulary:
     def test_both_sides_read_the_same_table(self):
         """Both the portfolio and the benchmark classify off `asset_grid` — one vocabulary.
 
-        ⚠ IT ASKS THE WHOLE `_grid*` FAMILY, NOT `_grid` ITSELF, AND THAT IS THE FIX FOR HOW THIS
+         IT ASKS THE WHOLE `_grid*` FAMILY, NOT `_grid` ITSELF, AND THAT IS THE FIX FOR HOW THIS
         BROKE. The assertion used to read `inspect.getsource(pa._grid)`; when the cross-portfolio
         leg cache split that function into a memoized wrapper plus `_grid_uncached`, the read moved
         out from under it and the test went red while the behaviour it guards was untouched. A
@@ -106,7 +106,7 @@ class TestLookthroughCertificateResults:
 
 
 class TestFundsAreNotLookedThrough:
-    """⚠ THE BUCKET THAT KEEPS THE CHART HONEST.
+    """ THE BUCKET THAT KEEPS THE CHART HONEST.
 
     An ETF is a basket and we hold none of its constituents. Its LISTING says nothing about its
     contents:
@@ -140,7 +140,7 @@ class TestFundsAreNotLookedThrough:
 
 
 class TestRegionIsTheIssuersNotOurVenues:
-    """⚠ THE S&P 500 IS NOT 7% EUROPEAN. It is an index of US companies.
+    """ THE S&P 500 IS NOT 7% EUROPEAN. It is an index of US companies.
 
     But that is what the first version said, because `asset_grid.msci_region` comes from
     `geo.resolve_geo`, which FALLS BACK TO THE LISTING COUNTRY when the domicile is unknown —
@@ -160,7 +160,7 @@ class TestRegionIsTheIssuersNotOurVenues:
     CODES = {"US": "United States", "IE": "Ireland", "CH": "Switzerland", "JP": "Japan"}
 
     def _row(self, domicile=None, listing="Germany", stored="Europe"):
-        """⚠ `msci_region` DEFAULTS TO THE WRONG ANSWER ON PURPOSE. It is the venue-derived column
+        """ `msci_region` DEFAULTS TO THE WRONG ANSWER ON PURPOSE. It is the venue-derived column
         (`resolve_geo` falls back to the listing), so every test below runs against a row whose
         stored region says Europe — which is exactly what the S&P megacaps looked like. A rule that
         only works when the grid happens to agree is not being tested by a row where it does."""
@@ -180,7 +180,7 @@ class TestRegionIsTheIssuersNotOurVenues:
         assert pa._region(self._row(domicile=None), "CH0044328745", self.CODES) == "Europe"
 
     def test_the_venue_is_consulted_LAST_and_never_before_the_issuers_own_geography(self):
-        """⚠⚠ THE ORDER **IS** THE FIX, and this is the assertion that guards it.
+        """ THE ORDER **IS** THE FIX, and this is the assertion that guards it.
 
         The stored `msci_region` is now a third step (see the next two tests), and it says Europe on
         this row — so if it were ever reached before the ISIN, the 54 US megacaps our grid prices on
@@ -203,7 +203,7 @@ class TestRegionIsTheIssuersNotOurVenues:
             == pa.UNKNOWN_BUCKET
 
     def test_a_stray_stored_value_is_refused_rather_than_becoming_a_bucket(self):
-        """⚠ The column is nullable and free-form. A country name, a future spelling or anything
+        """ The column is nullable and free-form. A country name, a future spelling or anything
         else would otherwise open a bar of its own on a chart of four regions — which reads as a
         region rather than as a bad cell. Validated against `geo`'s own map, not a literal list."""
         for junk in (None, "", "Germany", "EMEA", "north america", 0):
@@ -211,7 +211,7 @@ class TestRegionIsTheIssuersNotOurVenues:
                               "BMG507361001", self.CODES) == pa.UNKNOWN_BUCKET
 
     def test_a_domicile_with_no_MSCI_region_falls_through_to_the_isin(self):
-        """⚠ MercadoLibre. Yahoo reports Uruguay — its Montevideo head office, correctly — MSCI has
+        """ MercadoLibre. Yahoo reports Uruguay — its Montevideo head office, correctly — MSCI has
         no Uruguay, and the ISIN says Delaware. The first version returned on the spot for ANY
         domicile (`if dom: return msci_region_of(dom) or UNKNOWN`), so a domicile that existed but
         did not map never reached the ISIN below it: the region tab read `Unclassified` while
@@ -223,7 +223,7 @@ class TestRegionIsTheIssuersNotOurVenues:
         assert pa._region(self._row(domicile="Luxembourg"), "FR0014000MR3", codes) == "Europe"
 
     def test_an_incorporation_haven_falls_through_to_the_grids_stored_region(self):
-        """⚠⚠ NEITHER ISSUER-LEVEL SIGNAL IS A MARKET FOR THESE, so the grid's value is the only
+        """ NEITHER ISSUER-LEVEL SIGNAL IS A MARKET FOR THESE, so the grid's value is the only
         answer there is — and it is the one `/asset-pipeline` already shows.
 
         18 of ACWI's 21 unclassified members were incorporated in a haven (Cayman, Bermuda,
@@ -245,7 +245,7 @@ class TestRegionIsTheIssuersNotOurVenues:
                           "KYG7800X1079", codes) == "Pacific"            # Sands China, on HKSE
 
     def test_it_inherits_a_wrong_LISTING_and_that_is_a_listing_bug_not_a_region_bug(self):
-        """⚠⚠ THE PRICE OF THE STEP ABOVE, STATED RATHER THAN HIDDEN.
+        """ THE PRICE OF THE STEP ABOVE, STATED RATHER THAN HIDDEN.
 
         Where our venue choice is wrong, the region follows it: `asset_grid` prices Kingsoft on
         Stuttgart (`3K1.SG`, EUR 6,550/day), Li Ning on Stuttgart (`LNLB.SG`, EUR 2,594/day) and
@@ -263,7 +263,7 @@ class TestRegionIsTheIssuersNotOurVenues:
 
 
 class TestCurrencyIsTheCompanysNotOurVenues:
-    """⚠ THE LISTING CURRENCY IS OUR CHOICE OF VENUE, NOT A FACT ABOUT THE COMPANY.
+    """ THE LISTING CURRENCY IS OUR CHOICE OF VENUE, NOT A FACT ABOUT THE COMPANY.
 
     Measured on the S&P 500: by listing currency it reads 91% USD; by the company's own reporting
     currency, 98%. The gap is 40 members our grid prices on European/Canadian venues (Corning on
@@ -309,7 +309,7 @@ class TestCashAndCoverage:
 
 
 class TestTheBenchmarkRidesTheSAMEWINDOW:
-    """⚠ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER.
+    """ A BENCHMARK MEASURED OVER A DIFFERENT WINDOW IS NOT A BENCHMARK, IT IS A NUMBER.
 
     A model's "YTD" opens at `max(1 Jan, its inception)` — and 27 of the 56 models are younger
     than the year. `MoTopSelectie_FX` is NINE DAYS old. Setting its -3.04% beside the index's
@@ -341,7 +341,7 @@ class TestTheBenchmarkRidesTheSAMEWINDOW:
         the /portfolios table shows exactly it. Re-deriving it here — even 'the same way' — is
         how a modal ends up quietly disagreeing with the row that opened it."""
         src = inspect.getsource(pa._returns)
-        # ⚠ MATCH THE CALL, NOT AN EXACT ARGUMENT LIST. This read `compute_portfolio_performance()`
+        #  Match the call, not an exact argument list. This read `compute_portfolio_performance()`
         # with empty parens until 2026-08-04, so the day that call gained `only_portfolio_id=` —
         # an optimisation that left the invariant completely intact — the test went red claiming
         # the portfolio side was being recomputed. A guard that fires on a signature change it does
@@ -374,7 +374,7 @@ class TestTheAxesAreComparable:
 
 
 class TestTheBarsAreTheAttributionWeights:
-    """⚠ THE COMPOSITION BARS AND THE BRINSON ROWS ARE ONE NUMBER (2026-07-31, on request).
+    """ THE COMPOSITION BARS AND THE BRINSON ROWS ARE ONE NUMBER (2026-07-31, on request).
 
     They used to be two. The chart divided TODAY's value by the whole equity sleeve; attribution
     divided the value at the window's OPEN by the attributable holdings alone. Measured on
@@ -452,7 +452,7 @@ class TestTheBarsAreTheAttributionWeights:
         assert sum(w.values()) == pytest.approx(100.0)
 
     def test_the_dropped_weight_is_REPORTED_not_swallowed(self, monkeypatch):
-        """⚠ THE COST OF THIS BASIS, MADE VISIBLE. The fund and the cash are 30% of the book and
+        """ THE COST OF THIS BASIS, MADE VISIBLE. The fund and the cash are 30% of the book and
         they are not on the chart. A percentage that quietly loses weight is the failure the
         coverage floors elsewhere exist to stop, so the axis carries both the share it speaks for
         and the names behind the gap."""
@@ -460,13 +460,13 @@ class TestTheBarsAreTheAttributionWeights:
         axes = pa._basis_axes(1, "book", None, None)
         assert axes["sector"]["attributable_pct"] == pytest.approx(70.0)
         reasons = {e["isin"]: e["reason"] for e in axes["sector"]["excluded"]}
-        # ⚠ `fund`, NOT `unclassified` (2026-08-31). It reads as a FACT about the instrument rather
+        #  `fund`, NOT `unclassified` (2026-08-31). It reads as a FACT about the instrument rather
         # than as a failure of ours, and it is what keeps a fund out of the unpriceable warning —
         # see `TestAFundIsExcludedAsAFund`.
         assert reasons == {"IE9": "fund", None: "cash"}
 
     def test_a_fund_or_a_cash_line_is_NOT_counted_as_a_gap(self, monkeypatch):
-        """⚠ THE DISTINCTION THAT KEEPS THE WARNING MEANINGFUL. A fund has no sector BY DEFINITION
+        """ THE DISTINCTION THAT KEEPS THE WARNING MEANINGFUL. A fund has no sector BY DEFINITION
         and is not a stock in our own classification; so does cash. Counting them as weight the
         chart 'cannot handle' put an alarm on a perfectly ordinary 13%-in-ETFs portfolio, which is
         how a warning stops being read. `unpriced_pct` counts only the real hole."""
@@ -491,15 +491,15 @@ class TestTheBarsAreTheAttributionWeights:
         assert axes["sector"]["attributable_pct"] == pytest.approx(60.0)
 
     def test_a_fund_with_no_price_series_is_a_FUND_not_an_unpriceable_hole(self, monkeypatch):
-        """⚠⚠ THE STOCKS DRILL-DOWN WAS WARNING ABOUT A FUND. `Letko Bross Global EM Equity Fund`
+        """ THE STOCKS DRILL-DOWN WAS WARNING ABOUT A FUND. `Letko Bross Global EM Equity Fund`
         is an unlisted mutual fund: OpenFIGI types it `Open-End Fund`, Yahoo has no series, so its
-        `return_pct` is None and it landed under `unpriced` — printing "⚠ 1.5% held but
+        `return_pct` is None and it landed under `unpriced` — printing " 1.5% held but
         unpriceable — missing from these bars" on a book whose stocks are all priced. That reads as
         a data-quality problem somebody could fix, and it is not one: a fund has no sector of its
         own, this app does not look through funds, and it already has its own `Stock ETFs` section
         in the holdings table.
 
-        ⚠ THE ORDER IS THE TEST. `fund` has to be decided BEFORE `unpriced`, or the missing price
+         THE ORDER IS THE TEST. `fund` has to be decided BEFORE `unpriced`, or the missing price
         wins and the warning comes back.
         """
         legs = [{"isin": "US1", "weight_pct": 70.0, "return_pct": 10.0, "airs_name": "Alpha",
@@ -510,13 +510,13 @@ class TestTheBarsAreTheAttributionWeights:
         self._patch(monkeypatch, legs)
         axes = pa._basis_axes(1, "book", None, None)
         assert [e["reason"] for e in axes["sector"]["excluded"]] == ["fund"]
-        # ⚠ AND THE WARNING IS SILENT. The weight is still reported — as funds, by the line beside
+        #  And the warning is silent. The weight is still reported — as funds, by the line beside
         # the chart — but `unpriced_pct` is what raises an alarm, and there is nothing to alarm at.
         assert axes["sector"]["unpriced_pct"] == pytest.approx(0.0)
         assert axes["sector"]["attributable_pct"] == pytest.approx(70.0)
 
     def test_it_is_the_WRAPPER_test_so_membership_does_not_move(self, monkeypatch):
-        """⚠ A LABEL CHANGE, NOT AN EXCLUSION. A fund was already out of the bars either way —
+        """ A LABEL CHANGE, NOT AN EXCLUSION. A fund was already out of the bars either way —
         `unpriced` without a series, `unclassified` with one — so no bar height may move. Measured
         on BUS_Offensief_Dyn when this shipped: 44 attributable and 7 excluded before and after,
         Technology 39.66%, Financials 19.24%."""
@@ -533,7 +533,7 @@ class TestTheBarsAreTheAttributionWeights:
         """So a fund can be shown as "Equity — has no sector" rather than as the ladder's own word
         "unclassified", which reads as our data having failed.
 
-        ⚠ THE LABEL IS "Equity" AND NOT "Equity ETF" SINCE 2026-08-18 — an equity ETF invests in
+         THE LABEL IS "Equity" AND NOT "Equity ETF" SINCE 2026-08-18 — an equity ETF invests in
         equity, so the wrapper no longer has a bucket of its own. The point of the test is
         unchanged: the excluded row keeps the class we already stored for it. What it is NOT
         allowed to become is the ladder's "unclassified", which claims we failed to classify a row
@@ -549,7 +549,7 @@ class TestTheBarsAreTheAttributionWeights:
             == [("IE9", "Equity")]
 
     def test_an_unpriceable_holding_is_excluded_and_NAMED(self, monkeypatch):
-        """⚠ THE DANGEROUS EXCLUSION. A real equity in a real sector that we cannot price vanishes
+        """ THE DANGEROUS EXCLUSION. A real equity in a real sector that we cannot price vanishes
         from the bar, and its sector then reads as UNOWNED — a false finding, not a missing one.
         It has to go (there is no return), so it must be named."""
         legs = [
@@ -594,13 +594,13 @@ class TestTheBarsAreTheAttributionWeights:
         assert axes["sector"]["weights"] == {"Technology": pytest.approx(100.0)}
 
     def test_a_class_filter_makes_coverage_a_STOCKS_ratio_not_a_BOOK_one(self, monkeypatch):
-        """⚠ THE MIXED RATIO. `total_w` and `excluded` were left un-filtered, so with Stocks
+        """ THE MIXED RATIO. `total_w` and `excluded` were left un-filtered, so with Stocks
         selected the card divided stocks-with-a-sector by the WHOLE book and reported "87% of the
         book has a sector" — under a Stocks-only chart, where it reads as a claim that 13% of the
         STOCKS are unclassified. They were a bond tracker and a cash line. Every stock had a
         sector, and the honest figure for that selection is 100%.
 
-        ⚠⚠ THE EXCLUDED FUND IS A **BOND** TRACKER, AND THAT CHANGED WITH THE BUCKET MERGE
+         THE EXCLUDED FUND IS A **BOND** TRACKER, AND THAT CHANGED WITH THE BUCKET MERGE
         (2026-08-18). It used to be an equity ETF, which sat in its own `Equity ETF` bucket and was
         therefore outside an `Equity` selection. Equity ETFs are now Stocks, so an equity tracker no
         longer discriminates here at all: it would be INSIDE the selection, and the class ratio
@@ -628,7 +628,7 @@ class TestTheBarsAreTheAttributionWeights:
         whole = pa._basis_axes(1, "book", None, None)["sector"]
         assert whole["attributable_pct"] == pytest.approx(87.0)
         assert {e["isin"] for e in whole["excluded"]} == {"IE9", None}
-        # ⚠ THE TWO RATIOS MUST DIFFER, or this test proves nothing about which denominator ran.
+        #  The two ratios must differ, or this test proves nothing about which denominator ran.
         assert stocks["attributable_pct"] != pytest.approx(whole["attributable_pct"])
 
     def test_a_class_filter_we_cannot_apply_refuses_rather_than_empties(self, monkeypatch):
@@ -650,7 +650,7 @@ class TestTheBarsAreTheAttributionWeights:
 
 
 class TestTheHoldingsTableReconcilesWithTheBars:
-    """⚠ THE THIRD WEIGHT, AND WHY IT HAD TO EXIST.
+    """ THE THIRD WEIGHT, AND WHY IT HAD TO EXIST.
 
     The Holdings table showed ASML at 7.02% (current value, whole book) while the Technology bar
     showed 5.75% (Beginwaarde, attributable holdings). The natural check — divide 7.02 by the
@@ -691,7 +691,7 @@ class TestTheDrillDownSumsToItsBar:
     """`_axis_holdings` is what makes a composition bar checkable, and its whole value is ONE
     identity: the rows behind a bucket add up to that bucket's `portfolio_pct`, exactly.
 
-    ⚠ THE REASON THIS MATTERS IS A MEASURED CONFUSION, NOT A HYPOTHETICAL. Technology reads 36% on
+     THE REASON THIS MATTERS IS A MEASURED CONFUSION, NOT A HYPOTHETICAL. Technology reads 36% on
     this chart and 39.1% in the Brinson table for the same portfolio, because attribution drops
     funds/cash/unpriced names and renormalises what is left. Both are right. But the composition
     chart shipped aggregates only, so a reader could inspect the attribution number and not this
@@ -743,7 +743,7 @@ class TestBookWeighting:
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": ([{"portefeuille": "X_DYN", "model_portfolio_id": 7}] if link else [])})
 
-        # ⚠ THE STUB TAKES `**kw` AND THE TEST BELOW ASSERTS WHAT ARRIVED IN IT, rather than the
+        #  The stub takes `**kw` AND THE TEST BELOW ASSERTS WHAT ARRIVED IN IT, rather than the
         # stub simply widening to swallow anything. `resolve_account_isins` gained a `freshen`
         # keyword (default TRUE) and this caller passes FALSE — a real decision, not plumbing: a
         # truthy `freshen` re-scrapes the account from AIRS live, so the default would put a
@@ -758,7 +758,7 @@ class TestBookWeighting:
 
         monkeypatch.setattr(hisin, "resolve_account_isins", _resolve)
         self.calls = calls
-        # ⚠ THE LOOK-THROUGH HOP, WHICH READS THE DATABASE. `_book_port_items` expands certificates
+        #  The look-through hop, which reads the database. `_book_port_items` expands certificates
         # that ARE other models before classifying, and that path holds its own Supabase handle —
         # so without this the test builds a real client and, on a developer machine, queries
         # PRODUCTION (it only fails in CI, where there are no credentials). None of these fixtures
@@ -773,13 +773,13 @@ class TestBookWeighting:
         monkeypatch.setattr("routers._airs_lookthrough._datum_of", lambda pid: None)
         monkeypatch.setattr("routers._airs_portfolio_perf.compute_holding_marks",
                             lambda isins, anchor, **kw: {})
-        # ⚠ ADDED 2026-08-04, AFTER THESE FOUR WENT RED IN CI AND ONLY IN CI. `_book_port_items`
+        #  ADDED 2026-08-04, AFTER THESE FOUR WENT RED IN CI AND ONLY IN CI. `_book_port_items`
         # grew a read of `airs_holding` for the book's snapshot date (2026-08-03), which on a
         # developer machine quietly queried PRODUCTION and in CI raised `KeyError: 'SUPABASE_URL'`
         # — the exact failure mode conftest's guard describes, arriving through a hop these tests
         # predate. Stubbing the named function is what the guard's docstring prescribes.
         monkeypatch.setattr(pa, "_book_snapshot_date", lambda pf: None)
-        # ⚠ AND THE THIRD ONE, 2026-08-10 — `_book_port_items` now also reads the Mutaties journal
+        #  And the third one, 2026-08-10 — `_book_port_items` now also reads the Mutaties journal
         # (`_airs_accounts._direct_result`) so a class subtotal carries dividends like the rows
         # above it and the tile below it. That is the right change and it is the third database hop
         # to arrive through a module these tests predate; each one broke them the same way. Stubbed
@@ -812,7 +812,7 @@ class TestBookWeighting:
         assert pw["sector"]["Technology"] == 75.0
 
     def test_a_short_or_overdraft_is_excluded_from_the_composition(self, monkeypatch):
-        # ⚠ Negative value = a short (Nestle India) or an overdraft cash line. A bar chart of
+        #  Negative value = a short (Nestle India) or an overdraft cash line. A bar chart of
         # what the book is LONG drops it — same rule the model side applies to a 0% weight.
         self._wire(monkeypatch, rows=[
             {"isin": "US1", "current_value_eur": 1000, "asset_class": "Equity"},
@@ -866,7 +866,7 @@ class TestBookWeighting:
         assert pa._book_port_items(7, {}) is None
 
     def test_the_book_is_read_from_cache_never_rescraped_to_draw_a_chart(self, monkeypatch):
-        """⚠ `freshen=False` IS THE WHOLE POINT OF THE ARGUMENT — the default is True.
+        """ `freshen=False` IS THE WHOLE POINT OF THE ARGUMENT — the default is True.
 
         Drawing the composition bars must not reach out to AIRS. `resolve_account_isins(…,
         freshen=True)` re-downloads the account's Vermogensoverzicht, which is a slow scrape of a
@@ -906,13 +906,13 @@ class TestBookWeighting:
 
 
 class TestTheAllocationBarAlwaysShowsTheFourClasses:
-    """⚠⚠ AN OMITTED CLASS CANNOT STATE A ZERO.
+    """ AN OMITTED CLASS CANNOT STATE A ZERO.
 
     `_weigh_alloc` used to drop every empty bucket, so a book holding no bonds produced three bars
     and the reader had to remember which fourth was missing to tell "holds no bonds" from "bonds
     not computed". The two read identically, and only one of them is a fact about the portfolio.
 
-    ⚠ AND IT COST THE POLICY OVERLAY ITS MOST IMPORTANT CASE. The allocation bands are drawn per
+     AND IT COST THE POLICY OVERLAY ITS MOST IMPORTANT CASE. The allocation bands are drawn per
     bar: a Defensief book holding NO bonds against a 55% minimum had no bar to draw the breach on,
     so the single largest violation the policy can express was the one the overlay could not show.
 
@@ -933,7 +933,7 @@ class TestTheAllocationBarAlwaysShowsTheFourClasses:
         assert [s["bucket"] for s in slices] == ["Equity", "Bonds", "Alternatives", "Cash"]
 
     def test_unclassified_is_not_forced_but_still_appears_when_it_has_rows(self):
-        """⚠ It is not a class anyone allocates to — it is our own failure to classify. An empty
+        """ It is not a class anyone allocates to — it is our own failure to classify. An empty
         one is GOOD news, and printing "Unclassified 0.00%" on every healthy book advertises a
         problem that does not exist."""
         assert "Unclassified" not in [s["bucket"] for s in pa._weigh_alloc([(100.0, "Equity")])]
@@ -942,7 +942,7 @@ class TestTheAllocationBarAlwaysShowsTheFourClasses:
         assert with_unknown[-1]["pct"] == pytest.approx(10.0)
 
     def test_the_percentages_still_sum_to_a_hundred_over_the_real_holdings(self):
-        """⚠ THE ZEROS MUST NOT ENTER THE DENOMINATOR. A forced bucket is a row on screen, not a
+        """ THE ZEROS MUST NOT ENTER THE DENOMINATOR. A forced bucket is a row on screen, not a
         holding — if it changed the total, every real class's percentage would fall by being
         beside an empty one."""
         slices = pa._weigh_alloc([(75.0, "Equity"), (25.0, "Cash")])
@@ -950,7 +950,7 @@ class TestTheAllocationBarAlwaysShowsTheFourClasses:
         assert {s["bucket"]: s["pct"] for s in slices}["Equity"] == pytest.approx(75.0)
 
     def test_an_empty_book_still_returns_nothing(self):
-        """⚠ NO WEIGHT AT ALL IS NOT "A BOOK HOLDING FOUR EMPTY CLASSES" — there is no portfolio to
+        """ NO WEIGHT AT ALL IS NOT "A BOOK HOLDING FOUR EMPTY CLASSES" — there is no portfolio to
         describe, and four 0.00% bars would dress a failed load as a real allocation."""
         assert pa._weigh_alloc([]) == []
         assert pa._weigh_alloc([(0.0, "Equity")]) == []

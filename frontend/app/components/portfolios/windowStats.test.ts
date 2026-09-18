@@ -7,7 +7,7 @@ import {
 /**
  * The 5y/10y averages behind the `Tables` tab.
  *
- * ⚠ A MARGIN AND A ROIC DO NOT COMPOUND, which is why these are means and not rates. "ROIC grew 6%
+ *  A margin and a roic do not compound, which is why these are means and not rates. "ROIC grew 6%
  * a year" is a sentence about a percentage of a percentage that nobody means; the five-year read of
  * a ratio is its five-year average, which is also what `MarginCard`'s own tiles show.
  */
@@ -24,7 +24,7 @@ describe('the window', () => {
     expect(got.mean).toBeCloseTo((14 + 16 + 18 + 20 + 22) / 5, 10);
   });
 
-  it('⚠ the start is EXCLUSIVE — written `>=` it would be a six-year mean under a 5y heading', () => {
+  it(' the start is EXCLUSIVE — written `>=` it would be a six-year mean under a 5y heading', () => {
     expect(windowMean(s, 2025, 5)).toMatchObject({ fromX: 2021, n: 5 });
   });
 
@@ -40,7 +40,7 @@ describe('the window', () => {
 });
 
 describe('gaps', () => {
-  it('⚠ a null year is skipped, NEVER counted as zero', () => {
+  it(' a null year is skipped, NEVER counted as zero', () => {
     // Counting it as 0 drags the average toward zero by exactly the missing data — the most
     // flattering-looking way to be wrong about a bad year.
     const s = series([[2021, 10], [2022, null], [2023, 20]]);
@@ -75,7 +75,7 @@ describe('the shared endpoint', () => {
     expect(latestCommonX(book, index)).toBe(2024);
   });
 
-  it('⚠ a null on one side is not a shared year', () => {
+  it(' a null on one side is not a shared year', () => {
     const book = series([[2024, 2], [2025, 3]]);
     const index = series([[2024, 2], [2025, null]]);
     expect(latestCommonX(book, index)).toBe(2024);
@@ -100,7 +100,7 @@ describe('the excess', () => {
     expect((got as { pp: number }).pp).toBeCloseTo(4, 10);
   });
 
-  it('⚠ refuses across different windows', () => {
+  it(' refuses across different windows', () => {
     const got = meanExcess(windowMean(s, 2025, 5), windowMean(t, 2024, 5));
     expect(got.pp).toBeNull();
     expect((got as { reason: string }).reason).toMatch(/different windows/);
@@ -116,7 +116,7 @@ describe('the excess', () => {
 /**
  * ─── THE STAT TILES' SHARED WINDOW ──────────────────────────────────────────────────────────────
  *
- * ⚠⚠ EVERY LONG EQUITY CARD NOW PRINTS ITS FIGURE AND THE BENCHMARK'S SIDE BY SIDE, and two tiles
+ *  Every long equity card now prints its figure and the benchmark's side by side, and two tiles
  * side by side are a subtraction waiting to happen. Over different spans that subtraction means
  * nothing, and nothing on screen would contradict it — a single company reaching back to 1998
  * against an index blend starting in 2015 is a 27-year rate beside a 10-year one under one word.

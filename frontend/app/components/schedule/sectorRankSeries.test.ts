@@ -28,7 +28,7 @@ describe('sectorRankSeries', () => {
     ]);
   });
 
-  it('⚠ a day with no sector_scores becomes a HOLE, not a dropped point', () => {
+  it(' a day with no sector_scores becomes a HOLE, not a dropped point', () => {
     // Dropping it would slide the neighbours together and draw a continuous line across a
     // period we have no ranking for.
     const withGap: RankDay[] = [days[0], { date: '2026-01-05' }, days[2]];
@@ -37,7 +37,7 @@ describe('sectorRankSeries', () => {
     expect(tech.points).toHaveLength(3);
   });
 
-  it('⚠ a sector absent from one day is NOT ranked last', () => {
+  it(' a sector absent from one day is NOT ranked last', () => {
     // It left the pool (every company failed the price floor). Forcing it to the bottom of the
     // axis would draw a collapse that never happened.
     const d = [
@@ -74,7 +74,7 @@ describe('sectorRankSeries', () => {
 });
 
 describe('the two non-ranked states are distinguished', () => {
-  it('⚠ absent from a day that HAS rankings = dropped from the pool, not missing data', () => {
+  it(' absent from a day that HAS rankings = dropped from the pool, not missing data', () => {
     // Measured: Consumer Cyclical went rank 3 -> gone -> rank 8 across 11-16 June, because a
     // min_price_score floor of 30 dropped every one of its companies. That is a finding about the
     // sector. Rendered the same as an outage, it gets reported as a bug — it was, twice.
@@ -152,7 +152,7 @@ describe('maxRank — the shared y-domain', () => {
     expect(maxRank(sectorRankSeries([day('2026-01-02', { A: 1, B: 9 })]))).toBe(9);
   });
 
-  it('⚠ is shared so panels are comparable', () => {
+  it(' is shared so panels are comparable', () => {
     // Per-panel autoscaling would draw an 11-sector move and a 2-sector wobble at the same
     // amplitude — the reason this is one number and not one per series.
     const s = sectorRankSeries([day('2026-01-02', { A: 1, B: 11 })]);
