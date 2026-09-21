@@ -2653,6 +2653,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/external-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * External Search Assets
+         * @description Find equity listings outside the locally stored, priceable asset grid.
+         *
+         *     This is deliberately a search-only fallback. A result is not persisted until
+         *     a person chooses it via ``external-store``; that keeps the database driven by
+         *     actual research interest rather than by a speculative bulk import.
+         */
+        get: operations["external_search_assets_api_asset_pipeline_external_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/asset-pipeline/external-store": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Store External Asset
+         * @description Validate and persist one explicitly selected external equity by ISIN.
+         *
+         *     Yahoo does not reliably return ISINs. The user may supply one, but it is
+         *     accepted only after OpenFIGI/Yahoo resolution confirms that it represents
+         *     the selected company; an unverified identifier is never written.
+         */
+        post: operations["store_external_asset_api_asset_pipeline_external_store_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/financials/isin/{isin}/{item}": {
         parameters: {
             query?: never;
@@ -6432,6 +6480,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/log-dashboard/entries/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Entry */
+        delete: operations["delete_entry_api_log_dashboard_entries__entry_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/log-dashboard/news/{ticker}": {
         parameters: {
             query?: never;
@@ -6444,6 +6509,30 @@ export interface paths {
          * @description Latest headlines from the legacy GuruFocus API used by this app.
          */
         get: operations["stock_news_api_log_dashboard_news__ticker__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/log-dashboard/yahoo-return/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Yahoo Return Since
+         * @description Stored Yahoo close-price return from the first close on/after ``since``.
+         *
+         *     Uses the asset pipeline's persisted Yahoo series, so opening a log entry
+         *     never silently makes a fresh vendor request. This is price return only;
+         *     dividends are intentionally not implied to be included.
+         */
+        get: operations["yahoo_return_since_api_log_dashboard_yahoo_return__isin__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -10466,6 +10555,29 @@ export interface components {
             /** Weight Pct */
             weight_pct: number;
         };
+        /** ExternalAssetSearchResponse */
+        ExternalAssetSearchResponse: {
+            /** Rows */
+            rows: components["schemas"]["ExternalAssetSearchRow"][];
+        };
+        /**
+         * ExternalAssetSearchRow
+         * @description A user-confirmable Yahoo listing which is not in our asset grid yet.
+         */
+        ExternalAssetSearchRow: {
+            /** Currency */
+            currency?: string | null;
+            /** Exchange */
+            exchange?: string | null;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name: string;
+            /** Sector */
+            sector?: string | null;
+            /** Symbol */
+            symbol: string;
+        };
         /** FeeConfigIn */
         FeeConfigIn: {
             /** Bustelberg Mgmt Bps */
@@ -11323,22 +11435,12 @@ export interface components {
         };
         /** LogEntryIn */
         LogEntryIn: {
-            /**
-             * Actions
-             * @default
-             */
-            actions?: string;
             /** Company Name */
             company_name: string;
             /** Conviction */
             conviction: number;
             /** Decision */
             decision: string;
-            /**
-             * Flag
-             * @default none
-             */
-            flag?: string;
             /** Isin */
             isin: string;
             /**
@@ -13728,6 +13830,13 @@ export interface components {
         _ExistingBody: {
             /** Identifiers */
             identifiers: string[];
+        };
+        /** _ExternalStoreBody */
+        _ExternalStoreBody: {
+            /** Isin */
+            isin: string;
+            /** Symbol */
+            symbol: string;
         };
         /** _GfCompanyNameBody */
         _GfCompanyNameBody: {
@@ -16992,6 +17101,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    external_search_assets_api_asset_pipeline_external_search_get: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExternalAssetSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    store_external_asset_api_asset_pipeline_external_store_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["_ExternalStoreBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetSearchRow"];
                 };
             };
             /** @description Validation Error */
@@ -21566,12 +21739,76 @@ export interface operations {
             };
         };
     };
+    delete_entry_api_log_dashboard_entries__entry_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stock_news_api_log_dashboard_news__ticker__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    yahoo_return_since_api_log_dashboard_yahoo_return__isin__get: {
+        parameters: {
+            query: {
+                since: string;
+            };
+            header?: never;
+            path: {
+                isin: string;
             };
             cookie?: never;
         };

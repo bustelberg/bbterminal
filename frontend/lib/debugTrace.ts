@@ -223,7 +223,7 @@ export function traceRequest(
       if (resp.status === 401 || resp.status === 403) {
         console.warn(`%c[${PREFIX}:api]%c ${line} — not authorised; the panel will look empty`,
           'color:#c0891a', '');
-      } else if (resp.status === 404) {
+      } else if (resp.status === 404 || resp.status === 422) {
         // Several read endpoints use 404 as an empty-data result and their callers render that
         // state normally. Keep it visible without triggering Next's development error overlay.
         console.warn(`%c[${PREFIX}:api]%c ${line} — no data`, 'color:#c0891a', '');
