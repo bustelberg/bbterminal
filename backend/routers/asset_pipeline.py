@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import queue as _queue
+import re
 import threading
 
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
@@ -20,6 +21,7 @@ from pydantic import BaseModel
 
 from asset_pipeline.resolve import resolve as _resolve
 from asset_pipeline.yahoo import YahooThrottled
+from asset_pipeline import yahoo as _yahoo
 
 from ._asset_dividends import router as _dividends_router
 from ._asset_financials import router as _financials_router
@@ -1159,6 +1161,26 @@ class AssetSearchResponse(BaseModel):
     truncated: bool = False
 
 
+class ExternalAssetSearchRow(BaseModel):
+    """A user-confirmable Yahoo listing which is not in our asset grid yet."""
+
+    symbol: str
+    name: str
+    isin: str | None = None
+    exchange: str | None = None
+    currency: str | None = None
+    sector: str | None = None
+
+
+class ExternalAssetSearchResponse(BaseModel):
+    rows: list[ExternalAssetSearchRow]
+
+
+class _ExternalStoreBody(BaseModel):
+    symbol: str
+    isin: str
+
+
 @router.get("/api/asset-pipeline/search", response_model=AssetSearchResponse)
 async def search_assets(
     q: str = Query(..., min_length=1, max_length=120),
@@ -1204,6 +1226,106 @@ async def search_assets(
         return {"rows": rows[:limit], "truncated": len(rows) > limit}
 
     return await asyncio.to_thread(_q)
+
+
+@router.get("/api/asset-pipeline/external-search", response_model=ExternalAssetSearchResponse)
+async def external_search_assets(q: str = Query(..., min_length=2, max_length=120)):
+    """Find equity listings outside the locally stored, priceable asset grid.
+
+    This is deliberately a search-only fallback. A result is not persisted until
+    a person chooses it via ``external-store``; that keeps the database driven by
+    actual research interest rather than by a speculative bulk import.
+    """
+    term = q.strip()
+    if not term:
+        return {"rows": []}
+
+    def _search() -> list[dict]:
+        seen: set[str] = set()
+        rows: list[dict] = []
+        for quote in _yahoo.search(term, count=25):
+            symbol = str(quote.get("symbol") or "").strip().upper()
+            if (quote.get("quoteType") or "").upper() != "EQUITY" or not symbol or symbol in seen:
+                continue
+            if not re.fullmatch(r"[A-Z0-9.^=-]+", symbol):
+                continue
+            seen.add(symbol)
+            rows.append({
+                "symbol": symbol,
+                "name": quote.get("longname") or quote.get("shortname") or symbol,
+                "isin": quote.get("isin") or None,
+                "exchange": quote.get("exchDisp") or quote.get("fullExchangeName"),
+                "currency": quote.get("currency"),
+                "sector": quote.get("sector"),
+            })
+            if len(rows) == 10:
+                break
+        return rows
+
+    return {"rows": await asyncio.to_thread(_search)}
+
+
+@router.post("/api/asset-pipeline/external-store", response_model=AssetSearchRow)
+async def store_external_asset(body: _ExternalStoreBody):
+    """Validate and persist one explicitly selected external equity by ISIN.
+
+    Yahoo does not reliably return ISINs. The user may supply one, but it is
+    accepted only after OpenFIGI/Yahoo resolution confirms that it represents
+    the selected company; an unverified identifier is never written.
+    """
+    symbol = body.symbol.strip().upper()
+    isin = body.isin.strip().upper()
+    if not re.fullmatch(r"[A-Z0-9.^=-]+", symbol):
+        raise HTTPException(422, "A valid Yahoo symbol is required")
+    from asset_pipeline.isin_util import is_valid_isin  # noqa: PLC0415
+    if not is_valid_isin(isin):
+        raise HTTPException(422, "Enter a valid ISIN (including its check digit)")
+
+    def _existing() -> dict | None:
+        from deps import supabase  # noqa: PLC0415
+        rows = (supabase.table("asset_grid")
+                .select("isin,analysis_id,name,yahoo_symbol,exchange,currency,sector,bars")
+                .eq("isin", isin).limit(1).execute().data or [])
+        return rows[0] if rows else None
+
+    existing = await asyncio.to_thread(_existing)
+    if existing:
+        return existing
+
+    def _validate() -> str | None:
+        from asset_pipeline.resolve import resolve, same_company  # noqa: PLC0415
+        selected = next((q for q in _yahoo.search(symbol, count=25)
+                         if str(q.get("symbol") or "").upper() == symbol
+                         and (q.get("quoteType") or "").upper() == "EQUITY"), None)
+        if not selected:
+            return "That Yahoo equity listing could not be confirmed"
+        resolved = resolve(isin, with_candles=False)
+        execution = resolved.get("execution") or {}
+        if not execution.get("symbol"):
+            return resolved.get("reason") or "The ISIN could not be resolved"
+        selected_name = selected.get("longname") or selected.get("shortname")
+        if not same_company(execution.get("name"), selected_name):
+            return "That ISIN belongs to a different company than the selected listing"
+        return None
+
+    invalid = await asyncio.to_thread(_validate)
+    if invalid:
+        raise HTTPException(422, invalid)
+
+    from asset_pipeline import store  # noqa: PLC0415
+    try:
+        await asyncio.to_thread(store.store_one, isin)
+    except YahooThrottled as e:
+        raise HTTPException(429, f"Yahoo rate-limited — try again shortly. {e}") from e
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except Exception as e:
+        raise HTTPException(502, f"Could not store {symbol}: {type(e).__name__}: {e}") from e
+
+    stored = await asyncio.to_thread(_existing)
+    if not stored:
+        raise HTTPException(502, f"{symbol} was stored but could not be read back")
+    return stored
 
 
 @router.get("/api/asset-pipeline/universe", response_model=UniverseResponse)

@@ -159,6 +159,13 @@ def _is_admin_only_pattern(path: str) -> bool:
 # (Earnings refresh is handled separately by `_is_earnings_refresh`.)
 _USER_WRITE_PREFIXES: tuple[str, ...] = ("/api/log-dashboard/",)
 
+# An explicit user selection in the shared Research/Log company picker may add
+# one verified ISIN to the asset grid. Keep it exact: the sibling asset-pipeline
+# mutations include bulk ingest, resolving and refresh controls and remain admin-only.
+_USER_WRITE_PATHS: frozenset[str] = frozenset({
+    "/api/asset-pipeline/external-store",
+})
+
 #  Reads that arrive as post. This gate splits on HTTP method, so a compute-and-return endpoint
 # whose input is a LIST OF ISINS — too long for a URL — lands in the write tier and 403s for a user
 # on a page they are allowed to open. Every path here mutates nothing; it takes a basket in and
@@ -297,6 +304,7 @@ _USER_GET_RESOURCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/momentum/current-picks/\d+$"),
     re.compile(r"^/api/momentum/backtests/\d+$"),
     re.compile(r"^/api/asset-pipeline/search$"),
+    re.compile(r"^/api/asset-pipeline/external-search$"),
 )
 
 
@@ -472,6 +480,7 @@ async def enforce_api_auth(
     elif request.method in _WRITE_METHODS:
         allowed = (
             _starts_with_any(path, _USER_WRITE_PREFIXES)
+            or path in _USER_WRITE_PATHS
             or _is_earnings_refresh(path)
             or _is_latest_close_refresh(path)
             or (request.method == "POST" and _is_user_refresh(path))

@@ -16,6 +16,15 @@ export type AssetPick = {
   bars?: number | null;
 };
 
+type ExternalAsset = {
+  symbol: string;
+  name: string;
+  isin?: string | null;
+  exchange?: string | null;
+  currency?: string | null;
+  sector?: string | null;
+};
+
 /**
  * Type-ahead over the asset pipeline, for picking ONE company.
  *
@@ -36,9 +45,14 @@ export default function CompanyPicker({ label, value, onPick }: {
 }) {
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<AssetPick[]>([]);
+  const [externalRows, setExternalRows] = useState<ExternalAsset[]>([]);
   const [truncated, setTruncated] = useState(false);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [selectedExternal, setSelectedExternal] = useState<ExternalAsset | null>(null);
+  const [isin, setIsin] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState('');
   const box = useRef<HTMLDivElement>(null);
 
   //  Debounced, and the in-flight request is aborted. Typing "nvidia" is six keystrokes; without
@@ -46,7 +60,7 @@ export default function CompanyPicker({ label, value, onPick }: {
   // whichever answered last rather than on what is in the box.
   useEffect(() => {
     const term = q.trim();
-    if (term.length < 2) { setRows([]); setTruncated(false); return; }
+    if (term.length < 2) { setRows([]); setExternalRows([]); setTruncated(false); return; }
     const ctrl = new AbortController();
     const t = setTimeout(() => {
       setBusy(true);
@@ -57,12 +71,23 @@ export default function CompanyPicker({ label, value, onPick }: {
             { signal: ctrl.signal });
           const b = await r.json().catch(() => null);
           if (!r.ok) throw new Error((b?.detail as string) ?? `HTTP ${r.status}`);
-          setRows((b?.rows ?? []) as AssetPick[]);
+          const localRows = (b?.rows ?? []) as AssetPick[];
+          setRows(localRows);
           setTruncated(Boolean(b?.truncated));
+          if (localRows.length) {
+            setExternalRows([]);
+            return;
+          }
+          const external = await apiFetch(
+            `${API_URL}/api/asset-pipeline/external-search?q=${encodeURIComponent(term)}`,
+            { signal: ctrl.signal });
+          const externalBody = await external.json().catch(() => null);
+          if (!external.ok) throw new Error((externalBody?.detail as string) ?? `HTTP ${external.status}`);
+          setExternalRows((externalBody?.rows ?? []) as ExternalAsset[]);
         } catch (e) {
           if (ctrl.signal.aborted) return;      // our own cancel, not a failure
           console.warn('[research] search failed:', e);
-          setRows([]);
+          setRows([]); setExternalRows([]);
         } finally {
           if (!ctrl.signal.aborted) setBusy(false);
         }
@@ -70,6 +95,25 @@ export default function CompanyPicker({ label, value, onPick }: {
     }, 200);
     return () => { clearTimeout(t); ctrl.abort(); };
   }, [q]);
+
+  const addExternal = async () => {
+    if (!selectedExternal || !isin.trim()) return;
+    setAdding(true); setAddError('');
+    try {
+      const r = await apiFetch(`${API_URL}/api/asset-pipeline/external-store`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol: selectedExternal.symbol, isin: isin.trim() }),
+      });
+      const body = await r.json().catch(() => null);
+      if (!r.ok) throw new Error((body?.detail as string) ?? `HTTP ${r.status}`);
+      onPick(body as AssetPick);
+      setOpen(false); setSelectedExternal(null); setIsin('');
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Could not add this company.');
+    } finally {
+      setAdding(false);
+    }
+  };
 
   // Close on an outside click — a dropdown that only closes on selection traps the page.
   useEffect(() => {
@@ -91,7 +135,7 @@ export default function CompanyPicker({ label, value, onPick }: {
           </div>
           <button
             type="button"
-            onClick={() => { onPick(null); setQ(''); }}
+            onClick={() => { onPick(null); setQ(''); setSelectedExternal(null); setIsin(''); setAddError(''); }}
             className="shrink-0 text-xs text-fg-subtle transition-colors hover:text-fg"
           >
             Change
@@ -112,7 +156,7 @@ export default function CompanyPicker({ label, value, onPick }: {
       <div className="flex gap-2">
         <input
           value={q}
-          onChange={(e) => { setQ(e.target.value); setOpen(true); }}
+          onChange={(e) => { setQ(e.target.value); setOpen(true); setSelectedExternal(null); setIsin(''); setAddError(''); }}
           onFocus={() => setOpen(true)}
           placeholder="Name, ISIN or ticker…"
           className="flex-1 min-w-0 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors"
@@ -122,18 +166,49 @@ export default function CompanyPicker({ label, value, onPick }: {
       {open && q.trim().length >= 2 && (
         <div className="absolute z-20 mt-1 w-full max-h-72 overflow-auto bg-popover border border-neutral-800/40 rounded-lg shadow-lg">
           {busy && !rows.length && <p className="px-3 py-2 text-xs text-fg-subtle">Searching…</p>}
-          {!busy && !rows.length && (
+          {!busy && !rows.length && !externalRows.length && (
             <p className="px-3 py-2 text-xs text-fg-subtle">
-              Nothing priceable matches that. Only resolved instruments with price history can be
-              charted.
+              No matching company was found.
             </p>
           )}
           {rows.map((r) => (
             <button key={`${r.isin}-${r.analysis_id ?? ''}`} type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onPick(r); setOpen(false); setQ(r.name ?? r.isin); }}
               onClick={() => { onPick(r); setOpen(false); setQ(r.name ?? r.isin); }}
-              className="w-full text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
+              className="w-full cursor-pointer text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
               <div className="text-sm text-fg-strong truncate">{r.name ?? r.isin}</div>
               <div className="text-[11px] text-fg-faint font-mono truncate">{r.isin}</div>
+            </button>
+          ))}
+          {selectedExternal && (
+            <div className="border-t border-neutral-800/20 p-3 space-y-2 bg-overlay/[0.02]">
+              <p className="text-xs text-fg-subtle">
+                {selectedExternal.isin
+                  ? <>We found ISIN <span className="font-mono text-fg-strong">{selectedExternal.isin}</span> for {selectedExternal.name}.</>
+                  : <>Enter the ISIN for <span className="text-fg-strong">{selectedExternal.name}</span>.</>}
+                {' '}We will verify it matches {selectedExternal.symbol} before saving.
+              </p>
+              <div className="flex gap-2">
+                <input value={isin} onChange={(e) => setIsin(e.target.value.toUpperCase())}
+                  placeholder="ISIN, e.g. US0378331005" maxLength={12}
+                  className="min-w-0 flex-1 bg-page border border-neutral-700 rounded-lg px-2.5 py-1.5 text-xs text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500" />
+                <button type="button" disabled={adding || !isin.trim()} onClick={() => void addExternal()}
+                  className="shrink-0 rounded-lg bg-accent-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                  {adding ? 'Verifying…' : 'Add'}
+                </button>
+              </div>
+              {addError && <p className="text-xs text-red-400">{addError}</p>}
+            </div>
+          )}
+          {!rows.length && externalRows.map((r) => (
+            <button key={r.symbol} type="button"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setSelectedExternal(r); setIsin(r.isin ?? ''); setAddError(''); }}
+              onClick={() => { setSelectedExternal(r); setIsin(r.isin ?? ''); setAddError(''); }}
+              className="w-full cursor-pointer text-left px-3 py-2 hover:bg-overlay/[0.04] transition-colors border-b border-neutral-800/20 last:border-0">
+              <div className="text-sm text-fg-strong truncate">{r.name}</div>
+              <div className="text-[11px] text-fg-faint font-mono truncate">
+                {r.exchange ? `${r.exchange}: ` : ''}{r.symbol} · Add to research
+              </div>
             </button>
           ))}
           {truncated && (
