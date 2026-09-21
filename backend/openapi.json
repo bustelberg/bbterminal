@@ -6665,6 +6665,85 @@
         "title": "ExposurePosition",
         "type": "object"
       },
+      "ExternalAssetSearchResponse": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ExternalAssetSearchRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "title": "ExternalAssetSearchResponse",
+        "type": "object"
+      },
+      "ExternalAssetSearchRow": {
+        "description": "A user-confirmable Yahoo listing which is not in our asset grid yet.",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "exchange": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exchange"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "name"
+        ],
+        "title": "ExternalAssetSearchRow",
+        "type": "object"
+      },
       "FeeConfigIn": {
         "properties": {
           "bustelberg_mgmt_bps": {
@@ -15471,6 +15550,24 @@
         "title": "_ExistingBody",
         "type": "object"
       },
+      "_ExternalStoreBody": {
+        "properties": {
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "isin"
+        ],
+        "title": "_ExternalStoreBody",
+        "type": "object"
+      },
       "_GfCompanyNameBody": {
         "properties": {
           "exchange": {
@@ -20821,6 +20918,93 @@
           }
         },
         "summary": "Existing",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/external-search": {
+      "get": {
+        "description": "Find equity listings outside the locally stored, priceable asset grid.\n\nThis is deliberately a search-only fallback. A result is not persisted until\na person chooses it via ``external-store``; that keeps the database driven by\nactual research interest rather than by a speculative bulk import.",
+        "operationId": "external_search_assets_api_asset_pipeline_external_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 120,
+              "minLength": 2,
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalAssetSearchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "External Search Assets",
+        "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/external-store": {
+      "post": {
+        "description": "Validate and persist one explicitly selected external equity by ISIN.\n\nYahoo does not reliably return ISINs. The user may supply one, but it is\naccepted only after OpenFIGI/Yahoo resolution confirms that it represents\nthe selected company; an unverified identifier is never written.",
+        "operationId": "store_external_asset_api_asset_pipeline_external_store_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/_ExternalStoreBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetSearchRow"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Store External Asset",
         "tags": [
           "asset-pipeline"
         ]
@@ -27454,6 +27638,56 @@
           }
         },
         "summary": "Stock News",
+        "tags": [
+          "log dashboard"
+        ]
+      }
+    },
+    "/api/log-dashboard/yahoo-return/{isin}": {
+      "get": {
+        "description": "Stored Yahoo close-price return from the first close on/after ``since``.\n\nUses the asset pipeline's persisted Yahoo series, so opening a log entry\nnever silently makes a fresh vendor request. This is price return only;\ndividends are intentionally not implied to be included.",
+        "operationId": "yahoo_return_since_api_log_dashboard_yahoo_return__isin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "since",
+            "required": true,
+            "schema": {
+              "title": "Since",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Yahoo Return Since",
         "tags": [
           "log dashboard"
         ]
