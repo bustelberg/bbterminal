@@ -36,6 +36,12 @@ import { useAnalyseCopy } from './analyseCopy';
 
 const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
 
+const GICS_SECTORS = [
+  'Communication Services', 'Consumer Discretionary', 'Consumer Staples',
+  'Energy', 'Financials', 'Health Care', 'Industrials', 'Information Technology',
+  'Materials', 'Real Estate', 'Utilities',
+] as const;
+
 function saleDateLabel(value: string | null | undefined): string {
   if (!value) return 'onbekende datum';
   const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
@@ -781,6 +787,55 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
 }
 
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
+
+function SectorOverrideDialog({ holding, onClose, onSave }: {
+  holding: BookHolding;
+  onClose: () => void;
+  onSave: (sector: string | null) => Promise<void>;
+}) {
+  const [sector, setSector] = useState(holding.sector_overridden ? (holding.sector ?? '') : '');
+  const [saving, setSaving] = useState(false);
+  const automatic = holding.sector_default ?? holding.sector ?? 'no source sector';
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await onSave(sector || null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <PanelDialog onClose={onClose} labelledBy="sector-override-title">
+      <div className="m-auto w-full max-w-md rounded-xl border border-neutral-800 bg-card p-5 shadow-2xl">
+        <h2 id="sector-override-title" className="text-base font-semibold text-fg">Set company sector</h2>
+        <p className="mt-1 text-sm text-fg-muted">{holding.name ?? holding.isin}</p>
+        <p className="mt-4 text-[12px] text-fg-faint">
+          This company-wide management override sits above source data. Automatic uses: {automatic}.
+        </p>
+        <label className="mt-3 block text-sm text-fg-subtle">
+          Sector
+          <select value={sector} onChange={(event) => setSector(event.target.value)}
+            className="mt-1 w-full rounded-lg border border-neutral-800 bg-page px-3 py-2 text-sm text-fg focus:border-accent-500">
+            <option value="">Automatic · {automatic}</option>
+            {GICS_SECTORS.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </label>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={saving}
+            className="rounded-lg border border-neutral-800 px-3 py-1.5 text-sm text-fg-subtle hover:bg-overlay/5 disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="button" onClick={() => void save()} disabled={saving}
+            className="rounded-lg bg-accent-600 px-3 py-1.5 text-sm text-white hover:bg-accent-500 disabled:opacity-50">
+            {saving ? 'Saving…' : 'Save sector'}
+          </button>
+        </div>
+      </div>
+    </PanelDialog>
+  );
+}
 
 
 /** THE WHOLE PORTFOLIO, one row per instrument, grouped by asset class — what the reader sees
@@ -1530,7 +1585,7 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
 }
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
-  onTiming, onFundamental }: {
+  onTiming, onFundamental, onSectorOverride }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /**  THE BETA COLUMN NAMES ITS BASE. A beta with no benchmark on it is not a weaker statement,
    *  it is an unreadable one — and the modal's picker changes it per request, so it cannot be
@@ -1550,6 +1605,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    *  holds. Those are two different numbers and only one of them answers "how much of the book is
    *  this". */
   onFundamental: (t: { name: string; isin?: string; basket?: Basket; weightPct?: number }) => void;
+  /** Only direct company rows have a source sector to override; funds remain opaque. */
+  onSectorOverride?: (holding: BookHolding) => void;
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
    *  render as one sentence, next to a portfolios list that visibly has rows. */
   note?: string | null;
@@ -2282,7 +2339,22 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       names are short and known; they get to stay on one line. */}
                   <td className="py-1.5 pr-3 text-fg-muted whitespace-nowrap"
                     title={sectorLabel(h.sector) || copy.row.noSector}>
-                    {sectorLabel(h.sector) || <span className="text-fg-faint">—</span>}
+                    <span className="inline-flex items-center gap-1">
+                      {sectorLabel(h.sector) || <span className="text-fg-faint">—</span>}
+                      {onSectorOverride && h.company_id != null && !h.is_fund && h.isin && (
+                        <button type="button" onClick={(event) => {
+                          // The row itself opens the timing review; this is an independent edit.
+                          event.stopPropagation();
+                          onSectorOverride(h);
+                        }}
+                          className="rounded p-0.5 text-fg-faint hover:bg-overlay/10 hover:text-accent-300"
+                          title="Override company sector" aria-label={`Override sector for ${h.name ?? h.isin}`}>
+                          <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5 fill-none stroke-current stroke-2">
+                            <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                          </svg>
+                        </button>
+                      )}
+                    </span>
                   </td>
                   {/*  THE ONE COLOURED COLUMN OF THE THREE. Momentum has a SIGN — up or down is
                       the whole reading — while vol and beta are magnitudes where colour would turn
@@ -3188,6 +3260,7 @@ export default function PortfolioAnalysisModal({
   //  The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
   // Transacties sheet joins on — it carries no ISIN.
   const [timingFor, setTimingFor] = useState<string | null>(null);
+  const [sectorFor, setSectorFor] = useState<BookHolding | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
@@ -3234,6 +3307,23 @@ export default function PortfolioAnalysisModal({
    * up its "these bars belong to a different selection" state for the length of one request.
    */
   const [reloadSeq, setReloadSeq] = useState(0);
+  const saveSectorOverride = async (sector: string | null) => {
+    if (sectorFor?.company_id == null) return;
+    const response = await apiFetch(`${API_URL}/api/companies/${sectorFor.company_id}/sector-override`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sector }),
+    });
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+      await dialog.alert(body?.detail ?? `Could not save the sector (HTTP ${response.status}).`,
+        { title: 'Sector not saved' });
+      return;
+    }
+    setSectorFor(null);
+    // The override affects table rows, allocation bars and attribution. Re-read the one shared
+    // payload rather than locally patching three views that each derive from it.
+    setReloadSeq((value) => value + 1);
+  };
   const refreshBenchmarkData = async () => {
     setRefreshingBenchmarkData(true);
     try {
@@ -3693,6 +3783,7 @@ export default function PortfolioAnalysisModal({
               <>
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 onFundamental={(target) => { void openFundamental(target); }}
+                onSectorOverride={setSectorFor}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
                 benchmark={data.benchmark ?? benchmark}
                 /*  Only when this modal is a real portfolio with a paired book. An ad-hoc
@@ -3778,6 +3869,10 @@ export default function PortfolioAnalysisModal({
 
            Each re-checks `data`: they sit outside the `data && (…)` subtree that renders the
           charts, so it is genuinely nullable here. */}
+      {sectorFor && (
+        <SectorOverrideDialog holding={sectorFor} onClose={() => setSectorFor(null)}
+          onSave={saveSectorOverride} />
+      )}
       {risk && data && (
         <PanelDialog onClose={() => setRisk(false)}>
           {/*  THE HOLDINGS THE TABLE IS SHOWING, PASSED STRAIGHT THROUGH. The panel does not

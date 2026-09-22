@@ -125,6 +125,28 @@ export function InputsViewSwitch({ view, onChange }: {
  */
 type SortKey = 'name' | 'exchange' | 'ticker' | 'weight' | 'ccy' | `impact:${string}`;
 
+// Fixed widths make the offsets of these frozen columns stable for every company block.
+const PIN = {
+  company: 'sticky left-0 z-10 w-[13rem] min-w-[13rem]',
+  exchange: 'sticky left-[13rem] z-10 w-[5rem] min-w-[5rem]',
+  ticker: 'sticky left-[18rem] z-10 w-[6.5rem] min-w-[6.5rem]',
+  weight: 'sticky left-[24.5rem] z-10 w-[5rem] min-w-[5rem]',
+  currency: 'sticky left-[29.5rem] z-10 w-[4rem] min-w-[4rem]',
+  line: 'sticky left-[33.5rem] z-10 min-w-[10rem]',
+};
+
+function periodLabel(period: string): string {
+  return /^\d{4}$/.test(period) ? `FY ${period}` : period;
+}
+
+function periodTitle(period: string): string {
+  if (/^\d{4}$/.test(period)) {
+    return `FY ${period}: reported at each company's own fiscal year-end, not necessarily 31 December.`;
+  }
+  const quarter = /^(\d{4})-Q([1-4])$/.exec(period);
+  return quarter ? `TTM to ${period}: trailing twelve months through that reported quarter-end.` : period;
+}
+
 function cmp(a: number | string | null | undefined, b: number | string | null | undefined,
   dir: 'asc' | 'desc') {
   if (a == null && b == null) return 0;
@@ -136,7 +158,7 @@ function cmp(a: number | string | null | undefined, b: number | string | null | 
 }
 
 export function RatioInputsTable<R extends InputsRow>({
-  data, lines, derived, fmtValue = fmtRevM, view = 'reported', onFetch,
+  data, lines, derived, fmtValue = fmtRevM, view = 'reported', onFetch, ltmComponents, ltmInfo, periodNote,
 }: {
   data: InputsData<R>;
   lines: InputsLine<R>[];
@@ -163,6 +185,12 @@ export function RatioInputsTable<R extends InputsRow>({
   view?: InputsView;
   /** Holdings only. An index is not curated row by row, so its `no_data` cells just say so. */
   onFetch?: (isin: string, name: string, signal?: AbortSignal) => Promise<void>;
+  /** A card-specific audit cell beside LTM (for example the four filings that make up TTM FCF). */
+  ltmComponents?: (row: R) => React.ReactNode;
+  /** Existing app-style information control, rendered inside the LTM value cell. */
+  ltmInfo?: (row: R, line: InputsLine<R>) => React.ReactNode;
+  /** Card-specific qualifier beside a reported value (for example, `= LTM` on a fiscal-year-end). */
+  periodNote?: (row: R, line: InputsLine<R>, period: string) => React.ReactNode;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>(
     { key: 'weight', dir: 'desc' });
@@ -294,21 +322,25 @@ export function RatioInputsTable<R extends InputsRow>({
 
   return (
     <div className="overflow-auto rounded-lg border border-neutral-800/40">
+      <p className="px-3 py-1 text-[11px] text-fg-faint border-b border-neutral-800/40">
+        FY columns are each company&apos;s fiscal year-end; quarterly columns are trailing twelve months through the named quarter.
+      </p>
       <table className="w-full text-xs">
         <thead className="bg-page">
           <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40 [&>th]:cursor-pointer [&>th:hover]:text-fg-soft">
-            <th className="px-3 py-1.5 font-medium text-left sticky left-0 bg-page z-10 w-full" onClick={() => toggle('name')}>Company{caret('name')}</th>
-            <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('exchange')}>GF exch{caret('exchange')}</th>
-            <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ticker')}>Ticker{caret('ticker')}</th>
-            <th className="px-3 py-1.5 font-medium text-right whitespace-nowrap" onClick={() => toggle('weight')}
+            <th className={`px-3 py-1.5 font-medium text-left bg-page ${PIN.company}`} onClick={() => toggle('name')}>Company{caret('name')}</th>
+            <th className={`px-3 py-1.5 font-medium text-left whitespace-nowrap bg-page ${PIN.exchange}`} onClick={() => toggle('exchange')}>GF exch{caret('exchange')}</th>
+            <th className={`px-3 py-1.5 font-medium text-left whitespace-nowrap bg-page ${PIN.ticker}`} onClick={() => toggle('ticker')}>Ticker{caret('ticker')}</th>
+            <th className={`px-3 py-1.5 font-medium text-right whitespace-nowrap bg-page ${PIN.weight}`} onClick={() => toggle('weight')}
               title="Share of this table.  NOT the weight used in any single period — a period renormalises over the companies that reported it, which is the `weight` line inside each company's block.">
               Weight{caret('weight')}
             </th>
-            <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap" onClick={() => toggle('ccy')}>Ccy{caret('ccy')}</th>
-            <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap">Line</th>
+            <th className={`px-3 py-1.5 font-medium text-left whitespace-nowrap bg-page ${PIN.currency}`} onClick={() => toggle('ccy')}>Ccy{caret('ccy')}</th>
+            <th className={`px-3 py-1.5 font-medium text-left whitespace-nowrap bg-page ${PIN.line}`}>Line</th>
             {years.map((y, i) => (
               <th key={y} className={`px-3 py-1.5 font-medium text-right${i > 0 ? ' cursor-pointer' : ''}`}
                 onClick={i > 0 ? () => toggle(`impact:${y}`) : undefined}
+                aria-label={periodTitle(y)}
                 title={i > 0
                   ? `Sort by impact on the ${y} move: each row's weight × its change from `
                     + `${years[i - 1]}. This is what moved the line, not what is biggest — a large `
@@ -321,11 +353,12 @@ export function RatioInputsTable<R extends InputsRow>({
                 {/*  Sized in `em`, not px — this table sits inside the tab-wide rem scale, and a
                     hardcoded size would stop tracking the header it belongs to at other densities.
                     `leading-none` keeps the taller glyph from adding a row of header height. */}
-                {y}<span className="text-[1.5em] leading-none align-middle">
+                <span title={periodTitle(y)}>{periodLabel(y)}</span><span className="text-[1.5em] leading-none align-middle">
                   {caret(`impact:${y}`)}
                 </span>
               </th>
             ))}
+            {ltmComponents && <th className="px-3 py-1.5 font-medium text-left whitespace-nowrap">LTM ends</th>}
           </tr>
         </thead>
         <tbody>
@@ -333,15 +366,15 @@ export function RatioInputsTable<R extends InputsRow>({
             // Company-level cells — rendered on the FIRST line of the company's block only.
             const head = (
               <>
-                <td className="px-3 py-1 text-fg-soft sticky left-0 bg-card z-10 max-w-[22ch]">
+                <td className={`px-3 py-1 text-fg-soft bg-card ${PIN.company}`}>
                   <span className="block truncate" title={r.name}>{r.name}</span>
                 </td>
-                <td className="px-3 py-1 font-mono text-[12px] text-fg-subtle whitespace-nowrap">{r.exchange ?? '—'}</td>
-                <td className="px-3 py-1 font-mono text-[12px] whitespace-nowrap">
+                <td className={`px-3 py-1 font-mono text-[12px] text-fg-subtle whitespace-nowrap bg-card ${PIN.exchange}`}>{r.exchange ?? '—'}</td>
+                <td className={`px-3 py-1 font-mono text-[12px] whitespace-nowrap bg-card ${PIN.ticker}`}>
                   {r.ticker ? <a href={guruFocusUrl(r.ticker, r.exchange)} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:underline">{r.ticker} ↗</a> : '—'}
                 </td>
-                <td className="px-3 py-1 text-right font-mono text-fg-muted whitespace-nowrap">{r.weight_pct.toFixed(1)}%</td>
-                <td className="px-3 py-1 font-mono text-[12px] text-fg-subtle whitespace-nowrap">{r.currency ?? '—'}</td>
+                <td className={`px-3 py-1 text-right font-mono text-fg-muted whitespace-nowrap bg-card ${PIN.weight}`}>{r.weight_pct.toFixed(1)}%</td>
+                <td className={`px-3 py-1 font-mono text-[12px] text-fg-subtle whitespace-nowrap bg-card ${PIN.currency}`}>{r.currency ?? '—'}</td>
               </>
             );
             if (r.status !== 'ok') {
@@ -349,10 +382,10 @@ export function RatioInputsTable<R extends InputsRow>({
                 <tr key={r.isin} className="border-t border-neutral-800/40 hover:bg-overlay/[0.02]">
                   {head}
                   {r.status === 'unsubscribed' ? (
-                    <td colSpan={years.length + 1} className="px-3 py-1 text-warn-300"
+                    <td colSpan={years.length + 1} className={`px-3 py-1 text-warn-300 bg-card ${PIN.line}`}
                       title={`${r.ticker ?? ''}@${r.exchange ?? '?'} is on an exchange outside our GuruFocus subscription.`}>Unsubscribed</td>
                   ) : (
-                    <td colSpan={years.length + 1} className="px-3 py-1">
+                    <td colSpan={years.length + 1} className={`px-3 py-1 bg-card ${PIN.line}`}>
                       {ingest[r.isin]?.busy ? <span className="text-[12px] text-fg-faint">fetching…</span> : onFetch ? (
                         <span className="inline-flex items-center gap-2">
                           <button type="button" onClick={() => fetchOne(r.isin, r.name)}
@@ -371,12 +404,12 @@ export function RatioInputsTable<R extends InputsRow>({
                   return (
                     <tr key={ln.label} className={`${li === 0 ? 'border-t border-neutral-800/40' : ''} hover:bg-overlay/[0.02]`}>
                       {li === 0 ? head : (
-                        <>
-                          <td className="px-3 py-1 sticky left-0 bg-card z-10" />
-                          <td /><td /><td /><td />
-                        </>
+                        // One frozen blank covers the five identity columns on continuation
+                        // lines. Five separate stickies per row made wide benchmark tables repaint
+                        // thousands of layers for every horizontal scroll frame.
+                        <td colSpan={5} className="sticky left-0 z-10 w-[33.5rem] min-w-[33.5rem] bg-card" />
                       )}
-                      <td className={`px-3 py-1 whitespace-nowrap ${ln.muted ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
+                      <td className={`px-3 py-1 whitespace-nowrap bg-card ${PIN.line} ${ln.muted ? 'text-fg-muted' : 'text-fg-soft'}`}>{ln.label}</td>
                       {years.map((y, yi) => (
                         <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft"
                           //  The figure as filed stays reachable in every view. An index point or
@@ -385,8 +418,11 @@ export function RatioInputsTable<R extends InputsRow>({
                           title={v === 'reported' ? undefined
                             : `${ln.label} ${y}: ${fmtValue(ln.of(r, y))} as reported`}>
                           {cellText(shown[yi], fmtValue)}
+                          {periodNote?.(r, ln, y)}
+                          {y === 'LTM' && ltmInfo?.(r, ln)}
                         </td>
                       ))}
+                      {ltmComponents && <td className="px-3 py-1 text-[11px] text-fg-muted whitespace-nowrap">{ln.label === 'Free Cash Flow' || ln.label === 'Free Cash Flow (TTM)' ? ltmComponents(r) : null}</td>}
                     </tr>
                   );
                 })}
@@ -397,8 +433,8 @@ export function RatioInputsTable<R extends InputsRow>({
                   const shown = v === 'rebased' ? plotSeries(r, v) : viewed(r, derived.of);
                   return (
                     <tr className="hover:bg-overlay/[0.02]">
-                      <td className="px-3 py-1 sticky left-0 bg-card z-10" /><td /><td /><td /><td />
-                      <td className="px-3 py-1 whitespace-nowrap text-fg-soft font-medium">{derived.label}</td>
+                      <td colSpan={5} className="sticky left-0 z-10 w-[33.5rem] min-w-[33.5rem] bg-card" />
+                      <td className={`px-3 py-1 whitespace-nowrap bg-card text-fg-soft font-medium ${PIN.line}`}>{derived.label}</td>
                       {years.map((y, yi) => (
                         <td key={y} className="px-3 py-1 text-right font-mono text-fg-soft font-medium"
                           title={v === 'reported' ? undefined
@@ -406,6 +442,7 @@ export function RatioInputsTable<R extends InputsRow>({
                           {cellText(shown[yi], derivedFmt)}
                         </td>
                       ))}
+                      {ltmComponents && <td />}
                     </tr>
                   );
                 })()}
@@ -416,12 +453,12 @@ export function RatioInputsTable<R extends InputsRow>({
         </tbody>
         <tfoot>
           <tr className="border-t border-neutral-800/40 bg-page font-semibold text-fg-strong">
-            <td className="px-3 py-1.5 sticky left-0 bg-page z-10">Total</td>
-            <td /><td />
-            <td className="px-3 py-1.5 text-right font-mono whitespace-nowrap">
+            <td className={`px-3 py-1.5 bg-page ${PIN.company}`}>Total</td>
+            <td className={`bg-page ${PIN.exchange}`} /><td className={`bg-page ${PIN.ticker}`} />
+            <td className={`px-3 py-1.5 text-right font-mono whitespace-nowrap bg-page ${PIN.weight}`}>
               {rows.reduce((a, r) => a + r.weight_pct, 0).toFixed(1)}%
             </td>
-            <td /><td />
+            <td className={`bg-page ${PIN.currency}`} /><td className={`bg-page ${PIN.line}`} />
             {years.map((y) => <td key={y} />)}
           </tr>
         </tfoot>

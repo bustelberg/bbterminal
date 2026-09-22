@@ -71,6 +71,7 @@ class TestOnlyTheAlwaysPositiveMembersDrawTheLine:
     def test_a_member_negative_in_any_period_is_excluded(self, earnings):
         built = earnings._blend_rows(_rows(EPS), COVERED)
         assert built["member_counts"][EPS] == {"considered": 1, "total": 3,
+                                              "latest_considered": 1, "latest_period": "2025",
                                               "rule": "positive_only"}
 
     def test_one_bad_year_anywhere_is_enough(self, earnings):
@@ -85,7 +86,9 @@ class TestOnlyTheAlwaysPositiveMembersDrawTheLine:
         #  The control. Revenue goes negative for nobody, but the point is the RULE is per metric:
         # applying it everywhere would silently shrink twelve other charts.
         built = earnings._blend_rows(_rows(REV), COVERED)
-        assert built["member_counts"][REV] == {"considered": 3, "total": 3, "rule": "all"}
+        assert built["member_counts"][REV] == {"considered": 2, "total": 3,
+                                              "latest_considered": 2, "latest_period": "2025",
+                                              "rule": "all"}
 
     def test_the_filter_is_keyed_off_the_metric_KEY_not_the_code_spelling(self, earnings):
         """ THE TRAP THAT WOULD MAKE IT A SILENT NO-OP. `_POSITIVE_ONLY_METRICS` holds `eps_nri`;
@@ -94,6 +97,7 @@ class TestOnlyTheAlwaysPositiveMembersDrawTheLine:
         lower = "annuals__per_share_data__EPS without NRI"
         built = earnings._blend_rows(_rows(lower), COVERED)
         assert built["member_counts"][lower] == {"considered": 1, "total": 3,
+                                                "latest_considered": 1, "latest_period": "2025",
                                                 "rule": "positive_only"}
 
 
@@ -103,7 +107,8 @@ class TestTheCountIsAlwaysReported:
         "n of m" — it compares the two numbers and stays silent when they match."""
         built = earnings._blend_rows(_rows(REV) + _rows(EPS), COVERED)
         assert set(built["member_counts"]) == {REV, EPS}
-        assert built["member_counts"][REV]["considered"] == built["member_counts"][REV]["total"]
+        assert built["member_counts"][REV]["considered"] == 2
+        assert built["member_counts"][REV]["total"] == 3
         assert built["member_counts"][EPS]["considered"] < built["member_counts"][EPS]["total"]
 
     def test_the_total_is_the_covered_set_not_the_rows_that_arrived(self, earnings):
@@ -175,7 +180,9 @@ class TestTheRuleSaysWhyMembersAreMissing:
         totals = {REV: {1: {"2023-12-31": 100.0, "2024-12-31": 110.0, "2025-12-31": 120.0},
                         2: {"2023-12-31": 50.0, "2024-12-31": 55.0, "2025-12-31": 60.0}}}
         built = earnings._blend_rows(_rows(REV), COVERED, None, "annual", totals)
-        assert built["member_counts"][REV] == {"considered": 2, "total": 3, "rule": "aggregate"}
+        assert built["member_counts"][REV] == {"considered": 2, "total": 3,
+                                              "latest_considered": 2, "latest_period": "2025",
+                                              "rule": "aggregate"}
 
     def test_the_denominator_is_still_the_whole_book_on_the_aggregate_path(self, earnings):
         """ `total` IS `len(covered)` ON BOTH CONSTRUCTIONS. `blend_series` also knows how many
@@ -213,6 +220,7 @@ class TestEpsEligibilitySpansTheConsensusToo:
         from routers import earnings as e
         built = e._blend_rows(self._eps_rows(-1.0), COVERED[:2])
         assert built["member_counts"][EPS] == {"considered": 1, "total": 2,
+                                               "latest_considered": 1, "latest_period": "2025",
                                                "rule": "positive_only"}
 
     def test_and_it_leaves_BOTH_legs_not_just_the_one_it_failed(self):

@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
+import { ValueBadge } from '../../../lib/dynamicValue';
+import InfoTip from '../InfoTip';
 import { fcfSbcYieldOf, type FcfSbcYieldInputs, type FcfSbcYieldRow } from './fcfSbcYieldData';
 import { RatioInputsTable, type InputsLine } from './RatioInputsTable';
 import { inputsBody, type BenchTarget } from './benchSeries';
@@ -30,11 +32,16 @@ import BenchmarkFundamentalsRefresh from './BenchmarkFundamentalsRefresh';
  * of the line the chart drew.
  */
 
-const LINES: InputsLine<FcfSbcYieldRow>[] = [
-  { label: 'Free Cash Flow', of: (r, y) => r.fcf[y] },
-  { label: 'SBC', of: (r, y) => r.sbc[y], muted: true },
+function linesFor(cadence?: string): InputsLine<FcfSbcYieldRow>[] {
+  const ttm = cadence === 'daily';
+  return [
+  // Daily yield needs a trailing cash-flow numerator against a daily market cap. It is not the
+  // quarter's FCF, so the label must make a $5.2B TTM never read as Arista's Q2 result.
+  { label: ttm ? 'Free Cash Flow (TTM)' : 'Free Cash Flow', of: (r, y) => r.fcf[y] },
+  { label: ttm ? 'SBC (TTM)' : 'SBC', of: (r, y) => r.sbc[y], muted: true },
   { label: 'Market cap', of: (r, y) => r.market_cap[y], muted: true },
-];
+  ];
+}
 
 export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTarget, benchLabel, onClose }: {
   target: Target; portfolioName?: string | null; onClose: () => void;
@@ -49,7 +56,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
   const load = async (body: Target | BenchTarget): Promise<FcfSbcYieldInputs> => {
     const r = await apiFetch(`${API_URL}/api/earnings/fcf-sbc-yield-inputs`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: inputsBody(body),
+      body: inputsBody(body), noReadCache: true,
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
@@ -107,7 +114,90 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
   };
 
   const section = 'text-[12px] uppercase tracking-wide text-fg-muted';
+  const daily = target.cadence === 'daily';
   const derived = { label: 'FCF-SBC yield', kind: 'ratio' as const, of: (r: FcfSbcYieldRow, y: string) => fcfSbcYieldOf(r.fcf[y], r.sbc[y], r.market_cap[y]) };
+  const fcfM = (value: number) => `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })}M`;
+  const ltmComponents = (row: FcfSbcYieldRow) => {
+    // Older in-memory payloads have the component dates but predate `ltm_end`; retain the visible
+    // end date during a hot deploy instead of rendering an empty audit column.
+    const endDate = row.ltm_end ?? row.ltm_fcf_parts?.at(-1)?.date;
+    if (!endDate) return null;
+    const end = new Date(`${endDate.slice(0, 10)}T00:00:00Z`);
+    const label = `${end.getUTCFullYear()} Q${Math.floor(end.getUTCMonth() / 3) + 1}`;
+    const isFiscalYear = row.ltm_source === 'fiscal_year';
+    return <span>{label}<InfoTip className="ml-1 align-middle" content={
+      <span className="block min-w-[16rem] space-y-1.5">
+        <span className="block text-[10px] uppercase tracking-wider text-fg-faint">
+          {isFiscalYear ? 'LTM equals latest FY' : 'LTM end date'}
+        </span>
+        <span className="block text-[12px] text-fg-muted">
+          FCF, SBC, and market cap all end on <ValueBadge>{endDate.slice(0, 10)}</ValueBadge>.
+        </span>
+        <span className="block text-[11px] text-fg-faint">
+          {isFiscalYear
+            ? 'This is the reported fiscal-year total; quarterly components are not available.'
+            : 'The detailed four-quarter FCF calculation is available from the info badge in the LTM FCF cell.'}
+        </span>
+      </span>
+    } /></span>;
+  };
+  const ltmInfo = (row: FcfSbcYieldRow, line: InputsLine<FcfSbcYieldRow>) => {
+    const parts = row.ltm_fcf_parts ?? [];
+    const endDate = row.ltm_end ?? parts.at(-1)?.date;
+    if (!endDate) return null;
+    const isFcf = line.label === 'Free Cash Flow' || line.label === 'Free Cash Flow (TTM)';
+    if (row.ltm_matches_latest_fy && (!isFcf || !parts.length)) {
+      return <InfoTip className="ml-1 align-middle" content={
+        <span className="block min-w-[15rem] space-y-1.5">
+          <span className="block text-[10px] uppercase tracking-wider text-fg-faint">LTM equals latest FY</span>
+          <span className="block text-[12px] text-fg-muted">The latest fiscal-year value is already the trailing twelve months through <ValueBadge>{endDate.slice(0, 10)}</ValueBadge>; it is not duplicated here.</span>
+        </span>
+      } />;
+    }
+    if ((line.label === 'SBC' || line.label === 'SBC (TTM)') && line.of(row, 'LTM') == null) {
+      return <InfoTip className="ml-1 align-middle" content={
+        <span className="block min-w-[15rem] space-y-1.5">
+          <span className="block text-[10px] uppercase tracking-wider text-fg-faint">No reported SBC</span>
+          <span className="block text-[12px] text-fg-muted">The company reports no SBC line. The FCF-SBC yield therefore treats SBC as zero; FCF and market cap both end on <ValueBadge>{endDate.slice(0, 10)}</ValueBadge>.</span>
+        </span>
+      } />;
+    }
+    if (!isFcf) {
+      return <InfoTip className="ml-1 align-middle" content={
+        <span className="block min-w-[15rem] space-y-1.5">
+          <span className="block text-[10px] uppercase tracking-wider text-fg-faint">LTM alignment</span>
+          <span className="block text-[12px] text-fg-muted">This value ends on <ValueBadge>{endDate.slice(0, 10)}</ValueBadge>, the same period as the other LTM inputs.</span>
+        </span>
+      } />;
+    }
+    if (!parts.length) return null;
+    const sum = parts.reduce((total, part) => total + part.value, 0);
+    return <InfoTip className="ml-1 align-middle" content={
+      <span className="block min-w-[18rem] space-y-2">
+        <span className="block text-[10px] uppercase tracking-wider text-fg-faint">LTM free cash flow</span>
+        <span className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-[12px]">
+          <span className="text-[10px] uppercase tracking-wider text-fg-faint">Reported quarter</span>
+          <span className="text-right text-[10px] uppercase tracking-wider text-fg-faint">FCF</span>
+          {parts.map((part) => <span key={part.date} className="contents">
+            <span><ValueBadge>{part.date.slice(0, 10)}</ValueBadge></span>
+            <span className="text-right"><ValueBadge>{fcfM(part.value)}</ValueBadge></span>
+          </span>)}
+          <span className="col-span-2 my-1 border-t border-neutral-800/40" />
+          <span><ValueBadge>LTM</ValueBadge></span>
+          <span className="text-right"><ValueBadge>{fcfM(sum)}</ValueBadge></span>
+        </span>
+        <span className="block text-[11px] text-fg-faint">Shown only when FCF, SBC, and market cap all end on the same quarter.</span>
+      </span>
+    } />;
+  };
+  const periodNote = (row: FcfSbcYieldRow, line: InputsLine<FcfSbcYieldRow>, period: string) => {
+    const endYear = row.ltm_end?.slice(0, 4);
+    if (!row.ltm_matches_latest_fy || period !== endYear) return null;
+    if ((line.label === 'SBC' || line.label === 'SBC (TTM)') && line.of(row, period) == null) {
+      return <span className="ml-1 text-[10px] font-sans text-fg-faint" title="No SBC line is reported, so the FCF-SBC yield treats SBC as zero.">= 0 in yield</span>;
+    }
+    return <span className="ml-1 text-[10px] font-sans text-fg-faint" title="This fiscal-year value is also the latest trailing twelve months.">= LTM</span>;
+  };
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-scrim/60 p-4"
@@ -115,7 +205,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
       <div className="bg-card rounded-xl border border-neutral-800/40 shadow-xl w-[88vw] h-[84vh] flex flex-col"
         onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <div className="flex items-baseline gap-3 px-6 py-4 border-b border-neutral-800/40">
-          <h2 className="text-fg-strong font-medium">Holdings — FCF-SBC yield inputs by year</h2>
+          <h2 className="text-fg-strong font-medium">Holdings — {daily ? 'daily TTM FCF-SBC yield inputs' : 'FCF-SBC yield inputs by period'}</h2>
           {portfolioName && <span className="text-sm text-fg-soft truncate max-w-[24ch]" title={portfolioName}>{portfolioName}</span>}
           {data && <span className="text-[12px] text-fg-faint">{data.rows.length} companies</span>}
           {benchLabel && <span className="text-[12px]" style={{ color: chartTheme.pos }}>vs {benchLabel}</span>}
@@ -123,22 +213,26 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
         </div>
 
         <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
-          <p className="text-[12px] text-fg-faint">Free Cash Flow, SBC and market cap as reported (millions, native currency). Yield = (FCF − SBC) ÷ Market cap.</p>
+          <p className="text-[12px] text-fg-faint">
+            {daily
+              ? 'FCF and SBC are trailing twelve months (the latest four reported quarters), held flat until the next filing; market cap is daily. Values are millions in native currency.'
+              : 'Free Cash Flow, SBC and market cap as reported (millions, native currency).'} Yield = (FCF − SBC) ÷ Market cap.
+          </p>
 
           <div className="space-y-1.5">
-            <h3 className={section}>{portfolioName ? `${portfolioName} — ` : ''}inputs by year</h3>
+            <h3 className={section}>{portfolioName ? `${portfolioName} — ` : ''}{daily ? 'daily TTM inputs' : 'inputs by period'}</h3>
             {err && <p className="text-xs text-neg-300">{err}</p>}
             {!data && !err && <p className="text-xs text-fg-subtle">Loading…</p>}
             {data && data.rows.length === 0 && !err && <p className="text-xs text-fg-subtle">No held company has these figures ingested.</p>}
             {data && data.rows.length > 0 && (
-              <RatioInputsTable data={data} lines={LINES} derived={derived} onFetch={fetchFinancials} />
+              <RatioInputsTable data={data} lines={linesFor(target.cadence)} derived={derived} onFetch={fetchFinancials} ltmComponents={ltmComponents} ltmInfo={ltmInfo} periodNote={periodNote} />
             )}
           </div>
 
           {benchTarget && (
             <div className="space-y-1.5">
               <div className="flex items-baseline gap-3">
-                <h3 className={section}>{benchLabel} constituents — inputs by year</h3>
+                <h3 className={section}>{benchLabel} constituents — inputs by period</h3>
                 <BenchmarkFundamentalsRefresh benchTarget={benchTarget} benchLabel={benchLabel}
                   onDone={() => setBenchReloadKey((k) => k + 1)} />
               </div>
@@ -155,7 +249,7 @@ export default function FcfSbcYieldInputsModal({ target, portfolioName, benchTar
                     {bench.rows.filter((r) => r.status === 'ok').length} with figures feed the line,
                     renormalised each period
                   </p>
-                  <RatioInputsTable data={bench} lines={LINES} derived={derived} />
+                  <RatioInputsTable data={bench} lines={linesFor(benchTarget.cadence)} derived={derived} ltmComponents={ltmComponents} ltmInfo={ltmInfo} periodNote={periodNote} />
                 </>
               )}
             </div>

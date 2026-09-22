@@ -119,7 +119,7 @@ _WATCHED = (
     # (the same scan writes `airs_performance`), and an accident is not the rule this list states.
     "airs_account_roster",
     "asset_price", "asset_execution", "asset_analysis", "asset_bucket_override",
-    "asset_isin_alias",
+    "asset_isin_alias", "company_sector_override",
     #  Added with the momentum state chip. `_holding_risk` reads this to place each holding's
     # 12-1 return in the benchmark universe's distribution, and that distribution is REWRITTEN
     # every day by the precompute. Without this line the daily rewrite would be invisible to the

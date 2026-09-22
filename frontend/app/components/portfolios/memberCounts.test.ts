@@ -50,6 +50,13 @@ describe('memberCountLine', () => {
       .toBe('ACWI: 1,480 of 1,514');
   });
 
+  it('separates an all-history member set from a temporary newest-period gap', () => {
+    expect(memberCountLine({ ...base, own: {
+      considered: 24, total: 24, latest_considered: 18, latest_period: '2026', rule: 'all',
+    }, always: true })?.text)
+      .toBe('Bustelberg Offensief: 24 of 24 (2026: 18 of 24) companies');
+  });
+
   it('says nothing about a single company — one member of one is a tautology', () => {
     expect(memberCountLine({ ...base, isAgg: false, benchLabel: null,
       own: c(0, 1, 'positive_only') })).toBeNull();

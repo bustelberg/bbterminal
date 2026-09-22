@@ -1041,8 +1041,8 @@ def _ltm_by_company(company_ids: list[int], metric: str,
     return _ltm_multi(company_ids, [metric], cadence).get(metric, {})
 
 
-def _ltm_multi(company_ids: list[int], metrics: list[str],
-               cadence: str) -> dict[str, dict[int, tuple[str, float]]]:
+def _ltm_multi(company_ids: list[int], metrics: list[str], cadence: str,
+               include_annual_duplicate: bool = False) -> dict[str, dict[int, tuple[str, float]]]:
     """`{metric: {company_id: (period_end, LTM value)}}` — `_ltm_by_company` for several metrics on
     ONE pair of bulk reads instead of two per metric.
 
@@ -1068,8 +1068,11 @@ def _ltm_multi(company_ids: list[int], metrics: list[str],
             q_date, q_val = max(dated)
             last_annual = max((d for d, v in ((annual.get(metric) or {}).get(cid) or {}).values()
                                if v is not None), default=None)
-            # Equal dates mean the trailing twelve months ARE that fiscal year: already on the chart.
-            if last_annual is None or q_date > last_annual:
+            # An annual chart normally omits an equal-date LTM because it would duplicate its
+            # fiscal-year column. Some drill-downs intentionally ask for that duplicate so an
+            # explicit LTM column can say that the FY value IS current through this quarter.
+            if (last_annual is None or q_date > last_annual
+                    or (include_annual_duplicate and q_date == last_annual)):
                 per_metric[cid] = (q_date, q_val)
         out[metric] = per_metric
     return out
@@ -1117,8 +1120,8 @@ def _ltm_blend_rows(cids: list[int], metrics: list[str] | None,
     return out
 
 
-def ltm_parts_by_company(cids: list[int], metric: str,
-                         cadence: str) -> dict[int, list[dict]]:
+def ltm_parts_by_company(cids: list[int], metric: str, cadence: str,
+                         include_annual_duplicate: bool = False) -> dict[int, list[dict]]:
     """`{company_id: [{date, value}, …]}` — the FILINGS each company's newest trailing year was
     built from. Behind the ⓘ on every cell of the drill-down's LTM column.
 
@@ -1140,7 +1143,7 @@ def ltm_parts_by_company(cids: list[int], metric: str,
     shown is what the figure was computed from, which is deliberately not everything the vendor
     filed.
     """
-    have = _ltm_multi(cids, [metric], cadence).get(metric, {})
+    have = _ltm_multi(cids, [metric], cadence, include_annual_duplicate).get(metric, {})
     if not have:
         return {}
     _codes, rule = _codes_and_rule(metric, "quarterly")
@@ -1156,8 +1159,8 @@ def ltm_parts_by_company(cids: list[int], metric: str,
     return out
 
 
-def ltm_aligned(company_ids: list[int], metrics: list[str],
-                cadence: str) -> dict[int, tuple[str, dict[str, float]]]:
+def ltm_aligned(company_ids: list[int], metrics: list[str], cadence: str,
+                include_annual_duplicate: bool = False) -> dict[int, tuple[str, dict[str, float]]]:
     """`{company_id: (period_end, {metric: LTM value})}` for the derived-ratio cards — every line
     rolled to the SAME twelve months, or none of them.
 
@@ -1180,7 +1183,7 @@ def ltm_aligned(company_ids: list[int], metrics: list[str],
     is the same absence the annual series already carries for that metric — the caller handles it
     exactly as it handles a missing year. Only two DIFFERENT dates disqualify.
     """
-    per_metric = _ltm_multi(company_ids, metrics, cadence)
+    per_metric = _ltm_multi(company_ids, metrics, cadence, include_annual_duplicate)
     if not per_metric:
         return {}
     out: dict[int, tuple[str, dict[str, float]]] = {}
@@ -1190,6 +1193,42 @@ def ltm_aligned(company_ids: list[int], metrics: list[str],
         if not got or len(dates) != 1:
             continue
         out[cid] = (dates.pop(), {m: v for m, (_, v) in got.items()})
+    return out
+
+
+def latest_annual_aligned(company_ids: list[int], metrics: list[str], cadence: str,
+                          optional_metrics: set[str] | None = None
+                          ) -> dict[int, tuple[str, dict[str, float]]]:
+    """The newest common fiscal-year end for every requested metric.
+
+    This is LTM provenance for a company whose latest available filing is a full year but whose
+    quarterly history is absent or incomplete. It does not manufacture quarterly components: the
+    caller labels it as the reported FY. Requested metrics must share one end date when present;
+    callers may identify a genuinely optional line such as SBC, which the FCF-SBC yield defines
+    as zero when the company does not report it.
+    """
+    if cadence == "quarterly" or not company_ids or not metrics:
+        return {}
+    from routers._benchmark_fundamental_grid import _values_with_dates  # noqa: PLC0415
+
+    annual = _values_with_dates(company_ids, metrics, "annual")
+    optional = optional_metrics or set()
+    out: dict[int, tuple[str, dict[str, float]]] = {}
+    for cid in company_ids:
+        got: dict[str, tuple[str, float]] = {}
+        for metric in metrics:
+            dated = [(d, v) for d, v in ((annual.get(metric, {}).get(cid) or {}).values())
+                     if v is not None]
+            if not dated:
+                if metric in optional:
+                    continue
+                break
+            got[metric] = max(dated)
+        if any(metric not in got for metric in metrics if metric not in optional):
+            continue
+        dates = {d for d, _ in got.values()}
+        if len(dates) == 1:
+            out[cid] = (dates.pop(), {metric: value for metric, (_, value) in got.items()})
     return out
 
 
@@ -2087,8 +2126,13 @@ def _blend_rows(rows: list[dict], covered: list[dict],
         #
         #  It does not move a single line. This is a disclosure: `blend_members` is unchanged and
         # the aggregate is drawn from whatever it was always drawn from.
-        counts[code] = {"considered": s.get("fund_members", considered),
+        counts[code] = {"considered": s.get("fund_members", s.get("members", considered)),
                         "total": len(covered),
+                        # All-history membership and the newest reporting period are different
+                        # facts. A temporary FY2026 gap must not read as though those companies
+                        # were absent from the entire chart.
+                        "latest_considered": s.get("latest_members"),
+                        "latest_period": s.get("latest_period"),
                         #  Why they are missing, decided where they are dropped. The card has to
                         # explain the count it prints, and the two constructions withhold members
                         # for entirely different reasons — one is a chosen survivorship filter, the
@@ -2197,7 +2241,12 @@ def _member_count_total(body: FundamentalCoverageRequest, cov: dict) -> int:
 
 
 async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], dict]:
-    """The covered holdings and the coverage report, or the 404 that says why there are none."""
+    """The holdings that can contribute to at least one chart and the coverage report.
+
+    ``covered`` is a core-financials verdict, not a valid admission rule for the share-price
+    chart. A company can have a complete price history while its statements are not ingested.
+    Keep those ``no_metrics`` company rows here; `_blend_rows` decides membership per metric.
+    """
     from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
 
     members = await _load_and_expand_members(body)
@@ -2205,10 +2254,11 @@ async def _blend_inputs(body: FundamentalCoverageRequest) -> tuple[list[dict], d
         raise HTTPException(status_code=404, detail="no holdings to blend")
     cov = await coverage_for_async(members)
     cov["member_count_total"] = _member_count_total(body, cov)
-    covered = [r for r in cov["rows"] if r["reason"] == "covered" and r.get("company_id")]
-    if not covered:
-        raise HTTPException(status_code=404, detail="no holding has fundamentals to blend")
-    return covered, cov
+    blendable = [r for r in cov["rows"]
+                 if r["reason"] in {"covered", "no_metrics"} and r.get("company_id")]
+    if not blendable:
+        raise HTTPException(status_code=404, detail="no holding has fundamentals or price data to blend")
+    return blendable, cov
 
 
 def _blend_extras(body: FundamentalCoverageRequest, covered: list[dict],
@@ -4693,7 +4743,7 @@ async def cash_conversion_inputs(body: FundamentalCoverageRequest, request: Requ
 
 
 @router.post("/api/earnings/fcf-sbc-yield-inputs")
-@cached_blend("fcf-sbc-yield-inputs")
+@cached_blend("fcf-sbc-yield-inputs-v3")
 async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Request, response: Response):
     """The base inputs behind the FCF-SBC yield, per holding: Free Cash Flow, Stock-Based
     Compensation and Market Cap per fiscal year, in the company's own reporting currency (millions).
@@ -4753,6 +4803,32 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Reques
         timings["metrics_ms"] = (time.perf_counter() - started) * 1000
         if body.cadence != "daily":
             _prefetch(cids, ('fcf', 'sbc', 'market_cap',), body.cadence)
+        # The LTM ratio is valid only when FCF, SBC and market cap reach the SAME quarter-end.
+        # Ship the exact FCF filings behind it so the click-through can show its arithmetic.
+        metrics = ['fcf', 'sbc', 'market_cap']
+        ltm = (ltm_aligned(cids, metrics, body.cadence)
+               if body.cadence != "daily" else {})
+        # SBC is optional: companies such as Berkshire report no SBC line and the yield formula
+        # deliberately treats that absence as zero. FCF and market cap remain mandatory; an SBC
+        # line that does exist is still checked by `ltm_aligned` against their quarter-end.
+        ltm = {cid: hit for cid, hit in ltm.items()
+               if {'fcf', 'market_cap'} <= set(hit[1])}
+        # The table has an explicit LTM-status column. Include fiscal-year-end matches in its
+        # provenance so an empty status cell never makes a current FY look like missing data;
+        # the duplicate value itself remains suppressed below.
+        ltm_from_quarters = (
+            ltm_aligned(cids, metrics, body.cadence,
+                        include_annual_duplicate=True)
+            if body.cadence != "daily" else {})
+        ltm_from_quarters = {cid: hit for cid, hit in ltm_from_quarters.items()
+                             if {'fcf', 'market_cap'} <= set(hit[1])}
+        ltm_from_fy = (latest_annual_aligned(cids, metrics, body.cadence,
+                                             optional_metrics={'sbc'})
+                       if body.cadence != "daily" else {})
+        # A quarterly-derived LTM is newer or more explicit than the same fiscal-year window.
+        ltm_or_latest_fy = {**ltm_from_fy, **ltm_from_quarters}
+        ltm_fcf_parts = ltm_parts_by_company(list(ltm_from_quarters), 'fcf', body.cadence,
+                                             include_annual_duplicate=True)
         for ci in canon:
             c = comp.get(ci)
             if not c:
@@ -4779,6 +4855,7 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Reques
                 fcf = _metric_by_year(c["company_id"], "fcf", body.cadence)
                 sbc = _metric_by_year(c["company_id"], "sbc", body.cadence)
                 mc = _metric_by_year(c["company_id"], "market_cap", body.cadence)
+                _attach_ltm(c["company_id"], ltm, {"fcf": fcf, "sbc": sbc, "market_cap": mc})
             years |= set(fcf) | set(sbc) | set(mc)
             exch = gx.get("exchange_code")
             subscribed = is_gf_subscribed_exchange(exch) if exch else None
@@ -4792,6 +4869,12 @@ async def fcf_sbc_yield_inputs(body: FundamentalCoverageRequest, request: Reques
                 "ticker": c.get("gurufocus_ticker"), "exchange": exch,
                 "status": status,
                 "fcf": fcf, "sbc": sbc, "market_cap": mc,
+                "ltm_fcf_parts": ltm_fcf_parts.get(c["company_id"], []),
+                "ltm_end": (ltm_or_latest_fy.get(c["company_id"]) or (None, {}))[0],
+                "ltm_source": ("quarters" if c["company_id"] in ltm_from_quarters
+                               else "fiscal_year" if c["company_id"] in ltm_from_fy else None),
+                "ltm_matches_latest_fy": (c["company_id"] in ltm_or_latest_fy
+                                          and c["company_id"] not in ltm),
             })
         rows.sort(key=lambda r: -r["weight_pct"])
         return {"years": sorted(y for y in years if y >= _GRAPH_START_YEAR), "rows": rows}

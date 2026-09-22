@@ -1,5 +1,7 @@
 import { periodDenoms, weightAt, type Weighted } from './marginData';
 
+const LINE_PIN = 'sticky left-[33.5rem] z-10 min-w-[10rem]';
+
 /**
  * The two extra LINES every ratio card's drill-down carries under its raw inputs: the market cap
  * that period, and the weight it produced.
@@ -34,12 +36,7 @@ function capBn(v: number | null | undefined): string {
  *   The first one stays sticky — without it the row slides under the pinned Company column when
  *  the table scrolls sideways, which is visible as a gap the other rows do not have. */
 function Lead({ n }: { n: number }) {
-  return (
-    <>
-      <td className="px-3 py-1 sticky left-0 bg-card z-10" />
-      {Array.from({ length: Math.max(0, n - 1) }, (_, i) => <td key={i} />)}
-    </>
-  );
+  return <td colSpan={n} className="sticky left-0 z-10 w-[33.5rem] min-w-[33.5rem] bg-card" />;
 }
 
 export { periodDenoms };
@@ -59,7 +56,7 @@ export function CapWeightLines<T extends Weighted>({ row, years, denoms, lead = 
       {caps && (
         <tr className="hover:bg-overlay/[0.02]">
           <Lead n={lead} />
-          <td className="px-3 py-1 whitespace-nowrap text-fg-dim">cap (EUR)</td>
+          <td className={`px-3 py-1 whitespace-nowrap bg-card text-fg-dim ${LINE_PIN}`}>cap (EUR)</td>
           {years.map((y) => (
             <td key={y} className="px-3 py-1 text-right font-mono text-fg-dim">
               {capBn(caps[y])}
@@ -69,7 +66,7 @@ export function CapWeightLines<T extends Weighted>({ row, years, denoms, lead = 
       )}
       <tr className="hover:bg-overlay/[0.02]">
         <Lead n={lead} />
-        <td className="px-3 py-1 whitespace-nowrap text-fg-faint">weight</td>
+        <td className={`px-3 py-1 whitespace-nowrap bg-card text-fg-faint ${LINE_PIN}`}>weight</td>
         {years.map((y) => {
           const w = weightAt(row, y);
           const d = denoms[y];

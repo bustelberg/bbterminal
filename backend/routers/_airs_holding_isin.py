@@ -66,7 +66,7 @@ from ._benchmark_index import _fx_to_eur, _rate
 _log = logging.getLogger(__name__)
 
 _HOLDING_GRID_COLS = ("isin,name,openfigi_name,leonteq_name,leonteq_product_type,"
-                      "country,continent,msci_region,asset_class,sector")
+                      "company_id,country,continent,msci_region,asset_class,sector")
 
 
 @contextmanager
@@ -511,6 +511,20 @@ def _load_bucket_overrides(isins: list[str]) -> dict[str, str]:
     return out
 
 
+def _load_company_sector_overrides(company_ids: list[int]) -> dict[int, str]:
+    """Manual management sectors by company.  Source sector data remains on
+    asset_grid; this narrow overlay is intentionally applied only at read time."""
+    ids = sorted(set(company_ids))
+    if not ids:
+        return {}
+    try:
+        rows = (supabase.table("company_sector_override").select("company_id,sector")
+                .in_("company_id", ids).execute().data or [])
+        return {int(row["company_id"]): row["sector"] for row in rows if row.get("sector")}
+    except Exception:  # Migration may not have reached this environment yet.
+        return {}
+
+
 def _segments(rows: list[dict]) -> list[dict]:
     """One row per asset class: exposure, and what that exposure returned.
 
@@ -640,6 +654,10 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         for g in _rows:
             grid[g["isin"]] = g
 
+    company_sector_overrides = _load_company_sector_overrides([
+        int(g["company_id"]) for g in grid.values() if g.get("company_id") is not None
+    ])
+
     #  An execution row is priced from its *ANALYSIS* INSTRUMENT, WHICH CAN BE A DIFFERENT
     # LISTING — that is the design, not a fault. An ADR's execution row is deliberately served by
     # the main company's instrument (`asset_isin_alias`), and the two do not trade at the same
@@ -745,13 +763,17 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         #  `asset_class=None` ALWAYS now: AIRS's `categorie` came from the paired model position
         # and there is no pairing. The grid and the name carry it (see `classify_bucket`).
         override = overrides.get(isin or "")
+        company_id = g.get("company_id")
+        sector_override = company_sector_overrides.get(int(company_id)) if company_id is not None else None
         bucket = override or classify_bucket(None, is_etf, isin, h["holding_name"], g)
         rows.append({
             "holding_name": h["holding_name"],
             "lines": h.get("lines", 1),
             "bucket": bucket,
             "bucket_overridden": bool(override),
-            "sector": _display_sector(g.get("sector")),
+            "company_id": company_id,
+            "sector": sector_override or _display_sector(g.get("sector")),
+            "sector_overridden": bool(sector_override),
             "country": g.get("country") or None,
             "continent": g.get("continent") or None,
             "region": g.get("msci_region") or None,

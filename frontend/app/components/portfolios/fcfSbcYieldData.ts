@@ -12,6 +12,14 @@ export type FcfSbcYieldRow = {
   fcf: Record<string, number | null>;
   sbc: Record<string, number | null>;
   market_cap: Record<string, number | null>;
+  /** Exact quarterly FCF filings summed into this row's annual-view LTM column. */
+  ltm_fcf_parts?: { date: string; value: number }[];
+  /** Common end date of FCF, SBC, and market cap behind LTM or a matching latest FY. */
+  ltm_end?: string | null;
+  /** Whether the LTM provenance is four quarters or one reported fiscal-year total. */
+  ltm_source?: 'quarters' | 'fiscal_year' | null;
+  /** The latest FY is the same trailing-twelve-month window; its value is not repeated in LTM. */
+  ltm_matches_latest_fy?: boolean;
 };
 export type FcfSbcYieldInputs = { years: string[]; rows: FcfSbcYieldRow[] };
 

@@ -551,6 +551,7 @@ export default function MetricGrowthCard({
     own: countFor(cfg.codes, memberCounts),
     bench: omitBenchmarkForRawSeries ? undefined : countFor(cfg.codes, benchCounts),
     isAgg, ownLabel: coverageLabel ?? ownLabel, benchLabel: omitBenchmarkForRawSeries ? null : benchLabel, lang,
+    always: true,
   }), [memberCounts, benchCounts, cfg.codes, isAgg, coverageLabel, ownLabel, benchLabel, lang,
        omitBenchmarkForRawSeries]);
   const sharedCoverage = useGraphCoverage();
