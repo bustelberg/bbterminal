@@ -42,6 +42,10 @@ export type MemberCount = {
   total: number;
   /** Why any are missing. Absent on an older payload; see {@link memberCountHow}. */
   rule?: string;
+  /** Companies reporting in the newest available period for this metric. */
+  latest_considered?: number;
+  /** The reporting period behind `latest_considered`, e.g. `2026`. */
+  latest_period?: string | null;
 };
 
 /** The coverage envelope returned beside a blended metrics response. */
@@ -106,11 +110,23 @@ export function showMetricCountLine(
  */
 const LOCALE: Record<Lang, string> = { en: 'en-US', nl: 'nl-NL' };
 
-/** `36 of 42 companies` / `36 van 42 ondernemingen`. */
-const COUNT_OF: Record<Lang, (label: string, n: string, of: string, companies: boolean) => string> = {
-  en: (label, n, of, companies) => `${label}: ${n} of ${of}${companies ? ' companies' : ''}`,
-  nl: (label, n, of, companies) => `${label}: ${n} van ${of}${companies ? ' ondernemingen' : ''}`,
-};
+function countText(c: MemberCount, lang: Lang): string {
+  const n = c.considered.toLocaleString(LOCALE[lang]);
+  const total = c.total.toLocaleString(LOCALE[lang]);
+  const base = lang === 'nl' ? `${n} van ${total}` : `${n} of ${total}`;
+  if (c.latest_considered == null || c.latest_considered >= c.considered || !c.latest_period) {
+    return base;
+  }
+  const latest = c.latest_considered.toLocaleString(LOCALE[lang]);
+  const tail = lang === 'nl'
+    ? `${c.latest_period}: ${latest} van ${total}`
+    : `${c.latest_period}: ${latest} of ${total}`;
+  return `${base} (${tail})`;
+}
+
+function labelledCount(label: string, c: MemberCount, companies: boolean, lang: Lang): string {
+  return `${label}: ${countText(c, lang)}${companies ? (lang === 'nl' ? ' ondernemingen' : ' companies') : ''}`;
+}
 
 /**
  * The count line under a card's title, or `null` when both lines used everything they had.
@@ -134,11 +150,10 @@ export function memberCountLine({ own, bench, isAgg, ownLabel, benchLabel, lang,
 }): MemberCountLine | null {
   const parts: string[] = [];
   if (isAgg && own && (always || withheld(own))) {
-    parts.push(COUNT_OF[lang](ownLabel, String(own.considered), String(own.total), true));
+    parts.push(labelledCount(ownLabel, own, true, lang));
   }
   if (benchLabel && bench && (always || withheld(bench))) {
-    parts.push(COUNT_OF[lang](benchLabel, bench.considered.toLocaleString(LOCALE[lang]),
-      bench.total.toLocaleString(LOCALE[lang]), false));
+    parts.push(labelledCount(benchLabel, bench, false, lang));
   }
   if (!parts.length) return null;
   //  The rule is per metric, not per line — `_blend_rows` is the one place a book and an index

@@ -333,7 +333,7 @@ def _sector(raw: str | None) -> str:
     return _SECTOR_ALIASES.get(raw, raw)
 
 
-_GRID_COLS = ("isin,name,sector,country,msci_region,domicile_country,currency,"
+_GRID_COLS = ("isin,company_id,name,sector,country,msci_region,domicile_country,currency,"
               "market_cap_currency,asset_class,status")
 
 
@@ -354,9 +354,31 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
         for i in range(0, len(isins), IN_CHUNK_SIZE):
             rows += (supabase.table("asset_grid").select(_GRID_COLS)
                      .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
+    # A management sector is an overlay, never a rewrite of vendor metadata.  Keeping the source
+    # value alongside it makes the UI able to offer "Automatic" honestly, and applying it here
+    # means every analysis consumer (table, composition bars and attribution) shares one answer.
+    company_ids = sorted({r.get("company_id") for r in rows if r.get("company_id") is not None})
+    overrides: dict[int, str] = {}
+    if company_ids:
+        try:
+            override_rows = (supabase.table("company_sector_override").select("company_id,sector")
+                             .in_("company_id", company_ids).execute().data or [])
+            overrides = {int(r["company_id"]): r["sector"] for r in override_rows if r.get("sector")}
+        except Exception as e:  # migration may not yet be present on an older database
+            _log.warning("[analysis] sector overrides unavailable: %s", e)
     out: dict[str, dict] = {}
     for r in rows:
         if r.get("status") == "ok":
+            company_id = r.get("company_id")
+            default_sector = r.get("sector")
+            override = overrides.get(int(company_id)) if company_id is not None else None
+            if override:
+                r["sector_default"] = default_sector
+                r["sector"] = override
+                r["sector_overridden"] = True
+            else:
+                r["sector_default"] = default_sector
+                r["sector_overridden"] = False
             out[r["isin"]] = r
     return out
 
@@ -1639,6 +1661,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             # exists to prevent: ETFs back in the fundamentals blend, quietly.
             "is_fund": bool(r.get("is_fund")),
             "sector": sec,
+            "company_id": grow.get("company_id") if grow else None,
+            "sector_default": _sector(grow.get("sector_default")) if grow else None,
+            "sector_overridden": bool(grow and grow.get("sector_overridden")),
             "currency": cur,
             "via_names": via,
             # The certificate INSTRUMENT names behind those routes. Parallel to `via_names` (the

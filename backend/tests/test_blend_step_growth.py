@@ -115,6 +115,17 @@ class TestAOneHoldingBookIsItsCompany:
         assert blended == pytest.approx(filed, rel=1e-9)
 
 
+def test_latest_member_count_is_not_an_all_history_exclusion():
+    """A missing FY2026 price is a current reporting gap, not a missing share history."""
+    out = blend_series([
+        _member(1.0, {"2024-12-31": 10.0, "2025-12-31": 12.0, "2026-12-31": 13.0}),
+        _member(1.0, {"2024-12-31": 10.0, "2025-12-31": 11.0}),
+    ], TestAOneHoldingBookIsItsCompany.PRICE_CODE)
+    assert out["members"] == 2
+    assert out["latest_period"] == "2026"
+    assert out["latest_members"] == 1
+
+
 class TestTheIndexCannotBeFlippedByOneHolding:
     def _panel(self) -> list[dict]:
         """Nineteen steady names and one Prosus — the AEX's shape, minimised."""

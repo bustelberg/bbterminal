@@ -621,7 +621,7 @@ export default function LongEquityTab({
     </div>
     {/* The controls above stay put; only what they govern is replaced while it loads or fails. */}
     {body ?? (
-    <GraphCoverageProvider value={sharedCoverage}>
+    <GraphCoverageProvider value={null}>
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
       {/*  THREE ACROSS, NOT FOUR. Each card carries a 320px chart with up to five series, a legend
           that wraps, and stat tiles above it — at four columns the plot area was narrow enough that

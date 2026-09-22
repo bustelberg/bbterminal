@@ -4365,6 +4365,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/sector-override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Company Sector Override
+         * @description Set a management sector without mutating Yahoo or universe source data.
+         *
+         *     A missing sector deliberately removes the override, returning every
+         *     consumer to its source sector on the next read.
+         */
+        put: operations["set_company_sector_override_api_companies__company_id__sector_override_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/data/latest-close": {
         parameters: {
             query?: never;
@@ -8787,6 +8810,8 @@ export interface components {
             bucket?: string | null;
             /** Bucket Overridden */
             bucket_overridden?: boolean | null;
+            /** Company Id */
+            company_id?: number | null;
             /** Continent */
             continent?: string | null;
             /** Country */
@@ -8840,6 +8865,8 @@ export interface components {
             region?: string | null;
             /** Sector */
             sector?: string | null;
+            /** Sector Overridden */
+            sector_overridden?: boolean | null;
             /** Served By */
             served_by?: string | null;
             /** Start Value Eur */
@@ -9709,6 +9736,8 @@ export interface components {
              * @default false
              */
             capital_unknown?: boolean;
+            /** Company Id */
+            company_id?: number | null;
             /** Contribution Pct */
             contribution_pct?: number | null;
             /** Currency */
@@ -9766,6 +9795,10 @@ export interface components {
             return_pct?: number | null;
             /** Sector */
             sector?: string | null;
+            /** Sector Default */
+            sector_default?: string | null;
+            /** Sector Overridden */
+            sector_overridden?: boolean | null;
             /**
              * Sources
              * @default []
@@ -13374,6 +13407,14 @@ export interface components {
              * @default false
              */
             force_refresh?: boolean;
+        };
+        /**
+         * SectorOverrideRequest
+         * @description A management-owned GICS sector, or null to return to source data.
+         */
+        SectorOverrideRequest: {
+            /** Sector */
+            sector?: string | null;
         };
         /** SetCashRequest */
         SetCashRequest: {
@@ -19130,6 +19171,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_company_sector_override_api_companies__company_id__sector_override_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SectorOverrideRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -1650,6 +1650,17 @@
             ],
             "title": "Bucket Overridden"
           },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
           "continent": {
             "anyOf": [
               {
@@ -1911,6 +1922,17 @@
               }
             ],
             "title": "Sector"
+          },
+          "sector_overridden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Overridden"
           },
           "served_by": {
             "anyOf": [
@@ -4417,6 +4439,17 @@
             "title": "Capital Unknown",
             "type": "boolean"
           },
+          "company_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Id"
+          },
           "contribution_pct": {
             "anyOf": [
               {
@@ -4707,6 +4740,28 @@
               }
             ],
             "title": "Sector"
+          },
+          "sector_default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Default"
+          },
+          "sector_overridden": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Overridden"
           },
           "sources": {
             "default": [],
@@ -14175,6 +14230,24 @@
           }
         },
         "title": "ScreenRequest",
+        "type": "object"
+      },
+      "SectorOverrideRequest": {
+        "description": "A management-owned GICS sector, or null to return to source data.",
+        "properties": {
+          "sector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector"
+          }
+        },
+        "title": "SectorOverrideRequest",
         "type": "object"
       },
       "SetCashRequest": {
@@ -23967,6 +24040,57 @@
           }
         },
         "summary": "Verify One Openfigi",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/sector-override": {
+      "put": {
+        "description": "Set a management sector without mutating Yahoo or universe source data.\n\nA missing sector deliberately removes the override, returning every\nconsumer to its source sector on the next read.",
+        "operationId": "set_company_sector_override_api_companies__company_id__sector_override_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SectorOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Company Sector Override",
         "tags": [
           "companies"
         ]

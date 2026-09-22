@@ -943,7 +943,7 @@ market cap it was weighted by in that period, and the weight that produced.">
             {data.years.map((y) => (
               <th key={y} className="px-3 py-1.5 font-medium text-right whitespace-nowrap w-24"
                 onClick={() => toggle(y)}
-                title={`${y}. Each cell carries the figure on top and, beneath it, that company’s `
+                title={`${/^\d{4}$/.test(y) ? `FY ${y}, at each company's fiscal year-end (not necessarily 31 December)` : y}. Each cell carries the figure on top and, beneath it, that company’s `
                   + 'share of the weight behind THIS period’s line — which moves from period to '
                   + 'period as companies enter and leave the average, even though the Weight '
                   + 'column beside the name is a single stored number. The second line sums to '
@@ -952,7 +952,7 @@ market cap it was weighted by in that period, and the weight that produced.">
                     ? 'Sorting ranks on the pp impact in this view — most to least, drivers at the '
                       + 'top and detractors at the bottom.'
                     : 'Sorting still ranks on the figure, not the weight.')}>
-                {y}{caret(y)}
+                {/^\d{4}$/.test(y) ? `FY ${y}` : y}{caret(y)}
               </th>
             ))}
           </tr>

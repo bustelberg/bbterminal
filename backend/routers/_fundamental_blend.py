@@ -538,7 +538,8 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
     total_w = sum(abs(float(m.get("weight") or 0)) for m in members)
     total_n = len(members)
     if total_w <= 0 or not total_n:
-        return {"kind": kind, "points": [], "covered_pct": 0.0}
+        return {"kind": kind, "points": [], "covered_pct": 0.0,
+                "members": 0, "latest_period": None, "latest_members": 0}
 
     prepared, _ = _prepare(members, kind, bucket)
     by_date: dict[str, list[tuple[float, float]]] = defaultdict(list)
@@ -715,10 +716,14 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
         # member with no share count has no `F_i` and is therefore in `covered_pct` but not in the
         # sum — the one way this path can quietly speak for less of the index than it claims. The
         # two counts side by side make that visible instead of leaving it to be discovered.
+        # LTM is a single newest filing, not a common reporting period. Reporting it as the
+        # badge's latest coverage would turn a full annual price history into "1 of 24".
+        latest = max((period for period in axis if period != "LTM"), default=None)
         return {"kind": kind, "points": out, "covered_pct": round(spanned, 2),
                 "aggregate": True,
                 "fund_members": sum(1 for p in prepared if p["fund"]),
-                "members": len(prepared)}
+                "members": len(prepared), "latest_period": latest,
+                "latest_members": cover_n.get(latest, 0) if latest else 0}
     if kind == "level":
         #  A level series is chained from weighted **GROWTH**, NOT AVERAGED FROM REBASED LEVELS.
         # Between two drawn points the index moves by the cap-weighted average of what its
@@ -829,7 +834,11 @@ def blend_series(members: list[dict], metric_code: str, bucket=year_bucket,
                 continue    #  omitted, never drawn as a dip — see the docstring
             out.append(_point(d, value))
     spanned = max((p["covered_pct"] for p in out), default=0.0)
-    return {"kind": kind, "points": out, "covered_pct": round(spanned, 2)}
+    # See the aggregate path above: an LTM point is not comparable membership coverage.
+    latest = max((period for period in axis if period != "LTM"), default=None)
+    return {"kind": kind, "points": out, "covered_pct": round(spanned, 2),
+            "members": len(prepared), "latest_period": latest,
+            "latest_members": cover_n.get(latest, 0) if latest else 0}
 
 
 def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> dict | None:

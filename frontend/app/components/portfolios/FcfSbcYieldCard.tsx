@@ -122,7 +122,7 @@ export default function FcfSbcYieldCard({ holdingsTarget, holdingsName, sbcCorre
       <div className="flex items-baseline justify-between gap-2">
         <CardHeading chartKey="fcfYield" sbc={sbcCorrection} />
         <DailyToggle on={daily} onChange={setDaily}
-          note={'Daily: FCF − SBC stays flat between fiscal periods while the market cap moves '
+          note={'Daily: trailing-twelve-month FCF − SBC stays flat between fiscal periods while the market cap moves '
             + 'every trading day — rebuilt from the day’s close and the share count, since '
             + 'GuruFocus publishes a market cap only per fiscal period. Off, it follows the tab.'} />
       </div>

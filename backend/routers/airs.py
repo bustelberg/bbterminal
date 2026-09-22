@@ -1059,6 +1059,11 @@ class BookHoldingDetail(BaseModel):
     # holds, and cash to Cash. A column that named a sector the bars have never heard of is exactly
     # the taxonomy split this module exists to prevent, one screen apart instead of one chart apart.
     sector: str | None = None
+    # Identity and source value travel with the chart-normalised `sector` so an Analyse reader can
+    # set a company-wide editorial override, or return to Automatic without guessing what it was.
+    company_id: int | None = None
+    sector_default: str | None = None
+    sector_overridden: bool | None = None
     currency: str | None = None
     # Which strategies put us in this instrument — the model portfolios whose certificates were
     # looked through to reach it. Empty when the position is held directly. More than one is
@@ -3819,6 +3824,11 @@ class AirsHoldingIsin(BaseModel):
     # ISIN. `region` is the MSCI ACWI region.  For an ETF these describe its LISTING, not what it
     # holds — the grid cannot look inside a fund.
     sector: str | None = None
+    # The company bridge is present only for holdings that map to our
+    # company universe.  A sector override is a company-wide management choice
+    # and therefore deliberately unavailable for funds/unmapped instruments.
+    company_id: int | None = None
+    sector_overridden: bool | None = None
     country: str | None = None
     continent: str | None = None
     region: str | None = None

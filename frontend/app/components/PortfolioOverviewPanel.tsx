@@ -179,6 +179,15 @@ const collectionNameOrder: Record<PortfolioCollection, string[]> = {
   topselecties: [],
 };
 
+// The management override deliberately uses the standard GICS taxonomy. The
+// source value may use Yahoo's vocabulary; selecting Automatic keeps that
+// source value instead of coercing it into one of these labels.
+const GICS_SECTORS = [
+  'Communication Services', 'Consumer Discretionary', 'Consumer Staples',
+  'Energy', 'Financials', 'Health Care', 'Industrials', 'Information Technology',
+  'Materials', 'Real Estate', 'Utilities',
+] as const;
+
 export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
   //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
   // component in one render gets the same value — passing copy down would add a prop to each
@@ -1992,6 +2001,21 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
     });
     if (portefeuille && onOverride) await onOverride(portefeuille);
   }, [portefeuille, onOverride]);
+  // A company sector is an editorial management choice. It is deliberately
+  // separate from Yahoo's instrument metadata, so choosing a sector here
+  // cannot be overwritten by an asset refresh.
+  const setSector = useCallback(async (companyId: number, sector: string | null) => {
+    const res = await apiFetch(`${API_URL}/api/companies/${companyId}/sector-override`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sector }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
+      await dialog.alert(body?.detail ?? `Could not save the sector (HTTP ${res.status}).`);
+      return;
+    }
+    if (portefeuille && onOverride) await onOverride(portefeuille);
+  }, [portefeuille, onOverride]);
   // Supply this holding's ISIN by hand. The ONLY route when the model has no position for it —
   // no matching can find an ISIN that is not in the data. Keyed by name, so it fixes every book
   // holding the same instrument at once; an empty answer clears the pin.
@@ -2190,7 +2214,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 title="The model portfolio this holding IS, for the few positions that are certificates wrapping another strategy rather than instruments. The badge is the confidence of our automatic guess; pick from the dropdown to overrule it, and the choice applies to this holding everywhere it is held.">
                 Link
               </th>
-              <th className="px-3 py-1.5 font-medium text-left" title="The instrument's own yfinance sector. A fund is opaque, so it reads “—”.">{t.overview.colSector}</th>
+              <th className="px-3 py-1.5 font-medium text-left" title="Yahoo's instrument sector, unless an administrator has chosen a company-wide management sector. A fund is opaque, so it reads “—”.">{t.overview.colSector}</th>
               <th className="px-3 py-1.5 font-medium text-left" title="MSCI region from the instrument's yfinance geo.  For an ETF this describes its listing, not what it holds.">{t.overview.colRegion}</th>
               <th className="px-3 py-1.5 font-medium text-left">Ccy</th>
               <th className="px-3 py-1.5 font-medium text-right"
@@ -2402,11 +2426,21 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                   linkBase={`/api/airs/accounts/${encodeURIComponent(portefeuille ?? '')}`}
                   onSaved={() => { if (portefeuille && onOverride) void onOverride(portefeuille); }} />
                 <td className="px-3 py-1.5 text-fg-subtle">
-                  {g?.sector || '—'}
+                  {canEdit && g?.company_id ? (
+                    <select value={g.sector_overridden ? (g.sector ?? '') : ''}
+                      onChange={(event) => void setSector(g.company_id!, event.target.value || null)}
+                      className="max-w-48 rounded-md border border-neutral-800/60 bg-page px-2 py-1 text-[12px] text-fg-subtle hover:border-accent-600/50 focus:border-accent-500">
+                      <option value="">Automatic · {g.sector ?? '—'}</option>
+                      {GICS_SECTORS.map((sector) => <option key={sector} value={sector}>{sector}</option>)}
+                    </select>
+                  ) : (g?.sector || '—')}
                   {g?.sector && (
-                    <Provenance source="yfinance" kind="copied"
-                      what="The industry the issuer operates in."
-                      note="sector — the instrument's own sector in asset_grid, joined by ISIN" />
+                    <Provenance source={g.sector_overridden ? "derived" : "yfinance"}
+                      kind="copied"
+                      what={g.sector_overridden ? "The sector management selected for this company." : "The industry the issuer operates in."}
+                      note={g.sector_overridden
+                        ? "sector — manual company override"
+                        : "sector — the instrument's own sector in asset_grid, joined by ISIN"} />
                   )}
                 </td>
                 <td className="px-3 py-1.5 text-fg-subtle">

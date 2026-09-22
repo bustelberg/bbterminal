@@ -87,6 +87,18 @@ class UpdateCompanyRequest(BaseModel):
     gurufocus_exchange: str | None = None  # exchange_code
 
 
+class SectorOverrideRequest(BaseModel):
+    """A management-owned GICS sector, or null to return to source data."""
+    sector: str | None = None
+
+
+_GICS_SECTORS = frozenset({
+    "Communication Services", "Consumer Discretionary", "Consumer Staples",
+    "Energy", "Financials", "Health Care", "Industrials", "Information Technology",
+    "Materials", "Real Estate", "Utilities",
+})
+
+
 def _resolve_exchange_id(exchange_code: str) -> int | None:
     """Look up exchange_id from an exchange_code (case-insensitive)."""
     resp = (
@@ -454,6 +466,32 @@ async def update_company(company_id: int, req: UpdateCompanyRequest):
     if not resp.data:
         raise HTTPException(status_code=404, detail="Company not found")
     return resp.data[0]
+
+
+@router.put("/api/companies/{company_id}/sector-override")
+async def set_company_sector_override(company_id: int, req: SectorOverrideRequest):
+    """Set a management sector without mutating Yahoo or universe source data.
+
+    A missing sector deliberately removes the override, returning every
+    consumer to its source sector on the next read.
+    """
+    sector = req.sector.strip() if req.sector else None
+    if sector is not None and sector not in _GICS_SECTORS:
+        raise HTTPException(status_code=422, detail="Choose a valid GICS sector or Automatic.")
+
+    exists = (supabase.table("company").select("company_id")
+              .eq("company_id", company_id).limit(1).execute().data or [])
+    if not exists:
+        raise HTTPException(status_code=404, detail="Company not found")
+    if sector is None:
+        supabase.table("company_sector_override").delete().eq("company_id", company_id).execute()
+        return {"company_id": company_id, "sector": None}
+
+    row = (supabase.table("company_sector_override")
+           .upsert({"company_id": company_id, "sector": sector,
+                    "updated_at": datetime.now(timezone.utc).isoformat()}, on_conflict="company_id")
+           .execute().data)
+    return row[0] if row else {"company_id": company_id, "sector": sector}
 
 
 @router.delete("/api/companies/{company_id}")
