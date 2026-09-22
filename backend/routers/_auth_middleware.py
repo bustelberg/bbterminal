@@ -166,6 +166,17 @@ _USER_WRITE_PATHS: frozenset[str] = frozenset({
     "/api/asset-pipeline/external-store",
 })
 
+# The one editorial override every authenticated user may make. The sector pencil is present in
+# the user-visible Analyse modal, and sector corrections feed its allocation and attribution
+# views. Keep this narrower than `/api/companies`: that namespace also contains company identity
+# edits, creates and deletes, which remain admin-only. Numeric id + anchored suffix mirror the
+# FastAPI route exactly, so neither a neighbouring mutation nor a future child route inherits it.
+_COMPANY_SECTOR_OVERRIDE = re.compile(r"^/api/companies/\d+/sector-override$")
+
+
+def _is_company_sector_override(path: str) -> bool:
+    return _COMPANY_SECTOR_OVERRIDE.match(path) is not None
+
 #  Reads that arrive as post. This gate splits on HTTP method, so a compute-and-return endpoint
 # whose input is a LIST OF ISINS — too long for a URL — lands in the write tier and 403s for a user
 # on a page they are allowed to open. Every path here mutates nothing; it takes a basket in and
@@ -481,6 +492,7 @@ async def enforce_api_auth(
         allowed = (
             _starts_with_any(path, _USER_WRITE_PREFIXES)
             or path in _USER_WRITE_PATHS
+            or (request.method == "PUT" and _is_company_sector_override(path))
             or _is_earnings_refresh(path)
             or _is_latest_close_refresh(path)
             or (request.method == "POST" and _is_user_refresh(path))
