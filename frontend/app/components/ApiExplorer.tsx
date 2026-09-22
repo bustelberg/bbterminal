@@ -92,6 +92,7 @@ const VISIBLE_ENDPOINTS = new Set<string>([
   'POST /api/admin/company-price-refresh',
   'POST /api/admin/gurufocus-exchange-search',
   'GET /api/admin/gurufocus-probe',
+  'GET /api/admin/gurufocus-research',
   'GET /api/admin/egress-ip',
   'GET /api/admin/network-diagnostics',
   'GET /api/admin/copy-status',

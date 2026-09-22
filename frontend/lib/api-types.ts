@@ -500,6 +500,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/gurufocus-research": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Gurufocus Research
+         * @description Return the complete GuruFocus analyst-data payloads used by ``/research``.
+         *
+         *     This deliberately returns vendor-shaped JSON instead of normalising it. The page is a
+         *     temporary inspection surface: fields that are surprising, undocumented or newly added must
+         *     remain visible. One load currently makes 14 GuruFocus requests, stated in the response and in
+         *     the UI so an admin cannot accidentally mistake this for a free database read.
+         */
+        get: operations["gurufocus_research_api_admin_gurufocus_research_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/network-diagnostics": {
         parameters: {
             query?: never;
@@ -14472,6 +14497,39 @@ export interface operations {
             query?: {
                 symbol?: string;
                 endpoint?: string;
+            };
+            header?: {
+                authorization?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    gurufocus_research_api_admin_gurufocus_research_get: {
+        parameters: {
+            query?: {
+                symbol?: string;
             };
             header?: {
                 authorization?: string;

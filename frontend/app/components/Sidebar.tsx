@@ -36,6 +36,7 @@ const navItems: NavEntry[] = [
   // fundamentals side by side, off the same view the Fundamental button opens. Filed with the
   // one-off admin tools near the bottom it would read as one of them.
   { href: '/research-dashboard' },
+  { href: '/research' },
   { href: '/log-dashboard' },
   //  Near the top, not near the bottom (moved up 2026-08-13; Research Dashboard came in above it
   // on 2026-08-19, so it is no longer literally second). It is the page that answers "is the data
