@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  airsRiskHoldings, airsRiskWeightContext, collapseByCertificate, holdingsForCertificateScope,
-  individualStocksBasket,
+  airsRiskHoldings, airsRiskWeightContext, applyCompanySectorOverride, collapseByCertificate,
+  holdingsForCertificateScope, individualStocksBasket,
   syntheticAirsName, syntheticBasket,
 } from './PortfolioAnalysisModal';
 import { holdingsOnRiskBasis } from './ActiveSharePanel';
@@ -155,5 +155,33 @@ describe('AIRS Risk weights', () => {
     ]);
     expect(context.nowTotal).toBe(1000);
     expect(context.startTotal).toBe(1000);
+  });
+});
+
+describe('company sector override paint', () => {
+  it('shows a confirmed sector immediately without losing the source sector', () => {
+    const analysis = {
+      book_holdings: [{ company_id: 42, name: 'Adyen', sector: 'Technology',
+        sector_default: 'Technology', sector_overridden: false }],
+    } as never;
+
+    const updated = applyCompanySectorOverride(analysis, 42, 'Financials');
+
+    expect(updated.book_holdings?.[0]).toMatchObject({
+      sector: 'Financials', sector_default: 'Technology', sector_overridden: true,
+    });
+  });
+
+  it('restores the source sector immediately when Automatic is selected', () => {
+    const analysis = {
+      book_holdings: [{ company_id: 42, name: 'Adyen', sector: 'Financials',
+        sector_default: 'Technology', sector_overridden: true }],
+    } as never;
+
+    const updated = applyCompanySectorOverride(analysis, 42, null);
+
+    expect(updated.book_holdings?.[0]).toMatchObject({
+      sector: 'Technology', sector_default: 'Technology', sector_overridden: false,
+    });
   });
 });

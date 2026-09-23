@@ -22,10 +22,11 @@ export function startSectorOverride(options: SectorOverrideOptions): string {
   const target = sector ?? `Automatic${automaticSector ? ` (${automaticSector})` : ''}`;
 
   return startLocalJob(
-    `Update sector · ${companyName}`,
+    'Updating company sector',
     `company.sector:${companyId}`,
     async (signal, report) => {
-      report({ done: 0, total: 2, message: `Changing ${companyName} to ${target}…` });
+      report({ done: 0, total: 2,
+        message: `Updating the sector of ${companyName} to ${target} in the background…` });
       const response = await apiFetch(`${API_URL}/api/companies/${companyId}/sector-override`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -36,7 +37,8 @@ export function startSectorOverride(options: SectorOverrideOptions): string {
         const body = (await response.json().catch(() => null)) as { detail?: string } | null;
         throw new Error(body?.detail ?? `Could not save the sector (HTTP ${response.status}).`);
       }
-      report({ done: 1, total: 2, message: `Saved ${target}; updating the view…` });
+      report({ done: 1, total: 2,
+        message: `Saved ${target}; refreshing all affected views…` });
       if (!signal.aborted) await afterSave?.();
       report({ done: 2, total: 2, message: `${companyName} now uses ${target}` });
       return `${companyName} now uses ${target}`;

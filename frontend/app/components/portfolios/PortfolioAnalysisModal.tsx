@@ -789,6 +789,22 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
 
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
 
+/** Paint a confirmed override immediately while the authoritative analysis is being rebuilt. */
+export function applyCompanySectorOverride(
+  analysis: ModelPortfolioAnalysis, companyId: number, sector: string | null,
+): ModelPortfolioAnalysis {
+  return {
+    ...analysis,
+    book_holdings: analysis.book_holdings?.map((holding) => holding.company_id === companyId
+      ? {
+        ...holding,
+        sector: sector ?? holding.sector_default ?? holding.sector,
+        sector_overridden: sector != null,
+      }
+      : holding),
+  };
+}
+
 function SectorOverrideDialog({ holding, onClose, onSave }: {
   holding: BookHolding;
   onClose: () => void;
@@ -3367,14 +3383,27 @@ export default function PortfolioAnalysisModal({
    * up its "these bars belong to a different selection" state for the length of one request.
    */
   const [reloadSeq, setReloadSeq] = useState(0);
+  const reloadWaiters = useRef<Array<{
+    resolve: () => void;
+    reject: (reason: unknown) => void;
+  }>>([]);
+  const reloadAnalysis = () => new Promise<void>((resolve, reject) => {
+    reloadWaiters.current.push({ resolve, reject });
+    setReloadSeq((value) => value + 1);
+  });
   const saveSectorOverride = async (sector: string | null) => {
     if (sectorFor?.company_id == null) return;
+    const companyId = sectorFor.company_id;
     startSectorOverride({
-      companyId: sectorFor.company_id,
-      companyName: sectorFor.name ?? sectorFor.isin ?? `Company ${sectorFor.company_id}`,
+      companyId,
+      companyName: sectorFor.name ?? sectorFor.isin ?? `Company ${companyId}`,
       sector,
       automaticSector: sectorFor.sector_default ?? sectorFor.sector,
-      afterSave: () => setReloadSeq((value) => value + 1),
+      afterSave: async () => {
+        setData((current) => current
+          ? applyCompanySectorOverride(current, companyId, sector) : current);
+        await reloadAnalysis();
+      },
     });
     setSectorFor(null);
   };
@@ -3426,9 +3455,13 @@ export default function PortfolioAnalysisModal({
         }
         setLoadedFor(viewKey);
         setData(b);
+        reloadWaiters.current.splice(0).forEach((waiter) => waiter.resolve());
       } catch (e) {
         traceError('analyse', 'the composition could not be loaded', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          reloadWaiters.current.splice(0).forEach((waiter) => waiter.reject(e));
+        }
       }
     })();
     return () => { cancelled = true; };
