@@ -1212,6 +1212,9 @@ export interface paths {
          *
          *     `bucket` (an allocation label — Equity, Bonds, …) filters the CHART axes to that asset-class
          *     sleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.
+         *
+         *     `look_through` is false by default. When false, certificate constituents do not contribute to
+         *     Sector, Region or Currency; when true, the same constituents Attribution adds are included.
          */
         get: operations["airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get"];
         put?: never;
@@ -1242,6 +1245,9 @@ export interface paths {
          *
          *     `source=model` still gives the yfinance reconstruction of the model's nominal composition,
          *     which is the right question for an unlinked model — it is just not what the book did.
+         *
+         *     `look_through` is false by default. When false, certificates stay excluded wrappers; when
+         *     true, their linked model constituents become portfolio legs.
          */
         get: operations["airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get"];
         put?: never;
@@ -8367,6 +8373,11 @@ export interface components {
              * @default 0
              */
             portfolio_pct?: number;
+            /**
+             * Residual
+             * @default false
+             */
+            residual?: boolean;
         };
         /**
          * ActiveShareUnmatched
@@ -9416,13 +9427,33 @@ export interface components {
             return_pct?: number | null;
             /** Ticker */
             ticker?: string | null;
+            /** Weight Denominator Components */
+            weight_denominator_components?: components["schemas"]["AttributionWeightComponent"][] | null;
             /** Weight Now Pct */
             weight_now_pct?: number | null;
+            /** Weight Now Total Eur */
+            weight_now_total_eur?: number | null;
+            /** Weight Now Value Eur */
+            weight_now_value_eur?: number | null;
             /**
              * Weight Pct
              * @default 0
              */
             weight_pct?: number;
+            /** Weight Total Eur */
+            weight_total_eur?: number | null;
+            /** Weight Value Eur */
+            weight_value_eur?: number | null;
+        };
+        /**
+         * AttributionWeightComponent
+         * @description One raw AIRS VOLK Beginwaarde included in an opening-weight denominator.
+         */
+        AttributionWeightComponent: {
+            /** Name */
+            name: string;
+            /** Value Eur */
+            value_eur: number;
         };
         /** BacktestRequest */
         BacktestRequest: {
@@ -10029,16 +10060,15 @@ export interface components {
          * CompositionHolding
          * @description One holding behind a composition bar, at the weight that bar counted it at.
          *
-         *      `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
-         *     bucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other
-         *     two by every long position, so the SAME holding carries different weights on different axes and
-         *     that is correct. See `_airs_portfolio_analysis._axis_holdings`.
+         *      For an AIRS-backed portfolio, `weight_pct` is the holding's CURRENT share of the complete
+         *     book — the same denominator as Attribution's `Weight (now)`. For a model fallback it remains
+         *     a share of the visible axis. In both cases Σ over a bucket IS that bucket's `portfolio_pct`,
+         *     exactly. See `_airs_portfolio_analysis._axis_holdings`.
          *
-         *      IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
-         *     funds, cash and anything it could not price, then renormalises what remains to 100% and weights
-         *     it by the position's value when the window OPENED. Measured on Bustelberg Offensief:
-         *     Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong —
-         *     they are shares of different denominators, which is precisely what this list exists to show.
+         *      Attribution uses the real opening AIRS weight instead: Beginwaarde divided by the complete
+         *     opening book. It does not renormalise the remaining stocks after funds, cash, certificates or
+         *     unpriced names are omitted. The two surfaces may still differ because one is current and the
+         *     other is the window's open, but no hidden denominator inflates the attribution weights.
          */
         CompositionHolding: {
             /** Asset Class */
@@ -15417,6 +15447,7 @@ export interface operations {
                 weight_by?: string;
                 source?: string;
                 bucket?: string | null;
+                look_through?: boolean;
             };
             header?: never;
             path: {
@@ -15453,6 +15484,7 @@ export interface operations {
                 window?: string;
                 axis?: string;
                 source?: string;
+                look_through?: boolean;
             };
             header?: never;
             path: {
@@ -15914,6 +15946,7 @@ export interface operations {
         parameters: {
             query?: {
                 benchmark?: string;
+                benchmark_start?: string | null;
             };
             header?: never;
             path?: never;
@@ -15949,6 +15982,7 @@ export interface operations {
         parameters: {
             query?: {
                 benchmark?: string;
+                benchmark_start?: string | null;
             };
             header?: never;
             path?: never;

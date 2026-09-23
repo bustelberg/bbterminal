@@ -27,16 +27,17 @@
  * precision, and the table's own column header already said Company while the counts beside it
  * said issuers. Same rename in Concentration and Effective positions, which fold identically.
  */
-import { useEffect, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum, workedRatio } from './workedFormula';
 import { dayOf, dayRange } from './asOfLine';
-import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
+import {
+  Provenance, sourceField, sourceLabel, sourceVendor, type SourceKey,
+} from '../../../lib/provenance';
 import type { ActiveShare, ActiveShareRow } from '../../../lib/types/api';
 import { useRiskCopy } from './riskCopy';
 import LoadingDots from './LoadingDots';
@@ -45,19 +46,23 @@ import CorrelationView from './CorrelationView';
 import VolatilityView from './VolatilityView';
 import DrawdownView from './DrawdownView';
 import ConcentrationView from './ConcentrationView';
+import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
+import { riskRequestKey, useRiskResult } from './useRiskResult';
 
 /**
- * One body for all seven risk views.
+ * One body for all six risk views.
  *
- *  Six of them are scale-free and read only `weight_pct`; `value_eur` and `currency` exist for
- * the Effective-positions view alone. They ride on the SAME object anyway, deliberately: seven
- * views assembled from seven slightly different holdings lists is exactly the failure the shared
+ *  They are scale-free and read only `weight_pct`; the extra AIRS fields ride on the SAME object
+ * anyway, deliberately: views assembled from subtly different holdings lists are exactly the failure the shared
  * `build_issuer_weights` / `build_paired_series` exist to prevent, one level up.
  */
 export type ActiveShareHolding = {
   isin?: string | null;
   name?: string | null;
   weight_pct: number;
+  /** Raw AIRS sizing at the two dates offered by the Risk-wide basis control. */
+  weight_now_pct?: number | null;
+  weight_start_pct?: number | null;
   is_fund?: boolean;
   /** AIRS's own `current_value_eur`.  Absent on an ad-hoc basket — weights without euros. */
   value_eur?: number | null;
@@ -65,7 +70,21 @@ export type ActiveShareHolding = {
   currency?: string | null;
 };
 
-/**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
+export type RiskWeightBasis = 'now' | 'start';
+
+/** Apply one AIRS weight snapshot without changing membership or any other holding fact. */
+export function holdingsOnRiskBasis(
+  holdings: ActiveShareHolding[], basis: RiskWeightBasis,
+): ActiveShareHolding[] {
+  return holdings.map((holding) => ({
+    ...holding,
+    weight_pct: basis === 'start'
+      ? (holding.weight_start_pct ?? 0)
+      : (holding.weight_now_pct ?? holding.weight_pct),
+  }));
+}
+
+/**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SIX VIEWS. One decimal read as false
  *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
  *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
  *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
@@ -107,7 +126,9 @@ function Tile({ label, value, tone, info }: {
 }
 
 export default function ActiveSharePanel({
-  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource, onClose,
+  holdings, benchmark, portfolioName, portfolioAsOf, portfolioStartAsOf, portfolioFetchedAt,
+  portfolioSource, weightComponentsNow, weightComponentsStart, weightTotalNow, weightTotalStart,
+  onClose,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
@@ -124,6 +145,8 @@ export default function ActiveSharePanel({
    * exactly why the claim went unchecked for as long as it did.
    */
   portfolioAsOf?: string | null;
+  /** The AIRS Beginwaarde snapshot date (normally 1 January of the analysis year). */
+  portfolioStartAsOf?: string | null;
   /** When WE last read that valuation — a different fact from when AIRS produced it. */
   portfolioFetchedAt?: string | null;
   /**
@@ -135,11 +158,13 @@ export default function ActiveSharePanel({
    * happens to be right for whichever kind of book was opened first.
    */
   portfolioSource: SourceKey;
+  weightComponentsNow?: AirsWeightComponent[];
+  weightComponentsStart?: AirsWeightComponent[];
+  weightTotalNow?: number | null;
+  weightTotalStart?: number | null;
   onClose: () => void;
 }) {
   const t = useRiskCopy();
-  const [data, setData] = useState<ActiveShare | null>(null);
-  const [error, setError] = useState<string | null>(null);
   /**  ALL ROWS, OR ONLY WHAT WE HOLD. The underweights are the other half of the measure — a book
    *  can be 70% active almost entirely by NOT owning things — but there are ~1,700 of them on ACWI,
    *  so the default is the book and the index's biggest gaps are one click away. */
@@ -160,36 +185,36 @@ export default function ActiveSharePanel({
    */
   const [view, setView] =
     useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active');
+  const [weightBasis, setWeightBasis] = useState<RiskWeightBasis>('now');
+  const hasStartWeights = holdings.some((holding) => holding.weight_start_pct != null);
+  const weightedHoldings = useMemo(
+    () => holdingsOnRiskBasis(holdings, weightBasis), [holdings, weightBasis],
+  );
+  const selectedPortfolioAsOf = weightBasis === 'start' ? portfolioStartAsOf : portfolioAsOf;
+  const benchmarkStart = weightBasis === 'start' ? portfolioStartAsOf : null;
+  const selectedWeightComponents = weightBasis === 'start'
+    ? weightComponentsStart : weightComponentsNow;
+  const selectedWeightTotal = weightBasis === 'start' ? weightTotalStart : weightTotalNow;
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const key = `${benchmark}|${holdings.length}|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const r = await apiFetch(
-          `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ holdings }) });
-        const b = await r.json().catch(() => null);
-        if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as ActiveShare);
-      } catch (e) {
-        traceError('active-share', 'the active share could not be computed', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}`
+    + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
+  const activeBody = JSON.stringify({ holdings: weightedHoldings });
+  const key = riskRequestKey(activeUrl, activeBody);
+  const { data, error } = useRiskResult<ActiveShare>(key, async () => {
+    const r = await apiFetch(activeUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: activeBody,
+    });
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+    return b as ActiveShare;
+  }, 'active-share', 'the active share could not be computed');
 
   //  `?? []` ON BOTH — every list on this payload is optional in the generated types (the
   // Pydantic default makes it so), and `.filter` on undefined is a blank panel with no error.
   const all: ActiveShareRow[] = data?.rows ?? [];
-  const rows = all.filter((r) => (showAll ? true : r.held));
+  const rows = all.filter((r) => (showAll ? true : r.held && !r.residual));
   const maxBet = Math.max(0, ...all.map((r) => Math.abs(r.active_pct ?? 0)));
   /**
    * The footer row's sums — over the ROWS ON SCREEN, not over `all`.
@@ -214,7 +239,7 @@ export default function ActiveSharePanel({
    * deliberately NOT here — no index appears in it, so it takes `whenBook`.
    */
   const whenBoth = t.active.whenWeights(
-    portfolioName, dayOf(portfolioAsOf), dayOf(portfolioFetchedAt),
+    portfolioName, dayOf(selectedPortfolioAsOf), dayOf(portfolioFetchedAt),
     data?.benchmark ?? benchmark,
     dayRange(data?.benchmark_caps_from, data?.benchmark_caps_to),
     data?.benchmark_caps_unstamped ?? 0);
@@ -271,6 +296,25 @@ export default function ActiveSharePanel({
               </button>
             ))}
           </div>
+          {hasStartWeights && (
+            <div className="flex items-center gap-2 mt-2">
+              <span className="text-[10px] uppercase tracking-wider text-fg-faint">
+                {t.basis.label}
+              </span>
+              <span className="inline-flex rounded-md border border-neutral-800/40 overflow-hidden">
+                {(['now', 'start'] as const).map((basis) => (
+                  <button key={basis} type="button"
+                    onClick={() => setWeightBasis(basis)}
+                    aria-pressed={weightBasis === basis}
+                    className={`cursor-pointer px-2.5 py-0.5 text-[11px] transition-colors ${
+                      weightBasis === basis ? 'bg-accent-600 text-white'
+                        : 'bg-elevated text-fg-muted hover:text-accent-300'}`}>
+                    {basis === 'now' ? t.basis.now : t.basis.start}
+                  </button>
+                ))}
+              </span>
+            </div>
+          )}
         </div>
         <button type="button" onClick={onClose}
           className="cursor-pointer text-fg-faint hover:text-fg text-sm leading-none px-1"
@@ -286,31 +330,37 @@ export default function ActiveSharePanel({
           lazy load real rather than merely hidden. It takes the SAME holdings, so both views
           describe one portfolio; see `compute_tracking_error`. */}
       {view === 'te' && (
-        <TrackingErrorView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
+        <TrackingErrorView key={weightBasis} holdings={weightedHoldings}
+          benchmark={data?.benchmark ?? benchmark}
           //  The same book identity the active-share cards carry. This view measures the same
           // sleeve, so its cards owe the reader the same answer to "whose weights, read when, from
           // where" — and a second copy of those facts would be a second thing to keep true.
-          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+          portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'corr' && (
-        <CorrelationView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
-          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+        <CorrelationView key={weightBasis} holdings={weightedHoldings}
+          benchmark={data?.benchmark ?? benchmark}
+          portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'vol' && (
-        <VolatilityView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
-          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+        <VolatilityView key={weightBasis} holdings={weightedHoldings}
+          benchmark={data?.benchmark ?? benchmark}
+          portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'dd' && (
-        <DrawdownView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
-          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+        <DrawdownView key={weightBasis} holdings={weightedHoldings}
+          benchmark={data?.benchmark ?? benchmark}
+          portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'conc' && (
-        <ConcentrationView holdings={holdings} benchmark={data?.benchmark ?? benchmark}
-          portfolioName={portfolioName} portfolioAsOf={portfolioAsOf}
+        <ConcentrationView key={weightBasis} holdings={weightedHoldings}
+          benchmark={data?.benchmark ?? benchmark}
+          benchmarkStart={benchmarkStart}
+          portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
 
@@ -481,15 +531,33 @@ export default function ActiveSharePanel({
                   <tr key={r.name}
                     className="[&>td]:px-2.5 [&>td]:py-1 [&>td]:border-t [&>td]:border-neutral-800/20">
                     <td className="text-fg-soft">
-                      {r.name}
-                      {!r.held && (
+                      {r.residual ? t.active.otherPositions : r.name}
+                      {!r.held && !r.residual && (
                         <span className="ml-1.5 text-[10px] text-fg-faint">
                           {t.active.notHeld}
                         </span>
                       )}
                     </td>
                     <td className="text-right font-mono tabular-nums text-fg-muted">
-                      {(r.portfolio_pct ?? 0) > 0 ? `${(r.portfolio_pct ?? 0).toFixed(2)}%` : '—'}
+                      <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
+                        {(r.portfolio_pct ?? 0) > 0 ? `${(r.portfolio_pct ?? 0).toFixed(2)}%` : '—'}
+                        {r.held && !r.residual && selectedWeightTotal != null
+                          && selectedWeightTotal > 0 && selectedWeightComponents?.length ? (
+                            <Provenance source={portfolioSource} asOf={selectedPortfolioAsOf}
+                              what={t.active.weightWhat(r.name, portfolioName)}
+                              note={weightBasis === 'start'
+                                ? t.active.startWeight : t.active.currentWeight}
+                              how={t.active.weightHow}
+                              calculation={<AirsWeightCalculation
+                                components={selectedWeightComponents}
+                                numerator={(r.portfolio_pct ?? 0) / 100 * selectedWeightTotal}
+                                denominator={selectedWeightTotal}
+                                result={`${(r.portfolio_pct ?? 0).toFixed(2)}%`}
+                                holdingName={r.name}
+                                valueLabel={weightBasis === 'start'
+                                  ? 'Beginwaarde' : 'Huidige waarde'} />} />
+                          ) : null}
+                      </span>
                     </td>
                     <td className="text-right font-mono tabular-nums text-fg-muted">
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%` : '—'}

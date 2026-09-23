@@ -21,7 +21,6 @@
  * 0. Both are called "downside deviation"; this is the one the Sortino beside it is built on, so
  * the ratio equals its own parts.
  */
-import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
@@ -31,10 +30,10 @@ import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum } from './workedFormula';
 import type { PortfolioVolatility } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
+import { riskRequestKey, useRiskResult } from './useRiskResult';
 
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const signed2 = (v: number | null | undefined) =>
@@ -75,36 +74,20 @@ export default function VolatilityView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
-  const [data, setData] = useState<PortfolioVolatility | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const freq = 'monthly';
 
-  const key = `${benchmark}|${freq}|${holdings.length}`
-    + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    void (async () => {
-      try {
-        const r = await apiFetch(
-          `${API_URL}/api/airs/portfolio/volatility`
-          + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ holdings }) });
-        const b = await r.json().catch(() => null);
-        if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        setError(null);
-        setData(b as PortfolioVolatility);
-      } catch (e) {
-        traceError('volatility', 'the volatility could not be computed', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  const requestUrl = `${API_URL}/api/airs/portfolio/volatility`
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`;
+  const requestBody = JSON.stringify({ holdings });
+  const key = riskRequestKey(requestUrl, requestBody);
+  const { data, error } = useRiskResult<PortfolioVolatility>(key, async () => {
+    const r = await apiFetch(requestUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
+    });
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+    return b as PortfolioVolatility;
+  }, 'volatility', 'the volatility could not be computed');
 
   const period = 'month';
 
@@ -357,7 +340,7 @@ export default function VolatilityView({
                 footnote. "Today's weights over 5 years" asserted a start date instead of reporting
                 one, and the paired grid rarely reaches the full five.  Not badged: a bare <p> is
                 outside the card system, and `v()` only renders inside one. */}
-            {`${portfolioName}'s stock sleeve at its current weights, priced from `}
+            {`${portfolioName}'s stock sleeve at the selected AIRS weights, priced from `}
             {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} `}
             {`(${data.priced_holdings} of ${data.total_holdings} priced). `}
             Deposits and withdrawals cannot distort this — it is a weighted basket of instrument

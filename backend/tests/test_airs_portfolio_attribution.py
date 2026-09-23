@@ -47,6 +47,36 @@ class TestTheIdentityIsTheWholePoint:
         assert (w_p - w_b) * (R_bi - R_b_total) < 0          # correctly a COST
         assert (w_p - w_b) * R_bi > 0                        # plain Brinson would call it a gain
 
+    def test_real_airs_weights_are_not_inflated_to_a_100_percent_stock_portfolio(self):
+        """Only 50% of this book is directly held stocks. Their weights stay 35% + 15%, while
+        ACWI stays 40% + 60%; the explained excess is the sleeve's contribution to the WHOLE
+        book, not the excess of an invented 70% + 30% stock-only portfolio."""
+        rows = (
+            (0.35, 0.40, 10.0, 8.0),
+            (0.15, 0.60, -5.0, 2.0),
+        )
+        portfolio_share = sum(wp for wp, _, _, _ in rows)
+        portfolio_sleeve_return = sum(wp * rp for wp, _, rp, _ in rows) / portfolio_share
+        benchmark_return = sum(wb * rb for _, wb, _, rb in rows)
+
+        attributed = 0.0
+        for wp, wb, rp, rb in rows:
+            attributed += (
+                (wp - wb) * (rb - benchmark_return)
+                + wb * (rp - rb)
+                + (wp - wb) * (rp - rb)
+            )
+
+        assert portfolio_share == pytest.approx(0.50)
+        assert attributed == pytest.approx(
+            portfolio_share * (portfolio_sleeve_return - benchmark_return))
+
+    def test_the_implementation_keeps_the_raw_portfolio_weights(self):
+        src = inspect.getsource(at.compute_attribution)
+        assert '(i["weight_pct"], i["return_pct"])' in src
+        assert 'h["weight_pct"] = h["weight_pct"] / p_w_total' not in src
+        assert 'for h in holdings)' in src, "current weights also use the complete book denominator"
+
 
 class TestFundsAndCashAreNotASectorBet:
     """An ETF has no sector. In the `Fund (not looked through)` bucket the benchmark's weight is

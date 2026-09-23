@@ -13,10 +13,10 @@ const en = {
   },
   headers: { name: 'Name', weight: 'Weight', ret: 'Ret.', contribution: 'Contr.', yourWeight: 'Your weight', indexWeight: 'Index weight', yourReturn: 'Your return', indexReturn: 'Index return', allocation: 'Allocation', selection: 'Selection', interaction: 'Interact.', total: 'Total', totalExcess: 'Total (= the excess)' },
   names: {
-    yourHoldings: 'Your holdings', inBoth: 'in both', attributableModel: 'of the attributable model', constituents: 'constituents', ofIndex: 'of the index',
+    yourHoldings: 'Your holdings', attributableModel: 'of the complete opening book', constituents: 'constituents', ofIndex: 'of the index',
     noneMine: (bucket: string) => `You hold nothing in ${bucket} — the whole effect is the decision not to own it, so Selection and Interaction are zero.`,
     noneIndex: (benchmark: string, bucket: string) => `${benchmark} holds nothing in ${bucket}, so there is no index return to judge your picks against; the whole effect is allocation.`,
-    shared: (benchmark: string) => `Marked rows are held in both your portfolio and ${benchmark}; a share class counts as the same company.`,
+    shared: (benchmark: string) => `Blue circles indicate overlap between the portfolio and ${benchmark}.`,
     contributors: 'Biggest contributors', detractors: 'Biggest detractors', detractorsHint: 'what cost you the most',
     winners: (benchmark: string) => `${benchmark} winners you didn’t own`,
     winnersHint: 'matched by COMPANY, not ISIN — a share class is not a different business', weightReturnHint: 'weight × return, in EUR',
@@ -55,7 +55,7 @@ const en = {
     yours: 'your book',
     contributionHow: 'The holding’s weight times what it returned.',
     bucketsHow: (w: string) => `Every ${w} held on either side, classified the same way.`,
-    yourWeightHow: (basis: string) => `${basis}, renormalised over the attributable holdings.`,
+    yourWeightHow: (basis: string) => `${basis}, as a share of the complete opening book or model; omitted positions remain in the denominator.`,
     indexWeightHow: (benchmark: string) =>
       `${benchmark}’s cap weight at the start of the window.`,
     yourReturnHow: (basis: string) => `Weighted by holding, where each is ${basis}.`,
@@ -104,10 +104,10 @@ const nl: AttributionCopy = {
   },
   headers: { name: 'Naam', weight: 'Gewicht', ret: 'Rend.', contribution: 'Bijdr.', yourWeight: 'Uw gewicht', indexWeight: 'Indexgewicht', yourReturn: 'Uw rendement', indexReturn: 'Indexrendement', allocation: 'Allocatie', selection: 'Selectie', interaction: 'Interactie', total: 'Totaal', totalExcess: 'Totaal (= het meerrendement)' },
   names: {
-    yourHoldings: 'Uw posities', inBoth: 'in beide', attributableModel: 'van het toewijsbare model', constituents: 'constituenten', ofIndex: 'van de index',
+    yourHoldings: 'Uw posities', attributableModel: 'van het volledige boek aan het begin', constituents: 'constituenten', ofIndex: 'van de index',
     noneMine: (bucket) => `U houdt niets aan in ${bucket} — het hele effect is de keuze om deze niet te bezitten; Selectie en Interactie zijn daarom nul.`,
     noneIndex: (benchmark, bucket) => `${benchmark} houdt niets aan in ${bucket}. Er is dus geen indexrendement om uw selectie tegen af te zetten; het hele effect is allocatie.`,
-    shared: (benchmark) => `Gemarkeerde rijen worden zowel door uw portefeuille als door ${benchmark} aangehouden; een andere aandelenklasse telt als dezelfde onderneming.`,
+    shared: (benchmark) => `Blauwe cirkels tonen overlap tussen de portefeuille en ${benchmark}.`,
     contributors: 'Grootste positieve bijdragen', detractors: 'Grootste negatieve bijdragen', detractorsHint: 'wat het meeste kostte',
     winners: (benchmark) => `Winnaars in ${benchmark} die u niet bezat`,
     winnersHint: 'gekoppeld op ONDERNEMING, niet op ISIN — een aandelenklasse is geen ander bedrijf', weightReturnHint: 'gewicht × rendement, in EUR',
@@ -134,7 +134,7 @@ const nl: AttributionCopy = {
     yours: 'uw boek',
     contributionHow: 'Het gewicht van de positie maal het rendement ervan.',
     bucketsHow: (w) => `Elke ${w} die aan een van beide kanten wordt gehouden, op dezelfde manier ingedeeld.`,
-    yourWeightHow: (basis) => `${basis}, geherwogen over de toerekenbare posities.`,
+    yourWeightHow: (basis) => `${basis}, als aandeel van het volledige boek of model aan het begin; weggelaten posities blijven in de noemer.`,
     indexWeightHow: (benchmark) =>
       `Het marktkapitalisatiegewicht van ${benchmark} aan het begin van de periode.`,
     yourReturnHow: (basis) => `Gewogen per positie, waarbij elke positie ${basis} is.`,

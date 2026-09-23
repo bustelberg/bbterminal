@@ -53,6 +53,7 @@ export type RiskCopy = {
   titles: {
     active: string; te: string; corr: string; vol: string; dd: string; conc: string;
   };
+  basis: { label: string; now: string; start: string };
   subtitle: string;
   close: string;
 
@@ -75,6 +76,9 @@ export type RiskCopy = {
     activeShare: string; overlap: string; offBenchmark: string; stocks: string;
     heldOnly: (n: number) => string; everyName: (n: number) => string;
     colCompany: string; colBook: string; colActive: string; notHeld: string;
+    otherPositions: string;
+    currentWeight: string; startWeight: string; weightHow: string;
+    weightWhat: (company: string, book: string) => string;
     /** The footer row.  IT SAYS WHICH SET IT TOTALS — see the  in `ActiveSharePanel`. */
     totalHeld: (n: number) => string;
     totalAll: (n: number) => string;
@@ -263,7 +267,8 @@ const en: RiskCopy = {
     dd: 'Drawdown', conc: 'Concentration' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlation',
     vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration' },
-  subtitle: 'The individual stocks only, taken as 100% of the portfolio.',
+  basis: { label: 'AIRS weights', now: 'Current', start: 'Start of year' },
+  subtitle: 'Individual stocks at their actual weight in the complete AIRS book.',
   close: 'close',
 
   common: {
@@ -274,7 +279,7 @@ const en: RiskCopy = {
     freqNote: (f) => `f = ${f} observations per year.`,
     pricedFrom: (field, vendor) => `Prices from ${v(field)} at ${v(vendor)}.`,
     computing: 'Computing',
-    synthetic: (y, p, t) => `Today's stock sleeve at today's weights over ${y} years `
+    synthetic: (y, p, t) => `The selected stock sleeve at the selected AIRS weights over ${y} years `
       + `(${p} of ${t} priced).`,
     observations: 'Observations',
   },
@@ -284,6 +289,10 @@ const en: RiskCopy = {
     stocks: 'Stocks',
     heldOnly: (n) => `What we hold (${n})`, everyName: (n) => `Every name (${n})`,
     colCompany: 'Company', colBook: 'Book', colActive: 'Active', notHeld: 'not held',
+    otherPositions: 'Other portfolio positions',
+    currentWeight: 'current AIRS weight', startWeight: 'opening AIRS weight',
+    weightHow: 'The company value divided by the sum of all raw AIRS values in the complete book.',
+    weightWhat: (company, book) => `${v(company)}'s weight in the complete ${v(book)} AIRS book.`,
     heldVsIndex: (h, m, bookSrc, benchField, benchVendor) =>
       `${v(h)} companies and their weights from ${v(bookSrc)}, against ${v(m)} priced index `
       + `members weighted by ${v(benchField)} from ${v(benchVendor)}.`,
@@ -299,8 +308,8 @@ const en: RiskCopy = {
     },
     totalCardHeld: {
       what: 'The held names only, so the Active column does NOT sum to zero.',
-      where: 'Book is 100% by construction; the benchmark column is what the index holds in these '
-        + 'same names.',
+      where: 'Book uses the actual complete-book AIRS weights; the benchmark column is what the '
+        + 'index holds in these same names.',
       how: ' THE TOTAL IS THE BOOK\'S WHOLE OVERWEIGHT, and it is carried, name for name, by the '
         + 'index constituents not shown here. Switch to every name to see it cancel.  ½ Σ |Active| '
         + 'over this subset is NOT the active share — half the sum is missing.',
@@ -316,7 +325,7 @@ const en: RiskCopy = {
       issuer: 'one company, and one term in the sum — Alphabet A and Alphabet C are folded into a '
         + 'single i, not two',
       wp: (bookName) =>
-        `${v(bookName)}'s weight in that company, over the stock sleeve renormalised to 100%`,
+        `${v(bookName)}'s actual weight in that company, over the complete AIRS book`,
       wb: (bench) => `${v(bench)}'s own weight in the same company, by market cap`,
       min: 'the SMALLER of the two weights — where we hold less of a company than the index does, '
         + 'only our weight counts, which is why the benchmark column can sum to more than this',
@@ -337,10 +346,10 @@ const en: RiskCopy = {
       + `${unstamped > 0 ? ` (${v(unstamped)} undated)` : ''}`,
     cards: {
       activeShare: {
-        what: 'How much of the stock sleeve differs from the benchmark.',
+        what: 'How much of the complete AIRS book differs from the benchmark.',
       },
       overlap: {
-        what: 'The share of the sleeve that IS the benchmark.',
+        what: 'The share of the complete AIRS book that IS the benchmark.',
         how: 'Exactly 100% − active share, by construction. The two are one number, so nothing '
           + 'is learned by reading both — they are printed together because each is the natural '
           + 'answer to a different question.',
@@ -353,10 +362,9 @@ const en: RiskCopy = {
       },
       stocks: {
         what: 'How much of the whole book this comparison covers.',
-        where: 'Funds, cash and bonds are excluded and the rest renormalised to 100%.',
-        how: ' THE FIGURES ABOVE DESCRIBE THIS SLICE, NOT THE BOOK. Leaving cash in at its real '
-          + 'weight would count liquidity as an active bet against every index name at once — a '
-          + 'defensible measure, but a different one.',
+        where: 'Comparable stocks divided by every position in the complete AIRS book.',
+        how: 'The rest stays in the denominator and appears as Other portfolio positions; the '
+          + 'individual companies are not renormalised.',
       },
     },
   },
@@ -417,7 +425,7 @@ const en: RiskCopy = {
     },
     observationsWhat: (freq) => `The T in the formula — ${v(freq)} periods both series had.`,
     sleeve: (book, from, to) =>
-      `${book}'s stock sleeve at its current weights, priced from ${from} to ${to} — `,
+      `${book}'s stock sleeve at the selected AIRS weights, priced from ${from} to ${to} — `,
     note: "not the book's realised history, so a name bought in March contributes its January "
       + 'return. It is the same portfolio the Active share view describes.',
   },
@@ -612,7 +620,8 @@ const nl: RiskCopy = {
     dd: 'Drawdown', conc: 'Concentratie' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
     vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
-  subtitle: 'Alleen de individuele aandelen, genomen als 100% van de portefeuille.',
+  basis: { label: 'AIRS-wegingen', now: 'Actueel', start: 'Begin van het jaar' },
+  subtitle: 'Individuele aandelen tegen hun werkelijke gewicht in het volledige AIRS-boek.',
   close: 'sluiten',
 
   common: {
@@ -623,7 +632,7 @@ const nl: RiskCopy = {
     freqNote: (f) => `f = ${f} waarnemingen per jaar.`,
     pricedFrom: (field, vendor) => `Koersen uit ${v(field)} bij ${v(vendor)}.`,
     computing: 'Berekenen',
-    synthetic: (y, p, t) => `De huidige aandelenselectie tegen de huidige gewichten over ${y} jaar `
+    synthetic: (y, p, t) => `De gekozen aandelenselectie tegen de gekozen AIRS-wegingen over ${y} jaar `
       + `(${p} van ${t} geprijsd).`,
     observations: 'Waarnemingen',
   },
@@ -636,6 +645,10 @@ const nl: RiskCopy = {
     // Risico, en de ⓘ eronder gebruikt hetzelfde woord — anders benoemt één paneel dezelfde kolom
     // op twee manieren.
     colCompany: 'Onderneming', colBook: 'Portfolio', colActive: 'Actief', notHeld: 'niet gehouden',
+    otherPositions: 'Overige portefeuilleposities',
+    currentWeight: 'actuele AIRS-weging', startWeight: 'AIRS-weging aan het begin',
+    weightHow: 'De waarde van de onderneming gedeeld door de som van alle ruwe AIRS-waarden in het volledige boek.',
+    weightWhat: (company, book) => `Het gewicht van ${v(company)} in het volledige AIRS-boek ${v(book)}.`,
     heldVsIndex: (h, m, bookSrc, benchField, benchVendor) =>
       `${v(h)} ondernemingen en hun gewichten uit ${v(bookSrc)}, tegenover ${v(m)} geprijsde `
       + `indexleden gewogen naar ${v(benchField)} van ${v(benchVendor)}.`,
@@ -651,8 +664,8 @@ const nl: RiskCopy = {
     },
     totalCardHeld: {
       what: 'Alleen de gehouden namen, dus de kolom Actief telt niet op tot nul.',
-      where: 'Portfolio is per constructie 100%; de benchmarkkolom is wat de index in diezelfde namen '
-        + 'houdt.',
+      where: 'De portefeuille gebruikt de werkelijke AIRS-gewichten van het volledige boek; de '
+        + 'benchmarkkolom toont wat de index in dezelfde namen houdt.',
       how: ' HET TOTAAL IS DE VOLLEDIGE OVERWEGING VAN HET BOEK, en die wordt naam voor naam '
         + 'gedragen door de indexposities die hier niet staan. Schakel naar alle namen om het te '
         + 'zien wegvallen.  ½ Σ |Actief| over deze deelverzameling is NIET de active share — de '
@@ -665,8 +678,8 @@ const nl: RiskCopy = {
     legend: {
       issuer: 'één onderneming, en één term in de som — Alphabet A en Alphabet C worden tot één i '
         + 'samengevoegd, niet twee',
-      wp: (bookName) => `het gewicht van ${v(bookName)} in die onderneming, over de tot 100% `
-        + 'geherwogen aandelenselectie',
+      wp: (bookName) => `het werkelijke gewicht van ${v(bookName)} in die onderneming, over het `
+        + 'volledige AIRS-boek',
       wb: (bench) => `het gewicht van ${v(bench)} zelf in diezelfde onderneming, naar marktkapitalisatie`,
       min: 'het KLEINSTE van de twee gewichten — houden we minder van een onderneming dan de index, '
         + 'dan telt alleen ons gewicht mee; daarom kan de benchmarkkolom hoger uitkomen dan dit',
@@ -688,10 +701,10 @@ const nl: RiskCopy = {
       + `${unstamped > 0 ? ` (${v(unstamped)} zonder datum)` : ''}`,
     cards: {
       activeShare: {
-        what: 'Hoeveel van de aandelenselectie afwijkt van de benchmark.',
+        what: 'Hoeveel van het volledige AIRS-boek afwijkt van de benchmark.',
       },
       overlap: {
-        what: 'Het deel van de selectie dat de benchmark WEL is.',
+        what: 'Het deel van het volledige AIRS-boek dat de benchmark WEL is.',
         how: 'Per definitie exact 100% − active share. De twee zijn één getal, dus beide lezen '
           + 'levert niets extra op — ze staan samen omdat elk het natuurlijke antwoord is op een '
           + 'andere vraag.',
@@ -704,10 +717,9 @@ const nl: RiskCopy = {
       },
       stocks: {
         what: 'Welk deel van het hele boek deze vergelijking beslaat.',
-        where: 'Fondsen, liquiditeiten en obligaties vallen eruit; de rest wordt geherweegd naar 100%.',
-        how: ' DE CIJFERS HIERBOVEN BESCHRIJVEN DIT DEEL, NIET HET BOEK. Liquiditeiten op hun '
-          + 'werkelijke gewicht laten staan zou liquiditeit als actieve positie tegen elke '
-          + 'indexnaam tegelijk tellen — verdedigbaar, maar een andere maatstaf.',
+        where: 'Vergelijkbare aandelen gedeeld door alle posities in het volledige AIRS-boek.',
+        how: 'De rest blijft in de noemer en staat als Overige portefeuilleposities in de tabel; '
+          + 'de individuele ondernemingen worden niet geherwogen.',
       },
     },
   },
@@ -772,7 +784,7 @@ const nl: RiskCopy = {
     },
     observationsWhat: (freq) => `De T in de formule — ${v(freq)} perioden die beide reeksen hadden.`,
     sleeve: (book, from, to) =>
-      `De aandelenselectie van ${book} tegen de huidige gewichten, geprijsd van ${from} tot ${to} — `,
+      `De aandelenselectie van ${book} tegen de gekozen AIRS-wegingen, geprijsd van ${from} tot ${to} — `,
     note: 'niet de werkelijke historie van het boek, dus een naam die in maart is gekocht draagt '
       + 'hier zijn januarirendement bij. Het is dezelfde portefeuille die de Active share-weergave '
       + 'beschrijft.',

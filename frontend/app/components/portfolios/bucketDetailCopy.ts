@@ -15,7 +15,7 @@ export type BucketDetailCopy = {
   axis: { sector: string; region: string; currency: string };
   yourHoldings: string;
   constituents: (benchmark: string) => string;
-  inBoth: (n: string) => string;
+  overlapLegend: (benchmark: string) => string;
   weightedAtOpen: string;
   startOfYear: string;
   colName: string;
@@ -35,7 +35,7 @@ const EN: BucketDetailCopy = {
   axis: { sector: 'Sector', region: 'Region', currency: 'Currency' },
   yourHoldings: 'Your holdings',
   constituents: (benchmark) => `${benchmark} constituents`,
-  inBoth: (n) => `${n} in both`,
+  overlapLegend: (benchmark) => `Blue circles indicate overlap between the portfolio and ${benchmark}.`,
   weightedAtOpen: 'weighted at window open',
   startOfYear: 'Start of year',
   colName: 'Name',
@@ -64,7 +64,7 @@ const NL: BucketDetailCopy = {
   axis: { sector: 'Sector', region: 'Regio', currency: 'Valuta' },
   yourHoldings: 'Uw posities',
   constituents: (benchmark) => `Bestanddelen ${benchmark}`,
-  inBoth: (n) => `${n} in beide`,
+  overlapLegend: (benchmark) => `Blauwe cirkels tonen overlap tussen de portefeuille en ${benchmark}.`,
   weightedAtOpen: 'gewogen bij aanvang van de periode',
   startOfYear: 'Begin van het jaar',
   colName: 'Naam',

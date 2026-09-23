@@ -267,6 +267,11 @@
             "default": 0.0,
             "title": "Portfolio Pct",
             "type": "number"
+          },
+          "residual": {
+            "default": false,
+            "title": "Residual",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3697,6 +3702,20 @@
             ],
             "title": "Ticker"
           },
+          "weight_denominator_components": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/AttributionWeightComponent"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Denominator Components"
+          },
           "weight_now_pct": {
             "anyOf": [
               {
@@ -3708,13 +3727,76 @@
             ],
             "title": "Weight Now Pct"
           },
+          "weight_now_total_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Now Total Eur"
+          },
+          "weight_now_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Now Value Eur"
+          },
           "weight_pct": {
             "default": 0.0,
             "title": "Weight Pct",
             "type": "number"
+          },
+          "weight_total_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Total Eur"
+          },
+          "weight_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Value Eur"
           }
         },
         "title": "AttributionName",
+        "type": "object"
+      },
+      "AttributionWeightComponent": {
+        "description": "One raw AIRS VOLK Beginwaarde included in an opening-weight denominator.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "value_eur": {
+            "title": "Value Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "value_eur"
+        ],
+        "title": "AttributionWeightComponent",
         "type": "object"
       },
       "BacktestRequest": {
@@ -5262,7 +5344,7 @@
         "type": "object"
       },
       "CompositionHolding": {
-        "description": "One holding behind a composition bar, at the weight that bar counted it at.\n\n `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO \u2014 \u03a3 over a bucket IS that\nbucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other\ntwo by every long position, so the SAME holding carries different weights on different axes and\nthat is correct. See `_airs_portfolio_analysis._axis_holdings`.\n\n IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops\nfunds, cash and anything it could not price, then renormalises what remains to 100% and weights\nit by the position's value when the window OPENED. Measured on Bustelberg Offensief:\nTechnology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong \u2014\nthey are shares of different denominators, which is precisely what this list exists to show.",
+        "description": "One holding behind a composition bar, at the weight that bar counted it at.\n\n For an AIRS-backed portfolio, `weight_pct` is the holding's CURRENT share of the complete\nbook \u2014 the same denominator as Attribution's `Weight (now)`. For a model fallback it remains\na share of the visible axis. In both cases \u03a3 over a bucket IS that bucket's `portfolio_pct`,\nexactly. See `_airs_portfolio_analysis._axis_holdings`.\n\n Attribution uses the real opening AIRS weight instead: Beginwaarde divided by the complete\nopening book. It does not renormalise the remaining stocks after funds, cash, certificates or\nunpriced names are omitted. The two surfaces may still differ because one is current and the\nother is the window's open, but no hidden denominator inflates the attribution weights.",
         "properties": {
           "asset_class": {
             "anyOf": [
@@ -17912,7 +17994,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/analysis": {
       "get": {
-        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.\n\n`weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings\ninstead of the model's nominal weights; the benchmark and the classification are unchanged.\n\n`source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the\nVOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays\nyfinance either way, so the two are comparable.\n\n`bucket` (an allocation label \u2014 Equity, Bonds, \u2026) filters the CHART axes to that asset-class\nsleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.",
+        "description": "Sector / region / currency split of one model portfolio, beside the benchmark's.\n\n`weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings\ninstead of the model's nominal weights; the benchmark and the classification are unchanged.\n\n`source=book` reads the RETURN numbers from AIRS's own book (`cumulatief_rendement` + the\nVOLK per-holding results) instead of the yfinance model reconstruction. The benchmark stays\nyfinance either way, so the two are comparable.\n\n`bucket` (an allocation label \u2014 Equity, Bonds, \u2026) filters the CHART axes to that asset-class\nsleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.\n\n`look_through` is false by default. When false, certificate constituents do not contribute to\nSector, Region or Currency; when true, the same constituents Attribution adds are included.",
         "operationId": "airs_model_portfolio_analysis_api_airs_model_portfolios__portfolio_id__analysis_get",
         "parameters": [
           {
@@ -17969,6 +18051,16 @@
               ],
               "title": "Bucket"
             }
+          },
+          {
+            "in": "query",
+            "name": "look_through",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Look Through",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -18001,7 +18093,7 @@
     },
     "/api/airs/model-portfolios/{portfolio_id}/attribution": {
       "get": {
-        "description": "Brinson-Fachler attribution of one model against a benchmark, over one window.\n\n THE DEFAULT IS `book` \u2014 THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.\nAn attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody\nheld: it assumes every position opened the year at its target weight and never drifted. Only\nthe start weights reproduce the book's realised return, because\n`\u03a3 start_i\u00b7ret_i / \u03a3 start_i == (\u03a3 cur \u2212 \u03a3 start) / \u03a3 start` is an identity \u2014 so with any\nother weighting the \"excess\" being decomposed is not the excess the book earned.\n\n`source=model` still gives the yfinance reconstruction of the model's nominal composition,\nwhich is the right question for an unlinked model \u2014 it is just not what the book did.",
+        "description": "Brinson-Fachler attribution of one model against a benchmark, over one window.\n\n THE DEFAULT IS `book` \u2014 THE BEGINWAARDE START WEIGHTS, NOT THE MODEL'S DESIGN PERCENTAGES.\nAn attribution weighted by the design % (a flat 5.00% per name) decomposes a portfolio nobody\nheld: it assumes every position opened the year at its target weight and never drifted. Only\nthe start weights reproduce the book's realised return, because\n`\u03a3 start_i\u00b7ret_i / \u03a3 start_i == (\u03a3 cur \u2212 \u03a3 start) / \u03a3 start` is an identity \u2014 so with any\nother weighting the \"excess\" being decomposed is not the excess the book earned.\n\n`source=model` still gives the yfinance reconstruction of the model's nominal composition,\nwhich is the right question for an unlinked model \u2014 it is just not what the book did.\n\n`look_through` is false by default. When false, certificates stay excluded wrappers; when\ntrue, their linked model constituents become portfolio legs.",
         "operationId": "airs_model_portfolio_attribution_api_airs_model_portfolios__portfolio_id__attribution_get",
         "parameters": [
           {
@@ -18051,6 +18143,16 @@
               "default": "book",
               "title": "Source",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "look_through",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Look Through",
+              "type": "boolean"
             }
           }
         ],
@@ -18798,6 +18900,22 @@
               "title": "Benchmark",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "benchmark_start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark Start"
+            }
           }
         ],
         "requestBody": {
@@ -18851,6 +18969,22 @@
               "default": "ACWI",
               "title": "Benchmark",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark_start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark Start"
             }
           }
         ],

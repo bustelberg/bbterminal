@@ -58,6 +58,7 @@ describe('pctTex makes a formatted figure safe for maths mode', () => {
 describe('every expression parses in strict mode', () => {
   it('the two column rules', () => {
     expect(() => render(workedWeight('18.4%'))).not.toThrow();
+    expect(() => render(workedWeight('4.92%', 49_200, 1_000_000))).not.toThrow();
     expect(() => render(workedReturn('12.7%'))).not.toThrow();
   });
 
@@ -87,6 +88,13 @@ describe('the figures survive to the screen', () => {
       expect(seen, `${part} was swallowed`).toContain(part);
     }
     expect(seen).toContain('%');
+  });
+
+  it('an AIRS weight shows both raw euro operands and the resulting percentage', () => {
+    const seen = shown(workedWeight('4.92%', 49_200, 1_000_000));
+    for (const part of ['EUR', '49,200.00', '1,000,000.00', '4.92', '%']) {
+      expect(seen).toContain(part);
+    }
   });
 
   it('and an unescaped percent really would truncate it — the failure, demonstrated', () => {

@@ -57,6 +57,19 @@ def _run(freq: str = "daily", holdings=None):
 
 
 class TestTheDefinition:
+    def test_non_stock_positions_stay_in_the_airs_denominator(self, wire):
+        dates = _weekdays(400)
+        wire([0.01] * 399, [0.0] * 399, dates)
+        holdings = [
+            {"isin": ONE, "name": "One", "weight_pct": 25.0, "is_fund": False},
+            {"isin": "IE1", "name": "Fund", "weight_pct": 75.0, "is_fund": True},
+        ]
+
+        built = T.build_paired_series(holdings, "ACWI", "daily", 5)
+
+        assert built["portfolio"][0] == pytest.approx(0.0025)
+        assert built["weight_used"][0] == pytest.approx(0.25)
+
     def test_a_book_that_IS_the_index_has_no_tracking_error(self, wire):
         dates = _weekdays(400)
         b = list(np.random.default_rng(1).normal(0.0004, 0.01, 399))

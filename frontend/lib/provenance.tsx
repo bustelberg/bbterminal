@@ -276,10 +276,11 @@ function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
 
 
 function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh,
-  worked, legend, onRefresh }: {
+  worked, legend, calculation, onRefresh }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
   note?: string; how?: string; kind?: ProvKind;
   worked?: string; legend?: readonly FormulaSymbol[];
+  calculation?: React.ReactNode;
   column?: boolean; what?: string;
   /** See `Provenance`. */
   onRefresh?: () => Promise<string | null>;
@@ -406,6 +407,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
           {legend?.length ? <Legend items={legend} /> : null}
           </span>
         )}
+        {calculation}
       </>
     </TipCard>
   );
@@ -482,12 +484,14 @@ export function ProvenanceFetchedAt({ at, children }: {
 }
 
 export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what,
-  worked, legend, onRefresh }: {
+  worked, legend, calculation, onRefresh }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
   /** What each symbol in `worked` stands for. */
   legend?: readonly FormulaSymbol[];
+  /** A literal, caller-designed audit trail when a list of source rows is clearer than algebra. */
+  calculation?: React.ReactNode;
   /** When WE last read the source, if the caller knows it. Turns an amber badge from a dead end
    *  into an answer — see `whoseLag` in the card. Optional everywhere. */
   fetchedAt?: string | null;
@@ -539,7 +543,7 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   const fresh = provenanceFreshness(asOf, fetched, column);
   return (
     <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
-      worked={worked} legend={legend}
+      worked={worked} legend={legend} calculation={calculation}
       how={how} kind={kind} column={column} what={what} fresh={fresh}
       onRefresh={onRefresh} />}>
       <span

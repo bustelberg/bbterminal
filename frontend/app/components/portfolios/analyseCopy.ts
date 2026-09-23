@@ -12,7 +12,7 @@ const en = {
     cancellingTitle: 'Cancelling — the account being downloaded finishes first.',
     columns: '+ columns', columnsTitle: 'Show the columns behind each figure',
     lookThrough: 'Look through certificates',
-    lookThroughTitle: 'A holding that is itself another portfolio is listed as its underlying instruments. Untick to fold it back into one row naming the strategy. Class subtotals, charts, and totals remain identical because the fold stays within one asset class.',
+    lookThroughTitle: 'A holding that is itself another portfolio is listed as its underlying instruments. Untick to keep the certificate opaque and omit its constituent stocks from Holdings, Attribution, Risk, Sector, Region, and Currency.',
   },
   columnGroups: {
     return: { label: 'How the Instrument return is built', hint: '(Value now − Beginwaarde) + Realised + Income = Result, ÷ Beginwaarde' },
@@ -222,7 +222,7 @@ const nl: AnalyseCopy = {
     cancellingTitle: 'Annuleren — de rekening die nu wordt gedownload wordt eerst voltooid.',
     columns: '+ kolommen', columnsTitle: 'Toon de kolommen achter elk cijfer',
     lookThrough: 'Kijk door certificaten heen',
-    lookThroughTitle: 'Een positie die zelf een andere portefeuille is wordt als de onderliggende instrumenten weergegeven. Vink dit uit om deze terug te vouwen tot één rij met de strategienaam. Subtotalen, grafieken en totalen blijven gelijk omdat alleen binnen dezelfde beleggingscategorie wordt gevouwen.',
+    lookThroughTitle: 'Een positie die zelf een andere portefeuille is wordt als de onderliggende instrumenten weergegeven. Vink dit uit om het certificaat niet door te kijken en de onderliggende aandelen niet mee te nemen in Holdings, Attributie, Risico, Sector, Regio en Valuta.',
   },
   columnGroups: {
     return: { label: 'Opbouw instrumentrendement', hint: '(Huidige waarde − Beginwaarde) + Gerealiseerd + Inkomsten = Resultaat, ÷ Beginwaarde' },

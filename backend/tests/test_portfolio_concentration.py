@@ -97,9 +97,11 @@ class TestBothDenominators:
         wire([("Co0", 100.0)], {"I0": "Co0"})
         got = K.compute_concentration([
             _h("Co0", "I0", 25.0), _h("Fund", "IE1", 50.0, True), _h("Cash", "", 25.0)], "ACWI")
-        assert got["top10_pct"] == pytest.approx(100.0, abs=1e-9)
+        assert got["top10_pct"] == pytest.approx(25.0, abs=1e-9)
         assert got["top10_of_book_pct"] == pytest.approx(25.0, abs=1e-9)
         assert got["stocks_pct"] == pytest.approx(25.0, abs=1e-9)
+        assert got["top"][0]["weight_pct"] == pytest.approx(25.0, abs=1e-9)
+        assert got["top"][0]["cumulative_pct"] == pytest.approx(25.0, abs=1e-9)
 
 
 class TestAgainstTheIndex:

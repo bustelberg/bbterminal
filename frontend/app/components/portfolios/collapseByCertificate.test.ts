@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  collapseByCertificate, individualStocksBasket, syntheticAirsName, syntheticBasket,
+  airsRiskHoldings, airsRiskWeightContext, collapseByCertificate, holdingsForCertificateScope,
+  individualStocksBasket,
+  syntheticAirsName, syntheticBasket,
 } from './PortfolioAnalysisModal';
+import { holdingsOnRiskBasis } from './ActiveSharePanel';
 
 describe('collapseByCertificate', () => {
   it('keeps a folded TopSelectie in Stock ETFs when its first underlying row is cash', () => {
@@ -90,5 +93,67 @@ describe('individualStocksBasket', () => {
     expect(basket.holdings).toEqual(companies.map((holding) => ({
       isin: holding.isin, weight: holding.weight_now_pct, name: holding.name,
     })));
+  });
+});
+
+describe('holdingsForCertificateScope', () => {
+  const rows = [
+    { name: 'Direct stock', isin: 'US-DIRECT', bucket: 'Equity', is_fund: false,
+      weight_now_pct: 60, current_value_eur: 60, start_value_eur: 60 },
+    { name: 'Underlying stock', isin: 'US-CHILD', bucket: 'Equity', is_fund: false,
+      weight_now_pct: 40, current_value_eur: 40, start_value_eur: 40,
+      via_names: ['Held certificate'] },
+  ] as never;
+
+  it('keeps certificate constituents out by default', () => {
+    const scoped = holdingsForCertificateScope(rows, false);
+    expect(scoped.map((row) => row.name)).toEqual(['Direct stock', 'Held certificate']);
+    expect(scoped.find((row) => row.name === 'Held certificate')?.is_fund).toBe(true);
+  });
+
+  it('adds the underlying stocks only when look-through is selected', () => {
+    expect(holdingsForCertificateScope(rows, true).map((row) => row.name))
+      .toEqual(['Direct stock', 'Underlying stock']);
+  });
+});
+
+describe('AIRS Risk weights', () => {
+  const rows = [
+    { name: 'A', isin: 'US-A', bucket: 'Equity', is_fund: false,
+      current_value_eur: 600, start_value_eur: 200, weight_now_pct: 60 },
+    { name: 'B', isin: 'US-B', bucket: 'Equity', is_fund: false,
+      current_value_eur: 300, start_value_eur: 500, weight_now_pct: 30 },
+    { name: 'Cash', isin: null, bucket: 'Cash', is_fund: false,
+      current_value_eur: 100, start_value_eur: 300, weight_now_pct: 10 },
+  ] as never;
+
+  it('derives current and opening weights from their own complete AIRS euro totals', () => {
+    const holdings = airsRiskHoldings(rows, true);
+    expect(holdings.map((holding) => holding.weight_now_pct)).toEqual([60, 30, 10]);
+    expect(holdings.map((holding) => holding.weight_start_pct)).toEqual([20, 50, 30]);
+  });
+
+  it('applies the selected basis to the one body shared by every Risk view', () => {
+    const holdings = airsRiskHoldings(rows, true);
+    expect(holdingsOnRiskBasis(holdings, 'now').map((holding) => holding.weight_pct))
+      .toEqual([60, 30, 10]);
+    expect(holdingsOnRiskBasis(holdings, 'start').map((holding) => holding.weight_pct))
+      .toEqual([20, 50, 30]);
+  });
+
+  it('gives Risk info icons the same literal AIRS rows as the weight denominator', () => {
+    const context = airsRiskWeightContext(rows, true);
+    expect(context.now).toEqual([
+      { name: 'A', value_eur: 600 },
+      { name: 'B', value_eur: 300 },
+      { name: 'Cash', value_eur: 100 },
+    ]);
+    expect(context.start).toEqual([
+      { name: 'A', value_eur: 200 },
+      { name: 'B', value_eur: 500 },
+      { name: 'Cash', value_eur: 300 },
+    ]);
+    expect(context.nowTotal).toBe(1000);
+    expect(context.startTotal).toBe(1000);
   });
 });

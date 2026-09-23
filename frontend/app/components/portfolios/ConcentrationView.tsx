@@ -21,7 +21,6 @@
  * even ten-name portfolio and one dominated by its top three. N_eff has no cut-off and reads in
  * units anybody can hold in their head.
  */
-import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
@@ -31,10 +30,10 @@ import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf, dayRange } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum } from './workedFormula';
 import type { PortfolioConcentration } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
+import { riskRequestKey, useRiskResult } from './useRiskResult';
 
 /**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SEVEN VIEWS. One decimal read as false
  *  precision on a figure the reader is asked to check against a table that carries two: "79.5%"
@@ -80,10 +79,12 @@ function Tile({ label, value, sub, tone, info }: {
 }
 
 export default function ConcentrationView({
-  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+  holdings, benchmark, benchmarkStart, portfolioName, portfolioAsOf, portfolioFetchedAt,
+  portfolioSource,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
+  benchmarkStart?: string | null;
   /** The book's identity, forwarded from the panel — see `ActiveSharePanel`'s own props. */
   portfolioName: string;
   portfolioAsOf?: string | null;
@@ -91,34 +92,18 @@ export default function ConcentrationView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
-  const [data, setData] = useState<PortfolioConcentration | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const key = `${benchmark}|${holdings.length}`
-    + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    void (async () => {
-      try {
-        const r = await apiFetch(
-          `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ holdings }) });
-        const b = await r.json().catch(() => null);
-        if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        setError(null);
-        setData(b as PortfolioConcentration);
-      } catch (e) {
-        traceError('concentration', 'the concentration could not be computed', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  const requestUrl = `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}`
+    + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
+  const requestBody = JSON.stringify({ holdings });
+  const key = riskRequestKey(requestUrl, requestBody);
+  const { data, error } = useRiskResult<PortfolioConcentration>(key, async () => {
+    const r = await apiFetch(requestUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
+    });
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+    return b as PortfolioConcentration;
+  }, 'concentration', 'the concentration could not be computed');
 
   const rows = data?.top ?? [];
 
@@ -182,7 +167,7 @@ export default function ConcentrationView({
                    changes the ordering. */
                 />} />} />
             <Tile label="Top 10" value={pct2(data.top10_pct)}
-              sub={`${pct2(data.top10_of_book_pct)} of the whole book`}
+              sub={`${pct2(data.stocks_pct)} of the complete book is in comparable stocks`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.conc.cards.top10.what}
                 where={where}
@@ -198,10 +183,9 @@ export default function ConcentrationView({
                   { sym: String.raw`w_{(i)}`, is: LEGEND.wSorted },
                   { sym: String.raw`C_{10}`, is: LEGEND.c10 },
                 ]}
-                how={' TWO DENOMINATORS, BOTH TRUE. The headline is of the STOCK SLEEVE, which is '
-                  + 'what compares across books; the line beneath is of the whole book including '
-                  + `cash and funds (the sleeve is ${pct2(data.stocks_pct)} of it). A book that is `
-                  + '30% cash really is less concentrated in absolute terms.'} />} />} />
+                how={'Company weights use the complete AIRS book denominator, exactly as in '
+                  + 'Attribution. Funds, cash and other excluded positions are not redistributed '
+                  + 'over the visible companies.'} />} />} />
             <Tile label={t.conc.largest} value={pct2(data.top1_pct)} tone="text-fg-strong"
               sub={rows[0]?.name}
               info={<InfoTip className="ml-0.5" content={<AspectCard

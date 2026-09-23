@@ -36,11 +36,19 @@ export function pctTex(v: string | null | undefined): string {
 /** Every builder returns `''` when an operand is missing — `withWorked` then shows the rule alone. */
 const has = (...xs: (string | null | undefined)[]) => xs.every((x) => x != null && x !== '');
 
-/** `w = Σ wᵢ ÷ Σ w` — a bucket's share of the attributable book, renormalised to 100%. */
-export const WEIGHT_TEX = String.raw`w_{\text{bucket}} = \dfrac{\sum_{i \in \text{bucket}} w_i}`
-  + String.raw`{\sum_{i} w_i}`;
+/** `w = Σ wᵢ` — each input already is a share of the complete book or index. */
+export const WEIGHT_TEX = String.raw`w_{\text{bucket}} = \sum_{i \in \text{bucket}} w_i`;
 
-export function workedWeight(result: string | null | undefined): string {
+const eurTex = (value: number): string => texEscape(
+  `€${value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`,
+);
+
+export function workedWeight(result: string | null | undefined,
+  valueEur?: number | null, totalEur?: number | null): string {
+  if (has(result) && valueEur != null && totalEur != null && totalEur !== 0) {
+    return withWorked(String.raw`w_i = \dfrac{V_i}{V_{\text{book}}} \times 100`,
+      String.raw`\dfrac{${eurTex(valueEur)}}{${eurTex(totalEur)}} \times 100 = ${pctTex(result)}`);
+  }
   return withWorked(WEIGHT_TEX, has(result) ? String.raw`= ${pctTex(result)}` : '');
 }
 

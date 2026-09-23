@@ -15,7 +15,12 @@ call, and plain Brinson would score it positive.
 
  THE IDENTITY IS THE WHOLE POINT — AND IT IS ASSERTED, NOT ASSUMED.
 
-    sum_i (allocation_i + selection_i + interaction_i)  ==  R_p - R_b
+    sum_i (allocation_i + selection_i + interaction_i)  ==  P x (R_p - R_b)
+
+`P` is the real opening weight of the attributable individual stocks in the complete AIRS book.
+The portfolio weights are not inflated after certificates, funds and cash are removed; ACWI keeps
+its genuine 100%-of-index weights. The result is therefore the stock sleeve's contribution to the
+whole book's excess, not an invented 100%-stock portfolio.
 
 If that does not hold, the decomposition is not a decomposition — it is three columns of numbers
 that happen to sit next to each other. `reconciles` carries the residual, and it is returned, not
@@ -28,13 +33,13 @@ swallowed.
     true and analytically worthless. Cash is the same.
 
     So the attribution runs on the ATTRIBUTABLE sleeve only — the priced, sector-classified
-    equities — with weights renormalised to sum to 1 within it. The funds and cash are reported
-    as their own line (weight + return, undecomposed), and `attributable_pct` says how much of
-    the model the table below actually explains.
+    equities — while preserving every stock's real AIRS opening-book weight. Funds and cash are
+    reported separately (weight + return, undecomposed), and `attributable_pct` is both the real
+    sleeve weight and the scale applied to its excess.
 
-     Consequence, stated rather than hidden: the attributed excess is the excess OF THAT SLEEVE,
-    and it does NOT equal the headline excess (which includes the fund/cash drag). A reader who
-    assumes it does will misread the table, so the payload carries both and the UI shows both.
+     Consequence, stated rather than hidden: the attributed excess is that sleeve's CONTRIBUTION
+    versus the benchmark and does NOT equal the account headline excess (which includes funds,
+    cash, flows and closed positions). The payload carries both so the difference is explicit.
 """
 from __future__ import annotations
 
@@ -130,12 +135,15 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
 
 def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                         window: str = "ytd", axis: str = "sector",
-                        source: str = "book") -> dict:
+                        source: str = "book", look_through: bool = False) -> dict:
     """Brinson-Fachler over one window, plus the names that drove it.
 
     `source="book"` decomposes the paired AIRS BOOK's actual holdings + returns instead of the
     yfinance model reconstruction; the benchmark is priced from the book's window (the calendar
     year, since AIRS reports the book over 1 Jan -> today) and is yfinance either way.
+
+    `look_through=False` keeps held certificates opaque. Only the explicit UI toggle may add the
+    stocks inside their linked model portfolios to this decomposition.
     """
     idx = _AXIS_IDX.get(axis, 0)
 
@@ -151,7 +159,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     if not start:
         return {}
 
-    holdings = portfolio_legs(source, portfolio_id, eff, start)
+    holdings = portfolio_legs(source, portfolio_id, eff, start, look_through=look_through)
     if holdings is None:
         return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
                 "window": window, "axis": axis, "start": start, "source": source, "rows": [],
@@ -167,6 +175,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # bars from the SAME call, which is the only reason the two panels agree — see that module's
     # header for what "attributable" means and what it costs.
     attributable, excluded, total_w = split_legs(holdings, idx, grid, codes)
+    coverage_total_w = total_w
     # `name` is the CANONICAL label (asset_grid, joined by ISIN) so this table and the index's
     # speak one vocabulary; `airs_name` keeps AIRS's own label, which is what you see in AIRS
     # itself and is the row's identity there. Display only — see `_display_name`.
@@ -207,6 +216,9 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         port_holdings_by_bucket.setdefault(i["bucket"], []).append({
             "isin": i["isin"], "name": i["name"], "ticker": None,
             "weight_pct": i["weight_pct"], "return_pct": i["return_pct"],
+            "weight_value_eur": i.get("weight_value_eur"),
+            "weight_total_eur": i.get("weight_total_eur"),
+            "weight_denominator_components": i.get("weight_denominator_components"),
             "contribution_pct": i["weight_pct"] / 100.0 * (i["return_pct"] or 0.0),
             "_value_now": float(i.get("current_value_eur") or 0.0),
         })
@@ -232,23 +244,18 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     p_by_bucket: dict[str, list[tuple[float, float]]] = {}
     for i in attributable:
         p_by_bucket.setdefault(i["bucket"], []).append(
-            (i["weight_pct"] / p_w_total * 100.0, i["return_pct"]))
+            (i["weight_pct"], i["return_pct"]))
     b_norm: dict[str, list[tuple[float, float]]] = {
         k: [(w / b_w_total * 100.0, r) for w, r in rows] for k, rows in b_by_bucket.items()
     }
 
-    #  The holdings lists must be on the same base as the bucket weight they sit under.
-    # `w_p`/`w_b` are renormalised over what each side can attribute (the identity below needs
-    # weights summing to 1), but the per-holding lists were left as raw shares of the WHOLE
-    # portfolio. Measured on ToppenbergBeheer Defensief: the drill-down said Technology 34.38%
-    # and its own holdings added to 9.11% — out by exactly 100/attributable_pct (3.77x), on every
-    # bucket. A reader who adds up the list gets a different number from the heading above it,
-    # and neither is wrong on its own, which is the worst kind of disagreement to debug.
-    #  A second weight, on today's values, renormalised over the same set (2026-09-03, on
-    # request). The composition bars moved to current weights that day, so a bucket reading 36% on
-    # the chart opened a drill-down whose names added to 39.1% — the two were on different dates
-    # and neither was wrong. This column is the bridge: same members, same denominator rule, today's
-    # figures instead of the window's open.
+    #  THE PORTFOLIO WEIGHTS STAY ON AIRS'S WHOLE-BOOK BASIS. Do not renormalise the individual
+    # stocks to 100%: a 4% opening position was 4% of the book, regardless of how much sat in
+    # certificates, funds or cash beside it. The bucket heading and its holdings therefore add on
+    # the same real basis, while the benchmark remains ACWI's genuine 100%-of-index weights.
+    #  A second weight, on today's values (2026-09-03, on request). It also stays on the whole-book
+    # denominator, so the two columns are the same real position share at two dates rather than a
+    # raw opening weight beside a renormalised current one.
     #  It is a column, not a replacement. `weight_pct` still drives Return and Contribution, and
     # `Σ weight × return / 100 == contribution` is still exact — a return is earned by what was
     # held while it was earned, so re-weighting the decomposition on today's values would make it
@@ -256,31 +263,27 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # design weights).
     #  Zero total means no column, not a division by zero: `None` renders as a dash, which is the
     # honest answer for a side whose current values we do not have (the `model` source has none).
-    #  The denominator is every leg, not just the attributable ones — which is what makes this
-    # column equal the bar (2026-09-03, reported: "43.69% is weight now, 39.66% is weight start,
-    # but the sector card shows 36.33% which is neither"). Measured on BUS_Offensief: the bar reads
-    # 36.33% and the drill-down read 43.69%, exactly 36.33 x 1.2025 — and 1.2025 is 1/(1 - 0.1684),
-    # the book's Unclassified weight. The composition chart counts Unclassified as its own BUCKET;
-    # the attribution basis throws it out and renormalises the rest to 100. Same numerator, two
-    # denominators, and the ratio was the excluded weight every time.
-    #  So this column no longer sums to 100 ACROSS BUCKETS, AND MUST NOT. It is a share of the
-    # whole sleeve, exactly as the bars are; the missing remainder is the weight that has no bucket
-    # to drill into. `weight_pct` beside it still renormalises, because the Brinson identity needs
-    # weights summing to 1 over what it can attribute.
+    #  The denominator is every leg, not just the attributable ones. This prevents an excluded
+    # wrapper or unclassified position from silently increasing every displayed stock weight.
+    #  Neither portfolio weight column sums to 100 across the attributable buckets, AND MUST NOT.
+    # The missing remainder is the real opening/current weight in wrappers, funds, cash and gaps.
     #  The attributable set, and nothing added back — because the composition bars now exclude
     # funds too (2026-09-03; see `_airs_portfolio_analysis`'s sector sleeve). This briefly added
     # the excluded weight back in, to reach a bar that still counted funds as `Unclassified`. That
     # was a correction applied at the wrong end: two membership rules, kept in step by arithmetic.
     # One rule on both sides makes the bar and this column the same number by construction.
-    p_now_total = sum(h["_value_now"] for legs in port_holdings_by_bucket.values() for h in legs)
+    # Use ALL book legs, including a position bought after the window opened (opening weight 0).
+    # `split_legs` correctly omits such a leg from the opening attribution, but omitting its current
+    # value from this denominator would inflate every "Weight (now)" beside it.
+    p_now_total = sum(float(h.get("current_value_eur") or 0.0) for h in holdings)
     b_now_total = sum(h["_cap_now"] for legs in bench_holdings_by_bucket.values() for h in legs)
     for legs in port_holdings_by_bucket.values():
         for h in legs:
-            h["weight_pct"] = h["weight_pct"] / p_w_total * 100.0
-            # The contribution is weight x return, so it has to be rescaled with the weight or it
-            # stops being the product of the two numbers printed beside it.
             h["contribution_pct"] = h["weight_pct"] / 100.0 * (h["return_pct"] or 0.0)
-            h["weight_now_pct"] = (h.pop("_value_now") / p_now_total * 100.0
+            value_now = h.pop("_value_now")
+            h["weight_now_value_eur"] = value_now
+            h["weight_now_total_eur"] = p_now_total
+            h["weight_now_pct"] = (value_now / p_now_total * 100.0
                                    if p_now_total > 0 else None)
     for legs in bench_holdings_by_bucket.values():
         for h in legs:
@@ -289,7 +292,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             h["weight_now_pct"] = (h.pop("_cap_now") / b_now_total * 100.0
                                    if b_now_total > 0 else None)
 
-    r_p_total = sum(w / 100.0 * ret for rows in p_by_bucket.values() for w, ret in rows)
+    # Return of the individual-stock sleeve itself. Its EXCESS below is scaled by the sleeve's
+    # real share of the whole AIRS book, turning it into a contribution rather than pretending the
+    # sleeve was the whole portfolio.
+    r_p_total = _weighted([(w, ret) for rows in p_by_bucket.values() for w, ret in rows])
     r_b_total = sum(w / 100.0 * ret for rows in b_norm.values() for w, ret in rows)
 
     rows_out: list[dict] = []
@@ -348,7 +354,8 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     rows_out.sort(key=lambda r: r["total_pct"])
 
     attributed = sum(r["total_pct"] for r in rows_out)
-    excess = r_p_total - r_b_total
+    portfolio_share = p_w_total / 100.0
+    excess = portfolio_share * (r_p_total - r_b_total)
     # The identity. Returned, never assumed: three columns that do not sum to the excess are not
     # a decomposition of it.
     residual = excess - attributed
@@ -400,11 +407,9 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     #                                                    cash included, and carrying dividends
     #                                                    from positions SOLD during the year
     #                                                    (which have no holding row left).
-    #     this panel    35.7649% − 12.3768% = +23.39pp   the ATTRIBUTABLE SLEEVE — the holdings
-    #                                                    that have a sector at all, renormalised
-    #                                                    once cash and funds come out. Cash has
-    #                                                    no sector; leaving it in would score
-    #                                                    holding cash as a sector bet.
+    #     this panel    the attributable stock sleeve's excess, multiplied by its real opening
+    #                   share of the whole AIRS book — its contribution versus ACWI, without
+    #                   pretending the individual stocks were 100% of the portfolio.
     #
     # Neither figure is wrong and neither can be dropped. What was wrong is presenting them as
     # the same quantity, in the same word, one click apart, with nothing naming the 0.88pp
@@ -425,9 +430,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # WARNING, not info: uvicorn leaves the root logger at WARNING, so an `info` line never
     # reaches production — and this is the line that says why two screens show two excesses.
     _log.warning(
-        "[attribution] %s (%s/%s): sleeve %+.2f%% − benchmark %+.2f%% = %+.2fpp explained; "
+        "[attribution] %s (%s/%s): %.2f%% stock sleeve × (%+.2f%% − benchmark %+.2f%%) "
+        "= %+.2fpp explained; "
         "account %s%s",
-        p["name"], axis, window, r_p_total, r_b_total, excess,
+        p["name"], axis, window, portfolio_share * 100.0, r_p_total, r_b_total, excess,
         f"{account_excess:+.2f}pp" if account_excess is not None else "n/a",
         (f", leaving {unattributed:+.2f}pp in cash / closed positions / flows — no sector to "
          f"attribute it to" if unattributed is not None else ""))
@@ -448,7 +454,8 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "start": start,
         # Where the portfolio legs came from: the yfinance model, or the paired AIRS book.
         "source": source,
-        # The attributable sleeve's own numbers. NOT the headline — see the module docstring.
+        # The sleeve return and its whole-book excess CONTRIBUTION. The weights remain AIRS's
+        # actual opening-book weights; `excess_pct` is therefore share × (sleeve return − ACWI).
         "portfolio_return_pct": r_p_total,
         "benchmark_return_pct": r_b_total,
         "excess_pct": excess,
@@ -464,15 +471,18 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "unattributed_excess_pct": unattributed,
         #  How much of the model the table above explains. The rest is funds and cash, which are
         # not a sector bet and are NOT decomposed.
-        "attributable_pct": (p_w_total / total_w * 100.0) if total_w > 0 else 0.0,
-        "excluded_pct": (excl_w / total_w * 100.0) if total_w > 0 else 0.0,
+        "attributable_pct": (p_w_total / coverage_total_w * 100.0
+                             if coverage_total_w > 0 else 0.0),
+        "excluded_pct": (excl_w / coverage_total_w * 100.0
+                         if coverage_total_w > 0 else 0.0),
         "excluded_return_pct": (_weighted([(e["weight_pct"], e["return_pct"])
                                            for e in excl_priced]) if excl_priced else None),
         #  NOT the same as `excluded_pct`. A fund is excluded because it is not a sector bet; an
         # UNPRICED equity is excluded because we failed to price it — and its sector then reads as
         # UNOWNED in the table, so the allocation effect there is a FALSE finding. Surfaced with
         # the buckets it corrupts, so a reader can discount exactly those rows.
-        "unpriced_pct": (unpriced_w / total_w * 100.0) if total_w > 0 else 0.0,
+        "unpriced_pct": (unpriced_w / coverage_total_w * 100.0
+                         if coverage_total_w > 0 else 0.0),
         "unpriced_buckets": sorted({e["bucket"] for e in unpriced}),
         "excluded": [{"bucket": e["bucket"], "name": e["name"], "isin": e["isin"],
                       "weight_pct": e["weight_pct"], "return_pct": e["return_pct"],
@@ -487,6 +497,6 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
 
 async def compute_attribution_async(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                                     window: str = "ytd", axis: str = "sector",
-                                    source: str = "book") -> dict:
+                                    source: str = "book", look_through: bool = False) -> dict:
     return await asyncio.to_thread(
-        compute_attribution, portfolio_id, benchmark_label, window, axis, source)
+        compute_attribution, portfolio_id, benchmark_label, window, axis, source, look_through)
