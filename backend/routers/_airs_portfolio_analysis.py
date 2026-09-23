@@ -46,6 +46,7 @@ from collections import defaultdict
 from datetime import date
 
 from asset_pipeline.geo import MSCI_REGION, msci_region_of
+from asset_pipeline.sector_override import load_file_sector_overrides
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 from routers._airs_ref import model as ref_model, mutaties_for as ref_mutaties_for, positions_for as ref_positions_for
@@ -366,12 +367,21 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
             overrides = {int(r["company_id"]): r["sector"] for r in override_rows if r.get("sector")}
         except Exception as e:  # migration may not yet be present on an older database
             _log.warning("[analysis] sector overrides unavailable: %s", e)
+    # Reviewed overrides ship with the application and therefore reach production without a
+    # manual data seed. They are keyed by ISIN because company ids differ between environments.
+    file_overrides = load_file_sector_overrides()
     out: dict[str, dict] = {}
     for r in rows:
         if r.get("status") == "ok":
             company_id = r.get("company_id")
             default_sector = r.get("sector")
-            override = overrides.get(int(company_id)) if company_id is not None else None
+            db_override = overrides.get(int(company_id)) if company_id is not None else None
+            file_override = file_overrides.get(str(r.get("isin") or "").strip().upper())
+            if file_override and db_override and file_override != db_override:
+                _log.error("[analysis] %s sector is %s in sector_overrides.json and %s in "
+                           "company_sector_override; using the checked-in production override",
+                           r.get("isin"), file_override, db_override)
+            override = file_override or db_override
             if override:
                 r["sector_default"] = default_sector
                 r["sector"] = override
@@ -505,8 +515,14 @@ def _buckets(row: dict | None, is_cash: bool, isin: str | None = None,
     )
 
 
-def _weigh(items: list[tuple[float, tuple[str, str, str]]]) -> dict[str, dict[str, float]]:
-    """Sum weights per bucket, per axis, and normalise each axis to 100%."""
+def _weigh(items: list[tuple[float, tuple[str, str, str]]],
+           denominator: float | None = None) -> dict[str, dict[str, float]]:
+    """Sum weights per bucket and axis, optionally retaining a whole-book denominator.
+
+    Model weights and the benchmark use the visible items as their denominator. A paired AIRS
+    book passes its complete current value explicitly, so hiding an opaque fund or restricting
+    Sector to stocks does not inflate the remaining holdings above their real current weights.
+    """
     axes: dict[str, dict[str, float]] = {"sector": defaultdict(float),
                                          "region": defaultdict(float),
                                          "currency": defaultdict(float)}
@@ -516,7 +532,7 @@ def _weigh(items: list[tuple[float, tuple[str, str, str]]]) -> dict[str, dict[st
         axes["currency"][cur] += w
     out: dict[str, dict[str, float]] = {}
     for axis, d in axes.items():
-        total = sum(d.values())
+        total = denominator if denominator is not None else sum(d.values())
         out[axis] = {k: (v / total * 100.0) for k, v in d.items()} if total > 0 else {}
     return out
 
@@ -567,7 +583,9 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
     start = window_start(source, "ytd", effective)
     if not start:
         return None
-    legs = portfolio_legs(source, portfolio_id, effective, start)
+    # Composition charts continue to describe constituent exposure. The reader-facing checkbox
+    # controls Holdings, Attribution and Risk; it does not silently change these bars.
+    legs = portfolio_legs(source, portfolio_id, effective, start, look_through=True)
     if not legs:
         return None
     #  A class filter we cannot apply is a refusal, not a no-op. Only the book legs carry an asset
@@ -648,20 +666,18 @@ def _basis_axes(portfolio_id: int, source: str, effective: str | None,
     return out
 
 
-def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]],
-                   labels: list[dict]) -> dict[str, dict[str, list[dict]]]:
+def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]], labels: list[dict],
+                   denominator: float | None = None) -> dict[str, dict[str, list[dict]]]:
     """The rows behind every bar: per axis, per bucket, the holdings and their weights.
 
-     NORMALISED BY THE AXIS TOTAL — THE SAME DIVISION `_weigh` DOES, SO Σ OVER A BUCKET **IS**
-    THAT BAR. That identity is the entire purpose of this function: a drill-down whose rows sum to
-    something near-but-not-equal to the number that opened it converts one unexplained figure into
-    two. It is computed here rather than in the UI for the same reason the sibling drill-downs are
-    handed their series — a second implementation of the denominator is a second denominator.
+     THE SAME DIVISION `_weigh` DOES, SO Σ OVER A BUCKET **IS** THAT BAR. That identity is the
+    entire purpose of this function: a drill-down whose rows sum to something near-but-not-equal
+    to the number that opened it converts one unexplained figure into two. It is computed here
+    rather than in the UI so there is only one implementation of the denominator.
 
-     AND THE DENOMINATOR IS PER AXIS, NOT PER PORTFOLIO. `sector` is weighed over the EQUITY
-    sleeve while `region`/`currency` are weighed over every long position, so the caller passes a
-    different `items` list for each and the same holding legitimately carries two different
-    weights. Sharing one total across the three would make two of the axes wrong.
+     FOR A PAIRED AIRS BOOK THE DENOMINATOR IS THE COMPLETE CURRENT BOOK. Sector still displays
+    only equities and all axes still omit opaque funds, but those omissions leave a real remainder
+    instead of inflating the visible holdings. Model fallbacks retain the per-axis denominator.
 
     Why this exists at all: the attribution table has always shipped its own per-bucket holdings
     (`rows[].portfolio_holdings`, rebased to ITS denominator), so it is self-verifying, while the
@@ -671,7 +687,7 @@ def _axis_holdings(items: list[tuple[float, tuple[str, str, str]]],
     Offensief: 36% here against 39.1% there, both correct.
     """
     out: dict[str, dict[str, list[dict]]] = {"sector": {}, "region": {}, "currency": {}}
-    total = sum(w for w, _b in items)
+    total = denominator if denominator is not None else sum(w for w, _b in items)
     if total <= 0:
         return out
     for (w, buckets), lab in zip(items, labels):
@@ -1341,6 +1357,10 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     rows = (resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or [])
     if not rows:
         return None
+    # Attribution's Weight (now) divides by the NET current AIRS book, including an overdraft or
+    # short balance. Capture that exact denominator before look-through expands certificates and
+    # before the composition loop deliberately drops non-positive positions from its numerators.
+    current_book_total = sum(float(r.get("current_value_eur") or 0.0) for r in rows)
 
     #  Both of these are taken before the expansion, and that is the entire point.
     #
@@ -1381,6 +1401,11 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # exactly one place a weight comes from.
     labels: list[dict] = []
     alloc_items: list[tuple[float, str]] = []
+    # Chart equivalents when certificate look-through is OFF. Expanded rows remain available to
+    # the Holdings table, while only the directly-held route contributes to these lists.
+    direct_items: list[tuple[float, tuple[str, str, str]]] = []
+    direct_labels: list[dict] = []
+    direct_alloc_items: list[tuple[float, str]] = []
     # (row, current EUR value, class) for every LONG position — the whole-portfolio holdings table.
     raw_positions: list[tuple[dict, float, str]] = []
     classified_w = total_w = 0.0
@@ -1412,11 +1437,26 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             bucket = classify_bucket(None, _is_fund(grow, r.get("holding_name") or ""),
                                     isin, r.get("holding_name") or "", grow)
         items.append((w, b))
-        labels.append({"name": r.get("holding_name"), "isin": isin,
-                       "asset_class": bucket,
-                       "via_names": r.get("via_names") or []})
+        label = {"name": r.get("holding_name"), "isin": isin,
+                 "asset_class": bucket,
+                 "via_names": r.get("via_names") or []}
+        labels.append(label)
         # The book row is already classified by resolve_account_isins (the shared classifier).
         alloc_items.append((w, bucket))
+        # `_expand_book_rows` stamps one source per route. `label=None` is the parent book's own
+        # shares; labelled routes came through a certificate. This preserves the direct portion
+        # of a stock held both ways without counting its certificate portion while the toggle is
+        # off. An opaque linked certificate remains excluded too.
+        sources = r.get("sources") or []
+        direct_w = (
+            0.0 if r.get("linked_portfolio_id") else
+            sum(float(s.get("value_eur") or 0.0) for s in sources
+                if s.get("label") is None) if sources else w
+        )
+        if direct_w > 0:
+            direct_items.append((direct_w, b))
+            direct_labels.append({**label, "via_names": []})
+            direct_alloc_items.append((direct_w, bucket))
         raw_positions.append((r, w, bucket))
     if not items:
         return None
@@ -1735,8 +1775,11 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # back in.
     return {"items": items, "labels": labels,
             "alloc_items": alloc_items,
+            "direct_items": direct_items, "direct_labels": direct_labels,
+            "direct_alloc_items": direct_alloc_items,
             "holdings_detail": holdings_detail,
-            "classified_w": classified_w, "total_w": total_w, "foreign": foreign,
+            "classified_w": classified_w, "total_w": total_w,
+            "current_book_total": current_book_total, "foreign": foreign,
             # The snapshot every figure above is valued at — carried out so the payload can stamp
             # the weight columns with it instead of with the composition's effective date.
             "book_as_of": book_as_of,
@@ -2147,7 +2190,8 @@ def compute_portfolio_analysis(portfolio_id: int,
                                benchmark_label: str = SP500_LABEL,
                                weight_by: str = "model",
                                source: str = "model",
-                               bucket_filter: str | None = None) -> dict:
+                               bucket_filter: str | None = None,
+                               look_through: bool = False) -> dict:
     """The portfolio's composition beside the benchmark's, on one set of buckets.
 
     `source` ("model" | "book") picks where the RETURN numbers come from: the yfinance model
@@ -2193,7 +2237,10 @@ def compute_portfolio_analysis(portfolio_id: int,
     # as the portfolio's composition. Expanding replaces each with the stocks it actually holds.
     from ._airs_lookthrough import expand_positions  # noqa: PLC0415  (cycle at module level)
 
-    pos, lookthrough = expand_positions(portfolio_id, p.get("positions_datum"), pos)
+    if look_through:
+        pos, lookthrough = expand_positions(portfolio_id, p.get("positions_datum"), pos)
+    else:
+        lookthrough = {"expanded": [], "looked_through_pct": 0.0, "opaque_pct": 0.0}
 
     # --- the portfolio side -------------------------------------------------------------
     from routers._airs_holding_isin import (  # noqa: PLC0415  (avoid a module-level cycle)
@@ -2283,12 +2330,17 @@ def compute_portfolio_analysis(portfolio_id: int,
                      portfolio_id, len(book.get("holdings_detail") or []),
                      book.get("portefeuille"))
     weight_basis, weight_note = "model", None
+    allocation_items = alloc_items
     port_holdings = len([r for r in pos if r.get("isin")])
     if weight_by == "book":
         if book:
-            port_items = book["items"]
-            port_labels = book["labels"]
-            alloc_items = book["alloc_items"]
+            port_items = book["items"] if look_through else book["direct_items"]
+            port_labels = book["labels"] if look_through else book["direct_labels"]
+            alloc_items = (book["alloc_items"] if look_through
+                           else book["direct_alloc_items"])
+            # Allocation describes every held wrapper/class and does not change when the three
+            # constituent charts expand or fold certificates.
+            allocation_items = book["alloc_items"]
             classified_w, total_w = book["classified_w"], book["total_w"]
             port_foreign, port_holdings = book["foreign"], book["holdings"]
             weight_basis = "book"
@@ -2360,7 +2412,13 @@ def compute_portfolio_analysis(portfolio_id: int,
                          if ai[1] in _EQUITY and lb.get("isin") not in _funds])
     sector_items = [pi for pi, _lb in sector_keep]
     sector_labels = [lb for _pi, lb in sector_keep]
-    pw_general, pw_sector = _weigh(general_items), _weigh(sector_items)
+    # Keep AIRS portfolio percentages on the same complete-current-book denominator as
+    # Attribution's Weight (now). Items omitted from an axis leave a real gap; they no longer
+    # cause the displayed remainder to be rebased to 100%. Model fallbacks keep their existing
+    # visible-axis normalisation because no AIRS book exists behind those weights.
+    portfolio_denominator = book["current_book_total"] if weight_basis == "book" else None
+    pw_general = _weigh(general_items, portfolio_denominator)
+    pw_sector = _weigh(sector_items, portfolio_denominator)
     #  The index is weighed on the same basis as the portfolio it is drawn against, and it was
     # NOT (fixed 2026-08-10). `bench_items` above carries `market_cap_eur` — the cap TODAY — while
     # the portfolio bars moved to the attribution basis (Beginwaarde, the window's open) in
@@ -2376,22 +2434,18 @@ def compute_portfolio_analysis(portfolio_id: int,
     #  Only when there is a window to open. Without a priced book there is no Beginwaarde and the
     # portfolio bars fall back to current value — so the index falls back with it, and the axis
     # note already says the basis is not the attribution one. Two fallbacks, one basis, either way.
-    # The rows behind the bars, on each axis's OWN denominator — see `_axis_holdings`.
-    dd_general = _axis_holdings(general_items, general_labels)
-    dd_sector = _axis_holdings(sector_items, sector_labels)
+    # The rows behind the bars, on the same selected denominator — see `_axis_holdings`.
+    dd_general = _axis_holdings(general_items, general_labels, portfolio_denominator)
+    dd_sector = _axis_holdings(sector_items, sector_labels, portfolio_denominator)
 
-    #  Named, not inferred. The sector axis divides by the equity sleeve and the other two by
-    # every long position, so "our weight" means a different denominator per chart. The drill-down
-    # prints this sentence rather than leaving a reader to reverse-engineer which total a bar is a
-    # share of — the exact question that made the composition's 36% look inconsistent with the
-    # attribution table's 39.1% for the same sector.
+    # Named, not inferred. These are the model-fallback denominators; paired AIRS books use the
+    # complete-current-book wording below for all three axes.
     _basis_note = {
         "sector": "the equity sleeve (shares and equity ETFs)",
         "region": "every long position",
         "currency": "every long position",
     }
-    weight_field = ("each position's current EUR value" if weight_basis == "book"
-                    else "the model's stated percentage")
+    weight_field = "the model's stated percentage"
 
     # The Sector/Region/Currency charts are now read-only current-composition views; their former
     # drilldowns live in Attribution.  They therefore need today's market caps and classification,
@@ -2474,8 +2528,14 @@ def compute_portfolio_analysis(portfolio_id: int,
         pw = pw_sector if axis == "sector" else pw_general
         dd = dd_sector if axis == "sector" else dd_general
         pw_axis, dd_axis = pw[axis], dd[axis]
-        note = (f"Share of {_basis_note[axis]}, by {weight_field}, as at the latest AIRS "
-                f"valuation. Not the Attribution basis, which weighs the window's open.")
+        note = (
+            "Share of the complete current AIRS book, using the same current-value denominator "
+            "as Attribution's Weight (now) column. Opaque funds and holdings for which this axis "
+            "is not applicable are not rebased into the displayed percentages."
+            if weight_basis == "book" else
+            f"Share of {_basis_note[axis]}, by {weight_field}. Not the Attribution basis, which "
+            "weighs the window's open."
+        )
         positions = len(sector_items if axis == "sector" else general_items)
         excluded, attributable_pct, unpriced_pct = [], None, None
         keys = set(pw_axis) | set(bw[axis])
@@ -2630,11 +2690,8 @@ def compute_portfolio_analysis(portfolio_id: int,
         "benchmark_missing_countries": bench_coverage.get("missing_countries") or [],
         "returns": _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
                                   source, _phase),
-        #  The composition was expanded, and that must be visible. These charts are drawn over
-        # the stocks BEHIND the certificates, not over the twelve lines AIRS stores. Without
-        # this the reader cannot tell a portfolio that genuinely holds 22 names from one that
-        # holds three certificates — and cannot check the figures against the composition table,
-        # which still shows the unexpanded rows.
+        # Expansion metadata follows the same checkbox as the charts. Off means certificate
+        # constituents are absent; on reports which wrappers supplied the added stocks.
         "looked_through_pct": lookthrough["looked_through_pct"],
         # Weight still inside a certificate we could NOT expand — its target has no stored
         # composition. Not dropped (that would delete the weight silently); reported.
@@ -2645,7 +2702,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         # the bucket's value-weighted YTD price return (from the paired book), for the pie legend.
         "allocation": [{**s, "return_pct": bucket_returns.get(s["bucket"]),
                         "contribution_pct": _contrib.get(s["bucket"])}
-                       for s in _weigh_alloc(alloc_items)],
+                       for s in _weigh_alloc(allocation_items)],
         # Per-holding book detail (bucket / currency / start-weight / return) — the source for a
         # non-equity sleeve's contribution + currency view, where sector-vs-SP500 says nothing.
         # Empty when no book is paired (a model with no book has no per-holding returns).
@@ -3503,7 +3560,8 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
                                            benchmark_label: str = SP500_LABEL,
                                            weight_by: str = "model",
                                            source: str = "model",
-                                           bucket_filter: str | None = None) -> dict:
+                                           bucket_filter: str | None = None,
+                                           look_through: bool = False) -> dict:
     """The Analyse modal's one request.
 
      THE READ MEMO IS OPENED **HERE**, AT THE REQUEST BOUNDARY, NOT INSIDE THE COMPUTATION.
@@ -3538,7 +3596,7 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
-    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter,
+    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter, look_through,
            COMPOSITION_BASIS)
     # The fingerprint is a database read, so it goes to a thread like everything else here.
     fp = await asyncio.to_thread(ac.fingerprint)
@@ -3548,7 +3606,7 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
     with read_cache(f"analysis:{portfolio_id}"):
         out = await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
-                                      weight_by, source, bucket_filter)
+                                      weight_by, source, bucket_filter, look_through)
     #  Stored against the fingerprint read BEFORE the computation, deliberately. If a write lands
     # mid-computation the payload is a mix of both states — filing it under the OLD fingerprint
     # means the next request (which sees the new one) misses and recomputes. Filing it under a

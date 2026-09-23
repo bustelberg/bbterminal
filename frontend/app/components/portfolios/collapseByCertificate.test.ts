@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  collapseByCertificate, individualStocksBasket, syntheticAirsName, syntheticBasket,
+  collapseByCertificate, holdingsForCertificateScope, individualStocksBasket,
+  syntheticAirsName, syntheticBasket,
 } from './PortfolioAnalysisModal';
 
 describe('collapseByCertificate', () => {
@@ -90,5 +91,26 @@ describe('individualStocksBasket', () => {
     expect(basket.holdings).toEqual(companies.map((holding) => ({
       isin: holding.isin, weight: holding.weight_now_pct, name: holding.name,
     })));
+  });
+});
+
+describe('holdingsForCertificateScope', () => {
+  const rows = [
+    { name: 'Direct stock', isin: 'US-DIRECT', bucket: 'Equity', is_fund: false,
+      weight_now_pct: 60, current_value_eur: 60, start_value_eur: 60 },
+    { name: 'Underlying stock', isin: 'US-CHILD', bucket: 'Equity', is_fund: false,
+      weight_now_pct: 40, current_value_eur: 40, start_value_eur: 40,
+      via_names: ['Held certificate'] },
+  ] as never;
+
+  it('keeps certificate constituents out by default', () => {
+    const scoped = holdingsForCertificateScope(rows, false);
+    expect(scoped.map((row) => row.name)).toEqual(['Direct stock', 'Held certificate']);
+    expect(scoped.find((row) => row.name === 'Held certificate')?.is_fund).toBe(true);
+  });
+
+  it('adds the underlying stocks only when look-through is selected', () => {
+    expect(holdingsForCertificateScope(rows, true).map((row) => row.name))
+      .toEqual(['Direct stock', 'Underlying stock']);
   });
 });

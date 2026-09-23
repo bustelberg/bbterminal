@@ -786,21 +786,21 @@ async def airs_model_portfolio_correlations(request: Request, year: int | None =
 class CompositionHolding(BaseModel):
     """One holding behind a composition bar, at the weight that bar counted it at.
 
-     `weight_pct` IS A SHARE OF THE AXIS TOTAL, NOT OF THE PORTFOLIO — Σ over a bucket IS that
-    bucket's `portfolio_pct`, exactly. The sector axis divides by the equity sleeve and the other
-    two by every long position, so the SAME holding carries different weights on different axes and
-    that is correct. See `_airs_portfolio_analysis._axis_holdings`.
+     For an AIRS-backed portfolio, `weight_pct` is the holding's CURRENT share of the complete
+    book — the same denominator as Attribution's `Weight (now)`. For a model fallback it remains
+    a share of the visible axis. In both cases Σ over a bucket IS that bucket's `portfolio_pct`,
+    exactly. See `_airs_portfolio_analysis._axis_holdings`.
 
-     IT IS ALSO NOT THE ATTRIBUTION TABLE'S WEIGHT, AND THE TWO ARE BOTH RIGHT. Attribution drops
-    funds, cash and anything it could not price, then renormalises what remains to 100% and weights
-    it by the position's value when the window OPENED. Measured on Bustelberg Offensief:
-    Technology reads 36% here and 39.1% there. Neither is a rounding error and neither is wrong —
-    they are shares of different denominators, which is precisely what this list exists to show.
+     Attribution uses the real opening AIRS weight instead: Beginwaarde divided by the complete
+    opening book. It does not renormalise the remaining stocks after funds, cash, certificates or
+    unpriced names are omitted. The two surfaces may still differ because one is current and the
+    other is the window's open, but no hidden denominator inflates the attribution weights.
     """
 
     name: str | None = None
     isin: str | None = None
-    # Share of THIS axis's total. Σ over a bucket == that bucket's `portfolio_pct`.
+    # Share of the complete current AIRS book, or of the visible model axis on fallback.
+    # Σ over a bucket == that bucket's `portfolio_pct`.
     weight_pct: float = 0.0
     # The asset class (Equity / Bonds / Cash / …) — which is what decides whether a holding is in
     # the sector axis's denominator at all.
@@ -843,10 +843,8 @@ class CompositionExcluded(BaseModel):
 class PortfolioAnalysisAxis(BaseModel):
     axis: str                          # sector | region | currency
     rows: list[PortfolioAnalysisRow]
-    #  The denominator, in words — and it is now the ATTRIBUTION basis (start-of-window value over
-    # the attributable holdings), so a bar equals its own Brinson row. Stated rather than implied,
-    # because a percentage whose base is unstated is how two correct numbers read as a
-    # contradiction. Says so explicitly when a portfolio falls back to the current-value basis.
+    # The denominator, in words. AIRS-backed current charts use the complete current book, matching
+    # Attribution's Weight (now); model fallbacks state their visible-axis basis explicitly.
     basis: str | None = None
     # How many positions that denominator spans.
     positions: int | None = None
@@ -1485,13 +1483,9 @@ class ModelPortfolioAnalysis(BaseModel):
     covered_pct: float = 0.0
     benchmark_covered_pct: float = 0.0
     # ── Look-through ───────────────────────────────────────────────────────────────────────
-    # Some positions are not instruments: they are other model portfolios wrapped as a Leonteq
-    # certificate. These charts are drawn over the stocks BEHIND them, not over the lines AIRS
-    # stores — measured on ToppenbergBeheer Defensief, 9 of 12 positions and 44.56% of the
-    # weight. Unexpanded it charted "Unclassified 100%" over 1% classified weight.
-    #
-    #  Reported, not silent. The composition table still shows the unexpanded rows, so without
-    # this a reader cannot reconcile 168 holdings against the twelve in front of them, and cannot
+    # Some positions are other model portfolios wrapped as a Leonteq certificate. The charts add
+    # their constituent stocks only when `look_through=true`, matching Attribution and Risk.
+    # Reported, not silent: without this a reader cannot reconcile the expanded stock count and
     # tell a portfolio that genuinely holds 22 names from one holding three certificates.
     looked_through_pct: float = 0.0
     # Weight still inside a certificate we could NOT expand (its target has no stored
@@ -1548,7 +1542,8 @@ class ModelPortfolioAnalysis(BaseModel):
             response_model=ModelPortfolioAnalysis)
 async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP500",
                                         weight_by: str = "model", source: str = "model",
-                                        bucket: str | None = None):
+                                        bucket: str | None = None,
+                                        look_through: bool = False):
     """Sector / region / currency split of one model portfolio, beside the benchmark's.
 
     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
@@ -1560,6 +1555,9 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
 
     `bucket` (an allocation label — Equity, Bonds, …) filters the CHART axes to that asset-class
     sleeve; the `allocation` bar itself stays over the whole model so a reader can re-select.
+
+    `look_through` is false by default. When false, certificate constituents do not contribute to
+    Sector, Region or Currency; when true, the same constituents Attribution adds are included.
     """
     from routers._airs_holding_isin import BUCKET_ORDER  # noqa: PLC0415
     from routers._airs_portfolio_analysis import (  # noqa: PLC0415
@@ -1569,7 +1567,8 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     basis = weight_by if weight_by in ("model", "book") else "model"
     src = source if source in ("model", "book") else "book"
     bucket_filter = bucket if bucket in BUCKET_ORDER else None
-    return await compute_portfolio_analysis_async(portfolio_id, benchmark, basis, src, bucket_filter)
+    return await compute_portfolio_analysis_async(
+        portfolio_id, benchmark, basis, src, bucket_filter, look_through)
 
 
 class HoldingTradeEffect(BaseModel):
@@ -2411,6 +2410,13 @@ async def airs_portfolio_exposure(req: ActiveShareRequest, benchmark: str = "ACW
         compute_exposure, [h.model_dump() for h in req.holdings], benchmark)
 
 
+class AttributionWeightComponent(BaseModel):
+    """One raw AIRS VOLK Beginwaarde included in an opening-weight denominator."""
+
+    name: str
+    value_eur: float
+
+
 class AttributionName(BaseModel):
     isin: str | None = None
     # The CANONICAL label (asset_grid, joined by ISIN) — the model side and the index side speak
@@ -2422,12 +2428,21 @@ class AttributionName(BaseModel):
     airs_name: str | None = None
     ticker: str | None = None
     weight_pct: float = 0.0
+    # Raw AIRS operands behind `weight_pct`, so its provenance card can show
+    # Raw AIRS operands behind `weight_pct`. Null for model/index weights.
+    weight_value_eur: float | None = None
+    weight_total_eur: float | None = None
+    # Every named raw VOLK Beginwaarde that is added into `weight_total_eur`.
+    weight_denominator_components: list[AttributionWeightComponent] | None = None
     #: TODAY's share, on the same members and the same denominator rule as `weight_pct`.
     #:  A SECOND COLUMN, NOT A CORRECTION. `weight_pct` is the window's open and is what Return
     #: and Contribution are built from; this one is what the composition bars are weighed on, so
     #: the drill-down reconciles with the bar it opened from. Null where the source has no current
     #: values (`source=model`, whose weights are design percentages).
     weight_now_pct: float | None = None
+    # Current AIRS operands behind `weight_now_pct`. Null for model/index weights.
+    weight_now_value_eur: float | None = None
+    weight_now_total_eur: float | None = None
     return_pct: float | None = None
     contribution_pct: float = 0.0
     # True when this company is held on BOTH sides — in the model AND the benchmark bucket.
@@ -2518,9 +2533,9 @@ class ModelPortfolioAttribution(BaseModel):
     reconciles: bool = False
     #  Two different "EXCESS" FIGURES LIVE ON THIS SCREEN AND BOTH ARE RIGHT — the payload
     # carries both so the panel can reconcile them instead of contradicting the tile.
-    #   `excess_pct`         the ATTRIBUTABLE SLEEVE's: the holdings that have a bucket at all,
-    #                        renormalised once cash and funds come out (cash has no sector, so
-    #                        leaving it in would score holding cash as a sector bet).
+    #   `excess_pct`         the attributable individual-stock sleeve's contribution versus the
+    #                        benchmark: its own excess multiplied by its real opening-book share.
+    #                        Stocks are not renormalised to 100% after exclusions.
     #   `account_excess_pct` the ACCOUNT's: AIRS's own flow-aware `cumulatief_rendement` against
     #                        the same benchmark — what the Analyse tile shows.
     # Measured on AITopSelectie OFF DYN: +23.39pp here against +24.26pp there, same benchmark.
@@ -2546,7 +2561,7 @@ class ModelPortfolioAttribution(BaseModel):
             response_model=ModelPortfolioAttribution)
 async def airs_model_portfolio_attribution(
     portfolio_id: int, benchmark: str = "SP500", window: str = "ytd", axis: str = "sector",
-    source: str = "book",
+    source: str = "book", look_through: bool = False,
 ):
     """Brinson-Fachler attribution of one model against a benchmark, over one window.
 
@@ -2559,13 +2574,17 @@ async def airs_model_portfolio_attribution(
 
     `source=model` still gives the yfinance reconstruction of the model's nominal composition,
     which is the right question for an unlinked model — it is just not what the book did.
+
+    `look_through` is false by default. When false, certificates stay excluded wrappers; when
+    true, their linked model constituents become portfolio legs.
     """
     from routers._airs_portfolio_attribution import (  # noqa: PLC0415
         compute_attribution_async,
     )
 
     src = source if source in ("model", "book") else "model"
-    return await compute_attribution_async(portfolio_id, benchmark, window, axis, src)
+    return await compute_attribution_async(
+        portfolio_id, benchmark, window, axis, src, look_through)
 
 
 class ModelPortfolioPosition(BaseModel):

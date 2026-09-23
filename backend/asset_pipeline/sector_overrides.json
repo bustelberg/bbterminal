@@ -1,0 +1,10 @@
+{
+  "overrides": [
+    {
+      "isin": "BE0003797140",
+      "sector": "Financials",
+      "name": "Groupe Bruxelles Lambert SA",
+      "note": "GBL is an investment holding company classified in Financial Services/Financials. Its Yahoo-backed asset_grid row has no usable sector, which otherwise puts this ACWI constituent in Unclassified in composition and attribution."
+    }
+  ]
+}

@@ -59,7 +59,8 @@ def window_start(source: str, window: str, effective: str | None) -> str | None:
     return effective if window == "since" else ytd_anchor_for(effective)
 
 
-def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
+def model_legs(portfolio_id: int, eff: str | None, start: str,
+               look_through: bool = False) -> list[dict]:
     """The model's NOMINAL composition as legs: weight = the design percentage, return = the
     yfinance EUR return over `start`.
 
@@ -74,9 +75,9 @@ def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
     #  The same expansion the composition chart uses, from the same function. A certificate has
     # no price series, so unexpanded it lands in `unpriced` — and an unpriced EQUITY is the
     # dangerous exclusion above: its sectors read as UNOWNED.
-    from ._airs_lookthrough import expand_positions  # noqa: PLC0415
-
-    pos, _lt = expand_positions(portfolio_id, eff, pos)
+    if look_through:
+        from ._airs_lookthrough import expand_positions  # noqa: PLC0415
+        pos, _lt = expand_positions(portfolio_id, eff, pos)
     held = sorted({r["isin"] for r in pos if r.get("isin")})
     marks = compute_holding_marks(held, start)
     return [{
@@ -89,7 +90,7 @@ def model_legs(portfolio_id: int, eff: str | None, start: str) -> list[dict]:
     } for r in pos]
 
 
-def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
+def book_legs(portfolio_id: int, start: str, look_through: bool = False) -> list[dict] | None:
     """The paired AIRS BOOK as legs: weight = the START-of-window EUR value as a % of the book,
     return = the INSTRUMENT's own EUR price return over `start`. None when no book is paired.
 
@@ -159,8 +160,17 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
-    rows = _expand_book_rows(
-        resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or [])
+    rows = resolve_account_isins(link["portefeuille"], freshen=False).get("rows") or []
+    # The denominator is deliberately the itemised AIRS VOLK data: every raw Beginwaarde row,
+    # added together. Carry the complete audit trail so an info card can show the actual named
+    # amounts rather than a symbolic formula or an opaque account-level total from ATT.
+    denominator_components = [{
+        "name": r.get("holding_name") or r.get("isin") or "Unnamed AIRS position",
+        "value_eur": float(r.get("start_value_eur") or 0),
+    } for r in rows]
+    total = sum(c["value_eur"] for c in denominator_components) or 1.0
+    if look_through:
+        rows = _expand_book_rows(rows)
     # The row's own income loader, keyed on `holding_name` exactly as `account_holdings` keys it.
     # A second pass over the Mutaties journal here would be a second answer to "what did this
     # holding pay", free to drift from the column the reader is comparing against.
@@ -171,7 +181,6 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
     # the expansion, so a looked-through leg is priced as the INSTRUMENT it is rather than as its
     # certificate's slice.
     marks = compute_holding_marks(sorted({r["isin"] for r in rows if r.get("isin")}), start)
-    total = sum(float(r.get("start_value_eur") or 0) for r in rows) or 1.0
     out: list[dict] = []
     for r in rows:
         start_val = float(r.get("start_value_eur") or 0)
@@ -187,6 +196,11 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
         out.append({
             "isin": isin,
             "weight_pct": start_val / total * 100.0,
+            # Raw AIRS operands travel with the percentage so the UI can show a checkable worked
+            # calculation rather than restating only the rounded result.
+            "weight_value_eur": start_val,
+            "weight_total_eur": total,
+            "weight_denominator_components": denominator_components,
             #  The current value, carried but never weighed here. `weight_pct` above is and stays
             # Beginwaarde — a Brinson decomposition is only valid on the weights that earned the
             # return. This rides along so the drill-down can print TODAY's weight in a column of
@@ -218,13 +232,16 @@ def book_legs(portfolio_id: int, start: str) -> list[dict] | None:
 
 
 def portfolio_legs(source: str, portfolio_id: int, eff: str | None,
-                   start: str) -> list[dict] | None:
-    """Legs from the chosen source. None only when `source=book` and no book is paired."""
+                   start: str, look_through: bool = False) -> list[dict] | None:
+    """Legs from the chosen source. None only when `source=book` and no book is paired.
+
+    Certificate constituents are opt-in: unchecked analyses retain the wrapper as the holding.
+    """
     #  Both paths now take `start` AND BOTH PRICE FROM `asset_price`. The book path used to price
     # itself off AIRS and ignore the window entirely, so switching `source` changed the VENDOR as
     # well as the weights — two variables at once, on a control the reader thinks moves one.
-    return (book_legs(portfolio_id, start) if source == "book"
-            else model_legs(portfolio_id, eff, start))
+    return (book_legs(portfolio_id, start, look_through) if source == "book"
+            else model_legs(portfolio_id, eff, start, look_through))
 
 
 def split_legs(legs: list[dict], idx: int, grid: dict | None = None,

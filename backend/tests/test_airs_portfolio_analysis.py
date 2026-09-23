@@ -372,6 +372,14 @@ class TestTheAxesAreComparable:
     def test_an_empty_side_does_not_divide_by_zero(self):
         assert pa._weigh([]) == {"sector": {}, "region": {}, "currency": {}}
 
+    def test_airs_denominator_preserves_real_current_book_weights(self):
+        """An omitted remainder stays omitted; the visible stocks are not inflated to 100%."""
+        items = [(50.0, ("Tech", "NA", "USD")),
+                 (25.0, ("Health", "EU", "EUR"))]
+        out = pa._weigh(items, denominator=100.0)
+        assert out["sector"] == {"Tech": 50.0, "Health": 25.0}
+        assert sum(out["sector"].values()) == 75.0
+
 
 class TestTheBarsAreTheAttributionWeights:
     """ THE COMPOSITION BARS AND THE BRINSON ROWS ARE ONE NUMBER (2026-07-31, on request).
@@ -729,6 +737,12 @@ class TestTheDrillDownSumsToItsBar:
     def test_an_empty_side_does_not_divide_by_zero(self):
         assert pa._axis_holdings([], []) == {"sector": {}, "region": {}, "currency": {}}
 
+    def test_airs_drilldown_uses_the_same_complete_book_denominator(self):
+        weighed = pa._weigh(self.ITEMS[:2], denominator=200.0)
+        detail = pa._axis_holdings(self.ITEMS[:2], self.LABELS[:2], denominator=200.0)
+        assert weighed["sector"]["Tech"] == 37.5
+        assert sum(h["weight_pct"] for h in detail["sector"]["Tech"]) == 37.5
+
 
 class TestBookWeighting:
     """`weight_by="book"` reweights the portfolio bars by the paired AIRS book's actual EUR
@@ -811,6 +825,27 @@ class TestBookWeighting:
         pw = pa._weigh(out["items"])
         assert pw["sector"]["Technology"] == 75.0
 
+    def test_unlooked_chart_keeps_only_the_direct_route_of_a_merged_stock(self, monkeypatch):
+        self._wire(monkeypatch, rows=[
+            {"isin": "US1", "current_value_eur": 60, "asset_class": "Equity"},
+            {"isin": "CERT", "current_value_eur": 60, "asset_class": "Equity"},
+        ])
+        monkeypatch.setattr(pa, "_expand_book_rows", lambda _rows: [
+            {"isin": "US1", "holding_name": "Alpha Tech", "current_value_eur": 100,
+             "asset_class": "Equity", "bucket": "Equity",
+             "sources": [{"label": None, "value_eur": 60},
+                         {"label": "Certificate", "value_eur": 40}]},
+            {"isin": "US2", "holding_name": "Beta Financial", "current_value_eur": 20,
+             "asset_class": "Equity", "bucket": "Equity",
+             "sources": [{"label": "Certificate", "value_eur": 20}]},
+        ])
+        out = pa._book_port_items(7, {})
+        looked = pa._weigh(out["items"], out["current_book_total"])
+        folded = pa._weigh(out["direct_items"], out["current_book_total"])
+        assert looked["sector"]["Technology"] == pytest.approx(100 / 120 * 100)
+        assert folded["sector"] == {"Technology": 50.0}
+        assert "Financials" not in folded["sector"]
+
     def test_a_short_or_overdraft_is_excluded_from_the_composition(self, monkeypatch):
         #  Negative value = a short (Nestle India) or an overdraft cash line. A bar chart of
         # what the book is LONG drops it — same rule the model side applies to a 0% weight.
@@ -821,6 +856,8 @@ class TestBookWeighting:
         out = pa._book_port_items(7, {})
         assert out["holdings"] == 1
         assert out["total_w"] == 1000
+        # The chart denominator still matches Attribution's current-weight column: net book value.
+        assert out["current_book_total"] == 600
 
     def test_classification_is_yfinance_not_airs(self, monkeypatch):
         # The row carries AIRS's own category, but the bucket must come from the grid — Financials

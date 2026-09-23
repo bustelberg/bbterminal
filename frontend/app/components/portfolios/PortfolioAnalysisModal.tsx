@@ -1585,9 +1585,19 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
   return [...kept, ...folded];
 }
 
+/** The portfolio membership selected by the one certificate-scope checkbox. */
+export function holdingsForCertificateScope(
+  rows: BookHolding[], lookThrough: boolean,
+): BookHolding[] {
+  return lookThrough ? rows : collapseByCertificate(rows);
+}
+
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
-  onTiming, onFundamental, onSectorOverride }: {
+  lookThrough, onLookThroughChange, onTiming, onFundamental, onSectorOverride }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
+  /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
+  lookThrough: boolean;
+  onLookThroughChange: (value: boolean) => void;
   /**  THE BETA COLUMN NAMES ITS BASE. A beta with no benchmark on it is not a weaker statement,
    *  it is an unreadable one — and the modal's picker changes it per request, so it cannot be
    *  hardcoded here. */
@@ -1628,14 +1638,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    * switch on look-through to inspect the underlying positions of held certificates.
    */
   const copy = useAnalyseCopy();
-  const [lookThrough, setLookThrough] = useState(false);
   /** Number of certificates with available underlying routes. Count routes rather than the net
    *  row reduction: a certificate with one underlying is still a meaningful look-through. */
   const lookThroughCertificates = useMemo(() => new Set(
     holdings.flatMap(splitByRoute).map(soleVia).filter((label): label is string => Boolean(label)),
   ).size, [holdings]);
   const shownHoldings = useMemo(
-    () => (lookThrough ? holdings : collapseByCertificate(holdings)), [holdings, lookThrough]);
+    () => holdingsForCertificateScope(holdings, lookThrough), [holdings, lookThrough]);
   //  One predicate, used in all six row shapes (thead, class row, holding row, sold header, sold
   // row, total). The file already warns that the column count is counted by hand in several
   // places; making them CONDITIONAL multiplies that risk, so every gate is a bare `show(<key>)`
@@ -1822,7 +1831,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
           <label className={`${CHIP_SHAPE} ${CHIP_IDLE} flex items-center gap-1.5`}
             title={copy.actions.lookThroughTitle}>
             <input type="checkbox" checked={lookThrough}
-              onChange={() => setLookThrough((v) => !v)} className="accent-accent-600" />
+              onChange={(event) => onLookThroughChange(event.target.checked)}
+              className="accent-accent-600" />
             {copy.actions.lookThrough}
             {lookThroughCertificates > 0 && (
               <span className="font-mono text-fg-faint">({lookThroughCertificates})</span>
@@ -3214,6 +3224,12 @@ export default function PortfolioAnalysisModal({
    * that it had opened.
    */
   const [risk, setRisk] = useState(false);
+  /**
+   * One membership choice for every holdings-based view. OFF means the book owns the certificate
+   * wrapper, not its constituent stocks; turning it on expands those constituents in Holdings,
+   * Attribution, Risk, Sector, Region and Currency together.
+   */
+  const [lookThrough, setLookThrough] = useState(false);
   // Which allocation class the reader picked, to break down. Null = NOTHING selected — the whole
   // portfolio, where the modal shows the book's return vs the benchmark and prompts the reader to
   // click a class. Selecting a class replaces that with the class's OWN return + its breakdown.
@@ -3335,7 +3351,7 @@ export default function PortfolioAnalysisModal({
     }
   };
   const assetRetryCount = useRef(new Map<string, number>());
-  const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${refreshSeq}|${reloadSeq}`;
+  const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${lookThrough ? 1 : 0}|${refreshSeq}|${reloadSeq}`;
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
   const stale = data != null && loadedFor !== viewKey;
 
@@ -3349,6 +3365,7 @@ export default function PortfolioAnalysisModal({
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
               + `?benchmark=${benchmark}&weight_by=${source}&source=${source}`
+              + `&look_through=${lookThrough}`
               + (assetFilter ? `&bucket=${encodeURIComponent(assetFilter)}` : ''));
           const body = await r.json().catch(() => null);
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
@@ -3376,7 +3393,7 @@ export default function PortfolioAnalysisModal({
     // rebuilds the composition, prices and FX this payload is derived from, so without it the
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reqKey, benchmark, source, assetFilter, refreshSeq, reloadSeq]);
+  }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -3747,10 +3764,8 @@ export default function PortfolioAnalysisModal({
                 screen (the whole-portfolio scorecard, or the Stocks charts). ACWI's missing names
                 go a whole country at a time, and a cap-weighted index renormalised over the rest
                 does not LOSE that weight — it redistributes it. Stated, never assumed to be 100%. */}
-            {/*  NO LOOK-THROUGH BANNER HERE. These charts ARE drawn through the certificates —
-                the composition is the stocks behind them, not the lines AIRS stores — and the
-                payload still reports `looked_through_pct` / `opaque_pct` / `looked_through` for
-                anyone reading the API. It is simply not announced on screen. */}
+            {/* No separate look-through banner here: the checkbox above is the single membership
+                control for Holdings, Attribution, Risk and all three composition charts. */}
             {/*  THE REBUILD-COVERAGE WARNING CAME OFF THIS VIEW, 2026-09-02 ON REQUEST, AND THE
                 REASON IT DID NOT BELONG IS SHARPER THAN "IT IS NOISE": IT WAS GATED ON `!sleeve`,
                 WHICH IS EXACTLY WHEN THE NUMBER IT WARNS ABOUT IS NOT ON SCREEN. It described the
@@ -3777,6 +3792,7 @@ export default function PortfolioAnalysisModal({
                  card. `realised` carries them (and the book's own return to check against). */
               <>
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+                lookThrough={lookThrough} onLookThroughChange={setLookThrough}
                 onFundamental={(target) => { void openFundamental(target); }}
                 onSectorOverride={setSectorFor}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
@@ -3877,7 +3893,9 @@ export default function PortfolioAnalysisModal({
                `book_holdings`, NOT `holdings`: the latter is a COUNT on this payload
               (`holdings: int`), so the obvious name silently types as a number. */}
           <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
-            holdings={(data.book_holdings ?? []).map((h): ActiveShareHolding => ({
+            holdings={holdingsForCertificateScope(
+              data.book_holdings ?? [], lookThrough,
+            ).map((h): ActiveShareHolding => ({
               isin: h.isin, name: h.name,
               weight_pct: h.weight_now_pct ?? 0, is_fund: !!h.is_fund,
               //  The euros and the currency this payload already carries. Only the
@@ -3902,7 +3920,8 @@ export default function PortfolioAnalysisModal({
       {why && data && (
         <PanelDialog onClose={() => setWhy(null)}>
           <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
-            source={source} portfolioAsOf={data.returns?.portfolio_as_of}
+            source={source} lookThrough={lookThrough}
+            portfolioAsOf={data.returns?.portfolio_as_of}
             benchmarkAsOf={data.returns?.benchmark_as_of}
             onClose={() => setWhy(null)} />
         </PanelDialog>

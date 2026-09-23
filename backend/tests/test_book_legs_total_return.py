@@ -83,6 +83,8 @@ def book(monkeypatch):
     monkeypatch.setattr("routers._airs_portfolio_analysis._expand_book_rows", lambda r: r)
     monkeypatch.setattr("routers._airs_accounts._direct_result",
                         lambda _p, _n: (income, {"gross": None, "tax": None, "funds": None}))
+    monkeypatch.setattr("routers._airs_accounts._year_perf",
+                        lambda: {"BOOK_A": {"beginvermogen": 3500.0}})
     monkeypatch.setattr(basis, "compute_holding_marks", lambda _i, _s: marks)
     return rows
 
@@ -166,7 +168,26 @@ class TestTheWeightIsStillTheOpeningValue:
     def test_weights_are_beginwaarde_shares(self, book):
         legs = _by_name(basis.book_legs(7, START))
         assert legs["US Payer"]["weight_pct"] == pytest.approx(1000 / 3500 * 100)
+        assert legs["US Payer"]["weight_value_eur"] == 1000
+        assert legs["US Payer"]["weight_total_eur"] == 3500
+        assert legs["US Payer"]["weight_denominator_components"] == [
+            {"name": "US Payer", "value_eur": 1000.0},
+            {"name": "NL Payer", "value_eur": 1000.0},
+            {"name": "Silent", "value_eur": 1000.0},
+            {"name": "Cash", "value_eur": 500.0},
+        ]
         assert sum(leg["weight_pct"] for leg in basis.book_legs(7, START)) == pytest.approx(100.0)
+
+    def test_denominator_is_the_sum_of_raw_volk_values_not_att_beginvermogen(self, book,
+                                                                              monkeypatch):
+        monkeypatch.setattr("routers._airs_accounts._year_perf",
+                            lambda: {"BOOK_A": {"beginvermogen": 4000.0}})
+        legs = _by_name(basis.book_legs(7, START))
+        assert legs["US Payer"]["weight_pct"] == pytest.approx(1000 / 3500 * 100)
+        assert legs["US Payer"]["weight_total_eur"] == 3500.0
+        assert sum(c["value_eur"] for c in
+                   legs["US Payer"]["weight_denominator_components"]) == 3500.0
+        assert sum(leg["weight_pct"] for leg in legs.values()) == pytest.approx(100.0)
 
 
 class TestBothPathsShareOneBasis:
@@ -177,3 +198,31 @@ class TestBothPathsShareOneBasis:
 
         assert "start" in inspect.signature(basis.book_legs).parameters
         assert "compute_holding_marks" in inspect.getsource(basis.book_legs)
+
+
+class TestCertificateScopeIsExplicit:
+    """Unchecked means the certificate remains the holding; expansion is an opt-in."""
+
+    @staticmethod
+    def _expanded(rows):
+        return [
+            {**rows[0], "holding_name": "Underlying stock", "isin": "US-UNDERLYING"},
+            *rows[1:],
+        ]
+
+    def test_default_does_not_add_certificate_constituents(self, book, monkeypatch):
+        monkeypatch.setattr(
+            "routers._airs_portfolio_analysis._expand_book_rows",
+            lambda _rows: pytest.fail("unchecked attribution expanded a certificate"),
+        )
+        names = {leg["airs_name"] for leg in basis.book_legs(7, START)}
+        assert "US Payer" in names
+        assert "Underlying stock" not in names
+
+    def test_checked_adds_the_underlying_positions(self, book, monkeypatch):
+        monkeypatch.setattr(
+            "routers._airs_portfolio_analysis._expand_book_rows", self._expanded,
+        )
+        names = {leg["airs_name"] for leg in basis.book_legs(7, START, look_through=True)}
+        assert "Underlying stock" in names
+        assert "US Payer" not in names
