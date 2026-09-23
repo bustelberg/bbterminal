@@ -16609,6 +16609,57 @@
         ]
       }
     },
+    "/api/admin/gurufocus-research": {
+      "get": {
+        "description": "Return the complete GuruFocus analyst-data payloads used by ``/research``.\n\nThis deliberately returns vendor-shaped JSON instead of normalising it. The page is a\ntemporary inspection surface: fields that are surprising, undocumented or newly added must\nremain visible. One load currently makes 14 GuruFocus requests, stated in the response and in\nthe UI so an admin cannot accidentally mistake this for a free database read.",
+        "operationId": "gurufocus_research_api_admin_gurufocus_research_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "symbol",
+            "required": false,
+            "schema": {
+              "default": "NVDA",
+              "title": "Symbol",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "title": "Authorization",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Gurufocus Research",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/admin/network-diagnostics": {
       "get": {
         "description": "Reachability report for every external service the terminal depends on\n\u2014 backs the /network page. Returns this backend's egress IP, the live\nGuruFocus Cloudflare circuit-breaker state, and per-source verdicts (DNS\nIP, latency, status, and a plain-language reason). `guru_method=curl`\n(default) probes GuruFocus through the real curl_cffi impersonation ladder\nso the verdict matches what the ingest pipeline experiences in prod;\n`guru_method=plain` uses a bare requests.get to show whether the API still\nbot-challenges fingerprint-less clients. See routers/_network_diag.py.",

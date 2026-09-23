@@ -382,6 +382,35 @@ class TestWriteTiers:
         assert _run(monkeypatch, "GET", "/api/admin/health", "admin") == (200, True)
 
 
+class TestCompanySectorOverrideForUsers:
+    """The Analyse modal shows the sector pencil to every authenticated user.
+
+    This is one exact editorial mutation, not write access to the user-readable companies
+    namespace. A correction is shared because the override is company-wide; all identity edits,
+    creates, deletes and neighbouring paths remain admin-only.
+    """
+
+    def test_a_user_may_set_or_clear_a_company_sector(self, monkeypatch):
+        assert _run(monkeypatch, "PUT", "/api/companies/42/sector-override", "user") == (200, True)
+
+    def test_an_admin_may_too(self, monkeypatch):
+        assert _run(monkeypatch, "PUT", "/api/companies/42/sector-override", "admin") == (200, True)
+
+    def test_it_still_requires_authentication(self, monkeypatch):
+        assert _run(monkeypatch, "PUT", "/api/companies/42/sector-override", None) == (401, False)
+
+    def test_other_company_writes_remain_admin_only(self, monkeypatch):
+        for method, path in (
+            ("PUT", "/api/companies/42"),
+            ("POST", "/api/companies"),
+            ("DELETE", "/api/companies/42"),
+            ("POST", "/api/companies/42/sector-override"),
+            ("PUT", "/api/companies/42/sector-override/history"),
+            ("PUT", "/api/companies/not-an-id/sector-override"),
+        ):
+            assert _run(monkeypatch, method, path, "user") == (403, False), path
+
+
 class TestUnreachableIdentityProviderIsNot401:
     """An outage must not be reported as a credentials problem.
 

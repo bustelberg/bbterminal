@@ -22,6 +22,7 @@ reconsider first is whether it should be a user-shaped credential at all.
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException
@@ -32,6 +33,70 @@ from deps import fetch_in_chunks, supabase
 from routers.auth import _require_admin
 
 router = APIRouter(tags=["admin"])
+
+
+# Kept explicit rather than accepting an arbitrary path from the browser. This page is a
+# microscope for the analyst data we have actually verified GuruFocus serves; an open proxy to
+# every vendor endpoint would make typos spend quota and could expose payloads we never intended
+# to put in the UI.
+_GURUFOCUS_RESEARCH_ENDPOINTS: tuple[tuple[str, str, str], ...] = (
+    (
+        "current_analyst_estimates",
+        "Current analyst estimates",
+        "analyst_estimate",
+    ),
+    (
+        "current_key_ratio_forecasts",
+        "Current key-ratio forecasts (includes FCF)",
+        "keyratios",
+    ),
+    (
+        "historical_estimates",
+        "Historical estimates, actuals and surprises",
+        "estimate_history",
+    ),
+    (
+        "forward_pe_history",
+        "Historical forward P/E",
+        "forward_pe_ratio",
+    ),
+    ("revenue_series", "Revenue: actuals + current forecasts", "revenue_estimate"),
+    (
+        "operating_cash_flow_series",
+        "Operating cash flow: actuals + current forecasts",
+        "operating_cash_flow_estimate",
+    ),
+    ("ebit_series", "EBIT: actuals + current forecasts", "ebit_estimate"),
+    ("ebitda_series", "EBITDA: actuals + current forecasts", "ebitda_estimate"),
+    (
+        "net_income_series",
+        "Net income: actuals + current forecasts",
+        "net_income_estimate",
+    ),
+    ("eps_nri_series", "EPS NRI: actuals + current forecasts", "eps_nri_estimate"),
+    (
+        "eps_series",
+        "EPS: actuals + current forecasts",
+        "per_share_eps_estimate",
+    ),
+    (
+        "pretax_income_series",
+        "Pretax income: actuals + current forecasts",
+        "pretax_income_estimate",
+    ),
+    (
+        "gross_margin_series",
+        "Gross margin: actuals + current forecasts",
+        "gross_margin_estimate",
+    ),
+    (
+        "capital_expenditure_series",
+        "Capital expenditure: actuals + current forecasts",
+        "capital_expenditure_estimate",
+    ),
+)
+
+_GURUFOCUS_SYMBOL_RE = re.compile(r"^[A-Z0-9.^:-]{1,32}$")
 
 
 # ─── Portfolio ─────────────────────────────────────────────────────
@@ -462,6 +527,82 @@ async def gurufocus_probe(
             "body_length": len(resp.text or ""),
             "proxy_set": bool(_os.environ.get("GURUFOCUS_PROXY") or _os.environ.get("HTTPS_PROXY")),
             "observed_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    return await asyncio.to_thread(_q)
+
+
+@router.get("/api/admin/gurufocus-research")
+async def gurufocus_research(
+    authorization: str = Header(None),
+    symbol: str = "NVDA",
+):
+    """Return the complete GuruFocus analyst-data payloads used by ``/research``.
+
+    This deliberately returns vendor-shaped JSON instead of normalising it. The page is a
+    temporary inspection surface: fields that are surprising, undocumented or newly added must
+    remain visible. One load currently makes 14 GuruFocus requests, stated in the response and in
+    the UI so an admin cannot accidentally mistake this for a free database read.
+    """
+    _require_admin(authorization)
+    import os as _os  # noqa: PLC0415
+
+    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
+
+    cleaned_symbol = symbol.strip().upper()
+    if not _GURUFOCUS_SYMBOL_RE.fullmatch(cleaned_symbol):
+        raise HTTPException(
+            422,
+            "symbol must be 1-32 letters, numbers, or one of '.', '^', ':', '-'",
+        )
+    if not _os.environ.get("GURUFOCUS_BASE_URL", "").strip() or not _os.environ.get(
+        "GURUFOCUS_API_KEY", ""
+    ).strip():
+        raise HTTPException(500, "GURUFOCUS_BASE_URL / GURUFOCUS_API_KEY not set")
+
+    def _q() -> dict:
+        sections = []
+        attempted = 0
+        for key, label, endpoint in _GURUFOCUS_RESEARCH_ENDPOINTS:
+            attempted += 1
+            try:
+                result = _api_request(
+                    _build_api_url(f"stock/{cleaned_symbol}/{endpoint}"),
+                    timeout=45,
+                )
+                status_code = result.status_code
+                data = result.data
+                error = None if data is not None else result.log
+            except Exception as exc:
+                # This is an inspection page: one malformed/unavailable vendor route should be
+                # visible beside the other thirteen answers, not erase them all with a 500.
+                status_code = None
+                data = None
+                error = f"{type(exc).__name__}: {exc}"
+            sections.append(
+                {
+                    "key": key,
+                    "label": label,
+                    "endpoint": endpoint,
+                    "status_code": status_code,
+                    "ok": data is not None,
+                    "error": error,
+                    "data": data,
+                }
+            )
+
+        # The usage table is regional. A symbol without an exchange prefix is a US symbol in the
+        # GuruFocus API; prefixed symbols retain their exchange so the existing region classifier
+        # can place Europe and Asia correctly. One atomic increment also avoids fourteen database
+        # round trips for a diagnostic page.
+        usage_exchange = cleaned_symbol.split(":", 1)[0] if ":" in cleaned_symbol else "NASDAQ"
+        track_api_call(supabase, usage_exchange, count=attempted)
+        return {
+            "symbol": cleaned_symbol,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "guru_focus_requests": attempted,
+            "sections": sections,
         }
 
     return await asyncio.to_thread(_q)
