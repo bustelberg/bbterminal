@@ -773,6 +773,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
             "bucket_overridden": bool(override),
             "company_id": company_id,
             "sector": sector_override or _display_sector(g.get("sector")),
+            "sector_default": _display_sector(g.get("sector")),
             "sector_overridden": bool(sector_override),
             "country": g.get("country") or None,
             "continent": g.get("continent") or None,

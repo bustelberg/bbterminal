@@ -12,6 +12,7 @@ import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
+import { startSectorOverride } from '../../lib/sectorOverride';
 import { createLiveReload } from '../../lib/liveReload';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
 import AccountTransactions from './portfolios/AccountTransactions';
@@ -2004,17 +2005,14 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
   // A company sector is an editorial management choice. It is deliberately
   // separate from Yahoo's instrument metadata, so choosing a sector here
   // cannot be overwritten by an asset refresh.
-  const setSector = useCallback(async (companyId: number, sector: string | null) => {
-    const res = await apiFetch(`${API_URL}/api/companies/${companyId}/sector-override`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sector }),
+  const setSector = useCallback((companyId: number, companyName: string, sector: string | null,
+                                 automaticSector?: string | null) => {
+    startSectorOverride({
+      companyId, companyName, sector, automaticSector,
+      afterSave: async () => {
+        if (portefeuille && onOverride) await onOverride(portefeuille);
+      },
     });
-    if (!res.ok) {
-      const body = (await res.json().catch(() => null)) as { detail?: string } | null;
-      await dialog.alert(body?.detail ?? `Could not save the sector (HTTP ${res.status}).`);
-      return;
-    }
-    if (portefeuille && onOverride) await onOverride(portefeuille);
   }, [portefeuille, onOverride]);
   // Supply this holding's ISIN by hand. The ONLY route when the model has no position for it —
   // no matching can find an ISIN that is not in the data. Keyed by name, so it fixes every book
@@ -2428,7 +2426,10 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                 <td className="px-3 py-1.5 text-fg-subtle">
                   {canEdit && g?.company_id ? (
                     <select value={g.sector_overridden ? (g.sector ?? '') : ''}
-                      onChange={(event) => void setSector(g.company_id!, event.target.value || null)}
+                      onChange={(event) => setSector(
+                        g.company_id!, r.holding_name, event.target.value || null,
+                        g.sector_default ?? g.sector,
+                      )}
                       className="max-w-48 rounded-md border border-neutral-800/60 bg-page px-2 py-1 text-[12px] text-fg-subtle hover:border-accent-600/50 focus:border-accent-500">
                       <option value="">Automatic · {g.sector ?? '—'}</option>
                       {GICS_SECTORS.map((sector) => <option key={sector} value={sector}>{sector}</option>)}

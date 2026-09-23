@@ -469,7 +469,7 @@ async def update_company(company_id: int, req: UpdateCompanyRequest):
 
 
 @router.put("/api/companies/{company_id}/sector-override")
-async def set_company_sector_override(company_id: int, req: SectorOverrideRequest):
+async def set_company_sector_override(company_id: int, req: SectorOverrideRequest, request: Request):
     """Set a management sector without mutating Yahoo or universe source data.
 
     A missing sector deliberately removes the override, returning every
@@ -487,9 +487,14 @@ async def set_company_sector_override(company_id: int, req: SectorOverrideReques
         supabase.table("company_sector_override").delete().eq("company_id", company_id).execute()
         return {"company_id": company_id, "sector": None}
 
+    actor = getattr(request.state, "auth", None) or {}
     row = (supabase.table("company_sector_override")
            .upsert({"company_id": company_id, "sector": sector,
-                    "updated_at": datetime.now(timezone.utc).isoformat()}, on_conflict="company_id")
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    # Keep both: the id remains stable if an email changes, while the email makes
+                    # an operational override list readable without joining into auth.users.
+                    "updated_by_user_id": actor.get("id"),
+                    "updated_by_email": actor.get("email")}, on_conflict="company_id")
            .execute().data)
     return row[0] if row else {"company_id": company_id, "sector": sector}
 

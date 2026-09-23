@@ -8890,6 +8890,8 @@ export interface components {
             region?: string | null;
             /** Sector */
             sector?: string | null;
+            /** Sector Default */
+            sector_default?: string | null;
             /** Sector Overridden */
             sector_overridden?: boolean | null;
             /** Served By */
