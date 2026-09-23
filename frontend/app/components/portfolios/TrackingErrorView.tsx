@@ -19,7 +19,6 @@
  *  The active return is shown beside it, always. TE is the SPREAD of that quantity, and the two
  * are constantly confused — so the panel prints both rather than letting one stand for the other.
  */
-import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
@@ -29,10 +28,10 @@ import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum, subPct2, workedBand } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 import type { TrackingError } from '../../../lib/types/api';
+import { riskRequestKey, useRiskResult } from './useRiskResult';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
@@ -78,38 +77,22 @@ export default function TrackingErrorView({
   portfolioFetchedAt?: string | null;
   portfolioSource: SourceKey;
 }) {
-  const [data, setData] = useState<TrackingError | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const freq = 'monthly';
 
   //  A string key, not the array — `holdings` is rebuilt on every parent render, so depending on
   // its identity would refetch for ever.
-  const key = `${benchmark}|${freq}|${holdings.length}`
-    + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    void (async () => {
-      try {
-        const r = await apiFetch(
-          `${API_URL}/api/airs/portfolio/tracking-error`
-          + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ holdings }) });
-        const b = await r.json().catch(() => null);
-        if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        setError(null);
-        setData(b as TrackingError);
-      } catch (e) {
-        traceError('tracking-error', 'the tracking error could not be computed', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  const requestUrl = `${API_URL}/api/airs/portfolio/tracking-error`
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`;
+  const requestBody = JSON.stringify({ holdings });
+  const key = riskRequestKey(requestUrl, requestBody);
+  const { data, error } = useRiskResult<TrackingError>(key, async () => {
+    const r = await apiFetch(requestUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
+    });
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+    return b as TrackingError;
+  }, 'tracking-error', 'the tracking error could not be computed');
 
   const periodsPerYear = 12;
 
@@ -248,7 +231,7 @@ export default function TrackingErrorView({
                  on `when`. "Today's sleeve carried back 5 years" asserted a start date rather
                 than reporting one, and the grid rarely reaches the full five.  NOT badged: this
                 is a plain <p> outside the card system, and `v()` only renders inside one. */}
-            {`${portfolioName}'s stock sleeve at its current weights, priced from `}
+            {`${portfolioName}'s stock sleeve at the selected AIRS weights, priced from `}
             {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} — `}
             not the book&apos;s realised history, so a name bought in March contributes its January
             return. It is the same portfolio the Active share view describes.

@@ -8373,6 +8373,11 @@ export interface components {
              * @default 0
              */
             portfolio_pct?: number;
+            /**
+             * Residual
+             * @default false
+             */
+            residual?: boolean;
         };
         /**
          * ActiveShareUnmatched
@@ -15941,6 +15946,7 @@ export interface operations {
         parameters: {
             query?: {
                 benchmark?: string;
+                benchmark_start?: string | null;
             };
             header?: never;
             path?: never;
@@ -15976,6 +15982,7 @@ export interface operations {
         parameters: {
             query?: {
                 benchmark?: string;
+                benchmark_start?: string | null;
             };
             header?: never;
             path?: never;

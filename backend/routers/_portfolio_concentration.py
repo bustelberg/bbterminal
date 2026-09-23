@@ -57,10 +57,11 @@ def _profile(weights_pct: list[float]) -> dict:
     }
 
 
-def compute_concentration(holdings: list[dict], benchmark: str) -> dict:
+def compute_concentration(holdings: list[dict], benchmark: str,
+                          benchmark_start: str | None = None) -> dict:
     """C₁₀ / HHI / N_eff for the book's stock sleeve, beside the benchmark's own."""
     try:
-        built = build_issuer_weights(holdings, benchmark)
+        built = build_issuer_weights(holdings, benchmark, benchmark_start)
     except IssuerError as e:
         return {"available": False, "reason": e.reason, "benchmark": benchmark}
 
@@ -74,14 +75,19 @@ def compute_concentration(holdings: list[dict], benchmark: str) -> dict:
     # The sleeve as a share of everything — the scale factor between the two denominators.
     sleeve_share = (stocks_w / total_all) if total_all > 0 else None
 
+    # Company rows use the actual complete-book AIRS weights shown in Attribution. The sleeve
+    # profile above remains available for HHI/effective-position comparisons, while the table no
+    # longer makes the visible companies pretend to fill 100% of the book.
+    book_scale = sleeve_share or 0.0
     cumulative = 0.0
     top: list[dict] = []
     for i, r in enumerate(rows[:20], 1):
-        cumulative += r["weight_pct"]
+        book_weight = r["weight_pct"] * book_scale
+        cumulative += book_weight
         top.append({
             "rank": i,
             "name": r["name"],
-            "weight_pct": r["weight_pct"],
+            "weight_pct": book_weight,
             "cumulative_pct": cumulative,
             #  The index's weight in the same issuer, so a big position can be read as a big BET
             # or merely as a big company. Apple at 6% is not concentration if the index holds 5%.
@@ -95,11 +101,11 @@ def compute_concentration(holdings: list[dict], benchmark: str) -> dict:
         "benchmark_issuers": b["n"],
 
         #  Of the sleeve. The panel's convention, and the one that compares across books.
-        "top1_pct": p["cuts"].get(1),
-        "top3_pct": p["cuts"].get(3),
-        "top5_pct": p["cuts"].get(5),
-        "top10_pct": p["cuts"].get(10),
-        "top20_pct": p["cuts"].get(20),
+        "top1_pct": None if p["cuts"].get(1) is None else p["cuts"][1] * book_scale,
+        "top3_pct": None if p["cuts"].get(3) is None else p["cuts"][3] * book_scale,
+        "top5_pct": None if p["cuts"].get(5) is None else p["cuts"][5] * book_scale,
+        "top10_pct": None if p["cuts"].get(10) is None else p["cuts"][10] * book_scale,
+        "top20_pct": None if p["cuts"].get(20) is None else p["cuts"][20] * book_scale,
         #  Of the whole book, cash and funds included — the other honest answer to the same
         # question. Returned rather than chosen between; see the module header.
         "top10_of_book_pct": (None if p["cuts"].get(10) is None or sleeve_share is None

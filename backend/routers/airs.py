@@ -1821,6 +1821,7 @@ class ActiveShareRow(BaseModel):
     #: `portfolio_pct - benchmark_pct`. Positive = overweight; a name we do not hold is negative.
     active_pct: float = 0.0
     held: bool = False
+    residual: bool = False
 
 
 class ActiveShareUnmatched(BaseModel):
@@ -1921,7 +1922,8 @@ class ActiveShareRequest(BaseModel):
 
 
 @router.post("/api/airs/portfolio/active-share", response_model=ActiveShare)
-async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = "ACWI"):
+async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                      benchmark_start: str | None = None):
     """How much of the book's stock sleeve is NOT the benchmark.
 
      ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
@@ -1937,7 +1939,7 @@ async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = 
     from routers._active_share import compute_active_share  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_active_share, [h.model_dump() for h in req.holdings], benchmark)
+        compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start)
 
 
 class TrackingError(BaseModel):
@@ -2322,7 +2324,8 @@ class PortfolioConcentration(BaseModel):
 
 
 @router.post("/api/airs/portfolio/concentration", response_model=PortfolioConcentration)
-async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str = "ACWI"):
+async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                       benchmark_start: str | None = None):
     """How much of the book sits in how few issuers, beside the index's own concentration.
 
      SAME ISSUER FOLDING AS ACTIVE SHARE (`build_issuer_weights`), so the two views cannot
@@ -2334,7 +2337,7 @@ async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str =
     from routers._portfolio_concentration import compute_concentration  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_concentration, [h.model_dump() for h in req.holdings], benchmark)
+        compute_concentration, [h.model_dump() for h in req.holdings], benchmark, benchmark_start)
 
 
 class ExposurePosition(BaseModel):

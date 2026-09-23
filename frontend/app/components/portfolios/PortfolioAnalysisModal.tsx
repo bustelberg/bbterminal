@@ -1592,6 +1592,49 @@ export function holdingsForCertificateScope(
   return lookThrough ? rows : collapseByCertificate(rows);
 }
 
+/** Both raw AIRS weight snapshots used by Risk, each on its complete-book denominator. */
+export function airsRiskHoldings(
+  rows: BookHolding[], lookThrough: boolean,
+): ActiveShareHolding[] {
+  const scoped = holdingsForCertificateScope(rows, lookThrough);
+  const currentTotal = scoped.reduce((sum, h) => sum + (h.current_value_eur ?? 0), 0);
+  const startTotal = scoped.reduce((sum, h) => sum + (h.start_value_eur ?? 0), 0);
+  return scoped.map((h) => {
+    const current = h.current_value_eur ?? 0;
+    const start = h.start_value_eur ?? 0;
+    const weightNow = currentTotal > 0 ? current / currentTotal * 100 : (h.weight_now_pct ?? 0);
+    return {
+      isin: h.isin,
+      name: h.name,
+      // Current remains the default for callers without the Risk basis switch.
+      weight_pct: weightNow,
+      weight_now_pct: weightNow,
+      weight_start_pct: startTotal > 0 ? start / startTotal * 100 : null,
+      is_fund: !!h.is_fund,
+      value_eur: h.current_value_eur,
+      currency: h.currency,
+    };
+  });
+}
+
+/** The literal AIRS rows used by the Risk weight info icons, on the identical scoped denominator. */
+export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean) {
+  const scoped = holdingsForCertificateScope(rows, lookThrough);
+  const componentName = (h: BookHolding) => h.name ?? h.isin ?? 'Holding';
+  const now = scoped.map((h) => ({
+    name: componentName(h), value_eur: h.current_value_eur ?? 0,
+  }));
+  const start = scoped.map((h) => ({
+    name: componentName(h), value_eur: h.start_value_eur ?? 0,
+  }));
+  return {
+    now,
+    start,
+    nowTotal: now.reduce((sum, row) => sum + row.value_eur, 0),
+    startTotal: start.reduce((sum, row) => sum + row.value_eur, 0),
+  };
+}
+
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
   lookThrough, onLookThroughChange, onTiming, onFundamental, onSectorOverride }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
@@ -3447,6 +3490,7 @@ export default function PortfolioAnalysisModal({
   /**  A CALLER WITH NOTHING TO CANCEL KEEPS THE OLD BUTTON — spinner, "Refreshing…", disabled.
    *  Painting a  it cannot honour would be the same broken control in the opposite direction. */
   const inert = stopping || (refreshing && !canStop);
+  const riskWeightContext = airsRiskWeightContext(data?.book_holdings ?? [], lookThrough);
 
   return (
     /*  THE BOOK'S FETCH TIME, FOR EVERY ⓘ IN HERE — this is what makes the modal and the row
@@ -3893,23 +3937,20 @@ export default function PortfolioAnalysisModal({
                `book_holdings`, NOT `holdings`: the latter is a COUNT on this payload
               (`holdings: int`), so the obvious name silently types as a number. */}
           <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
-            holdings={holdingsForCertificateScope(
-              data.book_holdings ?? [], lookThrough,
-            ).map((h): ActiveShareHolding => ({
-              isin: h.isin, name: h.name,
-              weight_pct: h.weight_now_pct ?? 0, is_fund: !!h.is_fund,
-              //  The euros and the currency this payload already carries. Only the
-              // Effective-positions view reads them — the other six are scale-free — but they
-              // ride on the ONE body so the seven views cannot end up describing seven
-              // slightly different portfolios.
-              value_eur: h.current_value_eur, currency: h.currency,
-            }))}
+            holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
             //  The book's dates travel with its weights. The panel cannot derive them — an array
             // of holdings carries no date — so without these its When line can only assume
             // "today", which is exactly what it used to do.
             portfolioName={name}
             portfolioAsOf={data.returns?.portfolio_as_of}
+            portfolioStartAsOf={
+              `${(data.returns?.portfolio_as_of ?? new Date().toISOString()).slice(0, 4)}-01-01`
+            }
             portfolioFetchedAt={data.holdings_fetched_at}
+            weightComponentsNow={riskWeightContext.now}
+            weightComponentsStart={riskWeightContext.start}
+            weightTotalNow={riskWeightContext.nowTotal}
+            weightTotalStart={riskWeightContext.startTotal}
             //  The two AIRS scans are different sources, and this modal is the only place that
             // knows which one it opened — a model portfolio's composition or an account's own
             // Vermogensoverzicht. Same distinction `source` already draws for the return.

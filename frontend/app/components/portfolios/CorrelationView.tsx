@@ -23,7 +23,6 @@
  * against that pair's 4.9). A second convention on a second matrix in the same app would be worse
  * than either.
  */
-import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
@@ -34,10 +33,10 @@ import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum } from './workedFormula';
 import type { RiskCorrelation } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
+import { riskRequestKey, useRiskResult } from './useRiskResult';
 
 const rho2 = (v: number | null | undefined) =>
   (v == null ? '—' : v.toFixed(2));
@@ -100,35 +99,18 @@ export default function CorrelationView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
-  const [data, setData] = useState<RiskCorrelation | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const key = `${benchmark}|monthly|${holdings.length}`
-    + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    void (async () => {
-      try {
-        const r = await apiFetch(
-          `${API_URL}/api/airs/portfolio/risk-correlation`
-          + `?benchmark=${encodeURIComponent(benchmark)}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ holdings }) });
-        const b = await r.json().catch(() => null);
-        if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        setError(null);
-        setData(b as RiskCorrelation);
-      } catch (e) {
-        traceError('risk-correlation', 'the correlations could not be computed', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  const requestUrl = `${API_URL}/api/airs/portfolio/risk-correlation`
+    + `?benchmark=${encodeURIComponent(benchmark)}`;
+  const requestBody = JSON.stringify({ holdings });
+  const key = riskRequestKey(requestUrl, requestBody);
+  const { data, error } = useRiskResult<RiskCorrelation>(key, async () => {
+    const r = await apiFetch(requestUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
+    });
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+    return b as RiskCorrelation;
+  }, 'risk-correlation', 'the correlations could not be computed');
 
   const labels = data?.labels ?? [];
   /** Every pair the matrix COULD have — n(n−1)/2.  Printed beside the measured count so a
@@ -356,7 +338,7 @@ export default function CorrelationView({
           )}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {`Today's stock sleeve at today's weights over ${data.years} years `}
+            {`The selected stock sleeve at the selected AIRS weights over ${data.years} years `}
             {`(${data.priced_holdings} of ${data.total_holdings} priced). `}
             A pair with fewer than {data.min_pair_observations} overlapping returns is left blank
             rather than tinted — over ten weeks a correlation is noise with a sign, and a coloured

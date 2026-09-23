@@ -18,7 +18,6 @@
  *  And the percentage is the least useful part. "−31.4%" is one number; "peaked 19 Feb, bottomed
  * 7 Apr after 33 days, back to level 12 Aug after another 91" is a conversation.
  */
-import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
@@ -28,10 +27,10 @@ import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { traceError } from '../../../lib/debugTrace';
 import { withWorked, subNum } from './workedFormula';
 import type { PortfolioDrawdown } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
+import { riskRequestKey, useRiskResult } from './useRiskResult';
 
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const day = (d: string | null | undefined) =>
@@ -77,35 +76,18 @@ export default function DrawdownView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
-  const [data, setData] = useState<PortfolioDrawdown | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const key = `${benchmark}|daily|${holdings.length}`
-    + `|${holdings.reduce((s, h) => s + h.weight_pct, 0).toFixed(4)}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    void (async () => {
-      try {
-        const r = await apiFetch(
-          `${API_URL}/api/airs/portfolio/drawdown`
-          + `?benchmark=${encodeURIComponent(benchmark)}`,
-          { method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ holdings }) });
-        const b = await r.json().catch(() => null);
-        if (cancelled) return;
-        if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        setError(null);
-        setData(b as PortfolioDrawdown);
-      } catch (e) {
-        traceError('drawdown', 'the drawdown could not be computed', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  const requestUrl = `${API_URL}/api/airs/portfolio/drawdown`
+    + `?benchmark=${encodeURIComponent(benchmark)}`;
+  const requestBody = JSON.stringify({ holdings });
+  const key = riskRequestKey(requestUrl, requestBody);
+  const { data, error } = useRiskResult<PortfolioDrawdown>(key, async () => {
+    const r = await apiFetch(requestUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
+    });
+    const b = await r.json().catch(() => null);
+    if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
+    return b as PortfolioDrawdown;
+  }, 'drawdown', 'the drawdown could not be computed');
 
   const unit = 'trading days';
   const worst = data?.worst;
@@ -278,7 +260,7 @@ export default function DrawdownView({
             {/*  THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as the tracking-error and
                 volatility footnotes. "Today's weights over 5 years" asserted a start date
                 instead of reporting one, and the paired grid rarely reaches the full five. */}
-            {`${portfolioName}'s stock sleeve at its current weights, priced from `}
+            {`${portfolioName}'s stock sleeve at the selected AIRS weights, priced from `}
             {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} `}
             {`(${data.priced_holdings} of ${data.total_holdings} priced). `}
             Durations are in {unit} of the selected cadence, not calendar days.

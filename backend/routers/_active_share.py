@@ -140,7 +140,8 @@ class IssuerError(Exception):
         self.reason = reason
 
 
-def build_issuer_weights(holdings: list[dict], benchmark: str) -> dict:
+def build_issuer_weights(holdings: list[dict], benchmark: str,
+                         benchmark_start: str | None = None) -> dict:
     """Both sides of the comparison, folded onto ISSUER keys and each summing to 100.
 
      SHARED BY ACTIVE SHARE AND CONCENTRATION so the two describe the same objects. Both ask
@@ -152,7 +153,7 @@ def build_issuer_weights(holdings: list[dict], benchmark: str) -> dict:
     `{key: {key, name, weight_pct}}`, each summing to 100. Raises `IssuerError` rather than
     returning a sentinel — every caller turns it into the same `{available: False, reason}`.
     """
-    from routers._asset_benchmark import members  # noqa: PLC0415  (module cycle)
+    from routers._asset_benchmark import index_rows, members  # noqa: PLC0415  (module cycle)
 
     # ── the book: individual stocks only, renormalised to 1 ────────────────────────────────────
     total_all = sum(float(h.get("weight_pct") or 0) for h in holdings)
@@ -185,20 +186,43 @@ def build_issuer_weights(holdings: list[dict], benchmark: str) -> dict:
     port = _fold(p_entries)
 
     # ── the index: cap weights over the names we can price ─────────────────────────────────────
-    mem, coverage = members(benchmark)
-    cap_total = sum(float(m.get("market_cap_eur") or 0) for m in mem)
-    if not mem or cap_total <= 0:
-        raise IssuerError(f"No priced constituents for {benchmark}.")
-    bench = _fold([(_issuer_key(m.get("company_name")) or f"isin:{(m.get('isin') or '').upper()}",
-                    m.get("company_name") or "", float(m.get("market_cap_eur") or 0) / cap_total * 100.0)
-                   for m in mem if float(m.get("market_cap_eur") or 0) > 0])
+    if benchmark_start:
+        # Match Attribution's benchmark snapshot. `index_rows` rolls each current cap back to the
+        # opening price and applies the benchmark's own cap rule, so a January AIRS book is never
+        # compared with September ACWI weights.
+        mem, coverage = index_rows(benchmark, benchmark_start)
+        positive = [m for m in mem if float(m.get("weight_pct") or 0) > 0]
+        if not positive:
+            raise IssuerError(f"No priced constituents for {benchmark} at {benchmark_start}.")
+        bench = _fold([
+            (_issuer_key(m.get("company_name")) or f"isin:{(m.get('isin') or '').upper()}",
+             m.get("company_name") or "", float(m["weight_pct"]))
+            for m in positive
+        ])
+        dates = [m.get("start_date") for m in positive if m.get("start_date")]
+        coverage = {**coverage,
+                    "caps_from": min(dates) if dates else benchmark_start,
+                    "caps_to": max(dates) if dates else benchmark_start,
+                    "caps_unstamped": len(positive) - len(dates)}
+    else:
+        mem, coverage = members(benchmark)
+        cap_total = sum(float(m.get("market_cap_eur") or 0) for m in mem)
+        if not mem or cap_total <= 0:
+            raise IssuerError(f"No priced constituents for {benchmark}.")
+        bench = _fold([
+            (_issuer_key(m.get("company_name")) or f"isin:{(m.get('isin') or '').upper()}",
+             m.get("company_name") or "",
+             float(m.get("market_cap_eur") or 0) / cap_total * 100.0)
+            for m in mem if float(m.get("market_cap_eur") or 0) > 0
+        ])
 
 
     return {"port": port, "bench": bench, "stocks_w": stocks_w, "total_all": total_all,
             "unresolved": unresolved, "coverage": coverage}
 
 
-def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
+def compute_active_share(holdings: list[dict], benchmark: str,
+                         benchmark_start: str | None = None) -> dict:
     """Active share of the book's individual stocks against `benchmark`.
 
     `holdings` are the rows the Analyse modal is already showing — `{isin, weight_pct, name,
@@ -207,12 +231,30 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
     a number the table cannot be made to reproduce.
     """
     try:
-        built = build_issuer_weights(holdings, benchmark)
+        built = build_issuer_weights(holdings, benchmark, benchmark_start)
     except IssuerError as e:
         return {"available": False, "reason": e.reason, "benchmark": benchmark}
-    port, bench = built["port"], built["bench"]
+    sleeve_port, bench = built["port"], built["bench"]
     stocks_w, total_all = built["stocks_w"], built["total_all"]
     unresolved, coverage = built["unresolved"], built["coverage"]
+
+    # Show actual AIRS whole-book weights. The shared builder also serves Concentration's sleeve
+    # profile, so scale that vector back here and explicitly retain the rest of the book.
+    sleeve_share = stocks_w / total_all if total_all > 0 else 0.0
+    port = {
+        key: {**row, "weight_pct": float(row["weight_pct"]) * sleeve_share}
+        for key, row in sleeve_port.items()
+    }
+    residual_key = "__other_portfolio_positions__"
+    residual_pct = max(0.0, 100.0 - sum(r["weight_pct"] for r in port.values()))
+    if residual_pct > 1e-12:
+        port[residual_key] = {
+            "key": residual_key,
+            "name": "Other portfolio positions",
+            "weight_pct": residual_pct,
+        }
+    unresolved = [{**row, "weight_pct": float(row["weight_pct"]) * sleeve_share}
+                  for row in unresolved]
 
     # ── ½ Σ |wᵖ − wᵇ| over the UNION ───────────────────────────────────────────────────────────
     rows: list[dict] = []
@@ -225,11 +267,12 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
             "benchmark_pct": b,
             "active_pct": p - b,
             "held": key in port,
+            "residual": key == residual_key,
         })
     active_share = sum(abs(r["active_pct"]) for r in rows) / 2.0
     overlap = sum(min(r["portfolio_pct"], r["benchmark_pct"]) for r in rows)
 
-    held = [r for r in rows if r["held"]]
+    held = [r for r in rows if r["held"] and not r["residual"]]
     in_bench = [r for r in held if r["benchmark_pct"] > 0]
     return {
         "available": True,
@@ -246,7 +289,7 @@ def compute_active_share(holdings: list[dict], benchmark: str) -> dict:
         # rather than re-derived on the client, which would be a second definition of "a stock".
         "stocks_weight": stocks_w,
         "total_weight": total_all,
-        "n_holdings": len(port),
+        "n_holdings": len(held),
         "n_in_benchmark": len(in_bench),
         # The book's weight that sits in names the index does not hold at all — the part of active
         # share that is SELECTION rather than sizing.

@@ -131,19 +131,20 @@ def build_paired_series(holdings: list[dict], benchmark: str,
 
     #  The sleeve, exactly as active share defines it — individual stocks with an ISIN, renormalised
     # to 1. Funds and cash are dropped, not zero-weighted; see `_active_share`.
+    total_book_w = sum(max(0.0, float(h.get("weight_pct") or 0)) for h in holdings)
     stocks = [h for h in holdings
               if not h.get("is_fund")
               and (h.get("isin") or "").strip()
               and float(h.get("weight_pct") or 0) > 0]
-    total_w = sum(float(h["weight_pct"]) for h in stocks)
-    if total_w <= 0:
+    stocks_w = sum(float(h["weight_pct"]) for h in stocks)
+    if stocks_w <= 0 or total_book_w <= 0:
         raise SeriesError("This book holds no individual stocks with an ISIN to compare.")
 
     names: dict[str, str] = {}
     weight: dict[str, float] = {}
     for h in stocks:
         k = (h["isin"] or "").strip().upper()
-        weight[k] = weight.get(k, 0.0) + float(h["weight_pct"]) / total_w
+        weight[k] = weight.get(k, 0.0) + float(h["weight_pct"]) / total_book_w
         if h.get("name"):
             names.setdefault(k, str(h["name"]))
     isins = sorted(weight)
@@ -216,7 +217,8 @@ def build_paired_series(holdings: list[dict], benchmark: str,
                 per_holding[i].append(None)
         if den <= 0:
             continue
-        rp = num / den
+        # The unpriced and non-stock remainder stays in the AIRS denominator, as in Attribution.
+        rp = num
         port.append(rp)
         bench_r.append(rb)
         active.append(rp - rb)

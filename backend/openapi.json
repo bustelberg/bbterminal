@@ -267,6 +267,11 @@
             "default": 0.0,
             "title": "Portfolio Pct",
             "type": "number"
+          },
+          "residual": {
+            "default": false,
+            "title": "Residual",
+            "type": "boolean"
           }
         },
         "required": [
@@ -18895,6 +18900,22 @@
               "title": "Benchmark",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "benchmark_start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark Start"
+            }
           }
         ],
         "requestBody": {
@@ -18948,6 +18969,22 @@
               "default": "ACWI",
               "title": "Benchmark",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark_start",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark Start"
             }
           }
         ],

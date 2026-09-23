@@ -13,22 +13,23 @@ const money = (value: number, locale: string) => new Intl.NumberFormat(locale, {
 
 /** The literal AIRS rows behind one opening weight—no symbolic algebra or hidden subtotal. */
 export default function AirsWeightCalculation({ components, numerator, denominator, result,
-  holdingName }: {
+  holdingName, valueLabel = 'Beginwaarde' }: {
   components: AirsWeightComponent[];
   numerator: number;
   denominator: number;
   result: string;
   holdingName: string;
+  valueLabel?: string;
 }) {
   const [lang] = useLang();
   const locale = lang === 'nl' ? 'nl-NL' : 'en-GB';
   const copy = lang === 'nl' ? {
     heading: 'Werkelijke AIRS-waarden (VOLK)',
-    sum: `Som van ${components.length} Beginwaarde-regels`,
+    sum: `Som van ${components.length} ${valueLabel}-regels`,
     result: 'Uiteindelijke weging',
   } : {
     heading: 'Actual AIRS values (VOLK)',
-    sum: `Sum of ${components.length} Beginwaarde rows`,
+    sum: `Sum of ${components.length} ${valueLabel} rows`,
     result: 'Resulting weight',
   };
 

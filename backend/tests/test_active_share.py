@@ -105,7 +105,7 @@ class TestTheIssuerNotTheLine:
 
 
 class TestTheDenominator:
-    def test_funds_cash_and_unpriceable_lines_are_dropped_and_the_rest_renormalised(self, monkeypatch):
+    def test_stocks_keep_their_whole_book_weight_and_the_rest_is_explicit(self, monkeypatch):
         """ THE STATED ASSUMPTION: the individual stocks ARE 100% of the compared portfolio. A
         fund left in at its real weight would count as a bet against every index name at once."""
         _bench(monkeypatch, [("Apple Inc", 100.0)])
@@ -115,7 +115,11 @@ class TestTheDenominator:
             _h("iShares Core MSCI World", "IE1", 50, is_fund=True),
             _h("Liquiditeiten", "", 25),
         ], "ACWI")
-        assert got["active_share_pct"] < 1e-9, "the one stock IS the index once renormalised"
+        companies = [r for r in got["rows"] if r["held"] and not r["residual"]]
+        residual = [r for r in got["rows"] if r["residual"]]
+        assert sum(r["portfolio_pct"] for r in companies) == 25.0
+        assert len(residual) == 1 and residual[0]["portfolio_pct"] == 75.0
+        assert got["active_share_pct"] == 75.0
         #  And the renormalisation is reported, never silent — 25 of 100 is the sleeve compared.
         assert abs(got["stocks_pct"] - 25.0) < 1e-9
 
@@ -138,6 +142,24 @@ class TestTheDenominator:
 
 
 class TestWhatItRefusesToHide:
+    def test_start_basis_uses_the_same_opening_index_weights_as_attribution(self, monkeypatch):
+        import routers._asset_benchmark as B
+        monkeypatch.setattr(B, "index_rows", lambda label, start: ([
+            {"company_name": "Apple Inc", "isin": "US0", "weight_pct": 25.0,
+             "start_date": "2026-01-02"},
+            {"company_name": "Microsoft Corp", "isin": "US1", "weight_pct": 75.0,
+             "start_date": "2026-01-02"},
+        ], {"covered_pct": 99.0}))
+        monkeypatch.setattr(B, "members", lambda _label: (_ for _ in ()).throw(
+            AssertionError("current caps must not be read for a start snapshot")))
+        _grid(monkeypatch, {"US1": "Microsoft Corp"})
+
+        got = A.compute_active_share([_h("Microsoft", "US1", 100)], "ACWI", "2026-01-01")
+
+        assert got["active_share_pct"] == 25.0
+        assert got["benchmark_caps_from"] == "2026-01-02"
+        assert got["benchmark_caps_to"] == "2026-01-02"
+
     def test_it_reports_how_much_of_the_index_it_could_price(self, monkeypatch):
         """ A MISSING CONSTITUENT INFLATES THE WEIGHT OF THE REST (renormalisation), so an
         unpriceable name we do not hold makes active share read slightly LOW. Never exact."""
