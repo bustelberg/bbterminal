@@ -3828,6 +3828,8 @@ class AirsHoldingIsin(BaseModel):
     # company universe.  A sector override is a company-wide management choice
     # and therefore deliberately unavailable for funds/unmapped instruments.
     company_id: int | None = None
+    # Source sector beneath a company-wide override, so "Automatic" can name what it restores.
+    sector_default: str | None = None
     sector_overridden: bool | None = None
     country: str | None = None
     continent: str | None = None

@@ -6,6 +6,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { ValueBadge } from '../../../lib/dynamicValue';
 import { startJob } from '../../../lib/stores/jobs';
+import { startSectorOverride } from '../../../lib/sectorOverride';
 import { Field, TipCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
 import { formatPct, visibleBuckets } from './composition';
@@ -3309,20 +3310,14 @@ export default function PortfolioAnalysisModal({
   const [reloadSeq, setReloadSeq] = useState(0);
   const saveSectorOverride = async (sector: string | null) => {
     if (sectorFor?.company_id == null) return;
-    const response = await apiFetch(`${API_URL}/api/companies/${sectorFor.company_id}/sector-override`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sector }),
+    startSectorOverride({
+      companyId: sectorFor.company_id,
+      companyName: sectorFor.name ?? sectorFor.isin ?? `Company ${sectorFor.company_id}`,
+      sector,
+      automaticSector: sectorFor.sector_default ?? sectorFor.sector,
+      afterSave: () => setReloadSeq((value) => value + 1),
     });
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { detail?: string } | null;
-      await dialog.alert(body?.detail ?? `Could not save the sector (HTTP ${response.status}).`,
-        { title: 'Sector not saved' });
-      return;
-    }
     setSectorFor(null);
-    // The override affects table rows, allocation bars and attribution. Re-read the one shared
-    // payload rather than locally patching three views that each derive from it.
-    setReloadSeq((value) => value + 1);
   };
   const refreshBenchmarkData = async () => {
     setRefreshingBenchmarkData(true);

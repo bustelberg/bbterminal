@@ -1923,6 +1923,17 @@
             ],
             "title": "Sector"
           },
+          "sector_default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Default"
+          },
           "sector_overridden": {
             "anyOf": [
               {
