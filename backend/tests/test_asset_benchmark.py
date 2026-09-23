@@ -38,16 +38,17 @@ def index(monkeypatch):
         "universe_membership": [{"universe_id": 9, "company_id": c} for c in (1, 2, 3)],
         "universe_asset_membership": [{"universe_id": 9, "analysis_id": a} for a in (10, 20)],
         "asset_grid": [
-            {"analysis_id": 10, "isin": "US-A", "yahoo_symbol": "AAA", "name": "Alpha Inc",
+            {"analysis_id": 10, "company_id": 1, "isin": "US-A", "yahoo_symbol": "AAA", "name": "Alpha Inc",
              "gf_company_name": "Alpha Inc", "currency": "USD", "market_cap_eur": 1_000.0,
              "market_cap_currency": "USD", "status": "ok", "bars": 900, "is_default": True,
              "delisted_at": None, "out_of_scope_at": None},
-            {"analysis_id": 20, "isin": "US-B", "yahoo_symbol": "BBB", "name": "Beta Inc",
+            {"analysis_id": 20, "company_id": 2, "isin": "US-B", "yahoo_symbol": "BBB", "name": "Beta Inc",
              "gf_company_name": "Beta Inc", "currency": "USD", "market_cap_eur": 500.0,
              "market_cap_currency": "USD", "status": "ok", "bars": 800, "is_default": True,
              "delisted_at": None, "out_of_scope_at": None},
         ],
         "asset_analysis": [],
+        "company": [],
     })
     monkeypatch.setattr(ab, "supabase", fake)
     return fake, ab
@@ -65,7 +66,7 @@ def _add_share_classes(fake, *classes) -> None:
         aid = 30 + i
         fake.tables["universe_asset_membership"].append({"universe_id": 9, "analysis_id": aid})
         fake.tables["asset_grid"].append(
-            {"analysis_id": aid, "isin": f"US-ALPHABET-{i}", "yahoo_symbol": symbol,
+            {"analysis_id": aid, "company_id": 100, "isin": f"US-ALPHABET-{i}", "yahoo_symbol": symbol,
              "name": f"Alphabet Inc {'AC'[i]}", "gf_company_name": "Alphabet Inc",
              "currency": "USD", "market_cap_eur": cap, "market_cap_currency": "USD",
              "status": "ok", "bars": 5000, "is_default": True,
@@ -223,6 +224,39 @@ class TestCoverageIsNeverAssumed:
         assert {m["isin"] for m in out} == {"US-A"}
         assert coverage["priced"] == 1
         assert coverage["covered_pct"] == pytest.approx(100 / 3)
+
+    def test_company_cap_is_the_exact_id_fallback_when_yahoo_has_none(self, index):
+        """Investor AB has prices but Yahoo supplies no marketCap; the verified company cap keeps
+        the constituent in ACWI without introducing a name-based join."""
+        fake, ab_mod = index
+        for r in fake.tables["asset_grid"]:
+            if r["analysis_id"] == 20:
+                r["market_cap_eur"] = None
+        fake.tables["company"].append({
+            "company_id": 2, "market_cap_eur": 650.0,
+            "market_cap_native": 7_100.0, "market_cap_currency": "SEK",
+            "market_cap_date": "2026-06-15",
+        })
+
+        out, coverage = ab_mod.members("SP500")
+
+        beta = next(m for m in out if m["isin"] == "US-B")
+        assert beta["market_cap_eur"] == pytest.approx(650.0)
+        assert beta["market_cap_source"] == "company_fallback"
+        assert coverage["priced"] == 2
+
+    def test_membership_identity_keeps_a_capless_constituent_visible(self, index):
+        """Overlap is a membership statement, not a market-cap coverage statement."""
+        fake, ab_mod = index
+        for r in fake.tables["asset_grid"]:
+            if r["analysis_id"] == 20:
+                r["market_cap_eur"] = None
+
+        out, coverage = ab_mod.members("SP500", include_membership_identity=True)
+
+        assert {m["isin"] for m in out} == {"US-A"}
+        assert set(coverage["_member_isins"]) == {"US-A", "US-B"}
+        assert set(coverage["_member_names"]) == {"Alpha Inc", "Beta Inc"}
 
 
 class TestThePortfolioAndTheBenchmarkSharePriceUniverse:

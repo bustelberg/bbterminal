@@ -56,7 +56,7 @@ from routers._benchmark_index import (
 
 _log = logging.getLogger(__name__)
 
-_BENCH_GRID_COLS = ("isin,analysis_id,yahoo_symbol,name,gf_company_name,currency,"
+_BENCH_GRID_COLS = ("isin,analysis_id,company_id,yahoo_symbol,name,gf_company_name,currency,"
                     "market_cap_eur,market_cap_currency,status,bars,is_default,"
                     "delisted_at,out_of_scope_at")
 
@@ -386,7 +386,7 @@ def cap_stamp_range(rows: list[dict]) -> tuple[str | None, str | None, int]:
     return stamps[0], stamps[-1], len(rows) - len(stamps)
 
 
-def members(label: str) -> tuple[list[dict], dict]:
+def members(label: str, *, include_membership_identity: bool = False) -> tuple[list[dict], dict]:
     """The index's constituents, priced from the ASSET world. Returns (members, coverage).
 
     Shaped for `_benchmark_index._window_rows`, which keys prices by `company_id` — here that
@@ -412,7 +412,10 @@ def members(label: str) -> tuple[list[dict], dict]:
     #   with 129 of the 1,807 not among the 1,998. See `_file_only_count`.
     ids = _universe_company_ids(label)
     if not ids:
-        return [], {"universe_members": 0, "priced": 0, "covered_pct": None}
+        coverage = {"universe_members": 0, "priced": 0, "covered_pct": None}
+        if include_membership_identity:
+            coverage.update({"_member_isins": [], "_member_names": []})
+        return [], coverage
 
     aids = _universe_analysis_ids(label)
     # One copy for the whole universe (502 ids) instead of three chunked round trips.
@@ -422,6 +425,14 @@ def members(label: str) -> tuple[list[dict], dict]:
         for i in range(0, len(aids), IN_CHUNK_SIZE):
             grid_rows += (supabase.table("asset_grid").select(_BENCH_GRID_COLS)
                           .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or [])
+
+    # Membership and calculability are different facts. A constituent without a Yahoo market cap
+    # cannot yet carry a cap weight, but it is still in the index. Attribution optionally needs
+    # this identity set so a missing cap cannot become the false claim "not in ACWI".
+    member_isins = sorted({str(r["isin"]).strip().upper() for r in grid_rows if r.get("isin")})
+    member_names = sorted({str(r.get("gf_company_name") or r.get("name")).strip()
+                           for r in grid_rows
+                           if r.get("gf_company_name") or r.get("name")})
 
     #  One row per analysis asset, not per listing. `asset_grid` is one row per EXECUTION, so a
     #   company traded on several venues appears several times — measured on the S&P, 501 assets
@@ -458,6 +469,22 @@ def members(label: str) -> tuple[list[dict], dict]:
                   .in_("analysis_id", priced_aids[i:i + IN_CHUNK_SIZE]).execute().data or []):
             caps[r["analysis_id"]] = r
 
+    # Yahoo legitimately omits `marketCap` for some healthy primary listings. Investor AB
+    # (`INVE-B.ST`) is one: prices and ACWI membership are present, but a null asset cap used to
+    # remove it from the benchmark. The company pipeline already has a verified EUR cap. Use that
+    # only when the asset cap is absent and only through the exact company_id -- never by name.
+    fallback_ids = sorted({int(g["company_id"]) for g in grid.values()
+                           if float(g.get("market_cap_eur") or 0) <= 0
+                           and g.get("company_id") is not None})
+    company_caps: dict[int, dict] = {}
+    for i in range(0, len(fallback_ids), IN_CHUNK_SIZE):
+        for r in (supabase.table("company")
+                  .select("company_id,market_cap_eur,market_cap_native,"
+                          "market_cap_currency,market_cap_date")
+                  .in_("company_id", fallback_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            if float(r.get("market_cap_eur") or 0) > 0:
+                company_caps[int(r["company_id"])] = r
+
     #  One company, one row — and the asset world does not make this unnecessary. Keying
     #   membership on `analysis_id` collapses a company's LISTINGS, not its SHARE CLASSES: those
     #   have different ISINs, hence different assets. Measured on the S&P after the repoint,
@@ -471,7 +498,9 @@ def members(label: str) -> tuple[list[dict], dict]:
     #   brought a company row with it.
     by_name: dict[str, dict] = {}
     for aid, g in grid.items():
-        cap = float(g.get("market_cap_eur") or 0)
+        fallback = (company_caps.get(int(g["company_id"]))
+                    if g.get("company_id") is not None else None)
+        cap = float(g.get("market_cap_eur") or (fallback or {}).get("market_cap_eur") or 0)
         if cap <= 0:
             continue                      # no cap to weight it by
         prov = caps.get(aid) or {}
@@ -487,10 +516,14 @@ def members(label: str) -> tuple[list[dict], dict]:
                 "currency": g.get("currency"),
                 "market_cap_eur": cap,
                 # Provenance only — nothing downstream weights off these.
-                "market_cap_native": prov.get("market_cap_native"),
-                "market_cap_currency": (prov.get("market_cap_currency")
+                "market_cap_native": (prov.get("market_cap_native")
+                                      or (fallback or {}).get("market_cap_native")),
+                "market_cap_currency": ((fallback or {}).get("market_cap_currency")
+                                        if fallback else prov.get("market_cap_currency")
                                         or g.get("market_cap_currency")),
-                "market_cap_checked_at": prov.get("market_cap_checked_at"),
+                "market_cap_checked_at": ((fallback or {}).get("market_cap_date")
+                                          if fallback else prov.get("market_cap_checked_at")),
+                "market_cap_source": "company_fallback" if fallback else "asset_yahoo",
             }
 
     out = list(by_name.values())
@@ -538,6 +571,8 @@ def members(label: str) -> tuple[list[dict], dict]:
         # missing", which is what `covered_pct` is for.
         "missing_countries": missing_countries,
     }
+    if include_membership_identity:
+        coverage.update({"_member_isins": member_isins, "_member_names": member_names})
     return out, coverage
 
 
@@ -584,7 +619,8 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
     return out
 
 
-def index_rows(label: str, start: str) -> tuple[list[dict], dict]:
+def index_rows(label: str, start: str, *,
+               include_membership_identity: bool = False) -> tuple[list[dict], dict]:
     """The index's CONSTITUENTS over one window — each with its start-of-window weight and its
     EUR return. Returns (rows, coverage).
 
@@ -595,7 +631,7 @@ def index_rows(label: str, start: str) -> tuple[list[dict], dict]:
     """
     from datetime import date, timedelta  # noqa: PLC0415
 
-    mem, coverage = members(label)
+    mem, coverage = members(label, include_membership_identity=include_membership_identity)
     if not mem:
         return [], coverage
     lookback = (date.fromisoformat(start) - timedelta(days=45)).isoformat()

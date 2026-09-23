@@ -183,7 +183,13 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         i["name"] = _display_name(i.get("grid_row"), i.get("airs_name"))
 
     # --- the benchmark ------------------------------------------------------------------
-    bench, coverage = index_rows(benchmark_label, start)
+    bench, coverage = index_rows(
+        benchmark_label, start, include_membership_identity=True)
+    # Internal matching keys, not coverage data for the client. They include real index members
+    # that lack a cap or window return. Such a data gap may exclude a name from the attribution
+    # maths, but must not relabel a held constituent as "outside ACWI".
+    benchmark_member_isins = set(coverage.pop("_member_isins", []))
+    benchmark_member_names = list(coverage.pop("_member_names", []))
     bgrid = _grid(sorted({b["isin"] for b in bench if b.get("isin")}))
     b_by_bucket: dict[str, list[tuple[float, float]]] = {}
     # The index's NAMES per bucket, for the click-through detail (b_by_bucket keeps only the
@@ -331,7 +337,11 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         p_isins = {h["isin"] for h in p_hold if h.get("isin")}
         b_isins = {h["isin"] for h in b_hold_all if h.get("isin")}
         for h in p_hold:
-            h["in_both"] = _overlaps(h, b_isins, b_names)
+            h["in_both"] = _overlaps(
+                h,
+                benchmark_member_isins or b_isins,
+                benchmark_member_names or b_names,
+            )
         # The full index bucket — the drill-down lists every constituent (sorted client-side); no
         # cap. Sorted largest-weight first so the default view is meaningful before any re-sort.
         b_hold = b_hold_all

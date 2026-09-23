@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   airsRiskHoldings, airsRiskWeightContext, applyCompanySectorOverride, collapseByCertificate,
-  holdingsForCertificateScope, individualStocksBasket,
+  holdingsForCertificateScope, individualStocksBasket, sectorDiffersFromOriginal,
   syntheticAirsName, syntheticBasket,
 } from './PortfolioAnalysisModal';
 import { holdingsOnRiskBasis } from './ActiveSharePanel';
@@ -183,5 +183,17 @@ describe('company sector override paint', () => {
     expect(updated.book_holdings?.[0]).toMatchObject({
       sector: 'Technology', sector_default: 'Technology', sector_overridden: false,
     });
+  });
+
+  it('marks only an override that actually differs from the original sector', () => {
+    expect(sectorDiffersFromOriginal({
+      sector: 'Financials', sector_default: 'Technology', sector_overridden: true,
+    } as never)).toBe(true);
+    expect(sectorDiffersFromOriginal({
+      sector: 'Technology', sector_default: 'Technology', sector_overridden: true,
+    } as never)).toBe(false);
+    expect(sectorDiffersFromOriginal({
+      sector: 'Financials', sector_default: 'Technology', sector_overridden: false,
+    } as never)).toBe(false);
   });
 });

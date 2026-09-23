@@ -805,6 +805,11 @@ export function applyCompanySectorOverride(
   };
 }
 
+export function sectorDiffersFromOriginal(holding: BookHolding): boolean {
+  return Boolean(holding.sector_overridden && holding.sector && holding.sector_default
+    && holding.sector !== holding.sector_default);
+}
+
 function SectorOverrideDialog({ holding, onClose, onSave }: {
   holding: BookHolding;
   onClose: () => void;
@@ -2424,6 +2429,18 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           </svg>
                         </button>
                       )}
+                      {sectorDiffersFromOriginal(h) && (
+                        <span title={`Sector changed from ${h.sector_default} to ${h.sector}`}
+                          aria-label={`Sector changed from ${h.sector_default} to ${h.sector}`}>
+                          <svg viewBox="0 0 16 16" aria-hidden="true"
+                            className="h-3.5 w-3.5 text-accent-400">
+                            <circle cx="8" cy="8" r="7" fill="currentColor" />
+                            <path d="m4.75 8.1 2.05 2.05 4.45-4.45" fill="none"
+                              stroke="var(--color-card)" strokeWidth="1.6"
+                              strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      )}
                     </span>
                   </td>
                   {/*  THE ONE COLOURED COLUMN OF THE THREE. Momentum has a SIGN — up or down is
@@ -3455,7 +3472,6 @@ export default function PortfolioAnalysisModal({
         }
         setLoadedFor(viewKey);
         setData(b);
-        reloadWaiters.current.splice(0).forEach((waiter) => waiter.resolve());
       } catch (e) {
         traceError('analyse', 'the composition could not be loaded', e);
         if (!cancelled) {
@@ -3470,6 +3486,16 @@ export default function PortfolioAnalysisModal({
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq]);
+
+  // Receiving the payload and displaying it are different moments. Keep the sector job running
+  // through the commit and the next paint, so its completed state cannot precede the changed row.
+  useEffect(() => {
+    if (loadedFor !== viewKey || reloadWaiters.current.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      reloadWaiters.current.splice(0).forEach((waiter) => waiter.resolve());
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [loadedFor, viewKey]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -3995,6 +4021,7 @@ export default function PortfolioAnalysisModal({
         <PanelDialog onClose={() => setWhy(null)}>
           <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
             source={source} lookThrough={lookThrough}
+            portfolioName={name}
             portfolioAsOf={data.returns?.portfolio_as_of}
             benchmarkAsOf={data.returns?.benchmark_as_of}
             onClose={() => setWhy(null)} />

@@ -202,6 +202,12 @@ class TestTheNameLegIsExactNotFuzzy:
         src = inspect.getsource(at.compute_attribution)
         assert src.count("_overlaps(") >= 3
 
+    def test_overlap_uses_membership_not_only_calculable_benchmark_rows(self):
+        """A missing market cap may remove a row from the maths, never from ACWI membership."""
+        src = inspect.getsource(at.compute_attribution)
+        assert "include_membership_identity=True" in src
+        assert "benchmark_member_isins or b_isins" in src
+
 
 class TestOneNameVocabularyAcrossBothSides:
     """The model side speaks AIRS's fund label ("AMD", "Applied"); the index side speaks the
@@ -237,4 +243,6 @@ class TestTheBenchmarkWeightsAreTheSAMEONES:
         # two prices a window actually reads. What must not change is which function weights it.
         assert "_window_rows(" in inspect.getsource(ab.index_rows)
         assert "index_weights(" in inspect.getsource(ab.index_rows)
-        assert "index_rows(benchmark_label, start)" in inspect.getsource(at.compute_attribution)
+        attribution_src = inspect.getsource(at.compute_attribution)
+        assert "index_rows(" in attribution_src
+        assert "benchmark_label, start" in attribution_src

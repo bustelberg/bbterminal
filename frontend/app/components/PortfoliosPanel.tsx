@@ -550,7 +550,10 @@ export default function PortfoliosPanel() {
                     {/* stopPropagation: the row's own onClick expands the positions table, and a
                         button that also expanded the row would do two things on one press. */}
                     <button type="button"
-                      onClick={(e) => { e.stopPropagation(); setAnalyse({ id: r.id, name: r.name }); }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setAnalyse({ id: r.id, name: r.display_name || r.name });
+                      }}
                       disabled={noComposition(r)}
                       title={noComposition(r)
                         ? 'This portfolio has no fixed model — AIRS stores no composition for it, so there is nothing to analyse.'

@@ -14,6 +14,7 @@ import {
   workedSelection, workedTotal, workedWeight,
 } from './attributionFormulas';
 import AirsWeightCalculation from './AirsWeightCalculation';
+import ReturnCalculation from './ReturnCalculation';
 
 /**
  * WHY the model beat or lagged the index — Brinson-Fachler.
@@ -300,17 +301,17 @@ function BucketNames({ row, bucket, benchmark, startLabel, portfolioProvenance,
   return (
     <div className="space-y-2">
       {hasSharedHolding && (
-        <p className="text-[11px] text-fg-faint flex items-center gap-1.5">
+        <p className="text-[13px] text-fg-muted flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-accent-500 inline-block shrink-0 ring-2 ring-accent-500/25" />
           {copy.names.shared(benchmark)}
         </p>
       )}
       <div className="grid gap-4 lg:grid-cols-2 lg:items-start">
         <div>
-          <p className="text-[12px] font-medium text-fg-muted mb-1">
+          <p className="text-base font-medium text-fg-muted mb-1.5">
             {copy.names.yourHoldings} <span className="text-fg-faint">({mine.length})</span>
             {mine.length > 0 && (
-              <span className="text-fg-faint"> · {wt(sum(mine))}% {copy.names.attributableModel}</span>
+              <span className="text-fg-faint"> &middot; {wt(sum(mine))}%</span>
             )}
           </p>
           {mine.length
@@ -322,10 +323,10 @@ function BucketNames({ row, bucket, benchmark, startLabel, portfolioProvenance,
             )}
         </div>
         <div>
-          <p className="text-[12px] font-medium text-fg-muted mb-1">
+          <p className="text-base font-medium text-fg-muted mb-1.5">
             {benchmark} {copy.names.constituents} <span className="text-fg-faint">({theirs.length})</span>
             {theirs.length > 0 && (
-              <span className="text-fg-faint"> · {wt(sum(theirs))}% {copy.names.ofIndex}</span>
+              <span className="text-fg-faint"> &middot; {wt(sum(theirs))}%</span>
             )}
           </p>
           {theirs.length
@@ -342,9 +343,11 @@ function BucketNames({ row, bucket, benchmark, startLabel, portfolioProvenance,
 }
 
 export default function AttributionPanel({ id, benchmark, window, source = 'model',
-  lookThrough = false, portfolioAsOf, benchmarkAsOf, onClose }: {
+  lookThrough = false, portfolioName, portfolioAsOf, benchmarkAsOf, onClose }: {
   id: number; benchmark: string; window: 'ytd' | 'since';
   source?: 'model' | 'book';
+  /** Reader-facing nickname passed by the row that opened Analyse. */
+  portfolioName?: string;
   /** Match the parent modal's certificate-membership toggle. Off by default. */
   lookThrough?: boolean;
   portfolioAsOf?: string | null; benchmarkAsOf?: string | null;
@@ -482,6 +485,11 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     returnBasis: 'The EUR close at the end of the window against the close at the start.',
   };
   const hasRows = (data?.rows?.length ?? 0) > 0;
+  const attributionYear = data?.start?.slice(0, 4) ?? new Date().getUTCFullYear().toString();
+  const portfolioWeightTotal = (data?.rows ?? [])
+    .reduce((sum, row) => sum + n(row.portfolio_weight_pct), 0);
+  const benchmarkWeightTotal = (data?.rows ?? [])
+    .reduce((sum, row) => sum + n(row.benchmark_weight_pct), 0);
 
   return (
     <section className="h-full min-h-0 flex flex-col bg-card border border-accent-500/30
@@ -492,7 +500,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       <div className="shrink-0 flex items-start justify-between gap-3 mb-2">
         <div>
           <h4 className="text-sm font-semibold text-fg-strong">
-            {copy.chrome.title(label, benchmark)}
+            {copy.chrome.title(label, benchmark, portfolioName || data?.name || undefined)}
           </h4>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -571,9 +579,9 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
           {hasRows && <>
-          <div className="overflow-auto rounded-lg border border-neutral-800/40 mb-3">
+          <div className="overflow-x-auto rounded-lg border border-neutral-800/40 mb-3">
             <table className="w-full text-[12px]">
-              <thead className="bg-card">
+              <thead className="sticky top-0 z-[1] bg-card">
                 <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <Th align="left" label={w}
                     prov={<Provenance source="derived" column kind="formula" note={`the ${w}s`}
@@ -586,19 +594,19 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       the convention. A header that needs a hover to be read at all is a header
                       that will be guessed at instead. The tooltip formulas use the same words, so
                       the two cannot drift apart the way symbols and a missing key did. */}
-                  <Th label={copy.headers.yourWeight}
+                  <Th label={copy.headers.yourWeight(attributionYear)}
                     prov={<Provenance source={pWeightSource} column kind="formula"
                       what={`Your real AIRS opening weight in each ${w}, as a share of the complete book or model. Removed funds, cash and opaque certificates remain outside the rows without inflating the stocks to 100%.`}
                       note={`your weight in this ${w}`}
                       how={copy.prov.yourWeightHow(pWeightSrc)}
                       worked={workedWeight(null)} />} />
-                  <Th label={copy.headers.indexWeight}
+                  <Th label={copy.headers.indexWeight(attributionYear)}
                     prov={<Provenance source="benchmark_caps" column kind="formula"
                       what={`${benchmark}'s share in each ${w}, at the START of the window — weighting by today’s cap would be look-ahead.`}
                       note={`${benchmark} weight in this ${w}`}
                       how={copy.prov.indexWeightHow(benchmark)}
                       worked={workedWeight(null)} />} />
-                  <Th label={copy.headers.yourReturn}
+                  <Th label={copy.headers.yourReturn(attributionYear)}
                     prov={<Provenance source={pSrc} column kind="formula"
                       what={`What your holdings in each ${w} returned, in EUR. A dash means you hold nothing there.`}
                       note={`your return in this ${w}`}
@@ -607,7 +615,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   {/* The reference point. Allocation is scored against THIS number, so it has to
                       be on the screen — an over/underweight is judged by whether its sector beat
                       or lagged the index as a whole, not by whether it went up. */}
-                  <Th label={copy.headers.indexReturn}
+                  <Th label={copy.headers.indexReturn(attributionYear)}
                     prov={<Provenance source="benchmark" column kind="formula"
                       what={`What ${benchmark}'s holdings in each ${w} returned, in EUR.`}
                       note={`${benchmark} return in this ${w}`}
@@ -670,7 +678,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                           note={`your weight in ${r.bucket}`}
                           how={copy.prov.yourWeightHow(pWeightSrc)}
                           worked={workedWeight(`${wt(wP)}%`)} />}>
-                          {wt(wP)}
+                          {wt(wP)}%
                         </Num>
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
@@ -679,7 +687,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                           note={`${benchmark} weight in ${r.bucket}`}
                           how={copy.prov.indexWeightHow(benchmark)}
                           worked={workedWeight(`${wt(wB)}%`)} />}>
-                          {wt(wB)}
+                          {wt(wB)}%
                         </Num>
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
@@ -687,7 +695,9 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                           what={`What your ${r.bucket} holdings returned, in EUR.`}
                           note={`your return in ${r.bucket}`}
                           how={copy.prov.yourReturnHow(pReturnHow)}
-                          worked={workedReturn(rP)} legend={copy.prov.returnLegend(copy.prov.yours)} />}>
+                          worked={workedReturn(rP)} legend={copy.prov.returnLegend(copy.prov.yours)}
+                          calculation={<ReturnCalculation rows={r.portfolio_holdings ?? []}
+                            result={rP} bucket={r.bucket} owner={copy.prov.yours} />} />}>
                           {rP}
                         </Num>
                       </td>
@@ -696,7 +706,9 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                           what={`What ${benchmark}'s ${r.bucket} holdings returned, in EUR.`}
                           note={`${benchmark} return in ${r.bucket}`}
                           how={copy.prov.indexReturnHow(benchmark)}
-                          worked={workedReturn(rB)} legend={copy.prov.returnLegend(benchmark)} />}>
+                          worked={workedReturn(rB)} legend={copy.prov.returnLegend(benchmark)}
+                          calculation={<ReturnCalculation rows={r.benchmark_holdings ?? []}
+                            result={rB} bucket={r.bucket} owner={benchmark} />} />}>
                           {rB}
                         </Num>
                       </td>
@@ -748,7 +760,26 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               </tbody>
               <tfoot>
                 <tr className="border-t border-neutral-800/40 font-semibold">
-                  <td className="px-2 py-1.5 text-fg" colSpan={5}>{copy.headers.totalExcess}</td>
+                  <td className="px-2 py-1.5 text-fg">{copy.headers.totalExcess}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                    <Num prov={<Provenance source={pWeightSource} asOf={data.start} kind="formula"
+                      what={`Your combined opening weight across every displayed ${w}.`}
+                      note={`total displayed portfolio weight by ${w}`}
+                      how={`Every displayed ${w}'s real opening-book weight, summed. Positions outside this attribution remain outside this total.`} />}>
+                      {wt(portfolioWeightTotal)}%
+                    </Num>
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                    <Num prov={<Provenance source="benchmark_caps" asOf={data.start} kind="formula"
+                      what={`${benchmark}'s combined opening weight across every displayed ${w}.`}
+                      note={`total displayed ${benchmark} weight by ${w}`}
+                      how={`Every displayed ${w}'s opening index weight, summed.`} />}>
+                      {wt(benchmarkWeightTotal)}%
+                    </Num>
+                  </td>
+                  {/* Returns are weighted averages, not additive totals. Keep their two columns
+                      empty rather than putting a mathematically meaningless sum underneath. */}
+                  <td colSpan={2} />
                   <td className="px-2 py-1.5 text-right font-mono">
                     <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.allocation_pct), 0)}
                       prov={<Provenance source="derived" kind="formula" note="total allocation"
@@ -778,7 +809,20 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </table>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-3">
+          <details className="group rounded-lg border border-neutral-800/35 bg-card">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5
+                                text-[12px] text-fg-muted hover:bg-overlay/[0.02]">
+              <svg viewBox="0 0 16 16" aria-hidden="true"
+                className="h-3 w-3 shrink-0 text-fg-faint transition-transform group-open:rotate-90"
+                fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="m6 3 5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span className="font-semibold text-fg-strong">{copy.chrome.drivers}</span>
+              <span className="hidden text-fg-faint sm:inline">
+                &middot; {copy.chrome.driversHint}
+              </span>
+            </summary>
+            <div className="grid gap-5 border-t border-neutral-800/25 px-3 py-3 md:grid-cols-3">
             <Names title={copy.names.contributors} rows={data.top_contributors ?? []}
               hint={copy.names.weightReturnHint} weightSrc={pWeightSource} returnSrc={pSrc}
               weightAsOf={data.start} returnAsOf={benchmarkAsOf}
@@ -799,7 +843,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               owner={benchmark} held={false}
               weightHow="start-of-window cap weight"
               returnHow="EUR close at the window’s end ÷ its close at the start − 1" />
-          </div>
+            </div>
+          </details>
           </>}
         </>
       )}
