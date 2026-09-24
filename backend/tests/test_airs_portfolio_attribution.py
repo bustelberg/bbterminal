@@ -77,6 +77,11 @@ class TestTheIdentityIsTheWholePoint:
         assert 'h["weight_pct"] = h["weight_pct"] / p_w_total' not in src
         assert 'for h in holdings)' in src, "current weights also use the complete book denominator"
 
+    def test_dino_polskas_workbook_name_marks_the_held_company_as_acwi(self):
+        """Punctuation and corporate-form spelling cannot hide explicit workbook membership."""
+        holding = {"isin": "PLDINPL00011", "name": "Dino Polska S.A."}
+        assert at._overlaps(holding, set(), ["DINO POLSKA SA"]) is True
+
 
 class TestFundsAndCashAreNotASectorBet:
     """An ETF has no sector. In the `Fund (not looked through)` bucket the benchmark's weight is

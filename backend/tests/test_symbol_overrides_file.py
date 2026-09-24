@@ -66,3 +66,15 @@ class TestTheOverridesFileIsWellFormed:
         assert got["KYG5264Y1089"] == "3888.HK"    # Kingsoft, was 3K1.SG
         assert got["KYG5496K1242"] == "2331.HK"    # Li Ning, was LNLB.SG
         assert got["BMG677491539"] == "0316.HK"    # Orient Overseas, was ORI1.MU
+
+    def test_tsmc_ordinary_is_not_priced_from_the_us_adr(self):
+        """ACWI holds 2330.TW; `TSM` is a different security with a different ISIN."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["TW0002330008"] == "2330.TW"
+
+    def test_ferrovial_uses_the_listing_named_by_the_acwi_workbook(self):
+        """The file's `FER` on Bolsa de Madrid is `FER.MC`, not the 0P2N.IL line the automatic
+        resolver selected. An exact-symbol membership join can only work when both sides use the
+        workbook's listing."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["NL0015001FS8"] == "FER.MC"

@@ -65,6 +65,7 @@ _log = logging.getLogger(__name__)
 # Constellation Software appear outside ACWI while the workbook plainly contained it.
 _ACWI_FILE_MEMBERS_TTL_SECONDS = 60.0
 _acwi_file_members_cache: tuple[float, list[int]] | None = None
+_acwi_file_member_names_cache: tuple[float, list[str]] | None = None
 
 
 def _acwi_file_analysis_ids() -> list[int]:
@@ -84,6 +85,36 @@ def _acwi_file_analysis_ids() -> list[int]:
     ids = sorted({int(r["analysis_id"]) for r in rows if r.get("analysis_id") is not None})
     _acwi_file_members_cache = (now + _ACWI_FILE_MEMBERS_TTL_SECONDS, ids)
     return list(ids)
+
+
+def _acwi_file_member_names() -> list[str]:
+    """Every equity name the bundled iShares workbook calls an ACWI constituent.
+
+    This is IDENTITY ONLY. A name that cannot be resolved by ticker + venue must not enter the
+    benchmark's priced member set: doing that would let an H share borrow an A share's return.
+    Attribution's overlap marker already compares exact normalized company roots so two listings
+    of one business (Alphabet A/C, an ordinary/ADR, or Dino's 0TCP.IL/DNP.WA lines) read as the
+    same company without making the benchmark price a guessed security.
+    """
+    global _acwi_file_member_names_cache  # noqa: PLW0603 - one small process-local read cache
+
+    now = time.monotonic()
+    if (_acwi_file_member_names_cache is not None
+            and now < _acwi_file_member_names_cache[0]):
+        return list(_acwi_file_member_names_cache[1])
+
+    from index_universe.acwi.holdings import load_acwi_holdings  # noqa: PLC0415
+
+    holdings, _as_of = load_acwi_holdings()
+    names = sorted({str(h.get("Name") or "").strip()
+                    for h in holdings
+                    if (h.get("Asset Class") or "").strip() == "Equity"
+                    and str(h.get("Name") or "").strip()})
+    _acwi_file_member_names_cache = (
+        now + _ACWI_FILE_MEMBERS_TTL_SECONDS,
+        names,
+    )
+    return list(names)
 
 _BENCH_GRID_COLS = ("isin,analysis_id,company_id,yahoo_symbol,name,gf_company_name,currency,"
                     "market_cap_eur,market_cap_currency,status,bars,is_default,"
@@ -485,6 +516,15 @@ def members(label: str, *, include_membership_identity: bool = False) -> tuple[l
     member_names = sorted({str(r.get("gf_company_name") or r.get("name")).strip()
                            for r in grid_rows
                            if r.get("gf_company_name") or r.get("name")})
+    if include_membership_identity and label.strip().upper() == "ACWI":
+        try:
+            # Membership comes from the provider workbook even when its ticker/venue cannot be
+            # joined to the symbol our asset row currently uses. Names are used only by the exact
+            # company-root overlap test; they never enter the priced benchmark member set above.
+            member_names = sorted(set(member_names).union(_acwi_file_member_names()))
+        except Exception as e:  # noqa: BLE001 - resolved identities remain a valid fallback
+            _log.warning("[bench] ACWI workbook identity names failed (%s: %s); using resolved "
+                         "member names only", type(e).__name__, e)
 
     #  One row per analysis asset, not per listing. `asset_grid` is one row per EXECUTION, so a
     #   company traded on several venues appears several times — measured on the S&P, 501 assets

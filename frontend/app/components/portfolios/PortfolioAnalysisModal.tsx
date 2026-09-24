@@ -5,6 +5,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { ValueBadge } from '../../../lib/dynamicValue';
+import { track } from '../../../lib/loading';
 import { startJob } from '../../../lib/stores/jobs';
 import { startSectorOverride } from '../../../lib/sectorOverride';
 import { Field, TipCard } from '../../../lib/tipCard';
@@ -30,7 +31,6 @@ import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import OwnerEarningsModal from './OwnerEarningsModal';
-import LoadingDots from './LoadingDots';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
@@ -3449,7 +3449,7 @@ export default function PortfolioAnalysisModal({
     const analysisKey = viewKey;
     void (async () => {
       try {
-        const b = await loadPrefetchedAnalysis(analysisKey, async () => {
+        const analysis = loadPrefetchedAnalysis(analysisKey, async () => {
           const r = isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
@@ -3460,6 +3460,10 @@ export default function PortfolioAnalysisModal({
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
           return body as ModelPortfolioAnalysis;
         });
+        // Once a payload is already on screen, selection and refresh loads belong in the shared
+        // root-level request popup. Keeping this around the existing promise reports the same
+        // request without launching a second one; the cold-open loader remains inside the modal.
+        const b = await (data == null ? analysis : track('Updating charts', analysis));
         if (cancelled) return;
         //  Where the wait went. `apiFetch` already logs the round-trip total, but this endpoint
         // is one request covering eight different loads — so a 5-second "Loading overview…"
@@ -3917,11 +3921,6 @@ export default function PortfolioAnalysisModal({
               /* STOCKS: read-only sector / region / currency exposure versus the benchmark.
                  Brinson Attribution is the sole drill-down surface. */
               <>
-                {stale && (
-                  <p className="mb-3 text-[12px] text-fg-muted" aria-live="polite">
-                    Updating charts <LoadingDots />
-                  </p>
-                )}
                 {!data.benchmark_caps_from && (
                   <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-fg-muted">
                     <span>{data.benchmark} weights are waiting for their first daily refresh.</span>

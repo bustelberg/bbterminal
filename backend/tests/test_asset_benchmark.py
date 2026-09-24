@@ -164,6 +164,27 @@ class TestAcwiMembershipComesFromTheWorkbook:
 
         assert ab._universe_analysis_ids("SP500") == [10, 20]
 
+    def test_overlap_identity_includes_unresolved_workbook_companies(self, index, monkeypatch):
+        """Dino Polska is `DNP.WA` in the workbook while its stored execution was `0TCP.IL`.
+
+        That symbol mismatch may keep it out of the PRICED benchmark until its listing is repaired,
+        but it cannot turn the workbook's explicit membership into "outside ACWI" in Attribution.
+        The raw workbook name is identity-only and never adds an analysis id or a price series.
+        """
+        fake, ab_mod = index
+        fake.tables["universe"][0]["label"] = "ACWI"
+        monkeypatch.setattr(ab_mod, "_acwi_file_analysis_ids", lambda: [10, 20])
+        monkeypatch.setattr(
+            ab_mod,
+            "_acwi_file_member_names",
+            lambda: ["ALPHA INC", "BETA INC", "DINO POLSKA SA"],
+        )
+
+        out, coverage = ab_mod.members("ACWI", include_membership_identity=True)
+
+        assert {m["isin"] for m in out} == {"US-A", "US-B"}
+        assert "DINO POLSKA SA" in coverage["_member_names"]
+
 
 class TestTheWeightingIsREUSEDNotCopied:
     """ START-OF-WINDOW CAP WEIGHTS. Weighting by TODAY's cap is look-ahead bias — it turned
