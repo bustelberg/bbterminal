@@ -88,6 +88,8 @@ describe('Analyse primary-view copy', () => {
     const how = ANALYSE_COPY.en.info.moneyHow('€100', '€1,000', '+10.00%');
     expect(how).toContain('Opening value and purchases are negative cash flows');
     expect(how).toContain('Sales, net income and the final valuation are positive cash flows');
+    expect(how).toContain('discounted money invested equals discounted money received');
+    expect(how).toContain('signed discounted cash flows sum to zero');
     expect(how).toContain('Result: +10.00% over the actual holding period (not annualised)');
     expect(how).toContain('typeset equation and every input used are shown below');
     expect(ANALYSE_COPY.en.info.moneyAggregateNote).toContain('Individual position rows use dated XIRR');

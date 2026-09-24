@@ -72,9 +72,10 @@ function rows(): { line: number; cells: number }[] {
 describe('the Analyse modal holdings table', () => {
   it('finds every hand-written row, not just the header', () => {
     //  The count of rows is itself part of the check. If the parse silently matched only the
-    // header, the assertion below would pass over one row and prove nothing. Six: the thead, the
-    // class group row, the held row, the sold group row, the sold detail row, the grand total.
-    expect(rows().length).toBe(6);
+    // header, the assertion below would pass over one row and prove nothing. Seven: the thead, the
+    // class group row, the held row, the sector total, the sold group row, the sold detail row,
+    // and the grand total.
+    expect(rows().length).toBe(7);
   });
 
   it(' gives every row the SAME leading cells as the header, or its figures sit under the wrong titles', () => {
@@ -87,7 +88,7 @@ describe('the Analyse modal holdings table', () => {
     expect(offenders.map((r) => `line ${r.line}: ${r.cells} cells`)).toEqual([]);
   });
 
-  it('counts a colSpan as its span, or four of the six rows would look short', () => {
+  it('counts a colSpan as its span, or subtotal rows would look short', () => {
     // The guard on the guard: three rows span the text columns with `colSpan={3}`, and a checker
     // that counted them as one cell would report a misalignment in rows that are correct — which
     // is the failure mode that gets a check deleted rather than fixed.
@@ -116,20 +117,20 @@ describe('sold-position risk cells', () => {
  * Every gated money column appears in every row of the table — the same invariant one column to
  * the right of the one above, and the one the leading-block check cannot see.
  *
- *  A column added to five rows out of six shifts every figure after it, in exactly the rows it
+ *  A column added to six rows out of seven shifts every figure after it, in exactly the rows it
  * was forgotten in, and only while the reader has that group ticked. The header, the class
- * subtotal, the held row, the `No longer held` subtotal, the sold detail row and the grand total
- * each render the money block by hand; the file's own  has said "counted by hand in SIX places"
- * since 2026-08-21, and the leading-block test below it only guards what comes BEFORE the block.
+ * subtotal, the held row, the sector subtotal, the `No longer held` subtotal, the sold detail row
+ * and the grand total each render the money block by hand. The leading-block test above only guards
+ * what comes BEFORE the block.
  *
  *  It counts `show('k')` OCCURRENCES rather than parsing the rows, because that is the whole
- * claim: six renders per column, no more and no less. A column that legitimately has nothing to
+ * claim: seven renders per column, no more and no less. A column that legitimately has nothing to
  * show in a row still renders `<td />` — an empty cell occupies the column, a missing one does not.
  *
  * Pure — reads a file, no DOM.
  */
 describe('every money column is rendered in every row', () => {
-  it('six renders each, from the header to the grand total', () => {
+  it('seven renders each, from the header to the grand total', () => {
     const s = source();
     const keys = [...new Set([...s.matchAll(/show\('([a-z]+)'\)/g)].map((m) => m[1]))];
     //  The set is read off the file, not listed here — a new column joins this check by existing.
@@ -140,9 +141,9 @@ describe('every money column is rendered in every row', () => {
     const counts = Object.fromEntries(
       keys.map((k) => [k, [...s.matchAll(new RegExp(String.raw`show\('${k}'\)`, 'g'))].length]));
     const rows = Math.max(...Object.values(counts));
-    //  And a floor on the count itself, for the same reason: six is the number of rows that render
+    //  And a floor on the count itself, for the same reason: seven is the number of rows that render
     // the block, so anything less means this test stopped finding them rather than that they agree.
-    expect(rows).toBeGreaterThanOrEqual(6);
+    expect(rows).toBeGreaterThanOrEqual(7);
     expect(counts, `every column must render in all ${rows} rows`).toEqual(
       Object.fromEntries(keys.map((k) => [k, rows])));
   });
