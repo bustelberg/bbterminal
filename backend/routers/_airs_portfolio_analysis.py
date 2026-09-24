@@ -1052,6 +1052,9 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 # can both hold NVIDIA, and each book values its own position differently.
                 "sources": [{"label": folded_name or "via a certificate",
                                "model_id": target or fallback_model_id,
+                             "wrapper_name": r.get("holding_name"),
+                             "wrapper_start_value_eur": start,
+                             "wrapper_current_value_eur": cur,
                              "value_eur": cur * share,
                              "start_value_eur": start * share}],
             })
@@ -1217,7 +1220,12 @@ def _weigh_sources(sources: list[dict] | None, total_w: float) -> list[dict]:
             continue
         key = (s.get("label"), s.get("model_id"))
         cur = agg.setdefault(key, {"label": key[0], "model_id": key[1],
-                                   "value_eur": 0.0, "start_value_eur": 0.0})
+                                   "value_eur": 0.0, "start_value_eur": 0.0,
+                                   # Repeated on every child leg and deliberately not summed.
+                                   # The collapsed UI needs the parent certificate's operands.
+                                   "wrapper_name": s.get("wrapper_name"),
+                                   "wrapper_start_value_eur": s.get("wrapper_start_value_eur"),
+                                   "wrapper_current_value_eur": s.get("wrapper_current_value_eur")})
         cur["value_eur"] += v
         cur["start_value_eur"] += float(s.get("start_value_eur") or 0)
     out = sorted(agg.values(), key=lambda s: -s["value_eur"])
@@ -2847,6 +2855,27 @@ def _with_results(holdings: list[dict], realised: dict,
                   else None)
         income = h.get("income_eur") or 0.0
         led = by_name.get(h.get("name") or "") or {}
+        # A folded certificate must be able to return to the PARENT instrument's own AIRS row.
+        # Its expanded child legs carry child-book returns and allocated child results; neither is
+        # the wrapper's return. Stamp the wrapper operands on every labelled route so collapsing
+        # later is lossless and never pairs one calculation with another result.
+        for source in h.get("sources") or []:
+            wrapper_name = source.get("wrapper_name")
+            if source.get("label") is None or not wrapper_name:
+                continue
+            wrapper_led = by_name.get(wrapper_name) or {}
+            wrapper_income = float(wrapper_led.get("income_eur") or 0.0)
+            source.update({
+                "wrapper_income_eur": wrapper_income,
+                "wrapper_realised_result_eur": wrapper_led.get("realised_result_eur"),
+                "wrapper_result_eur": wrapper_led.get("result_eur"),
+                "wrapper_return_pct": _airs_position_return({
+                    "start_value_eur": source.get("wrapper_start_value_eur"),
+                    "current_value_eur": source.get("wrapper_current_value_eur"),
+                }, wrapper_income),
+                "wrapper_book": realised.get("portefeuille"),
+                "wrapper_as_of": realised.get("holdings_as_of"),
+            })
         # Direct rows join their own ledger by name.  Expanded rows additionally carry their
         # certificate's realised/distributed result, allocated above by their exact route share.
         realised_eur = ((led.get("realised_result_eur") or 0.0)

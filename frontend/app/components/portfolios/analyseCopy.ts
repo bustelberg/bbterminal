@@ -159,6 +159,7 @@ const en = {
     blendHow: (math: string) => `Σ (each route’s share of this position × that route’s own return)\n\n${math}`,
     yfReturnHow: (pct: string, from: string) => `our own EUR close series — no AIRS book values this row\n\n${pct} since ${from}`,
     bookReturnHow: (math: string, pct: string, valuedBy?: string) => `Raw values from AIRS${valuedBy ? `, as valued by ${valuedBy}` : ''}\n\n${math}\n\nResult: ${pct}`,
+    returnMismatchHow: 'Calculation withheld: the raw AIRS operands do not reconcile to the returned percentage. This is a data-integrity error, not a second valid calculation.',
     routeTitle: (label: string, bookPct: string, value: string, rowPct?: string) => `${label}: ${bookPct}% of the book · ${value}${rowPct ? ` · ${rowPct}% of this position` : ''}`,
   },
   classRow: {
@@ -358,6 +359,7 @@ const nl: AnalyseCopy = {
     blendHow: (math) => `Σ (aandeel van elke route in deze positie × eigen rendement van die route)\n\n${math}`,
     yfReturnHow: (pct, from) => `onze eigen EUR-slotkoersreeks — geen AIRS-boekwaarden voor deze rij\n\n${pct} sinds ${from}`,
     bookReturnHow: (math, pct, valuedBy) => `Ruwe waarden uit AIRS${valuedBy ? `, gewaardeerd door ${valuedBy}` : ''}\n\n${math}\n\nUitkomst: ${pct}`,
+    returnMismatchHow: 'Berekening niet getoond: de ruwe AIRS-waarden sluiten niet aan op het teruggegeven percentage. Dit is een data-integriteitsfout, geen tweede geldige berekening.',
     routeTitle: (label, bookPct, value, rowPct) => `${label}: ${bookPct}% van het boek · ${value}${rowPct ? ` · ${rowPct}% van deze positie` : ''}`,
   },
   classRow: {

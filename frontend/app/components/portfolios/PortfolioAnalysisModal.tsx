@@ -1265,7 +1265,13 @@ const blendLegs = (h: BookHolding) =>
  *  `(€68,769 + €0) ÷ €58,669 − 1`. A percentage with no numerator or denominator on screen cannot
  *  be checked against the book it claims to come from — and being checkable against that book is
  *  the whole reason it is preferred over our price series. Null when the book sent no figures. */
-function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): string | null {
+type BookOperands = {
+  book_start_value_eur: number;
+  book_current_value_eur: number;
+  book_income_eur?: number | null;
+};
+
+function bookOperands(h: BookHolding): BookOperands | null {
   const source = (h.sources ?? []).find((x) => x.blend_weight_pct != null);
   // Older payloads did not carry the route-level operands. A directly held row still carries the
   // same raw AIRS values itself, so keep the explanation verifiable during a rolling deployment.
@@ -1275,6 +1281,26 @@ function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): st
     book_income_eur: h.own_income_eur,
   };
   if (!s?.book_start_value_eur || s.book_current_value_eur == null) return null;
+  return {
+    book_start_value_eur: s.book_start_value_eur,
+    book_current_value_eur: s.book_current_value_eur,
+    book_income_eur: s.book_income_eur,
+  };
+}
+
+export function bookMathMismatch(h: BookHolding): boolean {
+  const s = bookOperands(h);
+  if (!s || h.own_return_pct == null) return false;
+  const calculated = ((s.book_current_value_eur + (s.book_income_eur ?? 0))
+    / s.book_start_value_eur - 1) * 100;
+  // Half a displayed basis point: anything that would round to a different two-decimal result is
+  // not allowed to present itself as the derivation of the cell.
+  return Math.abs(calculated - h.own_return_pct) >= 0.005;
+}
+
+export function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): string | null {
+  const s = bookOperands(h);
+  if (!s || bookMathMismatch(h)) return null;
   const hasIncome = s.book_income_eur != null;
   const money = raw ? eur2 : eur0;
   const now = hasIncome
@@ -1551,6 +1577,12 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     // Keep a wrapper even for a one-leg certificate. The switch is a choice between the
     // instrument the book holds and its underlying positions, not merely a way to reduce rows.
     const s = sumResults(legs);
+    // Every child leg repeats the parent certificate's own AIRS operands. Use one copy when the
+    // look-through is folded back. Aggregating child-book Result and then explaining it with the
+    // wrapper's start/current values produced equations whose stated result was arithmetically
+    // impossible (StarTopSelectie: €49,469.04 ÷ €52,974.24 − 1 beside −6.13%).
+    const wrapper = legs.flatMap((leg) => leg.sources ?? [])
+      .find((source) => source.wrapper_return_pct != null);
     const weight = legs.reduce((a, h) => a + (h.weight_now_pct ?? 0), 0);
     // Aggregate every known constituent instead of inheriting whichever leg happens to be first.
     // The first leg is often Liquiditeiten, which is why AziëTopSelectie showed three dashes.
@@ -1591,7 +1623,12 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       contribution_pct: s.contribution,
       avg_capital_eur: s.avgcapital,
       money_weighted_return_pct: s.mwr,
-      own_return_pct: (s.result != null && s.opening) ? (s.result / s.opening) * 100 : null,
+      own_return_pct: wrapper?.wrapper_return_pct
+        ?? ((s.result != null && s.opening) ? (s.result / s.opening) * 100 : null),
+      own_return_source: wrapper?.wrapper_return_pct != null ? 'airs' : legs[0].own_return_source,
+      own_return_book: wrapper?.wrapper_book ?? legs[0].own_return_book,
+      own_return_as_of: wrapper?.wrapper_as_of ?? legs[0].own_return_as_of,
+      own_income_eur: wrapper?.wrapper_income_eur ?? legs[0].own_income_eur,
       mom_12_1_pct: weightedSignal((leg) => leg.mom_12_1_pct),
       mom_12_1_from: null,
       mom_12_1_to: null,
@@ -2705,7 +2742,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         ? copy.row.blendHow(blendHow(h, copy.row.heldDirectly, copy.row.atOpen)!)
                         : h.own_return_source === 'yfinance'
                           ? copy.row.yfReturnHow(fmtRet(h.own_return_pct), h.own_return_from ?? copy.info.yearOpened)
-                          : copy.row.bookReturnHow(
+                          : bookMathMismatch(h)
+                            ? copy.row.returnMismatchHow
+                            : copy.row.bookReturnHow(
                             bookMath(h, copy.row.netDividend, true) ?? (h.own_income_eur
                               ? `(Huidige waarde + ${eur0(h.own_income_eur)} ${copy.row.netDividend}) ÷ Beginwaarde − 1`
                               : 'Huidige waarde ÷ Beginwaarde − 1'),
