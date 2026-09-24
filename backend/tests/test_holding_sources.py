@@ -192,6 +192,9 @@ class TestTheExpansionStampsTheRoute:
               "linked_portfolio_name": "StarTopSelectie Offensief"}])
         mc = next(r for r in out if r["isin"] == "US1")
         assert mc["sources"] == [{"label": "StarTopSelectie Offensief", "model_id": 99,
+                                  "wrapper_name": "Cert",
+                                  "wrapper_start_value_eur": 52974.24,
+                                  "wrapper_current_value_eur": 49763.68,
                                   "value_eur": pytest.approx(49763.68 * 0.04),
                                   "start_value_eur": pytest.approx(52974.24 * 0.04)}]
         #  Value is conserved on BOTH ends: the routes across every leg still add to the

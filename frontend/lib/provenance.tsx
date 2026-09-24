@@ -542,7 +542,7 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   // "3 trading days old".
   const fresh = provenanceFreshness(asOf, fetched, column);
   return (
-    <InfoTip content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
+    <InfoTip wide={calculation != null} content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
       worked={worked} legend={legend} calculation={calculation}
       how={how} kind={kind} column={column} what={what} fresh={fresh}
       onRefresh={onRefresh} />}>

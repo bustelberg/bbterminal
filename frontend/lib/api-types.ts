@@ -11085,6 +11085,24 @@ export interface components {
             value_eur: number;
             /** Weight Now Pct */
             weight_now_pct: number;
+            /** Wrapper As Of */
+            wrapper_as_of?: string | null;
+            /** Wrapper Book */
+            wrapper_book?: string | null;
+            /** Wrapper Current Value Eur */
+            wrapper_current_value_eur?: number | null;
+            /** Wrapper Income Eur */
+            wrapper_income_eur?: number | null;
+            /** Wrapper Name */
+            wrapper_name?: string | null;
+            /** Wrapper Realised Result Eur */
+            wrapper_realised_result_eur?: number | null;
+            /** Wrapper Result Eur */
+            wrapper_result_eur?: number | null;
+            /** Wrapper Return Pct */
+            wrapper_return_pct?: number | null;
+            /** Wrapper Start Value Eur */
+            wrapper_start_value_eur?: number | null;
         };
         /** HoldingStateInfo */
         HoldingStateInfo: {

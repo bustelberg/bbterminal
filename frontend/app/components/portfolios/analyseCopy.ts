@@ -65,7 +65,8 @@ const en = {
     rest: 'Rest', moneyWeighted: 'Money-weighted return', instrumentReturn: 'AIRS return', contribution: 'Contribution',
     noValues: 'No valued positions to show here.', noSector: 'No sector — a fund, or not classifiable',
     noLongerHeld: 'No longer held', soldOut: 'sold out during the year', priorYear: 'prior yr',
-    bookYear: 'The book’s year', allPositions: 'positions, everything it held or sold', direct: 'direct',
+    bookYear: 'Total', sectorTotal: (sector: string) => `${sector} total`,
+    allPositions: 'positions, everything it held or sold', direct: 'direct',
   },
   info: {
     contributionNote: 'result ÷ the book’s opening capital', moneyNote: 'The return on your money, including the size and exact date of every cash flow. Calculated as XIRR and converted from an annual rate to the actual holding-period return.',
@@ -82,7 +83,7 @@ const en = {
     bookReturnWhat: 'The book’s own return for the year, from AIRS.',
     bookReturnNote: 'cumulatief_rendement — flow-aware, the system of record',
     bookContributionWhat: 'What every position in this table, held and sold, added up to for the book’s year.', yearOpened: 'the year opened',
-    moneyHow: (_result: string, _capital: string, pct: string) => `IRR procedure\n\n1. Opening value and purchases are negative cash flows on their dates.\n2. Sales, net income and the final valuation are positive cash flows on their dates.\n3. Solve the annual rate that makes the discounted cash flows sum to zero.\n4. Convert that rate back to the cumulative return from the first to the last cash-flow date.\n\nResult: ${pct} over the actual holding period (not annualised). The typeset equation and every input used are shown below`,
+    moneyHow: (_result: string, _capital: string, pct: string) => `IRR procedure\n\n1. Opening value and purchases are negative cash flows on their dates.\n2. Sales, net income and the final valuation are positive cash flows on their dates.\n3. Solve the annual rate at which discounted money invested equals discounted money received. This is equivalent to making the signed discounted cash flows sum to zero.\n4. Convert that rate back to the cumulative return from the first to the last cash-flow date.\n\nResult: ${pct} over the actual holding period (not annualised). The typeset equation and every input used are shown below`,
     moneyAggregateHow: (result: string, capital: string, pct: string) => `Combined result ÷ combined average invested capital\n\n${result} ÷ ${capital} = ${pct}`,
     contributionHow: (result: string, basis: string, pct: string) => `Result ÷ the book’s opening capital\n\n${result} ÷ ${basis} = ${pct}`,
   },
@@ -134,7 +135,7 @@ const en = {
     moneyViaWhat: (certificate: string) => `Held through ${certificate}, which has the purchases; this leg has none of its own.`,
     moneyCashWhat: 'Cash is not bought and sold, so there is no invested capital to measure against.',
     moneyUnknownWhat: (name: string) => `What ${name} returned on the money put into it cannot be worked out.`,
-    lookthroughHow: (book: string, capital: string, pct: string, name: string, certificate: string, slice: string) => `IRR procedure, measured in ${book}\n\nOpening value and purchases are negative cash flows; sales, net income and final valuation are positive cash flows, each on its own date. Solve the annual rate that makes their discounted sum zero, then convert it to the actual holding period. The typeset equation and every input used are shown below.\n\nResult: ${pct} (not annualised)\n\nThis book bought ${certificate}, not ${name}. Your timing into the certificate is excluded. ${capital} is the average capital shown for context, not a fixed IRR denominator; ${slice} is your slice of the position.`,
+    lookthroughHow: (book: string, capital: string, pct: string, name: string, certificate: string, slice: string) => `IRR procedure, measured in ${book}\n\nOpening value and purchases are negative cash flows; sales, net income and final valuation are positive cash flows, each on its own date. Solve the annual rate at which discounted money invested equals discounted money received, then convert it to the actual holding period. This is equivalent to making the signed discounted cash flows sum to zero. The typeset equation and every input used are shown below.\n\nResult: ${pct} (not annualised)\n\nThis book bought ${certificate}, not ${name}. Your timing into the certificate is excluded. ${capital} is the average capital shown for context, not a fixed IRR denominator; ${slice} is your slice of the position.`,
     noTransactionsHow: (reason: string) => `Result ÷ Avg capital invested\n\nno denominator — ${reason} Nothing is wrong with this position; every other column is unaffected.`,
     depositedHow: 'Result ÷ Avg capital invested\n\nrefused — shares were deposited during the year (split, bonus issue, or transfer in), so trade and holding quantities use different bases and invested capital cannot be derived. Euro columns are unaffected.',
     viaHow: (name: string, certificate: string, routes: string, pct: string, capital: string) => `Result ÷ Avg capital invested\n\nno denominator for ${name}: AIRS trades ${certificate}${routes} rather than its underlying instruments, so this leg has no purchases.\n\nThe certificate can be measured: ${pct} on ${capital} average invested capital. That is one figure for the wrapper, not this stock's own.`,
@@ -159,6 +160,7 @@ const en = {
     blendHow: (math: string) => `Σ (each route’s share of this position × that route’s own return)\n\n${math}`,
     yfReturnHow: (pct: string, from: string) => `our own EUR close series — no AIRS book values this row\n\n${pct} since ${from}`,
     bookReturnHow: (math: string, pct: string, valuedBy?: string) => `Raw values from AIRS${valuedBy ? `, as valued by ${valuedBy}` : ''}\n\n${math}\n\nResult: ${pct}`,
+    returnMismatchHow: 'Calculation withheld: the raw AIRS operands do not reconcile to the returned percentage. This is a data-integrity error, not a second valid calculation.',
     routeTitle: (label: string, bookPct: string, value: string, rowPct?: string) => `${label}: ${bookPct}% of the book · ${value}${rowPct ? ` · ${rowPct}% of this position` : ''}`,
   },
   classRow: {
@@ -187,9 +189,7 @@ const en = {
     betaTitle: (name: string, benchmark: string) => `Beta of ${name} against ${benchmark}, using weekly available history up to five years.`,
   },
   reconciliation: {
-    positions: (count: number) => `${count} positions, everything it held or sold`,
     compareHow: (contribution: string, book: string, agrees: boolean) => `AIRS's own cumulatief_rendement against the Contribution total\n\n${contribution} from these rows vs ${book} from AIRS — they ${agrees ? 'agree' : 'do NOT agree'}`,
-    success: (book: string) => ` These positions account for the whole year — Contribution adds exactly to AIRS's ${book}.`,
     mismatch: (sum: string, book: string, residual: string) => ` Contribution adds to ${sum} against AIRS's ${book}; ${residual} of the year is not explained by these rows.`,
   },
   /*  IT NAMES THE COUNTRIES, AND THE OLD COPY NAMED THE WRONG CAUSE. It used to say "the rest
@@ -270,7 +270,8 @@ const nl: AnalyseCopy = {
     rest: 'Rest', moneyWeighted: 'Geldgewogen rendement', instrumentReturn: 'AIRS-rendement', contribution: 'Bijdrage',
     noValues: 'Geen gewaardeerde posities om hier te tonen.', noSector: 'Geen sector — een fonds of niet classificeerbaar',
     noLongerHeld: 'Niet meer aangehouden', soldOut: 'gedurende het jaar volledig verkocht', priorYear: 'vorig jaar',
-    bookYear: 'Het boekjaar', allPositions: 'posities, alles wat is aangehouden of verkocht', direct: 'direct',
+    bookYear: 'Totaal', sectorTotal: (sector) => `${sector} totaal`,
+    allPositions: 'posities, alles wat is aangehouden of verkocht', direct: 'direct',
   },
   info: {
     contributionNote: 'resultaat ÷ beginkapitaal van het boek', moneyNote: 'Het rendement op uw geld, inclusief de omvang en exacte datum van elke kasstroom. Berekend als XIRR en van een jaarrendement omgerekend naar de werkelijke aanhoudperiode.',
@@ -287,7 +288,7 @@ const nl: AnalyseCopy = {
     bookReturnWhat: 'Het eigen jaarrendement van het boek volgens AIRS.',
     bookReturnNote: 'cumulatief_rendement — kasstroomgewogen, het bronsysteem',
     bookContributionWhat: 'Wat alle aangehouden en verkochte posities in deze tabel samen aan het boekjaar bijdroegen.', yearOpened: 'het begin van het jaar',
-    moneyHow: (_result, _capital, pct) => `IRR-procedure\n\n1. Openingswaarde en aankopen zijn negatieve kasstromen op hun datums.\n2. Verkopen, netto-inkomsten en de eindwaardering zijn positieve kasstromen op hun datums.\n3. Los het jaarrendement op waarbij de contante waarden van de kasstromen samen nul zijn.\n4. Reken dat rendement terug naar het cumulatieve rendement tussen de eerste en laatste kasstroomdatum.\n\nUitkomst: ${pct} over de werkelijke aanhoudperiode (niet geannualiseerd). De opgemaakte formule en alle gebruikte invoer staan hieronder`,
+    moneyHow: (_result, _capital, pct) => `IRR-procedure\n\n1. Openingswaarde en aankopen zijn negatieve kasstromen op hun datums.\n2. Verkopen, netto-inkomsten en de eindwaardering zijn positieve kasstromen op hun datums.\n3. Los het jaarrendement op waarbij het contant gemaakte belegde geld gelijk is aan het contant gemaakte ontvangen geld. Dit is hetzelfde als de getekende contante kasstromen samen op nul stellen.\n4. Reken dat rendement terug naar het cumulatieve rendement tussen de eerste en laatste kasstroomdatum.\n\nUitkomst: ${pct} over de werkelijke aanhoudperiode (niet geannualiseerd). De opgemaakte formule en alle gebruikte invoer staan hieronder`,
     moneyAggregateHow: (result, capital, pct) => `Gezamenlijk resultaat ÷ gezamenlijk gemiddeld belegd kapitaal\n\n${result} ÷ ${capital} = ${pct}`,
     contributionHow: (result, basis, pct) => `Resultaat ÷ beginkapitaal van het boek\n\n${result} ÷ ${basis} = ${pct}`,
   },
@@ -333,7 +334,7 @@ const nl: AnalyseCopy = {
     moneyViaWhat: (certificate) => `Aangehouden via ${certificate}, waarin de aankopen plaatsvinden; deze onderliggende positie heeft geen eigen aankopen.`,
     moneyCashWhat: 'Liquiditeiten worden niet gekocht en verkocht; er is daarom geen belegd kapitaal om rendement tegen af te zetten.',
     moneyUnknownWhat: (name) => `Het rendement van ${name} op het belegde geld kan niet worden berekend.`,
-    lookthroughHow: (book, capital, pct, name, certificate, slice) => `IRR-procedure, gemeten in ${book}\n\nOpeningswaarde en aankopen zijn negatieve kasstromen; verkopen, netto-inkomsten en eindwaardering zijn positieve kasstromen, elk op de eigen datum. Los het jaarrendement op waarbij hun contante waarden samen nul zijn en reken dit terug naar de werkelijke aanhoudperiode. De opgemaakte formule en alle gebruikte invoer staan hieronder.\n\nUitkomst: ${pct} (niet geannualiseerd)\n\nDit boek kocht ${certificate}, niet ${name}. Uw timing in het certificaat telt niet mee. ${capital} is het gemiddeld belegde kapitaal dat ter context wordt getoond, geen vaste IRR-noemer; ${slice} is uw aandeel in de positie.`,
+    lookthroughHow: (book, capital, pct, name, certificate, slice) => `IRR-procedure, gemeten in ${book}\n\nOpeningswaarde en aankopen zijn negatieve kasstromen; verkopen, netto-inkomsten en eindwaardering zijn positieve kasstromen, elk op de eigen datum. Los het jaarrendement op waarbij het contant gemaakte belegde geld gelijk is aan het contant gemaakte ontvangen geld en reken dit terug naar de werkelijke aanhoudperiode. Dit is hetzelfde als de getekende contante kasstromen samen op nul stellen. De opgemaakte formule en alle gebruikte invoer staan hieronder.\n\nUitkomst: ${pct} (niet geannualiseerd)\n\nDit boek kocht ${certificate}, niet ${name}. Uw timing in het certificaat telt niet mee. ${capital} is het gemiddeld belegde kapitaal dat ter context wordt getoond, geen vaste IRR-noemer; ${slice} is uw aandeel in de positie.`,
     noTransactionsHow: (reason) => `Resultaat ÷ gemiddeld belegd kapitaal\n\ngeen noemer — ${reason} Met deze positie is niets mis; alle andere kolommen blijven ongewijzigd.`,
     depositedHow: 'Resultaat ÷ gemiddeld belegd kapitaal\n\ngeweigerd — gedurende het jaar zijn aandelen gestort (splitsing, bonusaandeel of overdracht), waardoor handels- en positieaantallen verschillende grondslagen gebruiken. Het belegde kapitaal kan niet worden afgeleid; de eurokolommen blijven geldig.',
     viaHow: (name, certificate, routes, pct, capital) => `Resultaat ÷ gemiddeld belegd kapitaal\n\ngeen noemer voor ${name}: AIRS handelt ${certificate}${routes} in plaats van de onderliggende instrumenten, dus deze positie heeft geen eigen aankopen.\n\nHet certificaat is wel meetbaar: ${pct} over ${capital} gemiddeld belegd kapitaal. Dat is één cijfer voor het omhulsel, niet voor dit aandeel zelf.`,
@@ -358,6 +359,7 @@ const nl: AnalyseCopy = {
     blendHow: (math) => `Σ (aandeel van elke route in deze positie × eigen rendement van die route)\n\n${math}`,
     yfReturnHow: (pct, from) => `onze eigen EUR-slotkoersreeks — geen AIRS-boekwaarden voor deze rij\n\n${pct} sinds ${from}`,
     bookReturnHow: (math, pct, valuedBy) => `Ruwe waarden uit AIRS${valuedBy ? `, gewaardeerd door ${valuedBy}` : ''}\n\n${math}\n\nUitkomst: ${pct}`,
+    returnMismatchHow: 'Berekening niet getoond: de ruwe AIRS-waarden sluiten niet aan op het teruggegeven percentage. Dit is een data-integriteitsfout, geen tweede geldige berekening.',
     routeTitle: (label, bookPct, value, rowPct) => `${label}: ${bookPct}% van het boek · ${value}${rowPct ? ` · ${rowPct}% van deze positie` : ''}`,
   },
   classRow: {
@@ -386,9 +388,7 @@ const nl: AnalyseCopy = {
     betaTitle: (name, benchmark) => `Beta van ${name} tegenover ${benchmark}, op wekelijkse beschikbare historie tot maximaal vijf jaar.`,
   },
   reconciliation: {
-    positions: (count) => `${count} posities, alles wat werd aangehouden of verkocht`,
     compareHow: (contribution, book, agrees) => `AIRS' eigen cumulatief_rendement tegenover het totaal Bijdrage\n\n${contribution} uit deze rijen versus ${book} uit AIRS — ze ${agrees ? 'komen overeen' : 'komen NIET overeen'}`,
-    success: (book) => ` Deze posities verklaren het hele jaar — Bijdrage telt exact op tot AIRS' ${book}.`,
     mismatch: (sum, book, residual) => ` Bijdrage telt op tot ${sum} tegenover AIRS' ${book}; ${residual} van het jaar wordt niet door deze rijen verklaard.`,
   },
   coverageWarning: (priced, total, pct, missing) => {

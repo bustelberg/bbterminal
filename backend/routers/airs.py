@@ -1000,6 +1000,18 @@ class HoldingSource(BaseModel):
     # carried in `own_return_pct`. Null where the route had no return to contribute, which is also
     # how the card shows a reader which legs actually spoke.
     blend_weight_pct: float | None = None
+    # The parent certificate's own AIRS operands. Repeated on its child routes so folding the
+    # look-through back into one row recovers the real wrapper instead of aggregating child-book
+    # results and presenting them beside the wrapper's start/current values.
+    wrapper_name: str | None = None
+    wrapper_start_value_eur: float | None = None
+    wrapper_current_value_eur: float | None = None
+    wrapper_income_eur: float | None = None
+    wrapper_realised_result_eur: float | None = None
+    wrapper_result_eur: float | None = None
+    wrapper_return_pct: float | None = None
+    wrapper_book: str | None = None
+    wrapper_as_of: str | None = None
 
 
 class MoneyWeightedCashFlow(BaseModel):

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  airsRiskHoldings, airsRiskWeightContext, applyCompanySectorOverride, collapseByCertificate,
+  airsRiskHoldings, airsRiskWeightContext, applyCompanySectorOverride, bookMath, bookMathMismatch,
+  collapseByCertificate,
   holdingsForCertificateScope, individualStocksBasket, sectorDiffersFromOriginal, splitByRoute,
   syntheticAirsName, syntheticBasket,
 } from './PortfolioAnalysisModal';
@@ -39,6 +40,40 @@ describe('splitByRoute', () => {
 });
 
 describe('collapseByCertificate', () => {
+  it('uses a folded certificate own AIRS operands for both its return and explanation', () => {
+    const wrapper = {
+      label: 'StarTopSelectie', model_id: 2094, wrapper_name: 'Star Selection Index',
+      wrapper_start_value_eur: 52_974.24, wrapper_current_value_eur: 49_469.04,
+      wrapper_income_eur: 0, wrapper_return_pct: -6.6168009205995855,
+      wrapper_book: 'BUS_Offensief_Dyn', wrapper_as_of: '2026-09-24',
+    };
+    const rows = [
+      { name: 'A', bucket: 'Equity', start_value_eur: 30_000, current_value_eur: 29_000,
+        result_eur: -900, income_eur: 100, own_return_pct: 5,
+        sources: [{ ...wrapper, value_eur: 29_000, start_value_eur: 30_000 }] },
+      { name: 'B', bucket: 'Equity', start_value_eur: 22_974.24, current_value_eur: 20_469.04,
+        result_eur: -2_347, income_eur: 158, own_return_pct: -10,
+        sources: [{ ...wrapper, value_eur: 20_469.04, start_value_eur: 22_974.24 }] },
+    ];
+
+    const [folded] = collapseByCertificate(rows as never);
+
+    expect(folded.own_return_pct).toBeCloseTo(-6.6168009205995855, 10);
+    expect(folded.own_income_eur).toBe(0);
+    expect(folded.own_return_book).toBe('BUS_Offensief_Dyn');
+    expect(bookMathMismatch(folded)).toBe(false);
+    expect(bookMath(folded, 'net dividend', true)).toContain(
+      '(€49,469.04 + €0.00 net dividend) ÷ €52,974.24 − 1',
+    );
+  });
+
+  it('withholds a raw-value derivation when its operands do not produce the returned percentage', () => {
+    const row = { start_value_eur: 52_974.24, current_value_eur: 49_469.04,
+      own_income_eur: null, own_return_pct: -6.13 };
+    expect(bookMathMismatch(row as never)).toBe(true);
+    expect(bookMath(row as never, 'net dividend', true)).toBeNull();
+  });
+
   it('keeps a folded TopSelectie in Stock ETFs when its first underlying row is cash', () => {
     const rows = [
       {

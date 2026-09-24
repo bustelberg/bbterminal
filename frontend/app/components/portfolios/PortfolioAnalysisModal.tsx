@@ -16,6 +16,7 @@ import {
 } from './allocationColors';
 import { classWeightedReturn } from './classReturn';
 import { equityParts } from './equityParts';
+import { stockSectorParts } from './stockSectorParts';
 import { benchmarkProvenance } from './benchmarkSourceNote';
 import {
   Provenance, ProvenanceFetchedAt, ProvenanceRefresh, type SourceKey,
@@ -1265,7 +1266,13 @@ const blendLegs = (h: BookHolding) =>
  *  `(€68,769 + €0) ÷ €58,669 − 1`. A percentage with no numerator or denominator on screen cannot
  *  be checked against the book it claims to come from — and being checkable against that book is
  *  the whole reason it is preferred over our price series. Null when the book sent no figures. */
-function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): string | null {
+type BookOperands = {
+  book_start_value_eur: number;
+  book_current_value_eur: number;
+  book_income_eur?: number | null;
+};
+
+function bookOperands(h: BookHolding): BookOperands | null {
   const source = (h.sources ?? []).find((x) => x.blend_weight_pct != null);
   // Older payloads did not carry the route-level operands. A directly held row still carries the
   // same raw AIRS values itself, so keep the explanation verifiable during a rolling deployment.
@@ -1275,6 +1282,26 @@ function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): st
     book_income_eur: h.own_income_eur,
   };
   if (!s?.book_start_value_eur || s.book_current_value_eur == null) return null;
+  return {
+    book_start_value_eur: s.book_start_value_eur,
+    book_current_value_eur: s.book_current_value_eur,
+    book_income_eur: s.book_income_eur,
+  };
+}
+
+export function bookMathMismatch(h: BookHolding): boolean {
+  const s = bookOperands(h);
+  if (!s || h.own_return_pct == null) return false;
+  const calculated = ((s.book_current_value_eur + (s.book_income_eur ?? 0))
+    / s.book_start_value_eur - 1) * 100;
+  // Half a displayed basis point: anything that would round to a different two-decimal result is
+  // not allowed to present itself as the derivation of the cell.
+  return Math.abs(calculated - h.own_return_pct) >= 0.005;
+}
+
+export function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): string | null {
+  const s = bookOperands(h);
+  if (!s || bookMathMismatch(h)) return null;
   const hasIncome = s.book_income_eur != null;
   const money = raw ? eur2 : eur0;
   const now = hasIncome
@@ -1551,6 +1578,12 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     // Keep a wrapper even for a one-leg certificate. The switch is a choice between the
     // instrument the book holds and its underlying positions, not merely a way to reduce rows.
     const s = sumResults(legs);
+    // Every child leg repeats the parent certificate's own AIRS operands. Use one copy when the
+    // look-through is folded back. Aggregating child-book Result and then explaining it with the
+    // wrapper's start/current values produced equations whose stated result was arithmetically
+    // impossible (StarTopSelectie: €49,469.04 ÷ €52,974.24 − 1 beside −6.13%).
+    const wrapper = legs.flatMap((leg) => leg.sources ?? [])
+      .find((source) => source.wrapper_return_pct != null);
     const weight = legs.reduce((a, h) => a + (h.weight_now_pct ?? 0), 0);
     // Aggregate every known constituent instead of inheriting whichever leg happens to be first.
     // The first leg is often Liquiditeiten, which is why AziëTopSelectie showed three dashes.
@@ -1591,7 +1624,12 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       contribution_pct: s.contribution,
       avg_capital_eur: s.avgcapital,
       money_weighted_return_pct: s.mwr,
-      own_return_pct: (s.result != null && s.opening) ? (s.result / s.opening) * 100 : null,
+      own_return_pct: wrapper?.wrapper_return_pct
+        ?? ((s.result != null && s.opening) ? (s.result / s.opening) * 100 : null),
+      own_return_source: wrapper?.wrapper_return_pct != null ? 'airs' : legs[0].own_return_source,
+      own_return_book: wrapper?.wrapper_book ?? legs[0].own_return_book,
+      own_return_as_of: wrapper?.wrapper_as_of ?? legs[0].own_return_as_of,
+      own_income_eur: wrapper?.wrapper_income_eur ?? legs[0].own_income_eur,
       mom_12_1_pct: weightedSignal((leg) => leg.mom_12_1_pct),
       mom_12_1_from: null,
       mom_12_1_to: null,
@@ -2368,7 +2406,24 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     </td>
                   </tr>
                 )}
-                {part.rows.map((h) => { const i = n++; const certificateBasket = syntheticBasket(h); return (
+                {(g.bucket === EQUITY_BUCKET && !part.rows.some((h) => h.is_fund)
+                  ? stockSectorParts(part.rows)
+                  : [{ key: 'all', label: '', rows: part.rows }]).map((sector) => {
+                  const sectorSum = sumResults(sector.rows);
+                  const sectorReturn = classWeightedReturn(sector.rows);
+                  const groupedBySector = Boolean(sector.label);
+                  return (
+                  <Fragment key={sector.key}>
+                  {groupedBySector && (
+                    <tr className="border-t border-neutral-800/30 bg-overlay/[0.02]">
+                      <td colSpan={LEADING_COLS + cols.size + TRAILING_COLS}
+                        className="py-1.5 pl-6 text-[11px] font-medium text-fg-muted">
+                        {sector.label}
+                        <span className="ml-2 font-normal text-fg-faint">{sector.rows.length}</span>
+                      </td>
+                    </tr>
+                  )}
+                {sector.rows.map((h) => { const i = n++; const certificateBasket = syntheticBasket(h); return (
                 <tr key={[h.isin ?? h.name ?? `${g.bucket}-${i}`,
                   (h.via_names ?? []).join(',')].join('|')}
                   onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
@@ -2705,7 +2760,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         ? copy.row.blendHow(blendHow(h, copy.row.heldDirectly, copy.row.atOpen)!)
                         : h.own_return_source === 'yfinance'
                           ? copy.row.yfReturnHow(fmtRet(h.own_return_pct), h.own_return_from ?? copy.info.yearOpened)
-                          : copy.row.bookReturnHow(
+                          : bookMathMismatch(h)
+                            ? copy.row.returnMismatchHow
+                            : copy.row.bookReturnHow(
                             bookMath(h, copy.row.netDividend, true) ?? (h.own_income_eur
                               ? `(Huidige waarde + ${eur0(h.own_income_eur)} ${copy.row.netDividend}) ÷ Beginwaarde − 1`
                               : 'Huidige waarde ÷ Beginwaarde − 1'),
@@ -2724,6 +2781,42 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         : copy.row.noContributionHow} />
                   </td>
                 </tr>
+                ); })}
+                {groupedBySector && (
+                  <tr className="border-y border-neutral-800/30 bg-overlay/[0.035] font-medium">
+                    <td />
+                    <td className="py-1.5 text-fg-strong" colSpan={3}>
+                      {copy.holdings.sectorTotal(sector.label)}
+                    </td>
+                    {/* Momentum, volatility and beta describe instruments, not an additive sector. */}
+                    <td />
+                    <td />
+                    <td />
+                    <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg">
+                      {num2(sector.rows.reduce((total, h) => total + (h.weight_now_pct ?? 0), 0))}%
+                    </td>
+                    {show('opening') && <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted">{eur0n(sectorSum.opening)}</td>}
+                    {show('valuenow') && <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted">{eur0n(sectorSum.valuenow)}</td>}
+                    {show('avgcapital') && <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted">{eur0n(sectorSum.avgcapital)}</td>}
+                    {show('unrealised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.unrealised)}`}>{eur0n(sectorSum.unrealised)}</td>}
+                    {show('realised') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.realised)}`}>{eur0n(sectorSum.realised)}</td>}
+                    {show('income') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.income)}`}>{eur0n(sectorSum.income)}</td>}
+                    {show('result') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.result)}`}>{eur0n(sectorSum.result)}</td>}
+                    {show('koers') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.koers)}`}>{eur0n(sectorSum.koers)}{sectorSum.splitComplete && sectorSum.avgcapital != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(sectorSum.koers, sectorSum.avgcapital))}</span>}</td>}
+                    {show('valuta') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.valuta)}`}>{eur0n(sectorSum.valuta)}{sectorSum.splitComplete && sectorSum.avgcapital != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(sectorSum.valuta, sectorSum.avgcapital))}</span>}</td>}
+                    {show('unsplit') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.unsplit)}`}>{eur0n(sectorSum.unsplit)}{sectorSum.splitComplete && sectorSum.avgcapital != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(sectorSum.unsplit, sectorSum.avgcapital))}</span>}</td>}
+                    <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.mwr)}`}>
+                      {fmtRet(sectorSum.mwr)}
+                    </td>
+                    <td className={`py-1.5 pr-4 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorReturn.pct)}`}>
+                      {fmtRet(sectorReturn.pct)}
+                    </td>
+                    <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.contribution)}`}>
+                      {ppt(sectorSum.contribution)}
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
                 ); })}
                 </Fragment>
               )); })()}
@@ -2924,9 +3017,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 <td className="pl-4" />
                 <td className="py-2 text-fg-strong" colSpan={3}>
                   {copy.holdings.bookYear}
-                  <span className="ml-2 font-normal text-[11px] text-fg-faint">
-                    {copy.reconciliation.positions(holdings.length + sold.length)}
-                  </span>
                 </td>
                 {/*  TWO EMPTY CELLS, NOT TWO NUMBERS — vol and beta. A class's volatility is
                     NOT the average of its holdings' (it is the vol of the COMBINED series, lower by
@@ -2973,23 +3063,15 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
           )}
         </table>
       </div>
-      {/* Said in words under the table, because a reader who has just added a column of euros
-          wants to know whether it landed — not to compare two figures themselves. */}
-      {/*  IT USED TO FOLLOW THE COLUMN IT TALKS ABOUT, and no longer needs to: Contribution is
-          always on now, so the line can never point at a column that is not there. The gate that
-          remains is the one that always mattered — both figures have to exist for the sentence to
-          claim anything. */}
-      {grand.contribution != null && realised?.book_ytd_pct != null && (
+      {/* Silence is success; only show this line when the position contributions genuinely fail
+          to reconcile to AIRS. Both figures must exist before we can claim a mismatch. */}
+      {grand.contribution != null && realised?.book_ytd_pct != null && !reconciled && (
         <div className="px-4 py-2 border-t border-neutral-800/40 text-[11px]">
-          {reconciled ? (
-            <span className="text-pos-400">{copy.reconciliation.success(fmtRet(realised.book_ytd_pct))}</span>
-          ) : (
-            <span className="text-warn-500">
-              {copy.reconciliation.mismatch(ppt(grand.contribution), fmtRet(realised.book_ytd_pct),
-                ppt(grand.contribution - realised.book_ytd_pct))}
-              {realised.residual_reason ? ` ${copy.serverText(realised.residual_reason)}` : ''}
-            </span>
-          )}
+          <span className="text-warn-500">
+            {copy.reconciliation.mismatch(ppt(grand.contribution), fmtRet(realised.book_ytd_pct),
+              ppt(grand.contribution - realised.book_ytd_pct))}
+            {realised.residual_reason ? ` ${copy.serverText(realised.residual_reason)}` : ''}
+          </span>
         </div>
       )}
     </div>

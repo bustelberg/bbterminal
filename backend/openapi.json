@@ -7940,6 +7940,105 @@
           "weight_now_pct": {
             "title": "Weight Now Pct",
             "type": "number"
+          },
+          "wrapper_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper As Of"
+          },
+          "wrapper_book": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Book"
+          },
+          "wrapper_current_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Current Value Eur"
+          },
+          "wrapper_income_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Income Eur"
+          },
+          "wrapper_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Name"
+          },
+          "wrapper_realised_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Realised Result Eur"
+          },
+          "wrapper_result_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Result Eur"
+          },
+          "wrapper_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Return Pct"
+          },
+          "wrapper_start_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wrapper Start Value Eur"
           }
         },
         "required": [

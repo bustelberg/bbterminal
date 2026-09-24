@@ -18,7 +18,7 @@ import { AboutCard } from '../../lib/tipCard';
  * Originated in EarningsDashboard; lifted here so any future "help
  * icon next to a label" usage can drop it in.
  */
-export default function InfoTip({ text, content, children, className = "" }: {
+export default function InfoTip({ text, content, children, className = "", wide = false }: {
   text?: string;
   /** Rich JSX body — rendered instead of `text` when given, so a caller can style a structured
    *  card (labels, pills, dividers) while still using this component's viewport-clamped positioning. */
@@ -45,6 +45,8 @@ export default function InfoTip({ text, content, children, className = "" }: {
    * Windows it renders as a large white question mark stuck to the pointer.
    */
   className?: string;
+  /** Use the audit-table width. It still shrinks to the viewport on narrow screens. */
+  wide?: boolean;
 }) {
   const [show, setShow] = useState(false);
   // PINNED = clicked open so the reader can SELECT the text (source, formula) and copy it. Hover
@@ -166,7 +168,8 @@ export default function InfoTip({ text, content, children, className = "" }: {
           // styling. The tooltip renders inside its trigger, so it inherits whatever the trigger
           // sits in — a table header carries `uppercase tracking-wide text-right`, which once
           // rendered the whole explanation SHOUTED IN CAPS, right-aligned. Inheritance did it.
-          //  `w-[22rem]`, WIDENED FROM `w-72` (2026-08-22) BECAUSE THESE CARDS NOW CARRY FORMULAS.
+          //  Ordinary cards use `w-[26rem]`; audit tables opt into `w-[42rem]`. Both are capped
+          // by the viewport, so a phone still gets a usable card rather than a 42rem overflow.
           // At 288px `σ = √( Σ(Rₜ − R̄)² ÷ (T − 1) ) × √f` wraps mid-expression, and a formula
           // broken across a line at an arbitrary operator is harder to read than no formula.
           //  `max-w-[calc(100vw-1rem)]` IS THE GUARD THE CLAMP CANNOT PROVIDE: the positioner
@@ -177,7 +180,7 @@ export default function InfoTip({ text, content, children, className = "" }: {
           // The last legend row simply would not exist. Scrolling only helps once PINNED (on hover
           // the box is `pointer-events-none` by design, so the wheel goes to the page underneath),
           // but a card that can be read by pinning it beats one that silently loses its tail.
-          className={`fixed w-[22rem] max-w-[calc(100vw-1rem)] max-h-[80vh] overflow-y-auto px-3 py-2 bg-popover border rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl whitespace-pre-line normal-case text-left tracking-normal font-normal ${
+          className={`fixed ${wide ? 'w-[42rem]' : 'w-[26rem]'} max-w-[calc(100vw-1rem)] max-h-[80vh] overflow-y-auto px-3 py-2 bg-popover border rounded-lg text-xs text-fg-soft leading-relaxed z-[9999] shadow-xl whitespace-pre-line normal-case text-left tracking-normal font-normal ${
             pinned
               ? 'pointer-events-auto cursor-auto select-text border-accent-500/50'
               : 'pointer-events-none border-neutral-700'}`}
