@@ -121,9 +121,48 @@ class TestTheBridgeIsAJoinNotAColumn:
 
     def test_no_membership_column_is_read(self):
         """If someone adds `asset_execution.acwi`, this catches the moment it gets read."""
-        src = inspect.getsource(ab)
-        for flag in ('"acwi"', "'acwi'", '"in_sp500"', '"universe_label"'):
+        src = inspect.getsource(ab).lower()
+        # ACWI is now legitimately a LABEL literal because that index alone reads its provider
+        # workbook. Pin column-style access, not the bare word: the old assertion could not tell
+        # `label == "ACWI"` from `row["acwi"]`.
+        for flag in ('["acwi"]', "['acwi']", '.get("acwi")', ".get('acwi')",
+                     '"in_sp500"', '"universe_label"'):
             assert flag not in src.lower(), f"membership must be a join, not a stored flag ({flag})"
+
+
+class TestAcwiMembershipComesFromTheWorkbook:
+    def test_acwi_does_not_depend_on_the_persisted_membership_copy(self, monkeypatch):
+        """The read path must not need `sync_acwi_asset_membership.py` to have run first.
+
+        This is Constellation Software's failure in miniature: the database view has only the old
+        company-world member, while the workbook resolves a second, asset-only constituent.
+        """
+        fake = FakeSupabase({
+            "universe": [{"universe_id": 9, "label": "ACWI"}],
+            "universe_asset_membership": [{"universe_id": 9, "analysis_id": 10}],
+            "index_file_membership": [],
+        })
+        monkeypatch.setattr(ab, "supabase", fake)
+        monkeypatch.setattr(ab, "_acwi_file_analysis_ids", lambda: [10, 29])
+
+        assert ab._universe_analysis_ids("ACWI") == [10, 29]
+        assert ab.file_member_count("ACWI") == 2
+
+    def test_other_indexes_still_read_the_database_view(self, monkeypatch):
+        fake = FakeSupabase({
+            "universe": [{"universe_id": 9, "label": "SP500"}],
+            "universe_asset_membership": [
+                {"universe_id": 9, "analysis_id": 10},
+                {"universe_id": 9, "analysis_id": 20},
+            ],
+        })
+        monkeypatch.setattr(ab, "supabase", fake)
+        monkeypatch.setattr(
+            ab, "_acwi_file_analysis_ids",
+            lambda: pytest.fail("the ACWI workbook must not be read for SP500"),
+        )
+
+        assert ab._universe_analysis_ids("SP500") == [10, 20]
 
 
 class TestTheWeightingIsREUSEDNotCopied:

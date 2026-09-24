@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
@@ -55,6 +56,34 @@ from routers._benchmark_index import (
 
 
 _log = logging.getLogger(__name__)
+
+# The iShares workbook is the authority for CURRENT ACWI membership. Keep its resolved asset ids
+# briefly because resolving ticker+venue against the asset store pages through ~8,000 executions;
+# a short TTL avoids doing that again for every panel in one modal while still picking up newly
+# ingested assets without a process restart. This is deliberately not backed by
+# `index_file_membership`: requiring a separate sync before a read is the drift that made
+# Constellation Software appear outside ACWI while the workbook plainly contained it.
+_ACWI_FILE_MEMBERS_TTL_SECONDS = 60.0
+_acwi_file_members_cache: tuple[float, list[int]] | None = None
+
+
+def _acwi_file_analysis_ids() -> list[int]:
+    """Asset ids resolved directly from the bundled iShares ACWI holdings workbook."""
+    global _acwi_file_members_cache  # noqa: PLW0603 - one small process-local read cache
+
+    now = time.monotonic()
+    if (_acwi_file_members_cache is not None
+            and now < _acwi_file_members_cache[0]):
+        return list(_acwi_file_members_cache[1])
+
+    # Function-level import keeps the ACWI-only dependency off the S&P/AEX paths and avoids the
+    # asset-membership module importing the benchmark module during application startup.
+    from index_universe.acwi.asset_membership import resolve  # noqa: PLC0415
+
+    rows, _stats = resolve()
+    ids = sorted({int(r["analysis_id"]) for r in rows if r.get("analysis_id") is not None})
+    _acwi_file_members_cache = (now + _ACWI_FILE_MEMBERS_TTL_SECONDS, ids)
+    return list(ids)
 
 _BENCH_GRID_COLS = ("isin,analysis_id,company_id,yahoo_symbol,name,gf_company_name,currency,"
                     "market_cap_eur,market_cap_currency,status,bars,is_default,"
@@ -302,7 +331,13 @@ def _universe_company_ids(label: str) -> list[int]:
 
 
 def _universe_analysis_ids(label: str) -> list[int]:
-    """The universe's constituents as ASSET ids, straight from `universe_asset_membership`.
+    """The universe's constituents as ASSET ids.
+
+     ACWI IS READ DIRECTLY FROM THE ISHARES WORKBOOK. The workbook is the authority on current
+    membership; `index_file_membership` is only a persisted copy and may be empty or stale when
+    its manual sync has not run. That exact drift made Constellation Software appear outside ACWI
+    in Attribution despite the workbook containing `CSU / Toronto Stock Exchange`. Resolution is
+    still ticker+venue (plus the country-gated interlisting rule), never a name match.
 
      `universe_asset_membership` IS A VIEW, NOT A TABLE (migration 20260806060000). It IS the
     three-hop join `universe_membership.company_id -> company.isin -> asset_execution.isin`,
@@ -317,6 +352,16 @@ def _universe_analysis_ids(label: str) -> list[int]:
     because of the `.eq(universe_id)` filter above it: the view is DISTINCT on the pair, so the
     key is unique within one universe. A reader that drops that filter needs its own tiebreaker.
     """
+    if label.strip().upper() == "ACWI":
+        try:
+            ids = _acwi_file_analysis_ids()
+            if ids:
+                return ids
+            _log.warning("[bench] ACWI workbook resolved to no assets; falling back to the view")
+        except Exception as e:  # noqa: BLE001 - a read must degrade to the last persisted copy
+            _log.warning("[bench] ACWI workbook membership failed (%s: %s); falling back to the view",
+                         type(e).__name__, e)
+
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", label).limit(1).execute().data or [])
     if not uni:
@@ -348,6 +393,13 @@ def file_member_count(label: str) -> int:
     double-count. It is reported beside that count so a reader can see the second source exists;
     the ratio it sits next to is still company-side and still says so.
     """
+    if label.strip().upper() == "ACWI":
+        try:
+            return len(_acwi_file_analysis_ids())
+        except Exception as e:  # noqa: BLE001 - retain the persisted-copy fallback below
+            _log.warning("[bench] ACWI workbook count failed (%s: %s); using persisted count",
+                         type(e).__name__, e)
+
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", label).limit(1).execute().data or [])
     if not uni:
