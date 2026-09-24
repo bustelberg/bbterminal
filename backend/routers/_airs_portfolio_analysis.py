@@ -48,7 +48,7 @@ from datetime import date
 from asset_pipeline.geo import MSCI_REGION, msci_region_of
 from asset_pipeline.sector_override import load_file_sector_overrides
 from common.pg import load_rows_via_copy
-from deps import IN_CHUNK_SIZE, supabase
+from deps import IN_CHUNK_SIZE, fetch_in_chunks, supabase
 from routers._airs_ref import model as ref_model, mutaties_for as ref_mutaties_for, positions_for as ref_positions_for
 from routers._asset_benchmark import index_returns
 from routers._asset_benchmark import members as _members
@@ -362,8 +362,13 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
     overrides: dict[int, str] = {}
     if company_ids:
         try:
-            override_rows = (supabase.table("company_sector_override").select("company_id,sector")
-                             .in_("company_id", company_ids).execute().data or [])
+            # PostgREST encodes `.in_()` in the GET URL. ACWI supplies ~1,600 company ids here;
+            # one request exceeds the proxy's request-line limit and returns HTTP 414, silently
+            # removing every management override from the analysis. Use the shared bounded loader
+            # for the same reason the asset-grid fallback immediately above is chunked.
+            override_rows = fetch_in_chunks(company_ids, lambda chunk:
+                supabase.table("company_sector_override").select("company_id,sector")
+                .in_("company_id", chunk).execute())
             overrides = {int(r["company_id"]): r["sector"] for r in override_rows if r.get("sector")}
         except Exception as e:  # migration may not yet be present on an older database
             _log.warning("[analysis] sector overrides unavailable: %s", e)
@@ -1311,7 +1316,10 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
             # to come from, and checking it against that book is the entire reason it is preferred
             # over our price series.
             marks[isin] = {"return_pct": ret, "as_of": res.get("as_of"), "portefeuille": pf,
-                           "income_eur": net or None,
+                           # Zero is part of the calculation, not an absent fact. The UI exposes
+                           # these AIRS operands so a reader can reproduce the percentage; turning
+                           # 0 into null would make the formula silently drop one of its inputs.
+                           "income_eur": net,
                            "start_value_eur": float(r["start_value_eur"]),
                            "current_value_eur": float(r["current_value_eur"])}
         out[mid] = marks
@@ -1634,7 +1642,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
                 rt["book_start_value_eur"] = float(src_vals.get("start_value_eur") or 0) or None
                 rt["book_current_value_eur"] = (
                     float(src_vals.get("current_value_eur") or src_vals.get("value_eur") or 0) or None)
-                rt["book_income_eur"] = _net_income(src_row) or None
+                # Preserve zero. This is one of the three AIRS operands behind `return_pct`, and
+                # the provenance card must be able to print it explicitly for manual checking.
+                rt["book_income_eur"] = _net_income(src_row)
                 if rt["return_pct"] is not None and direct is not None:
                     # The income + journal line belong to the position the figure came from.
                     net_income = _net_income(direct)
@@ -1988,6 +1998,7 @@ def _via_capital(h: dict, by_name: dict, child_ledgers: dict[str, dict] | None =
             "capital_source": "lookthrough",
             "capital_book": src.get("book"),
             "money_weighted_return_pct": pos.get("return_pct"),
+            "money_weighted_cashflows": pos.get("money_weighted_cashflows") or [],
             "avg_capital_eur": (round(cap * share, 2)
                                 if (cap is not None and share is not None) else None),
             # Unscaled, so the card can show whose position was actually measured.
@@ -2051,7 +2062,9 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
     income_flows = defaultdict(list)
     for m in mut_rows:
         if m.grootboek in {"Dividend", "Dividendbelasting"} and m.fonds and m.boekdatum:
-            income_flows[m.fonds].append((m.boekdatum, m.amount_eur))
+            income_flows[m.fonds].append((m.boekdatum, m.amount_eur,
+                                          "dividend" if m.grootboek == "Dividend"
+                                          else "dividend withholding tax"))
 
     #  The names whose quantity arithmetic cannot be trusted — anything carrying a transaction
     # type we do not interpret. `trades()` drops those rows (it emits only buys and sells), so the
@@ -2141,6 +2154,8 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
             "unsplit_result_eur": p.unsplit_result_eur,
             "contribution_pct": position_contribution(p),
             "return_pct": money_weighted_return_pct(p),
+            # Exact operands behind that XIRR, in the signs and dates passed to the solver.
+            "money_weighted_cashflows": p.cashflow_details,
             "sales": p.sales,
             "first_sale": p.first_sale,
             "last_sale": p.last_sale,
@@ -2856,6 +2871,7 @@ def _with_results(holdings: list[dict], realised: dict,
                     # because more of it was bought later at higher prices.
                     "avg_capital_eur": avg_cap,
                     "money_weighted_return_pct": led.get("return_pct"),
+                    "money_weighted_cashflows": led.get("money_weighted_cashflows") or [],
                     # ── AIRS's OWN SPLIT of the held leg into price and currency, both in EUR.
                     #  It decomposes `unrealised_eur` AND NOTHING ELSE. `Fondsresultaat` +
                     # `Valutaresultaat` IS `current_value_eur - start_value_eur` on AIRS's own

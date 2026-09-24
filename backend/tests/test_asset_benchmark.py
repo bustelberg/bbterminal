@@ -38,16 +38,17 @@ def index(monkeypatch):
         "universe_membership": [{"universe_id": 9, "company_id": c} for c in (1, 2, 3)],
         "universe_asset_membership": [{"universe_id": 9, "analysis_id": a} for a in (10, 20)],
         "asset_grid": [
-            {"analysis_id": 10, "isin": "US-A", "yahoo_symbol": "AAA", "name": "Alpha Inc",
+            {"analysis_id": 10, "company_id": 1, "isin": "US-A", "yahoo_symbol": "AAA", "name": "Alpha Inc",
              "gf_company_name": "Alpha Inc", "currency": "USD", "market_cap_eur": 1_000.0,
              "market_cap_currency": "USD", "status": "ok", "bars": 900, "is_default": True,
              "delisted_at": None, "out_of_scope_at": None},
-            {"analysis_id": 20, "isin": "US-B", "yahoo_symbol": "BBB", "name": "Beta Inc",
+            {"analysis_id": 20, "company_id": 2, "isin": "US-B", "yahoo_symbol": "BBB", "name": "Beta Inc",
              "gf_company_name": "Beta Inc", "currency": "USD", "market_cap_eur": 500.0,
              "market_cap_currency": "USD", "status": "ok", "bars": 800, "is_default": True,
              "delisted_at": None, "out_of_scope_at": None},
         ],
         "asset_analysis": [],
+        "company": [],
     })
     monkeypatch.setattr(ab, "supabase", fake)
     return fake, ab
@@ -65,7 +66,7 @@ def _add_share_classes(fake, *classes) -> None:
         aid = 30 + i
         fake.tables["universe_asset_membership"].append({"universe_id": 9, "analysis_id": aid})
         fake.tables["asset_grid"].append(
-            {"analysis_id": aid, "isin": f"US-ALPHABET-{i}", "yahoo_symbol": symbol,
+            {"analysis_id": aid, "company_id": 100, "isin": f"US-ALPHABET-{i}", "yahoo_symbol": symbol,
              "name": f"Alphabet Inc {'AC'[i]}", "gf_company_name": "Alphabet Inc",
              "currency": "USD", "market_cap_eur": cap, "market_cap_currency": "USD",
              "status": "ok", "bars": 5000, "is_default": True,
@@ -120,9 +121,69 @@ class TestTheBridgeIsAJoinNotAColumn:
 
     def test_no_membership_column_is_read(self):
         """If someone adds `asset_execution.acwi`, this catches the moment it gets read."""
-        src = inspect.getsource(ab)
-        for flag in ('"acwi"', "'acwi'", '"in_sp500"', '"universe_label"'):
+        src = inspect.getsource(ab).lower()
+        # ACWI is now legitimately a LABEL literal because that index alone reads its provider
+        # workbook. Pin column-style access, not the bare word: the old assertion could not tell
+        # `label == "ACWI"` from `row["acwi"]`.
+        for flag in ('["acwi"]', "['acwi']", '.get("acwi")', ".get('acwi')",
+                     '"in_sp500"', '"universe_label"'):
             assert flag not in src.lower(), f"membership must be a join, not a stored flag ({flag})"
+
+
+class TestAcwiMembershipComesFromTheWorkbook:
+    def test_acwi_does_not_depend_on_the_persisted_membership_copy(self, monkeypatch):
+        """The read path must not need `sync_acwi_asset_membership.py` to have run first.
+
+        This is Constellation Software's failure in miniature: the database view has only the old
+        company-world member, while the workbook resolves a second, asset-only constituent.
+        """
+        fake = FakeSupabase({
+            "universe": [{"universe_id": 9, "label": "ACWI"}],
+            "universe_asset_membership": [{"universe_id": 9, "analysis_id": 10}],
+            "index_file_membership": [],
+        })
+        monkeypatch.setattr(ab, "supabase", fake)
+        monkeypatch.setattr(ab, "_acwi_file_analysis_ids", lambda: [10, 29])
+
+        assert ab._universe_analysis_ids("ACWI") == [10, 29]
+        assert ab.file_member_count("ACWI") == 2
+
+    def test_other_indexes_still_read_the_database_view(self, monkeypatch):
+        fake = FakeSupabase({
+            "universe": [{"universe_id": 9, "label": "SP500"}],
+            "universe_asset_membership": [
+                {"universe_id": 9, "analysis_id": 10},
+                {"universe_id": 9, "analysis_id": 20},
+            ],
+        })
+        monkeypatch.setattr(ab, "supabase", fake)
+        monkeypatch.setattr(
+            ab, "_acwi_file_analysis_ids",
+            lambda: pytest.fail("the ACWI workbook must not be read for SP500"),
+        )
+
+        assert ab._universe_analysis_ids("SP500") == [10, 20]
+
+    def test_overlap_identity_includes_unresolved_workbook_companies(self, index, monkeypatch):
+        """Dino Polska is `DNP.WA` in the workbook while its stored execution was `0TCP.IL`.
+
+        That symbol mismatch may keep it out of the PRICED benchmark until its listing is repaired,
+        but it cannot turn the workbook's explicit membership into "outside ACWI" in Attribution.
+        The raw workbook name is identity-only and never adds an analysis id or a price series.
+        """
+        fake, ab_mod = index
+        fake.tables["universe"][0]["label"] = "ACWI"
+        monkeypatch.setattr(ab_mod, "_acwi_file_analysis_ids", lambda: [10, 20])
+        monkeypatch.setattr(
+            ab_mod,
+            "_acwi_file_member_names",
+            lambda: ["ALPHA INC", "BETA INC", "DINO POLSKA SA"],
+        )
+
+        out, coverage = ab_mod.members("ACWI", include_membership_identity=True)
+
+        assert {m["isin"] for m in out} == {"US-A", "US-B"}
+        assert "DINO POLSKA SA" in coverage["_member_names"]
 
 
 class TestTheWeightingIsREUSEDNotCopied:
@@ -223,6 +284,39 @@ class TestCoverageIsNeverAssumed:
         assert {m["isin"] for m in out} == {"US-A"}
         assert coverage["priced"] == 1
         assert coverage["covered_pct"] == pytest.approx(100 / 3)
+
+    def test_company_cap_is_the_exact_id_fallback_when_yahoo_has_none(self, index):
+        """Investor AB has prices but Yahoo supplies no marketCap; the verified company cap keeps
+        the constituent in ACWI without introducing a name-based join."""
+        fake, ab_mod = index
+        for r in fake.tables["asset_grid"]:
+            if r["analysis_id"] == 20:
+                r["market_cap_eur"] = None
+        fake.tables["company"].append({
+            "company_id": 2, "market_cap_eur": 650.0,
+            "market_cap_native": 7_100.0, "market_cap_currency": "SEK",
+            "market_cap_date": "2026-06-15",
+        })
+
+        out, coverage = ab_mod.members("SP500")
+
+        beta = next(m for m in out if m["isin"] == "US-B")
+        assert beta["market_cap_eur"] == pytest.approx(650.0)
+        assert beta["market_cap_source"] == "company_fallback"
+        assert coverage["priced"] == 2
+
+    def test_membership_identity_keeps_a_capless_constituent_visible(self, index):
+        """Overlap is a membership statement, not a market-cap coverage statement."""
+        fake, ab_mod = index
+        for r in fake.tables["asset_grid"]:
+            if r["analysis_id"] == 20:
+                r["market_cap_eur"] = None
+
+        out, coverage = ab_mod.members("SP500", include_membership_identity=True)
+
+        assert {m["isin"] for m in out} == {"US-A"}
+        assert set(coverage["_member_isins"]) == {"US-A", "US-B"}
+        assert set(coverage["_member_names"]) == {"Alpha Inc", "Beta Inc"}
 
 
 class TestThePortfolioAndTheBenchmarkSharePriceUniverse:

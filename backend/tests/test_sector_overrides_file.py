@@ -59,3 +59,49 @@ def test_checked_in_override_reaches_the_shared_analysis_grid_and_wins(monkeypat
     assert row["sector"] == "Financials"
     assert row["sector_default"] is None
     assert row["sector_overridden"] is True
+
+
+def test_analysis_chunks_the_company_override_lookup(monkeypatch):
+    """ACWI sends more ids than fit in a PostgREST GET URL; no request may exceed 200."""
+    company_ids = list(range(1, 451))
+    monkeypatch.setattr(analysis, "load_rows_via_copy", lambda *_args, **_kwargs: [
+        {"isin": f"ISIN{i}", "company_id": i, "name": f"Company {i}",
+         "sector": "Industrials", "status": "ok"}
+        for i in company_ids
+    ])
+    monkeypatch.setattr(analysis, "load_file_sector_overrides", lambda: {})
+
+    class Query:
+        def __init__(self, owner):
+            self.owner = owner
+            self.ids = []
+
+        def select(self, *_args):
+            return self
+
+        def in_(self, _column, values):
+            self.ids = list(values)
+            self.owner.chunk_sizes.append(len(self.ids))
+            return self
+
+        def execute(self):
+            return type("Result", (), {"data": [
+                {"company_id": i, "sector": "Financials"} for i in self.ids
+            ]})()
+
+    class Supabase:
+        def __init__(self):
+            self.chunk_sizes = []
+
+        def table(self, name):
+            assert name == "company_sector_override"
+            return Query(self)
+
+    fake = Supabase()
+    monkeypatch.setattr(analysis, "supabase", fake)
+
+    rows = analysis._grid_uncached([f"ISIN{i}" for i in company_ids])
+
+    assert fake.chunk_sizes == [200, 200, 50]
+    assert len(rows) == 450
+    assert all(row["sector"] == "Financials" for row in rows.values())

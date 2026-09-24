@@ -1,11 +1,42 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  airsRiskHoldings, airsRiskWeightContext, collapseByCertificate, holdingsForCertificateScope,
-  individualStocksBasket,
+  airsRiskHoldings, airsRiskWeightContext, applyCompanySectorOverride, collapseByCertificate,
+  holdingsForCertificateScope, individualStocksBasket, sectorDiffersFromOriginal, splitByRoute,
   syntheticAirsName, syntheticBasket,
 } from './PortfolioAnalysisModal';
 import { holdingsOnRiskBasis } from './ActiveSharePanel';
+
+describe('splitByRoute', () => {
+  it('keeps each route AIRS return aligned with the raw values shown in its explanation', () => {
+    const holding = {
+      name: 'Constellation Software', start_value_eur: 36_541.6168,
+      current_value_eur: 31_182.6328, unrealised_eur: -8_000,
+      realised_result_eur: -500, income_eur: 60, own_return_pct: -14.49636494,
+      own_return_source: 'airs',
+      sources: [
+        { label: null, book: 'BUS_Offensief_Dyn', start_value_eur: 32_833.42,
+          value_eur: 27_719.80, return_pct: -15.4665017351, blend_weight_pct: 89.852127,
+          book_start_value_eur: 32_833.42, book_current_value_eur: 27_719.80,
+          book_income_eur: 35.438526, as_of: '2026-09-24' },
+        { label: 'StarTopSelectie', book: 'StarTopSelectie OFF DYN', start_value_eur: 3_708.1968,
+          value_eur: 3_462.8328, return_pct: -5.906500219, blend_weight_pct: 10.147873,
+          as_of: '2026-09-19' },
+      ],
+    };
+
+    const [direct, wrapped] = splitByRoute(holding as never);
+
+    expect(direct.own_return_pct).toBeCloseTo(-15.4665017351, 10);
+    expect(direct.own_return_book).toBe('BUS_Offensief_Dyn');
+    expect(wrapped.own_return_pct).toBeCloseTo(-5.906500219, 10);
+    expect(wrapped.own_return_book).toBe('StarTopSelectie OFF DYN');
+    // The allocated P&L remains additive, but no longer masquerades as the instrument return.
+    expect(direct.result_eur).not.toBeCloseTo(
+      (direct.start_value_eur ?? 0) * (direct.own_return_pct ?? 0) / 100, 2,
+    );
+  });
+});
 
 describe('collapseByCertificate', () => {
   it('keeps a folded TopSelectie in Stock ETFs when its first underlying row is cash', () => {
@@ -155,5 +186,45 @@ describe('AIRS Risk weights', () => {
     ]);
     expect(context.nowTotal).toBe(1000);
     expect(context.startTotal).toBe(1000);
+  });
+});
+
+describe('company sector override paint', () => {
+  it('shows a confirmed sector immediately without losing the source sector', () => {
+    const analysis = {
+      book_holdings: [{ company_id: 42, name: 'Adyen', sector: 'Technology',
+        sector_default: 'Technology', sector_overridden: false }],
+    } as never;
+
+    const updated = applyCompanySectorOverride(analysis, 42, 'Financials');
+
+    expect(updated.book_holdings?.[0]).toMatchObject({
+      sector: 'Financials', sector_default: 'Technology', sector_overridden: true,
+    });
+  });
+
+  it('restores the source sector immediately when Automatic is selected', () => {
+    const analysis = {
+      book_holdings: [{ company_id: 42, name: 'Adyen', sector: 'Financials',
+        sector_default: 'Technology', sector_overridden: true }],
+    } as never;
+
+    const updated = applyCompanySectorOverride(analysis, 42, null);
+
+    expect(updated.book_holdings?.[0]).toMatchObject({
+      sector: 'Technology', sector_default: 'Technology', sector_overridden: false,
+    });
+  });
+
+  it('marks only an override that actually differs from the original sector', () => {
+    expect(sectorDiffersFromOriginal({
+      sector: 'Financials', sector_default: 'Technology', sector_overridden: true,
+    } as never)).toBe(true);
+    expect(sectorDiffersFromOriginal({
+      sector: 'Technology', sector_default: 'Technology', sector_overridden: true,
+    } as never)).toBe(false);
+    expect(sectorDiffersFromOriginal({
+      sector: 'Financials', sector_default: 'Technology', sector_overridden: false,
+    } as never)).toBe(false);
   });
 });

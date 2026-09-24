@@ -9824,6 +9824,11 @@ export interface components {
             mom_rank_n?: number | null;
             /** Mom State */
             mom_state?: number | null;
+            /**
+             * Money Weighted Cashflows
+             * @default []
+             */
+            money_weighted_cashflows?: components["schemas"]["MoneyWeightedCashFlow"][];
             /** Money Weighted Return Pct */
             money_weighted_return_pct?: number | null;
             /** Name */
@@ -11458,6 +11463,11 @@ export interface components {
             mom_rank_n?: number | null;
             /** Mom State */
             mom_state?: number | null;
+            /**
+             * Money Weighted Cashflows
+             * @default []
+             */
+            money_weighted_cashflows?: components["schemas"]["MoneyWeightedCashFlow"][];
             /** Name */
             name: string;
             /** Opening Eur */
@@ -12072,6 +12082,20 @@ export interface components {
             unmatched: number;
             /** Ytd From */
             ytd_from?: string | null;
+        };
+        /**
+         * MoneyWeightedCashFlow
+         * @description One signed, dated operand passed unchanged to the position XIRR solver.
+         */
+        MoneyWeightedCashFlow: {
+            /** Amount Eur */
+            amount_eur: number;
+            /** Date */
+            date: string;
+            /** Kind */
+            kind: string;
+            /** Source */
+            source: string;
         };
         /** MonthStatInfo */
         MonthStatInfo: {

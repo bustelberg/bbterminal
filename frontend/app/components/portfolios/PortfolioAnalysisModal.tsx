@@ -5,6 +5,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { ValueBadge } from '../../../lib/dynamicValue';
+import { track } from '../../../lib/loading';
 import { startJob } from '../../../lib/stores/jobs';
 import { startSectorOverride } from '../../../lib/sectorOverride';
 import { Field, TipCard } from '../../../lib/tipCard';
@@ -30,10 +31,12 @@ import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import OwnerEarningsModal from './OwnerEarningsModal';
-import LoadingDots from './LoadingDots';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
+import {
+  MoneyWeightedCashflowCalculation, moneyWeightedWorked,
+} from './MoneyWeightedCalculation';
 
 const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
 
@@ -789,6 +792,27 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
 
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
 
+/** Paint a confirmed override immediately while the authoritative analysis is being rebuilt. */
+export function applyCompanySectorOverride(
+  analysis: ModelPortfolioAnalysis, companyId: number, sector: string | null,
+): ModelPortfolioAnalysis {
+  return {
+    ...analysis,
+    book_holdings: analysis.book_holdings?.map((holding) => holding.company_id === companyId
+      ? {
+        ...holding,
+        sector: sector ?? holding.sector_default ?? holding.sector,
+        sector_overridden: sector != null,
+      }
+      : holding),
+  };
+}
+
+export function sectorDiffersFromOriginal(holding: BookHolding): boolean {
+  return Boolean(holding.sector_overridden && holding.sector && holding.sector_default
+    && holding.sector !== holding.sector_default);
+}
+
 function SectorOverrideDialog({ holding, onClose, onSave }: {
   holding: BookHolding;
   onClose: () => void;
@@ -1226,6 +1250,12 @@ const sectorLabel = (s?: string | null) => (!s || s === 'Unclassified' ? '' : s)
 const eur0 = (v: number) =>
   `€${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
+/** AIRS operands shown for manual reconciliation. Cents matter here: rounding every input to a
+ * whole euro and then printing a two-decimal return can make the visible arithmetic miss by a
+ * basis point even though the calculation itself is correct. */
+const eur2 = (v: number) =>
+  `€${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 /** The routes that actually spoke for a holding's Return — those with both a return and an opening
  *  value. Fewer than two means the figure is one book's and needs no arithmetic shown. */
 const blendLegs = (h: BookHolding) =>
@@ -1235,15 +1265,26 @@ const blendLegs = (h: BookHolding) =>
  *  `(€68,769 + €0) ÷ €58,669 − 1`. A percentage with no numerator or denominator on screen cannot
  *  be checked against the book it claims to come from — and being checkable against that book is
  *  the whole reason it is preferred over our price series. Null when the book sent no figures. */
-function bookMath(h: BookHolding, netDividend = 'net dividend'): string | null {
-  const s = (h.sources ?? []).find((x) => x.blend_weight_pct != null);
+function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): string | null {
+  const source = (h.sources ?? []).find((x) => x.blend_weight_pct != null);
+  // Older payloads did not carry the route-level operands. A directly held row still carries the
+  // same raw AIRS values itself, so keep the explanation verifiable during a rolling deployment.
+  const s = source ?? {
+    book_start_value_eur: h.start_value_eur,
+    book_current_value_eur: h.current_value_eur,
+    book_income_eur: h.own_income_eur,
+  };
   if (!s?.book_start_value_eur || s.book_current_value_eur == null) return null;
-  // Brackets only when there is something to bracket — "(€68,769) ÷ …" reads as a formula with a
-  // term missing.
-  const now = s.book_income_eur
-    ? `(${eur0(s.book_current_value_eur)} + ${eur0(s.book_income_eur)} ${netDividend})`
-    : eur0(s.book_current_value_eur);
-  return `${now} ÷ ${eur0(s.book_start_value_eur)} − 1`;
+  const hasIncome = s.book_income_eur != null;
+  const money = raw ? eur2 : eur0;
+  const now = hasIncome
+    ? `(${money(s.book_current_value_eur)} + ${money(s.book_income_eur!)} ${netDividend})`
+    : money(s.book_current_value_eur);
+  const formula = `${now} ÷ ${money(s.book_start_value_eur)} − 1`;
+  if (!raw) return formula;
+  return `Huidige waarde (AIRS): ${money(s.book_current_value_eur)}\n`
+    + `Netto-inkomsten (AIRS Mutaties: bruto + ingehouden belasting): ${hasIncome ? money(s.book_income_eur!) : '—'}\n`
+    + `Beginwaarde lopend jaar (AIRS): ${money(s.book_start_value_eur)}\n\n${formula}`;
 }
 
 /** The arithmetic behind a blended Return, in the reader's own numbers — each leg carrying its
@@ -1322,7 +1363,7 @@ function FundamentalButton({ onOpen, title, className = '' }: {
  * allocation arithmetic below can only lose precision, and there is nothing to gain from running
  * it on a position that arrived one way.
  */
-function splitByRoute(h: BookHolding): BookHolding[] {
+export function splitByRoute(h: BookHolding): BookHolding[] {
   const routes = h.sources ?? [];
   if (routes.length < 2) return [h];
   const via = routes.filter((r) => r.label);
@@ -1346,6 +1387,22 @@ function splitByRoute(h: BookHolding): BookHolding[] {
     const realised = isDirect ? (h.realised_result_eur ?? null) : (h.realised_result_eur == null ? null : 0);
     const result = [unreal, realised, income].some((v) => v != null)
       ? (unreal ?? 0) + (realised ?? 0) + (income ?? 0) : null;
+    // Instrument return belongs to the AIRS route that values this leg. It is deliberately NOT
+    // `result / opening`: `result` above is an allocation of THIS book's wrapper P&L, while the
+    // source return is computed from the valuing book's raw current value, income and opening
+    // value. Mixing those two bases produced the impossible Constellation row: -25.86% beside
+    // `(EUR 27,719.80 + EUR 35.44) / EUR 32,833.42 - 1`, which is -15.47%.
+    const priced = rs.filter((r) => r.return_pct != null && r.blend_weight_pct != null);
+    const pricedWeight = priced.reduce((sum, r) => sum + r.blend_weight_pct!, 0);
+    const routeReturn = pricedWeight > 0
+      ? priced.reduce((sum, r) => sum + r.return_pct! * r.blend_weight_pct!, 0) / pricedWeight
+      : null;
+    // A yfinance fallback is an instrument-level price return and therefore applies to every
+    // route. An AIRS blend does not: an unvalued route must stay blank rather than inherit a
+    // different book's rate.
+    const ownReturn = routeReturn ?? (h.own_return_source === 'yfinance' ? h.own_return_pct : null);
+    const routeBooks = [...new Set(priced.map((r) => r.book).filter((v): v is string => Boolean(v)))];
+    const routeDates = priced.map((r) => r.as_of).filter((v): v is string => Boolean(v)).sort();
     return {
       ...h,
       //  The leg keeps the instrument's name. Splitting Mastercard by route yields two rows that
@@ -1368,7 +1425,11 @@ function splitByRoute(h: BookHolding): BookHolding[] {
       contribution_pct: cut(h.contribution_pct, f),
       avg_capital_eur: isDirect ? (h.avg_capital_eur ?? null) : null,
       money_weighted_return_pct: isDirect ? (h.money_weighted_return_pct ?? null) : null,
-      own_return_pct: (result != null && openOf(rs) > 0) ? (result / openOf(rs)) * 100 : null,
+      money_weighted_cashflows: isDirect ? (h.money_weighted_cashflows ?? []) : [],
+      own_return_pct: ownReturn,
+      own_return_source: routeReturn != null ? 'airs' : h.own_return_source,
+      own_return_book: routeBooks.length === 1 ? routeBooks[0] : null,
+      own_return_as_of: routeDates[0] ?? h.own_return_as_of,
       sources: rs as BookHolding['sources'],
       via_names: label ? [label] : [],
       via_holding_name: label ? h.via_holding_name : null,
@@ -2187,7 +2248,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {fmtRet(g.sum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.classRow.moneyWhat(copy.bucket(bucketLabel(g.bucket)))}
-                    note={copy.info.moneyNote}
+                    note={copy.info.moneyAggregateNote}
                     how={copy.classRow.moneyHow(eur0n(g.sum.mwrResult), eur0n(g.sum.avgcapital), fmtRet(g.sum.mwr), g.sum.mwrRows, g.rows.length)} />
                 </td>
                 {/*  THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
@@ -2408,6 +2469,18 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           </svg>
                         </button>
                       )}
+                      {sectorDiffersFromOriginal(h) && (
+                        <span title={`Sector changed from ${h.sector_default} to ${h.sector}`}
+                          aria-label={`Sector changed from ${h.sector_default} to ${h.sector}`}>
+                          <svg viewBox="0 0 16 16" aria-hidden="true"
+                            className="h-3.5 w-3.5 text-accent-400">
+                            <circle cx="8" cy="8" r="7" fill="currentColor" />
+                            <path d="m4.75 8.1 2.05 2.05 4.45-4.45" fill="none"
+                              stroke="var(--color-card)" strokeWidth="1.6"
+                              strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </span>
+                      )}
                     </span>
                   </td>
                   {/*  THE ONE COLOURED COLUMN OF THE THREE. Momentum has a SIGN — up or down is
@@ -2530,6 +2603,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                             ? copy.row.moneyCashWhat
                             : copy.row.moneyUnknownWhat(h.name ?? copy.row.thisPosition)}
                       note={h.money_weighted_return_pct == null ? undefined : copy.info.moneyNote}
+                      worked={moneyWeightedWorked(h.money_weighted_cashflows, h.money_weighted_return_pct)}
+                      calculation={h.money_weighted_return_pct != null
+                        ? <MoneyWeightedCashflowCalculation flows={h.money_weighted_cashflows}
+                            lang={copy.lang === 'nl' ? 'nl' : 'en'} />
+                        : undefined}
                       how={/*  A LOOKED-THROUGH FIGURE MUST NAME THE BOOK IT WAS MEASURED IN.
                               This book never bought the stock — it bought the certificate — so the
                               rate is the STRATEGY's on its own money, and the arithmetic behind it
@@ -2628,7 +2706,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         : h.own_return_source === 'yfinance'
                           ? copy.row.yfReturnHow(fmtRet(h.own_return_pct), h.own_return_from ?? copy.info.yearOpened)
                           : copy.row.bookReturnHow(
-                            bookMath(h, copy.row.netDividend) ?? (h.own_income_eur
+                            bookMath(h, copy.row.netDividend, true) ?? (h.own_income_eur
                               ? `(Huidige waarde + ${eur0(h.own_income_eur)} ${copy.row.netDividend}) ÷ Beginwaarde − 1`
                               : 'Huidige waarde ÷ Beginwaarde − 1'),
                             fmtRet(h.own_return_pct),
@@ -2698,8 +2776,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {fmtRet(soldSum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.info.soldMoneyWhat}
-                    note={copy.info.moneyNote}
-                    how={copy.info.moneyHow(eur0n(soldSum.mwrResult), eur0n(soldCap), fmtRet(soldSum.mwr))} />
+                    note={copy.info.moneyAggregateNote}
+                    how={copy.info.moneyAggregateHow(eur0n(soldSum.mwrResult), eur0n(soldCap), fmtRet(soldSum.mwr))} />
                 </td>
                 <td className="pr-4" />
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>
@@ -2808,6 +2886,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
                       what={copy.sold.moneyWhat(p.name ?? copy.row.thisPosition)}
                       note={copy.info.moneyNote}
+                      worked={moneyWeightedWorked(p.money_weighted_cashflows, p.return_pct)}
+                      calculation={<MoneyWeightedCashflowCalculation
+                        flows={p.money_weighted_cashflows} lang={copy.lang === 'nl' ? 'nl' : 'en'} />}
                       how={copy.info.moneyHow(eur0n(p.result_eur), eur0n(p.avg_capital_eur), fmtRet(p.return_pct))} />
                   </td>
                   {/* Instrument return is the book-period return. A post-sale price move is
@@ -2870,8 +2951,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {fmtRet(grand.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.info.bookMoneyWhat}
-                    note={copy.info.moneyNote}
-                    how={copy.info.moneyHow(eur0n(grand.mwrResult), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
+                    note={copy.info.moneyAggregateNote}
+                    how={copy.info.moneyAggregateHow(eur0n(grand.mwrResult), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
                 </td>
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
@@ -3367,14 +3448,27 @@ export default function PortfolioAnalysisModal({
    * up its "these bars belong to a different selection" state for the length of one request.
    */
   const [reloadSeq, setReloadSeq] = useState(0);
+  const reloadWaiters = useRef<Array<{
+    resolve: () => void;
+    reject: (reason: unknown) => void;
+  }>>([]);
+  const reloadAnalysis = () => new Promise<void>((resolve, reject) => {
+    reloadWaiters.current.push({ resolve, reject });
+    setReloadSeq((value) => value + 1);
+  });
   const saveSectorOverride = async (sector: string | null) => {
     if (sectorFor?.company_id == null) return;
+    const companyId = sectorFor.company_id;
     startSectorOverride({
-      companyId: sectorFor.company_id,
-      companyName: sectorFor.name ?? sectorFor.isin ?? `Company ${sectorFor.company_id}`,
+      companyId,
+      companyName: sectorFor.name ?? sectorFor.isin ?? `Company ${companyId}`,
       sector,
       automaticSector: sectorFor.sector_default ?? sectorFor.sector,
-      afterSave: () => setReloadSeq((value) => value + 1),
+      afterSave: async () => {
+        setData((current) => current
+          ? applyCompanySectorOverride(current, companyId, sector) : current);
+        await reloadAnalysis();
+      },
     });
     setSectorFor(null);
   };
@@ -3403,7 +3497,7 @@ export default function PortfolioAnalysisModal({
     const analysisKey = viewKey;
     void (async () => {
       try {
-        const b = await loadPrefetchedAnalysis(analysisKey, async () => {
+        const analysis = loadPrefetchedAnalysis(analysisKey, async () => {
           const r = isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
@@ -3414,6 +3508,10 @@ export default function PortfolioAnalysisModal({
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
           return body as ModelPortfolioAnalysis;
         });
+        // Once a payload is already on screen, selection and refresh loads belong in the shared
+        // root-level request popup. Keeping this around the existing promise reports the same
+        // request without launching a second one; the cold-open loader remains inside the modal.
+        const b = await (data == null ? analysis : track('Updating charts', analysis));
         if (cancelled) return;
         //  Where the wait went. `apiFetch` already logs the round-trip total, but this endpoint
         // is one request covering eight different loads — so a 5-second "Loading overview…"
@@ -3428,7 +3526,10 @@ export default function PortfolioAnalysisModal({
         setData(b);
       } catch (e) {
         traceError('analyse', 'the composition could not be loaded', e);
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e));
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : String(e));
+          reloadWaiters.current.splice(0).forEach((waiter) => waiter.reject(e));
+        }
       }
     })();
     return () => { cancelled = true; };
@@ -3437,6 +3538,16 @@ export default function PortfolioAnalysisModal({
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq]);
+
+  // Receiving the payload and displaying it are different moments. Keep the sector job running
+  // through the commit and the next paint, so its completed state cannot precede the changed row.
+  useEffect(() => {
+    if (loadedFor !== viewKey || reloadWaiters.current.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      reloadWaiters.current.splice(0).forEach((waiter) => waiter.resolve());
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [loadedFor, viewKey]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -3858,11 +3969,6 @@ export default function PortfolioAnalysisModal({
               /* STOCKS: read-only sector / region / currency exposure versus the benchmark.
                  Brinson Attribution is the sole drill-down surface. */
               <>
-                {stale && (
-                  <p className="mb-3 text-[12px] text-fg-muted" aria-live="polite">
-                    Updating charts <LoadingDots />
-                  </p>
-                )}
                 {!data.benchmark_caps_from && (
                   <div className="mb-3 flex flex-wrap items-center gap-2 text-[12px] text-fg-muted">
                     <span>{data.benchmark} weights are waiting for their first daily refresh.</span>
@@ -3962,6 +4068,7 @@ export default function PortfolioAnalysisModal({
         <PanelDialog onClose={() => setWhy(null)}>
           <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
             source={source} lookThrough={lookThrough}
+            portfolioName={name}
             portfolioAsOf={data.returns?.portfolio_as_of}
             benchmarkAsOf={data.returns?.benchmark_as_of}
             onClose={() => setWhy(null)} />

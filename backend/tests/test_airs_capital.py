@@ -175,6 +175,12 @@ class TestCashFlowReturn:
         assert p.avg_capital_eur < 10000.0                     # invested for part of the year
         assert p.capital_invested_eur == 10000.0
         assert money_weighted_return_pct(p) == pytest.approx(10.0)
+        assert sorted(p.cashflow_details, key=lambda f: f["date"]) == [
+            {"date": "2026-06-01", "amount_eur": -10000.0,
+             "kind": "purchase", "source": "AIRS Transacties"},
+            {"date": END.isoformat(), "amount_eur": 11000.0,
+             "kind": "final valuation", "source": "AIRS VOLK"},
+        ]
 
     def test_a_position_with_no_capital_has_no_return_rather_than_zero(self):
         led = build_ledger([], [_buy("A", 0.0, 0, "2026-03-01")], {}, 10000.0, Y0, END)

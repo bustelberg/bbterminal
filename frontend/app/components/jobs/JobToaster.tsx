@@ -147,7 +147,13 @@ function JobCard({ job }: { job: JobToast }) {
             {job.apiCalls} call{job.apiCalls === 1 ? '' : 's'}
           </span>
         )}
-        <span className={`text-[11px] font-mono ${tone.label}`}>
+        <span className={`inline-flex items-center gap-1 text-[11px] font-mono ${tone.label}`}>
+          {running && !job.cancelRequested && (
+            <svg viewBox="0 0 24 24" aria-hidden="true"
+              className="h-3 w-3 shrink-0 animate-spin fill-none stroke-current stroke-2">
+              <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+            </svg>
+          )}
           {/* The press is acknowledged the moment it happens, even though the worker stops at its
               next safe point a few seconds later. */}
           {job.cancelRequested && running ? 'cancelling…'

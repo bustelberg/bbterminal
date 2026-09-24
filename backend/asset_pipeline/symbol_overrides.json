@@ -23,6 +23,18 @@
       "symbol": "1658.HK",
       "name": "Postal Savings Bank of China Co Ltd H",
       "note": "The held AIRS security is the Hong Kong H share, not the separately listed Shanghai A share (CNE100003PZ4 / 601658.SS). Automatic resolution marked the H-share ISIN not_found; pinning Yahoo 1658.HK restores its own sector and price history without borrowing another share class."
+    },
+    {
+      "isin": "TW0002330008",
+      "symbol": "2330.TW",
+      "name": "Taiwan Semiconductor Manufacturing Co Ltd",
+      "note": "The ACWI workbook holds the Taiwan ordinary share under ticker 2330 on the Taiwan Stock Exchange. Automatic resolution attached this ISIN to the US ADR symbol TSM, so the workbook's exact 2330.TW membership could not resolve and Attribution marked the ADR holding as outside ACWI. Pinning the ordinary ISIN to its own liquid Yahoo listing preserves the security identity while the existing company-level overlap matcher can relate the ordinary share and ADR by their common company name."
+    },
+    {
+      "isin": "NL0015001FS8",
+      "symbol": "FER.MC",
+      "name": "Ferrovial N.V.",
+      "note": "The ACWI workbook holds Ferrovial under ticker FER on Bolsa de Madrid, which maps to Yahoo FER.MC. Automatic resolution selected the obscure 0P2N.IL line instead, so the workbook's exact ticker-and-venue membership could not resolve even though both the held security and the workbook row identify ISIN NL0015001FS8."
     }
   ]
 }

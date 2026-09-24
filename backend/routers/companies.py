@@ -485,6 +485,11 @@ async def set_company_sector_override(company_id: int, req: SectorOverrideReques
         raise HTTPException(status_code=404, detail="Company not found")
     if sector is None:
         supabase.table("company_sector_override").delete().eq("company_id", company_id).execute()
+        # The Analyse endpoint deliberately reuses its data fingerprint for two seconds. Clear it
+        # on this worker now: the UI immediately reloads after this response and must not start
+        # that relatively expensive calculation from the just-invalidated sector payload.
+        from routers import _analysis_cache  # noqa: PLC0415
+        _analysis_cache.invalidate()
         return {"company_id": company_id, "sector": None}
 
     actor = getattr(request.state, "auth", None) or {}
@@ -496,6 +501,8 @@ async def set_company_sector_override(company_id: int, req: SectorOverrideReques
                     "updated_by_user_id": actor.get("id"),
                     "updated_by_email": actor.get("email")}, on_conflict="company_id")
            .execute().data)
+    from routers import _analysis_cache  # noqa: PLC0415
+    _analysis_cache.invalidate()
     return row[0] if row else {"company_id": company_id, "sector": sector}
 
 

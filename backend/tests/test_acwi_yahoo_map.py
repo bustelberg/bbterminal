@@ -37,6 +37,14 @@ class TestTheThreeThatAreNotObvious:
         """ Yahoo's own convention, and what `asset_execution` stores: `BRK.B` -> `BRK-B`."""
         assert yahoo_symbol("BRK.B", "NYSE") == "BRK-B"
 
+    def test_berkshire_class_b_uses_the_files_exact_undotted_spelling(self):
+        """The iShares workbook writes `BRKB`, while Yahoo and our asset store use `BRK-B`.
+
+        This must be an exact override: guessing that a final letter is always a share class can
+        turn an ordinary ticker into a different listed security.
+        """
+        assert yahoo_symbol("BRKB", "NYSE", "United States") == "BRK-B"
+
     def test_the_nordics_are_one_label_over_three_markets(self):
         """ `Nasdaq Omx Nordic` covers Stockholm, Helsinki and Copenhagen — three Yahoo suffixes
         behind one exchange string. The row's country is what separates them, and guessing would

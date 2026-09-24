@@ -45,8 +45,13 @@ def _leg(name="Shopify", *, value=509.32, book_value=11243.16, book=CHILD, extra
 
 
 # The child book's OWN ledger position for Shopify — real purchases, real dates.
+CHILD_FLOWS = [{"date": "2026-01-01", "amount_eur": -10_000.0,
+                "kind": "opening value", "source": "AIRS VOLK + Transacties"},
+               {"date": "2026-09-24", "amount_eur": 11_154.0,
+                "kind": "final valuation", "source": "AIRS VOLK"}]
 CHILD_LEDGER = {CHILD: {"Shopify": {"name": "Shopify", "return_pct": 11.54,
-                                    "avg_capital_eur": 10_000.0}}}
+                                    "avg_capital_eur": 10_000.0,
+                                    "money_weighted_cashflows": CHILD_FLOWS}}}
 # The parent's ledger, which knows only the certificate.
 WRAPPER = {"Star Selection Index": {"name": "Star Selection Index", "return_pct": -3.86,
                                     "avg_capital_eur": 52_974.24}}
@@ -58,6 +63,7 @@ class TestTheLookThrough:
         assert got["capital_source"] == "lookthrough"
         assert got["capital_book"] == CHILD
         assert got["money_weighted_return_pct"] == 11.54
+        assert got["money_weighted_cashflows"] == CHILD_FLOWS
 
     def test_the_rate_transfers_and_the_euros_are_scaled_to_this_books_slice(self):
         """ THE CHILD'S BALANCE SHEET IS NOT THIS BOOK'S. It put EUR 10,000 into Shopify; this

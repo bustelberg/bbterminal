@@ -843,9 +843,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // re-groups under its new bucket without collapsing/re-opening the whole holdings table.
   const refreshIsins = useCallback(async (p: string) => {
     const i = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`);
-    if (!i.ok) return;
+    if (!i.ok) throw new Error(`Could not refresh the updated sector (HTTP ${i.status}).`);
     const resolved = (await i.json()) as AirsAccountIsins;
     setIsins((m) => ({ ...m, [p]: resolved }));
+    // The shared job is complete only when the row has actually painted the refreshed sector.
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
   }, []);
 
   /**

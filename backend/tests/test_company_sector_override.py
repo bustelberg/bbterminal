@@ -19,6 +19,8 @@ def _request(user_id: str = "b29a8667-87e6-4a66-a5dc-1bfb462c885e",
 def test_setting_an_override_records_the_verified_user(monkeypatch):
     fake = FakeSupabase({"company": [{"company_id": 42}], "company_sector_override": []})
     monkeypatch.setattr(companies, "supabase", fake)
+    invalidations: list[bool] = []
+    monkeypatch.setattr("routers._analysis_cache.invalidate", lambda: invalidations.append(True))
 
     result = asyncio.run(companies.set_company_sector_override(
         42, companies.SectorOverrideRequest(sector="Information Technology"), _request()))
@@ -28,6 +30,7 @@ def test_setting_an_override_records_the_verified_user(monkeypatch):
     assert saved["updated_by_user_id"] == "b29a8667-87e6-4a66-a5dc-1bfb462c885e"
     assert saved["updated_by_email"] == "editor@example.com"
     assert saved["updated_at"]
+    assert invalidations == [True]
 
 
 def test_automatic_removes_the_active_override(monkeypatch):
@@ -40,9 +43,12 @@ def test_automatic_removes_the_active_override(monkeypatch):
         }],
     })
     monkeypatch.setattr(companies, "supabase", fake)
+    invalidations: list[bool] = []
+    monkeypatch.setattr("routers._analysis_cache.invalidate", lambda: invalidations.append(True))
 
     result = asyncio.run(companies.set_company_sector_override(
         42, companies.SectorOverrideRequest(sector=None), _request()))
 
     assert result == {"company_id": 42, "sector": None}
     assert fake.tables["company_sector_override"] == []
+    assert invalidations == [True]

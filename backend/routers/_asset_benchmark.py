@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
@@ -56,7 +57,66 @@ from routers._benchmark_index import (
 
 _log = logging.getLogger(__name__)
 
-_BENCH_GRID_COLS = ("isin,analysis_id,yahoo_symbol,name,gf_company_name,currency,"
+# The iShares workbook is the authority for CURRENT ACWI membership. Keep its resolved asset ids
+# briefly because resolving ticker+venue against the asset store pages through ~8,000 executions;
+# a short TTL avoids doing that again for every panel in one modal while still picking up newly
+# ingested assets without a process restart. This is deliberately not backed by
+# `index_file_membership`: requiring a separate sync before a read is the drift that made
+# Constellation Software appear outside ACWI while the workbook plainly contained it.
+_ACWI_FILE_MEMBERS_TTL_SECONDS = 60.0
+_acwi_file_members_cache: tuple[float, list[int]] | None = None
+_acwi_file_member_names_cache: tuple[float, list[str]] | None = None
+
+
+def _acwi_file_analysis_ids() -> list[int]:
+    """Asset ids resolved directly from the bundled iShares ACWI holdings workbook."""
+    global _acwi_file_members_cache  # noqa: PLW0603 - one small process-local read cache
+
+    now = time.monotonic()
+    if (_acwi_file_members_cache is not None
+            and now < _acwi_file_members_cache[0]):
+        return list(_acwi_file_members_cache[1])
+
+    # Function-level import keeps the ACWI-only dependency off the S&P/AEX paths and avoids the
+    # asset-membership module importing the benchmark module during application startup.
+    from index_universe.acwi.asset_membership import resolve  # noqa: PLC0415
+
+    rows, _stats = resolve()
+    ids = sorted({int(r["analysis_id"]) for r in rows if r.get("analysis_id") is not None})
+    _acwi_file_members_cache = (now + _ACWI_FILE_MEMBERS_TTL_SECONDS, ids)
+    return list(ids)
+
+
+def _acwi_file_member_names() -> list[str]:
+    """Every equity name the bundled iShares workbook calls an ACWI constituent.
+
+    This is IDENTITY ONLY. A name that cannot be resolved by ticker + venue must not enter the
+    benchmark's priced member set: doing that would let an H share borrow an A share's return.
+    Attribution's overlap marker already compares exact normalized company roots so two listings
+    of one business (Alphabet A/C, an ordinary/ADR, or Dino's 0TCP.IL/DNP.WA lines) read as the
+    same company without making the benchmark price a guessed security.
+    """
+    global _acwi_file_member_names_cache  # noqa: PLW0603 - one small process-local read cache
+
+    now = time.monotonic()
+    if (_acwi_file_member_names_cache is not None
+            and now < _acwi_file_member_names_cache[0]):
+        return list(_acwi_file_member_names_cache[1])
+
+    from index_universe.acwi.holdings import load_acwi_holdings  # noqa: PLC0415
+
+    holdings, _as_of = load_acwi_holdings()
+    names = sorted({str(h.get("Name") or "").strip()
+                    for h in holdings
+                    if (h.get("Asset Class") or "").strip() == "Equity"
+                    and str(h.get("Name") or "").strip()})
+    _acwi_file_member_names_cache = (
+        now + _ACWI_FILE_MEMBERS_TTL_SECONDS,
+        names,
+    )
+    return list(names)
+
+_BENCH_GRID_COLS = ("isin,analysis_id,company_id,yahoo_symbol,name,gf_company_name,currency,"
                     "market_cap_eur,market_cap_currency,status,bars,is_default,"
                     "delisted_at,out_of_scope_at")
 
@@ -302,7 +362,13 @@ def _universe_company_ids(label: str) -> list[int]:
 
 
 def _universe_analysis_ids(label: str) -> list[int]:
-    """The universe's constituents as ASSET ids, straight from `universe_asset_membership`.
+    """The universe's constituents as ASSET ids.
+
+     ACWI IS READ DIRECTLY FROM THE ISHARES WORKBOOK. The workbook is the authority on current
+    membership; `index_file_membership` is only a persisted copy and may be empty or stale when
+    its manual sync has not run. That exact drift made Constellation Software appear outside ACWI
+    in Attribution despite the workbook containing `CSU / Toronto Stock Exchange`. Resolution is
+    still ticker+venue (plus the country-gated interlisting rule), never a name match.
 
      `universe_asset_membership` IS A VIEW, NOT A TABLE (migration 20260806060000). It IS the
     three-hop join `universe_membership.company_id -> company.isin -> asset_execution.isin`,
@@ -317,6 +383,16 @@ def _universe_analysis_ids(label: str) -> list[int]:
     because of the `.eq(universe_id)` filter above it: the view is DISTINCT on the pair, so the
     key is unique within one universe. A reader that drops that filter needs its own tiebreaker.
     """
+    if label.strip().upper() == "ACWI":
+        try:
+            ids = _acwi_file_analysis_ids()
+            if ids:
+                return ids
+            _log.warning("[bench] ACWI workbook resolved to no assets; falling back to the view")
+        except Exception as e:  # noqa: BLE001 - a read must degrade to the last persisted copy
+            _log.warning("[bench] ACWI workbook membership failed (%s: %s); falling back to the view",
+                         type(e).__name__, e)
+
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", label).limit(1).execute().data or [])
     if not uni:
@@ -348,6 +424,13 @@ def file_member_count(label: str) -> int:
     double-count. It is reported beside that count so a reader can see the second source exists;
     the ratio it sits next to is still company-side and still says so.
     """
+    if label.strip().upper() == "ACWI":
+        try:
+            return len(_acwi_file_analysis_ids())
+        except Exception as e:  # noqa: BLE001 - retain the persisted-copy fallback below
+            _log.warning("[bench] ACWI workbook count failed (%s: %s); using persisted count",
+                         type(e).__name__, e)
+
     uni = (supabase.table("universe").select("universe_id")
            .eq("label", label).limit(1).execute().data or [])
     if not uni:
@@ -386,7 +469,7 @@ def cap_stamp_range(rows: list[dict]) -> tuple[str | None, str | None, int]:
     return stamps[0], stamps[-1], len(rows) - len(stamps)
 
 
-def members(label: str) -> tuple[list[dict], dict]:
+def members(label: str, *, include_membership_identity: bool = False) -> tuple[list[dict], dict]:
     """The index's constituents, priced from the ASSET world. Returns (members, coverage).
 
     Shaped for `_benchmark_index._window_rows`, which keys prices by `company_id` — here that
@@ -412,7 +495,10 @@ def members(label: str) -> tuple[list[dict], dict]:
     #   with 129 of the 1,807 not among the 1,998. See `_file_only_count`.
     ids = _universe_company_ids(label)
     if not ids:
-        return [], {"universe_members": 0, "priced": 0, "covered_pct": None}
+        coverage = {"universe_members": 0, "priced": 0, "covered_pct": None}
+        if include_membership_identity:
+            coverage.update({"_member_isins": [], "_member_names": []})
+        return [], coverage
 
     aids = _universe_analysis_ids(label)
     # One copy for the whole universe (502 ids) instead of three chunked round trips.
@@ -422,6 +508,23 @@ def members(label: str) -> tuple[list[dict], dict]:
         for i in range(0, len(aids), IN_CHUNK_SIZE):
             grid_rows += (supabase.table("asset_grid").select(_BENCH_GRID_COLS)
                           .in_("analysis_id", aids[i:i + IN_CHUNK_SIZE]).execute().data or [])
+
+    # Membership and calculability are different facts. A constituent without a Yahoo market cap
+    # cannot yet carry a cap weight, but it is still in the index. Attribution optionally needs
+    # this identity set so a missing cap cannot become the false claim "not in ACWI".
+    member_isins = sorted({str(r["isin"]).strip().upper() for r in grid_rows if r.get("isin")})
+    member_names = sorted({str(r.get("gf_company_name") or r.get("name")).strip()
+                           for r in grid_rows
+                           if r.get("gf_company_name") or r.get("name")})
+    if include_membership_identity and label.strip().upper() == "ACWI":
+        try:
+            # Membership comes from the provider workbook even when its ticker/venue cannot be
+            # joined to the symbol our asset row currently uses. Names are used only by the exact
+            # company-root overlap test; they never enter the priced benchmark member set above.
+            member_names = sorted(set(member_names).union(_acwi_file_member_names()))
+        except Exception as e:  # noqa: BLE001 - resolved identities remain a valid fallback
+            _log.warning("[bench] ACWI workbook identity names failed (%s: %s); using resolved "
+                         "member names only", type(e).__name__, e)
 
     #  One row per analysis asset, not per listing. `asset_grid` is one row per EXECUTION, so a
     #   company traded on several venues appears several times — measured on the S&P, 501 assets
@@ -458,6 +561,22 @@ def members(label: str) -> tuple[list[dict], dict]:
                   .in_("analysis_id", priced_aids[i:i + IN_CHUNK_SIZE]).execute().data or []):
             caps[r["analysis_id"]] = r
 
+    # Yahoo legitimately omits `marketCap` for some healthy primary listings. Investor AB
+    # (`INVE-B.ST`) is one: prices and ACWI membership are present, but a null asset cap used to
+    # remove it from the benchmark. The company pipeline already has a verified EUR cap. Use that
+    # only when the asset cap is absent and only through the exact company_id -- never by name.
+    fallback_ids = sorted({int(g["company_id"]) for g in grid.values()
+                           if float(g.get("market_cap_eur") or 0) <= 0
+                           and g.get("company_id") is not None})
+    company_caps: dict[int, dict] = {}
+    for i in range(0, len(fallback_ids), IN_CHUNK_SIZE):
+        for r in (supabase.table("company")
+                  .select("company_id,market_cap_eur,market_cap_native,"
+                          "market_cap_currency,market_cap_date")
+                  .in_("company_id", fallback_ids[i:i + IN_CHUNK_SIZE]).execute().data or []):
+            if float(r.get("market_cap_eur") or 0) > 0:
+                company_caps[int(r["company_id"])] = r
+
     #  One company, one row — and the asset world does not make this unnecessary. Keying
     #   membership on `analysis_id` collapses a company's LISTINGS, not its SHARE CLASSES: those
     #   have different ISINs, hence different assets. Measured on the S&P after the repoint,
@@ -471,7 +590,9 @@ def members(label: str) -> tuple[list[dict], dict]:
     #   brought a company row with it.
     by_name: dict[str, dict] = {}
     for aid, g in grid.items():
-        cap = float(g.get("market_cap_eur") or 0)
+        fallback = (company_caps.get(int(g["company_id"]))
+                    if g.get("company_id") is not None else None)
+        cap = float(g.get("market_cap_eur") or (fallback or {}).get("market_cap_eur") or 0)
         if cap <= 0:
             continue                      # no cap to weight it by
         prov = caps.get(aid) or {}
@@ -487,10 +608,14 @@ def members(label: str) -> tuple[list[dict], dict]:
                 "currency": g.get("currency"),
                 "market_cap_eur": cap,
                 # Provenance only — nothing downstream weights off these.
-                "market_cap_native": prov.get("market_cap_native"),
-                "market_cap_currency": (prov.get("market_cap_currency")
+                "market_cap_native": (prov.get("market_cap_native")
+                                      or (fallback or {}).get("market_cap_native")),
+                "market_cap_currency": ((fallback or {}).get("market_cap_currency")
+                                        if fallback else prov.get("market_cap_currency")
                                         or g.get("market_cap_currency")),
-                "market_cap_checked_at": prov.get("market_cap_checked_at"),
+                "market_cap_checked_at": ((fallback or {}).get("market_cap_date")
+                                          if fallback else prov.get("market_cap_checked_at")),
+                "market_cap_source": "company_fallback" if fallback else "asset_yahoo",
             }
 
     out = list(by_name.values())
@@ -538,6 +663,8 @@ def members(label: str) -> tuple[list[dict], dict]:
         # missing", which is what `covered_pct` is for.
         "missing_countries": missing_countries,
     }
+    if include_membership_identity:
+        coverage.update({"_member_isins": member_isins, "_member_names": member_names})
     return out, coverage
 
 
@@ -584,7 +711,8 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
     return out
 
 
-def index_rows(label: str, start: str) -> tuple[list[dict], dict]:
+def index_rows(label: str, start: str, *,
+               include_membership_identity: bool = False) -> tuple[list[dict], dict]:
     """The index's CONSTITUENTS over one window — each with its start-of-window weight and its
     EUR return. Returns (rows, coverage).
 
@@ -595,7 +723,7 @@ def index_rows(label: str, start: str) -> tuple[list[dict], dict]:
     """
     from datetime import date, timedelta  # noqa: PLC0415
 
-    mem, coverage = members(label)
+    mem, coverage = members(label, include_membership_identity=include_membership_identity)
     if not mem:
         return [], coverage
     lookback = (date.fromisoformat(start) - timedelta(days=45)).isoformat()

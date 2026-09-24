@@ -73,6 +73,10 @@ class Position:
     weight_pct: float | None = None
     # Dated investor cash flows, used only for the position's true XIRR.
     cashflows: list[tuple[date, float]] = field(default_factory=list)
+    # The identical solver inputs with their AIRS role/source retained for the UI audit trail.
+    # `cashflows` stays as the small numerical representation used by XIRR; both lists are
+    # appended through `add_cashflow` so the explanation cannot drift from the calculation.
+    cashflow_details: list[dict[str, object]] = field(default_factory=list)
 
     # ── What it produced, split by where the figure comes from.
     # Still-held P&L: AIRS's own current − restated Beginwaarde. Restatement is what makes this
@@ -229,7 +233,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
                  beginvermogen: float | None, period_start: date, period_end: date,
                  unknown_names: set[str] | None = None,
                  splits: dict[str, float] | None = None,
-                 income_flows_by_name: dict[str, list[tuple[date, float]]] | None = None) -> Ledger:
+                 income_flows_by_name: dict[str, list[tuple]] | None = None) -> Ledger:
     """Every position the book touched, with its average capital and its contribution.
 
     `volk_rows` are `airs_holding` rows (holding_name, quantity, start_value_eur,
@@ -271,6 +275,15 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
         except ValueError:
             return period_start
 
+    def add_cashflow(p: Position, day: date, amount: float, kind: str, source: str) -> None:
+        """Add one non-zero XIRR operand and its provenance as a single operation."""
+        if not amount:
+            return
+        p.cashflows.append((day, amount))
+        p.cashflow_details.append({
+            "date": day.isoformat(), "amount_eur": amount, "kind": kind, "source": source,
+        })
+
     # ── Pass 1: the trades, so quantities are known before the holdings are de-restated.
     for t in trades:
         p = pos(t.fonds)
@@ -281,7 +294,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
             bought_qty[t.fonds] = bought_qty.get(t.fonds, 0.0) + t.quantity
             p.bought_eur = round(p.bought_eur + t.eur, 2)
             p.avg_capital_eur += t.eur * w
-            p.cashflows.append((flow_day(t.datum), -t.eur))
+            add_cashflow(p, flow_day(t.datum), -t.eur, "purchase", "AIRS Transacties")
         else:
             sold_qty[t.fonds] = sold_qty.get(t.fonds, 0.0) + t.quantity
             p.sold_eur = round(p.sold_eur + t.eur, 2)
@@ -293,7 +306,7 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
             # profitable full sale appear to have negative capital, so its money-weighted return
             # was hidden. `proceeds - Res. YtD` is AIRS's value at the start of this year.
             p.avg_capital_eur -= (t.eur - t.realised_ytd_eur) * w
-            p.cashflows.append((flow_day(t.datum), t.eur))
+            add_cashflow(p, flow_day(t.datum), t.eur, "sale", "AIRS Transacties")
             if t.datum:
                 p.first_sale = t.datum if p.first_sale is None else min(p.first_sale, t.datum)
                 p.last_sale = t.datum if p.last_sale is None else max(p.last_sale, t.datum)
@@ -363,21 +376,26 @@ def build_ledger(volk_rows: list[dict], trades: list, income_by_name: dict[str, 
     for name, eur in (income_by_name or {}).items():
         flows = (income_flows_by_name or {}).get(name)
         if flows:
-            pos(name).cashflows.extend(flows)
+            for flow in flows:
+                day, amount, *detail = flow
+                add_cashflow(pos(name), day, amount, detail[0] if detail else "net income",
+                             "AIRS Mutaties")
         elif eur:
-            pos(name).cashflows.append((period_end, eur))
+            add_cashflow(pos(name), period_end, eur, "net income (date unavailable)",
+                         "AIRS Mutaties")
 
     # The valuation closes each position's XIRR. Opening value is an investor outflow on the first
     # day; current value is an inflow on the report date. A sold-out position already closes through
     # its sale proceeds and therefore has no terminal valuation.
     for p in by_name.values():
         if p.opening_eur:
-            p.cashflows.append((period_start, -p.opening_eur))
+            add_cashflow(p, period_start, -p.opening_eur, "opening value",
+                         "AIRS VOLK + Transacties")
         if p.held:
             row = next((r for r in volk_rows if r.get("holding_name") == p.name), None) or {}
             current = _f(row.get("current_value_eur"))
             if current is not None:
-                p.cashflows.append((period_end, current))
+                add_cashflow(p, period_end, current, "final valuation", "AIRS VOLK")
 
     led.positions = sorted(by_name.values(), key=lambda p: -abs(p.result_eur))
     led.total_result_eur = round(sum(p.result_eur for p in led.positions), 2)
