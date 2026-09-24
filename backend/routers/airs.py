@@ -1002,6 +1002,15 @@ class HoldingSource(BaseModel):
     blend_weight_pct: float | None = None
 
 
+class MoneyWeightedCashFlow(BaseModel):
+    """One signed, dated operand passed unchanged to the position XIRR solver."""
+
+    date: str
+    amount_eur: float
+    kind: str
+    source: str
+
+
 class BookHoldingDetail(BaseModel):
     """One paired-book position — every LONG line, priced or not.
 
@@ -1118,6 +1127,7 @@ class BookHoldingDetail(BaseModel):
     # you put in" to divide by. 24 of BUS_Offensief_Dyn's 52 rows are in this position.
     avg_capital_eur: float | None = None
     money_weighted_return_pct: float | None = None
+    money_weighted_cashflows: list[MoneyWeightedCashFlow] = []
     #  WHICH of the two reasons the two fields above are blank. True = this position carries a
     # `Tt = D` (Deponering) row, so shares arrived without a purchase and its trade quantities and
     # its holding quantity are on different bases. False with a blank value = it is a leg inside a
@@ -1322,6 +1332,7 @@ class LedgerPosition(BaseModel):
     unsplit_result_eur: float | None = None
     contribution_pct: float | None = None
     return_pct: float | None = None
+    money_weighted_cashflows: list[MoneyWeightedCashFlow] = []
     sales: int = 0
     first_sale: str | None = None
     last_sale: str | None = None

@@ -51,7 +51,7 @@ describe('Analyse primary-view copy', () => {
     const source = readFileSync(join('app', 'components', 'portfolios', 'PortfolioAnalysisModal.tsx'), 'utf8');
     const forbidden = [
       'Sold during the year — no longer a holding', 'No valued positions to show here.',
-      'How the Instrument return is built', 'What this portfolio returned year to date',
+      'How the AIRS return is built', 'What this portfolio returned year to date',
       'A dash is not a zero', 'No sector — a fund', 'The book’s year',
       'positions, everything it held or sold', 'Fundamental — is',
       'This index is rebuilt from', 'Why the trading mattered for',
@@ -64,5 +64,32 @@ describe('Analyse primary-view copy', () => {
     expect(card.what).toContain('eigen EUR-rendement');
     expect(card.note).toContain('sinds jaarbegin');
     expect(card.how).toContain('slot');
+  });
+
+  it('labels a book-return derivation as raw AIRS data', () => {
+    const arithmetic = 'Huidige waarde (AIRS): €23,902.00\n'
+      + 'Netto-inkomsten (AIRS Mutaties: bruto + ingehouden belasting): €0.00\n'
+      + 'Beginwaarde lopend jaar (AIRS): €28,083.00\n\n'
+      + '(€23,902.00 + €0.00 nettodividend) ÷ €28,083.00 − 1';
+    const how = ANALYSE_COPY.nl.row.bookReturnHow(arithmetic, '-14.89%');
+
+    expect(how).toContain('Ruwe waarden uit AIRS');
+    expect(how).toContain('Netto-inkomsten (AIRS Mutaties: bruto + ingehouden belasting): €0.00');
+    expect(how).toContain('(€23,902.00 + €0.00 nettodividend) ÷ €28,083.00 − 1');
+    expect(how).toContain('Uitkomst: -14.89%');
+  });
+
+  it('names both return measures plainly and explains the dated IRR procedure', () => {
+    expect(ANALYSE_COPY.en.holdings.instrumentReturn).toBe('AIRS return');
+    expect(ANALYSE_COPY.en.holdings.moneyWeighted).toBe('Money-weighted return');
+    expect(ANALYSE_COPY.nl.holdings.instrumentReturn).toBe('AIRS-rendement');
+    expect(ANALYSE_COPY.nl.holdings.moneyWeighted).toBe('Geldgewogen rendement');
+
+    const how = ANALYSE_COPY.en.info.moneyHow('€100', '€1,000', '+10.00%');
+    expect(how).toContain('Opening value and purchases are negative cash flows');
+    expect(how).toContain('Sales, net income and the final valuation are positive cash flows');
+    expect(how).toContain('Result: +10.00% over the actual holding period (not annualised)');
+    expect(how).toContain('typeset equation and every input used are shown below');
+    expect(ANALYSE_COPY.en.info.moneyAggregateNote).toContain('Individual position rows use dated XIRR');
   });
 });

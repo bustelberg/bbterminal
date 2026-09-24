@@ -303,6 +303,7 @@ class TestWrappedBookMarks:
         out = pa._wrapped_book_marks({1})
         assert "CASH1" not in out[1]
         assert out[1]["US1"]["return_pct"] == pytest.approx(10.0)
+        assert out[1]["US1"]["income_eur"] == pytest.approx(0.0)
 
     def test_the_wrapped_books_own_journal_income_is_inside_its_figure(self, monkeypatch):
         # A leg that paid a dividend must not read lower than the identical instrument held

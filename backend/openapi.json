@@ -4697,6 +4697,14 @@
             ],
             "title": "Mom State"
           },
+          "money_weighted_cashflows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MoneyWeightedCashFlow"
+            },
+            "title": "Money Weighted Cashflows",
+            "type": "array"
+          },
           "money_weighted_return_pct": {
             "anyOf": [
               {
@@ -8898,6 +8906,14 @@
             ],
             "title": "Mom State"
           },
+          "money_weighted_cashflows": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/MoneyWeightedCashFlow"
+            },
+            "title": "Money Weighted Cashflows",
+            "type": "array"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -10337,6 +10353,35 @@
           "unmatched"
         ],
         "title": "ModelPortfolioPositions",
+        "type": "object"
+      },
+      "MoneyWeightedCashFlow": {
+        "description": "One signed, dated operand passed unchanged to the position XIRR solver.",
+        "properties": {
+          "amount_eur": {
+            "title": "Amount Eur",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "amount_eur",
+          "kind",
+          "source"
+        ],
+        "title": "MoneyWeightedCashFlow",
         "type": "object"
       },
       "MonthStatInfo": {
