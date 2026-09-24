@@ -109,6 +109,14 @@ NORDIC_BY_COUNTRY: dict[str, str] = {
     "Sweden": ".ST", "Finland": ".HE", "Denmark": ".CO", "Iceland": ".IC",
 }
 
+# Exact file spelling -> Yahoo symbol. These are exceptions where the provider omits information
+# that a general transform cannot recover safely. `BRKB` is Berkshire Class B in this workbook;
+# Yahoo stores that security as `BRK-B`. Do not generalise this to "last letter is a class" — an
+# ordinary ticker such as `XOM` would become ambiguous and could silently point at another asset.
+SYMBOL_OVERRIDES: dict[tuple[str, str], str] = {
+    ("NYSE", "BRKB"): "BRK-B",
+}
+
 
 def yahoo_symbol(ticker: str, exchange: str, location: str = "") -> str | None:
     """`('CSU', 'Toronto Stock Exchange')` -> `'CSU.TO'`, or None when the venue is unknown.
@@ -138,6 +146,9 @@ def yahoo_symbol(ticker: str, exchange: str, location: str = "") -> str | None:
     if not t:
         return None
     ex = (exchange or "").strip()
+    override = SYMBOL_OVERRIDES.get((ex, t))
+    if override is not None:
+        return override
     suffix = EXCHANGE_SUFFIX.get(ex)
     if suffix is None and ex == "Nasdaq Omx Nordic":
         suffix = NORDIC_BY_COUNTRY.get((location or "").strip())

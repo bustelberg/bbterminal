@@ -48,7 +48,7 @@ from datetime import date
 from asset_pipeline.geo import MSCI_REGION, msci_region_of
 from asset_pipeline.sector_override import load_file_sector_overrides
 from common.pg import load_rows_via_copy
-from deps import IN_CHUNK_SIZE, supabase
+from deps import IN_CHUNK_SIZE, fetch_in_chunks, supabase
 from routers._airs_ref import model as ref_model, mutaties_for as ref_mutaties_for, positions_for as ref_positions_for
 from routers._asset_benchmark import index_returns
 from routers._asset_benchmark import members as _members
@@ -362,8 +362,13 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
     overrides: dict[int, str] = {}
     if company_ids:
         try:
-            override_rows = (supabase.table("company_sector_override").select("company_id,sector")
-                             .in_("company_id", company_ids).execute().data or [])
+            # PostgREST encodes `.in_()` in the GET URL. ACWI supplies ~1,600 company ids here;
+            # one request exceeds the proxy's request-line limit and returns HTTP 414, silently
+            # removing every management override from the analysis. Use the shared bounded loader
+            # for the same reason the asset-grid fallback immediately above is chunked.
+            override_rows = fetch_in_chunks(company_ids, lambda chunk:
+                supabase.table("company_sector_override").select("company_id,sector")
+                .in_("company_id", chunk).execute())
             overrides = {int(r["company_id"]): r["sector"] for r in override_rows if r.get("sector")}
         except Exception as e:  # migration may not yet be present on an older database
             _log.warning("[analysis] sector overrides unavailable: %s", e)

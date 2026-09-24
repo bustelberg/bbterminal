@@ -56,7 +56,7 @@ from contextlib import contextmanager
 from datetime import date, timedelta
 
 from common.pg import load_rows_via_copy
-from deps import supabase
+from deps import fetch_in_chunks, supabase
 from routers._airs_ref import model_weights_for as ref_model_weights_for, models as ref_models
 from timeseries import load_series
 
@@ -518,8 +518,9 @@ def _load_company_sector_overrides(company_ids: list[int]) -> dict[int, str]:
     if not ids:
         return {}
     try:
-        rows = (supabase.table("company_sector_override").select("company_id,sector")
-                .in_("company_id", ids).execute().data or [])
+        rows = fetch_in_chunks(ids, lambda chunk:
+            supabase.table("company_sector_override").select("company_id,sector")
+            .in_("company_id", chunk).execute())
         return {int(row["company_id"]): row["sector"] for row in rows if row.get("sector")}
     except Exception:  # Migration may not have reached this environment yet.
         return {}
