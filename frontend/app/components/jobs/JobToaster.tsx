@@ -6,6 +6,7 @@ import { useIsAdmin } from '../../../lib/hooks/useEffectiveRole';
 import {
   attachRunningJobs, cancelJob, dismissJob, jobsStore, LINGER_SECONDS, type JobToast,
 } from '../../../lib/stores/jobs';
+import { fundamentalJobMessage } from './fundamentalJobMessage';
 
 /**
  * The bottom-right progress stack.
@@ -59,9 +60,39 @@ const FADE_MS = 300;
  *  from. A longer transition than the tick is exactly what left the bar unfinished at zero. */
 const TICK_MS = 100;
 
+type UnavailableNotice = { company: string; reason: string };
+
+/** Turn the server receipt into a small piece of UI instead of displaying its wire-format string.
+ *  The TSX rewrite also makes an already-running backend (which may still return the old wording)
+ *  useful immediately after a frontend deploy. */
+export function unavailableNotice(summary: string | null): UnavailableNotice | null {
+  const marker = ' — unavailable: ';
+  if (!summary?.includes(marker)) return null;
+  const detail = summary.slice(summary.indexOf(marker) + marker.length);
+  const separator = detail.indexOf(': ');
+  const company = separator >= 0 ? detail.slice(0, separator) : '';
+  let reason = separator >= 0 ? detail.slice(separator + 2) : detail;
+  if (/^TSX is outside (?:the|our) GuruFocus(?: subscription)?(?:…|\.\.\.)?$/i.test(reason)) {
+    reason = 'This is a Canadian listing (TSX), which is outside our GuruFocus subscription.';
+  } else if (/^Canada \(TSX\) is outside our GuruFocus subscription\.?$/i.test(reason)) {
+    reason = 'This is a Canadian listing (TSX), which is outside our GuruFocus subscription.';
+  }
+  return { company, reason };
+}
+
 function JobCard({ job }: { job: JobToast }) {
-  const tone = TONE[job.status] ?? TONE.running;
+  const unavailable = unavailableNotice(job.summary);
+  const fundamentals = job.kind.startsWith('fundamentals.');
+  const displayMessage = fundamentals
+    ? fundamentalJobMessage(job.summary || job.message)
+    : (job.summary || job.message);
+  const tone = unavailable ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
   const running = job.status === 'running';
+  // A pre-flight refusal is terminal and correctly `done` (nothing crashed and no paid call was
+  // attempted), but its explanation is as important as an error. Let it wrap instead of applying
+  // the compact success receipt style that cut "outside the GuruFocus subscription" down to an
+  // unexplained `TSX…`.
+  const explanation = job.status === 'failed' || fundamentals;
   //  Indeterminate until a total arrives. `done/0` is NaN, and a bar that reads 100% before the
   // first step is worse than one that reads nothing.
   const pct = job.total > 0 ? Math.min(100, (job.done / job.total) * 100) : null;
@@ -161,7 +192,7 @@ function JobCard({ job }: { job: JobToast }) {
               //  The countdown is shown, not just run. A card that disappears on an invisible
               // timer reads as a bug the first time you watch it happen; a number ticking down
               // says it was always going to. `paused` on hover explains why it stopped.
-              : `${job.status}${secondsLeft === null ? ''
+              : `${unavailable ? 'unavailable' : job.status}${secondsLeft === null ? ''
                 : hover ? ' · paused' : ` · ${secondsLeft}s`}`}
         </span>
       </div>
@@ -181,16 +212,39 @@ function JobCard({ job }: { job: JobToast }) {
           }} />
       </div>
 
-      {/*  ONE LINE, TRUNCATED, WITH THE WHOLE THING ON THE TITLE. Detail belongs in the console —
-          a toast that grows to fit its message reflows the stack under the reader's cursor.
+      {/*  ORDINARY SUCCESS STAYS ON ONE LINE; AN EXPLANATION DOES NOT. Detail belongs in the
+          console for a normal receipt, but a failure or pre-flight refusal's reason IS the result.
+          Hiding it behind native-title hover left failures saying only "0 refetched, 1 failed" and
+          unavailable companies ending at `TSX…`. These summaries are server-bounded, so wrapping
+          them cannot grow this card without limit.
            THE HOVER CARRIES BOTH READINGS. `summary` is what the reader wanted to know ("loaded
           FY2010–FY2025"); `message` is the last progress line, which for a finished ingest is the
           per-feed breakdown ("statements 36,378 · estimates 164"). That breakdown is what you need
           the moment one feed comes back empty, and nothing else on screen would tell you which. */}
-      <p className={`text-[12px] truncate ${tone.text}`}
-        title={[job.summary, job.message].filter(Boolean).join('\n') || undefined}>
-        {job.summary || job.message}
-      </p>
+      {unavailable ? (
+        <div className="rounded-lg border border-warn-500/25 bg-warn-500/5 px-2.5 py-2">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="inline-flex shrink-0 rounded-full bg-warn-500/15 px-1.5 py-0.5
+                             text-[10px] font-semibold uppercase tracking-wide text-warn-300">
+              Not available
+            </span>
+            {unavailable.company && (
+              <span className="min-w-0 text-[11px] font-medium text-fg-strong break-words">
+                {unavailable.company}
+              </span>
+            )}
+          </div>
+          <p className="text-[12px] leading-[1.45] text-fg-soft whitespace-normal break-words">
+            {unavailable.reason}
+          </p>
+        </div>
+      ) : (
+        <p className={`text-[12px] ${tone.text} ${
+          explanation ? 'whitespace-normal break-words' : 'truncate'}`}
+          title={[job.summary, job.message].filter(Boolean).join('\n') || undefined}>
+          {displayMessage}
+        </p>
+      )}
 
       <div className="flex justify-end gap-2">
         {running && !job.cancelRequested && (

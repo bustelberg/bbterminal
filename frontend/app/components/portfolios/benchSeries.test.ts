@@ -71,6 +71,13 @@ describe('benchNote', () => {
       'AEX: no period clears the 50% coverage floor');
   });
 
+  it('shows the backend reason for an empty server-side blend without mentioning a console', () => {
+    expect(benchNote(aex, { rows: [] }, null, m({}), false,
+      'even the best year includes only 40% of companies; a blended line needs at least 50%.'))
+      .toBe('AEX: even the best year includes only 40% of companies; '
+        + 'a blended line needs at least 50%.');
+  });
+
   it('calls out a single period, which otherwise reads as a rendering glitch', () => {
     // Measured on "Interest / op. profit": a bank reports no operating income at all, so the
     // financials' weight sits in the denominator uncounted and AEX clears the floor in exactly

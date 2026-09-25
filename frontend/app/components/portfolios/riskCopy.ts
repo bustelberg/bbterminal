@@ -54,7 +54,7 @@ export type RiskCopy = {
     active: string; te: string; corr: string; vol: string; dd: string; conc: string;
   };
   basis: { label: string; now: string; start: string };
-  subtitle: string;
+  subtitle: (portfolio: string, asOf?: string | null) => string;
   close: string;
 
   common: {
@@ -114,7 +114,8 @@ export type RiskCopy = {
      * The names go in badges (`v`), like every other live value in these cards.
      */
     legend: {
-      issuer: string; wp: (bookName: string) => string; wb: (bench: string) => string;
+      issuer: string; heldSet: string; allSet: string;
+      wp: (bookName: string) => string; wb: (bench: string) => string;
       /**  THE ROW THAT ANSWERS THE QUESTION THE OVERLAP TILE ACTUALLY PROVOKES — why the
        *  benchmark column can sum to more than the overlap. It is the min, and nothing else. */
       min: string;
@@ -262,13 +263,28 @@ export type RiskCopy = {
 
 };
 
+const NL_MONTHS = [
+  'januari', 'februari', 'maart', 'april', 'mei', 'juni',
+  'juli', 'augustus', 'september', 'oktober', 'november', 'december',
+] as const;
+
+/** A stable calendar-date spelling. Parsing as a JavaScript Date would shift the day in some
+ * timezones, while this value is an AIRS valuation date with no time of day. */
+export function riskLongDate(iso?: string | null): string | null {
+  const match = iso?.slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const month = NL_MONTHS[Number(match[2]) - 1];
+  return month ? `${Number(match[3])} ${month} ${match[1]}` : null;
+}
+
 const en: RiskCopy = {
   views: { active: 'Active share', te: 'Tracking error', corr: 'Correlation', vol: 'Volatility',
     dd: 'Drawdown', conc: 'Concentration' },
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlation',
     vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration' },
   basis: { label: 'AIRS weights', now: 'Current', start: 'Start of year' },
-  subtitle: 'Individual stocks at their actual weight in the complete AIRS book.',
+  subtitle: (portfolio, asOf) => `Individual stocks at their actual weight in AIRS for ${portfolio}`
+    + `${riskLongDate(asOf) ? ` as of ${riskLongDate(asOf)}` : ''}.`,
   close: 'close',
 
   common: {
@@ -301,18 +317,17 @@ const en: RiskCopy = {
     totalAll: (n) => `Total — all ${n} names`,
     totalCard: {
       what: 'Both columns sum to 100%, so the Active column sums to exactly zero.',
-      where: '½ · Σ |Active| is the active share in the tile above — the same number, from this '
-        + 'table.',
-      how: ' THAT ZERO IS THE REASON FOR THE ½. Every overweight has a matching underweight by '
-        + 'construction, so without halving it every difference would be counted twice.',
+      where: 'The totals use every company displayed in this table.',
+      how: 'Each figure is the sum of its column. Active is the portfolio total minus the '
+        + 'benchmark total.',
     },
     totalCardHeld: {
-      what: 'The held names only, so the Active column does NOT sum to zero.',
-      where: 'Book uses the actual complete-book AIRS weights; the benchmark column is what the '
-        + 'index holds in these same names.',
-      how: ' THE TOTAL IS THE BOOK\'S WHOLE OVERWEIGHT, and it is carried, name for name, by the '
-        + 'index constituents not shown here. Switch to every name to see it cancel.  ½ Σ |Active| '
-        + 'over this subset is NOT the active share — half the sum is missing.',
+      what: 'The held names only, so the Active column does not sum to zero.',
+      where: 'The portfolio column uses actual complete-portfolio AIRS weights. The benchmark '
+        + 'column shows the index weights for those same names.',
+      how: 'The total is the portfolio\'s overall overweight among the held names. Matching '
+        + 'underweights sit in benchmark constituents not shown here. Switch to Every name to '
+        + 'see the Active total return to zero. Each figure below is simply the sum of its column.',
     },
     coverage: (pct, b) => `Priced ${pct} of ${b}'s members. The missing weight is redistributed `
       + 'over the rest, so the active share reads slightly low.',
@@ -322,18 +337,19 @@ const en: RiskCopy = {
       //  It says what `i` IS, then gives the case that makes the fold matter. The previous
       // version — "both of its share classes are ONE i, not two" — presupposed two share classes,
       // which almost no company has, and never said that `i` is a term in the sum above.
-      issuer: 'one company, and one term in the sum — Alphabet A and Alphabet C are folded into a '
-        + 'single i, not two',
+      issuer: 'one company and one term in the sum. Alphabet A and Alphabet C are folded into a '
+        + 'single company',
+      heldSet: 'the set of companies held by the portfolio and shown in this table',
+      allSet: 'the set of all companies shown in this table',
       wp: (bookName) =>
         `${v(bookName)}'s actual weight in that company, over the complete AIRS book`,
       wb: (bench) => `${v(bench)}'s own weight in the same company, by market cap`,
-      min: 'the SMALLER of the two weights — where we hold less of a company than the index does, '
-        + 'only our weight counts, which is why the benchmark column can sum to more than this',
+      min: 'the smaller of the portfolio and benchmark weights for each company',
       notInBench: (bench) => `read as "over the companies ${v(bench)} does not hold at all" — the `
         + 'sum runs over those alone',
       stocksNum: 'the weight in individual stocks with an ISIN we could match',
       stocksDen: 'the weight in everything the book holds, funds and cash and bonds included',
-      absActive: 'the size of each bet regardless of direction — an overweight and an underweight '
+      absActive: 'the size of each bet regardless of direction. An overweight and an underweight '
         + 'of the same size count the same',
     },
     whenBook: (bookName, book, read) =>
@@ -349,10 +365,9 @@ const en: RiskCopy = {
         what: 'How much of the complete AIRS book differs from the benchmark.',
       },
       overlap: {
-        what: 'The share of the complete AIRS book that IS the benchmark.',
-        how: 'Exactly 100% − active share, by construction. The two are one number, so nothing '
-          + 'is learned by reading both — they are printed together because each is the natural '
-          + 'answer to a different question.',
+        what: 'The share of the portfolio that overlaps with the benchmark.',
+        how: 'Overlap and active share add up to 100%. Both are shown because overlap describes '
+          + 'what matches the benchmark, while active share describes what differs.',
       },
       offBenchmark: {
         what: 'Weight in companies the index does not hold at all.',
@@ -373,32 +388,28 @@ const en: RiskCopy = {
     trackingError: 'Tracking error (realised)', activeReturn: 'Active return (ann.)',
     infoRatio: 'Information ratio', observations: 'Observations',
     bandReading: (lo, hi, centre, bench) =>
-      `A typical year lands ā ± TE — between ${v(lo)} and ${v(hi)} against ${v(bench)}, centred on the mean `
-      + `active return of ${v(centre)} and NOT on zero. About two years in three; active returns are `
-      + 'fatter-tailed than normal, so read it as a scale rather than a promise.  THE CENTRE IS '
-      + 'THE ARITHMETIC mean annualised, so it sits a little above the geometric Active return '
-      + 'tile beside it — the gap is roughly TE²/2, and a ±σ band is only coherent around the '
-      + 'arithmetic one.',
+      `A typical year is roughly between ${v(lo)} and ${v(hi)} versus ${v(bench)}. The range is `
+      + `centred on the average active return of ${v(centre)}, not zero. About two years in three `
+      + 'may fall within it, so treat it as a guide rather than a promise.',
     cards: {
       te: {
-        what: "How much the book's return has diverged from the benchmark's, annualised.",
-        how: ' REALISED (ex-post), not the ex-ante forecast from a covariance matrix — those are '
-          + 'different numbers and routinely disagree. ā IS subtracted and the divisor is T−1 '
-          + '(Bessel); some providers do neither — that version is symmetric about the benchmark, '
-          + 'and larger.',
+        what: "How much the portfolio's annual return has typically differed from the benchmark.",
+        how: 'This is realised tracking error calculated from historical monthly returns. It can '
+          + 'differ from a forward-looking estimate based on a covariance matrix.',
       },
       activeReturn: {
-        what: 'What the sleeve earned above or below the benchmark, per year.',
-        where: 'The same active returns, compounded — not their spread.',
-        how: ' THIS IS THE QUANTITY THE TILE BESIDE IT MEASURES THE VOLATILITY OF. They are '
-          + 'constantly confused: a book can wander a long way from its index and end up exactly '
-          + 'level, which is a large tracking error and no active return.',
+        what: "The portfolio's annual return above or below the benchmark.",
+        where: 'The same active returns compounded over time, rather than their spread.',
+        how: 'This is the return difference, not its volatility. A portfolio can finish level '
+          + 'with the benchmark after moving very differently along the way. In that case active '
+          + 'return is zero, but tracking error can still be high.',
       },
       infoRatio: {
         what: 'Active return per unit of tracking error.',
         where: 'Active return ÷ tracking error, both annualised.',
-        how: 'Whether the divergence was worth taking.  A dash means the tracking error is ~0 — '
-          + 'there is no risk to divide by, not that the ratio is zero.',
+        how: 'This shows how much active return the portfolio earned for each unit of tracking '
+          + 'error. No value is shown when tracking error is effectively zero because the ratio '
+          + 'cannot be calculated.',
       },
       observations: {
         what: 'The T in the formula — the periods both series had.',
@@ -409,17 +420,14 @@ const en: RiskCopy = {
       },
     },
     legend: {
-      a: 'the active return in period t — what the sleeve did that period, minus what the tracker '
-        + 'did',
+      a: 'the portfolio return minus the benchmark return in period t',
       R: (book, bench) => `${v(book)}'s and ${v(bench)}'s own returns in that period, both in EUR`,
       aBar: 'the mean active return over the window — the band above is centred on it, not on zero',
-      T: (n) => `the number of paired periods (${v(n)} here) — the intersection of the two calendars`,
+      T: (n) => `the number of monthly periods used (${v(n)})`,
       f: (n) => `periods per year (${v(n)}), the annualisation factor`,
       te: 'one standard deviation of the active return, per year',
       teAnswer: 'the answer: one standard deviation of the active return, per year',
-      prod: 'the periods CHAINED, not averaged — this is what the gap compounded to, which is why '
-        + 'it sits slightly below the arithmetic mean the band on the tracking-error tile is '
-        + 'centred on',
+      prod: 'multiply the period returns to compound them over time',
       Ra: 'the active return from the tile beside this one, annualised',
       IR: 'the answer: active return per unit of the tracking error taken to earn it',
     },
@@ -478,48 +486,38 @@ const en: RiskCopy = {
     periodDay: 'day', periodWeek: 'week', periodMonth: 'month',
     cards: {
       volatility: {
-        what: "How much the sleeve's own return has varied, annualised.",
-        how: ' NO CASH FLOWS IN IT, and not because they were chain-linked out — this is a '
-          + 'weighted basket of instrument price returns, not an account value, so a deposit or '
-          + 'withdrawal is simply not in the series.  Same σₚ the Correlation view uses in '
-          + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ.',
+        what: 'The annualised variation in monthly portfolio returns.',
+        how: 'This uses instrument returns at the selected portfolio weights. Deposits and '
+          + 'withdrawals are not part of the series.',
       },
       downside: {
-        what: 'The same spread, counting only the periods that lost money.',
-        how: " SORTINO'S CONVENTION, not the semi-deviation (below-MEAN observations only, "
-          + 'divided by how many there are), which reads higher. Both are called "downside '
-          + 'deviation"; this is the one the Sortino below is built on. Volatility punishes a good '
-          + 'month exactly as hard as a bad one; this does not, which is closer to how the loss is '
-          + 'actually experienced.',
+        what: 'The annualised variation in negative monthly returns.',
+        how: 'Positive months count as zero. This is the downside-risk measure used in the '
+          + 'Sortino ratio.',
       },
       benchVol: {
         what: "The index's own volatility, on the same periods.",
         where: 'Same function, same series, different input.',
-        how: ' FOR SCALE, NOT AS A VERDICT. A sleeve more volatile than its index is not by '
-          + 'itself worse — that difference is what the Active share and Tracking error views are '
-          + 'about.',
+        how: 'This provides a like-for-like comparison with the portfolio.',
       },
       worst: {
         what: 'The single worst period in the window.',
-        how: ' NOBODY HAS EVER EXPERIENCED "18% ANNUALISED VOLATILITY". They have experienced the '
-          + 'worst week. For a fat-tailed book the two are far apart, which is exactly when σ on '
-          + 'its own misleads.',
+        how: 'This is an actual monthly loss observed in the data, not an annualised estimate.',
       },
       ret: {
-        what: 'What the sleeve compounded at over the same window.',
-        how: 'Here so the two ratios beside it can be checked — a risk number without the return '
-          + 'it bought is half a sentence.',
+        what: "The portfolio's annualised return over the same window.",
+        how: 'This return is used in the Sharpe and Sortino ratios shown beside it. It is the '
+          + 'portfolio return, not the active return versus the benchmark.',
       },
       sharpe: {
         what: 'Return per unit of total volatility.',
-        how: ' THE RISK-FREE RATE IS STATED because a Sharpe quoted without it is not comparable '
-          + "with anybody else's, and at current rates that is not cosmetic.",
+        how: 'Higher values mean more return above the risk-free rate for each unit of volatility.',
       },
       sortino: {
-        what: 'The same ratio, over downside deviation instead of total volatility.',
+        what: 'Annualised return per unit of downside risk.',
         where: 'Return ÷ downside deviation, both annualised.',
-        how: ' A DASH MEANS NOTHING EVER FELL BELOW THE TARGET — there is no downside to divide '
-          + 'by. That is a measurement, not a missing number.',
+        how: 'No value is shown when no monthly return fell below the target because there is no '
+          + 'downside deviation to divide by. That is a valid result, not missing data.',
       },
     },
     note: 'Deposits and withdrawals cannot distort this — it is a weighted basket of instrument '
@@ -531,29 +529,28 @@ const en: RiskCopy = {
   dd: {
     maxDrawdown: (f) => `Max drawdown (${f})`, benchMax: (b) => `${b} max drawdown`,
     today: 'Today', episodes: (pct) => `Falls over ${pct}%`,
-    provenance: "Based on today's holdings. Sold positions are not included, so this may differ "
-      + "from the client's actual drawdown. AIRS returns show the client's figure.",
+    provenance: "Reconstructed using today's holdings. For the portfolio's actual historical "
+      + 'drawdown, use the AIRS returns.',
     threeWays: 'The same drawdown, measured three ways',
     threeWaysNote: 'Coarser cadences cannot see a fall that recovers inside the period, so they '
       + 'read shallower. Daily is the honest basis for this measure.',
-    worstInFull: 'The worst one, in full',
-    peak: 'Peak', trough: 'Trough', recovered: 'Recovered', peakToPeak: 'Peak to peak',
+    worstInFull: 'Worst drawdown timeline',
+    peak: 'Peak', trough: 'Lowest point', recovered: 'Recovered', peakToPeak: 'Total',
     stillUnderwater: 'still underwater',
-    deepest: 'Deepest falls', colDepth: 'Depth', colDecline: 'Decline', colRecovery: 'Recovery',
+    deepest: 'Other drawdowns', colDepth: 'Depth', colDecline: 'Fall (days)',
+    colRecovery: 'Recovery (days)',
     open: 'open',
     unitDays: 'trading days', unitWeeks: 'weeks', unitMonths: 'months',
-    note: (u) => `Durations are in ${u} of the selected cadence, not calendar days.`,
+    note: (u) => `All durations use ${u}.`,
     cards: {
       maxDrawdown: {
         what: 'The deepest peak-to-trough fall in the window.',
-        how: ' THE CADENCE IS IN THE LABEL because it changes the answer: a fall that recovers '
-          + 'inside a week is invisible to a weekly series. See the comparison below.',
+        how: 'This is calculated from daily returns, so a fall that recovers within a week remains visible.',
       },
       benchMax: {
-        what: "The index's own deepest fall, over the same periods.",
-        where: 'Same formula, same window, different series.',
-        how: "For scale.  It carries none of this book's survivorship bias — the index kept its "
-          + 'fallers — so the gap between the two flatters the book.',
+        what: "The benchmark's deepest fall over the same dates.",
+        where: "The same daily calculation applied to the benchmark's tracker.",
+        how: 'The same daily calculation is used, providing a direct comparison with the portfolio.',
       },
       today: {
         what: 'How far below its own high water mark the sleeve sits right now.',
@@ -562,12 +559,10 @@ const en: RiskCopy = {
           + 'the second is the one being had.',
       },
       episodes: {
-        what: 'Distinct peak-to-trough episodes in the window.',
-        where: 'An episode ends only when the previous high is regained.',
-        how: ' ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four −25%s '
-          + 'share a maximum and are not the same risk.  A 40% fall that bounces 5% and falls '
-          + 'further is ONE drawdown, not two — splitting on direction would report shallow dips '
-          + 'and no crash.',
+        what: 'The number of separate drawdowns that crossed the threshold shown in the label.',
+        where: 'A drawdown begins below a previous peak and ends when that peak is regained.',
+        how: 'A drawdown ends only when the previous peak is regained. A partial recovery and '
+          + 'later fall remain part of the same episode.',
       },
     },
   },
@@ -621,7 +616,8 @@ const nl: RiskCopy = {
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
     vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
   basis: { label: 'AIRS-wegingen', now: 'Actueel', start: 'Begin van het jaar' },
-  subtitle: 'Individuele aandelen tegen hun werkelijke gewicht in het volledige AIRS-boek.',
+  subtitle: (portfolio, asOf) => `Individuele aandelen tegen hun werkelijke gewicht in AIRS voor `
+    + `${portfolio}${riskLongDate(asOf) ? ` per ${riskLongDate(asOf)}` : ''}.`,
   close: 'sluiten',
 
   common: {
@@ -657,37 +653,37 @@ const nl: RiskCopy = {
     totalAll: (n) => `Totaal — alle ${n} namen`,
     totalCard: {
       what: 'Beide kolommen tellen op tot 100%, dus de kolom Actief telt op tot precies nul.',
-      where: '½ · Σ |Actief| is de active share in de tegel hierboven — hetzelfde getal, uit deze '
-        + 'tabel.',
-      how: ' DIE NUL IS DE REDEN VOOR DE ½. Elke overweging heeft per constructie een even grote '
-        + 'onderweging, dus zonder halveren zou elk verschil dubbel worden geteld.',
+      where: 'De totalen gebruiken alle ondernemingen die in deze tabel staan.',
+      how: 'Elk getal is de som van zijn kolom. Actief is het portefeuilletotaal min het '
+        + 'benchmarktotaal.',
     },
     totalCardHeld: {
       what: 'Alleen de gehouden namen, dus de kolom Actief telt niet op tot nul.',
       where: 'De portefeuille gebruikt de werkelijke AIRS-gewichten van het volledige boek; de '
         + 'benchmarkkolom toont wat de index in dezelfde namen houdt.',
-      how: ' HET TOTAAL IS DE VOLLEDIGE OVERWEGING VAN HET BOEK, en die wordt naam voor naam '
-        + 'gedragen door de indexposities die hier niet staan. Schakel naar alle namen om het te '
-        + 'zien wegvallen.  ½ Σ |Actief| over deze deelverzameling is NIET de active share — de '
-        + 'helft van de som ontbreekt.',
+      how: 'Het totaal is de volledige overweging van de portefeuille binnen de gehouden namen. '
+        + 'De bijbehorende onderwegingen zitten in benchmarkposities die hier niet staan. Schakel '
+        + 'naar Alle namen om het totaal van Actief naar nul te zien gaan. Elk getal hieronder is '
+        + 'simpelweg de som van zijn kolom.',
     },
     coverage: (pct, b) => `${pct} van de leden van ${b} geprijsd. Het ontbrekende gewicht wordt over `
       + 'de rest herverdeeld, waardoor de active share iets te laag uitvalt.',
     unmatched: (n, pct, names) => `${n} positie${n === 1 ? '' : 's'} (${pct} van de selectie) kon `
       + `niet aan een ondernemingsnaam worden gekoppeld en telt volledig als actief: ${names}`,
     legend: {
-      issuer: 'één onderneming, en één term in de som — Alphabet A en Alphabet C worden tot één i '
-        + 'samengevoegd, niet twee',
+      issuer: 'één onderneming en één term in de som. Alphabet A en Alphabet C worden tot één '
+        + 'onderneming samengevoegd',
+      heldSet: 'de verzameling ondernemingen die de portefeuille houdt en die in deze tabel staan',
+      allSet: 'de verzameling van alle ondernemingen die in deze tabel staan',
       wp: (bookName) => `het werkelijke gewicht van ${v(bookName)} in die onderneming, over het `
         + 'volledige AIRS-boek',
       wb: (bench) => `het gewicht van ${v(bench)} zelf in diezelfde onderneming, naar marktkapitalisatie`,
-      min: 'het KLEINSTE van de twee gewichten — houden we minder van een onderneming dan de index, '
-        + 'dan telt alleen ons gewicht mee; daarom kan de benchmarkkolom hoger uitkomen dan dit',
+      min: 'het kleinste van het portefeuille- en benchmarkgewicht voor elke onderneming',
       notInBench: (bench) => `te lezen als "over de ondernemingen die ${v(bench)} helemaal niet `
         + 'houdt" — de som loopt alleen over die',
       stocksNum: 'het gewicht in individuele aandelen met een ISIN die we konden koppelen',
       stocksDen: 'het gewicht in alles wat het boek houdt, inclusief fondsen, liquiditeiten en obligaties',
-      absActive: 'de omvang van elke positie ongeacht de richting — een over- en een onderweging '
+      absActive: 'de omvang van elke positie ongeacht de richting. Een over- en een onderweging '
         + 'van dezelfde grootte tellen even zwaar',
     },
     whenBook: (bookName, book, read) =>
@@ -704,10 +700,9 @@ const nl: RiskCopy = {
         what: 'Hoeveel van het volledige AIRS-boek afwijkt van de benchmark.',
       },
       overlap: {
-        what: 'Het deel van het volledige AIRS-boek dat de benchmark WEL is.',
-        how: 'Per definitie exact 100% − active share. De twee zijn één getal, dus beide lezen '
-          + 'levert niets extra op — ze staan samen omdat elk het natuurlijke antwoord is op een '
-          + 'andere vraag.',
+        what: 'Het deel van de portefeuille dat overlapt met de benchmark.',
+        how: 'Overlap en active share tellen op tot 100%. Beide worden getoond omdat overlap '
+          + 'beschrijft wat overeenkomt met de benchmark en active share wat afwijkt.',
       },
       offBenchmark: {
         what: 'Gewicht in ondernemingen die de index helemaal niet houdt.',
@@ -745,17 +740,18 @@ const nl: RiskCopy = {
           + 'symmetrisch rond de benchmark, en groter.',
       },
       activeReturn: {
-        what: 'Wat de selectie boven of onder de benchmark verdiende, per jaar.',
-        where: 'Dezelfde actieve rendementen, samengesteld — niet hun spreiding.',
-        how: ' DIT IS DE GROOTHEID WAARVAN DE TEGEL ERNAAST DE VOLATILITEIT MEET. Ze worden '
-          + 'voortdurend verward: een boek kan ver van zijn index afdwalen en precies gelijk '
-          + 'eindigen — een grote tracking error en geen actief rendement.',
+        what: 'Het jaarlijkse rendement van de portefeuille boven of onder de benchmark.',
+        where: 'Dezelfde actieve rendementen, samengesteld over de tijd in plaats van hun spreiding.',
+        how: 'Dit is het rendementsverschil, niet de volatiliteit ervan. Een portefeuille kan '
+          + 'gelijk eindigen met de benchmark en onderweg toch heel anders bewegen. Dan is het '
+          + 'actieve rendement nul, terwijl de tracking error hoog kan zijn.',
       },
       infoRatio: {
         what: 'Actief rendement per eenheid tracking error.',
         where: 'Actief rendement ÷ tracking error, beide geannualiseerd.',
-        how: 'Of de afwijking het waard was.  Een streepje betekent dat de tracking error ~0 is — '
-          + 'er is geen risico om door te delen, niet dat de ratio nul is.',
+        how: 'Dit toont hoeveel actief rendement de portefeuille behaalde per eenheid tracking '
+          + 'error. Er wordt geen waarde getoond als de tracking error vrijwel nul is, omdat de '
+          + 'ratio dan niet kan worden berekend.',
       },
       observations: {
         what: 'De T in de formule — de perioden die beide reeksen hadden.',
@@ -766,19 +762,16 @@ const nl: RiskCopy = {
       },
     },
     legend: {
-      a: 'het actieve rendement in periode t — wat de selectie die periode deed, min wat de tracker '
-        + 'deed',
+      a: 'het portefeuillerendement min het benchmarkrendement in periode t',
       R: (book, bench) => `het eigen rendement van ${v(book)} en van ${v(bench)} in die periode, `
         + 'beide in EUR',
       aBar: 'het gemiddelde actieve rendement over de periode — de band hierboven ligt daaromheen, '
         + 'niet om nul',
-      T: (n) => `het aantal gepaarde perioden (${v(n)} hier) — de doorsnede van de twee kalenders`,
+      T: (n) => `het aantal gebruikte maandperioden (${v(n)})`,
       f: (n) => `perioden per jaar (${v(n)}), de annualiseringsfactor`,
       te: 'één standaarddeviatie van het actieve rendement, per jaar',
       teAnswer: 'het antwoord: één standaarddeviatie van het actieve rendement, per jaar',
-      prod: 'de perioden GEKETEND, niet gemiddeld — dit is waar het verschil naartoe is '
-        + 'samengesteld, en daarom ligt het iets onder het rekenkundig gemiddelde waaromheen de '
-        + 'band op de tracking-errortegel is gecentreerd',
+      prod: 'vermenigvuldig de perioderendementen om ze over de tijd samen te stellen',
       Ra: 'het actieve rendement van de tegel hiernaast, geannualiseerd',
       IR: 'het antwoord: actief rendement per eenheid tracking error die daarvoor is genomen',
     },
@@ -840,50 +833,40 @@ const nl: RiskCopy = {
     periodDay: 'dag', periodWeek: 'week', periodMonth: 'maand',
     cards: {
       volatility: {
-        what: 'Hoezeer het eigen rendement van de selectie heeft gevarieerd, geannualiseerd.',
-        how: ' ER ZITTEN GEEN KASSTROMEN IN, en niet omdat ze eruit zijn geketend — dit is een '
-          + 'gewogen mandje van koersrendementen van instrumenten, geen rekeningwaarde, dus een '
-          + 'storting of onttrekking zit er eenvoudigweg niet in.  Dezelfde σₚ die de '
-          + 'Correlatie-weergave gebruikt in σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ.',
+        what: 'De geannualiseerde variatie in maandelijkse portefeuillerendementen.',
+        how: 'Dit gebruikt instrumentrendementen tegen de gekozen portefeuillewegingen. '
+          + 'Stortingen en onttrekkingen maken geen deel uit van de reeks.',
       },
       downside: {
-        what: 'Dezelfde spreiding, maar alleen over de perioden met verlies.',
-        how: ' DE CONVENTIE VAN SORTINO, niet de semi-deviatie (alleen waarnemingen onder het '
-          + 'GEMIDDELDE, gedeeld door hun aantal), die hoger uitkomt. Beide heten "neerwaartse '
-          + 'deviatie"; dit is degene waarop de Sortino hieronder is gebouwd. Volatiliteit straft '
-          + 'een goede maand even hard af als een slechte; dit niet, en dat sluit dichter aan bij '
-          + 'hoe het verlies werkelijk wordt ervaren.',
+        what: 'De geannualiseerde variatie in negatieve maandrendementen.',
+        how: 'Positieve maanden tellen als nul. Dit is de maatstaf voor neerwaarts risico die in '
+          + 'de Sortino-ratio wordt gebruikt.',
       },
       benchVol: {
         what: 'De eigen volatiliteit van de index, over dezelfde perioden.',
         where: 'Dezelfde functie, dezelfde reeks, andere invoer.',
-        how: ' TER VERGELIJKING, NIET ALS OORDEEL. Een selectie die volatieler is dan haar index '
-          + 'is daarmee niet slechter — dat verschil is precies waar Active share en Tracking error '
-          + 'over gaan.',
+        how: 'Dezelfde dagelijkse berekening maakt een directe vergelijking met de portefeuille mogelijk.',
       },
       worst: {
-        what: 'De slechtste afzonderlijke week of maand in de gemeten periode.',
-        how: ' NIEMAND HEEFT OOIT "18% GEANNUALISEERDE VOLATILITEIT" MEEGEMAAKT. Men heeft de '
-          + 'slechtste week meegemaakt. Bij een boek met dikke staarten liggen die twee ver uiteen, '
-          + 'en juist dan misleidt σ op zichzelf.',
+        what: 'De slechtste afzonderlijke periode in het gemeten venster.',
+        how: 'Dit is een werkelijk waargenomen maandverlies, geen geannualiseerde schatting.',
       },
       ret: {
-        what: 'Waartegen de selectie over dezelfde periode is samengesteld.',
-        how: 'Staat hier zodat de twee ratio\'s ernaast te controleren zijn — een risicogetal '
-          + 'zonder het rendement dat het opleverde is een halve zin.',
+        what: 'Het geannualiseerde portefeuillerendement over hetzelfde venster.',
+        how: 'Dit rendement wordt gebruikt in de Sharpe- en Sortino-ratio ernaast. Het is het '
+          + 'portefeuillerendement, niet het actieve rendement ten opzichte van de benchmark.',
       },
       sharpe: {
         what: 'Rendement per eenheid totale volatiliteit.',
-        how: ' DE RISICOVRIJE VOET WORDT VERMELD, want een Sharpe zonder die voet is niet '
-          + 'vergelijkbaar met die van anderen, en bij de huidige rente is dat verschil niet '
-          + 'cosmetisch.',
+        how: 'Een hogere waarde betekent meer rendement boven de risicovrije rente per eenheid '
+          + 'volatiliteit.',
       },
       sortino: {
-        what: 'Dezelfde ratio, maar over de neerwaartse deviatie in plaats van de totale '
-          + 'volatiliteit.',
+        what: 'Geannualiseerd rendement per eenheid neerwaarts risico.',
         where: 'Rendement ÷ neerwaartse deviatie, beide geannualiseerd.',
-        how: ' EEN STREEPJE BETEKENT DAT NIETS OOIT ONDER DE DREMPEL IS GEKOMEN — er is geen '
-          + 'neerwaarts risico om door te delen. Dat is een meting, geen ontbrekend cijfer.',
+        how: 'Er wordt geen waarde getoond als geen enkel maandrendement onder de drempel viel, '
+          + 'omdat er dan geen neerwaartse deviatie is om door te delen. Dat is een geldig '
+          + 'resultaat, geen ontbrekende data.',
       },
     },
     note: 'Stortingen en onttrekkingen kunnen dit niet vertekenen — het is een gewogen mandje van '
@@ -896,30 +879,27 @@ const nl: RiskCopy = {
   dd: {
     maxDrawdown: (f) => `Maximale drawdown (${f})`, benchMax: (b) => `Maximale drawdown ${b}`,
     today: 'Vandaag', episodes: (pct) => `Dalingen boven ${pct}%`,
-    provenance: 'Gebaseerd op de huidige posities. Verkochte posities ontbreken, dus dit kan '
-      + 'afwijken van de werkelijke drawdown van de klant. AIRS-rendementen tonen het eigen cijfer.',
+    provenance: 'Gereconstrueerd met de huidige posities. Gebruik de AIRS-rendementen voor de '
+      + 'werkelijke historische drawdown van de portefeuille.',
     threeWays: 'Dezelfde drawdown, op drie manieren gemeten',
     threeWaysNote: 'Grovere frequenties zien een daling die binnen de periode herstelt niet, dus '
       + 'vallen ze ondieper uit. Dagelijks is de eerlijke basis voor deze maatstaf.',
-    worstInFull: 'De zwaarste, volledig',
-    peak: 'Piek', trough: 'Dieptepunt', recovered: 'Hersteld', peakToPeak: 'Piek tot piek',
+    worstInFull: 'Tijdlijn van de zwaarste drawdown',
+    peak: 'Piek', trough: 'Laagste punt', recovered: 'Hersteld', peakToPeak: 'Totaal',
     stillUnderwater: 'nog niet hersteld',
-    deepest: 'Zwaarste dalingen', colDepth: 'Diepte', colDecline: 'Daling',
-    colRecovery: 'Herstel', open: 'open',
+    deepest: 'Overige drawdowns', colDepth: 'Diepte', colDecline: 'Daling (dagen)',
+    colRecovery: 'Herstel (dagen)', open: 'open',
     unitDays: 'handelsdagen', unitWeeks: 'weken', unitMonths: 'maanden',
-    note: (u) => `Looptijden zijn in ${u} van de gekozen frequentie, niet in kalenderdagen.`,
+    note: (u) => `Alle looptijden gebruiken ${u}.`,
     cards: {
       maxDrawdown: {
         what: 'De diepste daling van piek naar dal binnen de periode.',
-        how: ' DE FREQUENTIE STAAT IN HET LABEL omdat zij het antwoord verandert: een daling die '
-          + 'binnen een week herstelt is onzichtbaar voor een weekreeks. Zie de vergelijking '
-          + 'hieronder.',
+        how: 'Dit wordt berekend met dagrendementen, zodat een daling die binnen een week herstelt zichtbaar blijft.',
       },
       benchMax: {
-        what: 'De diepste daling van de index zelf, over dezelfde perioden.',
-        where: 'Dezelfde formule, dezelfde periode, een andere reeks.',
-        how: 'Ter vergelijking.  De index draagt geen survivorship bias van dit boek — hij hield '
-          + 'zijn dalers — dus het verschil tussen beide vleit het boek.',
+        what: 'De diepste daling van de benchmark over dezelfde datums.',
+        where: 'Dezelfde dagelijkse berekening toegepast op de tracker van de benchmark.',
+        how: 'Dit maakt een directe vergelijking met de portefeuille mogelijk.',
       },
       today: {
         what: 'Hoe ver de selectie op dit moment onder haar eigen hoogste stand staat.',
@@ -928,12 +908,10 @@ const nl: RiskCopy = {
           + 'tweede is het gesprek dat gevoerd wordt.',
       },
       episodes: {
-        what: 'Afzonderlijke episodes van piek naar dal binnen de gemeten periode.',
-        where: 'Een episode eindigt pas wanneer de vorige top weer is bereikt.',
-        how: ' ÉÉN GETAL VERBERGT OF HET EEN PATROON WAS OF EEN GEBEURTENIS. Eén −30% en vier '
-          + '−25% delen hetzelfde maximum en zijn niet hetzelfde risico.  Een daling van 40% die '
-          + '5% opveert en verder zakt is ÉÉN drawdown, geen twee — splitsen op richting zou losse '
-          + 'ondiepe dipjes rapporteren en geen crash.',
+        what: 'Het aantal afzonderlijke drawdowns dat de grens in het label overschreed.',
+        where: 'Een drawdown begint onder een eerdere top en eindigt wanneer die top is hersteld.',
+        how: 'Een drawdown eindigt pas wanneer de vorige top is hersteld. Een gedeeltelijk herstel '
+          + 'en latere daling blijven deel van dezelfde episode.',
       },
     },
   },

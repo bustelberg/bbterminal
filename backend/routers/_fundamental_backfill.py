@@ -51,7 +51,8 @@ SENTINELS: dict[str, str] = {
 #: are on EVERY path (forced, statements-only, smart), not just the one that decides with them.
 COMPANY_SELECT = ("company_id,company_name,gurufocus_ticker,isin,"
                   "financials_fetched_at,estimates_fetched_at,indicators_fetched_at,"
-                  "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+                  "gurufocus_exchange:gurufocus_exchange("
+                  "exchange_code,country:country(country_name))")
 
 
 def _has(cids: list[int], metric_code: str) -> set[int]:
@@ -160,7 +161,13 @@ def eligible(c: dict) -> str | None:
     if not exch:
         return "no exchange"
     if not is_gf_subscribed_exchange(exch):
-        return f"{exch} is outside the GuruFocus subscription"
+        country = (((c.get("gurufocus_exchange") or {}).get("country") or {})
+                   .get("country_name"))
+        if country == "Canada":
+            return (f"This is a Canadian listing ({exch}), which is outside our "
+                    "GuruFocus subscription.")
+        venue = f"{country} ({exch})" if country else exch
+        return f"{venue} is outside our GuruFocus subscription"
     return None
 
 
@@ -280,8 +287,10 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
             # result, but surface this feed's actual failure to the job caller.
             error = getattr(r, "error", None)
             if error:
+                # Feed tags are useful internally and meaningless in a user-facing refresh
+                # receipt. The provider's explanation already names what was missing.
                 return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
-                        "error": f"{tag}: {error}", "stopped": False}
+                        "error": str(error), "stopped": False}
             done.append(f"{tag} {n}")
         return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
                 "error": None, "stopped": False}
@@ -291,7 +300,8 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
         # them; reporting 0 because it ended badly would hide exactly the quota you most want to
         # know about.
         return {"done": done, "rows": rows, "unchanged": unchanged, "calls": calls,
-                "error": f"{type(e).__name__}: {str(e)[:120]}", "stopped": False}
+                "error": "GuruFocus could not complete this request. Please try again later.",
+                "stopped": False}
 
 
 #: How old our copy of a CONTINUOUSLY-REVISED feed may be before a smart press re-asks for it.

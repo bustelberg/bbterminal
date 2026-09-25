@@ -989,10 +989,8 @@ class HoldingSource(BaseModel):
     return_pct: float | None = None
     book: str | None = None                # the AIRS account that valued this route
     as_of: str | None = None               # ...and the snapshot it valued it at
-    #  That book's own valuation — the numerator and denominator behind `return_pct`, so the card
-    # can print the division instead of asserting its result. NOT this route's slice of our book:
-    # on a split row the two diverge, and showing the slice beside the direct position's return
-    # would put two numbers on screen whose ratio is not the third.
+    # That book's own valuation and share-aligned net dividend: the operands behind `return_pct`.
+    # The dividend is restated to the same remaining quantity as AIRS's Beginwaarde after a sale.
     book_start_value_eur: float | None = None
     book_current_value_eur: float | None = None
     book_income_eur: float | None = None
@@ -1000,9 +998,9 @@ class HoldingSource(BaseModel):
     # carried in `own_return_pct`. Null where the route had no return to contribute, which is also
     # how the card shows a reader which legs actually spoke.
     blend_weight_pct: float | None = None
-    # The parent certificate's own AIRS operands. Repeated on its child routes so folding the
-    # look-through back into one row recovers the real wrapper instead of aggregating child-book
-    # results and presenting them beside the wrapper's start/current values.
+    # The parent certificate's own aligned AIRS return and contextual values. Repeated on its child
+    # routes so folding the look-through back into one row recovers the real wrapper instead of
+    # aggregating child-book results.
     wrapper_name: str | None = None
     wrapper_start_value_eur: float | None = None
     wrapper_current_value_eur: float | None = None
@@ -1128,8 +1126,9 @@ class BookHoldingDetail(BaseModel):
     unsplit_result_eur: float | None = None
     contribution_pct: float | None = None
     # ── WHAT THE MONEY MADE, as against what the instrument did.
-    #  `return_pct` / `own_return_pct` divide by AIRS's RESTATED `Beginwaarde` — today's quantity
-    # priced in January — which erases your timing ON PURPOSE so the figure describes the stock.
+    #  `return_pct` / `own_return_pct` combine AIRS's price+FX result with net dividends restated
+    # to its RESTATED `Beginwaarde` — today's quantity priced in January — so both numerator and
+    # denominator describe the remaining position.
     # This one is the cumulative cash-flow return: Result divided by capital actually committed
     # (opening value plus purchases). It has no capital-days weighting and is never annualised;
     # dividends net of withholding and anything realised on a mid-year sale remain in the numerator.
@@ -1163,7 +1162,7 @@ class BookHoldingDetail(BaseModel):
     capital_book: str | None = None
     via_money_weighted_return_pct: float | None = None
     via_avg_capital_eur: float | None = None
-    #  The instrument's own EUR return — not `return_pct`, AND THE DIFFERENCE IS THE WHOLE POINT.
+    #  The instrument's own EUR return — not the P&L-based `return_pct` above.
     # `return_pct` is the book's value change, and the book does not know what NVIDIA did: it knows
     # what the CERTIFICATE holding NVIDIA did. Splitting that certificate's start and current value
     # by the same composition share hands every instrument behind it the wrapper's return — 135
@@ -1175,12 +1174,11 @@ class BookHoldingDetail(BaseModel):
     #
     #  But only where the book cannot answer. The wrapper argument above is about LOOK-THROUGH
     # rows and was being applied to every row, including the ones AIRS values directly — and for
-    # those AIRS knows the answer exactly. Fortinet in AITopSelectie OFF DYN is +111.74% by AIRS's
-    # own Beginwaarde -> Huidige waarde plus its net dividend, and +108.65% off our yfinance
-    # series. Both defensible; the modal showing one while the row that opened it shows the other
-    # is not. So a directly-held row now reports AIRS's TOTAL return — the identical number the
-    # expanded row's `Return` column computes — and only a look-through row (or one with no
-    # opening value in the book) falls back to the instrument's own price series.
+    # those AIRS knows the answer exactly. Fortinet in AITopSelectie OFF DYN is +111.74% in AIRS's
+    # reported `Resultaat in %` field and +108.65% off our yfinance series. Both are defensible;
+    # the modal showing one while the row that opened it shows the other is not. So a directly-held
+    # row combines that field with a share-aligned dividend; only a look-through row that no AIRS
+    # book values falls back to the instrument's own price series.
     #
     # `own_return_source` says which of the two this row got. Two rows in one column measured
     # different ways, with nothing on screen saying which, is the thing that change undid.
@@ -1248,9 +1246,9 @@ class BookHoldingDetail(BaseModel):
     # model composition's effective date, and stamping the cards with it reported the row's own
     # +111.74% as 216 days old while the portfolios list called the same figure 2.
     own_return_as_of: str | None = None
-    # The net dividend inside an `airs` figure (gross + withholding, which AIRS books negative).
-    # None on a look-through row, and None when the journal has no line for the holding — "paid
-    # nothing" and "we have not read the journal" are different claims.
+    # The FULL net dividend shown separately in Result/MWR (gross + withholding, which AIRS books
+    # negative). `own_return_pct` uses a quantity-aligned dividend instead. None on a look-through
+    # row, and None when the journal has no line for the holding.
     own_income_eur: float | None = None
 
 
@@ -1738,6 +1736,15 @@ class BookReturnPoint(BaseModel):
     holdings: int | None = None
 
 
+class BenchmarkReturnPoint(BaseModel):
+    """Benchmark return on one of the book curve's dates."""
+
+    date: str
+    cum_pct: float
+    #: Actual ETF close used for this point; may precede a weekend/month-end chart date.
+    price_date: str
+
+
 class BookValueSeries(BaseModel):
     """The book's value through time, and the return that value earned.
 
@@ -1758,6 +1765,13 @@ class BookValueSeries(BaseModel):
     return_from: str | None = None
     #: The last point of the FULL curve, so a display resolution cannot move a reported figure.
     return_pct: float | None = None
+    benchmark: str | None = None
+    benchmark_ticker: str | None = None
+    benchmark_source: str | None = None
+    #: Same x-grid as `returns`, by construction.
+    benchmark_returns: list[BenchmarkReturnPoint] = []
+    benchmark_return_pct: float | None = None
+    benchmark_as_of: str | None = None
     first_date: str | None = None
     last_date: str | None = None
     #: The first date we hold a snapshot for — where the series stops being AIRS's and becomes ours.
@@ -1769,7 +1783,7 @@ class BookValueSeries(BaseModel):
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/value-series",
             response_model=BookValueSeries)
-async def airs_model_portfolio_value_series(portfolio_id: int):
+async def airs_model_portfolio_value_series(portfolio_id: int, benchmark: str = "SP500"):
     """The paired book's cumulative return through the year, and its value on every date we hold.
 
      THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
@@ -1793,7 +1807,8 @@ async def airs_model_portfolio_value_series(portfolio_id: int):
                       if a.get("model_portfolio_id") == portfolio_id), None))
     if not link:
         return BookValueSeries(reason="No Dynamic portfolio is paired with this one.")
-    return BookValueSeries(**await asyncio.to_thread(value_series, link["portefeuille"]))
+    return BookValueSeries(**await asyncio.to_thread(
+        value_series, link["portefeuille"], benchmark))
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/price-series",
@@ -3886,6 +3901,9 @@ class AirsHoldingIsin(BaseModel):
     current_value_eur: float | None = None
     start_value_eur: float | None = None
     ytd_return_eur: float | None = None
+    # AIRS's price+FX `Resultaat in %`, copied as a percent (not a fraction). The Analyse modal
+    # adds only the net dividend aligned to this row's remaining quantity.
+    airs_result_pct: float | None = None
     isin: str | None = None
     # WHERE the identity came from. The three are not equally strong and the digits look the same:
     #   book     AIRS's own `ISIN-code` on the holding — exact, nothing inferred

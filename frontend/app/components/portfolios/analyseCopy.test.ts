@@ -66,17 +66,11 @@ describe('Analyse primary-view copy', () => {
     expect(card.how).toContain('slot');
   });
 
-  it('labels a book-return derivation as raw AIRS data', () => {
-    const arithmetic = 'Huidige waarde (AIRS): €23,902.00\n'
-      + 'Netto-inkomsten (AIRS Mutaties: bruto + ingehouden belasting): €0.00\n'
-      + 'Beginwaarde lopend jaar (AIRS): €28,083.00\n\n'
-      + '(€23,902.00 + €0.00 nettodividend) ÷ €28,083.00 − 1';
-    const how = ANALYSE_COPY.nl.row.bookReturnHow(arithmetic, '-14.89%');
-
-    expect(how).toContain('Ruwe waarden uit AIRS');
-    expect(how).toContain('Netto-inkomsten (AIRS Mutaties: bruto + ingehouden belasting): €0.00');
-    expect(how).toContain('(€23,902.00 + €0.00 nettodividend) ÷ €28,083.00 − 1');
-    expect(how).toContain('Uitkomst: -14.89%');
+  it('explains that AIRS dividends are aligned to the remaining shares', () => {
+    const note = ANALYSE_COPY.nl.row.airsReturnNote('BUS_Offensief_Dyn');
+    expect(note).toContain('koers- en valutaresultaat');
+    expect(note).toContain('nettodividend dat aan de resterende aandelen toekomt');
+    expect(note).toContain('latere aankopen verhogen het nooit');
   });
 
   it('names both return measures plainly and explains the dated IRR procedure', () => {

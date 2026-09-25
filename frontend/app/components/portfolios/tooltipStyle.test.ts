@@ -51,9 +51,7 @@ const UNCONVERTED = new Set([
   // this list is here on its own merits.
   'CagrTable.tsx',
   'ConcentrationView.tsx',
-  'DrawdownView.tsx',
   'MetricGrowthCard.tsx',
-  'PortfolioAnalysisModal.tsx',
   'ReverseDcfPanel.tsx',
   // The component's `text={dynamicReason}` fields are runtime copy. This
   // source-only scanner cannot delimit them before the next JSX attribute and
@@ -63,7 +61,6 @@ const UNCONVERTED = new Set([
   // into `tablesCopy`, so nothing quoted is left in the component for this scanner to read — and
   // that copy carries its own guards: `tablesCopy.test.tsx` caps the row notes at 150 chars and
   // `tablesCopy.latex.test.ts` renders every formula in strict mode.
-  'VolatilityView.tsx',
 ]);
 
 const DIR = join('app', 'components', 'portfolios');

@@ -8842,6 +8842,8 @@ export interface components {
          *     we declined; re-scan the model portfolio to fix it.
          */
         AirsHoldingIsin: {
+            /** Airs Result Pct */
+            airs_result_pct?: number | null;
             /** Bucket */
             bucket?: string | null;
             /** Bucket Overridden */
@@ -9710,6 +9712,18 @@ export interface components {
             /** Prices From */
             prices_from?: string | null;
         };
+        /**
+         * BenchmarkReturnPoint
+         * @description Benchmark return on one of the book curve's dates.
+         */
+        BenchmarkReturnPoint: {
+            /** Cum Pct */
+            cum_pct: number;
+            /** Date */
+            date: string;
+            /** Price Date */
+            price_date: string;
+        };
         /** BenchmarkYear */
         BenchmarkYear: {
             /** Ret */
@@ -9965,6 +9979,21 @@ export interface components {
          *     Scorecard — so the chart and the tile beside it cannot disagree.
          */
         BookValueSeries: {
+            /** Benchmark */
+            benchmark?: string | null;
+            /** Benchmark As Of */
+            benchmark_as_of?: string | null;
+            /** Benchmark Return Pct */
+            benchmark_return_pct?: number | null;
+            /**
+             * Benchmark Returns
+             * @default []
+             */
+            benchmark_returns?: components["schemas"]["BenchmarkReturnPoint"][];
+            /** Benchmark Source */
+            benchmark_source?: string | null;
+            /** Benchmark Ticker */
+            benchmark_ticker?: string | null;
             /** First Date */
             first_date?: string | null;
             /**
@@ -15922,7 +15951,9 @@ export interface operations {
     };
     airs_model_portfolio_value_series_api_airs_model_portfolios__portfolio_id__value_series_get: {
         parameters: {
-            query?: never;
+            query?: {
+                benchmark?: string;
+            };
             header?: never;
             path: {
                 portfolio_id: number;

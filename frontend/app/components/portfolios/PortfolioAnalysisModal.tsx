@@ -903,8 +903,8 @@ function SectorOverrideDialog({ holding, onClose, onSave }: {
  *  actually printed underneath it. Two measures, and each is shown where its own rows are — the
  *  card on the cell says which one this is.
  *
- *   `own_return_pct` IS AIRS'S OWN FIGURE WHEREVER **ANY** AIRS BOOK HAS ONE — the identical
- *  number that book's expanded row shows (Beginwaarde → Huidige waarde plus net dividend). EVERY
+ *   `own_return_pct` IS AIRS'S PRICE + FX + SHARE-ALIGNED NET DIVIDEND wherever any AIRS book
+ *  can supply those inputs. EVERY
  *  Route into the position is valued by the book that holds it, and the figure is their blend,
  *  weighted by what each held when the window OPENED:
  *    * this book's own shares — for a split row, taken PRE-EXPANSION, because the merged row's
@@ -941,24 +941,20 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
  * cell of it. Picking columns individually meant assembling that chain by hand and getting it
  * wrong — turning on Return's denominator without its numerator, say.
  *
- *     Instrument return  Result ÷ Beginwaarde
+ *     Instrument return  AIRS Vermogensoverzicht `Resultaat in %`
  *     Cash-flow IRR      XIRR of dated position cash flows, shown cumulatively
  *     Contribution       Result ÷ the book's opening capital
  *
- *  `Instrument return` IS NOT A TIME-WEIGHTED RETURN AND MUST NOT BE RELABELLED AS ONE. A TWR
- * chains sub-period returns across every flow; this divides ONE period's Result by a Beginwaarde
- * that prices TODAY's share count at its 1 January price. That restatement erases timing — which
- * is the same INTENT as a TWR and is why the name is tempting — but it does so with a known bias a
- * real TWR does not have: a mid-year buy is valued at January's price, overstating by
- * `q_bought × (p_buy − p_open)` (measured on KLA: EUR 1,146 — see `backend/airs_timing.py`).
- * `Cash-flow IRR` beside it is true dated XIRR over the position's opening value, transactions,
- * income and final valuation. It is de-annualised over the actual holding period;
+ *  `Instrument return` is derived on the server from AIRS inputs. The dividend is first restated
+ * to the remaining share count; full journal income and realised sales are not divided by the
+ * restated Beginwaarde after a partial sale.
+ * `Cash-flow IRR` beside it is dated XIRR over the position's opening value, transactions, income
+ * and final valuation. It is de-annualised over the actual holding period;
  * `money_weighted_return_pct` remains the wire key for continuity.
  *
- *  All three share `Result`, WHICH IS WHY SELECTION IS STORED AS GROUPS AND THE COLUMNS ARE
- * Derived as their union. Storing columns instead would mean deciding what happens to `Result`
- * when one of two groups that both need it is switched off — a question with no good answer, and
- * one this shape never has to ask.
+ *  The optional groups expose the euro inputs and cash flows around those answers. Selection is
+ * stored as groups and the visible columns are derived as their union, so overlapping inputs such
+ * as `Result` are not accidentally hidden when one explanation remains enabled.
  *
  *  No group is on by default. The table opens at eight columns — Name, Via, Sector, Weight
  * (now), Money-weighted, Instrument return and Contribution, plus the row number — which fits a
@@ -971,12 +967,9 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
  * beside the figure it produces, which is the only arrangement in which a reader can check one
  * against the other.
  *
- *  Contribution is last, to the right of `Instrument return`, AND THE ORDER IS THE ARGUMENT. The
- * two return columns say what the INSTRUMENT did; Contribution says what that was worth to THIS
- * book — the same Result over the book's opening capital rather than the position's. Reading left
- * to right you get the rate, then the rate on your own money, then the effect. Putting it before
- * them (where it was, gated off) asked the reader to accept an effect before either figure it is
- * derived from was on screen.
+ *  Contribution is last, to the right of `Instrument return`. The return columns describe the
+ * AIRS instrument rate and the dated cash-flow rate; Contribution separately divides the
+ * accounting Result by this book's opening capital.
  */
 const COLUMN_GROUPS = [
   {
@@ -1251,68 +1244,10 @@ const sectorLabel = (s?: string | null) => (!s || s === 'Unclassified' ? '' : s)
 const eur0 = (v: number) =>
   `€${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
 
-/** AIRS operands shown for manual reconciliation. Cents matter here: rounding every input to a
- * whole euro and then printing a two-decimal return can make the visible arithmetic miss by a
- * basis point even though the calculation itself is correct. */
-const eur2 = (v: number) =>
-  `€${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
 /** The routes that actually spoke for a holding's Return — those with both a return and an opening
  *  value. Fewer than two means the figure is one book's and needs no arithmetic shown. */
 const blendLegs = (h: BookHolding) =>
   (h.sources ?? []).filter((s) => s.blend_weight_pct != null && s.return_pct != null);
-
-/** The division behind a single-route Return, in the valuing book's own euros:
- *  `(€68,769 + €0) ÷ €58,669 − 1`. A percentage with no numerator or denominator on screen cannot
- *  be checked against the book it claims to come from — and being checkable against that book is
- *  the whole reason it is preferred over our price series. Null when the book sent no figures. */
-type BookOperands = {
-  book_start_value_eur: number;
-  book_current_value_eur: number;
-  book_income_eur?: number | null;
-};
-
-function bookOperands(h: BookHolding): BookOperands | null {
-  const source = (h.sources ?? []).find((x) => x.blend_weight_pct != null);
-  // Older payloads did not carry the route-level operands. A directly held row still carries the
-  // same raw AIRS values itself, so keep the explanation verifiable during a rolling deployment.
-  const s = source ?? {
-    book_start_value_eur: h.start_value_eur,
-    book_current_value_eur: h.current_value_eur,
-    book_income_eur: h.own_income_eur,
-  };
-  if (!s?.book_start_value_eur || s.book_current_value_eur == null) return null;
-  return {
-    book_start_value_eur: s.book_start_value_eur,
-    book_current_value_eur: s.book_current_value_eur,
-    book_income_eur: s.book_income_eur,
-  };
-}
-
-export function bookMathMismatch(h: BookHolding): boolean {
-  const s = bookOperands(h);
-  if (!s || h.own_return_pct == null) return false;
-  const calculated = ((s.book_current_value_eur + (s.book_income_eur ?? 0))
-    / s.book_start_value_eur - 1) * 100;
-  // Half a displayed basis point: anything that would round to a different two-decimal result is
-  // not allowed to present itself as the derivation of the cell.
-  return Math.abs(calculated - h.own_return_pct) >= 0.005;
-}
-
-export function bookMath(h: BookHolding, netDividend = 'net dividend', raw = false): string | null {
-  const s = bookOperands(h);
-  if (!s || bookMathMismatch(h)) return null;
-  const hasIncome = s.book_income_eur != null;
-  const money = raw ? eur2 : eur0;
-  const now = hasIncome
-    ? `(${money(s.book_current_value_eur)} + ${money(s.book_income_eur!)} ${netDividend})`
-    : money(s.book_current_value_eur);
-  const formula = `${now} ÷ ${money(s.book_start_value_eur)} − 1`;
-  if (!raw) return formula;
-  return `Huidige waarde (AIRS): ${money(s.book_current_value_eur)}\n`
-    + `Netto-inkomsten (AIRS Mutaties: bruto + ingehouden belasting): ${hasIncome ? money(s.book_income_eur!) : '—'}\n`
-    + `Beginwaarde lopend jaar (AIRS): ${money(s.book_start_value_eur)}\n\n${formula}`;
-}
 
 /** The arithmetic behind a blended Return, in the reader's own numbers — each leg carrying its
  *  opening euros and the book that valued it, so the whole derivation is ONE line:
@@ -1416,9 +1351,8 @@ export function splitByRoute(h: BookHolding): BookHolding[] {
       ? (unreal ?? 0) + (realised ?? 0) + (income ?? 0) : null;
     // Instrument return belongs to the AIRS route that values this leg. It is deliberately NOT
     // `result / opening`: `result` above is an allocation of THIS book's wrapper P&L, while the
-    // source return is computed from the valuing book's raw current value, income and opening
-    // value. Mixing those two bases produced the impossible Constellation row: -25.86% beside
-    // `(EUR 27,719.80 + EUR 35.44) / EUR 32,833.42 - 1`, which is -15.47%.
+    // source return is the valuing book's raw `Resultaat in %`. Mixing the allocated P&L with the
+    // route's restated opening value produced impossible rows after partial sales.
     const priced = rs.filter((r) => r.return_pct != null && r.blend_weight_pct != null);
     const pricedWeight = priced.reduce((sum, r) => sum + r.blend_weight_pct!, 0);
     const routeReturn = pricedWeight > 0
@@ -1495,9 +1429,8 @@ function soleVia(h: BookHolding): string | null {
  * rule is the subtle one: only rows that HAVE an average invested capital may contribute their
  * result to that ratio, which on a book with certificates is 22 of 52 rows.
  *
- *  The rates are recomputed from the sums, never averaged. `Σ result ÷ Σ opening` is the class
- * row's own rule; averaging the legs' percentages would weight a EUR 900 position the same as a
- * EUR 9m one.
+ *  Result and money-weighted rates are recomputed from the sums, never averaged. The folded AIRS
+ *  return itself is carried from the certificate row saved on every child route.
  */
 /**
  * The rows this file MADE UP — a folded certificate, not a position the book can trade.
@@ -1578,10 +1511,8 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
     // Keep a wrapper even for a one-leg certificate. The switch is a choice between the
     // instrument the book holds and its underlying positions, not merely a way to reduce rows.
     const s = sumResults(legs);
-    // Every child leg repeats the parent certificate's own AIRS operands. Use one copy when the
-    // look-through is folded back. Aggregating child-book Result and then explaining it with the
-    // wrapper's start/current values produced equations whose stated result was arithmetically
-    // impossible (StarTopSelectie: €49,469.04 ÷ €52,974.24 − 1 beside −6.13%).
+    // Every child leg repeats the parent certificate's aligned AIRS return. Use one copy when the
+    // look-through is folded back rather than aggregating the underlying books' returns.
     const wrapper = legs.flatMap((leg) => leg.sources ?? [])
       .find((source) => source.wrapper_return_pct != null);
     const weight = legs.reduce((a, h) => a + (h.weight_now_pct ?? 0), 0);
@@ -2197,11 +2128,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             </tr>
           </thead>
           {groups.map((g) => {
-            //  The term that reconciles Contribution WITH Return, and it exists nowhere else on
-            // the row. `contribution = return × this`. Null when the book has no opening capital
-            // to divide by — in which case neither figure is on a footing to be explained.
-            const openingShare = (realised?.basis_eur && g.ret.startEur)
-              ? g.ret.startEur / realised.basis_eur * 100 : null;
             return (
             <tbody key={g.bucket}>
               <tr className="bg-inset border-y border-neutral-800/40">
@@ -2301,7 +2227,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       0.5pp of slack absorbs float noise without hiding a real gap. */}
                   {g.ret.pct != null && g.ret.coveredPct < 99.5 && (
                     <span className="ml-1 text-warn-400"
-                      title={copy.classRow.coverageTitle(num2(g.ret.coveredPct), copy.bucket(bucketLabel(g.bucket)), g.ret.rows - g.ret.legs)}></span>
+                      title={copy.classRow.coverageTitle(num2(g.ret.coveredPct), copy.bucket(bucketLabel(g.bucket)), g.ret.missing)}></span>
                   )}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={g.ret.pct == null
@@ -2309,7 +2235,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       : copy.classRow.returnWhat(copy.bucket(bucketLabel(g.bucket)))}
                     note={g.ret.pct == null
                       ? copy.classRow.dashNote
-                      : copy.classRow.returnNote(eur0n(g.ret.resultEur), eur0n(g.ret.startEur),
+                      : copy.classRow.returnNote(eur0n(g.ret.returnEur), eur0n(g.ret.startEur),
                         g.ret.coveredPct < 99.5 ? num2(g.ret.coveredPct) : undefined)}
                     /*  THE DIFFERENCE FROM THE BOOK'S OWN RETURN IS NAMED HERE, because a reader
                        who spots a class at 99.9% of the book returning a point less than the book
@@ -2324,25 +2250,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                        and deployed it on 5 January. On those true weights it composes exactly:
                        4.03% × 1102.77% + 95.97% × 0% = 44.4624%, AIRS's own figure. Which is
                        precisely why none of the three may be multiplied by another. */
-                    how={copy.classRow.returnHow(eur0n(g.ret.resultEur), eur0n(g.ret.startEur), fmtRet(g.ret.pct))} />
+                    how={copy.classRow.returnHow(eur0n(g.ret.returnEur), eur0n(g.ret.startEur), fmtRet(g.ret.pct))} />
                 </td>
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
                   {ppt(g.sum.contribution)}
-                  {/*  THE PAIR A READER CANNOT ARBITRATE UNLESS IT IS EXPLAINED, and on a class
-                      that is nearly the whole book the two sit a fraction of a point apart and
-                      look like one of them is wrong. They share a NUMERATOR and differ only in
-                      what they divide by — so the card prints both divisions, side by side. */}
+                  {/* Contribution deliberately remains the accounting Result over book opening
+                      capital. It is independent of the AIRS-return subtotal beside it. */}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.classRow.contributionWhat(copy.bucket(bucketLabel(g.bucket)))}
                     note={copy.classRow.contributionNote(eur0n(g.sum.result))}
-                    /*  THE MULTIPLICATION IS THE WHOLE EXPLANATION, so it goes on screen rather
-                       than in prose. Contribution and Return differ by exactly one term — the
-                       class's share of the book's OPENING capital — and that term is nowhere else
-                       in the table: the Weight column is today's share (85.38% where the opening
-                       share is 82.98%), which is why nobody could reconstruct it. Verified on
-                       every class of both measured books, to the third decimal. */
-                    how={copy.classRow.contributionHow(fmtRet(g.ret.pct), openingShare == null ? '—' : num2(openingShare) + '%',
-                      eur0n(g.ret.startEur), eur0n(realised?.basis_eur), ppt(g.sum.contribution))} />
+                    how={copy.classRow.contributionHow(
+                      eur0n(g.sum.result), eur0n(realised?.basis_eur), ppt(g.sum.contribution))} />
                 </td>
               </tr>
               {/*  THE ROUTE IS PART OF THE ROW KEY BELOW, AND THE BACKEND'S `merge_by_isin`
@@ -2412,6 +2330,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   const sectorSum = sumResults(sector.rows);
                   const sectorReturn = classWeightedReturn(sector.rows);
                   const groupedBySector = Boolean(sector.label);
+                  // Company parts close each named sector. The ETF part has no inner sector
+                  // header—the part header already says Stock ETFs—but still closes with the
+                  // same complete subtotal row.
+                  const subtotalLabel = sector.label
+                    || (sector.key === 'all' ? part.subtotalLabel : null);
                   return (
                   <Fragment key={sector.key}>
                   {groupedBySector && (
@@ -2748,26 +2671,14 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           ? copy.row.yfReturnNote
                           : blendHow(h, copy.row.heldDirectly, copy.row.atOpen)
                             ? copy.row.blendNote(blendLegs(h).length)
-                            /* The division in the valuing book's own euros — same line whether
-                               that is this book or the one behind a certificate, so the two read
-                               as one measure taken twice rather than two different measures. */
-                            : `${h.own_return_book && h.own_return_book !== bookName
-                              ? `${h.own_return_book}: ` : ''}${bookMath(h, copy.row.netDividend)
-                              ?? (h.own_income_eur
-                                ? `(Huidige waarde + ${eur0(h.own_income_eur)} net dividend) ÷ Beginwaarde − 1`
-                                : 'Huidige waarde ÷ Beginwaarde − 1')}`}
+                            : copy.row.airsReturnNote(
+                              h.own_return_book && h.own_return_book !== bookName
+                                ? h.own_return_book : undefined)}
                       how={blendHow(h, copy.row.heldDirectly, copy.row.atOpen)
                         ? copy.row.blendHow(blendHow(h, copy.row.heldDirectly, copy.row.atOpen)!)
                         : h.own_return_source === 'yfinance'
                           ? copy.row.yfReturnHow(fmtRet(h.own_return_pct), h.own_return_from ?? copy.info.yearOpened)
-                          : bookMathMismatch(h)
-                            ? copy.row.returnMismatchHow
-                            : copy.row.bookReturnHow(
-                            bookMath(h, copy.row.netDividend, true) ?? (h.own_income_eur
-                              ? `(Huidige waarde + ${eur0(h.own_income_eur)} ${copy.row.netDividend}) ÷ Beginwaarde − 1`
-                              : 'Huidige waarde ÷ Beginwaarde − 1'),
-                            fmtRet(h.own_return_pct),
-                            h.own_return_book && h.own_return_book !== bookName ? h.own_return_book : undefined)} />
+                          : copy.row.airsReturnHow} />
                   </td>
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>
                     {ppt(h.contribution_pct)}
@@ -2782,11 +2693,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   </td>
                 </tr>
                 ); })}
-                {groupedBySector && (
+                {subtotalLabel && (
                   <tr className="border-y border-neutral-800/30 bg-overlay/[0.035] font-medium">
                     <td />
                     <td className="py-1.5 text-fg-strong" colSpan={3}>
-                      {copy.holdings.sectorTotal(sector.label)}
+                      {copy.holdings.sectorTotal(subtotalLabel)}
                     </td>
                     {/* Momentum, volatility and beta describe instruments, not an additive sector. */}
                     <td />
@@ -3989,7 +3900,8 @@ export default function PortfolioAnalysisModal({
                         child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
                       <div className="w-0 min-w-full">
-                        <BookReturnChart portfolioId={id} refreshSeq={refreshSeq} />
+                        <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
+                          benchmark={benchmark} />
                       </div>
                     )}
                   </div>

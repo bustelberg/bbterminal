@@ -144,8 +144,7 @@ export default function CorrelationView({
   return (
     <div className="space-y-3">
       <p className="text-[11px] text-fg-faint">
-        Measured from monthly EUR returns. Monthly closes avoid the non-synchronous market-close
-        bias that distorts daily and weekly cross-market correlations.
+        Measured from monthly EUR returns.
       </p>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}

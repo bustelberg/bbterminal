@@ -731,25 +731,34 @@ def _book_fetched_at(portefeuille: str | None) -> str | None:
 
 def _apply_book_source(result: dict, benchmark_label: str) -> None:
     """Swap the PRIMARY portfolio return for AIRS's own book number (`cumulatief_rendement`), and
-    re-price the benchmark over the book's window — the calendar year, 1 Jan -> today.
+    re-price the benchmark over the exact window shown by the book-return chart.
 
-    AIRS reports the book only over the calendar year, flow-aware and INCLUDING income, and keeps
-    NO composition history — so 'since inception' has no book equivalent and is cleared rather than
-    left showing the yfinance model's number under a 'book' banner. `strategy_ytd_pct` still carries
-    the yfinance figure, so the Book-vs-strategy drift tile is unaffected by the swap.
+    A newly funded book also has leading zero AIRS months from before it existed. The chart removes
+    those months and starts at the first funded month, so the tile must use that same anchor instead
+    of comparing a partial-year book return with a full-year benchmark. AIRS keeps no composition
+    history, so 'since inception' still has no book equivalent and is cleared. `strategy_ytd_pct`
+    continues to carry the yfinance figure for the Book-vs-strategy drift tile.
     """
-    jan1 = f"{date.today().year}-01-01"
     p_ytd = result.get("book_ytd_pct")             # already computed by `_book_return`
-    bench = _index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
-    b_ytd = (bench.get(jan1) or {}).get("eur_pct")
+    from routers._airs_value_series import book_return_window  # noqa: PLC0415
+
+    window = (book_return_window(result["book_portefeuille"], benchmark_label)
+              if p_ytd is not None and result.get("book_portefeuille") else {})
+    anchor = window.get("return_from")
+    benchmark = window.get("benchmark") or {}
+    # AEX has no proxy ETF in the chart path. Retain its constituent fallback, but anchor that
+    # fallback to the book's first funded month too. ACWI/SP500 use the exact sampled chart line.
+    if anchor and not benchmark:
+        benchmark = (_index_returns(benchmark_label, [anchor]).get(anchor) or {})
+    b_ytd = benchmark.get("return_pct", benchmark.get("eur_pct"))
     result.update({
-        **_bench_prov(bench.get(jan1)),
+        **_bench_prov(benchmark),
         "source": "book",
-        "ytd_from": jan1 if p_ytd is not None else None,
+        "ytd_from": anchor,
         "portfolio_ytd_pct": p_ytd,
         # `book_as_of` was set by `_book_return` (runs in both source modes); the benchmark stays
         # yfinance, so `benchmark_as_of` from the model path above is left as-is.
-        "portfolio_as_of": result.get("book_as_of"),
+        "portfolio_as_of": window.get("return_as_of") or result.get("book_as_of"),
         "benchmark_ytd_pct": b_ytd,
         "ytd_excess_pct": (p_ytd - b_ytd) if (p_ytd is not None and b_ytd is not None) else None,
         # AIRS has no since-inception for the book — clear the model's rather than mislabel it.
@@ -953,7 +962,7 @@ def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
     } for row, value in valued if value > 0]
 
 
-def _expand_book_rows(rows: list[dict]) -> list[dict]:
+def _expand_book_rows(rows: list[dict], aligned_income: dict[str, float | None] | None = None) -> list[dict]:
     """Book holdings with each linked certificate replaced by the stocks of the model it IS.
 
     The certificate's EUR value is split across that model's composition by its own percentages,
@@ -973,6 +982,7 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
     # still knows how much of a leg came from where. One entry per ROUTE IN — `label=None` for the
     # book's own shares — carried through `merge_by_isin`, which concatenates them.
     out: list[dict] = []
+    aligned_income = aligned_income or {}
     account_compositions: dict[str, list[dict]] = {}
     for r in rows:
         target = r.get("linked_portfolio_id")
@@ -980,9 +990,16 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
         # Its direct source and values remain the certificate's own.
         folded_name = (nickname_for_holding(r.get("holding_name"))
                        or r.get("linked_portfolio_name") or r.get("holding_name"))
-        direct_src = [{"label": None, "model_id": None,
-                       "value_eur": float(r.get("current_value_eur") or 0),
-                       "start_value_eur": float(r.get("start_value_eur") or 0)}]
+        direct_source = {"label": None, "model_id": None,
+                         "value_eur": float(r.get("current_value_eur") or 0),
+                         "start_value_eur": float(r.get("start_value_eur") or 0)}
+        if r.get("airs_result_pct") is not None or r.get("holding_name") in aligned_income:
+            direct_source.update({
+                "return_pct": _airs_position_return(
+                    r, aligned_income.get(r.get("holding_name"), 0.0)),
+                "book_income_eur": aligned_income.get(r.get("holding_name"), 0.0),
+            })
+        direct_src = [direct_source]
         child = _positions_of(target, _datum_of(target)) if target else []
         fallback_model_id = None
         if not child and nickname_for_holding(r.get("holding_name")):
@@ -1050,13 +1067,23 @@ def _expand_book_rows(rows: list[dict]) -> list[dict]:
                 #  `model_id` RIDES ALONG, because the route's return has to come from the book
                 # behind THIS certificate specifically. Two certificates wrapping two strategies
                 # can both hold NVIDIA, and each book values its own position differently.
-                "sources": [{"label": folded_name or "via a certificate",
-                               "model_id": target or fallback_model_id,
-                             "wrapper_name": r.get("holding_name"),
-                             "wrapper_start_value_eur": start,
-                             "wrapper_current_value_eur": cur,
-                             "value_eur": cur * share,
-                             "start_value_eur": start * share}],
+                "sources": [{
+                    "label": folded_name or "via a certificate",
+                    "model_id": target or fallback_model_id,
+                    "wrapper_name": r.get("holding_name"),
+                    "wrapper_start_value_eur": start,
+                    "wrapper_current_value_eur": cur,
+                    "value_eur": cur * share,
+                    "start_value_eur": start * share,
+                    **({
+                        # Preserve the certificate's own total return before look-through
+                        # replaces the wrapper row with its underlying instruments.
+                        "wrapper_income_eur": aligned_income.get(r.get("holding_name"), 0.0),
+                        "wrapper_return_pct": _airs_position_return(
+                            r, aligned_income.get(r.get("holding_name"), 0.0)),
+                    } if (r.get("airs_result_pct") is not None
+                          or r.get("holding_name") in aligned_income) else {}),
+                }],
             })
     #  One leg per ISIN. A book can hold a stock directly AND through two certificates — three
     # rows for one instrument. React keys the drill-down by ISIN and treats duplicates as
@@ -1174,28 +1201,168 @@ def _book_snapshot_date(portefeuille: str) -> str | None:
     return str(rows[0]["as_of_date"]) if rows else None
 
 
-def _airs_position_return(row: dict | None, net_income: float = 0.0) -> float | None:
-    """AIRS's own result for one position: (Huidige waarde + net income) ÷ Beginwaarde − 1.
+def _airs_position_return(row: dict | None,
+                          aligned_income_eur: float | None = 0.0) -> float | None:
+    """AIRS total return for the snapshot quantity: price + FX + aligned net dividend.
 
      ONE DEFINITION, USED BY EVERY AIRS-SOURCED FIGURE ON THIS SCREEN — the parent's own rows, a
     directly-held leg of a certificate, and a leg valued by the book behind one. It is the same
-    arithmetic the expanded portfolio row's `Return` column runs, so a number here can always be
-    checked against the row it came from.
+    figure the Analyse PDF builds. AIRS restates `Beginwaarde` to the CURRENT quantity, so the
+    dividend leg must be restated to that same quantity too; `_book_aligned_dividend_income`
+    converts each payment to a per-share amount at its payment date and applies it to today's
+    shares, capped at the amount actually received. L'Oreal is the measured sale case: EUR 695
+    price+FX + EUR 513.32 × 50/97 dividend, divided by EUR 18,330, is 5.2351% -> 5.24%.
+    Hermes is the measured later-purchase case: its 22 current shares must not double the EUR
+    145.52 earned by the 11 shares held on the two payment dates.
 
-     IT IS A POSITION RESULT, NOT A PRICE RETURN, and the difference is not academic: AIRS's
-    Beginwaarde is the year-open value OR the PURCHASE value for a position opened during the year.
-    MasterCard is +2.14% in BUS_Offensief_Dyn's own book (held since January, ≈ the year's price
-    move) and +17.62% in StarTopSelectie's (bought later, cheaper) — same instrument, same window,
-    two correct answers to two different questions. That is exactly why each figure has to name the
-    book it came from.
+    AIRS displays Fondsresultaat in whole euros and Valutaresultaat in tenths, while Beginwaarde
+    and Huidige waarde retain cents. Their displayed components can therefore miss the exact held
+    value change by at most EUR 0.55. Reconcile only that rounding residue from current minus
+    opening; a larger gap is a real cash-flow/trading difference and must not be folded into the
+    price+FX leg. IDEXX is the boundary case: -7,853 + 992.10 gives -20.54490%, but the exact
+    EUR -6,861.36 value change gives -20.54627%, correctly displayed as -20.55%.
+
+    `airs_result_pct` is only the price+FX VOLK field. It remains the safe fallback when the dated
+    transaction history needed to align a real dividend is unavailable.
     """
     if not row:
         return None
     start = row.get("start_value_eur")
-    now = row.get("current_value_eur")
-    if not start or now is None:
-        return None
-    return ((float(now) + net_income) / float(start) - 1.0) * 100.0
+    current = row.get("current_value_eur")
+    if aligned_income_eur is None or not start or current is None:
+        value = row.get("airs_result_pct")
+        return float(value) if value is not None else None
+    fund, fx = row.get("fund_result_eur"), row.get("fx_result_eur")
+    exact_value_change = float(current) - float(start)
+    if fund is not None and fx is not None:
+        displayed_components = float(fund) + float(fx)
+        rounding_residue = exact_value_change - displayed_components
+        held_result = (exact_value_change if abs(rounding_residue) <= 0.5500001
+                       else displayed_components)
+    else:
+        held_result = exact_value_change
+    return (held_result + float(aligned_income_eur)) / float(start) * 100.0
+
+
+def _aligned_dividend_income(holdings: list[dict], trades: list,
+                             mutations: list[dict],
+                             unknown_names: set[str] | None = None,
+                             split_events: dict[str, tuple[float, str]] | None = None,
+                             ) -> dict[str, float | None]:
+    """Net dividend restated from shares on each payment date to the snapshot quantity.
+
+    Walking backwards from today's quantity makes the rule work for several payments around
+    several buys/sells: quantity_at_payment = quantity_now - later_buys + later_sells. The ratio
+    is capped at 1: a later sale removes the dividend attributable to shares no longer held, while
+    a later purchase cannot invent a dividend those new shares never received. Trade quantities
+    before a proven split are first converted to today's share basis. An unproven corporate action
+    or an undated trade makes that name unknowable; `None` tells the return helper to retain AIRS's
+    price+FX field instead of inventing a dividend allocation.
+    """
+    by_name = {str(r.get("holding_name")): r for r in holdings if r.get("holding_name")}
+    payments: dict[str, dict[str, float]] = defaultdict(dict)
+    refused = set(unknown_names or ())
+    split_events = dict(split_events or {})
+    for m in mutations:
+        if m.get("grootboek") not in {"Dividend", "Dividendbelasting"} or not m.get("fonds"):
+            continue
+        name = str(m["fonds"])
+        day = str(m.get("boekdatum") or "")
+        if not day:
+            refused.add(name)
+            continue
+        payments[name][day] = payments[name].get(day, 0.0) + float(m.get("amount_eur") or 0.0)
+
+    by_trade: dict[str, list] = defaultdict(list)
+    for trade in trades:
+        by_trade[trade.fonds].append(trade)
+
+    out: dict[str, float | None] = {}
+    for name, dated in payments.items():
+        row = by_name.get(name)
+        qty_now = float((row or {}).get("quantity") or 0.0)
+        if not row or qty_now <= 0 or (name in refused and name not in split_events):
+            out[name] = None
+            continue
+        aligned = 0.0
+        valid = True
+        for day, net in dated.items():
+            qty_then = qty_now
+            for trade in by_trade.get(name, []):
+                if not trade.datum:
+                    valid = False
+                    break
+                split = split_events.get(name)
+                trade_qty = (trade.quantity * split[0]
+                             if split and trade.datum < split[1] else trade.quantity)
+                if trade.datum > day:
+                    qty_then += trade_qty if trade.kind == "sell" else -trade_qty
+            if not valid or qty_then <= 0:
+                valid = False
+                break
+            aligned += net * min(1.0, qty_now / qty_then)
+        out[name] = aligned if valid else None
+    return out
+
+
+def _detected_book_splits(holdings: list[dict], sheet) -> tuple[
+        set[str], dict[str, tuple[float, str]]]:
+    """Return uninterpreted names and the subset proven to be stock splits.
+
+    AIRS records a split as a zero-value `D` deposit, the same code it can use for a real transfer.
+    `detect_split` requires both the quantity ratio and the pre-event trade-price ratio to agree;
+    only then may quantity arithmetic continue. The event date travels with the ratio so dividend
+    alignment can convert only trades in the old share units.
+    """
+    from airs_capital import detect_split  # noqa: PLC0415
+
+    unknown = {str(r.get("Fonds")) for r in sheet.rows
+               if r.get("Fonds") and r.get("Tt") not in ("A", "V")}
+    by_name = {r.get("holding_name"): r for r in holdings if r.get("holding_name")}
+    splits: dict[str, tuple[float, str]] = {}
+    for name in unknown:
+        row = by_name.get(name) or {}
+        qty = float(row.get("quantity") or 0)
+        start_val = float(row.get("start_value_eur") or 0)
+        if qty <= 0 or start_val <= 0:
+            continue
+        events = [r for r in sheet.rows
+                  if r.get("Fonds") == name and r.get("Tt") not in ("A", "V")]
+        deposited = sum(float(r.get("Aantal") or 0) for r in events)
+        first = min((str(r.get("Datum")) for r in events if r.get("Datum")), default=None)
+        prices = [abs(float(r.get("Waarde  EUR") or r.get("Waarde  EUR.1") or 0))
+                  / float(r["Aantal"])
+                  for r in sheet.rows
+                  if r.get("Fonds") == name and r.get("Tt") in ("A", "V")
+                  and float(r.get("Aantal") or 0) > 0
+                  and (not first or str(r.get("Datum") or "") < first)]
+        ratio = detect_split(qty, deposited, start_val / qty, prices)
+        if ratio and first:
+            splits[name] = (ratio, first)
+    return unknown, splits
+
+
+def _book_aligned_dividend_income(portefeuille: str,
+                                   holdings: list[dict]) -> dict[str, float | None]:
+    """Load one book's dated trades/income and align its dividends to current quantities."""
+    from airs_transacties import ParsedSheet, realised_results, trades  # noqa: PLC0415
+
+    mutations = ref_mutaties_for(portefeuille)
+    if not any(m.get("grootboek") in {"Dividend", "Dividendbelasting"} for m in mutations):
+        return {}
+    cached = (supabase.table("airs_transactie_snapshot").select("columns,kinds,rows")
+              .eq("portefeuille", portefeuille).limit(1).execute().data or [])
+    names = {str(m.get("fonds")) for m in mutations if m.get("fonds")}
+    if not cached:
+        return {name: None for name in names}
+    sheet = ParsedSheet(columns=cached[0].get("columns") or [],
+                        kinds=cached[0].get("kinds") or {}, rows=cached[0].get("rows") or [])
+    summary = realised_results(sheet)
+    if summary.unreadable:
+        return {name: None for name in names}
+    unknown, split_events = _detected_book_splits(holdings, sheet)
+    return _aligned_dividend_income(
+        holdings, trades(sheet), mutations, unknown, split_events)
 
 
 def _weigh_sources(sources: list[dict] | None, total_w: float) -> list[dict]:
@@ -1221,11 +1388,16 @@ def _weigh_sources(sources: list[dict] | None, total_w: float) -> list[dict]:
         key = (s.get("label"), s.get("model_id"))
         cur = agg.setdefault(key, {"label": key[0], "model_id": key[1],
                                    "value_eur": 0.0, "start_value_eur": 0.0,
+                                   # One AIRS book supplies one total return for this route.
+                                   # Repeated routes with the same (label, model) share it.
+                                   "return_pct": s.get("return_pct"),
                                    # Repeated on every child leg and deliberately not summed.
                                    # The collapsed UI needs the parent certificate's operands.
                                    "wrapper_name": s.get("wrapper_name"),
                                    "wrapper_start_value_eur": s.get("wrapper_start_value_eur"),
-                                   "wrapper_current_value_eur": s.get("wrapper_current_value_eur")})
+                                   "wrapper_current_value_eur": s.get("wrapper_current_value_eur"),
+                                   "wrapper_income_eur": s.get("wrapper_income_eur"),
+                                   "wrapper_return_pct": s.get("wrapper_return_pct")})
         cur["value_eur"] += v
         cur["start_value_eur"] += float(s.get("start_value_eur") or 0)
     out = sorted(agg.values(), key=lambda s: -s["value_eur"])
@@ -1273,8 +1445,8 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
     """model id → {ISIN → the AIRS valuation of that instrument in the book BEHIND that certificate}.
 
     A certificate is a wrapper around a model, and that model has an AIRS account of its own with a
-    real Vermogensoverzicht: Beginwaarde, Huidige waarde and the journal's dividends, per position.
-    That is the book that actually holds the shares, so it is the book that gets to say what they
+    real Vermogensoverzicht with a reported `Resultaat in %` per position. That is the book that
+    actually holds the shares, so it is the book that gets to say what they
     did — the alternative was our yfinance series, which answers a DIFFERENT question (the year's
     price move on a listing we picked) and diverged wildly from AIRS on this book: Shopify −25.54%
     against +18.24%, Fair Isaac −32.04% against +15.33%.
@@ -1290,8 +1462,6 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
 
-    from ._airs_accounts import account_holdings  # noqa: PLC0415
-
     if not model_ids:
         return {}
     by_model = {a["model_portfolio_id"]: a["portefeuille"]
@@ -1306,28 +1476,20 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
         # See `resolve_account_isins(freshen=...)` — this path shows no price-check verdict.
         res = resolve_account_isins(pf, freshen=False)
         child_rows = res.get("rows") or []
-        # The journal, for the same reason the parent loads it: a leg that paid a dividend must not
-        # read lower here than the identical instrument held directly.
-        income = {r["holding_name"]: r for r in (account_holdings(pf).get("rows") or [])}
+        aligned_income = _book_aligned_dividend_income(pf, child_rows)
         marks: dict[str, dict] = {}
         for r in child_rows:
             isin = r.get("isin")
             if not isin:
                 continue
-            d = income.get(r.get("holding_name")) or {}
-            net = (d.get("dividend_eur") or 0.0) + (d.get("dividend_tax_eur") or 0.0)
-            ret = _airs_position_return(r, net)
+            income = aligned_income.get(r.get("holding_name"), 0.0)
+            ret = _airs_position_return(r, income)
             if ret is None:
                 continue
-            #  The valuation itself rides along, not only the percentage it implies. A return with
-            # no numerator and denominator on screen cannot be checked against the book it claims
-            # to come from, and checking it against that book is the entire reason it is preferred
-            # over our price series.
+            # Keep the valuation as context, but never present it as the derivation of AIRS's raw
+            # percentage: partial sales can make the restated values answer a different question.
             marks[isin] = {"return_pct": ret, "as_of": res.get("as_of"), "portefeuille": pf,
-                           # Zero is part of the calculation, not an absent fact. The UI exposes
-                           # these AIRS operands so a reader can reproduce the percentage; turning
-                           # 0 into null would make the formula silently drop one of its inputs.
-                           "income_eur": net,
+                           "income_eur": income,
                            "start_value_eur": float(r["start_value_eur"]),
                            "current_value_eur": float(r["current_value_eur"])}
         out[mid] = marks
@@ -1394,6 +1556,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     direct_marks = {r["isin"]: r for r in rows
                     if r.get("isin") and not r.get("linked_portfolio_id")}
     wrapped_ids = {r["linked_portfolio_id"] for r in rows if r.get("linked_portfolio_id")}
+    aligned_income = _book_aligned_dividend_income(link["portefeuille"], rows)
 
     #  The book side needs the same look-through, and for a sharper reason. The model side at
     # least held nominal percentages; here the certificates ARE the book — ToppenbergBeheer
@@ -1401,7 +1564,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # left charts "Unclassified 100%". A composition chart that says the portfolio is entirely
     # unclassifiable is not a limitation, it is a wrong answer: the stocks are known, one link
     # away, and the model side is already drawing them.
-    rows = _expand_book_rows(rows)
+    rows = _expand_book_rows(rows, aligned_income)
     # A fallback expansion (EuropaTopSelectie) obtains its model ID from the mapped Dynamic
     # account because the certificate itself has no legacy model link. Collect those IDs after
     # expansion too, or the route has an identity but never loads that child book's valuations or
@@ -1485,9 +1648,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # sleeve figure: Σ over a bucket of (startᵢ / Σstart) · retᵢ == that bucket's return above, exactly.
     #  The income is loaded here, before any return is formed, because every return on this
     # Screen has to include it. AIRS's own headline (`cumulatief_rendement`) is flow-aware and
-    # carries dividends; the per-holding column is `(current + net income) ÷ Beginwaarde − 1`, the
-    # same figure the expanded row shows. A class subtotal computed on price alone therefore sat
-    # between two totals and disagreed with both — measured on EuropaTopSelect OFF DYN, the Equity
+    # carries dividends; the per-holding AIRS return adds share-aligned income to its price+FX
+    # field, while the separate Result chain adds full income and realised sales. A class subtotal computed on price
+    # alone therefore sat between two totals and disagreed with both — measured on EuropaTopSelect OFF DYN, the Equity
     # sleeve read −2.79% while 17 of its 27 holdings had paid a dividend that the rows above and
     # the tile below both counted. Three bases on one screen, all AIRS-sourced, all defensible
     # separately.
@@ -1555,8 +1718,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # belongs to the WRAPPER, so splitting it across the 135 stocks inside gives every one of them
     # the wrapper's number (NVIDIA read +0.08% against its own +2.82%). But it was applied to
     # EVERY row, including the ones the book values directly, and for those AIRS knows the answer
-    # exactly: Fortinet in AITopSelectie OFF DYN is +111.74% by AIRS's own Beginwaarde → Huidige
-    # waarde (plus its net dividend) and +108.65% off our yfinance series. Both are defensible;
+    # exactly: Fortinet in AITopSelectie OFF DYN is +111.74% in AIRS's own `Resultaat in %`
+    # field and +108.65% off our yfinance series. Both are defensible;
     # having the modal show one while the row that opened it shows the other is not.
     #
     # `via_names` is what tells the two apart: non-empty means the row was exploded out of a
@@ -1637,22 +1800,22 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
                 # This book's own shares. `direct` is set only on a split row; on a purely direct
                 # row the route's own start/current already ARE the clean ones.
                 src_row = direct if direct is not None else r
-                rt["return_pct"] = _airs_position_return(
-                    {"start_value_eur": rt["start_value_eur"], "current_value_eur": rt["value_eur"]}
-                    if direct is None else src_row, _net_income(src_row))
+                # A split row uses the clean pre-expansion direct position. A purely direct route
+                # already carries the aligned AIRS total return stamped by `_expand_book_rows`.
+                rt["return_pct"] = (_airs_position_return(
+                    src_row, aligned_income.get(src_row.get("holding_name"), 0.0))
+                                     if direct is not None else rt.get("return_pct"))
                 rt["book"] = link["portefeuille"] if rt["return_pct"] is not None else None
                 rt["as_of"] = book_as_of
-                #  The valuation the return was computed from, which for a split row is the
-                # DIRECT position's — not this route's slice of the book. They coincide on a
-                # purely direct row and diverge on a split one, and printing the slice beside the
-                # direct position's return would show two numbers whose ratio is not the third.
+                # Keep the direct position's valuation and aligned dividend as the operands from
+                # which the AIRS total return can be checked.
                 src_vals = src_row if direct is not None else rt
                 rt["book_start_value_eur"] = float(src_vals.get("start_value_eur") or 0) or None
                 rt["book_current_value_eur"] = (
                     float(src_vals.get("current_value_eur") or src_vals.get("value_eur") or 0) or None)
-                # Preserve zero. This is one of the three AIRS operands behind `return_pct`, and
-                # the provenance card must be able to print it explicitly for manual checking.
-                rt["book_income_eur"] = _net_income(src_row)
+                # The source-card income is aligned to the quantity behind Beginwaarde. The full
+                # journal income remains on the Result/MWR fields below.
+                rt["book_income_eur"] = aligned_income.get(src_row.get("holding_name"), 0.0)
                 if rt["return_pct"] is not None and direct is not None:
                     # The income + journal line belong to the position the figure came from.
                     net_income = _net_income(direct)
@@ -1775,8 +1938,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     # This is useful when tracing a return mismatch, but it is a normal successful
     # read and repeats on every modal refresh.  Keep it out of production logs.
     _log.debug(
-        "[analysis] %s: per-holding returns — %d from this book (Beginwaarde -> Huidige waarde + "
-        "net income, identical to the expanded row's Return column), %d BLENDED across this book "
+        "[analysis] %s: per-holding returns — %d from this book's price+FX plus aligned dividend, "
+        "%d BLENDED across this book "
         "and the book(s) behind a certificate (opening-value weighted), %d from this book's own "
         "DIRECT valuation alone, %d from a wrapped book alone, %d from the yfinance series (no "
         "AIRS book values them: an unpaired wrapped model, or no opening value anywhere), %d with "
@@ -2074,44 +2237,12 @@ def _position_ledger(portefeuille: str, rec: dict) -> dict:
                                           "dividend" if m.grootboek == "Dividend"
                                           else "dividend withholding tax"))
 
-    #  The names whose quantity arithmetic cannot be trusted — anything carrying a transaction
-    # type we do not interpret. `trades()` drops those rows (it emits only buys and sells), so the
-    # ledger would never learn of them; they have to be read off the sheet directly. Measured: a
-    # `D` row on KLA-Tencor added 279 shares in a 10:1 split, leaving its February purchase in
-    # PRE-split units against a POST-split holding — `qty_now − bought` gave 296 where the truth is
-    # 170, and the money-weighted return read +39.81% instead of +56.67%.
-    unknown = {r.get("Fonds") for r in sheet.rows
-               if r.get("Fonds") and r.get("Tt") not in ("A", "V")}
-    unknown = {n for n in unknown if isinstance(n, str)}
-
-    #  A deposit that can be proven a split is rescaled; one that cannot is still refused.
-    # `detect_split` needs two things this loader has and the ledger does not: the deposited
-    # quantity, and the per-share prices of the trades that happened BEFORE it. See its docstring
-    # for why both columns must agree before anything is rescaled.
-    from airs_capital import detect_split  # noqa: PLC0415
-
+    # Anything carrying a transaction type we do not interpret is refused unless the shared
+    # detector proves it is a split. The same evidence now governs both capital and dividends.
     by_name = {r.get("holding_name"): r for r in volk if r.get("holding_name")}
-    splits: dict[str, float] = {}
-    for name in unknown:
-        v = by_name.get(name) or {}
-        qty = float(v.get("quantity") or 0)
-        start_val = float(v.get("start_value_eur") or 0)
-        if qty <= 0 or start_val <= 0:
-            continue
-        events = [r for r in sheet.rows
-                  if r.get("Fonds") == name and r.get("Tt") not in ("A", "V")]
-        deposited = sum(float(r.get("Aantal") or 0) for r in events)
-        first = min((r.get("Datum") for r in events if r.get("Datum")), default=None)
-        prices = [abs(float(r.get("Waarde  EUR") or r.get("Waarde  EUR.1") or 0))
-                  / float(r["Aantal"])
-                  for r in sheet.rows
-                  if r.get("Fonds") == name and r.get("Tt") in ("A", "V")
-                  and float(r.get("Aantal") or 0) > 0
-                  and (not first or (r.get("Datum") or "") < first)]
-        ratio = detect_split(qty, deposited, start_val / qty, prices)
-        if ratio:
-            splits[name] = ratio
-    if splits:
+    unknown, split_events = _detected_book_splits(volk, sheet)
+    splits = {name: ratio for name, (ratio, _day) in split_events.items()}
+    if split_events:
         _log.debug("[analysis] %s: proven split(s) rescaled — %s", portefeuille,
                      ", ".join(f"{k} {v:.4f}:1" for k, v in splits.items()))
 
@@ -2857,22 +2988,24 @@ def _with_results(holdings: list[dict], realised: dict,
         led = by_name.get(h.get("name") or "") or {}
         # A folded certificate must be able to return to the PARENT instrument's own AIRS row.
         # Its expanded child legs carry child-book returns and allocated child results; neither is
-        # the wrapper's return. Stamp the wrapper operands on every labelled route so collapsing
-        # later is lossless and never pairs one calculation with another result.
+        # the wrapper's return. Stamp its aligned AIRS total return and operands on every labelled
+        # route so collapsing later is lossless.
         for source in h.get("sources") or []:
             wrapper_name = source.get("wrapper_name")
             if source.get("label") is None or not wrapper_name:
                 continue
             wrapper_led = by_name.get(wrapper_name) or {}
-            wrapper_income = float(wrapper_led.get("income_eur") or 0.0)
+            # This is the dividend aligned to the wrapper's remaining quantity and therefore the
+            # income leg of its AIRS return. `wrapper_led` retains the full journal dividend for
+            # Result/MWR separately.
+            wrapper_income = source.get("wrapper_income_eur")
             source.update({
                 "wrapper_income_eur": wrapper_income,
                 "wrapper_realised_result_eur": wrapper_led.get("realised_result_eur"),
                 "wrapper_result_eur": wrapper_led.get("result_eur"),
-                "wrapper_return_pct": _airs_position_return({
-                    "start_value_eur": source.get("wrapper_start_value_eur"),
-                    "current_value_eur": source.get("wrapper_current_value_eur"),
-                }, wrapper_income),
+                # Copied from the certificate's own `Resultaat in %` before look-through. The
+                # wrapper's dividends remain in its Result, not in this source percentage.
+                "wrapper_return_pct": source.get("wrapper_return_pct"),
                 "wrapper_book": realised.get("portefeuille"),
                 "wrapper_as_of": realised.get("holdings_as_of"),
             })
@@ -2891,9 +3024,8 @@ def _with_results(holdings: list[dict], realised: dict,
                     "realised_result_eur": realised_eur or None,
                     "result_eur": total,
                     #  What the money actually made, as opposed to what the instrument did. The
-                    # `Return` column beside it divides by AIRS's RESTATED Beginwaarde — today's
-                    # quantity at January's price — which deliberately erases your timing so the
-                    # figure describes the stock. This one divides by the capital that was really
+                    # `AIRS return` column beside it copies the Vermogensoverzicht's reported
+                    # `Resultaat in %`. This one instead measures the capital that was really
                     # tied up, flow-weighted by when it went in, and its numerator carries the
                     # dividends (net of withholding) and anything realised on a mid-year sale.
                     # Measured: KLA-Tencor is +55.62% as an instrument and +30.94% on the money,

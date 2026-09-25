@@ -248,7 +248,7 @@ export const BLEND_CODES: Record<string, { codes: string[]; forecast: string[] }
     .map((c) => [c.benchmarkMetric, { codes: c.codes, forecast: c.forecastCodes ?? [] }]));
 
 export default function LongEquityTab({
-  isin, name, basket, portfolioId, sbcCorrection = true, compare = null,
+  isin, name, basket, portfolioId, sbcCorrection = true, compare = null, onBenchmarkChange,
 }: {
   isin?: string;
   name?: string | null;
@@ -271,6 +271,8 @@ export default function LongEquityTab({
    * palette note in `benchSeries`.
    */
   compare?: { isin: string; name: string } | null;
+  /** Reports the selector's actual target to the modal-level Refresh fundamentals control. */
+  onBenchmarkChange?: (target: BenchTarget | null) => void;
   /**  OWNED BY THE MODAL, NOT HERE — its checkbox lives in the tab row, which is in the fixed
    *  head and therefore always visible. Governs the four charts whose numerator is FCF. */
   sbcCorrection?: boolean;
@@ -346,6 +348,8 @@ export default function LongEquityTab({
       ? { universe: selected, label: selected, cadence }
       : null;
   }, [compare, selected, cadence]);
+
+  useEffect(() => onBenchmarkChange?.(benchTarget), [benchTarget, onBenchmarkChange]);
 
   //  Memoised — it's a card/modal effect dep, so a fresh object each render would refetch forever.
   //  `cadence` RIDES IN THE BODY, which is what makes one toggle move nine cards: every derived

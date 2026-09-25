@@ -93,6 +93,31 @@ FILL_WORKERS = 3
 VENDOR_EMPTY_MARKER = "did not provide financial statements"
 VENDOR_EMPTY_LIMIT = 10
 
+
+def _all_failed_summary(failed: int, samples: list[str], reasons: dict[str, int]) -> str:
+    """A short, user-facing explanation for a batch in which every company failed."""
+    subject = "company" if failed == 1 else "companies"
+    if len(reasons) == 1 and samples:
+        reason = next(iter(reasons)).strip().removesuffix(".")
+        # The retry advice belongs once at the end, not once beside every company name.
+        reason = reason.removesuffix(" Please try again later").removesuffix(".")
+        names = [sample.split(": ", 1)[0] for sample in samples]
+        if len(names) == 1:
+            named = names[0]
+        else:
+            named = ", ".join(names[:-1]) + f" and {names[-1]}"
+        if failed == 1:
+            affected = named
+        elif failed > len(names):
+            affected = f"{failed} companies, including {named}"
+        else:
+            affected = named
+        return f"{reason} for {affected}. Please try again later."
+    if samples:
+        details = "; ".join(sample.removesuffix(".") + "." for sample in samples)
+        return f"Could not refresh {failed} {subject}. {details}"
+    return f"Could not refresh {failed} {subject}. Please try again later."
+
 # The two reported lines most readers use to judge whether a Graphs refresh did what it promised.
 # This is a post-run receipt, not the selection sentinel: a bank can validly lack FCF, but the
 # refresh must say so rather than hide it behind a generic 100% progress bar.
@@ -323,7 +348,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     argument runs ALL THREE feeds regardless of the flags, so under `statements` it would quietly
     triple the spend on data no page draws.
     """
-    from jobs import JobCancelled  # noqa: PLC0415 — same lazy-import shape as every other caller
+    from jobs import JobCancelled, UserFacingJobError  # noqa: PLC0415
 
     from ingest.api_usage import remaining_budget  # noqa: PLC0415
     from routers import _blend_cache  # noqa: PLC0415
@@ -409,6 +434,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     skipped = [(c, eligible(c)) for c in todo]
     work = [c for c, why in skipped if why is None]
     refused = [(c, why) for c, why in skipped if why]
+    refusal_samples = [f"{c.get('company_name') or c['company_id']}: {why}"
+                       for c, why in refused[:3]]
     #  Order before `limit`, NOT AFTER, or the whole point is lost — a capped run would take the
     # same `company_id`-ordered prefix and the reordering would only shuffle within it. See
     # `order_work`: least recently checked first, so a press that is cancelled or capped picks up
@@ -478,6 +505,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     # had already scrolled out of the toast. Keep a short receipt: the next action differs for an
     # empty GuruFocus template, an unsubscribed exchange, and a database write failure.
     failure_samples: list[str] = []
+    failure_reasons: dict[str, int] = {}
     # Rows the vendor returned that were already stored, so nothing was written for them. Reported
     # separately in the summary — see `ingest.metric_upsert.changed_rows` for why it is usually the
     # larger of the two by orders of magnitude.
@@ -583,8 +611,10 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                 empty_streak = 0
             if r["error"]:
                 failed += 1
+                reason = str(r["error"])
+                failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
                 if len(failure_samples) < 3:
-                    failure_samples.append(f"{who}: {r['error']}")
+                    failure_samples.append(f"{who}: {reason}")
             elif not r.get("stopped"):
                 #  A stopped company is not a loaded one. It ran some of its feeds and is counted
                 # in neither column — the summary reports where the run stopped instead, so nothing
@@ -676,8 +706,15 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     coverage_note = (f"reported EPS {eps_covered}/{len(work)} · "
                      f"FCF/share {fcf_covered}/{len(work)}")
     ctx.emit("info", f"{label}: refresh receipt — {coverage_note}")
+    if not work and refused:
+        # A deliberate pre-flight refusal is an answer, not a successful zero-row refresh. This
+        # is the common one-company shape for TSX/LSE/ASX holdings outside our GuruFocus plan.
+        # The per-company skip event has scrolled out by now and the terminal summary replaces it
+        # in the toast, so the restriction must survive here too.
+        return f"{label} — unavailable: {' | '.join(refusal_samples)}"
     summary = (f"{label} — {ok} companies {'refetched' if force else 'loaded'}"
                + (f", {failed} failed" if failed else "")
+               + (f", {len(refused)} unavailable" if refused else "")
                + f", {rows:,} data points"
                #  Said out loud, because a small `data points` FIGURE NOW MEANS SOMETHING GOOD.
                # Before `changed_rows` this run wrote every row the vendor returned, so the number
@@ -687,6 +724,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                + (f", {unchanged:,} already stored" if unchanged else "")
                + (f", {calls:,} API calls" if calls else "")
                + f" · {coverage_note}"
+               + (" · unavailable: " + " | ".join(refusal_samples) if refusal_samples else "")
                + (" · failures: " + " | ".join(failure_samples) if failure_samples else "")
                + (f" · {price_note}" if price_note else ""))
     if stopped:
@@ -700,4 +738,13 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         raise JobCancelled(
             f"CANCELLED after {ok + failed} of {len(work)} — {summary}. "
             "Everything fetched before the stop is stored; press again to continue from there.")
+    if failed and ok == 0:
+        # An all-failed batch is not a successful job merely because the worker itself completed.
+        # This is especially visible for a one-company refresh: the card used to turn green and
+        # say `done` while its summary admitted `0 refetched, 1 failed`. Put the actionable vendor
+        # reason first; `jobs.py` marks this deliberate user-facing exception as failed and keeps
+        # the complete explanation.
+        raise UserFacingJobError(
+            _all_failed_summary(failed, failure_samples, failure_reasons)
+        )
     return summary

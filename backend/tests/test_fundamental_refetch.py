@@ -141,4 +141,6 @@ class TestASelectedCompanyIsStillReportedHonestly:
         assert r["calls"] == 1
         assert r["rows"] == 0
         assert r["done"] == []
-        assert r["error"] == "fin: GuruFocus did not provide financial statements. Please try again later."
+        assert r["error"] == (
+            "GuruFocus did not provide financial statements. Please try again later."
+        )

@@ -46,9 +46,9 @@ const day = (d: string | null | undefined) =>
  */
 const LEGEND = {
   Rs: (bookName: string) => `${v(bookName)}'s return in period s, in EUR`,
-  W: 'the wealth curve — one euro compounded through every period up to t, cash flows absent',
-  M: 'the HIGH-WATER MARK: the best that curve had reached by t, so it never falls',
-  MDD: 'the answer: the deepest the curve ever sat below its own peak',
+  W: 'the value at period t of one euro compounded from the start',
+  M: 'the highest value reached up to period t',
+  MDD: 'the deepest fall below a previous peak',
 };
 
 function Tile({ label, value, tone, info }: {
@@ -91,6 +91,8 @@ export default function DrawdownView({
 
   const unit = 'trading days';
   const worst = data?.worst;
+  const otherEpisodes = (data?.episodes ?? []).filter((episode) =>
+    episode.peak_date !== worst?.peak_date || episode.trough_date !== worst?.trough_date);
 
   /**
    * What every card here is measured from, and over what window — built once.
@@ -114,25 +116,13 @@ export default function DrawdownView({
 
   return (
     <div className="space-y-3">
-      <p className="text-[11px] text-fg-faint">
-        Measured from daily EUR returns. Intraperiod recoveries remain visible.
-      </p>
-
       {error && <p className="text-xs text-neg-300">{error}</p>}
       {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
         <>
-          {/*  THE PROVENANCE WARNING LEADS, above the numbers rather than in a footnote. It is
-              not a caveat about precision — it says this is a DIFFERENT QUANTITY from the one a
-              client report carries, and a reader who takes it for the client's own drawdown has
-              been misled by the panel rather than by the data. */}
-          <p className="text-[11px] text-warn-300 leading-relaxed">
-            {t.dd.provenance}
-          </p>
-
-          <div className="flex flex-wrap gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <Tile label={t.dd.maxDrawdown(data.frequency)} value={pct2(data.max_drawdown_pct)}
               tone="text-neg-300"
               info={<InfoTip className="ml-0.5" content={<AspectCard
@@ -152,19 +142,17 @@ export default function DrawdownView({
                   { sym: 'M_t', is: LEGEND.M },
                   { sym: String.raw`MDD`, is: LEGEND.MDD },
                 ]}
+                how={t.dd.cards.maxDrawdown.how}
                 /* Daily is the only available basis, so the card needs no alternate-cadence
                    comparison to explain a number the reader cannot select. */
                 />} />} />
             <Tile label={t.dd.benchMax(data.benchmark)}
               value={pct2(data.benchmark_max_drawdown_pct)} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`The same measurement run over ${data.benchmark}'s own tracker instead of `
-                  + `${portfolioName} — same formula, same periods, so the two are directly `
-                  + 'comparable.'}
+                what={t.dd.cards.benchMax.what}
                 where={where}
                 when={when}
-                how={'For scale.  It carries none of this book\'s survivorship bias — the index '
-                  + 'kept its fallers — so the gap between the two flatters the book.'} />} />} />
+                how={t.dd.cards.benchMax.how} />} />} />
             {/*  THE VALUE IS THE FILTERED COUNT, and it did not used to be. The label has
                 always promised "over 5%" while the tile showed `episodes_total`, which counts
                 every peak-to-recovery cycle including a bad afternoon that came back the next
@@ -173,32 +161,28 @@ export default function DrawdownView({
             <Tile label={t.dd.episodes(Math.abs(data.episode_threshold_pct ?? 5).toFixed(0))}
               value={`${data.episodes_over_threshold ?? 0}`} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`How many distinct falls of at least `
-                  + `${Math.abs(data.episode_threshold_pct ?? 5).toFixed(0)}% the sleeve had. A `
-                  + 'fall opens when the wealth curve leaves a high-water mark and closes only '
-                  + 'when it regains it, so a slide that bounces part-way and drops again is ONE '
-                  + `fall, not two. ${v(data.episodes_total ?? 0)} cycles in all once every `
-                  + 'shallower dip is counted too.'}
+                what={t.dd.cards.episodes.what}
                 where={where}
                 when={when}
-                how={' ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four '
-                  + '−25%s share a maximum and are not the same risk.  A 40% fall that bounces 5% '
-                  + 'and falls further is ONE drawdown, not two — splitting on direction would '
-                  + 'report shallow dips and no crash.'} />} />} />
+                how={t.dd.cards.episodes.how} />} />} />
           </div>
+
+          <p className="text-[11px] text-fg-muted leading-relaxed">
+            {t.dd.provenance}
+          </p>
 
           {worst && (
             <div className="rounded-lg border border-neutral-800/40 px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-                The worst one, in full
+                {t.dd.worstInFull}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[11px]">
-                <div><span className="text-fg-faint">Peak</span>{' '}
+                <div><span className="text-fg-faint">{t.dd.peak}</span>{' '}
                   <span className="text-fg-soft">{day(worst.peak_date)}</span></div>
-                <div><span className="text-fg-faint">Trough</span>{' '}
+                <div><span className="text-fg-faint">{t.dd.trough}</span>{' '}
                   <span className="text-fg-soft">{day(worst.trough_date)}</span>
                   <span className="text-fg-faint"> ({worst.decline_periods} {unit})</span></div>
-                <div><span className="text-fg-faint">Recovered</span>{' '}
+                <div><span className="text-fg-faint">{t.dd.recovered}</span>{' '}
                   {worst.recovered
                     ? (
                       <>
@@ -218,23 +202,23 @@ export default function DrawdownView({
             </div>
           )}
 
-          {(data.episodes ?? []).length > 1 && (
+          {otherEpisodes.length > 0 && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-                Deepest falls
+                {t.dd.deepest}
               </div>
               <table className="w-full text-[11px]">
                 <thead>
                   <tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium">
-                    <th className="text-left">Peak</th>
-                    <th className="text-left">Trough</th>
-                    <th className="text-right">Depth</th>
-                    <th className="text-right">Decline</th>
-                    <th className="text-right">Recovery</th>
+                    <th className="text-left">{t.dd.peak}</th>
+                    <th className="text-left">{t.dd.trough}</th>
+                    <th className="text-right">{t.dd.colDepth}</th>
+                    <th className="text-right">{t.dd.colDecline}</th>
+                    <th className="text-right">{t.dd.colRecovery}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(data.episodes ?? []).map((e) => (
+                  {otherEpisodes.map((e) => (
                     <tr key={`${e.peak_date}|${e.trough_date}`}
                       className="[&>td]:py-1 [&>td]:border-t [&>td]:border-neutral-800/20">
                       <td className="text-fg-soft">{day(e.peak_date)}</td>
@@ -247,7 +231,7 @@ export default function DrawdownView({
                       </td>
                       <td className="text-right font-mono tabular-nums text-fg-muted">
                         {e.recovered ? e.recovery_periods
-                          : <span className="text-warn-300">open</span>}
+                          : <span className="text-warn-300">{t.dd.open}</span>}
                       </td>
                     </tr>
                   ))}
@@ -257,13 +241,9 @@ export default function DrawdownView({
           )}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {/*  THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as the tracking-error and
-                volatility footnotes. "Today's weights over 5 years" asserted a start date
-                instead of reporting one, and the paired grid rarely reaches the full five. */}
-            {`${portfolioName}'s stock sleeve at the selected AIRS weights, priced from `}
-            {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} `}
-            {`(${data.priced_holdings} of ${data.total_holdings} priced). `}
-            Durations are in {unit} of the selected cadence, not calendar days.
+            {`Data window: ${data.window_from ?? 'unknown'} to ${data.window_to ?? 'unknown'} · `}
+            {`${data.priced_holdings} of ${data.total_holdings} holdings priced. `}
+            {t.dd.note(unit)}
           </p>
         </>
       )}

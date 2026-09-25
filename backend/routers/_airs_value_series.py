@@ -144,7 +144,31 @@ def _return_series(perf: list[dict], by_date: dict[str, float],
     return (out, anchor) if len(out) > 1 else ([], None)
 
 
-def value_series(portefeuille: str) -> dict:
+def book_return_window(portefeuille: str, benchmark_label: str | None = None) -> dict:
+    """Return the exact paired window used by the overview chart.
+
+    AIRS writes leading zero months before a newly funded book existed. The chart removes those
+    months; the scorecard uses this helper so its benchmark opens on that same funded-book anchor.
+    """
+    perf = _page("airs_performance",
+                 "periode,beginvermogen,eindvermogen,cumulatief_rendement",
+                 eq={"portefeuille": portefeuille}, order="periode", tiebreak=None)
+    returns, anchor = _return_series(perf, {}, {})
+    benchmark: dict = {}
+    if benchmark_label and anchor and returns:
+        from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
+
+        benchmark = etf_return_series(
+            benchmark_label, anchor, [str(point["date"]) for point in returns])
+    return {
+        "return_from": anchor,
+        "return_as_of": returns[-1]["date"] if returns else None,
+        "return_pct": returns[-1]["cum_pct"] if returns else None,
+        "benchmark": benchmark,
+    }
+
+
+def value_series(portefeuille: str, benchmark_label: str | None = None) -> dict:
     """`{points, flows, …}` — the book's value on every date we hold a snapshot for."""
     rows = _page("airs_holding", "as_of_date,current_value_eur",
                  eq={"portefeuille": portefeuille}, order="as_of_date")
@@ -206,6 +230,12 @@ def value_series(portefeuille: str) -> dict:
     points = earlier[first_real:] + ours
 
     returns, anchor = _return_series(perf, by_date, counts)
+    benchmark: dict = {}
+    if benchmark_label and anchor and returns:
+        from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
+
+        benchmark = etf_return_series(
+            benchmark_label, anchor, [str(point["date"]) for point in returns])
     return {
         "portefeuille": portefeuille,
         "points": points,
@@ -218,6 +248,16 @@ def value_series(portefeuille: str) -> dict:
         #  The headline is the last point of the full series, so a display resolution cannot
         # move a reported figure. The same rule the value header already follows.
         "return_pct": returns[-1]["cum_pct"] if returns else None,
+        # The investable benchmark proxy, sampled on the exact AIRS dates above. Empty for a
+        # benchmark without a reachable ETF; never substitute the constituent reconstruction here
+        # because the scorecard's headline prefers the ETF and two definitions in one chart would
+        # be worse than one absent line.
+        "benchmark": benchmark.get("label") or benchmark_label,
+        "benchmark_ticker": benchmark.get("ticker"),
+        "benchmark_source": benchmark.get("source"),
+        "benchmark_returns": benchmark.get("points") or [],
+        "benchmark_return_pct": benchmark.get("return_pct"),
+        "benchmark_as_of": benchmark.get("as_of"),
         #  So the chart can say what it is looking at without counting. `first`/`last` are the span
         # we actually hold, which is the answer to "why does this start in June".
         "first_date": points[0]["date"] if points else None,

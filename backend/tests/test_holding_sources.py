@@ -182,6 +182,18 @@ class TestTheExpansionStampsTheRoute:
         assert out[0]["sources"] == [{"label": None, "model_id": None,
                                       "value_eur": 100.0, "start_value_eur": 90.0}]
 
+    def test_a_direct_route_carries_its_share_aligned_total_return(self, monkeypatch):
+        self._wire(monkeypatch, [])
+        aligned = (698.40 - 185.08) * 50 / 97
+        out = pa._expand_book_rows(
+            [{"isin": "FR1", "holding_name": "L` Oreal", "current_value_eur": 19_025.0,
+              "start_value_eur": 18_330.0, "fund_result_eur": 695.0,
+              "fx_result_eur": 0.0, "airs_result_pct": 3.79}],
+            {"L` Oreal": aligned})
+        source = out[0]["sources"][0]
+        assert source["book_income_eur"] == pytest.approx(264.5979381443)
+        assert source["return_pct"] == pytest.approx(5.2351224121)
+
     def test_a_certificate_stamps_each_leg_with_the_strategy_its_slice_and_its_model(
             self, monkeypatch):
         self._wire(monkeypatch, [{"isin": "US1", "fonds": "MasterCard", "percentage": 4.0},

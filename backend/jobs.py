@@ -89,6 +89,15 @@ class JobCancelled(Exception):
     """
 
 
+class UserFacingJobError(Exception):
+    """A failure whose message was deliberately written for the person watching the job.
+
+    Unexpected exceptions keep their short diagnostic receipt below. A worker that has already
+    translated a known failure into plain English uses this type so the toast does not prepend a
+    Python class name or cut a multi-company explanation in half.
+    """
+
+
 @dataclass
 class Job:
     id: str
@@ -310,6 +319,11 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Jo
             #  Named as an outcome, not an error. A cancelled job did what it was told; rendering
             # it in red beside a genuine failure teaches the reader to ignore both.
             ctx.emit("cancelled", job.summary)
+        except UserFacingJobError as e:
+            _log.warning("[job] %s (%s) failed - %s", label, kind, e)
+            job.status = "failed"
+            job.summary = str(e)
+            ctx.emit("error", job.summary)
         except Exception as e:  # noqa: BLE001
             _log.warning("[job] %s (%s) failed — %s: %s", label, kind, type(e).__name__, e)
             job.status = "failed"

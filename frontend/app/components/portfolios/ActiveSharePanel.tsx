@@ -33,7 +33,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { withWorked, subNum, workedRatio } from './workedFormula';
+import { withWorked, subNum, workedRatio, texWords } from './workedFormula';
 import { dayOf, dayRange } from './asOfLine';
 import {
   Provenance, sourceField, sourceLabel, sourceVendor, type SourceKey,
@@ -248,8 +248,7 @@ export default function ActiveSharePanel({
     book: a.book + (r.portfolio_pct ?? 0),
     bench: a.bench + (r.benchmark_pct ?? 0),
     active: a.active + (r.active_pct ?? 0),
-    abs: a.abs + Math.abs(r.active_pct ?? 0),
-  }), { book: 0, bench: 0, active: 0, abs: 0 });
+  }), { book: 0, bench: 0, active: 0 });
 
   return (
     <div className="h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
@@ -260,12 +259,12 @@ export default function ActiveSharePanel({
           just been clicked. A toggle that jumps out from under the pointer reads as a
           misclick even when it worked. */}
       <div className="shrink-0 flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <h4 className="text-sm font-semibold text-fg-strong">
             {t.titles[view]} vs {data?.benchmark ?? benchmark}
           </h4>
-          <p className="text-[11px] text-fg-faint mt-0.5">
-            {t.subtitle}
+          <p className="text-xs text-fg-faint mt-0.5">
+            {t.subtitle(portfolioName, selectedPortfolioAsOf)}
           </p>
           {/*  A TWO-POSITION SEGMENTED CONTROL, JOINED — which is the shape that means "exactly
               one of these". The filter chips elsewhere in this modal are separate pills because
@@ -274,7 +273,7 @@ export default function ActiveSharePanel({
           {/*  `flex-wrap`, NOT `inline-flex` — at six positions the row was wider than a
               narrow dialog, and an overflowing segmented control silently hides its last option.
               Wrapping keeps every view reachable; the joined look survives via the shared border. */}
-          <div className="flex flex-wrap mt-2 rounded-lg border border-neutral-800/40
+          <div className="flex w-fit flex-wrap mt-2 rounded-lg border border-neutral-800/40
             overflow-hidden max-w-full">
             {/*  FIVE RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SIXTH. Every one
                 of these describes the SHAPE of the book — how far it sits from the index, how far
@@ -289,7 +288,8 @@ export default function ActiveSharePanel({
             {(['active', 'te', 'corr', 'vol', 'dd', 'conc'] as const).map((k) => (
               <button key={k} type="button" onClick={() => setView(k)}
                 aria-pressed={view === k}
-                className={`cursor-pointer px-3 py-1 text-[11px] transition-colors ${
+                className={`cursor-pointer px-3 py-1 text-[11px] whitespace-nowrap
+                  transition-colors ${
                   view === k ? 'bg-accent-600 text-white'
                     : 'bg-elevated text-fg-muted hover:text-accent-300'}`}>
                 {t.views[k]}
@@ -324,7 +324,8 @@ export default function ActiveSharePanel({
       {/*  EVERYTHING BELOW THE HEADER SCROLLS AS ONE. `min-h-0` is what lets it: without it the
           flex child refuses to shrink under its content and the dialog's fixed height gives way
           — see `PanelDialog`. */}
-      <div className="flex-1 min-h-0 overflow-auto pt-3 space-y-3">
+      <div className={`flex-1 min-h-0 pt-3 ${view === 'active'
+        ? 'overflow-hidden' : 'overflow-auto space-y-3'}`}>
 
       {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
           lazy load real rather than merely hidden. It takes the SAME holdings, so both views
@@ -375,8 +376,8 @@ export default function ActiveSharePanel({
       )}
 
       {view === 'active' && data?.available && (
-        <>
-          <div className="flex flex-wrap gap-2">
+        <div className="h-full min-h-0 flex flex-col gap-3">
+          <div className="shrink-0 flex flex-wrap gap-2">
             {/*  `where` STAYS AT THE CALL SITE where it interpolates live counts — the copy
                 table carries the sentences, not the arithmetic. A `where` with two numbers in it
                 would need a formatter per language for no gain; these are counts and a benchmark
@@ -408,8 +409,9 @@ export default function ActiveSharePanel({
                 worked={data.overlap_pct == null ? '' : withWorked(
                   String.raw`\sum_i \min\!\left( w_i^{\,p},\; w_i^{\,b} \right)`,
                   String.raw`${subNum(data.overlap_pct, 2)}\% = 100\%`
-                  + String.raw` - \text{active } ${subNum(data.active_share_pct ?? 0, 2)}\%`)}
+                + String.raw` - \text{active } ${subNum(data.active_share_pct ?? 0, 2)}\%`)}
                 legend={[
+                  { sym: 'i', is: t.active.legend.issuer },
                   { sym: String.raw`\min`, is: t.active.legend.min },
                   { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
                   { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
@@ -454,14 +456,14 @@ export default function ActiveSharePanel({
               the composition charts follow. A constituent we cannot price does not lose its weight,
               it redistributes it across the rest, which makes active share read slightly LOW. */}
           {data.benchmark_covered_pct != null && data.benchmark_covered_pct < 99.5 && (
-            <p className="text-[11px] text-fg-faint">
+            <p className="shrink-0 text-[11px] text-fg-faint">
               {t.active.coverage(`${data.benchmark_covered_pct.toFixed(2)}%`,
                 data.benchmark ?? benchmark)}
             </p>
           )}
 
           {(data.unresolved ?? []).length > 0 && (
-            <p className="text-[11px] text-warn-300">
+            <p className="shrink-0 text-[11px] text-warn-300">
               {t.active.unmatched(
                 (data.unresolved ?? []).length,
                 pct2((data.unresolved ?? []).reduce((acc, u) => acc + (u.weight_pct ?? 0), 0)),
@@ -470,7 +472,7 @@ export default function ActiveSharePanel({
             </p>
           )}
 
-          <div className="flex items-center gap-2 pt-1">
+          <div className="shrink-0 flex items-center gap-2 pt-1">
             <button type="button" onClick={() => setShowAll(false)}
               className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
                 !showAll ? 'bg-accent-600 text-white border-transparent'
@@ -498,8 +500,17 @@ export default function ActiveSharePanel({
               the most-tested table pattern there is, and it is what the mobile rule in the project
               docs already asks for ("keep dense tables inside their own overflow-auto container").
                `max-h`, NOT `h` — a short book must not get a half-empty box with a scrollbar. */}
-          <div className="rounded-lg border border-neutral-800/40 max-h-[55vh] overflow-auto">
-            <table className="w-full text-xs">
+          <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-neutral-800/40
+            overflow-hidden">
+            <div className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable]">
+              <table className="w-full table-fixed text-xs">
+              <colgroup>
+                <col />
+                <col className="w-40" />
+                <col className="w-20" />
+                <col className="w-20" />
+                <col className="w-28" />
+              </colgroup>
               {/*  STICKY AND THE BACKGROUND BOTH SIT ON THE `<th>` CELLS, NOT ON `<thead>`, AND
                   THAT IS THE WHOLE FIX. Two separate reasons, either of which alone produces the
                   reported symptom — rows travelling over a header that should absorb them:
@@ -520,7 +531,7 @@ export default function ActiveSharePanel({
                 <tr className="text-fg-faint [&>th]:px-2.5 [&>th]:py-1 [&>th]:font-medium
                   [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:bg-inset">
                   <th className="text-left">{t.active.colCompany}</th>
-                  <th className="text-right">{t.active.colBook}</th>
+                  <th className="text-right whitespace-nowrap">{portfolioName}</th>
                   <th className="text-right">{data.benchmark ?? benchmark}</th>
                   <th className="text-right">{t.active.colActive}</th>
                   <th className="w-28" />
@@ -539,10 +550,17 @@ export default function ActiveSharePanel({
                       )}
                     </td>
                     <td className="text-right font-mono tabular-nums text-fg-muted">
-                      <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap">
-                        {(r.portfolio_pct ?? 0) > 0 ? `${(r.portfolio_pct ?? 0).toFixed(2)}%` : '—'}
-                        {r.held && !r.residual && selectedWeightTotal != null
-                          && selectedWeightTotal > 0 && selectedWeightComponents?.length ? (
+                      {/* Every row reserves one identical provenance slot. The digits therefore
+                          align independently of whether this particular row has an info icon. */}
+                      <span className="inline-grid grid-cols-[auto_1.375rem] items-center
+                        whitespace-nowrap">
+                        <span>
+                          {(r.portfolio_pct ?? 0) > 0
+                            ? `${(r.portfolio_pct ?? 0).toFixed(2)}%` : '—'}
+                        </span>
+                        <span className="flex justify-end">
+                          {r.held && !r.residual && selectedWeightTotal != null
+                            && selectedWeightTotal > 0 && selectedWeightComponents?.length ? (
                             <Provenance source={portfolioSource} asOf={selectedPortfolioAsOf}
                               what={t.active.weightWhat(r.name, portfolioName)}
                               note={weightBasis === 'start'
@@ -556,7 +574,8 @@ export default function ActiveSharePanel({
                                 holdingName={r.name}
                                 valueLabel={weightBasis === 'start'
                                   ? 'Beginwaarde' : 'Huidige waarde'} />} />
-                          ) : null}
+                            ) : null}
+                        </span>
                       </span>
                     </td>
                     <td className="text-right font-mono tabular-nums text-fg-muted">
@@ -573,38 +592,58 @@ export default function ActiveSharePanel({
                   </tr>
                 ))}
               </tbody>
-              {/*  STICKY TO THE BOTTOM OF THE SCROLL BOX, like the header is to the top. With
-                  1,678 rows a plain `<tfoot>` is a footer nobody reaches, and the total is the
-                  one row that reconciles this table to the tiles above it.
-                   A SOLID BACKGROUND IS LOAD-BEARING: the rows scroll UNDER it, and at any
-                  alpha the digits of two rows overlap. */}
-              {/*  SAME TREATMENT AS THE HEADER AND FOR BOTH THE SAME REASONS — see above. Rows
-                  pass under this end too, so it carried the identical bug. */}
+              </table>
+            </div>
+              {/*  FIXED BELOW THE SCROLL BOX. A sticky footer cannot rise from row 1,575; it only
+                  sticks after its natural position reaches the bottom edge. Keeping this outside
+                  makes the portfolio and benchmark sums visible in both table views. The repeated
+                  colgroup keeps all numeric columns aligned with the rows above. */}
+            <div className="shrink-0 overflow-y-auto [scrollbar-gutter:stable]">
+            <table className="w-full table-fixed text-xs" aria-label="Active share totals">
+              <colgroup>
+                <col />
+                <col className="w-40" />
+                <col className="w-20" />
+                <col className="w-20" />
+                <col className="w-28" />
+              </colgroup>
               <tfoot>
                 <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
-                  [&>td]:border-neutral-700/60 [&>td]:sticky [&>td]:bottom-0 [&>td]:z-10
-                  [&>td]:bg-inset font-medium">
+                  [&>td]:border-neutral-700/60 [&>td]:bg-inset font-medium">
                   <td className="text-fg-soft">
                     {showAll ? t.active.totalAll(rows.length) : t.active.totalHeld(rows.length)}
                     <InfoTip className="ml-1" content={<AspectCard
                       {...(showAll ? t.active.totalCard : t.active.totalCardHeld)}
                       when={whenBoth}
-                      //  The symbolic half only over every name. On the held subset half the sum
-                      // is missing, so ½ Σ|Active| is NOT the active share — printing the formula
-                      // there would invite exactly the reconciliation the copy warns against.
-                      worked={showAll
-                        ? withWorked(
-                          String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
-                          String.raw`\tfrac{1}{2} \times ${totals.abs.toFixed(2)}`
-                          + String.raw` = ${(totals.abs / 2).toFixed(2)}\%`)
-                        : ''}
-                      legend={showAll
-                        ? [{ sym: String.raw`\left| w_i^{\,p} - w_i^{\,b} \right|`,
-                          is: t.active.legend.absActive }]
-                        : undefined} />} />
+                      // This is a totals-row formula, not a second derivation of active share.
+                      // It mirrors the three numeric cells immediately to its right.
+                      worked={String.raw`\begin{aligned}`
+                        + `${texWords(portfolioName)} &= `
+                        + String.raw`\sum_{i\in S} w_i^{\,p}`
+                        + String.raw` = ${totals.book.toFixed(2)}\% \\ `
+                        + `${texWords(data.benchmark ?? benchmark)} &= `
+                        + String.raw`\sum_{i\in S} w_i^{\,b}`
+                        + String.raw` = ${totals.bench.toFixed(2)}\% \\ `
+                        + String.raw`\text{Active} &= \sum_{i\in S}`
+                        + String.raw`\left(w_i^{\,p}-w_i^{\,b}\right)`
+                        + String.raw` = ${totals.book.toFixed(2)}\% - ${totals.bench.toFixed(2)}\%`
+                        + String.raw` = ${totals.active.toFixed(2)}\%`
+                        + String.raw`\end{aligned}`}
+                      legend={[
+                        { sym: 'i', is: t.active.legend.issuer },
+                        { sym: 'S', is: showAll
+                          ? t.active.legend.allSet : t.active.legend.heldSet },
+                        { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
+                        { sym: String.raw`w_i^{\,b}`,
+                          is: t.active.legend.wb(data.benchmark ?? benchmark) },
+                      ]} />} />
                   </td>
                   <td className="text-right font-mono tabular-nums text-fg">
-                    {`${totals.book.toFixed(2)}%`}
+                    <span className="inline-grid grid-cols-[auto_1.375rem] items-center
+                      whitespace-nowrap">
+                      <span>{`${totals.book.toFixed(2)}%`}</span>
+                      <span aria-hidden />
+                    </span>
                   </td>
                   <td className="text-right font-mono tabular-nums text-fg">
                     {`${totals.bench.toFixed(2)}%`}
@@ -619,8 +658,9 @@ export default function ActiveSharePanel({
                 </tr>
               </tfoot>
             </table>
+            </div>
           </div>
-        </>
+        </div>
       )}
       </div>
     </div>

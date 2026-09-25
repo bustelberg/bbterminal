@@ -30,6 +30,8 @@ export type EquityPart<T> = {
   rows: T[];
   /** This part's share OF THE CLASS, 0-100, or null when the class has no weight to divide. */
   classPct: number | null;
+  /** A closing subtotal requested for this part. Company rows already close per sector. */
+  subtotalLabel: string | null;
 };
 
 /**
@@ -62,7 +64,9 @@ const LABEL = { stocks: 'Individual stocks', funds: 'Stock ETFs' } as const;
 export function equityParts<T extends Splittable>(
   bucket: string, equityBucket: string, rows: T[],
 ): EquityPart<T>[] {
-  const undivided: EquityPart<T>[] = [{ key: 'all', label: null, rows, classPct: null }];
+  const undivided: EquityPart<T>[] = [
+    { key: 'all', label: null, rows, classPct: null, subtotalLabel: null },
+  ];
   if (bucket !== equityBucket) return undivided;
 
   const stocks = rows.filter((r) => !r.is_fund);
@@ -82,7 +86,9 @@ export function equityParts<T extends Splittable>(
   const pct = (rs: T[]) => (total > 0 ? (100 * w(rs)) / total : null);
 
   return [
-    { key: 'stocks', label: LABEL.stocks, rows: stocks, classPct: pct(stocks) },
-    { key: 'funds', label: LABEL.funds, rows: funds, classPct: pct(funds) },
+    { key: 'stocks', label: LABEL.stocks, rows: stocks, classPct: pct(stocks),
+      subtotalLabel: null },
+    { key: 'funds', label: LABEL.funds, rows: funds, classPct: pct(funds),
+      subtotalLabel: LABEL.funds },
   ];
 }

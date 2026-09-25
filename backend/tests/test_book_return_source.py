@@ -26,32 +26,147 @@ from routers import _airs_portfolio_analysis as pa
 
 
 class TestTheOneDefinition:
-    """`_airs_position_return` is the single formula behind every AIRS-sourced figure on the
-    screen — this book's rows, a directly-held leg, and a leg valued by a wrapped book."""
+    """One AIRS total-return definition: price + FX + share-aligned net dividend."""
 
-    def test_a_position_with_no_opening_value_has_no_return(self):
-        # Undefined, never 0 — "not held when the window opened" is not "did not move".
-        assert pa._airs_position_return({"start_value_eur": 0, "current_value_eur": 100}) is None
-        assert pa._airs_position_return({"start_value_eur": None, "current_value_eur": 100}) is None
-        assert pa._airs_position_return({"start_value_eur": 100, "current_value_eur": None}) is None
+    def test_a_position_without_airs_result_has_no_airs_return(self):
+        assert pa._airs_position_return({"start_value_eur": 0, "current_value_eur": 110}) is None
         assert pa._airs_position_return(None) is None
 
-    def test_the_withholding_is_ADDED_because_airs_books_it_negative(self):
-        # gross 10 + tax -1.5 = 8.5 net on a 100 -> 110 position: (110 + 8.5)/100 - 1 = 18.5%.
-        # Writing the intuitive `- tax` overstates every foreign holding by twice the withholding.
-        assert pa._airs_position_return(
-            {"start_value_eur": 100, "current_value_eur": 110}, 10 - 1.5) == pytest.approx(18.5)
+    def test_loreal_reaches_the_pdf_total_after_its_partial_sale(self):
+        row = {"start_value_eur": 18_330, "current_value_eur": 19_025,
+               "fund_result_eur": 695, "fx_result_eur": 0, "airs_result_pct": 3.79}
+        aligned = (698.40 - 185.08) * 50 / 97
+        assert pa._airs_position_return(row, aligned) == pytest.approx(5.2351224121)
 
-    def test_a_plain_value_change_when_nothing_was_paid_out(self):
-        assert pa._airs_position_return(
-            {"start_value_eur": 490.0, "current_value_eur": 500.0}) == pytest.approx(
-                100 * (500.0 / 490.0 - 1))
+    def test_idexx_uses_the_exact_value_change_within_component_rounding_error(self):
+        row = {"start_value_eur": 33_394.67, "current_value_eur": 26_533.31,
+               "fund_result_eur": -7_853.0, "fx_result_eur": 992.10,
+               "airs_result_pct": -20.54}
+        assert pa._airs_position_return(row) == pytest.approx(-20.5462728034)
+
+    def test_a_material_gap_is_not_mistaken_for_component_rounding(self):
+        # A trade-related gap belongs outside the price+FX return. Only the tiny display-rounding
+        # residue may be reconciled from current minus opening.
+        row = {"start_value_eur": 25_928.0, "current_value_eur": 26_472.0,
+               "fund_result_eur": 684.0, "fx_result_eur": 0.0,
+               "airs_result_pct": 2.64}
+        assert pa._airs_position_return(row) == pytest.approx(684 / 25_928 * 100)
+
+    def test_raw_price_fx_is_the_fallback_when_dividend_alignment_is_unavailable(self):
+        assert pa._airs_position_return({"airs_result_pct": 3.79}, None) == 3.79
+
+    def test_each_payment_uses_the_quantity_held_on_its_own_date(self):
+        from airs_transacties import Trade
+
+        holdings = [{"holding_name": "L` Oreal", "quantity": 50}]
+        trades = [Trade(fonds="L` Oreal", kind="sell", datum="2026-05-22", quantity=47)]
+        mutations = [
+            {"fonds": "L` Oreal", "boekdatum": "2026-05-04", "grootboek": "Dividend",
+             "amount_eur": 698.40},
+            {"fonds": "L` Oreal", "boekdatum": "2026-05-04",
+             "grootboek": "Dividendbelasting", "amount_eur": -185.08},
+        ]
+        got = pa._aligned_dividend_income(holdings, trades, mutations)
+        assert got["L` Oreal"] == pytest.approx(264.5979381443)
+
+    def test_payments_on_both_sides_of_a_sale_get_different_share_counts(self):
+        from airs_transacties import Trade
+
+        holdings = [{"holding_name": "Example", "quantity": 80}]
+        trades = [Trade(fonds="Example", kind="sell", datum="2026-04-01", quantity=20)]
+        mutations = [
+            {"fonds": "Example", "boekdatum": "2026-03-01", "grootboek": "Dividend",
+             "amount_eur": 100},
+            {"fonds": "Example", "boekdatum": "2026-05-01", "grootboek": "Dividend",
+             "amount_eur": 80},
+        ]
+        # First payment: 100 × 80/100. Second payment: all 80 shares still remain.
+        assert pa._aligned_dividend_income(holdings, trades, mutations)["Example"] == 160
+
+    def test_a_later_purchase_never_invents_dividends_for_the_new_shares(self):
+        from airs_transacties import Trade
+
+        holdings = [{"holding_name": "Hermes Internationale", "quantity": 22}]
+        trades = [Trade(fonds="Hermes Internationale", kind="buy",
+                        datum="2026-05-13", quantity=11)]
+        mutations = [
+            {"fonds": "Hermes Internationale", "boekdatum": "2026-02-18",
+             "grootboek": "Dividend", "amount_eur": 55.0},
+            {"fonds": "Hermes Internationale", "boekdatum": "2026-02-18",
+             "grootboek": "Dividendbelasting", "amount_eur": -14.58},
+            {"fonds": "Hermes Internationale", "boekdatum": "2026-04-23",
+             "grootboek": "Dividend", "amount_eur": 143.0},
+            {"fonds": "Hermes Internationale", "boekdatum": "2026-04-23",
+             "grootboek": "Dividendbelasting", "amount_eur": -37.90},
+        ]
+        aligned = pa._aligned_dividend_income(holdings, trades, mutations)
+        assert aligned["Hermes Internationale"] == pytest.approx(145.52)
+        row = {"start_value_eur": 40_711.0, "current_value_eur": 29_689.0,
+               "fund_result_eur": -11_022.0, "fx_result_eur": 0.0,
+               "airs_result_pct": -27.07}
+        assert pa._airs_position_return(row, aligned["Hermes Internationale"]) == pytest.approx(
+            -26.7163174572)
+
+    def test_a_proven_split_does_not_discard_kla_dividends(self):
+        from airs_transacties import Trade
+
+        holdings = [{"holding_name": "KLA Corp.", "quantity": 310}]
+        trades = [Trade(fonds="KLA Corp.", kind="buy",
+                        datum="2026-02-03", quantity=14)]
+        mutations = [
+            {"fonds": "KLA Corp.", "boekdatum": "2026-03-03", "grootboek": "Dividend",
+             "amount_eur": 50.74961237},
+            {"fonds": "KLA Corp.", "boekdatum": "2026-03-03",
+             "grootboek": "Dividendbelasting", "amount_eur": -7.608133739},
+            {"fonds": "KLA Corp.", "boekdatum": "2026-06-02", "grootboek": "Dividend",
+             "amount_eur": 61.206970214},
+            {"fonds": "KLA Corp.", "boekdatum": "2026-06-02",
+             "grootboek": "Dividendbelasting", "amount_eur": -9.1767533182},
+            {"fonds": "KLA Corp.", "boekdatum": "2026-09-01", "grootboek": "Dividend",
+             "amount_eur": 61.518550501},
+            {"fonds": "KLA Corp.", "boekdatum": "2026-09-01",
+             "grootboek": "Dividendbelasting", "amount_eur": -9.2234685113},
+        ]
+        aligned = pa._aligned_dividend_income(
+            holdings, trades, mutations, {"KLA Corp."},
+            {"KLA Corp.": (10.0, "2026-06-12")})
+        assert aligned["KLA Corp."] == pytest.approx(147.4667770175)
+
+    def test_a_pre_split_sale_is_converted_to_todays_share_basis(self):
+        from airs_transacties import Trade
+
+        holdings = [{"holding_name": "Example", "quantity": 500}]
+        trades = [Trade(fonds="Example", kind="sell", datum="2026-03-01", quantity=50)]
+        mutations = [{"fonds": "Example", "boekdatum": "2026-02-01",
+                      "grootboek": "Dividend", "amount_eur": 100}]
+        aligned = pa._aligned_dividend_income(
+            holdings, trades, mutations, {"Example"},
+            {"Example": (10.0, "2026-06-01")})
+        # 500 remaining shares out of 1,000 held on the payment date.
+        assert aligned["Example"] == pytest.approx(50.0)
+
+    def test_the_kla_deposit_is_proven_as_a_split(self):
+        from types import SimpleNamespace
+
+        holdings = [{"holding_name": "KLA Corp.", "quantity": 310,
+                     "start_value_eur": 34_146.96}]
+        sheet = SimpleNamespace(rows=[
+            {"Tt": "A", "Datum": "2026-02-03", "Fonds": "KLA Corp.",
+             "Aantal": 14.0, "Waarde  EUR": 16_567.077772728},
+            {"Tt": "D", "Datum": "2026-06-12", "Fonds": "KLA Corp.",
+             "Aantal": 279.0, "Waarde  EUR": 0.0},
+        ])
+        unknown, splits = pa._detected_book_splits(holdings, sheet)
+        assert unknown == {"KLA Corp."}
+        assert splits["KLA Corp."][0] == pytest.approx(10.0)
+        assert splits["KLA Corp."][1] == "2026-06-12"
 
 
 class TestTheLadder:
     """Four rungs, and the price series is the fourth."""
 
-    def _wire(self, monkeypatch, *, pre, post, wrapped=None, marks=None):
+    def _wire(self, monkeypatch, *, pre, post, wrapped=None, marks=None, income=None,
+              aligned_income=None):
         """`pre` = the rows as AIRS stores them, certificates intact. `direct_marks` and
         `wrapped_ids` are read from THESE, before the expansion, which is the whole fix: afterwards
         an instrument held both directly and inside a certificate is one merged row whose
@@ -71,10 +186,12 @@ class TestTheLadder:
         # `test_airs_portfolio_analysis`, red. `TestWrappedBookMarks` below pins the VALUE, so
         # widening here does not lose the invariant.
         monkeypatch.setattr(hisin, "resolve_account_isins", lambda p, **_kw: {"rows": pre})
-        monkeypatch.setattr(pa, "_expand_book_rows", lambda rows: post)
+        monkeypatch.setattr(pa, "_expand_book_rows", lambda rows, *_args: post)
         # The wrapped books are stubbed here; they have their own tests below and their own DB hops.
         monkeypatch.setattr(pa, "_wrapped_book_marks", lambda ids: dict(wrapped or {}))
-        monkeypatch.setattr(accounts, "_direct_result", lambda pf, names: ({}, {}))
+        monkeypatch.setattr(pa, "_book_aligned_dividend_income",
+                            lambda pf, rows: dict(aligned_income or {}))
+        monkeypatch.setattr(accounts, "_direct_result", lambda pf, names: (dict(income or {}), {}))
         #  The last database hop in an otherwise pure function. Unstubbed it reads `airs_holding`
         # for the book's snapshot date — which passes on a developer machine (dotenv supplies
         # credentials, and the test reads PRODUCTION) and raises `KeyError: 'SUPABASE_URL'` in CI.
@@ -106,15 +223,39 @@ class TestTheLadder:
         self._wire(
             monkeypatch,
             pre=[{"isin": "US1", "holding_name": "Fortinet", "start_value_eur": 100.0,
-                  "current_value_eur": 111.74, "asset_class": "Equity"}],
+                  "current_value_eur": 111.74, "airs_result_pct": 11.74,
+                  "asset_class": "Equity"}],
             post=[{"isin": "US1", "holding_name": "Fortinet", "start_value_eur": 100.0,
-                   "current_value_eur": 111.74, "asset_class": "Equity", "bucket": "Equity",
-                   "via_names": [], "sources": self._direct(111.74, 100.0)}],
+                   "current_value_eur": 111.74, "airs_result_pct": 11.74,
+                   "asset_class": "Equity", "bucket": "Equity", "via_names": [],
+                   "sources": [{**self._direct(111.74, 100.0)[0], "return_pct": 11.74}]}],
         )
         h = self._row(pa._book_port_items(7, {}), "US1")
         assert h["own_return_pct"] == pytest.approx(11.74)
         assert h["own_return_source"] == "airs"
         assert h["own_return_book"] == "X_DYN"
+
+    def test_result_keeps_full_income_while_airs_return_uses_aligned_income(self, monkeypatch):
+        from airs_mutaties import DirectResult
+
+        self._wire(
+            monkeypatch,
+            pre=[{"isin": "US1", "holding_name": "Procter & Gamble",
+                  "start_value_eur": 17_563.10, "current_value_eur": 18_599.74,
+                  "airs_result_pct": 5.90, "asset_class": "Equity"}],
+            post=[{"isin": "US1", "holding_name": "Procter & Gamble",
+                   "start_value_eur": 17_563.10, "current_value_eur": 18_599.74,
+                   "airs_result_pct": 5.90, "asset_class": "Equity", "bucket": "Equity",
+                   "via_names": [],
+                   "sources": [{**self._direct(18_599.74, 17_563.10)[0],
+                                "return_pct": 7.10}]}],
+            income={"Procter & Gamble": DirectResult(
+                fonds="Procter & Gamble", gross_eur=662.166647, tax_eur=-99.317743)},
+            aligned_income={"Procter & Gamble": 210.75},
+        )
+        h = self._row(pa._book_port_items(7, {}), "US1")
+        assert h["own_return_pct"] == pytest.approx(7.10)
+        assert h["income_eur"] == pytest.approx(562.848904)
 
     def test_a_split_holding_is_BOTH_legs_weighted_by_opening_value(self, monkeypatch):
         """The MasterCard case, in round numbers: 490 held outright at +2.04% and 106 through the
@@ -125,7 +266,8 @@ class TestTheLadder:
             pre=[
                 # held outright — the clean valuation, and it exists ONLY before the expansion
                 {"isin": "US1", "holding_name": "MasterCard", "start_value_eur": 490.0,
-                 "current_value_eur": 500.0, "asset_class": "Equity"},
+                 "current_value_eur": 500.0, "airs_result_pct": 2.04,
+                 "asset_class": "Equity"},
                 {"isin": "CH1", "holding_name": "Cert", "start_value_eur": 106.0,
                  "current_value_eur": 100.0, "asset_class": "Equity", "linked_portfolio_id": 99},
             ],
@@ -134,13 +276,14 @@ class TestTheLadder:
             post=[{"isin": "US1", "holding_name": "MasterCard", "start_value_eur": 596.0,
                    "current_value_eur": 600.0, "asset_class": "Equity", "bucket": "Equity",
                    "via_names": ["Star"],
-                   "sources": [*self._direct(500.0, 490.0), *self._via(100.0, 106.0)]}],
+                   "sources": [{**self._direct(500.0, 490.0)[0], "return_pct": 2.04},
+                               *self._via(100.0, 106.0)]}],
             wrapped={99: {"US1": {"return_pct": 17.62, "as_of": "2026-07-30",
                                   "portefeuille": "Star_DYN", "income_eur": None}}},
             marks={"US1": {"return_pct": 2.71, "end_date": "2026-07-31"}},
         )
         h = self._row(pa._book_port_items(7, {}), "US1")
-        direct_ret = 100 * (500.0 / 490.0 - 1)
+        direct_ret = (500.0 / 490.0 - 1.0) * 100.0
         expected = 100 * ((490.0 * (1 + direct_ret / 100) + 106.0 * 1.1762) / 596.0 - 1)
         assert h["own_return_pct"] == pytest.approx(expected)
         assert h["own_return_pct"] != pytest.approx(direct_ret)      # not the direct leg alone
@@ -270,9 +413,11 @@ class TestWrappedBookMarks:
             seen.append({"portefeuille": pf, **kw})
             return {"as_of": "2026-07-30",
                     "rows": [{"isin": "US1", "holding_name": "NVIDIA", "start_value_eur": 100.0,
-                              "current_value_eur": 110.0 if pf == "A_DYN" else 150.0}]}
+                              "current_value_eur": 110.0 if pf == "A_DYN" else 150.0,
+                              "airs_result_pct": 10.0 if pf == "A_DYN" else 50.0}]}
 
         monkeypatch.setattr(hisin, "resolve_account_isins", _resolve)
+        monkeypatch.setattr(pa, "_book_aligned_dividend_income", lambda pf, rows: {})
         monkeypatch.setattr(accounts, "account_holdings", lambda pf: {"rows": []})
         out = pa._wrapped_book_marks({1, 2})
         #  `freshen=False` IS LOAD-BEARING HERE IN A WAY IT IS NOT ELSEWHERE. This path reads ONE
@@ -298,30 +443,28 @@ class TestWrappedBookMarks:
             "rows": [{"isin": "CASH1", "holding_name": "Effectenrekening",
                       "start_value_eur": 0.0, "current_value_eur": 31072.23},
                      {"isin": "US1", "holding_name": "NVIDIA", "start_value_eur": 100.0,
-                      "current_value_eur": 110.0}]})
+                      "current_value_eur": 110.0, "airs_result_pct": 10.0}]})
+        monkeypatch.setattr(pa, "_book_aligned_dividend_income", lambda pf, rows: {})
         monkeypatch.setattr(accounts, "account_holdings", lambda pf: {"rows": []})
         out = pa._wrapped_book_marks({1})
         assert "CASH1" not in out[1]
         assert out[1]["US1"]["return_pct"] == pytest.approx(10.0)
         assert out[1]["US1"]["income_eur"] == pytest.approx(0.0)
 
-    def test_the_wrapped_books_own_journal_income_is_inside_its_figure(self, monkeypatch):
-        # A leg that paid a dividend must not read lower than the identical instrument held
-        # directly — the parent's rows carry their income, so these have to as well.
+    def test_the_wrapped_books_include_their_aligned_dividend(
+            self, monkeypatch):
+        # The child book supplies its own aligned dividend, on the same quantity as its values.
         import routers._airs_account_links as links
         import routers._airs_holding_isin as hisin
-
-        from routers import _airs_accounts as accounts
 
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": [{"portefeuille": "A_DYN", "model_portfolio_id": 1}]})
         monkeypatch.setattr(hisin, "resolve_account_isins", lambda pf, **_kw: {
             "as_of": "2026-07-30",
             "rows": [{"isin": "US1", "holding_name": "Shell", "start_value_eur": 100.0,
-                      "current_value_eur": 110.0}]})
-        monkeypatch.setattr(accounts, "account_holdings", lambda pf: {
-            "rows": [{"holding_name": "Shell", "dividend_eur": 10.0,
-                      "dividend_tax_eur": -1.5}]})       #  AIRS books the withholding negative
+                      "current_value_eur": 110.0, "airs_result_pct": 10.0}]})
+        monkeypatch.setattr(pa, "_book_aligned_dividend_income",
+                            lambda pf, rows: {"Shell": 8.5})
         out = pa._wrapped_book_marks({1})
         assert out[1]["US1"]["return_pct"] == pytest.approx(18.5)
         assert out[1]["US1"]["income_eur"] == pytest.approx(8.5)

@@ -301,10 +301,35 @@ def _dedupe(holdings: list[dict]) -> list[dict]:
                       "fund_result_eur", "fx_result_eur"):
                 cur[k] = (cur.get(k) or 0) + (h.get(k) or 0)
             cur["weight"] = (cur.get("weight") or 0) + (h.get("weight") or 0)
+            raw = h.get("airs_result_pct")
+            raw_start = float(h.get("start_value_eur") or 0)
+            if raw is not None and raw_start > 0:
+                cur["_airs_result_numerator"] += float(raw) * raw_start
+                cur["_airs_result_denominator"] += raw_start
+            if cur["_airs_result_fallback"] is None and raw is not None:
+                cur["_airs_result_fallback"] = float(raw)
             cur["lines"] = cur.get("lines", 1) + 1
         else:
-            agg[k] = {**h, "lines": 1}
-    return list(agg.values())
+            raw = h.get("airs_result_pct")
+            raw_start = float(h.get("start_value_eur") or 0)
+            agg[k] = {
+                **h,
+                "lines": 1,
+                "_airs_result_numerator": (float(raw) * raw_start
+                                            if raw is not None and raw_start > 0 else 0.0),
+                "_airs_result_denominator": (raw_start
+                                              if raw is not None and raw_start > 0 else 0.0),
+                # A zero-opening-value line can still carry a literal AIRS result. Preserve it
+                # instead of turning a single untouched source row into a gap.
+                "_airs_result_fallback": float(raw) if raw is not None else None,
+            }
+    out = list(agg.values())
+    for row in out:
+        denominator = row.pop("_airs_result_denominator")
+        numerator = row.pop("_airs_result_numerator")
+        fallback = row.pop("_airs_result_fallback")
+        row["airs_result_pct"] = numerator / denominator if denominator > 0 else fallback
+    return out
 
 
 # How many of one account's instruments a single expand may fetch. The refresh is normally a
@@ -629,7 +654,8 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     with _phase(t, "holdings"):
         holdings = _dedupe(supabase.table("airs_holding")
                            .select("holding_name,isin,quantity,currency,weight,current_value_eur,"
-                                   "start_value_eur,ytd_return_eur,fund_result_eur,fx_result_eur")
+                                   "start_value_eur,ytd_return_eur,fund_result_eur,fx_result_eur,"
+                                   "airs_result_pct")
                            .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
                            .limit(500).execute().data or [])
     if not holdings:
@@ -788,6 +814,9 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
             "ytd_return_eur": h.get("ytd_return_eur"),
             "fund_result_eur": h.get("fund_result_eur"),
             "fx_result_eur": h.get("fx_result_eur"),
+            # AIRS's own price+FX `Resultaat in %`. The Analyse modal adds a net-dividend leg only
+            # after restating every payment to this row's remaining quantity.
+            "airs_result_pct": h.get("airs_result_pct"),
             "isin": isin,
             # `book` = AIRS's own ISIN-code; `override` = supplied by hand for a row that has none.
             # There is no third source any more — the name match is gone.
