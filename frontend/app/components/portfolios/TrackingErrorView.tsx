@@ -117,9 +117,9 @@ export default function TrackingErrorView({
    * naming different vendors for one number is unreconcilable from the outside.
    */
   const where = data?.available
-    ? `${v(data.observations)} ${v(data.frequency)} active returns, prices from `
-      + `${v(sourceField('yfinance'))} at ${v(sourceVendor('yfinance'))}, weights from `
-      + `${v(sourceLabel(portfolioSource))}, against ${v(data.benchmark)}'s tracker `
+    ? `${v(data.observations)} monthly return comparisons. Portfolio prices use `
+      + `${v(sourceField('yfinance'))} from ${v(sourceVendor('yfinance'))}, with weights from `
+      + `${v(sourceLabel(portfolioSource))}. The benchmark is ${v(data.benchmark)} tracker `
       + `${v(data.benchmark_isin ?? 'not resolved')}.`
     : '';
 

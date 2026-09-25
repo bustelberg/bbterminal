@@ -45,21 +45,20 @@ const signed2 = (v: number | null | undefined) =>
  */
 const LEGEND = {
   R: (bookName: string) => `${v(bookName)}'s return in period t, in EUR`,
-  RBar: 'the mean return over the window — subtracted so σ measures spread, not level',
+  RBar: 'the average return over the measured window',
   T: (n: number | null | undefined) => `the number of periods (${v(n)} here)`,
   f: (n: number | null | undefined) => `periods per year (${v(n)}), the annualisation factor`,
-  sigma: 'the answer: one standard deviation of the return, per year',
+  sigma: 'annualised volatility',
   //  THE min(·,0) IS THE WHOLE DIFFERENCE FROM σ. Every up period contributes exactly zero, so
   // this is a spread of losses only — and the divisor is still ALL periods, which is Sortino's
   // convention rather than the semi-deviation's.
-  minR: 'every gain replaced by zero, so only the losing periods contribute anything',
-  sigmaD: 'the answer: the spread of the losses alone, per year',
-  prod: 'the periods CHAINED — what the sleeve actually compounded to, not the average of its steps',
+  minR: 'the lower of the period return and zero, so gains contribute zero',
+  sigmaD: 'annualised downside deviation',
+  prod: 'multiply the period returns to compound them over time',
   Rann: 'the annualised return from the tile beside this one',
-  rf: 'the risk-free rate the return is measured above —  stated because a Sharpe quoted without '
-    + "one is not comparable with anybody else's",
-  sharpe: 'the answer: return per unit of TOTAL volatility, up and down alike',
-  sortino: 'the answer: the same return per unit of DOWNSIDE only',
+  rf: 'the annual risk-free rate deducted from the return',
+  sharpe: 'annualised excess return per unit of total volatility',
+  sortino: 'annualised excess return per unit of downside deviation',
 };
 
 export default function VolatilityView({
@@ -131,8 +130,7 @@ export default function VolatilityView({
       own: pct2(data.volatility_pct),
       bench: pct2(data.benchmark_volatility_pct),
       info: <InfoTip className="ml-0.5" content={<AspectCard
-        what={`How much ${portfolioName}'s return has varied, period to period. The ${data.benchmark} `
-          + 'row is the identical calculation over the tracker\'s own series.'}
+        what={t.vol.cards.volatility.what}
         where={where}
         when={when}
         worked={data.volatility_pct == null ? '' : withWorked(
@@ -145,7 +143,8 @@ export default function VolatilityView({
           { sym: 'T', is: LEGEND.T(data.observations) },
           { sym: 'f', is: LEGEND.f(data.periods_per_year) },
           { sym: String.raw`\sigma`, is: LEGEND.sigma },
-        ]} />} />,
+        ]}
+        how={t.vol.cards.volatility.how} />} />,
     },
     {
       key: 'dd',
@@ -153,9 +152,7 @@ export default function VolatilityView({
       own: pct2(data.downside_dev_pct),
       bench: pct2(data.benchmark_downside_dev_pct),
       info: <InfoTip className="ml-0.5" content={<AspectCard
-        what={'Volatility that charges only for losses. Every gain is replaced by zero before the '
-          + 'spread is taken, so a losing period raises this and a winning one dilutes it — where '
-          + 'the volatility column treats a +5% period exactly as hard as a −5% one.'}
+        what={t.vol.cards.downside.what}
         where={where}
         when={when}
         worked={data.downside_dev_pct == null ? '' : withWorked(
@@ -164,10 +161,12 @@ export default function VolatilityView({
           + String.raw` \;\Rightarrow\; ${subNum(data.downside_dev_pct, 2)}\%`)}
         legend={[
           { sym: String.raw`\min(R_t,\; 0)`, is: LEGEND.minR },
+          { sym: String.raw`R_t`, is: LEGEND.R(portfolioName) },
           { sym: 'T', is: LEGEND.T(data.observations) },
           { sym: 'f', is: LEGEND.f(data.periods_per_year) },
           { sym: String.raw`\sigma_d`, is: LEGEND.sigmaD },
-        ]} />} />,
+        ]}
+        how={t.vol.cards.downside.how} />} />,
     },
     {
       key: 'worst',
@@ -182,9 +181,7 @@ export default function VolatilityView({
           + `${v(`${data.negative_periods_pct?.toFixed(2)}%`)} of ${period}s were negative against `
           + `${v(`${data.benchmark_negative_periods_pct?.toFixed(2)}%`)}.`}
         when={when}
-        how={' NOBODY HAS EVER EXPERIENCED "18% ANNUALISED VOLATILITY". They have experienced the '
-          + `worst ${period}. For a fat-tailed book the two are far apart, which is exactly when σ `
-          + 'on its own misleads — so this column is the reality check on the first one.'} />} />,
+        how={t.vol.cards.worst.how} />} />,
     },
     {
       key: 'ret',
@@ -206,9 +203,7 @@ export default function VolatilityView({
           { sym: 'T', is: LEGEND.T(data.observations) },
           { sym: 'f', is: LEGEND.f(data.periods_per_year) },
         ]}
-        how={'Here so the two ratios beside it can be checked — a risk number without the return '
-          + 'it bought is half a sentence.  NOT the active return: that is this row minus the one '
-          + 'below it only in the loosest sense, and the Tracking error view computes it properly.'} />} />,
+        how={t.vol.cards.ret.how} />} />,
     },
     {
       key: 'sharpe',
@@ -229,7 +224,8 @@ export default function VolatilityView({
           { sym: 'r_f', is: LEGEND.rf },
           { sym: String.raw`\sigma`, is: LEGEND.sigma },
           { sym: String.raw`\text{Sharpe}`, is: LEGEND.sharpe },
-        ]} />} />,
+        ]}
+        how={t.vol.cards.sharpe.how} />} />,
     },
     {
       key: 'sortino',
@@ -247,11 +243,11 @@ export default function VolatilityView({
           + ` = ${data.sortino.toFixed(2)}`)}
         legend={[
           { sym: String.raw`R_{\text{ann}}`, is: LEGEND.Rann },
+          { sym: 'r_f', is: LEGEND.rf },
           { sym: String.raw`\sigma_d`, is: LEGEND.sigmaD },
           { sym: String.raw`\text{Sortino}`, is: LEGEND.sortino },
         ]}
-        how={' A DASH MEANS NOTHING EVER FELL BELOW THE TARGET — there is no downside to divide '
-          + 'by. That is a measurement, not a missing number.'} />} />,
+        how={t.vol.cards.sortino.how} />} />,
     },
   ] : [];
 

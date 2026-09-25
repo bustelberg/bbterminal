@@ -46,9 +46,9 @@ const day = (d: string | null | undefined) =>
  */
 const LEGEND = {
   Rs: (bookName: string) => `${v(bookName)}'s return in period s, in EUR`,
-  W: 'the wealth curve — one euro compounded through every period up to t, cash flows absent',
-  M: 'the HIGH-WATER MARK: the best that curve had reached by t, so it never falls',
-  MDD: 'the answer: the deepest the curve ever sat below its own peak',
+  W: 'the value at period t of one euro compounded from the start',
+  M: 'the highest value reached up to period t',
+  MDD: 'the deepest fall below a previous peak',
 };
 
 function Tile({ label, value, tone, info }: {
@@ -152,19 +152,17 @@ export default function DrawdownView({
                   { sym: 'M_t', is: LEGEND.M },
                   { sym: String.raw`MDD`, is: LEGEND.MDD },
                 ]}
+                how={t.dd.cards.maxDrawdown.how}
                 /* Daily is the only available basis, so the card needs no alternate-cadence
                    comparison to explain a number the reader cannot select. */
                 />} />} />
             <Tile label={t.dd.benchMax(data.benchmark)}
               value={pct2(data.benchmark_max_drawdown_pct)} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`The same measurement run over ${data.benchmark}'s own tracker instead of `
-                  + `${portfolioName} — same formula, same periods, so the two are directly `
-                  + 'comparable.'}
+                what={t.dd.cards.benchMax.what}
                 where={where}
                 when={when}
-                how={'For scale.  It carries none of this book\'s survivorship bias — the index '
-                  + 'kept its fallers — so the gap between the two flatters the book.'} />} />} />
+                how={t.dd.cards.benchMax.how} />} />} />
             {/*  THE VALUE IS THE FILTERED COUNT, and it did not used to be. The label has
                 always promised "over 5%" while the tile showed `episodes_total`, which counts
                 every peak-to-recovery cycle including a bad afternoon that came back the next
@@ -173,18 +171,10 @@ export default function DrawdownView({
             <Tile label={t.dd.episodes(Math.abs(data.episode_threshold_pct ?? 5).toFixed(0))}
               value={`${data.episodes_over_threshold ?? 0}`} tone="text-fg-muted"
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`How many distinct falls of at least `
-                  + `${Math.abs(data.episode_threshold_pct ?? 5).toFixed(0)}% the sleeve had. A `
-                  + 'fall opens when the wealth curve leaves a high-water mark and closes only '
-                  + 'when it regains it, so a slide that bounces part-way and drops again is ONE '
-                  + `fall, not two. ${v(data.episodes_total ?? 0)} cycles in all once every `
-                  + 'shallower dip is counted too.'}
+                what={t.dd.cards.episodes.what}
                 where={where}
                 when={when}
-                how={' ONE NUMBER HIDES WHETHER IT WAS A PATTERN OR AN EVENT. One −30% and four '
-                  + '−25%s share a maximum and are not the same risk.  A 40% fall that bounces 5% '
-                  + 'and falls further is ONE drawdown, not two — splitting on direction would '
-                  + 'report shallow dips and no crash.'} />} />} />
+                how={t.dd.cards.episodes.how} />} />} />
           </div>
 
           {worst && (
