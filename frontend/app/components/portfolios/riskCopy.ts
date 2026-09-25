@@ -529,18 +529,19 @@ const en: RiskCopy = {
   dd: {
     maxDrawdown: (f) => `Max drawdown (${f})`, benchMax: (b) => `${b} max drawdown`,
     today: 'Today', episodes: (pct) => `Falls over ${pct}%`,
-    provenance: "Based on today's holdings. Sold positions are not included, so this may differ "
-      + "from the client's actual drawdown. AIRS returns show the client's figure.",
+    provenance: "Reconstructed using today's holdings. For the portfolio's actual historical "
+      + 'drawdown, use the AIRS returns.',
     threeWays: 'The same drawdown, measured three ways',
     threeWaysNote: 'Coarser cadences cannot see a fall that recovers inside the period, so they '
       + 'read shallower. Daily is the honest basis for this measure.',
-    worstInFull: 'The worst one, in full',
-    peak: 'Peak', trough: 'Trough', recovered: 'Recovered', peakToPeak: 'Peak to peak',
+    worstInFull: 'Worst drawdown timeline',
+    peak: 'Peak', trough: 'Lowest point', recovered: 'Recovered', peakToPeak: 'Total',
     stillUnderwater: 'still underwater',
-    deepest: 'Deepest falls', colDepth: 'Depth', colDecline: 'Decline', colRecovery: 'Recovery',
+    deepest: 'Other drawdowns', colDepth: 'Depth', colDecline: 'Fall (days)',
+    colRecovery: 'Recovery (days)',
     open: 'open',
     unitDays: 'trading days', unitWeeks: 'weeks', unitMonths: 'months',
-    note: (u) => `Durations are in ${u} of the selected cadence, not calendar days.`,
+    note: (u) => `All durations use ${u}.`,
     cards: {
       maxDrawdown: {
         what: 'The deepest peak-to-trough fall in the window.',
@@ -878,18 +879,18 @@ const nl: RiskCopy = {
   dd: {
     maxDrawdown: (f) => `Maximale drawdown (${f})`, benchMax: (b) => `Maximale drawdown ${b}`,
     today: 'Vandaag', episodes: (pct) => `Dalingen boven ${pct}%`,
-    provenance: 'Gebaseerd op de huidige posities. Verkochte posities ontbreken, dus dit kan '
-      + 'afwijken van de werkelijke drawdown van de klant. AIRS-rendementen tonen het eigen cijfer.',
+    provenance: 'Gereconstrueerd met de huidige posities. Gebruik de AIRS-rendementen voor de '
+      + 'werkelijke historische drawdown van de portefeuille.',
     threeWays: 'Dezelfde drawdown, op drie manieren gemeten',
     threeWaysNote: 'Grovere frequenties zien een daling die binnen de periode herstelt niet, dus '
       + 'vallen ze ondieper uit. Dagelijks is de eerlijke basis voor deze maatstaf.',
-    worstInFull: 'De zwaarste, volledig',
-    peak: 'Piek', trough: 'Dieptepunt', recovered: 'Hersteld', peakToPeak: 'Piek tot piek',
+    worstInFull: 'Tijdlijn van de zwaarste drawdown',
+    peak: 'Piek', trough: 'Laagste punt', recovered: 'Hersteld', peakToPeak: 'Totaal',
     stillUnderwater: 'nog niet hersteld',
-    deepest: 'Zwaarste dalingen', colDepth: 'Diepte', colDecline: 'Daling',
-    colRecovery: 'Herstel', open: 'open',
+    deepest: 'Overige drawdowns', colDepth: 'Diepte', colDecline: 'Daling (dagen)',
+    colRecovery: 'Herstel (dagen)', open: 'open',
     unitDays: 'handelsdagen', unitWeeks: 'weken', unitMonths: 'maanden',
-    note: (u) => `Looptijden zijn in ${u} van de gekozen frequentie, niet in kalenderdagen.`,
+    note: (u) => `Alle looptijden gebruiken ${u}.`,
     cards: {
       maxDrawdown: {
         what: 'De diepste daling van piek naar dal binnen de periode.',
