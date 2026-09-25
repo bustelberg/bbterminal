@@ -879,6 +879,7 @@ def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> 
     # that explained a floor decision using a different denominator from the one that made it
     # would send the reader after the wrong cause.
     cover_w: dict[str, float] = defaultdict(float)
+    cover_n: dict[str, int] = defaultdict(int)
     #  The same carry as the series it explains. A diagnostic that aligned or carried differently
     # from the run it is explaining reports a different set of periods from the one that drew
     # nothing — which is how "no year clears the floor" came to be printed for a series whose
@@ -891,16 +892,23 @@ def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> 
                 by_year[year].append((abs(float(w)), v))
                 if reported:
                     cover_w[year] += abs(float(p.get("weight") or 0))
+                    cover_n[year] += 1
 
-    best = 0.0
-    below = no_value = 0
+    best = best_names = 0.0
+    below = below_weight = below_names = no_value = 0
     for year, pairs in by_year.items():
         covered = 100.0 * cover_w[year] / total_w if total_w > 0 else 0.0
+        covered_names = 100.0 * cover_n[year] / len(members) if members else 0.0
         best = max(best, covered)
+        best_names = max(best_names, covered_names)
         if combine(pairs) is None:
             no_value += 1
-        elif covered < MIN_BLEND_COVERAGE_PCT:
-            below += 1
+        else:
+            misses_weight = covered < MIN_BLEND_COVERAGE_PCT
+            misses_names = covered_names < MIN_BLEND_COVERAGE_NAMES_PCT
+            below_weight += int(misses_weight)
+            below_names += int(misses_names)
+            below += int(misses_weight or misses_names)
 
     counts: dict[str, int] = {}
     for d in dropped:
@@ -913,9 +921,13 @@ def explain_empty(members: list[dict], metric_code: str, bucket=year_bucket) -> 
         "contributing": len(prepared),
         "dropped": counts,
         "best_covered_pct": round(best, 2),
+        "best_covered_names_pct": round(best_names, 2),
         "floor_pct": MIN_BLEND_COVERAGE_PCT,
+        "names_floor_pct": MIN_BLEND_COVERAGE_NAMES_PCT,
         "years": len(by_year),
         "years_below_floor": below,
+        "years_below_weight_floor": below_weight,
+        "years_below_names_floor": below_names,
         "years_no_value": no_value,
     }
 

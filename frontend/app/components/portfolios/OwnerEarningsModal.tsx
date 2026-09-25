@@ -12,6 +12,7 @@ import LangSwitch from '../LangSwitch';
 import { useLang } from '../../../lib/i18n';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 import { valuationSubject } from './valuationSubject';
+import { isUniverseTarget, type BenchTarget } from './benchSeries';
 
 type Tab = 'longequity' | 'quickval' | 'deepval' | 'tables';
 
@@ -236,6 +237,18 @@ export default function OwnerEarningsModal({
    * claim to be doing something to charts it cannot reach.
    */
   const [sbcCorrection, setSbcCorrection] = useState(true);
+  // Graphs and Tables keep independent selectors, so retain both reported targets and choose the
+  // one belonging to the visible tab. A hidden visited tab must never overwrite "currently active".
+  const [graphsBenchmark, setGraphsBenchmark] = useState<BenchTarget | null>(null);
+  const [tablesBenchmark, setTablesBenchmark] = useState<BenchTarget | null>(null);
+  const activeBenchmark = tab === 'longequity' ? graphsBenchmark
+    : tab === 'tables' ? tablesBenchmark : null;
+  const activeBenchmarkScope = useMemo<RefreshScope | undefined>(() => {
+    if (!activeBenchmark) return undefined;
+    return isUniverseTarget(activeBenchmark)
+      ? { kind: 'universe', label: activeBenchmark.universe, name: activeBenchmark.label }
+      : { kind: 'company', isin: activeBenchmark.isin, name: activeBenchmark.label };
+  }, [activeBenchmark]);
   /**  PERSISTED PER BROWSER, NOT PER MODAL — a language is a property of the reader, so it has to
    *  survive closing the dialog. See `lib/i18n.ts` for why it cannot be seeded synchronously. */
   const [lang, setLang] = useLang();
@@ -351,7 +364,8 @@ export default function OwnerEarningsModal({
               the daily closes; its forward line and the Graphs tab's dotted consensus are the
               indicator and estimate feeds. None of the three is in the default fill. */}
           {scope && (
-            <PortfolioFundamentalsRefresh scope={scope} everything />
+            <PortfolioFundamentalsRefresh scope={scope} additionalScope={activeBenchmarkScope}
+              everything />
           )}
           {/*  ALWAYS ON, NOT ONLY ON THE TAB IT CURRENTLY TRANSLATES. It was tab-scoped first, on
               the same reasoning as the SBC checkbox below — a control that governs nothing on the
@@ -458,6 +472,7 @@ export default function OwnerEarningsModal({
                 drill-down and the ingest, and on a group it was the bare "Stocks". See `subject`. */}
             <LongEquityTab isin={isin} name={subject} basket={basket} portfolioId={portfolioId}
               compare={compare}
+              onBenchmarkChange={setGraphsBenchmark}
               sbcCorrection={sbcCorrection} />
           </div>
         )}
@@ -478,6 +493,7 @@ export default function OwnerEarningsModal({
               // companies; passing it to only one of them is how Graphs came to draw A against B
               // while this table summarised A against ACWI, on the same screen.
               compare={compare}
+              onBenchmarkChange={setTablesBenchmark}
               lang={lang} />
           </div>
         )}

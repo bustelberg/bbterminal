@@ -526,11 +526,13 @@ export default function MetricGrowthCard({
    *  both values are positive, and `rebaseSeries` then refuses rather than inventing a base. The
    *  card still draws — in absolute units, which is the honest fallback — so this says which basis
    *  is on screen instead of reporting an empty series. */
+  const benchBlendNote = noteFor(benchNotes, cfg.codes);
   const note = !omitBenchmarkForRawSeries && benchLabel
     //  `false` — THIS CARD APPLIES NO FLOOR. `benchByX` is the blended rows as they arrived; the
     // coverage decision was made on the server. Claiming the floor here is a diagnosis this
     // component cannot make — see `benchNote`.
-    ? benchNote(benchTarget ?? null, benchMetrics, benchErr ?? null, benchByX, false)
+    ? benchNote(benchTarget ?? null, benchMetrics, benchErr ?? null, benchByX, false,
+        benchBlendNote ? whyNoLine(benchBlendNote) : undefined)
       ?? (benchByX && !isRatio && !indexed
         ? `${benchLabel}: no year in common with a positive value — showing absolute, not indexed`
         : null)

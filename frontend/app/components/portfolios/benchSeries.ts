@@ -170,7 +170,8 @@ export function spliceCaps<T>(data: T, caps: CapTable): T {
  * else. But it does NOT fail silently: it returns the reason, and `benchNote` turns that into one
  * short line in the legend. An overlay that just doesn't appear is indistinguishable from an index
  * that matches the portfolio exactly, and there is no way for the reader to tell which they got.
- * The full detail goes to the console, as everywhere else here.
+ * The server's reason is rendered on the card; the console remains diagnostic only and is never
+ * an instruction to the user.
  *
  *  Two requests, and the second is not optional. `market_cap_by_period` used to ride on every
  * row of all ten card responses — the same table ten times, measured at 29.9% of each ACWI payload
@@ -253,7 +254,7 @@ export function useBenchInputs<T>(
  * Why a selected benchmark drew no line (or barely one) — one short sentence, or null.
  *
  *  The absences look identical on screen and have different fixes: the request is still in flight
- * (wait), the request failed (read the console), or it succeeded and every period fell under the
+ * (wait), the request failed (show its returned reason), or it succeeded and every period fell under the
  * weight-coverage floor (`MIN_YEAR_COVERAGE_PCT`). Collapsing them into "no line" is the same
  * mistake as showing an unpriced holding as 0%.
  *
@@ -288,6 +289,8 @@ export function benchNote(
    * coverage was computed at all (`quarter_bucket`).
    */
   flooredHere = true,
+  /** The backend's measured reason when it produced no blended points. */
+  emptyReason?: string,
 ): string | null {
   if (!target) return null;
   if (error) return `${target.label}: ${error}`;
@@ -296,7 +299,7 @@ export function benchNote(
     // What is observable from here, and nothing more. The reason lives on the server's
     // `blend_notes` for this code.
     if (!series || series.size === 0) {
-      return `${target.label}: the blended series came back empty — see the console`;
+      return `${target.label}: ${emptyReason ?? 'no usable periods were available for this line'}`;
     }
     return series.size === 1
       ? `${target.label}: one period only — a single dot, not a line` : null;

@@ -338,7 +338,7 @@ function MeanCell({ got, copy, unit = 'pct', transform, pending = false }:
 }
 
 export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection, lang,
-  compare = null }: {
+  compare = null, onBenchmarkChange }: {
   holdingsTarget: Target;
   holdingsName: string;
   sbcCorrection: boolean;
@@ -357,6 +357,8 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
    * arm, which is what that union exists for.
    */
   compare?: { isin: string; name: string } | null;
+  /** Reports the selector's actual target to the modal-level Refresh fundamentals control. */
+  onBenchmarkChange?: (target: BenchTarget) => void;
   /**  PASSED DOWN, NOT READ FROM `useLang` HERE — the choice is global (sidebar, every page) since
    *  2026-08-21 and this tab is one of the surfaces that answers it. See `lib/i18n.ts`; the
    *  remaining gaps are written down in `management/managementCopy.ts::UNTRANSLATED_SURFACES`. */
@@ -427,6 +429,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
       ? { isin: compare.isin, label: compare.name, cadence: 'annual' as const }
       : { universe: selected, label: selected, cadence: 'annual' as const }),
     [compare, selected]);
+  useEffect(() => onBenchmarkChange?.(benchTarget), [benchTarget, onBenchmarkChange]);
   /**
    * What the comparison column is CALLED.
    *

@@ -549,6 +549,19 @@ class TestAnEmptySeriesIsNotAnEmptyDatabase:
         assert why["best_covered_pct"] == pytest.approx(30.0)
         assert why["years_below_floor"] == 2
 
+    def test_a_names_floor_miss_is_reported_even_when_weight_clears(self):
+        members = [
+            {"weight": 0.6, "points": {"2024-12-31": 1.0}},
+            {"weight": 0.2, "points": {}},
+            {"weight": 0.2, "points": {}},
+        ]
+        why = explain_empty(members, DIV_PS)
+        assert why["best_covered_pct"] == pytest.approx(60.0)
+        assert why["best_covered_names_pct"] == pytest.approx(33.33)
+        assert why["years_below_weight_floor"] == 0
+        assert why["years_below_names_floor"] == 1
+        assert why["years_below_floor"] == 1
+
     def test_a_book_of_losses_is_a_multiple_with_no_usable_value(self):
         """ Above the floor and still no point: the harmonic combine has nothing to invert. Only
         `years_no_value` distinguishes that from a thin year."""

@@ -41,6 +41,24 @@ describe('whyNoLine', () => {
     expect(whyNoLine(note({ kind: 'multiple', best_covered_pct: 100, years_no_value: 3 })))
       .toMatch(/no year has a usable value/);
   });
+
+  it('names the constituent floor when weight coverage is sufficient', () => {
+    expect(whyNoLine(note({
+      best_covered_pct: 70, floor_pct: 50,
+      best_covered_names_pct: 40, names_floor_pct: 50,
+    }))).toBe(
+      'even the best year includes only 40% of companies; '
+      + 'a representative blended line needs at least 50%.',
+    );
+  });
+
+  it('does not blame a few zero bases for a basket-wide constituent shortfall', () => {
+    expect(whyNoLine(note({
+      dropped: { non_positive_base: 14, no_data: 899 },
+      best_covered_pct: 70, floor_pct: 50,
+      best_covered_names_pct: 40, names_floor_pct: 50,
+    }))).toMatch(/only 40% of companies/);
+  });
 });
 
 describe('reportingLine', () => {

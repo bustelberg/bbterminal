@@ -5,6 +5,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { traceError } from '../../../lib/debugTrace';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { cancelJob, jobsStore, startJob, watchJob } from '../../../lib/stores/jobs';
+import { fundamentalJobMessage } from '../jobs/fundamentalJobMessage';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 
 /**
@@ -57,9 +58,23 @@ export type RefreshScope =
    */
   | { kind: 'universe'; label: string; name: string; feeds?: IndexFeeds };
 
-export default function PortfolioFundamentalsRefresh({ scope, onDone, label, everything, allPeriods = false,
-  broadcast = true }: {
+export const refreshScopeKey = (s: RefreshScope): string => s.kind === 'portfolio'
+  ? `portfolio:${s.id}`
+  : s.kind === 'universe' ? `universe:${s.label}`
+    : s.kind === 'company' ? `company:${s.isin}`
+      : `basket:${s.holdings.map((h) => h.isin).sort().join('|')}`;
+
+/** The primary selection followed by its comparison target, without refreshing one scope twice. */
+export function refreshScopes(scope: RefreshScope, additional?: RefreshScope): RefreshScope[] {
+  return additional && refreshScopeKey(additional) !== refreshScopeKey(scope)
+    ? [scope, additional] : [scope];
+}
+
+export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, everything,
+  allPeriods = false, broadcast = true }: {
   scope: RefreshScope;
+  /** A selected benchmark/comparison refreshed after the primary scope by the same button. */
+  additionalScope?: RefreshScope;
   /**
    * Fetch EVERYTHING the Fundamental modal draws, not just the statements feed.
    *
@@ -134,8 +149,10 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
    *  It must match `jobs.start`'s KEY EXACTLY, because that is what the server de-duplicates on
    * and therefore the only thing that can identify "my run" from the outside.
    */
-  const jobKey = scope.kind === 'universe'
-    ? { kind: 'fundamentals.index', label: scope.label }
+  const indexedScope = scope.kind === 'universe' ? scope
+    : additionalScope?.kind === 'universe' ? additionalScope : null;
+  const jobKey = indexedScope
+    ? { kind: 'fundamentals.index', label: indexedScope.label }
     : null;
 
   /**
@@ -163,9 +180,9 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
     setNote('already running — this button now stops it');
     //  Follow it to the end, or `busy`/`jobId` never clear and the control is stuck on Cancel
     // long after the run finished.
-    void watchJob(live.id, `${scope.name} fundamentals`).then((job) => {
+    void watchJob(live.id, `${indexedScope?.name ?? scope.name} fundamentals`).then((job) => {
       if (job.status !== 'failed') {
-        invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
+        invalidateReadCache(`fundamentals fill finished for ${indexedScope?.name ?? scope.name}`);
         if (broadcast) window.dispatchEvent(new Event('bb:fundamentals-finished'));
         onDone?.();
       }
@@ -180,6 +197,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
 
   const run = async () => {
     setBusy(true);
+    let changed = false;
     try {
       //  `feeds=all` NARROWS NOTHING and `prices=true` adds the ingest that is not a feed — see
       // the `everything` prop for what the four things are and which chart each one was missing.
@@ -238,6 +256,46 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
         }
       }
       const job = await done;
+      changed = job.status !== 'failed';
+      // Between the two serial jobs there is nothing cancellable. Leave the control disabled until
+      // the benchmark job id arrives instead of sending Cancel to the already-finished first job.
+      setJobId(null);
+      // A pre-flight subscription refusal spends no call and is therefore a completed job, but
+      // it is not a successful refresh. Keep the server's reason beside the button after the toast
+      // leaves; otherwise the still-empty cards immediately invite the same impossible press.
+      if (job.summary?.includes(' — unavailable:')) setNote(fundamentalJobMessage(job.summary));
+      let additionalSucceeded = false;
+      const extra = refreshScopes(scope, additionalScope)[1];
+      if (extra && job.status !== 'cancelled') {
+        // One press, two deliberately SERIAL jobs. Both use the global GuruFocus rate limiter, so
+        // parallel jobs cannot finish sooner and would make both progress cards appear stalled.
+        const extraQ = `?force=true&only_due=${allPeriods ? 'false' : 'true'}`
+          + `${everything ? '&feeds=all&prices=true' : ''}`;
+        const extraHoldings = extra.kind === 'company' ? [{ isin: extra.isin }]
+          : extra.kind === 'basket' ? extra.holdings.map((h) => ({ isin: h.isin })) : null;
+        const extraUrl = extra.kind === 'universe'
+          ? `${API_URL}/api/benchmarks/index/${encodeURIComponent(extra.label)}`
+            + '/fundamentals/ingest/job?force=true&feeds=all&prices=true'
+          : extraHoldings
+            ? `${API_URL}/api/airs/basket/fundamentals/ingest/job${extraQ}`
+            : `${API_URL}/api/airs/model-portfolios/${(extra as { id: number }).id}`
+              + `/fundamentals/ingest/job${extraQ}`;
+        const extraStarted = await startJob(
+          extraUrl, `${extra.name} fundamentals`, extraHoldings
+            ? { headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ holdings: extraHoldings, label: extra.name }) }
+            : undefined);
+        setJobId(extraStarted.id);
+        const extraJob = await extraStarted.done;
+        if (extraJob.summary?.includes(' — unavailable:')) {
+          setNote(fundamentalJobMessage(extraJob.summary));
+        }
+        additionalSucceeded = extraJob.status !== 'failed';
+        changed ||= additionalSucceeded;
+        if (extraJob.status === 'done' && !extraJob.summary?.includes(' — unavailable:')) {
+          setNote(`updated ${scope.name} and ${extra.name}`);
+        }
+      }
       //  Re-read on anything but a failure, including a cancel. A cancelled fill has still loaded
       // every company it got through, and leaving the pre-fill charts on screen would hide real
       // work that was really done.
@@ -247,15 +305,19 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
       // the request succeeds, and what succeeded here was merely STARTING a job that then ran for
       // minutes. Every chart would refetch, hit the entries cached during the fill, and show the
       // pre-fill book — a refresh button that visibly does nothing.
-      if (job.status !== 'failed') {
-        invalidateReadCache(`fundamentals fill finished for ${scope.name}`);
+    } catch (e) {
+      traceError('fundamentals', `could not start the fill for ${scope.name}`, e);
+      setNote(`Could not start the fundamentals refresh: ${
+        e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      // Also runs when the second job could not start: work completed by the first job must still
+      // become visible instead of being stranded behind the pre-refresh read cache.
+      if (changed) {
+        invalidateReadCache(`fundamentals fill finished for ${scope.name}`
+          + (additionalScope ? ` and ${additionalScope.name}` : ''));
         if (broadcast) window.dispatchEvent(new Event('bb:fundamentals-finished'));
         onDone?.();
       }
-    } catch (e) {
-      traceError('fundamentals', `could not start the fill for ${scope.name}`, e);
-      setNote('could not start — see the console');
-    } finally {
       setBusy(false);
       setJobId(null);
       setCancelling(false);
@@ -284,12 +346,17 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
     if (!await cancelJob(jobId)) setCancelling(false);
   };
 
+  const extraTitle = refreshScopes(scope, additionalScope)[1]
+    ? ` This press then refreshes the active benchmark, ${additionalScope!.name}.`
+    : '';
+
   return (
     <span className="flex items-center gap-2 min-w-0">
       {/* The count sits LEFT of the button so the button keeps a fixed position as the text
           arrives — a control that slides sideways when its own result lands is a control you
           have to chase with the pointer. */}
-      <span className="text-[11px] text-fg-faint truncate max-w-[22rem]">{note}</span>
+      <span className="text-[11px] leading-snug text-fg-faint whitespace-normal break-words max-w-[22rem]"
+        title={note ?? undefined}>{note}</span>
       {/*  ONE CONTROL, TWO STATES — the button BECOMES the Cancel while the fill runs. The toast
           carries a Cancel too and both are correct, but a fill is minutes and the reader who wants
           to stop it is looking at the button they just pressed, not at the corner of the screen.
@@ -322,7 +389,7 @@ export default function PortfolioFundamentalsRefresh({ scope, onDone, label, eve
                 + 'plausibly have filed since we last looked — one API call each, and none for a '
                 + 'company whose next quarter cannot be out yet.')
             + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
-            + 'and carry on if you close this.'))}
+            + 'and carry on if you close this.' + extraTitle))}
         className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors
                     disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
           ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'

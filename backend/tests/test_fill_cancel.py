@@ -17,7 +17,7 @@ import threading
 import pytest
 
 import routers._fundamental_fill as fill
-from jobs import JobCancelled
+from jobs import JobCancelled, UserFacingJobError
 
 
 class FakeCtx:
@@ -216,6 +216,78 @@ class TestTheCancelledCardSaysWhatHappened:
         #  And it says the work is kept — a reader who believes a cancel rolled something back
         # presses the expensive button again.
         assert "stored" in msg
+
+
+class TestAnAllFailedFillIsAFailedJob:
+    def test_one_company_failure_raises_with_the_actual_reason(self, rig, monkeypatch):
+        ctx = FakeCtx()
+        monkeypatch.setattr(
+            "routers._fundamental_backfill.ingest_company",
+            _fake_ingest(rig, ctx, rows=0, error="GuruFocus returned no financial periods"),
+        )
+
+        with pytest.raises(UserFacingJobError) as exc:
+            fill.fill_company_ids(ctx, "Inditex", [1], feeds="statements", force=True)
+
+        assert str(exc.value) == (
+            "GuruFocus returned no financial periods for Co 1. Please try again later."
+        )
+        assert "RuntimeError" not in str(exc.value)
+
+        assert ctx.spent_calls == 3
+
+    def test_repeated_reasons_are_stated_once(self):
+        reason = (
+            "GuruFocus did not provide financial statements. Please try again later."
+        )
+        message = fill._all_failed_summary(  # noqa: SLF001
+            12,
+            [f"ASR NEDERLAND NV: {reason}", f"IMCD NV: {reason}",
+             f"KONINKLIJKE KPN NV: {reason}"],
+            {reason: 12},
+        )
+
+        assert message == (
+            "GuruFocus did not provide financial statements for 12 companies, including "
+            "ASR NEDERLAND NV, IMCD NV and KONINKLIJKE KPN NV. Please try again later."
+        )
+        assert message.count("GuruFocus did not provide financial statements") == 1
+
+
+class TestAnUnavailableCompanyExplainsTheNoOp:
+    def test_subscription_reason_translates_exchange_to_country(self):
+        from routers._fundamental_backfill import eligible
+
+        reason = eligible({
+            "gurufocus_ticker": "ATD",
+            "gurufocus_exchange": {
+                "exchange_code": "TSX",
+                "country": {"country_name": "Canada"},
+            },
+        })
+
+        assert reason == (
+            "This is a Canadian listing (TSX), which is outside our GuruFocus subscription."
+        )
+
+    def test_one_company_refusal_survives_in_the_terminal_summary(self, rig, monkeypatch):
+        ctx = FakeCtx()
+        monkeypatch.setattr(
+            "routers._fundamental_backfill.eligible",
+            lambda _company: (
+                "This is a Canadian listing (TSX), which is outside our GuruFocus subscription."
+            ),
+        )
+
+        summary = fill.fill_company_ids(
+            ctx, "Alimentation Couche", [1], feeds="all", force=True, prices=True)
+
+        assert summary == (
+            "Alimentation Couche — unavailable: "
+            "Co 1: This is a Canadian listing (TSX), which is outside our "
+            "GuruFocus subscription."
+        )
+        assert ctx.spent_calls == 0
 
 
 class TestAPressDuringTheSetup:
