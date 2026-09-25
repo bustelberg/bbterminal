@@ -1633,6 +1633,17 @@
       "AirsHoldingIsin": {
         "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n  unmatched      NO ISIN: the model has no position for this holding\n  cross_listed   the prices differ, and they are SUPPOSED to \u2014 this ISIN's execution row is\n                 deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR\n                 priced from the main company's listing. Not a fault, and not a pass either. at all\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.\n\n `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means\nthe row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) \u2014 a finding\nabout the model. `unmatched` means the pairing itself was refused: the name says a different\ninstrument and the price independently agrees, which is what a STALE model snapshot looks like\nwhen the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover\nwe declined; re-scan the model portfolio to fix it.",
         "properties": {
+          "airs_result_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airs Result Pct"
+          },
           "bucket": {
             "anyOf": [
               {

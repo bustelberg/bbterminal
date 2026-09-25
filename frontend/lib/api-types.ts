@@ -8842,6 +8842,8 @@ export interface components {
          *     we declined; re-scan the model portfolio to fix it.
          */
         AirsHoldingIsin: {
+            /** Airs Result Pct */
+            airs_result_pct?: number | null;
             /** Bucket */
             bucket?: string | null;
             /** Bucket Overridden */

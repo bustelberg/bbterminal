@@ -778,7 +778,8 @@ class TestBookWeighting:
         # PRODUCTION (it only fails in CI, where there are no credentials). None of these fixtures
         # contains a certificate, so passing the rows straight through is what expansion does here
         # anyway; expansion itself is covered by `test_lookthrough.TestTheBookSideIsExpandedToo`.
-        monkeypatch.setattr(pa, "_expand_book_rows", lambda rows: rows)
+        monkeypatch.setattr(pa, "_expand_book_rows", lambda rows, *_args: rows)
+        monkeypatch.setattr(pa, "_book_aligned_dividend_income", lambda pf, rows: {})
         # The two other database hops on this path, both added after these tests were written:
         # the composition's effective date, and the per-holding entry/exit price marks. These
         # tests assert on WEIGHTING and CLASSIFICATION only, so both are stubbed to "nothing
@@ -830,7 +831,7 @@ class TestBookWeighting:
             {"isin": "US1", "current_value_eur": 60, "asset_class": "Equity"},
             {"isin": "CERT", "current_value_eur": 60, "asset_class": "Equity"},
         ])
-        monkeypatch.setattr(pa, "_expand_book_rows", lambda _rows: [
+        monkeypatch.setattr(pa, "_expand_book_rows", lambda _rows, *_args: [
             {"isin": "US1", "holding_name": "Alpha Tech", "current_value_eur": 100,
              "asset_class": "Equity", "bucket": "Equity",
              "sources": [{"label": None, "value_eur": 60},

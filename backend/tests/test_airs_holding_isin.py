@@ -99,8 +99,18 @@ class TestTheAccountBillsOneInstrumentOnSeveralLines:
 
     def test_a_single_line_is_untouched_and_still_says_so(self):
         rows = _dedupe([{"holding_name": "ASML Holding", "quantity": 27,
-                         "current_value_eur": 41834.0}])
+                         "current_value_eur": 41834.0, "airs_result_pct": 12.34}])
         assert len(rows) == 1 and rows[0]["lines"] == 1
+        assert rows[0]["airs_result_pct"] == pytest.approx(12.34)
+
+    def test_duplicate_raw_returns_are_weighted_by_opening_value(self):
+        rows = _dedupe([
+            {"holding_name": "Rabobank", "start_value_eur": 900.0,
+             "airs_result_pct": 10.0},
+            {"holding_name": "Rabobank", "start_value_eur": 100.0,
+             "airs_result_pct": -10.0},
+        ])
+        assert rows[0]["airs_result_pct"] == pytest.approx(8.0)
 
     def test_a_nameless_row_is_dropped(self):
         assert _dedupe([{"holding_name": "  ", "quantity": 1}]) == []
