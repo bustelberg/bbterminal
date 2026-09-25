@@ -26,7 +26,14 @@ describe('when the division is real', () => {
     const parts = equityParts(EQUITY, EQUITY, rows);
     expect(parts.map((p) => p.key)).toEqual(['stocks', 'funds']);
     expect(parts.map((p) => p.label)).toEqual(['Individual stocks', 'Stock ETFs']);
+    expect(parts.map((p) => p.subtotalLabel)).toEqual([null, 'Stock ETFs']);
     expect(parts.map((p) => p.rows.length)).toEqual([2, 2]);
+  });
+
+  it('asks for one ETF subtotal while company rows subtotal by sector', () => {
+    const parts = equityParts(EQUITY, EQUITY, rows);
+    expect(parts[0].subtotalLabel).toBeNull();
+    expect(parts[1].subtotalLabel).toBe('Stock ETFs');
   });
 
   it(' shares are OF THE CLASS, so the two halves add to 100', () => {
@@ -82,7 +89,7 @@ describe(' when it is not', () => {
 
   it('an empty class is one empty part, not two', () => {
     expect(equityParts(EQUITY, EQUITY, [])).toEqual(
-      [{ key: 'all', label: null, rows: [], classPct: null }]);
+      [{ key: 'all', label: null, rows: [], classPct: null, subtotalLabel: null }]);
   });
 });
 

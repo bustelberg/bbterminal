@@ -2330,6 +2330,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   const sectorSum = sumResults(sector.rows);
                   const sectorReturn = classWeightedReturn(sector.rows);
                   const groupedBySector = Boolean(sector.label);
+                  // Company parts close each named sector. The ETF part has no inner sector
+                  // header—the part header already says Stock ETFs—but still closes with the
+                  // same complete subtotal row.
+                  const subtotalLabel = sector.label
+                    || (sector.key === 'all' ? part.subtotalLabel : null);
                   return (
                   <Fragment key={sector.key}>
                   {groupedBySector && (
@@ -2688,11 +2693,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   </td>
                 </tr>
                 ); })}
-                {groupedBySector && (
+                {subtotalLabel && (
                   <tr className="border-y border-neutral-800/30 bg-overlay/[0.035] font-medium">
                     <td />
                     <td className="py-1.5 text-fg-strong" colSpan={3}>
-                      {copy.holdings.sectorTotal(sector.label)}
+                      {copy.holdings.sectorTotal(subtotalLabel)}
                     </td>
                     {/* Momentum, volatility and beta describe instruments, not an additive sector. */}
                     <td />
