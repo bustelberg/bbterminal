@@ -457,8 +457,6 @@ class TestWrappedBookMarks:
         import routers._airs_account_links as links
         import routers._airs_holding_isin as hisin
 
-        from routers import _airs_accounts as accounts
-
         monkeypatch.setattr(links, "list_account_links", lambda: {
             "accounts": [{"portefeuille": "A_DYN", "model_portfolio_id": 1}]})
         monkeypatch.setattr(hisin, "resolve_account_isins", lambda pf, **_kw: {
