@@ -12,6 +12,37 @@ import pytest
 from routers import _airs_portfolio_analysis as pa
 
 
+class TestBookScorecardWindow:
+    def test_benchmark_uses_the_same_funded_book_window_as_the_chart(self, monkeypatch):
+        from routers import _airs_value_series as series
+
+        monkeypatch.setattr(series, "book_return_window", lambda _book, _benchmark: {
+            "return_from": "2026-06-01",
+            "return_as_of": "2026-09-24",
+            "return_pct": 5.61,
+            "benchmark": {
+                "source": "etf", "ticker": "ACWI", "return_pct": 3.09,
+                "start_date": "2026-05-29", "as_of": "2026-09-24",
+                "start_price": 100.0, "end_price": 103.09,
+                "fx_start": 1.0, "fx_end": 1.0,
+            },
+        })
+        monkeypatch.setattr(pa, "_index_returns", lambda *_args: pytest.fail(
+            "the scorecard must not reprice an ETF outside the chart window"))
+        result = {
+            "book_portefeuille": "NEW_BOOK", "book_ytd_pct": 5.61,
+            "book_as_of": "2026-09-25", "portfolio_since_pct": 12.0,
+        }
+
+        pa._apply_book_source(result, "ACWI")
+
+        assert result["ytd_from"] == "2026-06-01"
+        assert result["portfolio_as_of"] == "2026-09-24"
+        assert result["portfolio_ytd_pct"] == 5.61
+        assert result["benchmark_ytd_pct"] == 3.09
+        assert result["ytd_excess_pct"] == pytest.approx(2.52)
+
+
 class TestOneVocabulary:
     """The portfolio lives in the ISIN world (`asset_execution`); the benchmark in the `company`
     world. `company` HAS NO SECTOR COLUMN — its sector would come from `universe_membership`,

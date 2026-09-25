@@ -144,6 +144,30 @@ def _return_series(perf: list[dict], by_date: dict[str, float],
     return (out, anchor) if len(out) > 1 else ([], None)
 
 
+def book_return_window(portefeuille: str, benchmark_label: str | None = None) -> dict:
+    """Return the exact paired window used by the overview chart.
+
+    AIRS writes leading zero months before a newly funded book existed. The chart removes those
+    months; the scorecard uses this helper so its benchmark opens on that same funded-book anchor.
+    """
+    perf = _page("airs_performance",
+                 "periode,beginvermogen,eindvermogen,cumulatief_rendement",
+                 eq={"portefeuille": portefeuille}, order="periode", tiebreak=None)
+    returns, anchor = _return_series(perf, {}, {})
+    benchmark: dict = {}
+    if benchmark_label and anchor and returns:
+        from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
+
+        benchmark = etf_return_series(
+            benchmark_label, anchor, [str(point["date"]) for point in returns])
+    return {
+        "return_from": anchor,
+        "return_as_of": returns[-1]["date"] if returns else None,
+        "return_pct": returns[-1]["cum_pct"] if returns else None,
+        "benchmark": benchmark,
+    }
+
+
 def value_series(portefeuille: str, benchmark_label: str | None = None) -> dict:
     """`{points, flows, …}` — the book's value on every date we hold a snapshot for."""
     rows = _page("airs_holding", "as_of_date,current_value_eur",

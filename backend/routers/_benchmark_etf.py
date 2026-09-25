@@ -432,6 +432,8 @@ def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
     points: list[dict] = []
     i = 0
     mark: tuple[str, float] | None = None
+    end_price: float | None = None
+    end_fx: float | None = None
     for target in wanted:
         while i < len(marks) and marks[i][0] <= target:
             mark = marks[i]
@@ -451,6 +453,7 @@ def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
             "cum_pct": ((mark_p / r_mark) / (start_p / r_start) - 1.0) * 100.0,
             "price_date": mark_d,
         })
+        end_price, end_fx = mark_p, r_mark
     if not points:
         return {}
     return {
@@ -460,4 +463,12 @@ def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
         "points": points,
         "return_pct": points[-1]["cum_pct"],
         "as_of": points[-1]["price_date"],
+        # The scorecard consumes the same window as the chart. Carry its two marks so its
+        # provenance can show the arithmetic without repricing through a later close.
+        "start_date": start_d,
+        "start_price": start_p,
+        "end_price": end_price,
+        "fx_start": r_start,
+        "fx_end": end_fx,
+        "fetched_at": _proxy_fetched_at(bid),
     }

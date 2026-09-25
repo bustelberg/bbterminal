@@ -731,25 +731,34 @@ def _book_fetched_at(portefeuille: str | None) -> str | None:
 
 def _apply_book_source(result: dict, benchmark_label: str) -> None:
     """Swap the PRIMARY portfolio return for AIRS's own book number (`cumulatief_rendement`), and
-    re-price the benchmark over the book's window — the calendar year, 1 Jan -> today.
+    re-price the benchmark over the exact window shown by the book-return chart.
 
-    AIRS reports the book only over the calendar year, flow-aware and INCLUDING income, and keeps
-    NO composition history — so 'since inception' has no book equivalent and is cleared rather than
-    left showing the yfinance model's number under a 'book' banner. `strategy_ytd_pct` still carries
-    the yfinance figure, so the Book-vs-strategy drift tile is unaffected by the swap.
+    A newly funded book also has leading zero AIRS months from before it existed. The chart removes
+    those months and starts at the first funded month, so the tile must use that same anchor instead
+    of comparing a partial-year book return with a full-year benchmark. AIRS keeps no composition
+    history, so 'since inception' still has no book equivalent and is cleared. `strategy_ytd_pct`
+    continues to carry the yfinance figure for the Book-vs-strategy drift tile.
     """
-    jan1 = f"{date.today().year}-01-01"
     p_ytd = result.get("book_ytd_pct")             # already computed by `_book_return`
-    bench = _index_returns(benchmark_label, [jan1]) if p_ytd is not None else {}
-    b_ytd = (bench.get(jan1) or {}).get("eur_pct")
+    from routers._airs_value_series import book_return_window  # noqa: PLC0415
+
+    window = (book_return_window(result["book_portefeuille"], benchmark_label)
+              if p_ytd is not None and result.get("book_portefeuille") else {})
+    anchor = window.get("return_from")
+    benchmark = window.get("benchmark") or {}
+    # AEX has no proxy ETF in the chart path. Retain its constituent fallback, but anchor that
+    # fallback to the book's first funded month too. ACWI/SP500 use the exact sampled chart line.
+    if anchor and not benchmark:
+        benchmark = (_index_returns(benchmark_label, [anchor]).get(anchor) or {})
+    b_ytd = benchmark.get("return_pct", benchmark.get("eur_pct"))
     result.update({
-        **_bench_prov(bench.get(jan1)),
+        **_bench_prov(benchmark),
         "source": "book",
-        "ytd_from": jan1 if p_ytd is not None else None,
+        "ytd_from": anchor,
         "portfolio_ytd_pct": p_ytd,
         # `book_as_of` was set by `_book_return` (runs in both source modes); the benchmark stays
         # yfinance, so `benchmark_as_of` from the model path above is left as-is.
-        "portfolio_as_of": result.get("book_as_of"),
+        "portfolio_as_of": window.get("return_as_of") or result.get("book_as_of"),
         "benchmark_ytd_pct": b_ytd,
         "ytd_excess_pct": (p_ytd - b_ytd) if (p_ytd is not None and b_ytd is not None) else None,
         # AIRS has no since-inception for the book — clear the model's rather than mislabel it.
