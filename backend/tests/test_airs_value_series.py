@@ -199,6 +199,33 @@ class TestTheReturnIsAirsOwnAndStartsTheYearAtZero:
             ("2026-01-01", 0.0), ("2026-01-31", -3.0), ("2026-02-28", 1.0)]
         assert out["return_pct"] == 1.0
 
+    def test_the_benchmark_is_sampled_on_the_same_dates(self, store, monkeypatch):
+        from routers import _benchmark_etf as benchmark_etf
+
+        m, seed = store
+        seed("airs_performance", [
+            _perf("B", "2026-01-31", beginvermogen=1e6, eindvermogen=9.7e5,
+                  cumulatief_rendement=-3.0),
+            _perf("B", "2026-02-28", beginvermogen=9.7e5, eindvermogen=1.01e6,
+                  cumulatief_rendement=1.0)])
+        seen = {}
+
+        def benchmark(_label, anchor, dates):
+            seen.update(anchor=anchor, dates=dates)
+            return {"label": "SP500", "ticker": "SPY", "source": "etf",
+                    "points": [{"date": d, "cum_pct": float(i), "price_date": d}
+                               for i, d in enumerate(dates)],
+                    "return_pct": 2.0, "as_of": dates[-1]}
+
+        monkeypatch.setattr(benchmark_etf, "etf_return_series", benchmark)
+        out = m.value_series("B", "SP500")
+
+        assert seen == {"anchor": "2026-01-01",
+                        "dates": ["2026-01-01", "2026-01-31", "2026-02-28"]}
+        assert [p["date"] for p in out["benchmark_returns"]] == seen["dates"]
+        assert out["benchmark_return_pct"] == 2.0
+        assert out["benchmark_ticker"] == "SPY"
+
     def test_every_period_is_a_point_because_each_is_year_to_date(self, store):
         """ THIS IS EXACTLY WHAT `_year_perf` MUST NOT DO. It takes the freshest row per MONTH,
         because its money columns are per-period and June's seven rows would be counted seven

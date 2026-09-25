@@ -3900,7 +3900,8 @@ export default function PortfolioAnalysisModal({
                         child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
                       <div className="w-0 min-w-full">
-                        <BookReturnChart portfolioId={id} refreshSeq={refreshSeq} />
+                        <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
+                          benchmark={benchmark} />
                       </div>
                     )}
                   </div>

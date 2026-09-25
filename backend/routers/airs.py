@@ -1736,6 +1736,15 @@ class BookReturnPoint(BaseModel):
     holdings: int | None = None
 
 
+class BenchmarkReturnPoint(BaseModel):
+    """Benchmark return on one of the book curve's dates."""
+
+    date: str
+    cum_pct: float
+    #: Actual ETF close used for this point; may precede a weekend/month-end chart date.
+    price_date: str
+
+
 class BookValueSeries(BaseModel):
     """The book's value through time, and the return that value earned.
 
@@ -1756,6 +1765,13 @@ class BookValueSeries(BaseModel):
     return_from: str | None = None
     #: The last point of the FULL curve, so a display resolution cannot move a reported figure.
     return_pct: float | None = None
+    benchmark: str | None = None
+    benchmark_ticker: str | None = None
+    benchmark_source: str | None = None
+    #: Same x-grid as `returns`, by construction.
+    benchmark_returns: list[BenchmarkReturnPoint] = []
+    benchmark_return_pct: float | None = None
+    benchmark_as_of: str | None = None
     first_date: str | None = None
     last_date: str | None = None
     #: The first date we hold a snapshot for — where the series stops being AIRS's and becomes ours.
@@ -1767,7 +1783,7 @@ class BookValueSeries(BaseModel):
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/value-series",
             response_model=BookValueSeries)
-async def airs_model_portfolio_value_series(portfolio_id: int):
+async def airs_model_portfolio_value_series(portfolio_id: int, benchmark: str = "SP500"):
     """The paired book's cumulative return through the year, and its value on every date we hold.
 
      THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
@@ -1791,7 +1807,8 @@ async def airs_model_portfolio_value_series(portfolio_id: int):
                       if a.get("model_portfolio_id") == portfolio_id), None))
     if not link:
         return BookValueSeries(reason="No Dynamic portfolio is paired with this one.")
-    return BookValueSeries(**await asyncio.to_thread(value_series, link["portefeuille"]))
+    return BookValueSeries(**await asyncio.to_thread(
+        value_series, link["portefeuille"], benchmark))
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/price-series",

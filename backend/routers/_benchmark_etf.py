@@ -393,3 +393,71 @@ def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
             "members": 1,
         }
     return out
+
+
+def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
+    """The proxy ETF's cumulative EUR return sampled on the caller's exact dates.
+
+    The Analyse overview supplies AIRS's published dates. Each benchmark point uses the last ETF
+    close on or before that date, converted with that close date's FX rate, so the two chart lines
+    share one x-grid without inventing weekend prices. The opening mark follows `etf_returns`: the
+    last close on or before the portfolio's anchor.
+    """
+    from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
+
+    wanted = sorted({str(d)[:10] for d in dates if d and str(d)[:10] >= anchor})
+    fresh = ensure_fresh(label)
+    if not fresh or not wanted:
+        return {}
+    bid, _latest_mark = fresh
+    opened = _at_or_before(bid, anchor)
+    if not opened:
+        return {}
+    start_d, start_p = opened
+    end_limit = wanted[-1]
+    prices = (supabase.table("benchmark_price").select("target_date,price")
+              .eq("benchmark_id", bid).gte("target_date", start_d)
+              .lte("target_date", end_limit).order("target_date").execute().data or [])
+    marks = [(str(r["target_date"])[:10], float(r["price"])) for r in prices
+             if r.get("price") is not None and float(r["price"]) > 0]
+    if not marks:
+        return {}
+
+    ticker, ccy = PROXY[label], "USD"
+    fx = _fx_to_eur({ccy}, start_d, end_limit)
+    r_start = _rate(fx, ccy, start_d)
+    if start_p <= 0 or not r_start:
+        return {}
+
+    points: list[dict] = []
+    i = 0
+    mark: tuple[str, float] | None = None
+    for target in wanted:
+        while i < len(marks) and marks[i][0] <= target:
+            mark = marks[i]
+            i += 1
+        # The anchor may precede the first row in the ranged query only if storage changed between
+        # `_at_or_before` and this read. Retain the opening mark rather than dropping the 0% point.
+        if mark is None and target >= start_d:
+            mark = (start_d, start_p)
+        if mark is None:
+            continue
+        mark_d, mark_p = mark
+        r_mark = _rate(fx, ccy, mark_d)
+        if not r_mark:
+            continue
+        points.append({
+            "date": target,
+            "cum_pct": ((mark_p / r_mark) / (start_p / r_start) - 1.0) * 100.0,
+            "price_date": mark_d,
+        })
+    if not points:
+        return {}
+    return {
+        "label": label,
+        "ticker": ticker,
+        "source": "etf",
+        "points": points,
+        "return_pct": points[-1]["cum_pct"],
+        "as_of": points[-1]["price_date"],
+    }

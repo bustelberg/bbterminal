@@ -19,8 +19,10 @@
  * the server, which reports its date as `return_from`. It is the one point on this line nobody
  * measured, and it is what makes every other point readable.
  *
- *  The hover is deliberately only date + RETURN. Value and holding-count diagnostics belong in
- * the detailed tables; adding them here turns a quick time-series read into a miniature ledger.
+ *  The hover is deliberately only date + the TWO returns: AIRS book and benchmark. Value and
+ * holding-count diagnostics belong in the detailed tables; adding them here turns a quick
+ * time-series read into a miniature ledger. The benchmark is sampled on these exact AIRS dates,
+ * using the last market close on or before each date, so horizontal alignment has a real meaning.
  *
  *  The header is the return and nothing else (2026-09-01, on request): no value chip, no span
  * line. Both facts survive where a reader looks for them — the window on the x axis and in the ⓘ's
@@ -50,7 +52,7 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  Area, AreaChart, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Area, AreaChart, CartesianGrid, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
@@ -84,13 +86,17 @@ const tick = (t: number) => new Date(t).toLocaleDateString('en-GB', {
 const pct = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 
-function ReturnTooltip({ active, label, payload }: {
+function ReturnTooltip({ active, label, payload, benchmark }: {
   active?: boolean;
   label?: unknown;
-  payload?: { value?: unknown }[];
+  payload?: { value?: unknown; dataKey?: unknown }[];
+  benchmark: string;
 }) {
   if (!active || typeof label !== 'number') return null;
-  const value = payload?.find((p) => typeof p.value === 'number')?.value;
+  const book = payload?.find((p) => (p.dataKey === 'positive' || p.dataKey === 'negative')
+    && typeof p.value === 'number')?.value;
+  const bench = payload?.find((p) => p.dataKey === 'benchmark'
+    && typeof p.value === 'number')?.value;
   return (
     <div style={{ ...chartTheme.tooltipCard.contentStyle, padding: '7px 10px' }}>
       <p style={{ color: chartTheme.axisLabel, margin: 0 }}>
@@ -98,7 +104,12 @@ function ReturnTooltip({ active, label, payload }: {
           day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
         })}
       </p>
-      <p style={{ margin: '3px 0 0' }}>Return: {pct(typeof value === 'number' ? value : null)}</p>
+      <p style={{ margin: '3px 0 0' }}>Portfolio: {pct(typeof book === 'number' ? book : null)}</p>
+      {typeof bench === 'number' && (
+        <p style={{ margin: '2px 0 0', color: chartTheme.compare }}>
+          {benchmark}: {pct(bench)}
+        </p>
+      )}
     </div>
   );
 }
@@ -125,7 +136,8 @@ export default function BookReturnChart(
      * and it disagrees with the chip above it by exactly one AIRS row.
      */
     refreshSeq = 0,
-  }: { portfolioId: number; refreshSeq?: number },
+    benchmark,
+  }: { portfolioId: number; refreshSeq?: number; benchmark: string },
 ) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -136,7 +148,8 @@ export default function BookReturnChart(
       setData(null); setErr(null);
       try {
         const r = await apiFetch(
-          `${API_URL}/api/airs/model-portfolios/${portfolioId}/value-series`);
+          `${API_URL}/api/airs/model-portfolios/${portfolioId}/value-series`
+          + `?benchmark=${encodeURIComponent(benchmark)}`);
         const b = await r.json().catch(() => null);
         if (!alive) return;
         if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
@@ -148,7 +161,7 @@ export default function BookReturnChart(
       }
     })();
     return () => { alive = false; };
-  }, [portfolioId, refreshSeq]);
+  }, [portfolioId, refreshSeq, benchmark]);
 
   // Do not trust storage order for a charting rule. The server normally returns periods in date
   // order, but the latest observation must mean the latest DATE, never merely the final array
@@ -174,7 +187,10 @@ export default function BookReturnChart(
   const points = all.filter((p) => isCalendarMonthEnd(p.date));
   if (points.at(-1)?.date !== last.date) points.push(last);
   const first = points[0] ?? last;
-  const rows = points.map((p) => ({ ...p, t: ts(p.date) }));
+  const benchmarkByDate = new Map(
+    (data.benchmark_returns ?? []).map((p) => [p.date, p.cum_pct] as const));
+  const rows = points.map((p) => ({ ...p, t: ts(p.date),
+    benchmark: benchmarkByDate.get(p.date) ?? null }));
   const up = (data.return_pct ?? 0) >= 0;
   /** Two series let Recharts colour each part of the return path by its own sign. A crossing gets
    * an interpolated 0% point in BOTH series: without it, the green/red segments stop at their last
@@ -187,8 +203,11 @@ export default function BookReturnChart(
       if (previous && ((previous.cum_pct < 0 && row.cum_pct > 0)
         || (previous.cum_pct > 0 && row.cum_pct < 0))) {
         const share = -previous.cum_pct / (row.cum_pct - previous.cum_pct);
+        const crossingBenchmark = previous.benchmark != null && row.benchmark != null
+          ? previous.benchmark + (row.benchmark - previous.benchmark) * share : null;
         out.push({ ...row, t: previous.t + (row.t - previous.t) * share,
-          cum_pct: 0, positive: 0, negative: 0, interpolated: true });
+          cum_pct: 0, benchmark: crossingBenchmark,
+          positive: 0, negative: 0, interpolated: true });
       }
       out.push({ ...row,
         positive: row.cum_pct >= 0 ? row.cum_pct : null,
@@ -203,6 +222,11 @@ export default function BookReturnChart(
         <span className={`font-mono ${up ? 'text-pos-400' : 'text-neg-400'}`}>
           {pct(data.return_pct)}
         </span>
+        {data.benchmark_return_pct != null && (
+          <span className="font-mono text-[12px]" style={{ color: chartTheme.compare }}>
+            {data.benchmark ?? benchmark} {pct(data.benchmark_return_pct)}
+          </span>
+        )}
         {/*  NO VALUE CHIP AND NO SPAN LINE — removed on request (2026-09-01), and NEITHER FACT
             LEFT THE COMPONENT. The window is the ⓘ's `when` and it is written along the x axis;
             the book's value and that date's holding count are on every hover. What the header
@@ -243,7 +267,7 @@ export default function BookReturnChart(
           <YAxis domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
             width={44} tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-          <Tooltip content={<ReturnTooltip />} />
+          <Tooltip content={<ReturnTooltip benchmark={data.benchmark ?? benchmark} />} />
           {/*  THE BASELINE IS DRAWN, not just included in the domain. "Start at 0%" is the whole
               claim of this chart, and a gridline the reader has to identify is not the same as a
               rule they can see the line cross. */}
@@ -254,6 +278,8 @@ export default function BookReturnChart(
           <Area dataKey="negative" type="monotone" stroke={chartTheme.neg} strokeWidth={2}
             fill={chartTheme.neg} fillOpacity={0.08}
             dot={<ReturnDot fill={chartTheme.neg} />} />
+          <Line dataKey="benchmark" type="monotone" stroke={chartTheme.compare} strokeWidth={1.8}
+            strokeDasharray="5 3" dot={false} connectNulls={false} />
         </AreaChart>
       </ResponsiveContainer>
     </div>

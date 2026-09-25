@@ -4390,6 +4390,30 @@
         "title": "BenchmarkResetResult",
         "type": "object"
       },
+      "BenchmarkReturnPoint": {
+        "description": "Benchmark return on one of the book curve's dates.",
+        "properties": {
+          "cum_pct": {
+            "title": "Cum Pct",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "price_date": {
+            "title": "Price Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "cum_pct",
+          "price_date"
+        ],
+        "title": "BenchmarkReturnPoint",
+        "type": "object"
+      },
       "BenchmarkYear": {
         "properties": {
           "ret": {
@@ -5113,6 +5137,69 @@
       "BookValueSeries": {
         "description": "The book's value through time, and the return that value earned.\n\n TWO DIFFERENT QUANTITIES, AND ONLY ONE OF THEM IS PERFORMANCE. `points` is VALUE: a funding\nis a step in it and is not a gain, which is why the flows ride along. `returns` is AIRS's own\nflow-aware `cumulatief_rendement`, the same column `_airs_accounts._year_perf` reads for the\nScorecard \u2014 so the chart and the tile beside it cannot disagree.",
         "properties": {
+          "benchmark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark"
+          },
+          "benchmark_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark As Of"
+          },
+          "benchmark_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Pct"
+          },
+          "benchmark_returns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/BenchmarkReturnPoint"
+            },
+            "title": "Benchmark Returns",
+            "type": "array"
+          },
+          "benchmark_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Source"
+          },
+          "benchmark_ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Ticker"
+          },
           "first_date": {
             "anyOf": [
               {
@@ -18953,6 +19040,16 @@
             "schema": {
               "title": "Portfolio Id",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Benchmark",
+              "type": "string"
             }
           }
         ],
