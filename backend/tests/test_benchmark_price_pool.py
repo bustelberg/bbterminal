@@ -115,6 +115,19 @@ class TestEveryConstituentExactlyOnce:
         assert out["moved"] + out["unchanged"] + out["no_start"] + out["no_end"] == _TOTAL
         assert sorted(rig["fetched"]) == sorted(1000 + i for i in range(_TOTAL))
 
+    def test_a_run_scoped_union_fetches_an_overlapping_symbol_only_once(self, rig):
+        companies, isins, grid = _fixture(6)
+        seen = {"SYM1", "SYM4"}
+
+        out = br._prices(
+            companies, isins, grid, "2026-08-10", rig["emit"], run_symbols=seen)
+
+        assert out["skipped_overlap"] == 2
+        assert out["total"] == 4
+        assert out["fetched"] == 4
+        assert sorted(rig["fetched"]) == [1000, 1002, 1003, 1005]
+        assert seen == {f"SYM{i}" for i in range(6)}
+
     def test_the_step_counter_is_a_permutation_and_never_repeats(self, rig):
         companies, isins, grid = _fixture()
         br._prices(companies, isins, grid, "2026-08-10", rig["emit"])
@@ -145,6 +158,32 @@ class TestMovedVersusUnchanged:
         out = br._prices(companies, isins, grid, "2026-08-10", rig["emit"])
         assert out["moved"] == _TOTAL
         assert out["unchanged"] == 0
+
+    def test_automatic_refresh_skips_closes_already_at_the_market_anchor(self, rig):
+        companies, isins, grid = _fixture(6)
+        rig["before"] = {
+            1000: "2026-08-10",  # exactly current
+            1001: "2026-08-11",  # cannot become less current
+            1002: "2026-08-09",  # one published close behind
+        }
+
+        out = br._prices(
+            companies, isins, grid, "2026-08-10", rig["emit"], skip_current=True)
+
+        assert out["skipped_current"] == 2
+        assert out["total"] == 4
+        assert out["fetched"] == 4
+        assert sorted(rig["fetched"]) == [1002, 1003, 1004, 1005]
+
+    def test_manual_refresh_still_checks_a_current_close(self, rig):
+        companies, isins, grid = _fixture(1)
+        rig["before"] = {1000: "2026-08-10"}
+
+        out = br._prices(companies, isins, grid, "2026-08-10", rig["emit"])
+
+        assert out["skipped_current"] == 0
+        assert out["fetched"] == 1
+        assert rig["fetched"] == [1000]
 
 
 class TestOneDeadSymbolDoesNotEndTheRun:

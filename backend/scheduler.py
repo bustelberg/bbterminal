@@ -1366,6 +1366,11 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
 
     step = _reporter(ctx)
     summaries: dict[str, dict] = {}
+    # ONE union for the whole automatic run. ACWI contains most of SP500 and part of AEX; these
+    # sets ensure the later passes reuse those results instead of asking Yahoo for them again.
+    # Manual benchmark Refresh does not pass the sets and still fetches every constituent.
+    price_symbols: set[str] = set()
+    cap_symbols: set[str] = set()
     for i, label in enumerate(_RANKED_UNIVERSES, start=1):
         try:
             step(i - 1, len(_RANKED_UNIVERSES), f"{label}: starting")
@@ -1375,7 +1380,12 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
                 if message:
                     step(i - 1, len(_RANKED_UNIVERSES), f"{label}: {message}")
 
-            summaries[label] = refresh_benchmark(label, emit)
+            summaries[label] = refresh_benchmark(
+                label, emit,
+                run_price_symbols=price_symbols,
+                run_cap_symbols=cap_symbols,
+                skip_current_prices=True,
+            )
             step(i, len(_RANKED_UNIVERSES), f"{label}: complete")
         except Exception as exc:                                    # noqa: BLE001
             _log.warning("[benchmark-prices] %s failed (%s: %s)",
@@ -1386,12 +1396,17 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
     fetched = sum(int(s.get("prices_fetched") or 0) for s in summaries.values())
     moved = sum(int(s.get("prices_moved") or 0) for s in summaries.values())
     failed = sum(int(s.get("prices_failed") or 0) for s in summaries.values())
+    reused = sum(int(s.get("prices_skipped_overlap") or 0) for s in summaries.values())
+    current = sum(int(s.get("prices_skipped_current") or 0) for s in summaries.values())
     _log.info("[benchmark-prices] %s; %d price series fetched, %d updated, %d failed",
               {label: s.get("priceable", 0) for label, s in summaries.items()}, fetched, moved, failed)
     rank_detail, rank_summary = _body_relative_momentum_refresh(ctx)
-    return (f"{fetched} price series checked; {moved} updated; {rank_detail}",
+    return (f"{fetched} unique price series checked; {reused} overlapping constituent(s) reused; "
+            f"{current} already current; {moved} updated; {rank_detail}",
             {"benchmarks": summaries, "prices_fetched": fetched, "prices_moved": moved,
-             "prices_failed": failed, "relative_momentum": rank_summary})
+             "prices_failed": failed, "prices_reused": reused,
+             "prices_skipped_current": current,
+             "relative_momentum": rank_summary})
 
 
 #: The universes whose 12-1 returns are ranked into the seven relative-momentum states.

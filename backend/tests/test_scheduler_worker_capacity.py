@@ -98,9 +98,24 @@ def test_benchmark_refresh_ranks_only_after_all_benchmarks_are_refreshed(monkeyp
     from routers import _benchmark_refresh
 
     events: list[str] = []
+    price_sets: list[set[str]] = []
+    cap_sets: list[set[str]] = []
+
+    def _refresh(label, _emit, *, run_price_symbols, run_cap_symbols, skip_current_prices):
+        assert skip_current_prices is True
+        events.append(label)
+        price_sets.append(run_price_symbols)
+        cap_sets.append(run_cap_symbols)
+        # Model the first index claiming a symbol and later indices reusing it.
+        reused = int("SHARED" in run_price_symbols)
+        run_price_symbols.add("SHARED")
+        run_cap_symbols.add("SHARED")
+        return {"priceable": 1, "prices_fetched": 1 - reused,
+                "prices_skipped_overlap": reused, "prices_skipped_current": 0}
+
     monkeypatch.setattr(
         _benchmark_refresh, "refresh_benchmark",
-        lambda label, _emit: events.append(label) or {"priceable": 1, "prices_fetched": 1},
+        _refresh,
     )
     monkeypatch.setattr(
         S, "_body_relative_momentum_refresh",
@@ -110,6 +125,11 @@ def test_benchmark_refresh_ranks_only_after_all_benchmarks_are_refreshed(monkeyp
     _, detail = S._body_benchmark_price_slice()
 
     assert events == ["ACWI", "SP500", "AEX", "ranks"]
+    assert price_sets[0] is price_sets[1] is price_sets[2]
+    assert cap_sets[0] is cap_sets[1] is cap_sets[2]
+    assert detail["prices_fetched"] == 1
+    assert detail["prices_reused"] == 2
+    assert detail["prices_skipped_current"] == 0
     assert detail["relative_momentum"] == {"ranked": 3}
 
 
