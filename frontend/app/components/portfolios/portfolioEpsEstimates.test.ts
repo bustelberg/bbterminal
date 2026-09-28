@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear,
+  priceToEpsMultiple,
 } from './PortfolioFundamentalModal';
 
 const estimate = (year: number, value: number | null, code = 'annual_per_share_eps_estimate') => ({
@@ -33,5 +34,11 @@ describe('portfolio EPS estimate view', () => {
     expect(epsActualToEstimateCagr2025To2027([actual(2025, 4)])).toBeNull();
     expect(epsActualToEstimateCagr2025To2027([actual(2025, -1), estimate(2027, 9)]))
       .toBeNull();
+  });
+
+  it('calculates each P/E from the current stock price and the selected EPS', () => {
+    expect(priceToEpsMultiple(150, 6)).toBe(25);
+    expect(priceToEpsMultiple(150, null)).toBeNull();
+    expect(priceToEpsMultiple(150, -2)).toBeNull();
   });
 });

@@ -203,6 +203,11 @@ export function epsActualToEstimateCagr2025To2027(metrics: ApiMetric[]): number 
   return Math.pow(end / start, 1 / 2) - 1;
 }
 
+export function priceToEpsMultiple(price: number | null, eps: number | null): number | null {
+  if (price == null || price <= 0 || eps == null || eps <= 0) return null;
+  return price / eps;
+}
+
 function epsInput(metric: ApiMetric | null, label: string,
   currency?: string | null): InputObservation[] {
   if (metric?.numeric_value == null) return [];
@@ -263,11 +268,23 @@ function dcfRow(row: ApiRow, today: string) {
     year, epsEstimateForYear(row.metrics, year),
   ])) as Record<EpsEstimateYear, ApiMetric | null>;
   const epsEstimateCagr = epsActualToEstimateCagr2025To2027(row.metrics);
+  const epsByYear = {
+    2025: eps2025Actual?.numeric_value ?? null,
+    2026: epsEstimates[2026]?.numeric_value ?? null,
+    2027: epsEstimates[2027]?.numeric_value ?? null,
+  } as const;
+  const peByYear = {
+    2025: priceToEpsMultiple(src.price, epsByYear[2025]),
+    2026: priceToEpsMultiple(src.price, epsByYear[2026]),
+    2027: priceToEpsMultiple(src.price, epsByYear[2027]),
+  } as const;
   const commonInputs = [
     sourceInput(row.metrics, 'Close price', working.price,
       row.currency ? ` ${row.currency}` : ''),
     sourceInput(row.metrics, 'Diluted shares outstanding', working.shares, 'm shares'),
   ];
+  const stockPriceInputs = commonInputs.slice(0, 1)
+    .filter((input): input is InputObservation => input != null);
   const cashFlowInputs = !useForward
     ? [
       sourceInput(row.metrics, 'Free cash flow', working.fcf, 'm'),
@@ -295,8 +312,9 @@ function dcfRow(row: ApiRow, today: string) {
     ...row, src, growth,
     dcfForward: useForward,
     dcfInputs,
+    stockPriceInputs,
     egm, forwardPE, forwardPeDerived, egmAssumptions, egmResult,
-    eps2025Actual, epsEstimates, epsEstimateCagr,
+    eps2025Actual, epsEstimates, epsEstimateCagr, peByYear,
     estimateDates: dateWindow(cagrWorking.points.map((point) => point.date)),
     medianPeDates,
   };
@@ -312,6 +330,10 @@ function sortValue(row: ValuationRow, key: string): number | null {
   if (key.startsWith('epsEstimate:')) {
     const year = Number(key.slice('epsEstimate:'.length)) as EpsEstimateYear;
     return row.epsEstimates[year]?.numeric_value ?? null;
+  }
+  if (key.startsWith('epsPe:')) {
+    const year = Number(key.slice('epsPe:'.length)) as 2025 | 2026 | 2027;
+    return row.peByYear[year] ?? null;
   }
   const values: Record<string, number | null> = {
     weight: row.weight_pct,
@@ -511,6 +533,12 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                       ))}
                       <NumericHeader sortKey="epsEstimateCagr" label="CAGR 2025A–2027E"
                         className="bg-warn-500/10" />
+                      <NumericHeader sortKey="epsPe:2025" label="P/E 2025A"
+                        className="bg-warn-500/10" />
+                      <NumericHeader sortKey="epsPe:2026" label="P/E 2026E"
+                        className="bg-warn-500/10" />
+                      <NumericHeader sortKey="epsPe:2027" label="P/E 2027E"
+                        className="bg-warn-500/10" />
                     </>
                   )}
                 </tr>
@@ -691,6 +719,28 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             ...epsInput(row.epsEstimates[2027], 'EPS estimate for FY2027', row.currency),
                           ]}
                           how="Compound the change between positive FY2025 actual EPS and FY2027 estimated EPS over two years." />
+                        {([2025, 2026, 2027] as const).map((year) => {
+                          const actual = year === 2025;
+                          const epsMetric = actual ? row.eps2025Actual : row.epsEstimates[year];
+                          const multiple = row.peByYear[year];
+                          const period = `FY${year}${actual ? ' actual' : ' estimate'}`;
+                          return (
+                            <ValuationCell key={`pe:${year}`} tone="eps"
+                              value={multiple == null ? '—' : `${multiple.toFixed(1)}×`}
+                              what={`The latest stock price expressed as a multiple of the ${period} EPS.`}
+                              where={`GuruFocus close price and ${actual ? 'reported EPS without NRI' : 'analyst EPS consensus'} stored for ${row.name}.`}
+                              retrieved={[actual ? row.source_fetched_at.financials
+                                : row.source_fetched_at.estimates]}
+                              applies={[row.src.priceDate, epsMetric?.target_date]}
+                              inputs={[
+                                ...row.stockPriceInputs,
+                                ...epsInput(epsMetric,
+                                  `${actual ? 'Reported EPS' : 'EPS estimate'} for FY${year}`,
+                                  row.currency),
+                              ]}
+                              how={`Divide the latest stored close price by positive ${period} EPS.`} />
+                          );
+                        })}
                       </>
                     )}
                   </tr>
@@ -705,7 +755,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
             ? `Implied FCF growth over ${FORECAST_YEARS} years, with 3% perpetual growth. The 7–20% columns are discount rates.`
             : model === 'egm'
               ? 'Expected Growth Model over 10 years. EPS growth and exit P/E use company estimates/history where available, otherwise the 10% growth and 20× house defaults; hurdle rate is 10%.'
-              : 'FY2025 is reported EPS without NRI; FY2026 and FY2027 are GuruFocus consensus estimates. CAGR compounds FY2025A to FY2027E over two years and requires both endpoints to be positive.'}
+              : 'FY2025 is reported EPS without NRI; FY2026 and FY2027 are GuruFocus consensus estimates. CAGR compounds FY2025A to FY2027E over two years. Each P/E divides the latest stored stock price by that year’s positive EPS.'}
         </p>
         {companyFundamental && (
           <OwnerEarningsModal isin={companyFundamental.isin} name={companyFundamental.name}
