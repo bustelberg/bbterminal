@@ -35,6 +35,7 @@ import OwnerEarningsModal from './OwnerEarningsModal';
 import EtfSectorAllocationModal from './EtfSectorAllocationModal';
 import {
   addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
+  portfolioSectorBucket,
 } from './etfSectorLookThrough';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
@@ -1504,10 +1505,16 @@ function soleVia(h: BookHolding): string | null {
 const SYNTHETIC_ROWS = new WeakSet<object>();
 const isSynthetic = (h: BookHolding) => SYNTHETIC_ROWS.has(h);
 
-/** Known constituent basket for a folded certificate. The row stays a Stock ETF, but its
- * Fundamental action can use the holdings we already expanded from that certificate. */
+/** Known constituent basket for a folded certificate. Retained for calculations/tests even
+ * though folded TopSelecties now open Sector mix rather than Fundamental. */
 const SYNTHETIC_BASKETS = new WeakMap<object, Basket>();
 export const syntheticBasket = (h: object): Basket | undefined => SYNTHETIC_BASKETS.get(h);
+
+/** Sector mix calculated from the already-expanded AIRS legs behind a folded TopSelectie. */
+const SYNTHETIC_SECTOR_ALLOCATIONS = new WeakMap<object, EtfSectorAllocationResponse>();
+export const syntheticSectorAllocation = (
+  h: object,
+): EtfSectorAllocationResponse | undefined => SYNTHETIC_SECTOR_ALLOCATIONS.get(h);
 
 /** AIRS's own Dynamic-book code behind a reader-facing folded TopSelectie nickname. */
 const SYNTHETIC_AIRS_NAMES = new WeakMap<object, string>();
@@ -1655,6 +1662,48 @@ export function collapseByCertificate(rows: BookHolding[]): BookHolding[] {
       holdings,
       sourcePortfolioId: sourceIds.length === 1 ? sourceIds[0] : undefined,
     });
+    // The expanded legs are the source of truth for an internal certificate's current sector
+    // mix. Preserve the source/default -> our-sector relationship so the modal shows the same
+    // mapping comparison as an external fund. Membership deliberately matches the direct
+    // TopSelectie's clickable sector view: individual equities only. Cash, bonds and nested fund
+    // wrappers have no equity sector there and must not reappear here as a synthetic
+    // "Unclassified -> Cash" row merely because the external-fund mapper accounts for cash.
+    const byOurSector = new Map<string, Map<string, number>>();
+    for (const leg of legs) {
+      if (leg.bucket !== EQUITY_BUCKET || leg.is_fund) continue;
+      const legWeight = leg.weight_now_pct ?? 0;
+      if (legWeight <= 0) continue;
+      const ourSector = portfolioSectorBucket(leg.sector ?? 'Unclassified');
+      const providerSector = leg.sector_default ?? leg.sector ?? 'Unclassified';
+      const providerWeights = byOurSector.get(ourSector) ?? new Map<string, number>();
+      providerWeights.set(providerSector, (providerWeights.get(providerSector) ?? 0) + legWeight);
+      byOurSector.set(ourSector, providerWeights);
+    }
+    const sectorTotal = [...byOurSector.values()].reduce(
+      (total, providerWeights) => total
+        + [...providerWeights.values()].reduce((sum, value) => sum + value, 0), 0,
+    );
+    if (sectorTotal > 0) {
+      SYNTHETIC_SECTOR_ALLOCATIONS.set(row, {
+        isin: '',
+        name: label,
+        as_of: null,
+        source: 'AIRS look-through',
+        source_url: '',
+        sectors: [...byOurSector.entries()].map(([sector, providerWeights]) => ({
+          sector,
+          weight_pct: [...providerWeights.values()].reduce((sum, value) => sum + value, 0)
+            / sectorTotal * 100,
+          provider_sectors: [...providerWeights.keys()],
+          provider_weights: [...providerWeights.entries()].map(
+            ([providerSector, value]) => ({
+              sector: providerSector,
+              weight_pct: value / sectorTotal * 100,
+            }),
+          ),
+        })),
+      });
+    }
     const airsNames = [...new Set(legs.flatMap((leg) => {
       const routeNames = (leg.sources ?? [])
         .filter((source) => source.label === label)
@@ -2406,7 +2455,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       </td>
                     </tr>
                   )}
-                {sector.rows.map((h) => { const i = n++; const certificateBasket = syntheticBasket(h); return (
+                {sector.rows.map((h) => { const i = n++; const certificateAllocation = syntheticSectorAllocation(h); return (
                 <tr key={[h.isin ?? h.name ?? `${g.bucket}-${i}`,
                   (h.via_names ?? []).join(',')].join('|')}
                   onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
@@ -2461,17 +2510,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           so its right edge is two columns further out. Pushing it right would put
                           it on a DIFFERENT vertical line, which is worse than leaving it beside
                           the class label it belongs to. */}
-                      {onSectorAllocation && hasEtfSectorAllocation(h) ? (
+                      {onSectorAllocation && (hasEtfSectorAllocation(h) || certificateAllocation) ? (
                         <SectorAllocationButton
                           className="ml-auto shrink-0"
                           title={`Sector allocation inside ${h.name ?? h.isin}`}
                           onOpen={() => onSectorAllocation(h)} />
-                      ) : certificateBasket?.holdings.length ? (
-                        <FundamentalButton
-                          className="ml-auto shrink-0"
-                          title={copy.classRow.fundamentalTitle(certificateBasket.holdings.length, h.name ?? copy.row.thisPosition)}
-                          onOpen={() => onFundamental({ name: h.name ?? certificateBasket.label,
-                            basket: certificateBasket, weightPct: h.weight_now_pct })} />
                       ) : h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
                         <FundamentalButton
                           className="ml-auto shrink-0"
@@ -3461,7 +3504,8 @@ export default function PortfolioAnalysisModal({
   const [timingFor, setTimingFor] = useState<string | null>(null);
   const [sectorFor, setSectorFor] = useState<BookHolding | null>(null);
   const [sectorAllocationFor, setSectorAllocationFor] = useState<{
-    isin: string; name: string; portfolioWeightPct: number;
+    isin?: string; name: string; portfolioWeightPct: number;
+    allocation?: EtfSectorAllocationResponse;
   } | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -4069,11 +4113,16 @@ export default function PortfolioAnalysisModal({
                 lookThrough={lookThrough} onLookThroughChange={setLookThrough}
                 onFundamental={(target) => { void openFundamental(target); }}
                 onSectorAllocation={(holding) => {
-                  if (!holding.isin) return;
+                  const internal = syntheticSectorAllocation(holding);
+                  if (!holding.isin && !internal) return;
                   setSectorAllocationFor({
-                    isin: holding.isin,
-                    name: holding.name ?? holding.isin,
+                    isin: holding.isin ?? undefined,
+                    name: holding.name ?? holding.isin ?? internal!.name,
                     portfolioWeightPct: holding.weight_now_pct ?? 0,
+                    allocation: internal ? {
+                      ...internal,
+                      as_of: data.holdings_as_of ?? data.as_of ?? null,
+                    } : undefined,
                   });
                 }}
                 onSectorOverride={setSectorFor}
@@ -4227,6 +4276,7 @@ export default function PortfolioAnalysisModal({
         <EtfSectorAllocationModal isin={sectorAllocationFor.isin}
           name={sectorAllocationFor.name}
           portfolioWeightPct={sectorAllocationFor.portfolioWeightPct}
+          initialData={sectorAllocationFor.allocation}
           onClose={() => setSectorAllocationFor(null)} />
       )}
       {timingFor && id && (
