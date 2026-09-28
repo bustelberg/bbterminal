@@ -28,6 +28,8 @@ ASIA_EXCHANGES = {
 
 _EST = timezone(timedelta(hours=-5))
 _ACTIVE_JOB: ContextVar[str | None] = ContextVar("api_usage_job", default=None)
+_ATTRIBUTED_SCHEMA_AVAILABLE: bool | None = None
+_LEGACY_SCHEMA_WARNING_EMITTED = False
 
 
 def _current_month_est() -> str:
@@ -72,6 +74,42 @@ def current_api_job(default: str = "unattributed") -> str:
     return _ACTIVE_JOB.get() or default
 
 
+def _is_missing_attribution_schema(exc: Exception) -> bool:
+    """Whether PostgREST is still serving the pre-attribution database schema."""
+    code = str(getattr(exc, "code", "") or "")
+    message = str(exc)
+    return (
+        code in {"PGRST202", "42703"}
+        or "increment_api_usage_attributed" in message and "PGRST202" in message
+        or "api_usage.source does not exist" in message
+    )
+
+
+def _track_legacy(supabase: Client, *, month: str, region: str, source: str,
+                  count: int) -> None:
+    """Preserve GuruFocus quota accounting while an older schema is deployed.
+
+    The legacy table has no provider dimension. Recording Yahoo there would make an
+    unmetered request consume GuruFocus's regional allowance, so non-GuruFocus calls
+    deliberately wait for the attributed migration instead.
+    """
+    global _LEGACY_SCHEMA_WARNING_EMITTED
+    if not _LEGACY_SCHEMA_WARNING_EMITTED:
+        logger.warning(
+            "api_usage attribution migration is not applied; using the legacy "
+            "GuruFocus-only counter until it is deployed"
+        )
+        _LEGACY_SCHEMA_WARNING_EMITTED = True
+    if source != "gurufocus":
+        return
+    try:
+        supabase.rpc("increment_api_usage", {
+            "p_month": month, "p_region": region, "p_count": count,
+        }).execute()
+    except Exception as exc:
+        logger.warning("Failed to track legacy API usage: %s", exc)
+
+
 def track_api_call(
     supabase: Client,
     exchange: str = "",
@@ -83,6 +121,7 @@ def track_api_call(
     region: str | None = None,
 ) -> None:
     """Atomically add attributed request count; telemetry must never fail real work."""
+    global _ATTRIBUTED_SCHEMA_AVAILABLE
     if count <= 0:
         return
     month = _current_month_est()
@@ -95,6 +134,11 @@ def track_api_call(
         "job": job, "outcome": outcome,
     }
 
+    if _ATTRIBUTED_SCHEMA_AVAILABLE is False:
+        _track_legacy(
+            supabase, month=month, region=region, source=source, count=count)
+        return
+
     try:
         supabase.rpc("increment_api_usage_attributed", {
             "p_month": month,
@@ -104,7 +148,13 @@ def track_api_call(
             "p_outcome": outcome,
             "p_count": count,
         }).execute()
+        _ATTRIBUTED_SCHEMA_AVAILABLE = True
     except Exception as exc:
+        if _is_missing_attribution_schema(exc):
+            _ATTRIBUTED_SCHEMA_AVAILABLE = False
+            _track_legacy(
+                supabase, month=month, region=region, source=source, count=count)
+            return
         logger.warning("attributed API usage RPC failed (%s), trying read-then-write", exc)
         try:
             query = supabase.table("api_usage").select("id, request_count")
@@ -155,8 +205,32 @@ def get_usage(supabase: Client) -> dict:
             breakdown, key=lambda row: (-row["request_count"], row["source"], row["job"])
         )
         return result
+    except Exception as exc:
+        if not _is_missing_attribution_schema(exc):
+            return result
+
+    # Rolling-deploy compatibility: never report zero usage (and therefore a full
+    # GuruFocus budget) merely because the application arrived before its migration.
+    try:
+        rows = (supabase.table("api_usage")
+                .select("region,request_count")
+                .eq("month", month).execute().data or [])
+        for row in rows:
+            count = int(row.get("request_count") or 0)
+            region = str(row.get("region") or "unknown")
+            result["total"] += count
+            result["by_source"]["gurufocus"] = (
+                result["by_source"].get("gurufocus", 0) + count
+            )
+            if region in ("usa", "europe", "asia"):
+                result[region] += count
+            result["breakdown"].append({
+                "source": "gurufocus", "region": region, "job": "legacy",
+                "outcome": "unknown", "request_count": count,
+            })
     except Exception:
-        return result
+        pass
+    return result
 
 
 def remaining_budget(supabase: Client) -> dict:

@@ -993,6 +993,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/etf/{isin}/sector-allocation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Etf Sector Allocation
+         * @description Sector weights for an explicitly verified external fund.
+         *
+         *     The registry contains only exact ETF or mutual-fund share-class ISINs with a working issuer,
+         *     justETF, or Yahoo sector feed. Other fund-like instruments return 404, so internal portfolios
+         *     such as StarTopSelectie cannot accidentally acquire external-fund look-through merely because
+         *     AIRS groups them with funds. Successful vendor reads are cached for six hours.
+         */
+        get: operations["etf_sector_allocation_api_airs_etf__isin__sector_allocation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/holding-isin-override": {
         parameters: {
             query?: never;
@@ -9023,6 +9048,8 @@ export interface components {
              * @default []
              */
             missing_reports?: string[];
+            /** Model Fetched At */
+            model_fetched_at?: string | null;
             /** Months */
             months?: number | null;
             /** Name */
@@ -9872,6 +9899,11 @@ export interface components {
             return_pct?: number | null;
             /** Sector */
             sector?: string | null;
+            /**
+             * Sector Allocation Available
+             * @default false
+             */
+            sector_allocation_available?: boolean;
             /** Sector Default */
             sector_default?: string | null;
             /** Sector Overridden */
@@ -10644,6 +10676,39 @@ export interface components {
             band_pct?: number;
             /** Benchmark Id */
             benchmark_id: number;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** EtfProviderSectorWeight */
+        EtfProviderSectorWeight: {
+            /** Sector */
+            sector: string;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** EtfSectorAllocationResponse */
+        EtfSectorAllocationResponse: {
+            /** As Of */
+            as_of?: string | null;
+            /** Isin */
+            isin: string;
+            /** Name */
+            name: string;
+            /** Sectors */
+            sectors: components["schemas"]["EtfSectorWeight"][];
+            /** Source */
+            source: string;
+            /** Source Url */
+            source_url: string;
+        };
+        /** EtfSectorWeight */
+        EtfSectorWeight: {
+            /** Provider Sectors */
+            provider_sectors: string[];
+            /** Provider Weights */
+            provider_weights: components["schemas"]["EtfProviderSectorWeight"][];
+            /** Sector */
+            sector: string;
             /** Weight Pct */
             weight_pct: number;
         };
@@ -15277,6 +15342,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioFundamentalsJob"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    etf_sector_allocation_api_airs_etf__isin__sector_allocation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfSectorAllocationResponse"];
                 };
             };
             /** @description Validation Error */

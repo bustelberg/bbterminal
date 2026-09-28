@@ -8,6 +8,7 @@ const en = {
   actions: {
     close: 'Close', refresh: 'Refresh', refreshing: 'Refreshing…', cancel: 'Cancel',
     cancelling: 'Cancelling…', attribution: 'Attribution', risk: 'Risk', fundamental: 'Fundamental',
+    sectorAllocation: 'Sector mix',
     cancelRefresh: 'Cancel this refresh', refreshPortfolio: 'Refresh this portfolio',
     cancellingTitle: 'Cancelling — the account being downloaded finishes first.',
     columns: '+ columns', columnsTitle: 'Show the columns behind each figure',
@@ -55,6 +56,10 @@ const en = {
     // measured figure in it: "Excludes 17.8% in funds, bonds and cash — no sector to place". A
     // fixed sentence beside a live one is the weaker of two, and it appeared even at 0%.
     sectorNote: 'Current weights.',
+    addEtfs: 'Add funds',
+    addEtfsTitle: 'Add the underlying sectors of supported external funds and internal TopSelectie certificates, weighted by their current share of this portfolio.',
+    loadingEtfs: 'loading…',
+    unavailableEtfs: (count: number) => `(${count} unavailable)`,
     regionNote: "Current weights. The issuer's domicile, else its ISIN country. Not the listing venue.",
     currencyNote: 'Current weights. The reporting currency of the company. Not the listing currency.',
   },
@@ -220,6 +225,7 @@ const nl: AnalyseCopy = {
   actions: {
     close: 'Sluiten', refresh: 'Vernieuwen', refreshing: 'Vernieuwen…', cancel: 'Annuleren',
     cancelling: 'Annuleren…', attribution: 'Attributie', risk: 'Risico', fundamental: 'Fundamenteel',
+    sectorAllocation: 'Sectorverdeling',
     cancelRefresh: 'Deze vernieuwing annuleren', refreshPortfolio: 'Deze portefeuille vernieuwen',
     cancellingTitle: 'Annuleren — de rekening die nu wordt gedownload wordt eerst voltooid.',
     columns: '+ kolommen', columnsTitle: 'Toon de kolommen achter elk cijfer',
@@ -260,6 +266,10 @@ const nl: AnalyseCopy = {
   axes: {
     sector: 'Sector', region: 'Regio', currency: 'Valuta',
     sectorNote: 'Actuele wegingen.',
+    addEtfs: 'Fondsen toevoegen',
+    addEtfsTitle: "Voeg de onderliggende sectoren van ondersteunde externe fondsen en interne TopSelectie-certificaten toe, gewogen naar hun actuele gewicht in deze portefeuille.",
+    loadingEtfs: 'laden…',
+    unavailableEtfs: (count) => `(${count} niet beschikbaar)`,
     regionNote: 'Actuele wegingen. Vestigingsland van de uitgevende instelling, anders het ISIN-land. Niet de plaats van notering.',
     currencyNote: 'Actuele wegingen. Rapporteringsvaluta van de onderneming. Niet de noteringsvaluta.',
   },

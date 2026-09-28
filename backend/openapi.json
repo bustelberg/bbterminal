@@ -2385,6 +2385,17 @@
             "title": "Missing Reports",
             "type": "array"
           },
+          "model_fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Fetched At"
+          },
           "months": {
             "anyOf": [
               {
@@ -4877,6 +4888,11 @@
             ],
             "title": "Sector"
           },
+          "sector_allocation_available": {
+            "default": false,
+            "title": "Sector Allocation Available",
+            "type": "boolean"
+          },
           "sector_default": {
             "anyOf": [
               {
@@ -6854,6 +6870,105 @@
           "weight_pct"
         ],
         "title": "EtfOverlayHolding",
+        "type": "object"
+      },
+      "EtfProviderSectorWeight": {
+        "properties": {
+          "sector": {
+            "title": "Sector",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "sector",
+          "weight_pct"
+        ],
+        "title": "EtfProviderSectorWeight",
+        "type": "object"
+      },
+      "EtfSectorAllocationResponse": {
+        "properties": {
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "sectors": {
+            "items": {
+              "$ref": "#/components/schemas/EtfSectorWeight"
+            },
+            "title": "Sectors",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "source_url": {
+            "title": "Source Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "source",
+          "source_url",
+          "sectors"
+        ],
+        "title": "EtfSectorAllocationResponse",
+        "type": "object"
+      },
+      "EtfSectorWeight": {
+        "properties": {
+          "provider_sectors": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Provider Sectors",
+            "type": "array"
+          },
+          "provider_weights": {
+            "items": {
+              "$ref": "#/components/schemas/EtfProviderSectorWeight"
+            },
+            "title": "Provider Weights",
+            "type": "array"
+          },
+          "sector": {
+            "title": "Sector",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "provider_sectors",
+          "provider_weights",
+          "sector",
+          "weight_pct"
+        ],
+        "title": "EtfSectorWeight",
         "type": "object"
       },
       "ExchangeFeeIn": {
@@ -17924,6 +18039,49 @@
           }
         },
         "summary": "Ingest Basket Fundamentals Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/etf/{isin}/sector-allocation": {
+      "get": {
+        "description": "Sector weights for an explicitly verified external fund.\n\nThe registry contains only exact ETF or mutual-fund share-class ISINs with a working issuer,\njustETF, or Yahoo sector feed. Other fund-like instruments return 404, so internal portfolios\nsuch as StarTopSelectie cannot accidentally acquire external-fund look-through merely because\nAIRS groups them with funds. Successful vendor reads are cached for six hours.",
+        "operationId": "etf_sector_allocation_api_airs_etf__isin__sector_allocation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtfSectorAllocationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Etf Sector Allocation",
         "tags": [
           "airs"
         ]

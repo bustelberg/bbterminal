@@ -190,6 +190,99 @@ def asset_profile(symbols: list[str]) -> dict[str, dict]:
     return out
 
 
+_FUND_SECTOR_LABELS = {
+    "realestate": "Real Estate",
+    "consumer_cyclical": "Consumer Cyclical",
+    "basic_materials": "Basic Materials",
+    "consumer_defensive": "Consumer Defensive",
+    "technology": "Technology",
+    "communication_services": "Communication Services",
+    "financial_services": "Financial Services",
+    "utilities": "Utilities",
+    "industrials": "Industrials",
+    "energy": "Energy",
+    "healthcare": "Healthcare",
+}
+
+
+def _fund_sector_weightings(symbol: str, *, vehicle: str) -> list[dict]:
+    """One explicitly registered fund's Yahoo sector weights, as percentage rows.
+
+    Yahoo identifies ETFs through ``fundProfile.legalType`` and mutual funds through
+    ``price.quoteType``. Keep those as separate accepted identities: callers hold a mixture of
+    exchange-traded funds, mutual funds and in-house certificates, and a similarly shaped
+    ``topHoldings`` object alone is not permission to expose look-through.
+    """
+    global _quote_sess, _quote_crumb
+    if not symbol or not _HAS_CURL:
+        return []
+
+    def request() -> tuple[int | None, str]:
+        global _quote_sess, _quote_crumb
+        session, crumb = _quote_session()
+        if not session:
+            return None, ""
+        url = f"{_PROFILE}/{_urlquote(symbol, safe='=^.:-')}"
+        try:
+            response = session.get(
+                url,
+                params={"modules": "topHoldings,fundProfile,price", "crumb": crumb},
+                timeout=20,
+            )
+            _track_request(url, response.status_code, response.text or "")
+            if response.status_code == 401:
+                _quote_sess = _quote_crumb = None
+                session, crumb = _quote_session()
+                if not session:
+                    return 401, ""
+                response = session.get(
+                    url,
+                    params={"modules": "topHoldings,fundProfile,price", "crumb": crumb},
+                    timeout=20,
+                )
+                _track_request(url, response.status_code, response.text or "")
+            return response.status_code, response.text or ""
+        except Exception:  # noqa: BLE001
+            _track_request(url, None)
+            return None, ""
+
+    status, text = _throttle.run(request)
+    if status != 200:
+        return []
+    try:
+        result = ((json.loads(text).get("quoteSummary") or {}).get("result") or [])[0]
+        legal_type = (result.get("fundProfile") or {}).get("legalType")
+        quote_type = (result.get("price") or {}).get("quoteType")
+        if vehicle == "etf" and legal_type != "Exchange Traded Fund":
+            return []
+        if vehicle == "mutual_fund" and quote_type != "MUTUALFUND":
+            return []
+        raw_rows = (result.get("topHoldings") or {}).get("sectorWeightings") or []
+    except (IndexError, TypeError, ValueError):
+        return []
+
+    rows = []
+    for item in raw_rows:
+        if not isinstance(item, dict) or len(item) != 1:
+            continue
+        key, value = next(iter(item.items()))
+        raw = (value or {}).get("raw") if isinstance(value, dict) else None
+        if key not in _FUND_SECTOR_LABELS or not isinstance(raw, (int, float)) or raw <= 0:
+            continue
+        rows.append({"sector": _FUND_SECTOR_LABELS[key], "weight_pct": float(raw) * 100.0})
+    return rows
+
+
+def fund_sector_weightings(symbol: str) -> list[dict]:
+    """Yahoo sector weights for an explicitly registered ETF only."""
+    return _fund_sector_weightings(symbol, vehicle="etf")
+
+
+def mutual_fund_sector_weightings(symbol: str) -> list[dict]:
+    """Yahoo sector weights for an explicitly registered mutual-fund share class only."""
+    return _fund_sector_weightings(symbol, vehicle="mutual_fund")
+
+
 def quote(symbols: list[str]) -> dict[str, dict]:
     """Batch v7 quote -> {symbol: {marketCap, currency, sharesOutstanding, …}}.
     Chunks of 100, cookie+crumb auth (refreshed once on a 401), lightly paced.

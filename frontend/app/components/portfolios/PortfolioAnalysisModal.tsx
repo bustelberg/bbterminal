@@ -24,7 +24,7 @@ import {
 import { trace, traceError } from '../../../lib/debugTrace';
 import { loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import { dialog } from '../../../lib/dialog';
-import type { ModelPortfolioAnalysis } from '../../../lib/types/api';
+import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import PanelDialog from './PanelDialog';
 import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
@@ -32,6 +32,10 @@ import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import OwnerEarningsModal from './OwnerEarningsModal';
+import EtfSectorAllocationModal from './EtfSectorAllocationModal';
+import {
+  addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
+} from './etfSectorLookThrough';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
@@ -46,6 +50,19 @@ const GICS_SECTORS = [
   'Energy', 'Financials', 'Health Care', 'Industrials', 'Information Technology',
   'Materials', 'Real Estate', 'Utilities',
 ] as const;
+
+/** The first fund added to the look-through registry. Availability itself comes from the backend's
+ * exact external-fund ISIN registry; names and exchange tickers vary and are never identity. */
+export const ETF_SECTOR_ALLOCATION_ISIN = 'IE00BP3QZ825';
+export function hasEtfSectorAllocation(
+  holding: {
+    isin?: string | null;
+    is_fund?: boolean | null;
+    sector_allocation_available?: boolean;
+  },
+): boolean {
+  return !!holding.is_fund && !!holding.isin && !!holding.sector_allocation_available;
+}
 
 function saleDateLabel(value: string | null | undefined): string {
   if (!value) return 'onbekende datum';
@@ -66,12 +83,11 @@ function saleDateLabel(value: string | null | undefined): string {
  * white, which obliges relief, so every bar carries a DIRECT VALUE LABEL (in ink, never in the
  * series colour — text wears text tokens).
  *
- *  Funds fold into "Unclassified" — THE HONEST BUCKET. We hold no constituent data for an
- * ETF, and its listing tells you nothing about its contents: 24 of the 26 held ETFs have a
- * "sector" of literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European
- * exposure; quoted in EUR it still holds mostly USD assets. So funds are bucketed, not
- * decomposed. A portfolio that is 40% ETF shows a 40% Unclassified bar meaning "we cannot see
- * inside this" — which is true, and far better than a confident, invented split.
+ *  Funds are omitted unless the backend's exact ETF allow-list confirms that we have a verified
+ * constituent-sector feed. Those ETFs can be folded in with the checked "Add ETFs" control; each
+ * source sector share is multiplied by the ETF's current share of the whole AIRS book. Everything
+ * else stays opaque — a listing's own sector, venue or quote currency says nothing about what a
+ * fund holds, and we never invent a split from those fields.
  */
 const SERIES = {
   portfolio: chartTheme.accent,   // #3b82c9 — the thing of interest
@@ -587,7 +603,8 @@ function Chip({ label, value, valueClass, hint, prov }: {
 }
 
 function Chart({ axis, rows, unpricedPct, excluded, benchmark,
-  portfolioAsOf, benchmarkCapsFrom, benchmarkCapsTo, benchmarkCapsUnstamped = 0, stale = false }: {
+  portfolioAsOf, benchmarkCapsFrom, benchmarkCapsTo, benchmarkCapsUnstamped = 0, stale = false,
+  etfControl }: {
   axis: string;
   rows: Row[];
   /** True while these bars are the PREVIOUS selection's, waiting on the current one. The bars stay
@@ -605,6 +622,13 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   benchmarkCapsFrom?: string | null;
   benchmarkCapsTo?: string | null;
   benchmarkCapsUnstamped?: number;
+  etfControl?: {
+    enabled: boolean;
+    onChange: (enabled: boolean) => void;
+    count: number;
+    loading: boolean;
+    unavailable: number;
+  };
 }) {
   const copy = useAnalyseCopy();
   const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
@@ -662,9 +686,10 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
       {/* These are deliberately READ-ONLY exposure charts. Attribution is the one drill-down
           surface: keeping a second holding table here made two controls answer the same question
           with different grouping and state. */}
-      <div className="flex items-baseline gap-2">
-        <h4 className="text-sm font-semibold text-fg-strong">{axisLabel}</h4>
-        <InfoTip content={<TipCard label="Freshness" title="Composition weights">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+        <div className="flex items-baseline gap-2">
+          <h4 className="text-sm font-semibold text-fg-strong">{axisLabel}</h4>
+          <InfoTip content={<TipCard label="Freshness" title="Composition weights">
           <Field label="Portfolio">
             {portfolioAsOf ? <ValueBadge>{portfolioAsOf.slice(0, 10)}</ValueBadge>
               : <span className="text-fg-muted">not available</span>}
@@ -676,7 +701,25 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           {benchmarkCapsUnstamped > 0 && (
             <Field label="Caps">{benchmarkCapsUnstamped} without a timestamp</Field>
           )}
-        </TipCard>} />
+          </TipCard>} />
+        </div>
+        {axis === 'sector' && etfControl && etfControl.count > 0 && (
+          <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-fg-muted"
+            title={copy.axes.addEtfsTitle}>
+            <input type="checkbox" checked={etfControl.enabled}
+              onChange={(event) => etfControl.onChange(event.target.checked)}
+              className="h-3.5 w-3.5 cursor-pointer accent-accent-500" />
+            <span>{copy.axes.addEtfs}</span>
+            {etfControl.enabled && etfControl.loading && (
+              <span className="text-fg-faint">{copy.axes.loadingEtfs}</span>
+            )}
+            {etfControl.enabled && !etfControl.loading && etfControl.unavailable > 0 && (
+              <span className="text-warn-300">
+                {copy.axes.unavailableEtfs(etfControl.unavailable)}
+              </span>
+            )}
+          </label>
+        )}
       </div>
       <p className="text-[12px] text-fg-faint mt-0.5">{axisNote}</p>
       {/*  ONLY THE UNPRICED HOLDINGS GET A WARNING, AND THIS IS THE WHOLE DISTINCTION. A fund, a
@@ -1298,6 +1341,20 @@ function FundamentalButton({ onOpen, title, className = '' }: {
   );
 }
 
+function SectorAllocationButton({ onOpen, title, className = '' }: {
+  onOpen: () => void; title: string; className?: string;
+}) {
+  const copy = useAnalyseCopy();
+  return (
+    <button type="button"
+      onClick={(event) => { event.stopPropagation(); onOpen(); }}
+      title={title}
+      className={`${CHIP_SHAPE} ${CHIP_IDLE} ${className}`}>
+      {copy.actions.sectorAllocation}
+    </button>
+  );
+}
+
 /**
  * One position → one row per ROUTE IN: what the book holds outright, and what it holds through
  * each certificate.
@@ -1666,7 +1723,8 @@ export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean)
 }
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
-  lookThrough, onLookThroughChange, onTiming, onFundamental, onSectorOverride }: {
+  lookThrough, onLookThroughChange, onTiming, onFundamental, onSectorOverride,
+  onSectorAllocation }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
   lookThrough: boolean;
@@ -1691,6 +1749,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   onFundamental: (t: { name: string; isin?: string; basket?: Basket; weightPct?: number }) => void;
   /** Only direct company rows have a source sector to override; funds remain opaque. */
   onSectorOverride?: (holding: BookHolding) => void;
+  /** Opens official fund look-through. Present only for explicitly supported ETF ISINs. */
+  onSectorAllocation?: (holding: BookHolding) => void;
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
    *  render as one sentence, next to a portfolios list that visibly has rows. */
   note?: string | null;
@@ -2401,7 +2461,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                           so its right edge is two columns further out. Pushing it right would put
                           it on a DIFFERENT vertical line, which is worse than leaving it beside
                           the class label it belongs to. */}
-                      {certificateBasket?.holdings.length ? (
+                      {onSectorAllocation && hasEtfSectorAllocation(h) ? (
+                        <SectorAllocationButton
+                          className="ml-auto shrink-0"
+                          title={`Sector allocation inside ${h.name ?? h.isin}`}
+                          onOpen={() => onSectorAllocation(h)} />
+                      ) : certificateBasket?.holdings.length ? (
                         <FundamentalButton
                           className="ml-auto shrink-0"
                           title={copy.classRow.fundamentalTitle(certificateBasket.holdings.length, h.name ?? copy.row.thisPosition)}
@@ -3395,9 +3460,31 @@ export default function PortfolioAnalysisModal({
   // Transacties sheet joins on — it carries no ISIN.
   const [timingFor, setTimingFor] = useState<string | null>(null);
   const [sectorFor, setSectorFor] = useState<BookHolding | null>(null);
+  const [sectorAllocationFor, setSectorAllocationFor] = useState<{
+    isin: string; name: string; portfolioWeightPct: number;
+  } | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
+  const [includeEtfsInSector, setIncludeEtfsInSector] = useState(true);
+  const eligibleSectorEtfs = useMemo(() => {
+    const byIsin = new Map<string, BookHolding>();
+    for (const holding of data?.book_holdings ?? []) {
+      if (!hasEtfSectorAllocation(holding) || (holding.weight_now_pct ?? 0) <= 0) continue;
+      byIsin.set(holding.isin!.trim().toUpperCase(), holding);
+    }
+    return [...byIsin.values()].sort((a, b) => (a.isin ?? '').localeCompare(b.isin ?? ''));
+  }, [data?.book_holdings]);
+  const eligibleSectorEtfKey = eligibleSectorEtfs.map((holding) => holding.isin).join('|');
+  const eligibleCertificateSectorCount = useMemo(
+    () => certificateSectorLookThroughCount(data?.book_holdings ?? []),
+    [data?.book_holdings],
+  );
+  const [etfSectorResult, setEtfSectorResult] = useState<{
+    key: string;
+    allocations: Record<string, EtfSectorAllocationResponse>;
+    unavailable: number;
+  } | null>(null);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -3542,6 +3629,44 @@ export default function PortfolioAnalysisModal({
     return () => window.cancelAnimationFrame(frame);
   }, [loadedFor, viewKey]);
 
+  // Look-through is optional UI state, not part of the already-expensive analysis payload. Fetch
+  // only the exact ETF allow-list the backend marked as supported, once per set of held ISINs.
+  // Each endpoint has its own six-hour acquisition cache, and turning the checkbox off only changes
+  // the visual — it does not discard the successfully loaded breakdowns or cause another request.
+  useEffect(() => {
+    if (!includeEtfsInSector || !eligibleSectorEtfKey
+      || etfSectorResult?.key === eligibleSectorEtfKey) return;
+    const controller = new AbortController();
+    void (async () => {
+      const settled = await Promise.all(eligibleSectorEtfs.map(async (holding) => {
+        const isin = holding.isin!.trim().toUpperCase();
+        try {
+          const response = await apiFetch(
+            `${API_URL}/api/airs/etf/${encodeURIComponent(isin)}/sector-allocation`,
+            { signal: controller.signal },
+          );
+          const body = await response.json().catch(() => null);
+          if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+          return [isin, body as EtfSectorAllocationResponse] as const;
+        } catch (reason) {
+          if (!controller.signal.aborted) {
+            traceError('analyse', `ETF sector allocation unavailable for ${isin}`, reason);
+          }
+          return [isin, null] as const;
+        }
+      }));
+      if (controller.signal.aborted) return;
+      const allocations: Record<string, EtfSectorAllocationResponse> = {};
+      let unavailable = 0;
+      for (const [isin, allocation] of settled) {
+        if (allocation) allocations[isin] = allocation;
+        else unavailable += 1;
+      }
+      setEtfSectorResult({ key: eligibleSectorEtfKey, allocations, unavailable });
+    })();
+    return () => controller.abort();
+  }, [eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector]);
+
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
   // button. Retry the read a few times while the single background Yahoo worker stores metadata
@@ -3628,7 +3753,7 @@ export default function PortfolioAnalysisModal({
         return null;
       },
     } : undefined}>
-    <ProvenanceFetchedAt at={data?.holdings_fetched_at}>
+    <ProvenanceFetchedAt at={data?.holdings_fetched_at} scope="airs">
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-scrim/60"
       onClick={onClose} role="dialog" aria-modal="true">
       {/* Fixed at 80% of the viewport width AND height; the charts span the full width and the
@@ -3943,6 +4068,14 @@ export default function PortfolioAnalysisModal({
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 lookThrough={lookThrough} onLookThroughChange={setLookThrough}
                 onFundamental={(target) => { void openFundamental(target); }}
+                onSectorAllocation={(holding) => {
+                  if (!holding.isin) return;
+                  setSectorAllocationFor({
+                    isin: holding.isin,
+                    name: holding.name ?? holding.isin,
+                    portfolioWeightPct: holding.weight_now_pct ?? 0,
+                  });
+                }}
                 onSectorOverride={setSectorFor}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
                 benchmark={data.benchmark ?? benchmark}
@@ -3982,15 +4115,36 @@ export default function PortfolioAnalysisModal({
                     same fact is on the Attribution panel, where the false finding actually
                     bites, and the sold names are itemised under Holdings. */}
                 <div className="grid gap-4 lg:grid-cols-3">
-                  {(data.axes ?? []).map((a) => (
-                    <Chart key={a.axis} axis={a.axis} rows={a.rows}
+                  {(data.axes ?? []).map((a) => {
+                    const loadedEtfAllocations = etfSectorResult?.key === eligibleSectorEtfKey
+                      ? etfSectorResult.allocations : {};
+                    const sectorRows = a.axis === 'sector' && includeEtfsInSector && !lookThrough
+                      ? addCertificateSectorWeights(a.rows, data.book_holdings ?? [])
+                      : a.rows;
+                    const rows = a.axis === 'sector' && includeEtfsInSector
+                      ? addEtfSectorWeights(
+                        sectorRows, data.book_holdings ?? [], loadedEtfAllocations,
+                      ) : sectorRows;
+                    return (
+                    <Chart key={a.axis} axis={a.axis} rows={rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
                       benchmark={data.benchmark ?? benchmark}
                       portfolioAsOf={data.holdings_as_of ?? data.as_of}
                       benchmarkCapsFrom={data.benchmark_caps_from}
                       benchmarkCapsTo={data.benchmark_caps_to}
-                      benchmarkCapsUnstamped={data.benchmark_caps_unstamped} />
-                  ))}
+                      benchmarkCapsUnstamped={data.benchmark_caps_unstamped}
+                      etfControl={a.axis === 'sector'
+                        && (eligibleSectorEtfs.length + eligibleCertificateSectorCount) ? {
+                        enabled: includeEtfsInSector,
+                        onChange: setIncludeEtfsInSector,
+                        count: eligibleSectorEtfs.length + eligibleCertificateSectorCount,
+                        loading: includeEtfsInSector && eligibleSectorEtfs.length > 0
+                          && etfSectorResult?.key !== eligibleSectorEtfKey,
+                        unavailable: etfSectorResult?.key === eligibleSectorEtfKey
+                          ? etfSectorResult.unavailable : 0,
+                      } : undefined} />
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -4069,6 +4223,12 @@ export default function PortfolioAnalysisModal({
         </PanelDialog>
       )}
       <ProvenanceFetchedAt at={undefined}>
+      {sectorAllocationFor && (
+        <EtfSectorAllocationModal isin={sectorAllocationFor.isin}
+          name={sectorAllocationFor.name}
+          portfolioWeightPct={sectorAllocationFor.portfolioWeightPct}
+          onClose={() => setSectorAllocationFor(null)} />
+      )}
       {timingFor && id && (
         <HoldingTimingModal portfolioId={id} name={timingFor} onClose={() => setTimingFor(null)} />
       )}
