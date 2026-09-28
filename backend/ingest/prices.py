@@ -25,7 +25,7 @@ from ingest._gurufocus_http import (
 )
 from ingest.constants import DATA_CUTOFF
 from ingest.staleness import is_cache_fresh, is_daily_data_fresh
-from ingest.api_usage import track_api_call
+from ingest.api_usage import classify_outcome, track_api_call
 from .gurufocus_url import US_EXCHANGE_CODES as US_EXCHANGES  # single source of truth
 
 # The curl_cffi ladder / preferred target is logged once at boot by
@@ -800,7 +800,8 @@ def ensure_volume_for_company(
             on_log=lambda m: result.logs.append(m), start_date=gap_start,
             end_date=_settled_through(data_cutoff),
         )
-        track_api_call(supabase, used_exchange)
+        track_api_call(supabase, used_exchange, job="volume_gap",
+                       outcome=classify_outcome(http_status, has_data=data is not None))
         result.api_calls += 1
         result.logs.append(api_log)
         if data is not None:
@@ -831,7 +832,8 @@ def ensure_volume_for_company(
     data, api_log, http_status, used_exchange = _try_with_fallbacks(
         ticker, exchange, "volume", on_log=lambda m: result.logs.append(m),
     )
-    track_api_call(supabase, used_exchange)
+    track_api_call(supabase, used_exchange, job="volume_full",
+                   outcome=classify_outcome(http_status, has_data=data is not None))
     result.api_calls += 1
     result.logs.append(api_log)
     if used_exchange != exchange:
@@ -938,7 +940,8 @@ def ensure_prices_for_company(
             ticker, exchange, "price", on_log=_log,
             start_date=gap_start, end_date=_settled_through(data_cutoff),
         )
-        track_api_call(supabase, used_exchange)
+        track_api_call(supabase, used_exchange, job="price_gap",
+                       outcome=classify_outcome(http_status, has_data=data is not None))
         result.api_calls += 1
         result.http_status = http_status
         result.logs.append(api_log)
@@ -1021,7 +1024,8 @@ def ensure_prices_for_company(
     data, api_log, http_status, used_exchange = _try_with_fallbacks(
         ticker, exchange, "price", on_log=_log,
     )
-    track_api_call(supabase, used_exchange)
+    track_api_call(supabase, used_exchange, job="price_full",
+                   outcome=classify_outcome(http_status, has_data=data is not None))
     result.api_calls += 1
     result.http_status = http_status
     # Compact response capture: the parsed JSON re-serialized (faithful + small)

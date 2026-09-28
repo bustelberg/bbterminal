@@ -76,7 +76,7 @@ def extract(data: dict | None) -> dict[str, float | None]:
 def growth_estimates_for(company: dict, *, force: bool = False) -> dict:
     """`{symbol, fields, cached}` for one company row (needs `gurufocus_ticker` + exchange code)."""
     from deps import supabase  # noqa: PLC0415
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
     from ingest.earnings._common import (  # noqa: PLC0415
         _build_symbol,
@@ -103,7 +103,9 @@ def growth_estimates_for(company: dict, *, force: bool = False) -> dict:
 
     url = _build_api_url(f"stock/{symbol}/keyratios", {})
     api = _api_request(url)
-    track_api_call(supabase, exchange)
+    track_api_call(supabase, exchange, job="growth_estimates",
+                   outcome=classify_outcome(
+                       getattr(api, "status_code", None), has_data=api.data is not None))
     if api.data is None:
         #  Fall back to a STALE cache rather than to nothing: a week-old consensus beats a blank
         # column, and the alternative is that one flaky call empties the panel.

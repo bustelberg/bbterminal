@@ -181,7 +181,7 @@ async def company_price_refresh(body: _PriceRefreshBody, authorization: str = He
     import os  # noqa: PLC0415
     from urllib.parse import quote  # noqa: PLC0415
 
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
     from ingest.prices import (  # noqa: PLC0415
         _build_symbol,
@@ -227,7 +227,9 @@ async def company_price_refresh(body: _PriceRefreshBody, authorization: str = He
 
             before = (_edge(True, 1) or [None])[0]
             data, api_log, http_status = _fetch_price_from_api(ticker, exchange)
-            track_api_call(supabase, exchange)
+            track_api_call(supabase, exchange, job="admin_benchmark_price",
+                           outcome=classify_outcome(
+                               http_status, has_data=data is not None))
             parsed = _parse_price_series(data) if data is not None else []
             rows_loaded = 0
             if parsed:
@@ -547,7 +549,7 @@ async def gurufocus_research(
     _require_admin(authorization)
     import os as _os  # noqa: PLC0415
 
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
 
     cleaned_symbol = symbol.strip().upper()
@@ -580,6 +582,10 @@ async def gurufocus_research(
                 status_code = None
                 data = None
                 error = f"{type(exc).__name__}: {exc}"
+            usage_exchange = (cleaned_symbol.split(":", 1)[0]
+                              if ":" in cleaned_symbol else "NASDAQ")
+            track_api_call(supabase, usage_exchange, job=f"admin_research_{key}",
+                           outcome=classify_outcome(status_code, has_data=data is not None))
             sections.append(
                 {
                     "key": key,
@@ -592,12 +598,6 @@ async def gurufocus_research(
                 }
             )
 
-        # The usage table is regional. A symbol without an exchange prefix is a US symbol in the
-        # GuruFocus API; prefixed symbols retain their exchange so the existing region classifier
-        # can place Europe and Asia correctly. One atomic increment also avoids fourteen database
-        # round trips for a diagnostic page.
-        usage_exchange = cleaned_symbol.split(":", 1)[0] if ":" in cleaned_symbol else "NASDAQ"
-        track_api_call(supabase, usage_exchange, count=attempted)
         return {
             "symbol": cleaned_symbol,
             "fetched_at": datetime.now(timezone.utc).isoformat(),

@@ -1,25 +1,22 @@
-"""
-Track GuruFocus API usage per month and region (usa / europe).
-Stores counts in the `api_usage` Supabase table.
+"""Attributed external API usage, aggregated per month.
 
-Table schema:
-  id          serial primary key
-  month       text not null        -- e.g. "2026-04"
-  region      text not null        -- "usa" or "europe"
-  request_count integer not null default 0
-  unique(month, region)
+Each row answers four independent questions: provider (``source``), billing region, the logical
+workflow (``job``), and whether the request succeeded (``outcome``). GuruFocus's regional quota
+continues to use only ``source='gurufocus'``; unmetered Yahoo calls are recorded alongside it so the
+application's total upstream request volume can finally be reconciled.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone, timedelta
+from contextlib import contextmanager
+from contextvars import ContextVar
+from datetime import datetime, timedelta, timezone
+from typing import Iterator
 
 from supabase import Client
 
 logger = logging.getLogger(__name__)
 
-# GuruFocus monthly request cap PER REGION (USA / Europe / Asia). Mirrored in
-# the frontend ApiUsageBadge (`LIMIT`). Resets at midnight EST on the 1st.
 MONTHLY_API_LIMIT = 20000
 
 US_EXCHANGES = {"NYSE", "NASDAQ", "AMEX", "CBOE", "OTCPK"}
@@ -29,12 +26,11 @@ ASIA_EXCHANGES = {
     "ASX", "NZSE", "JSE",
 }
 
-# GuruFocus resets usage at midnight EST (UTC-5)
 _EST = timezone(timedelta(hours=-5))
+_ACTIVE_JOB: ContextVar[str | None] = ContextVar("api_usage_job", default=None)
 
 
 def _current_month_est() -> str:
-    """Return current month as YYYY-MM in EST timezone."""
     return datetime.now(_EST).strftime("%Y-%m")
 
 
@@ -47,66 +43,125 @@ def _region_for_exchange(exchange: str) -> str:
     return "europe"
 
 
-def track_api_call(supabase: Client, exchange: str, count: int = 1) -> None:
-    """Increment the API usage counter for the current month and region."""
+def classify_outcome(status: int | None, *, has_data: bool = True) -> str:
+    """Stable, low-cardinality outcome bucket for one completed HTTP attempt."""
+    if status in (429, 999):
+        return "rate_limited"
+    if status == 404:
+        return "not_found"
+    if status in (401, 403):
+        return "forbidden"
+    if status is None:
+        return "transport_error" if not has_data else "success"
+    if 200 <= status < 300:
+        return "success" if has_data else "empty"
+    return "http_error"
+
+
+@contextmanager
+def api_usage_job(job: str) -> Iterator[None]:
+    """Attribute nested requests to a workflow; safe to nest and exception-proof."""
+    token = _ACTIVE_JOB.set(job.strip().lower() or "unattributed")
+    try:
+        yield
+    finally:
+        _ACTIVE_JOB.reset(token)
+
+
+def current_api_job(default: str = "unattributed") -> str:
+    return _ACTIVE_JOB.get() or default
+
+
+def track_api_call(
+    supabase: Client,
+    exchange: str = "",
+    count: int = 1,
+    *,
+    source: str = "gurufocus",
+    job: str | None = None,
+    outcome: str = "unknown",
+    region: str | None = None,
+) -> None:
+    """Atomically add attributed request count; telemetry must never fail real work."""
+    if count <= 0:
+        return
     month = _current_month_est()
-    region = _region_for_exchange(exchange)
+    source = (source or "unknown").strip().lower()
+    region = region or (_region_for_exchange(exchange) if source == "gurufocus" else "global")
+    job = (job or current_api_job()).strip().lower()
+    outcome = (outcome or "unknown").strip().lower()
+    dimensions = {
+        "month": month, "region": region, "source": source,
+        "job": job, "outcome": outcome,
+    }
 
     try:
-        # Use Postgres RPC for atomic increment, fall back to read-then-write
-        supabase.rpc("increment_api_usage", {
+        supabase.rpc("increment_api_usage_attributed", {
             "p_month": month,
             "p_region": region,
+            "p_source": source,
+            "p_job": job,
+            "p_outcome": outcome,
             "p_count": count,
         }).execute()
-    except Exception as e:
-        logger.warning(f"RPC increment_api_usage failed ({e}), trying read-then-write")
+    except Exception as exc:
+        logger.warning("attributed API usage RPC failed (%s), trying read-then-write", exc)
         try:
-            row = (
-                supabase.table("api_usage")
-                .select("id, request_count")
-                .eq("month", month)
-                .eq("region", region)
-                .maybe_single()
-                .execute()
-            )
+            query = supabase.table("api_usage").select("id, request_count")
+            for key, value in dimensions.items():
+                query = query.eq(key, value)
+            row = query.maybe_single().execute()
             if row.data:
                 supabase.table("api_usage").update(
                     {"request_count": row.data["request_count"] + count}
                 ).eq("id", row.data["id"]).execute()
             else:
                 supabase.table("api_usage").insert(
-                    {"month": month, "region": region, "request_count": count}
+                    {**dimensions, "request_count": count}
                 ).execute()
-        except Exception as e2:
-            logger.warning(f"Failed to track API usage: {e2}")
-
-
-def remaining_budget(supabase: Client) -> dict:
-    """Per-region GuruFocus requests still available this month:
-    `{usa, europe, asia}` = `MONTHLY_API_LIMIT - used` (floored at 0). Used by
-    the month-end full-price refresh to bound how many companies it fetches."""
-    used = get_usage(supabase)
-    return {
-        r: max(0, MONTHLY_API_LIMIT - int(used.get(r, 0) or 0))
-        for r in ("usa", "europe", "asia")
-    }
+        except Exception as fallback_exc:
+            logger.warning("Failed to track API usage: %s", fallback_exc)
 
 
 def get_usage(supabase: Client) -> dict:
-    """Return current month's usage: {usa: N, europe: N, asia: N}."""
+    """Current totals and source/job/outcome breakdown.
+
+    The legacy ``usa/europe/asia`` keys stay GuruFocus-only because callers subtract them from that
+    provider's regional caps.
+    """
     month = _current_month_est()
+    result: dict = {
+        "usa": 0, "europe": 0, "asia": 0, "month": month,
+        "total": 0, "by_source": {}, "breakdown": [],
+    }
     try:
-        resp = (
-            supabase.table("api_usage")
-            .select("region, request_count")
-            .eq("month", month)
-            .execute()
+        rows = (supabase.table("api_usage")
+                .select("region,source,job,outcome,request_count")
+                .eq("month", month).execute().data or [])
+        breakdown = []
+        for row in rows:
+            count = int(row.get("request_count") or 0)
+            source = str(row.get("source") or "gurufocus")
+            region = str(row.get("region") or "unknown")
+            job = str(row.get("job") or "legacy")
+            outcome = str(row.get("outcome") or "unknown")
+            result["total"] += count
+            result["by_source"][source] = result["by_source"].get(source, 0) + count
+            if source == "gurufocus" and region in ("usa", "europe", "asia"):
+                result[region] += count
+            breakdown.append({"source": source, "region": region, "job": job,
+                              "outcome": outcome, "request_count": count})
+        result["breakdown"] = sorted(
+            breakdown, key=lambda row: (-row["request_count"], row["source"], row["job"])
         )
-        result = {"usa": 0, "europe": 0, "asia": 0, "month": month}
-        for row in resp.data or []:
-            if row["region"] in result:
-                result[row["region"]] = row["request_count"]
         return result
     except Exception:
-        return {"usa": 0, "europe": 0, "asia": 0, "month": month}
+        return result
+
+
+def remaining_budget(supabase: Client) -> dict:
+    used = get_usage(supabase)
+    return {
+        region: max(0, MONTHLY_API_LIMIT - int(used.get(region, 0) or 0))
+        for region in ("usa", "europe", "asia")
+    }

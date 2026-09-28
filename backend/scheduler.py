@@ -511,7 +511,9 @@ def _run_body(job_id: str, ctx=None, triggered_by: str = "auto") -> str:
         body(ctx)
         return "done"
     stopped: str | None = None
-    with record_run(job_id, triggered_by=triggered_by) as rec:
+    from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+    with api_usage_job(job_id), record_run(job_id, triggered_by=triggered_by) as rec:
         try:
             detail, summary = body(ctx)
         except _Cancelled as e:

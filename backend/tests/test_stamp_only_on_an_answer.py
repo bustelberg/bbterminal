@@ -34,7 +34,7 @@ def _rig(monkeypatch, api_result):
     monkeypatch.setattr(ind, "_ensure_bucket", lambda _sb: None)
     monkeypatch.setattr(ind, "_fetch_from_storage", lambda _sb, _p: None)
     monkeypatch.setattr(ind, "_upload_to_storage", lambda _sb, _p, _d: None)
-    monkeypatch.setattr(ind, "track_api_call", lambda _sb, _e: None)
+    monkeypatch.setattr(ind, "track_api_call", lambda *_a, **_k: None)
     monkeypatch.setattr(ind, "_api_request", lambda _url: api_result)
     monkeypatch.setattr(ind, "_upsert_metric_rows", lambda _sb, rows: (len(rows), 0))
     monkeypatch.setattr(ind, "_stamp_fetched",
@@ -96,7 +96,7 @@ class TestTheOtherTwoFeedsAlreadyHadThisProperty:
         stamped: list[str] = []
         monkeypatch.setattr(fin, "_ensure_bucket", lambda _sb: None)
         monkeypatch.setattr(fin, "_fetch_from_storage", lambda _sb, _p: None)
-        monkeypatch.setattr(fin, "track_api_call", lambda _sb, _e: None)
+        monkeypatch.setattr(fin, "track_api_call", lambda *_a, **_k: None)
         monkeypatch.setattr(fin, "_api_request", lambda _url: _Api(None, log="empty body"))
         monkeypatch.setattr(fin, "_stamp_fetched",
                             lambda _sb, _cid, source, _log: stamped.append(source))
@@ -109,7 +109,7 @@ class TestTheOtherTwoFeedsAlreadyHadThisProperty:
         stamped: list[str] = []
         monkeypatch.setattr(est, "_ensure_bucket", lambda _sb: None)
         monkeypatch.setattr(est, "_fetch_from_storage", lambda _sb, _p: None)
-        monkeypatch.setattr(est, "track_api_call", lambda _sb, _e: None)
+        monkeypatch.setattr(est, "track_api_call", lambda *_a, **_k: None)
         monkeypatch.setattr(est, "_api_request", lambda _url: _Api(None, log="empty body"))
         monkeypatch.setattr(est, "_stamp_fetched",
                             lambda _sb, _cid, source, _log: stamped.append(source))

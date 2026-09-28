@@ -1,9 +1,9 @@
-"""Small system-level endpoints: health check, hello, GuruFocus API usage.
+"""Small system-level endpoints: health check, hello, and attributed API usage.
 
 Endpoints:
     GET /api/hello   sanity ping
     GET /api/health  Supabase connectivity probe (used by uptime checks)
-    GET /api/usage   GuruFocus API call counter for the current month
+    GET /api/usage   provider/job/outcome request counters for the current month
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def health():
 
 @router.get("/api/usage")
 async def api_usage():
-    """GuruFocus API usage counter for the current month."""
+    """Monthly upstream usage; regional headline counters remain GuruFocus quota usage."""
     return await asyncio.to_thread(get_usage, supabase)
 
 

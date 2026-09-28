@@ -33,7 +33,7 @@ from datetime import date
 from typing import Callable
 
 from common.pg import _run_copy
-from ingest.api_usage import track_api_call
+from ingest.api_usage import classify_outcome, track_api_call
 from ingest.prices import _fetch_indicator_from_api, _parse_price_series
 from ingest.refetch_history import load_symbols, refetch_full_history
 
@@ -124,7 +124,8 @@ def check_drift(
             hi = date.fromordinal(lo.toordinal() + _PROBE_WINDOW_DAYS)
             data, _log, _st = _fetch_indicator_from_api(
                 tic, exch, indicator, start_date=lo, end_date=hi)
-            track_api_call(supabase, exch)
+            track_api_call(supabase, exch, job="history_drift_probe",
+                           outcome=classify_outcome(_st, has_data=data is not None))
             counters["probes"] += 1
             if data is None:
                 counters["probe_failed"] += 1

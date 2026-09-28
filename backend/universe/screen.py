@@ -18,7 +18,7 @@ from ingest.prices import (
     normalize_gurufocus_ticker,
 )
 from ingest.earnings import _build_api_url, _api_request
-from ingest.api_usage import track_api_call
+from ingest.api_usage import classify_outcome, track_api_call
 from universe.criteria import evaluate_criteria
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,9 @@ def _fetch_financials_api(
     # closes; this request remains the source for reported financial-statement lines.
     url = _build_api_url(f"stock/{quote(symbol, safe=':')}/financials")
     api = _api_request(url)
-    track_api_call(supabase, exchange)
+    track_api_call(supabase, exchange, job="universe_screen_financials",
+                   outcome=classify_outcome(
+                       getattr(api, "status_code", None), has_data=api.data is not None))
 
     if api.data is None:
         return None, api.log

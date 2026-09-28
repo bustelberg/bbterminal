@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from deps import supabase
 from routers._cache_headers import CACHE_STATIC
-from ingest.api_usage import track_api_call
+from ingest.api_usage import classify_outcome, track_api_call
 from ingest.constants import DATA_CUTOFF
 from ingest.metric_upsert import upsert_metric_rows
 from ingest.prices import (
@@ -94,7 +94,9 @@ async def indicators_fetch(req: IndicatorRequest):
         api_data = None
         if cached is None or req.force_refresh:
             data, api_log, _http_status = _fetch_indicator_from_api(ticker, exchange, indicator)
-            track_api_call(supabase, exchange)
+            track_api_call(supabase, exchange, job="custom_indicator",
+                           outcome=classify_outcome(
+                               _http_status, has_data=data is not None))
             logs.append(api_log)
             if data is not None:
                 _upload_to_storage(supabase, path, data)

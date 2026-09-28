@@ -302,7 +302,11 @@ def _caps(isins: list[str], grid: dict[str, dict], emit,
         ccy = _cap_currency(q.get("currency"))
         eur = None
         if native and ccy:
-            fx = yahoo.fx_to_eur(ccy) or 0.0
+            # Cap writes run in their own pool, so the parent job's ContextVar is not inherited.
+            from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+            with api_usage_job("benchmark_refresh"):
+                fx = yahoo.fx_to_eur(ccy) or 0.0
             eur = round(float(native) * fx, 2) if fx else None
         #  Written even when null, with the timestamp — otherwise every run re-asks Yahoo
         # about the same names it already knows have no cap (an ETF, a delisted line).
@@ -318,7 +322,10 @@ def _caps(isins: list[str], grid: dict[str, dict], emit,
 
     for i in range(0, len(syms), _QUOTE_BATCH):
         chunk = syms[i:i + _QUOTE_BATCH]
-        quotes = yahoo.quote(chunk)
+        from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+        with api_usage_job("benchmark_refresh"):
+            quotes = yahoo.quote(chunk)
         quoted += len(quotes)
         #  The quotes are batched and the writes were not — which is where this step's time went.
         # One Yahoo call answers 100 symbols; storing them was 100 separate PostgREST round trips,
@@ -463,6 +470,14 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     stopped = threading.Event()
 
     def _one(item: tuple[str, int, str]) -> None:
+        # ThreadPoolExecutor starts with an empty ContextVar context. Name this worker explicitly
+        # so its Yahoo chart requests do not fall back to the generic `yahoo_chart` bucket.
+        from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+        with api_usage_job("benchmark_refresh"):
+            _one_inner(item)
+
+    def _one_inner(item: tuple[str, int, str]) -> None:
         isin, aid, sym = item
         if should_stop and should_stop():
             #  Said once, by whichever thread sees it first. Every queued constituent passes

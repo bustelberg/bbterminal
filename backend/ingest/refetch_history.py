@@ -42,7 +42,7 @@ from typing import Callable
 
 from common.pg import _run_copy
 from deps import supabase
-from ingest.api_usage import track_api_call
+from ingest.api_usage import classify_outcome, track_api_call
 from ingest.prices import (
     DATA_CUTOFF,
     _fetch_indicator_from_api,
@@ -249,7 +249,8 @@ def refetch_full_history(
         for metric, indicator in METRICS:
             try:
                 data, _log, status = _fetch_indicator_from_api(tic, exch, indicator)
-                track_api_call(supabase, exch)
+                track_api_call(supabase, exch, job=f"history_refetch_{metric}",
+                               outcome=classify_outcome(status, has_data=data is not None))
                 with lock:
                     counters["api_calls"] += 1
             except Exception as e:  # noqa: BLE001

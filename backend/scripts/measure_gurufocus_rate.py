@@ -42,7 +42,7 @@ from urllib.parse import quote
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import deps  # noqa: E402  — loads .env / .env.local
-from ingest.api_usage import track_api_call  # noqa: E402
+from ingest.api_usage import classify_outcome, track_api_call  # noqa: E402
 from ingest.earnings._api_client import (  # noqa: E402
     _api_request, _api_request_cf, _build_api_url,
 )
@@ -81,10 +81,14 @@ def _raw_latency(comps: list[dict]) -> list[float]:
     for c in comps:
         exch, url = _url(c)
         t = time.perf_counter()
-        _api_request_cf(url)                 #  the UN-GATED path, called serially
+        response = _api_request_cf(url)      #  the UN-GATED path, called serially
         out.append(time.perf_counter() - t)
         try:
-            track_api_call(deps.supabase, exch)
+            track_api_call(
+                deps.supabase, exch, job="rate_measurement_raw",
+                outcome=classify_outcome(
+                    response.status_code, has_data=response.data is not None),
+            )
         except Exception:
             pass
     return out
@@ -96,7 +100,10 @@ def _one(c: dict) -> dict:
     r = _api_request(url)
     el = time.perf_counter() - t
     try:
-        track_api_call(deps.supabase, exch)
+        track_api_call(
+            deps.supabase, exch, job="rate_measurement_gated",
+            outcome=classify_outcome(r.status_code, has_data=r.data is not None),
+        )
     except Exception:                       # the meter must never fail the measurement
         pass
     #  Three outcomes, not two. "Empty" is the one that matters and it is not an error.

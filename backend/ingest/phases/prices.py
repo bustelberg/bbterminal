@@ -663,7 +663,7 @@ def refresh_held_benchmarks(run_id: int) -> int:
 
     Best-effort per benchmark (a fetch/upsert failure is logged + skipped).
     Returns the count refreshed."""
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
     from ingest.prices import _fetch_price_from_api, _parse_price_series  # noqa: PLC0415
 
@@ -686,7 +686,8 @@ def refresh_held_benchmarks(run_id: int) -> int:
             ticker = bm.data[0]["ticker"]
             # ETFs are US-listed — same fetch the /api/benchmarks refresh uses.
             data, fetch_log, _status = _fetch_price_from_api(ticker, "NYSE")
-            track_api_call(supabase, "NYSE")
+            track_api_call(supabase, "NYSE", job="held_benchmark_price",
+                           outcome=classify_outcome(_status, has_data=data is not None))
             if not data:
                 log.warning("[price_update] benchmark %s (%s) fetch failed: %s", bid, ticker, fetch_log)
                 continue
