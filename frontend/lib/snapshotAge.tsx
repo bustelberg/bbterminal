@@ -1,10 +1,10 @@
 /**
  * How old an AIRS snapshot is, and a badge that says so.
  *
- * AIRS values (airs_holding / airs_performance) only move when the daily scan runs — working days
- * ~11:00 Amsterdam. So a snapshot dated today is fresh, one dated the previous trading day is the
- * normal "today's scan hasn't run yet" state, and anything TWO or more trading days back means the
- * scan has genuinely missed days and the numbers on screen are stale.
+ * There are two clocks here. `snapshotFreshness` measures a source's dated observation for feeds
+ * with no acquisition receipt. `airsScheduleFreshness` measures our daily AIRS read against its
+ * declared 11:00 Amsterdam schedule. Provenance uses the latter whenever an AIRS `fetched_at`
+ * exists, so yesterday remains current until today's scheduled run has had time to complete.
  *
  *  This exists because a cached AIRS value shown as if it were current is exactly how a stale
  * holding gets trusted: a 4-day-old AMD value read €114,587 / +142% while AIRS-live was €107,086 /
@@ -76,16 +76,15 @@ export function snapshotFreshness(asOf: string | null | undefined):
  * different clock, and two thresholds would eventually disagree about one row.
  */
 /**
- * Was this read from the source TODAY?
+ * Was this non-scheduled source read TODAY?
  *
- *  The rule for the provenance badge (2026-08-19): a copy that is not from today is outdated,
+ *  The generic rule for feeds without a declared schedule: a copy not from today is outdated,
  * and outdated is amber. Not "≥2 trading days", which is what it was — a figure read on Monday and
  * still on screen on Wednesday looked as current as one read an hour ago.
  *
  *  Calendar days, not trading days, and that is the literal rule rather than a softened one. It
- * means a Saturday lights up everything read on Friday. That is not a false alarm: nothing HAS been
- * read today, the scheduled scans are Mon-Fri, and a manual Refresh does clear it — so the badge
- * stays actionable, which is the one property amber must keep.
+ * means a Saturday can light up something read on Friday. AIRS no longer uses this rule; its
+ * schedule-aware branch below decides against the 11:00 Europe/Amsterdam slot instead.
  *
  *  Compared in local time, on the date portion only. `fetched_at` is an ISO timestamp in UTC;
  * slicing to `YYYY-MM-DD` and comparing to the browser's own local date is what makes "today" mean
@@ -98,6 +97,65 @@ export function fetchedToday(fetchedAt: string | null | undefined): boolean {
   const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-`
     + `${String(d.getDate()).padStart(2, '0')}`;
   return fetchedAt.slice(0, 10) === local;
+}
+
+const AIRS_TIME_ZONE = 'Europe/Amsterdam';
+const AIRS_RUN_MINUTE = 11 * 60;
+// The fleet is sequential: accounts, model compositions, then paired-model pricing. Do not call a
+// still-running 11:00 pass stale merely because the clock has just struck eleven.
+const AIRS_COMPLETION_GRACE_MINUTES = 60;
+
+type ZonedMinute = { date: string; minute: number; stamp: string };
+
+function zonedMinute(value: Date, timeZone: string): ZonedMinute | null {
+  if (Number.isNaN(value.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(value);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((item) => item.type === type)?.value;
+  const year = part('year');
+  const month = part('month');
+  const day = part('day');
+  const hour = Number(part('hour'));
+  const minute = Number(part('minute'));
+  if (!year || !month || !day || !Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  const date = `${year}-${month}-${day}`;
+  return { date, minute: hour * 60 + minute,
+    stamp: `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}` };
+}
+
+function previousDate(date: string): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() - 1);
+  return value.toISOString().slice(0, 10);
+}
+
+/** Freshness of the daily AIRS acquisition, aligned to its 11:00 Amsterdam schedule.
+ *
+ * Before 12:00 (the scheduled time plus one hour for the sequential fleet run), yesterday's
+ * successful 11:00 pass is still the latest one we can reasonably require. From 12:00 onward,
+ * this requires a read at or after today's 11:00 slot. This is deliberately schedule-based rather
+ * than `age < 24h`: a manual read late yesterday must not conceal a missed scheduled run today.
+ */
+export function airsScheduleFreshness(
+  fetchedAt: string | null | undefined, now: Date = new Date(),
+): { stale: boolean; label: string } {
+  if (!fetchedAt) return { stale: true, label: 'AIRS has not been read yet' };
+  const current = zonedMinute(now, AIRS_TIME_ZONE);
+  const fetched = zonedMinute(new Date(fetchedAt), AIRS_TIME_ZONE);
+  if (!current || !fetched) return { stale: true, label: 'AIRS read time is invalid' };
+
+  const afterDeadline = current.minute >= AIRS_RUN_MINUTE + AIRS_COMPLETION_GRACE_MINUTES;
+  const expectedDate = afterDeadline ? current.date : previousDate(current.date);
+  const expectedStamp = `${expectedDate}T11:00`;
+  if (fetched.stamp >= expectedStamp) {
+    const awaitingToday = !afterDeadline && fetched.date < current.date;
+    return { stale: false,
+      label: awaitingToday ? "current; today's 11:00 AIRS run is pending" : 'current AIRS run' };
+  }
+  return { stale: true, label: `missing AIRS run since ${expectedDate} 11:00 Amsterdam` };
 }
 
 export type LagOwner = { side: 'source' | 'ours'; days: number; text: string };

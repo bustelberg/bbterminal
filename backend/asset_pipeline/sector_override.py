@@ -25,6 +25,42 @@ GICS_SECTORS = frozenset({
     "Materials", "Real Estate", "Utilities",
 })
 
+# Provider vocabularies used elsewhere in the application all describe the same eleven GICS
+# buckets. Keep the bridge beside the accepted vocabulary so ETF look-through, benchmark data,
+# and manually classified companies cannot slowly acquire different spellings for one sector.
+_GICS_ALIASES = {
+    "technology": "Information Technology",
+    "tech": "Information Technology",
+    "finance": "Financials",
+    "financial": "Financials",
+    "financial services": "Financials",
+    "healthcare": "Health Care",
+    "communication": "Communication Services",
+    "communications": "Communication Services",
+    "telecom": "Communication Services",
+    "telecommunication": "Communication Services",
+    "telecommunications": "Communication Services",
+    "telecommunication services": "Communication Services",
+    "basic materials": "Materials",
+    "non-energy materials": "Materials",
+    "consumer cyclical": "Consumer Discretionary",
+    "consumer cyclicals": "Consumer Discretionary",
+    "consumer services": "Consumer Discretionary",
+    "consumer defensive": "Consumer Staples",
+    "consumer non-cyclical": "Consumer Staples",
+    "consumer non-cyclicals": "Consumer Staples",
+    "business services": "Industrials",
+}
+_GICS_BY_NORMALIZED_NAME = {" ".join(name.lower().split()): name for name in GICS_SECTORS}
+
+
+def normalize_gics_sector(value: str | None) -> str | None:
+    """Return our canonical GICS display name for a known provider spelling."""
+    if not value:
+        return None
+    normalized = " ".join(value.lower().split())
+    return _GICS_BY_NORMALIZED_NAME.get(normalized) or _GICS_ALIASES.get(normalized)
+
 
 def load_file_sector_overrides() -> dict[str, str]:
     """Return ``{ISIN: GICS sector}``; log and ignore a malformed file at runtime.

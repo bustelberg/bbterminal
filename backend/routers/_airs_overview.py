@@ -139,7 +139,8 @@ def list_overview() -> list[dict]:
     # which is also why a book paired with no model could not be named at all before.
     nicknames = _nicknames()
     models = {m["id"]: m for m in (supabase.table("airs_model_portfolio")
-                                   .select("id,name,display_name,omschrijving,portfolio_type")
+                                   .select("id,name,display_name,omschrijving,portfolio_type,"
+                                           "scanned_at,positions_scanned_at")
                                    .limit(500).execute().data or [])}
     # Nicknames saved in Links are keyed by a model's AIRS name.  Keep this separate from the
     # account-nickname table above: a model nickname decorates only an account with the exact same
@@ -181,6 +182,9 @@ def list_overview() -> list[dict]:
             "fixed_name": (m or {}).get("name"),
             "fixed_portfolio_id": (m or {}).get("id"),
             "fixed_type": (m or {}).get("portfolio_type"),
+            # The Fixed/model half is a separate AIRS acquisition from the account reports below.
+            # A successful account scan must not make a failed model scan look current.
+            "model_fetched_at": (m or {}).get("scanned_at"),
             #  The account's own ISIN count — see `list_accounts`. It was the paired MODEL's
             # position count, which is a different object and absent entirely for an unpaired book:
             # BUS_WTS_StMerken_Dyn showed "—" while holding 22 ISINs. `positions` is still read for

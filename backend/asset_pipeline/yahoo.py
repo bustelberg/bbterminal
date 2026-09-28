@@ -190,6 +190,85 @@ def asset_profile(symbols: list[str]) -> dict[str, dict]:
     return out
 
 
+_FUND_SECTOR_LABELS = {
+    "realestate": "Real Estate",
+    "consumer_cyclical": "Consumer Cyclical",
+    "basic_materials": "Basic Materials",
+    "consumer_defensive": "Consumer Defensive",
+    "technology": "Technology",
+    "communication_services": "Communication Services",
+    "financial_services": "Financial Services",
+    "utilities": "Utilities",
+    "industrials": "Industrials",
+    "energy": "Energy",
+    "healthcare": "Healthcare",
+}
+
+
+def fund_sector_weightings(symbol: str) -> list[dict]:
+    """One verified ETF's Yahoo sector weights, as percentage rows.
+
+    ``fundProfile.legalType`` is checked before accepting ``topHoldings``.  That identity guard is
+    load-bearing: callers use this for fund wrappers, a set that also contains mutual funds and
+    in-house certificates.  A non-ETF must return no rows rather than inherit a button merely
+    because Yahoo happens to expose a similarly shaped payload.
+    """
+    global _quote_sess, _quote_crumb
+    if not symbol or not _HAS_CURL:
+        return []
+
+    def request() -> tuple[int | None, str]:
+        global _quote_sess, _quote_crumb
+        session, crumb = _quote_session()
+        if not session:
+            return None, ""
+        url = f"{_PROFILE}/{_urlquote(symbol, safe='=^.:-')}"
+        try:
+            response = session.get(
+                url,
+                params={"modules": "topHoldings,fundProfile", "crumb": crumb},
+                timeout=20,
+            )
+            _track_request(url, response.status_code, response.text or "")
+            if response.status_code == 401:
+                _quote_sess = _quote_crumb = None
+                session, crumb = _quote_session()
+                if not session:
+                    return 401, ""
+                response = session.get(
+                    url,
+                    params={"modules": "topHoldings,fundProfile", "crumb": crumb},
+                    timeout=20,
+                )
+                _track_request(url, response.status_code, response.text or "")
+            return response.status_code, response.text or ""
+        except Exception:  # noqa: BLE001
+            _track_request(url, None)
+            return None, ""
+
+    status, text = _throttle.run(request)
+    if status != 200:
+        return []
+    try:
+        result = ((json.loads(text).get("quoteSummary") or {}).get("result") or [])[0]
+        if (result.get("fundProfile") or {}).get("legalType") != "Exchange Traded Fund":
+            return []
+        raw_rows = (result.get("topHoldings") or {}).get("sectorWeightings") or []
+    except (IndexError, TypeError, ValueError):
+        return []
+
+    rows = []
+    for item in raw_rows:
+        if not isinstance(item, dict) or len(item) != 1:
+            continue
+        key, value = next(iter(item.items()))
+        raw = (value or {}).get("raw") if isinstance(value, dict) else None
+        if key not in _FUND_SECTOR_LABELS or not isinstance(raw, (int, float)) or raw <= 0:
+            continue
+        rows.append({"sector": _FUND_SECTOR_LABELS[key], "weight_pct": float(raw) * 100.0})
+    return rows
+
+
 def quote(symbols: list[str]) -> dict[str, dict]:
     """Batch v7 quote -> {symbol: {marketCap, currency, sharesOutstanding, …}}.
     Chunks of 100, cookie+crumb auth (refreshed once on a 401), lightly paced.

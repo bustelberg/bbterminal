@@ -19,6 +19,11 @@ import re
 from io import StringIO
 from routers import _airs_portfolio_store as store
 from routers._asset_financials import BasketRequest, PerformanceResponse, PriceSeriesResponse
+from routers._etf_sector_allocation import (
+    EtfSectorAllocationResponse,
+    fetch_sector_allocation,
+    supported as sector_allocation_supported,
+)
 from routers._sse import sse_event, sse_message
 import queue as thread_queue
 import threading
@@ -43,6 +48,29 @@ from portfolio import parse_airs_excel
 router = APIRouter(tags=["airs"])
 
 _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
+
+
+@router.get(
+    "/api/airs/etf/{isin}/sector-allocation",
+    response_model=EtfSectorAllocationResponse,
+)
+async def etf_sector_allocation(isin: str) -> EtfSectorAllocationResponse:
+    """Sector weights for an explicitly verified ETF.
+
+    The registry contains only actual exchange-traded funds with a working issuer, justETF, or
+    Yahoo sector feed. Other fund-like instruments return 404, so internal portfolios such as
+    StarTopSelectie cannot accidentally acquire ETF look-through merely because AIRS groups them
+    with funds. Successful vendor reads are cached for six hours.
+    """
+    normalized = isin.strip().upper()
+    if not sector_allocation_supported(normalized):
+        raise HTTPException(404, "Sector allocation is not available for this ETF yet")
+    try:
+        return await asyncio.to_thread(fetch_sector_allocation, normalized)
+    except Exception as exc:
+        raise HTTPException(
+            502, f"Could not read the current ETF sector allocation: {exc}"
+        ) from exc
 
 
 def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
@@ -1069,6 +1097,10 @@ class BookHoldingDetail(BaseModel):
     # bucket, so it travels here instead — otherwise the blender would be handed ETFs, which have
     # no earnings and which this app deliberately does not look through.
     is_fund: bool | None = None
+    # Exact allow-list of REAL exchange-traded funds with a verified sector feed. This is not
+    # derived from `is_fund`: that flag also covers mutual funds and our own TopSelectie
+    # certificates, which must never receive an ETF look-through button.
+    sector_allocation_available: bool = False
     #  The sector chart's own bucket, not `asset_grid.sector` RAW. It runs through the identical
     # `_buckets` the bars and the benchmark use — canonicalised ("Financial Services" -> Financials,
     # the two Yahoo vocabularies), the ETF/asset-class leftovers ("etf", "Equity") stripped back to
@@ -3795,6 +3827,9 @@ class AirsPortfolioOverview(BaseModel):
     fixed_name: str | None = None
     fixed_portfolio_id: int | None = None
     fixed_type: str | None = None
+    # When the paired Fixed/model row itself was scanned. Separate from `fetched_at`, which is the
+    # Dynamic account's report scan; the two are phases of one job and can fail independently.
+    model_fetched_at: str | None = None
     #  The book's own distinct ISINs, not the paired model's position count. It was the latter,
     # so an unpaired book showed "—" beside 22 holdings you could see on expanding it, and a paired
     # book's number described a different object. None = no snapshot stored; NOT 0.

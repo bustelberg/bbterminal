@@ -95,6 +95,15 @@ describe('the amber chip is reserved for the lag we own', () => {
     );
     expect(html).toContain(INFO_ICON_WARN);
   });
+
+  it('fires immediately when the latest acquisition is known to have missed this report', () => {
+    const html = renderToStaticMarkup(
+      <Provenance source="airs_att" asOf="2999-01-01"
+        fetchedAt={new Date().toISOString()} kind="copied" note="a value"
+        staleReason="Rendement was missing from the latest AIRS scan" />,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+  });
 });
 
 describe('a subtree can supply the fetch time once, for all of its icons', () => {
@@ -158,6 +167,25 @@ describe('a subtree can supply the fetch time once, for all of its icons', () =>
     );
     expect(html).toContain(INFO_ICON_WARN);
   });
+
+  it('an AIRS-scoped provider does not lend its timestamp to Yahoo data', () => {
+    const html = renderToStaticMarkup(
+      <ProvenanceFetchedAt at={`${LONG_AGO}T13:15:00Z`} scope="airs">
+        <Provenance source="yfinance" asOf="2999-01-01" kind="copied" note="a Yahoo value" />
+      </ProvenanceFetchedAt>,
+    );
+    expect(html).toContain(INFO_ICON);
+    expect(html).not.toContain(INFO_ICON_WARN);
+  });
+
+  it('the same AIRS-scoped timestamp still reaches AIRS values without an as-of date', () => {
+    const html = renderToStaticMarkup(
+      <ProvenanceFetchedAt at={`${LONG_AGO}T13:15:00Z`} scope="airs">
+        <Provenance source="airs_model" kind="copied" note="a model name" />
+      </ProvenanceFetchedAt>,
+    );
+    expect(html).toContain(INFO_ICON_WARN);
+  });
 });
 
 // Not asserted here: the card's When line ("per value — each cell carries its own date"). The
@@ -183,45 +211,38 @@ describe('a subtree can supply the fetch time once, for all of its icons', () =>
  */
 describe('the icon and its card carry ONE verdict', () => {
   const today = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
 
   /** The card is rendered only while the tip is open, so the pill is asserted through
    *  `provenanceFreshness` directly — the same function the icon reads. */
-  it(' REVERSED (2026-08-19) — READ YESTERDAY IS NOW AMBER. This asserted BLUE for "read '
-     + 'yesterday, valued days ago", on the old ≥2-trading-day threshold. The rule is now: not '
-     + 'read TODAY is outdated. Amber stays actionable either way — a Refresh sets `fetched_at` to '
-     + 'now and clears it — which is the property the 2026-08-17 incident was about', () => {
+  it('a missed scheduled AIRS read is amber in the icon and verdict', () => {
     const html = renderToStaticMarkup(
-      <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${yesterday}T13:00:00Z`}
+      <Provenance source="airs_att" asOf={LONG_AGO} fetchedAt={`${LONG_AGO}T13:00:00Z`}
         kind="copied" note="a value" />,
     );
     expect(html).toContain(INFO_ICON_WARN);
     // ...and the card agrees, because it is the same call.
-    expect(provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`).stale).toBe(true);
+    expect(provenanceFreshness(
+      LONG_AGO, `${LONG_AGO}T13:00:00Z`, false, 'airs_att',
+    ).stale).toBe(true);
   });
 
-  it(' THE SOURCE’S OWN AGE IS NO LONGER REPORTED AT ALL (2026-08-19). This asserted the '
-     + 'label said "the source’s latest" for a book read today but valued long ago. Where we '
-     + 'know when WE read it, that is the whole answer — the valuation age answers a question '
-     + 'nobody on this page is asking, and printing both put two clocks in one row with the '
-     + 'actionable one hidden', () => {
+  it('AIRS freshness reports the acquisition run, not the source valuation age', () => {
     const today = new Date().toISOString().slice(0, 10);
-    const f = provenanceFreshness(LONG_AGO, `${today}T13:00:00Z`);
+    const f = provenanceFreshness(LONG_AGO, `${today}T13:00:00Z`, false, 'airs_att');
     expect(f.stale).toBe(false);
-    expect(f.label).toBe('read today');
-    expect(f.label).not.toContain('source');
-    //  And nothing about trading-day ages either — that phrasing was the source's clock.
-    expect(f.label).not.toMatch(/old|trading day/);
+    expect(f.label).toMatch(/current|pending/);
+    expect(f.label).not.toMatch(/old|trading day|valuation/);
   });
 
   it(' WHEN SHOWS OUR READ DATE, not the valuation date, wherever we know it', () => {
     const html = renderToStaticMarkup(
-      <Provenance source="airs_volk" asOf={LONG_AGO} fetchedAt={`${yesterday}T13:00:00Z`}
+      <Provenance source="airs_volk" asOf={LONG_AGO} fetchedAt={`${LONG_AGO}T13:00:00Z`}
         kind="copied" note="a value" />,
     );
     // The card only renders inside the open tip, so assert the verdict the row is built from.
-    expect(provenanceFreshness(LONG_AGO, `${yesterday}T13:00:00Z`).label)
-      .toMatch(/not read today|read \d+ trading day/);
+    expect(provenanceFreshness(
+      LONG_AGO, `${LONG_AGO}T13:00:00Z`, false, 'airs_volk',
+    ).label).toContain('missing AIRS run');
     expect(html).toContain(INFO_ICON_WARN);
   });
 
@@ -238,7 +259,9 @@ describe('the icon and its card carry ONE verdict', () => {
         kind="copied" note="a value" />,
     );
     expect(html).toContain(INFO_ICON_WARN);
-    expect(provenanceFreshness(LONG_AGO, `${LONG_AGO}T09:00:00Z`).stale).toBe(true);
+    expect(provenanceFreshness(
+      LONG_AGO, `${LONG_AGO}T09:00:00Z`, false, 'airs_att',
+    ).stale).toBe(true);
   });
 
   it(' UNKNOWN WHOSE LAG STAYS AMBER — most call sites pass no fetchedAt', () => {
@@ -251,10 +274,11 @@ describe('the icon and its card carry ONE verdict', () => {
   });
 
   it('a genuinely current figure is blue with no pill to contradict it', () => {
-    const f = provenanceFreshness(today, `${today}T09:00:00Z`);
+    const fetchedNow = new Date().toISOString();
+    const f = provenanceFreshness(today, fetchedNow, false, 'airs_att');
     expect(f.stale).toBe(false);
     expect(renderToStaticMarkup(
-      <Provenance source="airs_att" asOf={today} fetchedAt={`${today}T09:00:00Z`}
+      <Provenance source="airs_att" asOf={today} fetchedAt={fetchedNow}
         kind="copied" note="a value" />,
     )).toContain(INFO_ICON);
   });

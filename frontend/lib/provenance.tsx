@@ -8,9 +8,10 @@
  * live one, an AIRS return from a yfinance one, or a price return from a flow-aware one, by looking
  * at the digits. This attaches that whole answer to the value.
  *
- * The badge turns amber when the source is genuinely stale (≥2 trading days), and the popover's
- * pill states the freshness. Rendered via {@link InfoTip} so it appears instantly (the native
- * `title=` sits for ~1-2s) and can't be clipped by an overflow ancestor.
+ * The badge turns amber when the source-specific freshness policy says the value is stale, and the
+ * popover states why. AIRS follows its 11:00 Amsterdam acquisition schedule; dated market feeds
+ * use their own observation dates. Rendered via {@link InfoTip} so it appears instantly and cannot
+ * be clipped by an overflow ancestor.
  */
 import * as React from 'react';
 import { createContext, useContext } from 'react';
@@ -21,7 +22,9 @@ import { ValueBadge } from './dynamicValue';
 import { dialog } from './dialog';
 import { BADGE_NEUTRAL, BADGE_PILL, BADGE_WARN } from './badgeChrome';
 import { trimStop } from './provenanceText';
-import { businessDaysBehind, fetchedToday, lagOwner, snapshotFreshness } from './snapshotAge';
+import {
+  airsScheduleFreshness, businessDaysBehind, fetchedToday, lagOwner, snapshotFreshness,
+} from './snapshotAge';
 
 export type SourceKey =
   | 'airs_volk'      // AIRS Vermogensoverzicht — the book's own EUR position values
@@ -33,6 +36,9 @@ export type SourceKey =
   | 'benchmark_etf'  // GuruFocus close for the index ETF itself (ACWI, SPY)
   | 'benchmark_caps' // yfinance market cap per constituent — the index's WEIGHTS, not its prices
   | 'derived';       // computed from the above (no single source of its own)
+
+const AIRS_SOURCES = new Set<SourceKey>(['airs_volk', 'airs_att', 'airs_model']);
+const isAirsSource = (source: SourceKey) => AIRS_SOURCES.has(source);
 
 /**
  *  The label is the whole answer — there is no second "vendor" line, and there must not be one
@@ -136,33 +142,21 @@ export const sourceField = (key: SourceKey): string => SOURCE[key].field;
  */
 export function provenanceFreshness(
   asOf: string | null | undefined, fetchedAt: string | null | undefined, column?: boolean,
+  source?: SourceKey,
 ): { stale: boolean; label: string } {
-  if (column || !asOf) return { stale: false, label: '' };
+  if (column) return { stale: false, label: '' };
+  // AIRS has a declared acquisition clock. Its valuation date can legitimately be old even after
+  // a successful read, so freshness is whether the latest scheduled read happened—not whether
+  // AIRS happened to publish a newer valuation. This also dates structural AIRS values such as a
+  // portfolio name, which have a fetch time but no independent `as_of` date.
+  if (source && isAirsSource(source) && fetchedAt) {
+    return airsScheduleFreshness(fetchedAt);
+  }
+  if (!asOf) return { stale: false, label: '' };
   const f = snapshotFreshness(asOf);
 
-  /**
-   *  Not fetched today is outdated (2026-08-19). Where we KNOW when we last read the source,
-   * that is the whole verdict: today is current, anything older is amber.
-   *
-   * This tightens the old threshold (≥2 trading days) rather than replacing the principle. Amber
-   * still means "you can fix this": a Refresh sets `fetched_at` to now and clears it, which is
-   * exactly the property the 2026-08-17 incident was about — firing amber on AIRS's own valuation
-   * lag produced 27 alarms of which 23 could not be cleared by anything on the page, and an alarm
-   * you cannot clear is one readers learn to scroll past. Our own read age is always ours to fix,
-   * so tightening it does not reintroduce that.
-   *
-   *  The source's own lag still is not a fault. Read today, the row is current even if AIRS last
-   * valued the book a week ago — the card says so in `Whose lag`, and the pill keeps the date.
-   */
-  /**
-   *  Where we know when we read it, that is the whole answer — the source's own valuation age is
-   * not reported at all (2026-08-19). It used to read "6 trading days old — the source's latest",
-   * which answers a question nobody on this page is asking: what matters is whether OUR copy is
-   * current, and the only thing that makes it current is having read it today.
-   *
-   * That also removes the last place the two lags could be confused. `stale` is now exactly
-   * "not read today", and the pill says so in the same words.
-   */
+  // Generic fetched-at policy for sources that have no declared schedule. AIRS returned above;
+  // market series normally carry no fetchedAt and therefore fall through to their own as-of date.
   if (fetchedAt) {
     if (fetchedToday(fetchedAt)) return { stale: false, label: 'read today' };
     const days = businessDaysBehind(fetchedAt.slice(0, 10));
@@ -312,7 +306,11 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
   // explanation this card no longer trades in. A row read today is current; there is nothing to
   // explain and nothing to act on.
   const lag = lagOwner(asOf, fetchedAt);
-  const whoseLag = lag?.side === 'ours' ? lag : null;
+  const whoseLag = isAirsSource(source) && fresh.stale && fetchedAt
+    ? { side: 'ours' as const, days: businessDaysBehind(fetchedAt.slice(0, 10)),
+      text: 'The latest scheduled 11:00 Amsterdam AIRS read is missing. Refreshing will ask AIRS '
+        + 'again now.' }
+    : lag?.side === 'ours' ? lag : null;
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
     <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}
@@ -445,7 +443,12 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
  * another's numbers and quietly de-amber a row that really is our lag. An explicit `fetchedAt` prop
  * always wins, so a nested exception stays possible.
  */
-const FetchedAtContext = createContext<string | null | undefined>(undefined);
+type FetchedAtContextValue = {
+  at?: string | null;
+  /** AIRS wrappers must not lend their timestamp to nested Yahoo/benchmark facts. */
+  scope: 'all' | 'airs';
+};
+const FetchedAtContext = createContext<FetchedAtContextValue | undefined>(undefined);
 
 /**
  * The refresh action every ⓘ under here offers, supplied ONCE per surface.
@@ -477,14 +480,14 @@ export function ProvenanceRefresh({ action, children }: {
   return <RefreshContext.Provider value={action}>{children}</RefreshContext.Provider>;
 }
 
-export function ProvenanceFetchedAt({ at, children }: {
-  at?: string | null; children: React.ReactNode;
+export function ProvenanceFetchedAt({ at, scope = 'all', children }: {
+  at?: string | null; scope?: 'all' | 'airs'; children: React.ReactNode;
 }) {
-  return <FetchedAtContext.Provider value={at}>{children}</FetchedAtContext.Provider>;
+  return <FetchedAtContext.Provider value={{ at, scope }}>{children}</FetchedAtContext.Provider>;
 }
 
 export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what,
-  worked, legend, calculation, onRefresh }: {
+  worked, legend, calculation, onRefresh, staleReason }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
@@ -514,6 +517,8 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
    * every ⓘ on the dashboard a data-owner.
    */
   onRefresh?: () => Promise<string | null>;
+  /** A known failed/partial acquisition. This outranks clock-based freshness for this value. */
+  staleReason?: string;
 }) {
   //  `!column &&` FIRST. A column header must never reach the stale branch, whatever it was
   // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
@@ -536,11 +541,15 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   // means "this call site does not know when we read it", which is precisely when the provider's
   // answer — about the same account — is the better one.
   const ctxFetchedAt = useContext(FetchedAtContext);
-  const fetched = fetchedAt ?? ctxFetchedAt;
+  const inheritedFetchedAt = ctxFetchedAt
+    && (ctxFetchedAt.scope === 'all' || isAirsSource(source)) ? ctxFetchedAt.at : undefined;
+  const fetched = fetchedAt ?? inheritedFetchedAt;
   //  Computed once and handed to both — the icon below and the card's When pill. Two
   // computations of "is this current" in one component is what produced a blue ⓘ over an amber
   // "3 trading days old".
-  const fresh = provenanceFreshness(asOf, fetched, column);
+  const fresh = staleReason && !column
+    ? { stale: true, label: staleReason }
+    : provenanceFreshness(asOf, fetched, column, source);
   return (
     <InfoTip wide={calculation != null} content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
       worked={worked} legend={legend} calculation={calculation}

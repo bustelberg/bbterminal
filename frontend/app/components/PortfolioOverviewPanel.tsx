@@ -1234,7 +1234,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             fetched string computed is the same mistake `formula` was making. The
                             name has no valuation date of its own, so `fetchedAt` alone is right:
                             the card badges it and prices its own freshness from it. */}
-                        <Provenance source="airs_model" kind="copied" fetchedAt={r.fetched_at}
+                        <Provenance source={r.fixed_name ? 'airs_model' : 'airs_volk'} kind="copied"
+                          fetchedAt={r.fixed_name ? r.model_fetched_at : r.fetched_at}
                           what={r.fixed_name
                             ? 'The name of this account, read from the model portfolio it is paired with.'
                             : 'The name of this account, as AIRS itself calls it.'}
@@ -1247,12 +1248,16 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                       <td className={`px-3 py-1.5 text-[15px] text-right font-mono font-semibold ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
+                          staleReason={r.missing_reports?.includes('att')
+                            ? 'Rendement was missing from the latest AIRS scan' : undefined}
                           what="This account's return so far this year, as AIRS itself reports it."
                           note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
                       </td>
                       <td className={`px-3 py-1.5 text-[15px] text-right font-mono ${tone(r.latest_month_pct)}`}>
                         {pct(r.latest_month_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
+                          staleReason={r.missing_reports?.includes('att')
+                            ? 'Rendement was missing from the latest AIRS scan' : undefined}
                           what="What this account returned in the most recent month AIRS has closed."
                           note="rendement — AIRS's return for the most recent month" />
                       </td>
@@ -2118,7 +2123,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
        the subtree rather than as a prop on forty call sites, where the one that got forgotten would
        be a single amber icon among quiet neighbours, reading as "this number in particular is
        stale". See `ProvenanceFetchedAt`. */
-    <ProvenanceFetchedAt at={d?.fetched_at}>
+    <ProvenanceFetchedAt at={d?.fetched_at} scope="airs">
     <div className="space-y-2">
       {/*  THE WHOLE BAR IS THE TOGGLE, not a caret you have to hit. The figures on it are the
           Total row's, so a reader who only wanted the summary has already been answered and the

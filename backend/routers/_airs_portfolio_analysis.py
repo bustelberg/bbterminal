@@ -53,6 +53,7 @@ from routers._airs_ref import model as ref_model, mutaties_for as ref_mutaties_f
 from routers._asset_benchmark import index_returns
 from routers._asset_benchmark import members as _members
 from routers._benchmark_index import SP500_LABEL
+from routers._etf_sector_allocation import supported as etf_sector_allocation_supported
 
 EQUITY_BUCKET = "Equity"
 CASH_BUCKET = "Cash"
@@ -1881,6 +1882,9 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             # `!h.is_fund` guard passed on `undefined`, which is exactly the failure the flag
             # exists to prevent: ETFs back in the fundamentals blend, quietly.
             "is_fund": bool(r.get("is_fund")),
+            # Exact ISIN allow-list, deliberately independent of the broad fund flag. In-house
+            # TopSelectie certificates are funds for the owner-earnings gate but are not ETFs.
+            "sector_allocation_available": etf_sector_allocation_supported(isin or ""),
             "sector": sec,
             "company_id": grow.get("company_id") if grow else None,
             "sector_default": _sector(grow.get("sector_default")) if grow else None,
