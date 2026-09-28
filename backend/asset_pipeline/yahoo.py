@@ -205,13 +205,13 @@ _FUND_SECTOR_LABELS = {
 }
 
 
-def fund_sector_weightings(symbol: str) -> list[dict]:
-    """One verified ETF's Yahoo sector weights, as percentage rows.
+def _fund_sector_weightings(symbol: str, *, vehicle: str) -> list[dict]:
+    """One explicitly registered fund's Yahoo sector weights, as percentage rows.
 
-    ``fundProfile.legalType`` is checked before accepting ``topHoldings``.  That identity guard is
-    load-bearing: callers use this for fund wrappers, a set that also contains mutual funds and
-    in-house certificates.  A non-ETF must return no rows rather than inherit a button merely
-    because Yahoo happens to expose a similarly shaped payload.
+    Yahoo identifies ETFs through ``fundProfile.legalType`` and mutual funds through
+    ``price.quoteType``. Keep those as separate accepted identities: callers hold a mixture of
+    exchange-traded funds, mutual funds and in-house certificates, and a similarly shaped
+    ``topHoldings`` object alone is not permission to expose look-through.
     """
     global _quote_sess, _quote_crumb
     if not symbol or not _HAS_CURL:
@@ -226,7 +226,7 @@ def fund_sector_weightings(symbol: str) -> list[dict]:
         try:
             response = session.get(
                 url,
-                params={"modules": "topHoldings,fundProfile", "crumb": crumb},
+                params={"modules": "topHoldings,fundProfile,price", "crumb": crumb},
                 timeout=20,
             )
             _track_request(url, response.status_code, response.text or "")
@@ -237,7 +237,7 @@ def fund_sector_weightings(symbol: str) -> list[dict]:
                     return 401, ""
                 response = session.get(
                     url,
-                    params={"modules": "topHoldings,fundProfile", "crumb": crumb},
+                    params={"modules": "topHoldings,fundProfile,price", "crumb": crumb},
                     timeout=20,
                 )
                 _track_request(url, response.status_code, response.text or "")
@@ -251,7 +251,11 @@ def fund_sector_weightings(symbol: str) -> list[dict]:
         return []
     try:
         result = ((json.loads(text).get("quoteSummary") or {}).get("result") or [])[0]
-        if (result.get("fundProfile") or {}).get("legalType") != "Exchange Traded Fund":
+        legal_type = (result.get("fundProfile") or {}).get("legalType")
+        quote_type = (result.get("price") or {}).get("quoteType")
+        if vehicle == "etf" and legal_type != "Exchange Traded Fund":
+            return []
+        if vehicle == "mutual_fund" and quote_type != "MUTUALFUND":
             return []
         raw_rows = (result.get("topHoldings") or {}).get("sectorWeightings") or []
     except (IndexError, TypeError, ValueError):
@@ -267,6 +271,16 @@ def fund_sector_weightings(symbol: str) -> list[dict]:
             continue
         rows.append({"sector": _FUND_SECTOR_LABELS[key], "weight_pct": float(raw) * 100.0})
     return rows
+
+
+def fund_sector_weightings(symbol: str) -> list[dict]:
+    """Yahoo sector weights for an explicitly registered ETF only."""
+    return _fund_sector_weightings(symbol, vehicle="etf")
+
+
+def mutual_fund_sector_weightings(symbol: str) -> list[dict]:
+    """Yahoo sector weights for an explicitly registered mutual-fund share class only."""
+    return _fund_sector_weightings(symbol, vehicle="mutual_fund")
 
 
 def quote(symbols: list[str]) -> dict[str, dict]:

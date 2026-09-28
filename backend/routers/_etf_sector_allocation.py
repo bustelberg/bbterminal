@@ -1,9 +1,9 @@
-"""Look-through sector weights for explicitly verified exchange-traded funds.
+"""Look-through sector weights for explicitly verified external funds.
 
 ``is_fund`` is deliberately too broad for this job: it also covers mutual funds and the Leonteq
 certificates that wrap our own TopSelectie portfolios. This module therefore owns an exact ISIN
-allow-list of real ETFs for which a sector feed has been verified. No name heuristic can create a
-button.
+allow-list of external ETFs and mutual-fund share classes for which a sector feed has been
+verified. No name heuristic can create a button.
 
 The preferred source is the issuer. Verified physical iShares funds use their daily official
 breakdown, with justETF as a fallback; other European ETFs use justETF's ISIN-keyed profile and
@@ -85,11 +85,22 @@ _YAHOO_PRODUCTS = {
     "IE000LCKJ888": ("WisdomTree Physical AI, Humanoids and Drones UCITS ETF", "WPAI.L"),
 }
 
+_YAHOO_MUTUAL_FUNDS = {
+    # Yahoo search resolves this exact ISIN to the Frankfurt mutual-fund share class below. Its
+    # quoteSummary publishes all eleven sectors and identifies the instrument as MUTUALFUND.
+    "IE000MEQP5U8": (
+        "Letko Brosseau Global Emerging Markets Equity Fund - Class Launch EUR Acc",
+        "0P0001TPVP.F",
+    ),
+}
+
 _PRODUCTS = {
     **{isin: {"name": name, "provider": "justetf"}
        for isin, name in _JUSTETF_NAMES.items()},
     **{isin: {"name": name, "provider": "yahoo", "symbol": symbol}
        for isin, (name, symbol) in _YAHOO_PRODUCTS.items()},
+    **{isin: {"name": name, "provider": "yahoo_mutual_fund", "symbol": symbol}
+       for isin, (name, symbol) in _YAHOO_MUTUAL_FUNDS.items()},
     **{
         isin: {
             "name": name,
@@ -283,10 +294,13 @@ def _fetch_justetf(isin: str) -> EtfSectorAllocationResponse:
 
 
 def _fetch_yahoo(isin: str, product: dict) -> EtfSectorAllocationResponse:
-    from asset_pipeline.yahoo import fund_sector_weightings  # noqa: PLC0415
+    from asset_pipeline.yahoo import (  # noqa: PLC0415
+        fund_sector_weightings, mutual_fund_sector_weightings)
 
     with api_usage_job("etf_sector_allocation"):
-        rows = fund_sector_weightings(product["symbol"])
+        rows = (mutual_fund_sector_weightings(product["symbol"])
+                if product["provider"] == "yahoo_mutual_fund"
+                else fund_sector_weightings(product["symbol"]))
     return _validated_response(
         isin=isin, name=product["name"], as_of=None, source="Yahoo Finance",
         source_url=f"https://finance.yahoo.com/quote/{product['symbol']}/holdings/",
@@ -295,7 +309,7 @@ def _fetch_yahoo(isin: str, product: dict) -> EtfSectorAllocationResponse:
 
 
 def fetch_sector_allocation(isin: str) -> EtfSectorAllocationResponse:
-    """Fetch one supported ETF, caching successful answers for six hours."""
+    """Fetch one supported external fund, caching successful answers for six hours."""
     isin = isin.strip().upper()
     product = _PRODUCTS[isin]
     now = time.monotonic()
@@ -310,10 +324,10 @@ def fetch_sector_allocation(isin: str) -> EtfSectorAllocationResponse:
             allocation = _fetch_ishares(isin, product)
         elif provider == "justetf":
             allocation = _fetch_justetf(isin)
-        elif provider == "yahoo":
+        elif provider in ("yahoo", "yahoo_mutual_fund"):
             allocation = _fetch_yahoo(isin, product)
         else:  # pragma: no cover - registry construction makes this impossible
-            raise ValueError(f"unknown ETF sector provider {provider}")
+            raise ValueError(f"unknown fund sector provider {provider}")
     except Exception as exc:
         if product.get("fallback") != "justetf":
             raise

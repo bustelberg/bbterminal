@@ -47,15 +47,15 @@ export default function EtfSectorAllocationModal({ isin, name, portfolioWeightPc
   const labels = lang === 'nl'
     ? { title: 'Sectorverdeling', asOf: 'Per', source: 'Bron', close: 'Sluiten',
       providerSector: 'Oorspronkelijke sector', originalWeight: 'Origineel',
-      ourSector: 'Onze sector', ourWeight: 'Onze ETF-weging', currentWeight: 'Actueel gewicht',
+      ourSector: 'Onze sector', ourWeight: 'Onze fondsweging', currentWeight: 'Actueel gewicht',
       portfolioWeight: 'In portefeuille',
-      holdingWeight: (weight: string) => `Deze ETF is ${weight}% van de actuele portefeuille.`,
+      holdingWeight: (weight: string) => `Dit fonds is ${weight}% van de actuele portefeuille.`,
       loading: 'Sectorwegingen laden', failed: 'Sectorverdeling kon niet worden geladen.' }
     : { title: 'Sector allocation', asOf: 'As of', source: 'Source', close: 'Close',
       providerSector: 'Original sector', originalWeight: 'Original weight',
-      ourSector: 'Our sector', ourWeight: 'Our ETF weight', currentWeight: 'Current weight',
+      ourSector: 'Our sector', ourWeight: 'Our fund weight', currentWeight: 'Current weight',
       portfolioWeight: 'In portfolio',
-      holdingWeight: (weight: string) => `This ETF is ${weight}% of the current portfolio.`,
+      holdingWeight: (weight: string) => `This fund is ${weight}% of the current portfolio.`,
       loading: 'Loading sector weights', failed: 'Sector allocation could not be loaded.' };
   const mappedSectors = collapseEtfSectors(data?.sectors ?? []);
   const sourceTotal = mappedSectors.reduce((sum, row) => sum + row.weight_pct, 0);

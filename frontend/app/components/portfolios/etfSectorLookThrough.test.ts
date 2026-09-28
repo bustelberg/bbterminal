@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import {
-  addEtfSectorWeights, collapseEtfSectors, etfSectorPortfolioContribution,
-  normalizedEtfSectorWeight, portfolioSectorBucket,
+  addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
+  collapseEtfSectors, etfSectorPortfolioContribution, normalizedEtfSectorWeight,
+  portfolioSectorBucket,
 } from './etfSectorLookThrough';
 
 type Holding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
@@ -96,5 +97,47 @@ describe('addEtfSectorWeights', () => {
     ] as Holding[];
 
     expect(addEtfSectorWeights([], holdings, {})).toEqual([]);
+  });
+
+  it('adds only the certificate routes of expanded TopSelectie constituents', () => {
+    const holdings = [
+      {
+        name: 'Mastercard', bucket: 'Equity', sector: 'Financial Services', is_fund: false,
+        weight_now_pct: 8,
+        sources: [
+          { label: null, value_eur: 600, weight_now_pct: 6 },
+          { label: 'StarTopSelectie', value_eur: 200, weight_now_pct: 2 },
+        ],
+      },
+      {
+        name: 'NVIDIA', bucket: 'Equity', sector: 'Technology', is_fund: false,
+        weight_now_pct: 3,
+        sources: [
+          { label: 'StarTopSelectie', value_eur: 300, weight_now_pct: 3 },
+        ],
+      },
+    ] as Holding[];
+
+    const result = addCertificateSectorWeights([
+      { bucket: 'Financials', portfolio_pct: 6, benchmark_pct: 10, diff_pct: -4,
+        holdings: [] },
+    ], holdings);
+
+    expect(result.find((row) => row.bucket === 'Financials')?.portfolio_pct).toBe(8);
+    expect(result.find((row) => row.bucket === 'Technology')?.portfolio_pct).toBe(3);
+    expect(result.reduce((sum, row) => sum + (row.portfolio_pct ?? 0), 0)).toBe(11);
+    expect(certificateSectorLookThroughCount(holdings)).toBe(1);
+  });
+
+  it('ignores non-equity and fund rows inside certificate payloads', () => {
+    const holdings = [
+      { bucket: 'Cash', sector: 'Cash', is_fund: false,
+        sources: [{ label: 'StarTopSelectie', value_eur: 2, weight_now_pct: 2 }] },
+      { bucket: 'Equity', sector: 'Unclassified', is_fund: true,
+        sources: [{ label: 'StarTopSelectie', value_eur: 4, weight_now_pct: 4 }] },
+    ] as Holding[];
+
+    expect(addCertificateSectorWeights([], holdings)).toEqual([]);
+    expect(certificateSectorLookThroughCount(holdings)).toBe(0);
   });
 });

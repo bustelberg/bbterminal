@@ -55,21 +55,21 @@ _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
     response_model=EtfSectorAllocationResponse,
 )
 async def etf_sector_allocation(isin: str) -> EtfSectorAllocationResponse:
-    """Sector weights for an explicitly verified ETF.
+    """Sector weights for an explicitly verified external fund.
 
-    The registry contains only actual exchange-traded funds with a working issuer, justETF, or
-    Yahoo sector feed. Other fund-like instruments return 404, so internal portfolios such as
-    StarTopSelectie cannot accidentally acquire ETF look-through merely because AIRS groups them
-    with funds. Successful vendor reads are cached for six hours.
+    The registry contains only exact ETF or mutual-fund share-class ISINs with a working issuer,
+    justETF, or Yahoo sector feed. Other fund-like instruments return 404, so internal portfolios
+    such as StarTopSelectie cannot accidentally acquire external-fund look-through merely because
+    AIRS groups them with funds. Successful vendor reads are cached for six hours.
     """
     normalized = isin.strip().upper()
     if not sector_allocation_supported(normalized):
-        raise HTTPException(404, "Sector allocation is not available for this ETF yet")
+        raise HTTPException(404, "Sector allocation is not available for this fund yet")
     try:
         return await asyncio.to_thread(fetch_sector_allocation, normalized)
     except Exception as exc:
         raise HTTPException(
-            502, f"Could not read the current ETF sector allocation: {exc}"
+            502, f"Could not read the current fund sector allocation: {exc}"
         ) from exc
 
 
@@ -1097,9 +1097,9 @@ class BookHoldingDetail(BaseModel):
     # bucket, so it travels here instead — otherwise the blender would be handed ETFs, which have
     # no earnings and which this app deliberately does not look through.
     is_fund: bool | None = None
-    # Exact allow-list of REAL exchange-traded funds with a verified sector feed. This is not
-    # derived from `is_fund`: that flag also covers mutual funds and our own TopSelectie
-    # certificates, which must never receive an ETF look-through button.
+    # Exact allow-list of external fund share classes with a verified sector feed. This is not
+    # derived from `is_fund`: that flag also covers unsupported mutual funds and our own
+    # TopSelectie certificates, which must never receive an external-fund look-through button.
     sector_allocation_available: bool = False
     #  The sector chart's own bucket, not `asset_grid.sector` RAW. It runs through the identical
     # `_buckets` the bars and the benchmark use — canonicalised ("Financial Services" -> Financials,

@@ -80,19 +80,7 @@ export function etfSectorPortfolioContribution(
   return portfolioWeightPct * normalizedEtfSectorWeight(sectorWeightPct, allocationTotal) / 100;
 }
 
-/**
- * Fold verified ETF look-through into the existing current-book sector rows.
- *
- * Both inputs use percentages of the complete current AIRS book. An ETF at 12% whose source
- * breakdown says 25% Financials therefore contributes 3 percentage points to Financials. Source
- * tables occasionally total 99.99 or 100.01 after publication rounding, so divide by their
- * reported total: the sectors added for one ETF then sum to exactly the weight actually owned.
- */
-export function addEtfSectorWeights(
-  rows: SectorChartRow[],
-  holdings: BookHolding[],
-  allocations: Readonly<Record<string, EtfSectorAllocationResponse>>,
-): SectorChartRow[] {
+function sectorRowsByBucket(rows: SectorChartRow[]): Map<string, SectorChartRow> {
   const bySector = new Map<string, SectorChartRow>();
   for (const row of rows) {
     const bucket = portfolioSectorBucket(row.bucket);
@@ -106,6 +94,83 @@ export function addEtfSectorWeights(
     current.diff_pct = (current.portfolio_pct ?? 0) - (current.benchmark_pct ?? 0);
     current.holdings = [...(current.holdings ?? []), ...(row.holdings ?? [])];
   }
+  return bySector;
+}
+
+function addPortfolioSectorWeight(
+  bySector: Map<string, SectorChartRow>, sector: string, contribution: number,
+): void {
+  const bucket = portfolioSectorBucket(sector);
+  const current = bySector.get(bucket);
+  if (current) {
+    const portfolio = (current.portfolio_pct ?? 0) + contribution;
+    current.portfolio_pct = portfolio;
+    current.diff_pct = portfolio - (current.benchmark_pct ?? 0);
+    return;
+  }
+  bySector.set(bucket, {
+    bucket,
+    portfolio_pct: contribution,
+    benchmark_pct: 0,
+    diff_pct: contribution,
+    holdings: [],
+  });
+}
+
+function certificateSectorWeight(holding: BookHolding): number {
+  return (holding.sources ?? []).reduce((sum, source) => (
+    source.label != null && source.weight_now_pct > 0
+      ? sum + source.weight_now_pct : sum
+  ), 0);
+}
+
+/** How many internal certificate baskets can contribute to the sector chart. */
+export function certificateSectorLookThroughCount(holdings: BookHolding[]): number {
+  const certificates = new Set<string>();
+  for (const holding of holdings) {
+    if (holding.bucket !== 'Equity' || holding.is_fund || !holding.sector) continue;
+    for (const source of holding.sources ?? []) {
+      if (source.label != null && source.weight_now_pct > 0) certificates.add(source.label);
+    }
+  }
+  return certificates.size;
+}
+
+/**
+ * Add the equity-sector portions reached through internal TopSelectie certificates.
+ *
+ * The server already expands these wrappers for the Holdings payload. Each labelled source is a
+ * route through a certificate and its `weight_now_pct` is a share of the complete current book,
+ * exactly like the sector bars. Unlabelled sources are shares held directly and are already in
+ * the base rows, so adding only labelled routes is what prevents a mixed direct/wrapped holding
+ * from being counted twice.
+ */
+export function addCertificateSectorWeights(
+  rows: SectorChartRow[], holdings: BookHolding[],
+): SectorChartRow[] {
+  const bySector = sectorRowsByBucket(rows);
+  for (const holding of holdings) {
+    if (holding.bucket !== 'Equity' || holding.is_fund || !holding.sector) continue;
+    const wrappedWeight = certificateSectorWeight(holding);
+    if (wrappedWeight > 0) addPortfolioSectorWeight(bySector, holding.sector, wrappedWeight);
+  }
+  return [...bySector.values()];
+}
+
+/**
+ * Fold verified ETF look-through into the existing current-book sector rows.
+ *
+ * Both inputs use percentages of the complete current AIRS book. An ETF at 12% whose source
+ * breakdown says 25% Financials therefore contributes 3 percentage points to Financials. Source
+ * tables occasionally total 99.99 or 100.01 after publication rounding, so divide by their
+ * reported total: the sectors added for one ETF then sum to exactly the weight actually owned.
+ */
+export function addEtfSectorWeights(
+  rows: SectorChartRow[],
+  holdings: BookHolding[],
+  allocations: Readonly<Record<string, EtfSectorAllocationResponse>>,
+): SectorChartRow[] {
+  const bySector = sectorRowsByBucket(rows);
 
   for (const holding of holdings) {
     const isin = holding.isin?.trim().toUpperCase();
@@ -124,20 +189,7 @@ export function addEtfSectorWeights(
       const contribution = etfSectorPortfolioContribution(
         holdingWeight, sector.weight_pct, allocationTotal,
       );
-      const current = bySector.get(sector.sector);
-      if (current) {
-        const portfolio = (current.portfolio_pct ?? 0) + contribution;
-        current.portfolio_pct = portfolio;
-        current.diff_pct = portfolio - (current.benchmark_pct ?? 0);
-      } else {
-        bySector.set(sector.sector, {
-          bucket: sector.sector,
-          portfolio_pct: contribution,
-          benchmark_pct: 0,
-          diff_pct: contribution,
-          holdings: [],
-        });
-      }
+      addPortfolioSectorWeight(bySector, sector.sector, contribution);
     }
   }
 

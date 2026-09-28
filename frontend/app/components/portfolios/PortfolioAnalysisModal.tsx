@@ -33,7 +33,9 @@ import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import OwnerEarningsModal from './OwnerEarningsModal';
 import EtfSectorAllocationModal from './EtfSectorAllocationModal';
-import { addEtfSectorWeights } from './etfSectorLookThrough';
+import {
+  addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
+} from './etfSectorLookThrough';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
@@ -50,7 +52,7 @@ const GICS_SECTORS = [
 ] as const;
 
 /** The first fund added to the look-through registry. Availability itself comes from the backend's
- * exact ISIN registry; names and exchange tickers vary by AIRS listing and are never identity. */
+ * exact external-fund ISIN registry; names and exchange tickers vary and are never identity. */
 export const ETF_SECTOR_ALLOCATION_ISIN = 'IE00BP3QZ825';
 export function hasEtfSectorAllocation(
   holding: {
@@ -3474,6 +3476,10 @@ export default function PortfolioAnalysisModal({
     return [...byIsin.values()].sort((a, b) => (a.isin ?? '').localeCompare(b.isin ?? ''));
   }, [data?.book_holdings]);
   const eligibleSectorEtfKey = eligibleSectorEtfs.map((holding) => holding.isin).join('|');
+  const eligibleCertificateSectorCount = useMemo(
+    () => certificateSectorLookThroughCount(data?.book_holdings ?? []),
+    [data?.book_holdings],
+  );
   const [etfSectorResult, setEtfSectorResult] = useState<{
     key: string;
     allocations: Record<string, EtfSectorAllocationResponse>;
@@ -4112,11 +4118,13 @@ export default function PortfolioAnalysisModal({
                   {(data.axes ?? []).map((a) => {
                     const loadedEtfAllocations = etfSectorResult?.key === eligibleSectorEtfKey
                       ? etfSectorResult.allocations : {};
+                    const sectorRows = a.axis === 'sector' && includeEtfsInSector && !lookThrough
+                      ? addCertificateSectorWeights(a.rows, data.book_holdings ?? [])
+                      : a.rows;
                     const rows = a.axis === 'sector' && includeEtfsInSector
                       ? addEtfSectorWeights(
-                        a.rows, data.book_holdings ?? [], loadedEtfAllocations,
-                      )
-                      : a.rows;
+                        sectorRows, data.book_holdings ?? [], loadedEtfAllocations,
+                      ) : sectorRows;
                     return (
                     <Chart key={a.axis} axis={a.axis} rows={rows}
                       unpricedPct={a.unpriced_pct} excluded={a.excluded} stale={stale}
@@ -4125,11 +4133,12 @@ export default function PortfolioAnalysisModal({
                       benchmarkCapsFrom={data.benchmark_caps_from}
                       benchmarkCapsTo={data.benchmark_caps_to}
                       benchmarkCapsUnstamped={data.benchmark_caps_unstamped}
-                      etfControl={a.axis === 'sector' && eligibleSectorEtfs.length ? {
+                      etfControl={a.axis === 'sector'
+                        && (eligibleSectorEtfs.length + eligibleCertificateSectorCount) ? {
                         enabled: includeEtfsInSector,
                         onChange: setIncludeEtfsInSector,
-                        count: eligibleSectorEtfs.length,
-                        loading: includeEtfsInSector
+                        count: eligibleSectorEtfs.length + eligibleCertificateSectorCount,
+                        loading: includeEtfsInSector && eligibleSectorEtfs.length > 0
                           && etfSectorResult?.key !== eligibleSectorEtfKey,
                         unavailable: etfSectorResult?.key === eligibleSectorEtfKey
                           ? etfSectorResult.unavailable : 0,

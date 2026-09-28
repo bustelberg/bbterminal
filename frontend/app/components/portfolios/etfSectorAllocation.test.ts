@@ -17,6 +17,11 @@ describe('ETF sector-allocation gate', () => {
       is_fund: true,
       sector_allocation_available: true,
     })).toBe(true);
+    expect(hasEtfSectorAllocation({
+      isin: 'IE000MEQP5U8',
+      is_fund: true,
+      sector_allocation_available: true,
+    })).toBe(true);
   });
 
   it('does not put the button on stocks, internal portfolios, or unavailable funds', () => {

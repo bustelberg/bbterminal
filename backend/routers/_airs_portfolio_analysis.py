@@ -1882,8 +1882,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
             # `!h.is_fund` guard passed on `undefined`, which is exactly the failure the flag
             # exists to prevent: ETFs back in the fundamentals blend, quietly.
             "is_fund": bool(r.get("is_fund")),
-            # Exact ISIN allow-list, deliberately independent of the broad fund flag. In-house
-            # TopSelectie certificates are funds for the owner-earnings gate but are not ETFs.
+            # Exact ISIN allow-list, deliberately independent of the broad fund flag. It contains
+            # verified external ETFs and mutual funds, never in-house TopSelectie certificates.
             "sector_allocation_available": etf_sector_allocation_supported(isin or ""),
             "sector": sec,
             "company_id": grow.get("company_id") if grow else None,

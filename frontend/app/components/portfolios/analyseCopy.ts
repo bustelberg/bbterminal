@@ -56,8 +56,8 @@ const en = {
     // measured figure in it: "Excludes 17.8% in funds, bonds and cash — no sector to place". A
     // fixed sentence beside a live one is the weaker of two, and it appeared even at 0%.
     sectorNote: 'Current weights.',
-    addEtfs: 'Add ETFs',
-    addEtfsTitle: 'Add each supported ETF’s underlying sectors, weighted by the ETF’s current share of this portfolio.',
+    addEtfs: 'Add funds',
+    addEtfsTitle: 'Add the underlying sectors of supported external funds and internal TopSelectie certificates, weighted by their current share of this portfolio.',
     loadingEtfs: 'loading…',
     unavailableEtfs: (count: number) => `(${count} unavailable)`,
     regionNote: "Current weights. The issuer's domicile, else its ISIN country. Not the listing venue.",
@@ -266,8 +266,8 @@ const nl: AnalyseCopy = {
   axes: {
     sector: 'Sector', region: 'Regio', currency: 'Valuta',
     sectorNote: 'Actuele wegingen.',
-    addEtfs: "ETF's toevoegen",
-    addEtfsTitle: "Voeg de onderliggende sectoren van elke ondersteunde ETF toe, gewogen naar het actuele gewicht van de ETF in deze portefeuille.",
+    addEtfs: 'Fondsen toevoegen',
+    addEtfsTitle: "Voeg de onderliggende sectoren van ondersteunde externe fondsen en interne TopSelectie-certificaten toe, gewogen naar hun actuele gewicht in deze portefeuille.",
     loadingEtfs: 'laden…',
     unavailableEtfs: (count) => `(${count} niet beschikbaar)`,
     regionNote: 'Actuele wegingen. Vestigingsland van de uitgevende instelling, anders het ISIN-land. Niet de plaats van notering.',

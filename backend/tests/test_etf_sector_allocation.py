@@ -28,7 +28,7 @@ def _page(*, names=None, weights=None, as_of=20260925) -> str:
     return f'<div data-product="{html.escape(embedded, quote=True)}"></div>'
 
 
-def test_registry_includes_verified_etfs_but_not_internal_or_mutual_funds():
+def test_registry_includes_verified_external_funds_but_not_internal_certificates():
     assert supported(MOMENTUM_ISIN)
     assert supported(MOMENTUM_ISIN.lower())
     assert supported("IE00B6R52259")  # iShares ACWI, via justETF
@@ -36,7 +36,7 @@ def test_registry_includes_verified_etfs_but_not_internal_or_mutual_funds():
     assert supported("IE000PS0J481")  # Global X BRIJ, verified ETF via Yahoo
     assert supported("IE000LCKJ888")  # WisdomTree WPAI, verified ETF via Yahoo
     assert not supported("CH1593776334")  # our own StarTopSelectie certificate
-    assert not supported("IE000MEQP5U8")  # mutual fund, not an ETF
+    assert supported("IE000MEQP5U8")  # verified Yahoo mutual-fund share class
     assert not supported("XS2427355958")  # exchange-traded product, not an ETF
 
 
@@ -50,6 +50,25 @@ def test_physical_ishares_are_issuer_first_but_synthetic_exposure_stays_on_juste
     assert all(sector_allocation._PRODUCTS[isin]["fallback"] == "justetf"
                for isin in physical)
     assert sector_allocation._PRODUCTS["IE0001ZFMLN7"]["provider"] == "justetf"
+    assert sector_allocation._PRODUCTS["IE000MEQP5U8"] == {
+        "name": "Letko Brosseau Global Emerging Markets Equity Fund - Class Launch EUR Acc",
+        "provider": "yahoo_mutual_fund",
+        "symbol": "0P0001TPVP.F",
+    }
+
+
+def test_yahoo_mutual_fund_uses_the_separate_identity_checked_reader(monkeypatch):
+    sentinel = [{"sector": "Technology", "weight_pct": 100.0}]
+    monkeypatch.setattr("asset_pipeline.yahoo.mutual_fund_sector_weightings",
+                        lambda symbol: sentinel if symbol == "0P0001TPVP.F" else [])
+    monkeypatch.setattr("asset_pipeline.yahoo.fund_sector_weightings",
+                        lambda _symbol: (_ for _ in ()).throw(AssertionError("ETF reader used")))
+
+    result = sector_allocation._fetch_yahoo(
+        "IE000MEQP5U8", sector_allocation._PRODUCTS["IE000MEQP5U8"])
+
+    assert result.source == "Yahoo Finance"
+    assert result.sectors[0].weight_pct == 100.0
 
 
 def test_physical_ishares_falls_back_to_justetf_when_the_issuer_page_fails(monkeypatch):
