@@ -71,7 +71,7 @@ export function refreshScopes(scope: RefreshScope, additional?: RefreshScope): R
 }
 
 export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, everything,
-  allPeriods = false, broadcast = true }: {
+  allPeriods = false, broadcast = true, prominent = false, showNote = true }: {
   scope: RefreshScope;
   /** A selected benchmark/comparison refreshed after the primary scope by the same button. */
   additionalScope?: RefreshScope;
@@ -104,6 +104,10 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
   allPeriods?: boolean;
   /** Notify every mounted fundamentals card. A drill-down that reloads itself keeps this false. */
   broadcast?: boolean;
+  /** Filled header-action treatment used beside a segmented slider. */
+  prominent?: boolean;
+  /** Show the scope/coverage receipt beside the button. Dense modal headers can leave it to toast. */
+  showNote?: boolean;
   /** Called when the fill ends without failing, so the caller can re-read what it wrote. */
   /**  OPTIONAL, AND THE CACHE DROP IS NOT. `invalidateReadCache` runs beside every call of
    *  this, unconditionally — that is what makes the new data reachable. `onDone` is only for a
@@ -356,8 +360,10 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
       {/* The count sits LEFT of the button so the button keeps a fixed position as the text
           arrives — a control that slides sideways when its own result lands is a control you
           have to chase with the pointer. */}
-      <span className="text-[11px] leading-snug text-fg-faint whitespace-normal break-words max-w-[22rem]"
-        title={note ?? undefined}>{note}</span>
+      {showNote && (
+        <span className="text-[11px] leading-snug text-fg-faint whitespace-normal break-words max-w-[22rem]"
+          title={note ?? undefined}>{note}</span>
+      )}
       {/*  ONE CONTROL, TWO STATES — the button BECOMES the Cancel while the fill runs. The toast
           carries a Cancel too and both are correct, but a fill is minutes and the reader who wants
           to stop it is looking at the button they just pressed, not at the corner of the screen.
@@ -391,10 +397,13 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
                 + 'company whose next quarter cannot be out yet.')
             + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
             + 'and carry on if you close this.' + extraTitle))}
-        className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors
+        className={`${prominent ? 'rounded-md px-4 py-1.5 text-sm font-medium shadow-sm'
+          : 'rounded-lg px-2.5 py-1 text-[12px]'} border transition-colors
                     disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
-          ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
-          : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
+          ? 'border-warn-500/50 bg-warn-500/10 text-warn-300 hover:bg-warn-500/15'
+          : prominent
+            ? 'border-accent-500 bg-accent-600 text-white hover:bg-accent-500'
+            : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
         {/*  THE STATES OUTRANK THE CALLER'S LABEL. Whatever the button is named at rest, while it
             runs it says what pressing it will now DO — a control that keeps its old name while its
             action has changed underneath is the trap this replaced.

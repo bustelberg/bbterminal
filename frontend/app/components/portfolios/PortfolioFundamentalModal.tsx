@@ -43,7 +43,15 @@ type Payload = {
 };
 
 const RATES = Array.from({ length: 14 }, (_, i) => (7 + i) / 100);
-type Model = 'dcf' | 'egm';
+const EPS_ESTIMATE_CODE = 'annual_per_share_eps_estimate';
+const EPS_ACTUAL_CODES = new Set([
+  'annuals__Per Share Data__EPS without NRI',
+  'annuals__per_share_data__EPS without NRI',
+  'annuals__per_share_data_array__EPS without NRI',
+]);
+const EPS_ESTIMATE_YEARS = [2026, 2027] as const;
+type EpsEstimateYear = typeof EPS_ESTIMATE_YEARS[number];
+type Model = 'dcf' | 'egm' | 'eps';
 type Sort = { key: string; direction: 'asc' | 'desc' };
 type InputObservation = {
   label: string;
@@ -133,11 +141,12 @@ function ValuationCell({ value, what, where, how, retrieved, applies, inputs, to
   retrieved: (string | null | undefined)[];
   applies: (string | null | undefined)[];
   inputs?: InputObservation[];
-  tone: 'dcf' | 'egm';
+  tone: 'dcf' | 'egm' | 'eps';
   emphasis?: boolean;
 }) {
   return (
-    <td className={`${tone === 'dcf' ? 'bg-accent-500/[0.035]' : 'bg-pos-500/[0.035]'} px-3 py-2 text-right font-mono tabular-nums ${emphasis ? 'font-semibold text-fg-strong' : ''}`}>
+    <td className={`${tone === 'dcf' ? 'bg-accent-500/[0.035]'
+      : tone === 'egm' ? 'bg-pos-500/[0.035]' : 'bg-warn-500/[0.035]'} px-3 py-2 text-right font-mono tabular-nums ${emphasis ? 'font-semibold text-fg-strong' : ''}`}>
       <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
         <span>{value}</span>
         <InfoTip wide className="font-sans text-fg-faint" content={(
@@ -171,6 +180,38 @@ function sourceInput(metrics: ApiMetric[], label: string, observation: SourceObs
     retrieved: observationRetrievedAt(metrics, observation),
     applies: observation.date,
   };
+}
+
+export function epsEstimateForYear(metrics: ApiMetric[], year: number): ApiMetric | null {
+  return metrics
+    .filter((metric) => metric.metric_code === EPS_ESTIMATE_CODE
+      && metric.numeric_value != null && metric.target_date.slice(0, 4) === String(year))
+    .sort((a, b) => b.target_date.localeCompare(a.target_date))[0] ?? null;
+}
+
+export function epsActualForYear(metrics: ApiMetric[], year: number): ApiMetric | null {
+  return metrics
+    .filter((metric) => EPS_ACTUAL_CODES.has(metric.metric_code)
+      && metric.numeric_value != null && metric.target_date.slice(0, 4) === String(year))
+    .sort((a, b) => b.target_date.localeCompare(a.target_date))[0] ?? null;
+}
+
+export function epsActualToEstimateCagr2025To2027(metrics: ApiMetric[]): number | null {
+  const start = epsActualForYear(metrics, 2025)?.numeric_value ?? null;
+  const end = epsEstimateForYear(metrics, 2027)?.numeric_value ?? null;
+  if (start == null || start <= 0 || end == null || end <= 0) return null;
+  return Math.pow(end / start, 1 / 2) - 1;
+}
+
+function epsInput(metric: ApiMetric | null, label: string,
+  currency?: string | null): InputObservation[] {
+  if (metric?.numeric_value == null) return [];
+  return [{
+    label,
+    value: `${inputNumber.format(metric.numeric_value)}${currency ? ` ${currency}/share` : ' per share'}`,
+    retrieved: metric.recorded_at ?? null,
+    applies: metric.target_date,
+  }];
 }
 
 function dcfRow(row: ApiRow, today: string) {
@@ -217,6 +258,11 @@ function dcfRow(row: ApiRow, today: string) {
     years: EGM_DEFAULTS.years,
   };
   const egmResult = calculateEGM({ ...egm, forwardPE }, egmAssumptions);
+  const eps2025Actual = epsActualForYear(row.metrics, 2025);
+  const epsEstimates = Object.fromEntries(EPS_ESTIMATE_YEARS.map((year) => [
+    year, epsEstimateForYear(row.metrics, year),
+  ])) as Record<EpsEstimateYear, ApiMetric | null>;
+  const epsEstimateCagr = epsActualToEstimateCagr2025To2027(row.metrics);
   const commonInputs = [
     sourceInput(row.metrics, 'Close price', working.price,
       row.currency ? ` ${row.currency}` : ''),
@@ -250,6 +296,7 @@ function dcfRow(row: ApiRow, today: string) {
     dcfForward: useForward,
     dcfInputs,
     egm, forwardPE, forwardPeDerived, egmAssumptions, egmResult,
+    eps2025Actual, epsEstimates, epsEstimateCagr,
     estimateDates: dateWindow(cagrWorking.points.map((point) => point.date)),
     medianPeDates,
   };
@@ -262,9 +309,14 @@ function sortValue(row: ValuationRow, key: string): number | null {
     const rate = Number(key.slice(5));
     return row.growth.find((cell) => cell.discountRate === rate)?.impliedGrowth ?? null;
   }
+  if (key.startsWith('epsEstimate:')) {
+    const year = Number(key.slice('epsEstimate:'.length)) as EpsEstimateYear;
+    return row.epsEstimates[year]?.numeric_value ?? null;
+  }
   const values: Record<string, number | null> = {
     weight: row.weight_pct,
     price: row.src.price,
+    epsActual2025: row.eps2025Actual?.numeric_value ?? null,
     eps: row.egm.epsNextFY,
     forwardPE: row.forwardPE,
     epsGrowth: row.egmAssumptions.growthRate,
@@ -275,6 +327,7 @@ function sortValue(row: ValuationRow, key: string): number | null {
     expectedReturn: row.egmResult.expectedReturn,
     impliedPrice: row.egmResult.impliedPrice,
     totalReturn: row.egmResult.totalReturn,
+    epsEstimateCagr: row.epsEstimateCagr,
   };
   return values[key] ?? null;
 }
@@ -293,6 +346,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
   const [sorts, setSorts] = useState<Record<Model, Sort>>({
     dcf: { key: 'weight', direction: 'desc' },
     egm: { key: 'weight', direction: 'desc' },
+    eps: { key: 'weight', direction: 'desc' },
   });
   const today = new Date().toISOString().slice(0, 10);
 
@@ -356,7 +410,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
           <button type="button" onClick={() => toggleSort(sortKey)}
             aria-label={`Sort by ${label} ${active && activeSort.direction === 'desc' ? 'ascending' : 'descending'}`}
             className={`inline-flex cursor-pointer items-center gap-1 whitespace-nowrap hover:text-fg-strong ${active
-              ? model === 'dcf' ? 'text-accent-300' : 'text-pos-300' : ''}`}>
+              ? model === 'dcf' ? 'text-accent-300'
+                : model === 'egm' ? 'text-pos-300' : 'text-warn-400' : ''}`}>
             <span>{label}</span>
             <span aria-hidden className="w-2 text-center text-[9px]">
               {active ? (activeSort.direction === 'desc' ? '▼' : '▲') : '↕'}
@@ -375,7 +430,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
             <h3 id="portfolio-fundamental-title" className="text-lg font-semibold text-fg-strong">
               Fundamental
             </h3>
-            <p className="truncate text-sm text-fg-muted">{name} · companies</p>
+            <p className="truncate text-sm text-fg-muted">
+              {name} · {data ? `${rows.length} ${rows.length === 1 ? 'company' : 'companies'}` : 'companies'}
+            </p>
           </div>
           <div className="ml-auto inline-flex shrink-0 rounded-lg border border-neutral-700 bg-page p-0.5"
             role="group" aria-label="Valuation model">
@@ -389,13 +446,18 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                 ? 'bg-pos-500 text-white shadow-sm' : 'text-fg-muted hover:bg-overlay/5 hover:text-fg-strong'}`}>
               Expected Growth Model
             </button>
+            <button type="button" onClick={() => setModel('eps')} aria-pressed={model === 'eps'}
+              className={`rounded-md px-4 py-1.5 text-xs font-medium transition-colors ${model === 'eps'
+                ? 'bg-warn-500 text-white shadow-sm' : 'text-fg-muted hover:bg-overlay/5 hover:text-fg-strong'}`}>
+              EPS Estimates
+            </button>
           </div>
           {refreshScope && (
-            <PortfolioFundamentalsRefresh scope={refreshScope} everything allPeriods
+            <PortfolioFundamentalsRefresh scope={refreshScope} everything allPeriods prominent showNote={false}
               label="Refresh all companies" onDone={() => setRefreshRevision((value) => value + 1)} />
           )}
           <button type="button" onClick={onClose}
-            className="shrink-0 rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-fg-muted hover:text-fg-strong">
+            className="shrink-0 rounded-md border border-accent-500 bg-accent-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-accent-500">
             Close
           </button>
         </div>
@@ -420,13 +482,13 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                   <NumericHeader sortKey="weight" label="Weight"
                     info="This operating company's share of the whole current portfolio after linked certificates and TopSelecties are looked through. Funds, cash, bonds and companies without stored fundamentals are not redistributed over these rows."
                     className="sticky left-64 z-20 w-24 min-w-24 bg-page" />
-                  <NumericHeader sortKey="price" label="Price"
+                  <NumericHeader sortKey="price" label="Stock price"
                     info="The latest stored GuruFocus closing price. The currency code is the company's GuruFocus exchange currency; the value is not converted to EUR."
                     className="sticky left-[22rem] z-20 w-28 min-w-28 border-r-2 border-neutral-700 bg-page" />
                   {model === 'dcf' ? RATES.map((rate) => (
                     <NumericHeader key={rate} sortKey={`rate:${rate}`}
                       label={`${(rate * 100).toFixed(0)}%`} className="bg-accent-500/10" />
-                  )) : (
+                  )) : model === 'egm' ? (
                     <>
                       <NumericHeader sortKey="eps" label="FY1 EPS" className="bg-pos-500/10" />
                       <NumericHeader sortKey="forwardPE" label="Forward P/E" className="bg-pos-500/10" />
@@ -438,6 +500,17 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                       <NumericHeader sortKey="expectedReturn" label="Expected p.a." className="bg-pos-500/10" />
                       <NumericHeader sortKey="impliedPrice" label="Price in 10y" className="bg-pos-500/10" />
                       <NumericHeader sortKey="totalReturn" label="Total return" className="bg-pos-500/10" />
+                    </>
+                  ) : (
+                    <>
+                      <NumericHeader sortKey="epsActual2025" label="EPS 2025A"
+                        className="bg-warn-500/10" />
+                      {EPS_ESTIMATE_YEARS.map((year) => (
+                        <NumericHeader key={year} sortKey={`epsEstimate:${year}`}
+                          label={`EPS ${year}E`} className="bg-warn-500/10" />
+                      ))}
+                      <NumericHeader sortKey="epsEstimateCagr" label="CAGR 2025A–2027E"
+                        className="bg-warn-500/10" />
                     </>
                   )}
                 </tr>
@@ -478,7 +551,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                           row.dcfForward ? row.src.ocfEstimateDate : null]}
                         inputs={row.dcfInputs}
                         how={`Project normalised FCF, add the terminal value, discount at ${(cell.discountRate * 100).toFixed(0)}%, then solve for the annual growth rate equalling today's market capitalisation.`} />
-                    )) : (
+                    )) : model === 'egm' ? (
                       <>
                         <ValuationCell tone="egm"
                           value={row.egm.epsNextFY == null ? '—' : row.egm.epsNextFY.toFixed(2)}
@@ -579,6 +652,46 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             row.egm.dividendYieldDate, ...row.estimateDates, ...row.medianPeDates]}
                           how="Compound the expected annual shareholder return for ten years." />
                       </>
+                    ) : (
+                      <>
+                        <ValuationCell tone="eps"
+                          value={row.eps2025Actual?.numeric_value == null
+                            ? '—' : row.eps2025Actual.numeric_value.toFixed(2)}
+                          what="The reported FY2025 earnings per share, excluding non-recurring items."
+                          where={`GuruFocus annual financial statements stored for ${row.name}.`}
+                          retrieved={[row.source_fetched_at.financials]}
+                          applies={[row.eps2025Actual?.target_date]}
+                          inputs={epsInput(row.eps2025Actual, 'Reported EPS for FY2025', row.currency)}
+                          how="Select the latest annual EPS without NRI observation whose fiscal period ends in 2025." />
+                        {EPS_ESTIMATE_YEARS.map((year) => {
+                          const estimate = row.epsEstimates[year];
+                          return (
+                            <ValuationCell key={year} tone="eps"
+                              value={estimate?.numeric_value == null
+                                ? '—' : estimate.numeric_value.toFixed(2)}
+                              what={`The GuruFocus consensus earnings-per-share estimate for fiscal year ${year}.`}
+                              where={`GuruFocus analyst estimates stored for ${row.name}.`}
+                              retrieved={[row.source_fetched_at.estimates]}
+                              applies={[estimate?.target_date]}
+                              inputs={epsInput(estimate, `EPS estimate for FY${year}`, row.currency)}
+                              how={`Select the annual per-share EPS estimate whose fiscal period ends in ${year}.`} />
+                          );
+                        })}
+                        <ValuationCell tone="eps" emphasis
+                          value={row.epsEstimateCagr == null
+                            ? '—' : `${(row.epsEstimateCagr * 100).toFixed(1)}%`}
+                          what="The annualised change from reported FY2025 EPS to the FY2027 EPS estimate."
+                          where={`GuruFocus financial statements and analyst estimates stored for ${row.name}.`}
+                          retrieved={[row.source_fetched_at.financials,
+                            row.source_fetched_at.estimates]}
+                          applies={[row.eps2025Actual?.target_date,
+                            row.epsEstimates[2027]?.target_date]}
+                          inputs={[
+                            ...epsInput(row.eps2025Actual, 'Reported EPS for FY2025', row.currency),
+                            ...epsInput(row.epsEstimates[2027], 'EPS estimate for FY2027', row.currency),
+                          ]}
+                          how="Compound the change between positive FY2025 actual EPS and FY2027 estimated EPS over two years." />
+                      </>
                     )}
                   </tr>
                 ))}
@@ -590,7 +703,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
         <p className="shrink-0 border-t border-neutral-800/40 px-5 py-3 text-xs leading-relaxed text-fg-muted">
           {model === 'dcf'
             ? `Implied FCF growth over ${FORECAST_YEARS} years, with 3% perpetual growth. The 7–20% columns are discount rates.`
-            : 'Expected Growth Model over 10 years. EPS growth and exit P/E use company estimates/history where available, otherwise the 10% growth and 20× house defaults; hurdle rate is 10%.'}
+            : model === 'egm'
+              ? 'Expected Growth Model over 10 years. EPS growth and exit P/E use company estimates/history where available, otherwise the 10% growth and 20× house defaults; hurdle rate is 10%.'
+              : 'FY2025 is reported EPS without NRI; FY2026 and FY2027 are GuruFocus consensus estimates. CAGR compounds FY2025A to FY2027E over two years and requires both endpoints to be positive.'}
         </p>
         {companyFundamental && (
           <OwnerEarningsModal isin={companyFundamental.isin} name={companyFundamental.name}
