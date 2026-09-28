@@ -8201,7 +8201,7 @@ export interface paths {
         };
         /**
          * Api Usage
-         * @description GuruFocus API usage counter for the current month.
+         * @description Monthly upstream usage; regional headline counters remain GuruFocus quota usage.
          */
         get: operations["api_usage_api_usage_get"];
         put?: never;

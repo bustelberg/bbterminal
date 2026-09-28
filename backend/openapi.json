@@ -31050,7 +31050,7 @@
     },
     "/api/usage": {
       "get": {
-        "description": "GuruFocus API usage counter for the current month.",
+        "description": "Monthly upstream usage; regional headline counters remain GuruFocus quota usage.",
         "operationId": "api_usage_api_usage_get",
         "responses": {
           "200": {
