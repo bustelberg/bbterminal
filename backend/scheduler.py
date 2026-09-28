@@ -1302,7 +1302,7 @@ def _maybe_kickstart_airs_models() -> None:
 
 
 def _fire_history_drift_check() -> None:
-    """Daily: probe 1/5th of the universe for a vendor rewrite of PAST bars.
+    """Weekly: probe 1/5th of the universe for a vendor rewrite of PAST bars.
 
      THE ONE FAILURE THE PIPELINE IS BLIND TO. Prices are only ever appended
     (`d > existing_max`), so a split or a free-share attribution leaves our
@@ -1312,8 +1312,10 @@ def _fire_history_drift_check() -> None:
     Cheap because of the undocumented `?start_date=&end_date=` filter: a probe is
     ~23 bytes against a 268 KB full series. It is NOT cheap on quota (requests are
     what's metered, and a probe costs the same one as a full fetch), which is why
-    it walks a fifth of the universe a day — every name inside a week at ~300
-    requests/day — instead of all of it.
+    normal price gap fetch now compares a one-week overlap for no extra request and immediately
+    repairs the common whole-series rescale. This standalone probe is the slower safety net for an
+    isolated OLD correction that does not touch the recent tail: one fifth each Monday, so every
+    name comes round inside five weeks at ~300 requests/week instead of ~300/day.
 
     Own daemon thread; never raises into the scheduler."""
     _spawn_body("history_drift_check")
@@ -2334,9 +2336,6 @@ def register_scheduler(app) -> None:
         # at ~1.5s each) can never overlap the next day's tick, and the job itself stands down
         # entirely while the ingest queue is resolving — see `_fire_asset_price_refresh`.
         _register("asset_price_refresh", _fire_asset_price_refresh)
-        # Daily history-drift probe — the early warning between monthly full
-        # refetches. 07:00 UTC: after the 05:00 pipeline sequence and the 06:00
-        # asset-price refresh, so it never competes with them for GuruFocus.
         # Refresh every benchmark's constituents, prices and caps, then calculate relative
         # momentum in the same worker. The dependency is explicit: a fixed later clock time could
         # start ranking while a long ACWI refresh is still in progress.
@@ -2344,6 +2343,9 @@ def register_scheduler(app) -> None:
         # Weekly due-only fundamentals pass. It fetches only companies whose next filing could
         # have arrived, rather than re-reading every constituent.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
+        # Weekly history-drift safety probe. Normal GuruFocus price updates compare a one-week
+        # overlap and immediately repair a rescale; this Monday slice catches isolated old-bar
+        # corrections that leave the recent tail untouched.
         _register("history_drift_check", _fire_history_drift_check)
         # Asset-pipeline ingest-queue worker — ON by default. Analyse queues missing ISINs and a
         # normal backend deployment must consume them without requiring a second process. A

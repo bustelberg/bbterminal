@@ -42,6 +42,7 @@ from typing import Callable
 
 from common.pg import _run_copy
 from deps import supabase
+from ingest.api_usage import track_api_call
 from ingest.prices import (
     DATA_CUTOFF,
     _fetch_indicator_from_api,
@@ -223,7 +224,7 @@ def refetch_full_history(
 
     cids = sorted({int(c) for c in company_ids})
     if not cids:
-        return {"companies": 0, "counters": {}, "moved": []}
+        return {"companies": 0, "api_calls": 0, "counters": {}, "moved": []}
     # ONE timestamp for the whole run, so "was there a refetch this month" reads a
     # single instant rather than a smear across a 20-minute walk.
     _now_iso = datetime.now(timezone.utc).isoformat()
@@ -248,6 +249,9 @@ def refetch_full_history(
         for metric, indicator in METRICS:
             try:
                 data, _log, status = _fetch_indicator_from_api(tic, exch, indicator)
+                track_api_call(supabase, exch)
+                with lock:
+                    counters["api_calls"] += 1
             except Exception as e:  # noqa: BLE001
                 with lock:
                     counters["error"] += 1
@@ -386,5 +390,6 @@ def refetch_full_history(
         )
         for ex in phantom_examples[:25]:
             _say(f"      {ex}")
-    return {"companies": done[0], "counters": dict(counters), "moved": moved,
+    return {"companies": done[0], "api_calls": counters.get("api_calls", 0),
+            "counters": dict(counters), "moved": moved,
             "phantoms": phantom_examples}

@@ -33,6 +33,12 @@ from .gurufocus_url import US_EXCHANGE_CODES as US_EXCHANGES  # single source of
 
 _BUCKET = "gurufocus-raw"
 
+# A normal gap request costs one API call whether it asks for tomorrow onward or repeats the last
+# few bars too. Repeating one calendar week lets that same call detect a split/free-share rewrite:
+# GuruFocus restates the overlap while our stored tail is still on the old basis.
+_GAP_OVERLAP_DAYS = 7
+_OVERLAP_TOLERANCE = 1e-6
+
 # When GuruFocus returns 404 "Stock not found" for a (ticker, exchange)
 # pair, try these alternative exchanges before giving up. iShares ACWI
 # often lists German cross-listings on Xetra (XTER) but GuruFocus only
@@ -76,6 +82,8 @@ class PriceResult:
     http_status: int | None = None       # HTTP status of the API fetch
     request_url: str | None = None        # masked GuruFocus URL actually called
     response_excerpt: str | None = None   # compact JSON excerpt of the body (or the failure log)
+    history_drift_detected: bool = False
+    history_repaired: bool = False
 
 
 def normalize_gurufocus_ticker(ticker: str, exchange: str) -> str:
@@ -571,6 +579,61 @@ def _db_max_date(
     return None
 
 
+def _stored_metric_window(
+    supabase: Client,
+    company_id: int,
+    metric_code: str,
+    start: date,
+    end: date,
+) -> dict[date, float] | None:
+    """Stored values inside a small overlap window, or None when the read failed.
+
+    Failure is deliberately distinct from an empty window: an unreadable comparison disables the
+    optimisation for this request; it must never manufacture a drift finding.
+    """
+    try:
+        rows = (
+            supabase.table("metric_data")
+            .select("target_date,numeric_value")
+            .eq("company_id", company_id)
+            .eq("metric_code", metric_code)
+            .eq("source_code", "gurufocus")
+            .gte("target_date", start.isoformat())
+            .lte("target_date", end.isoformat())
+            .order("target_date")
+            .limit(20)
+            .execute()
+        ).data or []
+    except Exception as exc:  # A failed audit must not fail the ordinary append path.
+        logging.getLogger(__name__).warning(
+            "[price_overlap] could not read cid=%s %s window: %s: %s",
+            company_id, metric_code, type(exc).__name__, exc,
+        )
+        return None
+    return {
+        date.fromisoformat(str(row["target_date"])[:10]): float(row["numeric_value"])
+        for row in rows
+        if row.get("target_date") and row.get("numeric_value") is not None
+    }
+
+
+def _first_overlap_drift(
+    stored: dict[date, float] | None,
+    vendor: list[tuple[date, float]],
+) -> tuple[date, float, float] | None:
+    """First shared date whose vendor value moved materially; pure for regression tests."""
+    if not stored:
+        return None
+    upstream = dict(vendor)
+    for day, old in sorted(stored.items()):
+        new = upstream.get(day)
+        if new is None:
+            continue
+        if abs(new - old) > max(_OVERLAP_TOLERANCE, abs(old) * 1e-9):
+            return day, old, new
+    return None
+
+
 def _upsert_metric_rows(
     supabase: Client,
     company_id: int,
@@ -851,7 +914,8 @@ def ensure_prices_for_company(
                 return result
 
     # ── GAP FETCH ──────────────────────────────────────────────────
-    #  We hold everything up to `db_max`, SO ASK FOR WHAT COMES AFTER IT. The
+    #  We hold everything up to `db_max`, so ask from one week BEFORE it. The repeated bars turn
+    # the normal update into a history-integrity check at no additional request cost. The
     # unfiltered endpoint hands back the entire history to add one bar — 268,703
     # bytes of Apple for 23 bytes of news. `?start_date=` costs the same single
     # API request (the quota counts requests, not bytes) but turns the daily
@@ -865,7 +929,11 @@ def ensure_prices_for_company(
     # (`force_refresh`, a company with no rows yet) still takes the full route
     # below and refreshes it.
     if db_max is not None and not force_refresh:
-        gap_start = db_max + timedelta(days=1)
+        # Repeat one calendar week in the SAME request. Quota is per request, not per returned
+        # bar, so this detects a restated tail without spending another call.
+        gap_start = db_max - timedelta(days=_GAP_OVERLAP_DAYS)
+        stored_overlap = _stored_metric_window(
+            supabase, company_id, "close_price", gap_start, db_max)
         data, api_log, http_status, used_exchange = _try_with_fallbacks(
             ticker, exchange, "price", on_log=_log,
             start_date=gap_start, end_date=_settled_through(data_cutoff),
@@ -881,6 +949,36 @@ def ensure_prices_for_company(
             if used_exchange != exchange:
                 result.resolved_exchange = used_exchange
             if parsed:
+                drift = _first_overlap_drift(stored_overlap, parsed)
+                if drift is not None:
+                    day, old, new = drift
+                    result.history_drift_detected = True
+                    _log(
+                        f"history rewrite detected in overlap: {day} stored {old:.6g} vs "
+                        f"vendor {new:.6g}; running full price + volume repair")
+                    try:
+                        # Lazy import avoids the module cycle: refetch_history imports the fetch
+                        # and parse primitives above. The full series is required because fixing
+                        # only this seam would leave every older bar on the wrong basis.
+                        from ingest.refetch_history import refetch_full_history  # noqa: PLC0415
+
+                        repaired = refetch_full_history(
+                            [company_id], apply=True,
+                            on_step=lambda message, _level: _log(message),
+                        )
+                        result.api_calls += int(repaired.get("api_calls") or 0)
+                        counters = repaired.get("counters") or {}
+                        result.rows_loaded = sum(
+                            int(counters.get(f"{metric}_bars_changed") or 0)
+                            for metric in ("close_price", "volume")
+                        )
+                        result.source = "api_gap_repaired"
+                        result.history_repaired = True
+                        return result
+                    except Exception as exc:  # Keep the new tail; the safety audit can retry.
+                        _log(
+                            f"full history repair failed ({type(exc).__name__}: {exc}); "
+                            "new bars will still be appended and the safety audit can retry")
                 result.rows_loaded = load_prices_into_db(supabase, company_id, parsed)
                 _log(f"gap fetch from {gap_start}: {len(parsed)} bar(s), "
                      f"{result.rows_loaded} loaded")

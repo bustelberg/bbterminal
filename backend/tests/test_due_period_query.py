@@ -30,20 +30,24 @@ import io
 from datetime import date
 
 import routers._fundamental_fill as fill
-from routers._fundamental_fill import DUE_PERIOD_CODE, due_company_ids
+from routers._fundamental_fill import (
+    DUE_PERIOD_CODE,
+    STATEMENT_DUE_RETRY_COOLDOWN_DAYS,
+    due_company_ids,
+)
 
 
 class _Copy:
     """Stands in for `common.pg._run_copy`, recording the SQL and params it was handed."""
 
-    def __init__(self, rows: list[tuple[int, str]] | None = None):
+    def __init__(self, rows: list[tuple] | None = None):
         self.rows = rows or []
         self.sql: str | None = None
         self.params: tuple | None = None
 
     def __call__(self, sql, params):
         self.sql, self.params = sql, params
-        body = "".join(f"{cid},{d}\n" for cid, d in self.rows)
+        body = "".join(",".join(str(value) for value in row) + "\n" for row in self.rows)
         return io.BytesIO(body.encode())
 
 
@@ -98,6 +102,28 @@ class TestWhatItReturns:
                 ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31")]
         out, note, _spy = _run(monkeypatch, rows, [7])
         assert out == [7] and note is None
+
+    def test_a_recent_old_period_answer_starts_a_short_cooldown(self, monkeypatch):
+        rows = [(7, d, "2026-08-16T09:12:00+00:00") for d in
+                ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31")]
+        out, note, _spy = _run(monkeypatch, rows, [7], today=date(2026, 8, 17))
+        assert out == [] and note is None
+
+    def test_the_company_is_offered_again_at_the_cooldown_boundary(self, monkeypatch):
+        asked = date(2026, 8, 14)
+        assert (date(2026, 8, 17) - asked).days == STATEMENT_DUE_RETRY_COOLDOWN_DAYS
+        rows = [(7, d, asked.isoformat()) for d in
+                ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31")]
+        out, _note, _spy = _run(monkeypatch, rows, [7], today=date(2026, 8, 17))
+        assert out == [7]
+
+    def test_a_fetch_before_the_filing_became_due_does_not_delay_the_first_probe(self, monkeypatch):
+        # The missing quarter ended 2026-06-30 and becomes plausible on 2026-07-25. This fetch
+        # asked a different question, so it is not an old-period answer for the now-due filing.
+        rows = [(7, d, "2026-07-24T23:59:00+00:00") for d in
+                ("2025-03-31", "2025-06-30", "2025-09-30", "2025-12-31", "2026-03-31")]
+        out, _note, _spy = _run(monkeypatch, rows, [7], today=date(2026, 7, 26))
+        assert out == [7]
 
     def test_a_company_that_is_up_to_date_is_left_alone(self, monkeypatch):
         rows = [(7, d) for d in

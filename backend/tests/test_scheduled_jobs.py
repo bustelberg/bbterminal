@@ -107,6 +107,9 @@ class TestOptInJobs:
         assert by_id["benchmark_fundamentals_fill"].trigger == {
             "day_of_week": "mon", "hour": 8, "minute": 0, "timezone": "UTC",
         }
+        assert by_id["history_drift_check"].trigger == {
+            "day_of_week": "mon", "hour": 7, "minute": 0, "timezone": "UTC",
+        }
 
 
 

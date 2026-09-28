@@ -198,12 +198,13 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         id="history_drift_check",
         label="History-drift probe",
         fills="re-fetches metric_data bars a vendor rewrote (splits, free-share attributions)",
-        cadence="Weekdays, 07:00 UTC",
-        trigger={"day_of_week": "mon-fri", "hour": 7, "minute": 0, "timezone": "UTC"},
-        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
-        max_age_hours=80,
-        note="Walks a fifth of the universe a day — every name within a week. The one failure the "
-             "append-only price path is blind to.",
+        cadence="Every Monday, 07:00 UTC",
+        trigger={"day_of_week": "mon", "hour": 7, "minute": 0, "timezone": "UTC"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 21600},
+        max_age_hours=24 * 10,
+        note="Walks a fifth of the universe each Monday — every name within five weeks. Normal "
+             "price updates now compare a one-week overlap and immediately repair the common "
+             "whole-series rescale; this slower probe remains for isolated old-bar corrections.",
     ),
     JobSpec(
         id="fx_sync",

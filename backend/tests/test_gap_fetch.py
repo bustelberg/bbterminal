@@ -99,16 +99,73 @@ class TestTheGapPathIsUsedButNotAlways:
         assert "falling back to the full series" in src
 
 
+class TestTheGapCarriesAFreeOverlapAudit:
+    def test_overlap_comparison_finds_a_restatement_not_float_noise(self):
+        stored = {date(2026, 8, 7): 100.0, date(2026, 8, 10): 102.0}
+
+        assert prices._first_overlap_drift(
+            stored, [(date(2026, 8, 7), 50.0), (date(2026, 8, 10), 51.0)]
+        ) == (date(2026, 8, 7), 100.0, 50.0)
+        assert prices._first_overlap_drift(
+            stored, [(date(2026, 8, 7), 100.0 + 1e-10)]
+        ) is None
+
+    def test_a_detected_restatement_escalates_to_the_full_repair(self, monkeypatch):
+        from ingest import refetch_history
+
+        requested: dict[str, date] = {}
+        monkeypatch.setattr(prices, "_ensure_bucket", lambda _sb: None)
+        monkeypatch.setattr(prices, "_db_max_date",
+                            lambda *_a, **_k: date(2026, 8, 10))
+        monkeypatch.setattr(prices, "is_daily_data_fresh", lambda *_a, **_k: (False, "stale"))
+        monkeypatch.setattr(
+            prices, "_stored_metric_window",
+            lambda *_a, **_k: {date(2026, 8, 7): 100.0},
+        )
+
+        def _fetch(*_a, start_date=None, end_date=None, **_k):
+            requested["start"] = start_date
+            requested["end"] = end_date
+            return (["payload"], "ok", 200, "NASDAQ")
+
+        monkeypatch.setattr(prices, "_try_with_fallbacks", _fetch)
+        monkeypatch.setattr(
+            prices, "_parse_price_series",
+            lambda _data: [(date(2026, 8, 7), 50.0), (date(2026, 8, 11), 51.0)],
+        )
+        monkeypatch.setattr(prices, "track_api_call", lambda *_a, **_k: None)
+        repaired: list[list[int]] = []
+
+        def _repair(cids, **_kwargs):
+            repaired.append(cids)
+            return {"api_calls": 2, "counters": {
+                "close_price_bars_changed": 100, "volume_bars_changed": 80,
+            }}
+
+        monkeypatch.setattr(refetch_history, "refetch_full_history", _repair)
+
+        result = prices.ensure_prices_for_company(
+            object(), 7, "AAPL", "NASDAQ", data_cutoff=date(2026, 8, 12))
+
+        assert requested["start"] == date(2026, 8, 3)  # max date minus one calendar week
+        assert repaired == [[7]]
+        assert result.history_drift_detected is True
+        assert result.history_repaired is True
+        assert result.source == "api_gap_repaired"
+        assert result.api_calls == 3  # one overlap request + price and volume full repair
+        assert result.rows_loaded == 180
+
+
 class TestTheDailyDriftProbe:
-    def test_the_slice_covers_everyone_within_a_week(self):
+    def test_the_weekly_slice_covers_everyone_within_five_weeks(self):
         from ingest.history_drift import SLICE_DIVISOR, slice_for_day
 
         ids = list(range(1, 1480))
         seen: set[int] = set()
         for i in range(SLICE_DIVISOR):
-            seen |= set(slice_for_day(ids, date(2026, 8, 2) + timedelta(days=i)))
+            seen |= set(slice_for_day(ids, date(2026, 8, 3) + timedelta(days=7 * i)))
         assert seen == set(ids)
-        assert SLICE_DIVISOR <= 7, "every company must come round within a week"
+        assert SLICE_DIVISOR == 5
 
     def test_the_slices_are_disjoint(self):
         from ingest.history_drift import slice_for_day

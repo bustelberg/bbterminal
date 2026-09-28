@@ -172,6 +172,17 @@ def _reported_coverage(company_ids: list[int], codes: tuple[str, ...]) -> int:
 #: direction of a bad pick here is an extra fetch, never a company that silently stops being offered.
 DUE_PERIOD_CODE = "quarterly__Per Share Data__Revenue per Share"
 
+#: How long to leave a financial-statements endpoint alone after we asked for a filing that was
+#: already plausibly due and GuruFocus still returned the old latest period.
+#:
+#:  THE FETCH STAMP PLUS THE UNCHANGED PERIOD AXIS IS THE RECEIPT. `financials_fetched_at` advances
+#: only after a valid statements payload was parsed and stored. If that stamp is on or after the
+#: projected filing's `due_since`, yet `period_due` still points at the same missing period, the
+#: vendor answered the question and did not have it yet. Re-asking from another manual/job retry a
+#: few minutes later cannot improve that answer. Three days is deliberately shorter than the weekly
+#: scheduled cadence: it absorbs retry bursts without adding a week of latency when a filing lands.
+STATEMENT_DUE_RETRY_COOLDOWN_DAYS = 3
+
 
 def order_work(work: list[dict], rng: random.Random | None = None) -> list[dict]:
     """The order companies are fetched in: LEAST RECENTLY CHECKED FIRST, ties broken at random.
@@ -245,16 +256,27 @@ def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int
     if not ids:
         return [], None
     buf = _run_copy(
-        "COPY (SELECT company_id, target_date::text FROM metric_data "
-        "WHERE company_id = ANY(%s::int[]) AND metric_code = %s "
-        "GROUP BY 1, 2) TO STDOUT WITH CSV", (list(ids), DUE_PERIOD_CODE))
+        "COPY (SELECT md.company_id, md.target_date::text, c.financials_fetched_at::text "
+        "FROM metric_data md JOIN company c ON c.company_id = md.company_id "
+        "WHERE md.company_id = ANY(%s::int[]) AND md.metric_code = %s "
+        "GROUP BY 1, 2, 3) TO STDOUT WITH CSV", (list(ids), DUE_PERIOD_CODE))
     if buf is None:
         return list(ids), "no direct-Postgres connection — could not check what is due, so all are offered"
 
     periods: dict[int, list[str]] = defaultdict(list)
+    last_asked: dict[int, date] = {}
     for line in buf.getvalue().decode().splitlines():
-        cid, d = line.split(",")
-        periods[int(cid)].append(d)
+        fields = line.split(",")
+        cid, d = fields[:2]
+        company_id = int(cid)
+        periods[company_id].append(d)
+        # Two fields keeps this reader compatible with old exports/test fixtures. Production's
+        # joined query always supplies the third field, empty when the feed was never fetched.
+        if len(fields) >= 3 and fields[2]:
+            try:
+                last_asked[company_id] = date.fromisoformat(fields[2][:10])
+            except ValueError:
+                pass
 
     today = today or date.today()
     out = []
@@ -266,7 +288,22 @@ def due_company_ids(ids: list[int], today: date | None = None) -> tuple[list[int
         #  This is also the safety net under `DUE_PERIOD_CODE`. A company that has quarterly data
         # but not that particular line reads as "no periods" and is offered, costing one call. The
         # opposite fallback — absent means fresh — would quietly retire it from every future press.
-        if not periods.get(cid) or period_due(periods[cid], today) is not None:
+        if not periods.get(cid):
+            out.append(cid)
+            continue
+        due = period_due(periods[cid], today)
+        if due is None:
+            continue
+        asked = last_asked.get(cid)
+        # A fetch BEFORE `due_since` did not ask whether this filing was available and therefore
+        # must not delay the first useful probe. A fetch on/after it did; while the expected period
+        # is still absent, its stamp is proof that GuruFocus answered with the old period.
+        cooling_down = (
+            asked is not None
+            and asked >= due["due_since"]
+            and (today - asked).days < STATEMENT_DUE_RETRY_COOLDOWN_DAYS
+        )
+        if not cooling_down:
             out.append(cid)
     return out, None
 
