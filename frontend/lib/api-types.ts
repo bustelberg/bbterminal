@@ -1002,12 +1002,12 @@ export interface paths {
         };
         /**
          * Etf Sector Allocation
-         * @description Sector weights for an explicitly verified ETF.
+         * @description Sector weights for an explicitly verified external fund.
          *
-         *     The registry contains only actual exchange-traded funds with a working issuer, justETF, or
-         *     Yahoo sector feed. Other fund-like instruments return 404, so internal portfolios such as
-         *     StarTopSelectie cannot accidentally acquire ETF look-through merely because AIRS groups them
-         *     with funds. Successful vendor reads are cached for six hours.
+         *     The registry contains only exact ETF or mutual-fund share-class ISINs with a working issuer,
+         *     justETF, or Yahoo sector feed. Other fund-like instruments return 404, so internal portfolios
+         *     such as StarTopSelectie cannot accidentally acquire external-fund look-through merely because
+         *     AIRS groups them with funds. Successful vendor reads are cached for six hours.
          */
         get: operations["etf_sector_allocation_api_airs_etf__isin__sector_allocation_get"];
         put?: never;
