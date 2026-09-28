@@ -324,7 +324,7 @@ def _resolve_listing(isin: str, *, force: bool = False) -> dict:
     from urllib.parse import quote  # noqa: PLC0415
 
     from deps import supabase  # noqa: PLC0415
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
 
     from ._gf_listing import pick_listing  # noqa: PLC0415
@@ -357,11 +357,16 @@ def _resolve_listing(isin: str, *, force: bool = False) -> dict:
     # server error is not "this ISIN does not exist". A genuine 200 with `[]` still caches
     # not_found, because that IS the answer.
     api = None
+    attempt_outcomes: list[str] = []
     for _ in range(_ISIN_MAX_TRIES):
         api = _api_request(_build_api_url(f"isin/{quote(isin)}"))
+        attempt_outcomes.append(classify_outcome(
+            getattr(api, "status_code", None), has_data=isinstance(api.data, list)))
         if isinstance(api.data, list):
             break
     if api is None or not isinstance(api.data, list):
+        for outcome in attempt_outcomes:
+            track_api_call(supabase, "", job="asset_listing_lookup", outcome=outcome)
         return {
             "isin": isin, "gurufocus_ticker": None, "exchange_code": None,
             "status": "error", "is_home": False, "candidates": [], "checked_at": _now_iso(),
@@ -376,11 +381,9 @@ def _resolve_listing(isin: str, *, force: bool = False) -> dict:
         currency_hint=currency_hint,
         exchange_currency=_exchange_currencies(),
     )
-    # Bill the call to the region of the listing it resolved to. The isin endpoint
-    # is global, so there is no region until we've picked one; an unresolved ISIN
-    # falls through `_region_for_exchange`'s default (europe). Tracked AFTER the
-    # pick for exactly that reason.
-    track_api_call(supabase, res.listing.exchange if res.listing else "")
+    for outcome in attempt_outcomes:
+        track_api_call(supabase, res.listing.exchange if res.listing else "",
+                       job="asset_listing_lookup", outcome=outcome)
     row = {
         "isin": isin,
         "gurufocus_ticker": res.listing.ticker if res.listing else None,
@@ -597,7 +600,7 @@ def _fetch_payment_records(ticker: str, exchange: str, *, force: bool) -> tuple[
     from urllib.parse import quote  # noqa: PLC0415
 
     from deps import supabase  # noqa: PLC0415
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
     from ingest.earnings._common import (  # noqa: PLC0415
         _build_symbol,
@@ -624,7 +627,9 @@ def _fetch_payment_records(ticker: str, exchange: str, *, force: bool) -> tuple[
 
     symbol = _build_symbol(ticker, exchange)
     api = _api_request(_build_api_url(f"stock/{quote(symbol, safe=':')}/dividend"))
-    track_api_call(supabase, exchange)
+    track_api_call(supabase, exchange, job="asset_dividends",
+                   outcome=classify_outcome(
+                       getattr(api, "status_code", None), has_data=api.data is not None))
     if api.is_forbidden:
         raise HTTPException(403, f"403 unsubscribed region for {symbol}")
     if not isinstance(api.data, list):

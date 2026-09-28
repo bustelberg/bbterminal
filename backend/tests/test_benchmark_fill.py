@@ -320,6 +320,23 @@ class TestEveryConstituentIsCapped:
 
         assert "weigh nothing" in inspect.getsource(r._caps)
 
+    def test_the_automatic_run_does_not_quote_a_symbol_twice(self, monkeypatch):
+        from asset_pipeline import yahoo
+        from routers import _benchmark_refresh as r
+
+        monkeypatch.setattr(
+            yahoo, "quote",
+            lambda _symbols: (_ for _ in ()).throw(AssertionError("overlap was quoted again")),
+        )
+        grid = {
+            "ISIN1": {"analysis_id": 1, "yahoo_symbol": "ASML.AS"},
+            "ISIN2": {"analysis_id": 2, "yahoo_symbol": "AAPL"},
+        }
+        out = r._caps(["ISIN1", "ISIN2"], grid, lambda *_a, **_k: None,
+                      run_symbols={"ASML.AS", "AAPL"})
+
+        assert out == {"quoted": 0, "capped": 0, "no_cap": 0, "skipped_overlap": 2}
+
 
 class TestThePriceStepFetchesBySymbolOnly:
     """Re-resolution asks Yahoo *which listing is this*, and Yahoo answers an overloaded caller

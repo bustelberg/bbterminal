@@ -306,7 +306,7 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Jo
         _JOBS[job.id] = job
     ctx = JobCtx(job)
 
-    def _runner() -> None:
+    def _runner_body() -> None:
         try:
             summary = fn(ctx)
             job.summary = summary
@@ -331,6 +331,15 @@ def start(kind: str, label: str, fn: Callable[[JobCtx], str | None]) -> tuple[Jo
             ctx.emit("error", job.summary)
         finally:
             job.ended_at = time.time()
+
+    def _runner() -> None:
+        # Every API request made directly by this job inherits its stable kind. Worker pools can
+        # establish a narrower context of their own; ContextVars deliberately do not leak between
+        # unrelated job threads.
+        from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+        with api_usage_job(kind):
+            _runner_body()
 
     threading.Thread(target=_runner, name=f"job-{job.id}", daemon=True).start()
     return job, False

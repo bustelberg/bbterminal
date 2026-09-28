@@ -31,7 +31,7 @@ from urllib.parse import quote
 
 from supabase import Client
 
-from ingest.api_usage import track_api_call
+from ingest.api_usage import classify_outcome, track_api_call
 from ingest.staleness import is_cache_fresh
 
 from ._api_client import _api_request, _build_api_url, _mask_url
@@ -187,7 +187,9 @@ def fetch_key_ratios(
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/keyratios")
         _log(f"Calling {_mask_url(url)} ...")
         api = _api_request(url)
-        track_api_call(supabase, exchange)
+        track_api_call(supabase, exchange, job="key_ratios",
+                       outcome=classify_outcome(
+                           getattr(api, "status_code", None), has_data=api.data is not None))
         result.api_calls += 1
         _log(api.log)
         if api.is_forbidden:

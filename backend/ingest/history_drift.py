@@ -1,4 +1,4 @@
-"""Daily drift check — has the vendor rewritten history we already stored?
+"""Weekly safety-net drift check — has the vendor rewritten history we already stored?
 
  THE PIPELINE CANNOT SEE A CORRECTION TO THE PAST. `_upsert_metric_rows` writes
 only `d > existing_max`, so a split, a reverse split or a free-share attribution
@@ -7,17 +7,17 @@ one. Measured on Leonteq 2026-08-02: 173 companies had wrong close history, 887
 had wrong volume history, and Worldline sat in the live book on a **+1142%**
 momentum for a stock that had fallen **69%**.
 
-The monthly full refetch is the guarantee. This is the early warning between
-them, and it exists because the undocumented `?start_date=&end_date=` filter
-makes a probe **23 bytes instead of 268,703** — an 11,682× cut that turns
-"re-verify the universe" from a 20-minute, 400 MB job into a few seconds.
+The monthly full refetch is the guarantee. Normal price updates now compare a
+one-week overlap and immediately repair the common whole-series rescale without
+another probe. This remains the safety net for an isolated OLD correction that
+does not touch that tail.
 
  IT DOES NOT SAVE QUOTA, WHICH IS WHY IT RUNS ON A SLICE. `api_usage` counts
 REQUESTS (20,000/region/month), and a one-day probe costs the same one request as
 a full history. Probing all 1,479 daily would be ~32,500 requests/month — over
 the USA cap on its own, with nothing left for the price updates that share it. So
-each day probes 1/`SLICE_DIVISOR` of the universe: every company is re-verified
-within a week, at ~300 requests a day.
+each weekly run probes 1/`SLICE_DIVISOR` of the universe: every company is
+re-verified within five weeks, at ~300 requests a week.
 
  AND THE ESCALATION IS A FULL FETCH, NOT A SECOND PROBE. Two sequential
 single-day probes cost two requests and can still both miss a one-bar vendor
@@ -33,21 +33,22 @@ from datetime import date
 from typing import Callable
 
 from common.pg import _run_copy
+from ingest.api_usage import classify_outcome, track_api_call
 from ingest.prices import _fetch_indicator_from_api, _parse_price_series
 from ingest.refetch_history import load_symbols, refetch_full_history
 
 log = logging.getLogger(__name__)
 
-# Each day probes `company_id % SLICE_DIVISOR == day_of_year % SLICE_DIVISOR`.
+# Each run probes `company_id % SLICE_DIVISOR == day_of_year % SLICE_DIVISOR`.
 # Stateless (no cursor to lose), deterministic, and every company comes round
-# within a week.
+# within five weekly runs (seven advances the day-of-year bucket by two mod five).
 SLICE_DIVISOR = 5
 WORKERS = 8
 #  The probe reads close price only, and that halves the bill for nothing lost.
 # The corporate actions that rewrite history re-scale BOTH series — a 1-for-40
 # multiplies price by 40 and divides volume by 40 — so the close alone detects
 # them, and the escalation refetches both metrics anyway. Probing volume too
-# would double a daily cost of ~1,500 requests/week to no additional detection.
+# would double this safety-net cost to no additional detection.
 _PROBE_METRIC = ("close_price", "price")
 # A stored/vendor difference beyond this is drift; below it is float noise.
 TOLERANCE = 1e-6
@@ -91,6 +92,8 @@ def check_drift(
     on_step: Callable[[str, str], None] | None = None,
 ) -> dict:
     """Probe each company's oldest stored bar; full-refetch the ones that moved."""
+    from deps import supabase  # noqa: PLC0415
+
     def _say(msg: str, level: str = "info") -> None:
         if on_step:
             on_step(msg, level)
@@ -121,6 +124,8 @@ def check_drift(
             hi = date.fromordinal(lo.toordinal() + _PROBE_WINDOW_DAYS)
             data, _log, _st = _fetch_indicator_from_api(
                 tic, exch, indicator, start_date=lo, end_date=hi)
+            track_api_call(supabase, exch, job="history_drift_probe",
+                           outcome=classify_outcome(_st, has_data=data is not None))
             counters["probes"] += 1
             if data is None:
                 counters["probe_failed"] += 1
@@ -172,6 +177,6 @@ def daily_drift_check(
     cids = [int(c["cid"]) for c in universe if c.get("cid") is not None]
     todays = slice_for_day(cids, day)
     if on_step:
-        on_step(f"Daily drift check: {len(todays)} of {len(cids)} companies "
-                f"(1/{SLICE_DIVISOR} slice — every name within a week)", "info")
+        on_step(f"Weekly drift check: {len(todays)} of {len(cids)} companies "
+                f"(1/{SLICE_DIVISOR} slice — every name within five weeks)", "info")
     return check_drift(todays, on_step=on_step)

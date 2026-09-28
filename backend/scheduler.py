@@ -511,7 +511,9 @@ def _run_body(job_id: str, ctx=None, triggered_by: str = "auto") -> str:
         body(ctx)
         return "done"
     stopped: str | None = None
-    with record_run(job_id, triggered_by=triggered_by) as rec:
+    from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+    with api_usage_job(job_id), record_run(job_id, triggered_by=triggered_by) as rec:
         try:
             detail, summary = body(ctx)
         except _Cancelled as e:
@@ -1302,7 +1304,7 @@ def _maybe_kickstart_airs_models() -> None:
 
 
 def _fire_history_drift_check() -> None:
-    """Daily: probe 1/5th of the universe for a vendor rewrite of PAST bars.
+    """Weekly: probe 1/5th of the universe for a vendor rewrite of PAST bars.
 
      THE ONE FAILURE THE PIPELINE IS BLIND TO. Prices are only ever appended
     (`d > existing_max`), so a split or a free-share attribution leaves our
@@ -1312,8 +1314,10 @@ def _fire_history_drift_check() -> None:
     Cheap because of the undocumented `?start_date=&end_date=` filter: a probe is
     ~23 bytes against a 268 KB full series. It is NOT cheap on quota (requests are
     what's metered, and a probe costs the same one as a full fetch), which is why
-    it walks a fifth of the universe a day — every name inside a week at ~300
-    requests/day — instead of all of it.
+    normal price gap fetch now compares a one-week overlap for no extra request and immediately
+    repairs the common whole-series rescale. This standalone probe is the slower safety net for an
+    isolated OLD correction that does not touch the recent tail: one fifth each Monday, so every
+    name comes round inside five weeks at ~300 requests/week instead of ~300/day.
 
     Own daemon thread; never raises into the scheduler."""
     _spawn_body("history_drift_check")
@@ -1366,6 +1370,11 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
 
     step = _reporter(ctx)
     summaries: dict[str, dict] = {}
+    # ONE union for the whole automatic run. ACWI contains most of SP500 and part of AEX; these
+    # sets ensure the later passes reuse those results instead of asking Yahoo for them again.
+    # Manual benchmark Refresh does not pass the sets and still fetches every constituent.
+    price_symbols: set[str] = set()
+    cap_symbols: set[str] = set()
     for i, label in enumerate(_RANKED_UNIVERSES, start=1):
         try:
             step(i - 1, len(_RANKED_UNIVERSES), f"{label}: starting")
@@ -1375,7 +1384,12 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
                 if message:
                     step(i - 1, len(_RANKED_UNIVERSES), f"{label}: {message}")
 
-            summaries[label] = refresh_benchmark(label, emit)
+            summaries[label] = refresh_benchmark(
+                label, emit,
+                run_price_symbols=price_symbols,
+                run_cap_symbols=cap_symbols,
+                skip_current_prices=True,
+            )
             step(i, len(_RANKED_UNIVERSES), f"{label}: complete")
         except Exception as exc:                                    # noqa: BLE001
             _log.warning("[benchmark-prices] %s failed (%s: %s)",
@@ -1386,12 +1400,17 @@ def _body_benchmark_price_slice(ctx=None) -> tuple[str, dict]:
     fetched = sum(int(s.get("prices_fetched") or 0) for s in summaries.values())
     moved = sum(int(s.get("prices_moved") or 0) for s in summaries.values())
     failed = sum(int(s.get("prices_failed") or 0) for s in summaries.values())
+    reused = sum(int(s.get("prices_skipped_overlap") or 0) for s in summaries.values())
+    current = sum(int(s.get("prices_skipped_current") or 0) for s in summaries.values())
     _log.info("[benchmark-prices] %s; %d price series fetched, %d updated, %d failed",
               {label: s.get("priceable", 0) for label, s in summaries.items()}, fetched, moved, failed)
     rank_detail, rank_summary = _body_relative_momentum_refresh(ctx)
-    return (f"{fetched} price series checked; {moved} updated; {rank_detail}",
+    return (f"{fetched} unique price series checked; {reused} overlapping constituent(s) reused; "
+            f"{current} already current; {moved} updated; {rank_detail}",
             {"benchmarks": summaries, "prices_fetched": fetched, "prices_moved": moved,
-             "prices_failed": failed, "relative_momentum": rank_summary})
+             "prices_failed": failed, "prices_reused": reused,
+             "prices_skipped_current": current,
+             "relative_momentum": rank_summary})
 
 
 #: The universes whose 12-1 returns are ranked into the seven relative-momentum states.
@@ -2319,9 +2338,6 @@ def register_scheduler(app) -> None:
         # at ~1.5s each) can never overlap the next day's tick, and the job itself stands down
         # entirely while the ingest queue is resolving — see `_fire_asset_price_refresh`.
         _register("asset_price_refresh", _fire_asset_price_refresh)
-        # Daily history-drift probe — the early warning between monthly full
-        # refetches. 07:00 UTC: after the 05:00 pipeline sequence and the 06:00
-        # asset-price refresh, so it never competes with them for GuruFocus.
         # Refresh every benchmark's constituents, prices and caps, then calculate relative
         # momentum in the same worker. The dependency is explicit: a fixed later clock time could
         # start ranking while a long ACWI refresh is still in progress.
@@ -2329,6 +2345,9 @@ def register_scheduler(app) -> None:
         # Weekly due-only fundamentals pass. It fetches only companies whose next filing could
         # have arrived, rather than re-reading every constituent.
         _register("benchmark_fundamentals_fill", _fire_benchmark_fundamentals)
+        # Weekly history-drift safety probe. Normal GuruFocus price updates compare a one-week
+        # overlap and immediately repair a rescale; this Monday slice catches isolated old-bar
+        # corrections that leave the recent tail untouched.
         _register("history_drift_check", _fire_history_drift_check)
         # Asset-pipeline ingest-queue worker — ON by default. Analyse queues missing ISINs and a
         # normal backend deployment must consume them without requiring a second process. A

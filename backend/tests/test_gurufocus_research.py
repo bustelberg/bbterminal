@@ -15,7 +15,7 @@ def test_research_returns_every_full_payload_and_counts_vendor_calls(monkeypatch
     monkeypatch.setenv("GURUFOCUS_API_KEY", "secret")
 
     calls: list[str] = []
-    tracked: list[tuple[str, int]] = []
+    tracked: list[tuple[str, int, dict]] = []
     large_payload = {"rows": [{"value": "x" * 3_000}]}
 
     def fake_request(url: str, timeout: int = 30):
@@ -31,7 +31,8 @@ def test_research_returns_every_full_payload_and_counts_vendor_calls(monkeypatch
     monkeypatch.setattr(
         api_usage,
         "track_api_call",
-        lambda _supabase, exchange, count=1: tracked.append((exchange, count)),
+        lambda _supabase, exchange, count=1, **dimensions:
+            tracked.append((exchange, count, dimensions)),
     )
 
     result = asyncio.run(admin.gurufocus_research(None, " nvda "))
@@ -51,7 +52,13 @@ def test_research_returns_every_full_payload_and_counts_vendor_calls(monkeypatch
         "error": "vendor failure",
         "data": None,
     }
-    assert tracked == [("NASDAQ", 14)]
+    assert len(tracked) == 14
+    assert all(exchange == "NASDAQ" and count == 1 for exchange, count, _dims in tracked)
+    assert {dims["job"] for _exchange, _count, dims in tracked} == {
+        f"admin_research_{key}" for key, _label, _endpoint in admin._GURUFOCUS_RESEARCH_ENDPOINTS
+    }
+    assert sum(dims["outcome"] == "http_error" for _e, _c, dims in tracked) == 1
+    assert sum(dims["outcome"] == "success" for _e, _c, dims in tracked) == 13
 
 
 def test_research_rejects_a_path_instead_of_proxying_it(monkeypatch):

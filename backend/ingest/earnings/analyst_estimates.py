@@ -11,7 +11,7 @@ from urllib.parse import quote
 
 from supabase import Client
 
-from ingest.api_usage import track_api_call
+from ingest.api_usage import classify_outcome, track_api_call
 from ingest.constants import DATA_CUTOFF
 from ingest.staleness import is_cache_fresh
 
@@ -122,7 +122,9 @@ def fetch_analyst_estimates(
         url = _build_api_url(f"stock/{quote(symbol, safe=':')}/analyst_estimate")
         _log(f"Calling {_mask_url(url)} ...")
         api = _api_request(url)
-        track_api_call(supabase, exchange)
+        track_api_call(supabase, exchange, job="analyst_estimates",
+                       outcome=classify_outcome(
+                           getattr(api, "status_code", None), has_data=api.data is not None))
         result.api_calls += 1
         _log(api.log)
         if api.is_forbidden:

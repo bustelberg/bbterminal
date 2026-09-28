@@ -492,7 +492,7 @@ def _fetch_financials_raw(ticker: str, exchange: str, *, force: bool) -> tuple[d
     from urllib.parse import quote  # noqa: PLC0415
 
     from deps import supabase  # noqa: PLC0415
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
     from ingest.earnings._common import (  # noqa: PLC0415
         _build_symbol,
@@ -512,7 +512,9 @@ def _fetch_financials_raw(ticker: str, exchange: str, *, force: bool) -> tuple[d
 
     symbol = _build_symbol(ticker, exchange)
     api = _api_request(_build_api_url(f"stock/{quote(symbol, safe=':')}/financials"))
-    track_api_call(supabase, exchange)
+    track_api_call(supabase, exchange, job="asset_financials",
+                   outcome=classify_outcome(
+                       getattr(api, "status_code", None), has_data=api.data is not None))
     if api.is_forbidden:
         raise HTTPException(403, f"403 unsubscribed region for {symbol}")
     if not isinstance(api.data, dict) or not api.data.get("financials"):
@@ -603,7 +605,7 @@ def _fetch_estimates_raw(ticker: str, exchange: str, *, force: bool) -> tuple[di
     from urllib.parse import quote  # noqa: PLC0415
 
     from deps import supabase  # noqa: PLC0415
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.earnings._api_client import _api_request, _build_api_url  # noqa: PLC0415
     from ingest.earnings._common import (  # noqa: PLC0415
         _build_symbol,
@@ -624,7 +626,9 @@ def _fetch_estimates_raw(ticker: str, exchange: str, *, force: bool) -> tuple[di
     symbol = _build_symbol(ticker, exchange)
     # SINGULAR — the plural is the router fallback. See `_SOURCE_ESTIMATES`.
     api = _api_request(_build_api_url(f"stock/{quote(symbol, safe=':')}/analyst_estimate"))
-    track_api_call(supabase, exchange)
+    track_api_call(supabase, exchange, job="asset_analyst_estimates",
+                   outcome=classify_outcome(
+                       getattr(api, "status_code", None), has_data=api.data is not None))
     if api.is_forbidden:
         raise HTTPException(403, f"403 unsubscribed region for {symbol}")
     if not isinstance(api.data, dict) or not api.data.get("annual"):

@@ -66,6 +66,32 @@ _quote_crumb: str | None = None
 _sess_lock = threading.Lock()
 
 
+def _usage_job_for_url(url: str) -> str:
+    """Low-cardinality fallback when the caller is not inside a named job context."""
+    from ingest.api_usage import current_api_job  # noqa: PLC0415
+
+    fallback = ("yahoo_search" if "/finance/search" in url
+                else "yahoo_chart" if "/finance/chart" in url
+                else "yahoo_profile" if "quoteSummary" in url
+                else "yahoo_quote" if "/finance/quote" in url
+                else "yahoo_session")
+    return current_api_job(fallback)
+
+
+def _track_request(url: str, status: int | None, body: str = "") -> None:
+    """Count one actual Yahoo HTTP attempt. Telemetry never changes the request result."""
+    try:
+        from deps import supabase  # noqa: PLC0415
+        from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
+
+        track_api_call(
+            supabase, source="yahoo", region="global", job=_usage_job_for_url(url),
+            outcome=classify_outcome(status, has_data=bool(body)),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _quote_session():
     """Cached (curl_cffi session, crumb) primed with Yahoo's cookie. (None, None)
     when curl_cffi is missing or priming failed — quote() then no-ops."""
@@ -79,11 +105,19 @@ def _quote_session():
             return _quote_sess, _quote_crumb
         try:
             s = _creq.Session(impersonate="chrome")
+            consent_url = "https://fc.yahoo.com"
             try:
-                s.get("https://fc.yahoo.com", timeout=10)  # sets the A1 consent cookie
+                consent = s.get(consent_url, timeout=10)  # sets the A1 consent cookie
+                _track_request(consent_url, consent.status_code, consent.text or "")
             except Exception:  # noqa: BLE001
-                pass
-            r = s.get("https://query1.finance.yahoo.com/v1/test/getcrumb", timeout=10)
+                _track_request(consent_url, None)
+            crumb_url = "https://query1.finance.yahoo.com/v1/test/getcrumb"
+            try:
+                r = s.get(crumb_url, timeout=10)
+            except Exception:  # noqa: BLE001
+                _track_request(crumb_url, None)
+                raise
+            _track_request(crumb_url, r.status_code, r.text or "")
             crumb = (r.text or "").strip()
             if not crumb or len(crumb) > 40:  # an HTML error page isn't a crumb
                 return None, None
@@ -105,14 +139,17 @@ def _profile_raw(sym: str) -> tuple[int | None, str]:
     url = f"{_PROFILE}/{_urlquote(sym, safe='=^.:-')}"
     try:
         r = s.get(url, params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
+        _track_request(url, r.status_code, r.text or "")
         if r.status_code == 401:  # crumb expired — refresh once, retry
             _quote_sess = _quote_crumb = None
             s, crumb = _quote_session()
             if not s:
                 return 401, ""
             r = s.get(url, params={"modules": "assetProfile", "crumb": crumb}, timeout=20)
+            _track_request(url, r.status_code, r.text or "")
         return r.status_code, (r.text or "")
     except Exception:  # noqa: BLE001
+        _track_request(url, None)
         return None, ""
 
 
@@ -171,6 +208,7 @@ def quote(symbols: list[str]) -> dict[str, dict]:
         chunk = syms[i:i + 100]
         try:
             r = s.get(_QUOTE, params={"symbols": ",".join(chunk), "crumb": crumb}, timeout=20)
+            _track_request(_QUOTE, r.status_code, r.text or "")
             if r.status_code == 401:  # crumb expired — refresh once, retry the chunk
                 _quote_sess = _quote_crumb = None
                 s, crumb = _quote_session()
@@ -181,7 +219,7 @@ def quote(symbols: list[str]) -> dict[str, dict]:
                 if q.get("symbol"):
                     out[q["symbol"]] = q
         except Exception:  # noqa: BLE001
-            pass
+            _track_request(_QUOTE, None)
         i += 100
         time.sleep(0.2)
     return out
@@ -194,15 +232,20 @@ def _raw_get(url: str) -> tuple[int | None, str]:
     if _HAS_CURL:
         try:
             r = _creq.get(url, impersonate="chrome", timeout=30)
+            _track_request(url, r.status_code, r.text or "")
             return r.status_code, (r.text or "")
         except Exception:  # noqa: BLE001
+            _track_request(url, None)
             return None, ""
     from urllib.request import Request, urlopen  # noqa: PLC0415
     try:
         req = Request(url, headers={"User-Agent": "Mozilla/5.0", "Accept": "application/json"})
         with urlopen(req, timeout=30) as resp:  # noqa: S310
-            return resp.status, resp.read().decode("utf-8", "replace")
+            body = resp.read().decode("utf-8", "replace")
+            _track_request(url, resp.status, body)
+            return resp.status, body
     except Exception:  # noqa: BLE001
+        _track_request(url, None)
         return None, ""
 
 

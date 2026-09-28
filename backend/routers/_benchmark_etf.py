@@ -181,12 +181,13 @@ def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
     invents a bar dated today carrying yesterday's price whenever today has not settled (measured
     on AAPL, 2026-08-02). So: ask for everything, write the tail.
     """
-    from ingest.api_usage import track_api_call  # noqa: PLC0415
+    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
     from ingest.prices import _fetch_price_from_api, _parse_price_series  # noqa: PLC0415
 
     data, fetch_log, _status = _fetch_price_from_api(ticker, "NYSE")
-    track_api_call(supabase, "NYSE")
+    track_api_call(supabase, "NYSE", job="benchmark_etf_price",
+                   outcome=classify_outcome(_status, has_data=data is not None))
     if not data:
         _log.warning("[bench-etf] %s: fetch returned nothing — %s", ticker, fetch_log)
         return 0

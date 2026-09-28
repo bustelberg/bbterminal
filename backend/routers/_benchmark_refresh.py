@@ -239,7 +239,8 @@ def _constituents(label: str, emit) -> tuple[list[dict], dict, dict]:
     return companies, grid, buckets
 
 
-def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
+def _caps(isins: list[str], grid: dict[str, dict], emit,
+          run_symbols: set[str] | None = None) -> dict:
     """Step 2 — a market cap for EVERY constituent, from Yahoo, now.
 
      ALL OF THEM, NOT ONLY THE UNCAPPED ONES. The cap IS the weight, and it moves every day —
@@ -261,10 +262,26 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
         g = grid.get(isin) or {}
         if g.get("yahoo_symbol") and g.get("analysis_id"):
             by_symbol.setdefault(g["yahoo_symbol"], g["analysis_id"])
+
+    # ACWI, SP500 and AEX overlap heavily. The automatic three-index job hands this function one
+    # run-scoped set, so a symbol quoted for ACWI is reused by the later indices. Manual Refresh
+    # passes no set and retains its explicit fetch-everything contract.
+    skipped_overlap = 0
+    if run_symbols is not None:
+        unique: dict[str, int] = {}
+        for sym, aid in by_symbol.items():
+            key = sym.strip().upper()
+            if key in run_symbols:
+                skipped_overlap += 1
+                continue
+            run_symbols.add(key)
+            unique[sym] = aid
+        by_symbol = unique
     emit("phase", phase="caps",
          message=f"2/3 Market caps from Yahoo for {len(by_symbol)} constituent(s)…")
     if not by_symbol:
-        return {"quoted": 0, "capped": 0, "no_cap": 0}
+        return {"quoted": 0, "capped": 0, "no_cap": 0,
+                "skipped_overlap": skipped_overlap}
 
     syms = sorted(by_symbol)
     now = datetime.now(timezone.utc).isoformat()
@@ -285,7 +302,11 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
         ccy = _cap_currency(q.get("currency"))
         eur = None
         if native and ccy:
-            fx = yahoo.fx_to_eur(ccy) or 0.0
+            # Cap writes run in their own pool, so the parent job's ContextVar is not inherited.
+            from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+            with api_usage_job("benchmark_refresh"):
+                fx = yahoo.fx_to_eur(ccy) or 0.0
             eur = round(float(native) * fx, 2) if fx else None
         #  Written even when null, with the timestamp — otherwise every run re-asks Yahoo
         # about the same names it already knows have no cap (an ETF, a delisted line).
@@ -301,7 +322,10 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
 
     for i in range(0, len(syms), _QUOTE_BATCH):
         chunk = syms[i:i + _QUOTE_BATCH]
-        quotes = yahoo.quote(chunk)
+        from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+        with api_usage_job("benchmark_refresh"):
+            quotes = yahoo.quote(chunk)
         quoted += len(quotes)
         #  The quotes are batched and the writes were not — which is where this step's time went.
         # One Yahoo call answers 100 symbols; storing them was 100 separate PostgREST round trips,
@@ -326,11 +350,13 @@ def _caps(isins: list[str], grid: dict[str, dict], emit) -> dict:
             f"   {len(no_cap)} with no market cap (they weigh nothing): "
             + ", ".join(no_cap[:15])
             + (f" … +{len(no_cap) - 15} more" if len(no_cap) > 15 else "")))
-    return {"quoted": quoted, "capped": capped, "no_cap": len(no_cap)}
+    return {"quoted": quoted, "capped": capped, "no_cap": len(no_cap),
+            "skipped_overlap": skipped_overlap}
 
 
 def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
-            anchor: str | None, emit, should_stop=None) -> dict:
+            anchor: str | None, emit, should_stop=None,
+            run_symbols: set[str] | None = None, *, skip_current: bool = False) -> dict:
     """Step 3 — the start-of-year price and the current price, per constituent.
 
      THE ONLY CANCELLATION POINT THAT MATTERS IS IN HERE, and it is between constituents. This
@@ -383,10 +409,20 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
             todo.append((isin, g["analysis_id"], g["yahoo_symbol"]))
     todo.sort(key=lambda t: t[2])
 
-    total = len(todo)
-    emit("phase", phase="prices", message=(
-        f"3/3 Start-of-year and current price for {total} constituent(s) — "
-        f"window opens {start_anchor}, {_PRICE_WORKERS} at a time"))
+    # Claim before the worker pool starts. That removes both cross-index overlap and duplicate
+    # symbols inside one index without a race. Failed requests remain claimed: at most once per
+    # automatic run is the quota guarantee; tomorrow's run or a manual Refresh can retry.
+    skipped_overlap = 0
+    if run_symbols is not None:
+        unique: list[tuple[str, int, str]] = []
+        for item in todo:
+            key = item[2].strip().upper()
+            if key in run_symbols:
+                skipped_overlap += 1
+                continue
+            run_symbols.add(key)
+            unique.append(item)
+        todo = unique
 
     #  THE "WHAT DID WE HOLD BEFORE?" READ IS ONE GROUPED COPY FOR THE WHOLE INDEX. It used to be
     # a `_marks` call per constituent — two indexed round trips each, on the critical path, purely
@@ -398,11 +434,35 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     # second copy here would be free to disagree with the tick about what "our newest close" means.
     before = latest_close_by_analysis([aid for _, aid, _ in todo]) if todo else {}
 
+    # Automatic work asks only for a close that can exist. If this instrument is already at the
+    # freshest close Yahoo says the market has published, another chart request can return only the
+    # same answer. Manual Refresh leaves `skip_current=False`: a human explicitly asking us to look
+    # still gets a real vendor request, preserving that control's existing contract.
+    skipped_current = 0
+    if skip_current and anchor:
+        stale: list[tuple[str, int, str]] = []
+        for item in todo:
+            last = before.get(item[1])
+            if last and last >= anchor:
+                skipped_current += 1
+                continue
+            stale.append(item)
+        todo = stale
+
+    total = len(todo)
+    emit("phase", phase="prices", message=(
+        f"3/3 Start-of-year and current price for {total} constituent(s) — "
+        f"window opens {start_anchor}, {_PRICE_WORKERS} at a time"
+        + (f" · {skipped_overlap} overlap(s) reused" if skipped_overlap else "")
+        + (f" · {skipped_current} already at market close {anchor}"
+           if skipped_current else "")))
+
     # `moved` = the series gained a closed bar. `unchanged` = the vendor has none after the one we
     # hold, which is an ANSWER (a venue with no close that day, a delisted line, a session still
     # open) and is why it is counted apart from a failure.
     out = {"total": total, "fetched": 0, "moved": 0, "unchanged": 0,
-           "failed": 0, "no_start": 0, "no_end": 0}
+           "failed": 0, "no_start": 0, "no_end": 0,
+           "skipped_overlap": skipped_overlap, "skipped_current": skipped_current}
     #  One lock over the tally *AND* THE COUNTER. They are read together to build a line, and a
     # count that is incremented outside the lock can be reported twice under the same `n`.
     tally = threading.Lock()
@@ -410,6 +470,14 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     stopped = threading.Event()
 
     def _one(item: tuple[str, int, str]) -> None:
+        # ThreadPoolExecutor starts with an empty ContextVar context. Name this worker explicitly
+        # so its Yahoo chart requests do not fall back to the generic `yahoo_chart` bucket.
+        from ingest.api_usage import api_usage_job  # noqa: PLC0415
+
+        with api_usage_job("benchmark_refresh"):
+            _one_inner(item)
+
+    def _one_inner(item: tuple[str, int, str]) -> None:
         isin, aid, sym = item
         if should_stop and should_stop():
             #  Said once, by whichever thread sees it first. Every queued constituent passes
@@ -494,7 +562,10 @@ def _prices(companies: list[dict], isins: list[str], grid: dict[str, dict],
     return out
 
 
-def refresh_benchmark(label: str, emit, should_stop=None) -> dict:
+def refresh_benchmark(label: str, emit, should_stop=None, *,
+                      run_price_symbols: set[str] | None = None,
+                      run_cap_symbols: set[str] | None = None,
+                      skip_current_prices: bool = False) -> dict:
     """The whole run, emitting one line per step. Returns the summary the `done` event carries.
 
     `emit(msg_type, **fields)` is the SSE sender — the same shape the AIRS scan uses.
@@ -520,13 +591,14 @@ def refresh_benchmark(label: str, emit, should_stop=None) -> dict:
     if should_stop and should_stop():
         return {"label": label, "universe_members": len(companies), "priceable": len(priceable),
                 "stopped": True, "note": "cancelled after the constituents step"}
-    caps = _caps(priceable, grid, emit)
+    caps = _caps(priceable, grid, emit, run_symbols=run_cap_symbols)
     # Re-read the grid: the caps just written are what makes a `needs_cap` constituent weighable,
     # and step 3 prices everything the grid can reach either way.
     grid = _grid_for(sorted({(c.get("isin") or "").strip().upper()
                              for c in companies if c.get("isin")}))
     anchor = _market_anchor(emit)
-    px = _prices(companies, priceable, grid, anchor, emit, should_stop)
+    px = _prices(companies, priceable, grid, anchor, emit, should_stop,
+                 run_symbols=run_price_symbols, skip_current=skip_current_prices)
 
     took = time.time() - started
     summary = {
@@ -539,9 +611,12 @@ def refresh_benchmark(label: str, emit, should_stop=None) -> dict:
         "needs_resolve": len(buckets[_NEEDS_RESOLVE]),
         "no_isin": len(buckets[_NO_ISIN]),
         "capped": caps["capped"],
+        "caps_skipped_overlap": caps["skipped_overlap"],
         "no_cap": caps["no_cap"],
-        "prices_total": px["total"],
+        "prices_total": px["total"] + px["skipped_overlap"] + px["skipped_current"],
         "prices_fetched": px["fetched"],
+        "prices_skipped_overlap": px["skipped_overlap"],
+        "prices_skipped_current": px["skipped_current"],
         # Of the ones fetched: how many gained a closed bar, and how many the vendor had nothing
         # newer for. The second is an answer, not a miss — see `_prices`.
         "prices_moved": px["moved"],
@@ -555,6 +630,10 @@ def refresh_benchmark(label: str, emit, should_stop=None) -> dict:
         f"[{label}] done in {took:.0f}s — {len(priceable)} constituents, {caps['capped']} caps, "
         f"{px['fetched']} price series fetched — {px['moved']} gained a new close, "
         f"{px['unchanged']} already at the vendor's latest"
+        + (f", {px['skipped_overlap']} overlap(s) reused from an earlier index"
+           if px["skipped_overlap"] else "")
+        + (f", {px['skipped_current']} already current and not requested"
+           if px["skipped_current"] else "")
         + (f", {px['failed']} failed" if px["failed"] else "")))
     return summary
 
