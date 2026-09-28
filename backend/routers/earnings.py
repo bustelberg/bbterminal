@@ -22,7 +22,7 @@ from collections import Counter, defaultdict
 #  ALIASED. Three loops in this file already bind a variable called `date` (they iterate
 # `{date: value}` maps), and importing the type under that name shadows it inside them — the same
 # word meaning two things a few lines apart is how the wrong one gets called.
-from datetime import date as _date
+from datetime import date as _date, timedelta
 from routers._blend_cache import cached_blend, cached_coverage, cached_metric_reads
 from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
@@ -561,6 +561,31 @@ class FundamentalCoverageRequest(BaseModel):
     metrics: list[str] | None = None
 
 
+class PortfolioCompanyMetric(BaseModel):
+    metric_code: str
+    target_date: str
+    numeric_value: float | None = None
+    is_prediction: bool | None = None
+    recorded_at: str | None = None
+
+
+class PortfolioCompanyMetricsRow(BaseModel):
+    company_id: int
+    isin: str
+    name: str
+    weight_pct: float
+    currency: str | None = None
+    source_fetched_at: dict[str, str | None]
+    metrics: list[PortfolioCompanyMetric]
+
+
+class PortfolioCompanyMetricsResponse(BaseModel):
+    """The operating companies in a book, with the inputs used by the existing Reverse DCF."""
+
+    coverage: dict
+    rows: list[PortfolioCompanyMetricsRow]
+
+
 async def _load_and_expand_members(body: FundamentalCoverageRequest, *,
                                    all_constituents: bool = False) -> list[dict]:
     """The flat holdings to analyse, with every linked certificate looked THROUGH to the model it
@@ -684,6 +709,129 @@ async def fundamental_coverage(body: FundamentalCoverageRequest, request: Reques
     if not members:
         return _EMPTY_COVERAGE()
     return await coverage_for_async(members)
+
+
+@router.post("/api/earnings/portfolio-company-metrics",
+             response_model=PortfolioCompanyMetricsResponse)
+async def portfolio_company_metrics(body: FundamentalCoverageRequest):
+    """One bulk read for the portfolio company list and its Reverse-DCF inputs.
+
+    This deliberately returns source observations rather than a second server-side valuation.
+    The client runs the same ``reverseDcfSource`` and ``impliedGrowth`` functions as the existing
+    single-company Deep Valuation screen, so the portfolio table cannot acquire a subtly different
+    definition of FCF, WACC, or implied growth. Funds, cash and bonds remain visible in ``coverage``
+    but are not rows: a reverse DCF belongs to an operating company, not to its wrapper.
+    """
+    members = await _load_and_expand_members(body)
+    if not members:
+        return {"coverage": _EMPTY_COVERAGE(), "rows": []}
+
+    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
+
+    coverage = await coverage_for_async(members)
+    covered = [r for r in coverage["rows"]
+               if r.get("reason") == "covered" and r.get("company_id") and r.get("isin")]
+    if not covered:
+        return {"coverage": coverage, "rows": []}
+
+    def _load() -> list[dict]:
+        cids = sorted({int(r["company_id"]) for r in covered})
+        # The exact families read by ``egmInputs.reverseDcfSource``. Quarterly twins are needed
+        # for its TTM quorum; the four ``annual_*`` rows are the FY1 consensus base. Keeping this
+        # allowlist narrow avoids transferring decades of unrelated dashboard metrics.
+        annual = [
+            "annuals__Income Statement__Shares Outstanding (Diluted Average)",
+            "annuals__income_statement__Shares Outstanding (Diluted Average)",
+            "annuals__Ratios__WACC %", "annuals__ratios__WACC %",
+            "annuals__Cashflow Statement__Free Cash Flow",
+            "annuals__cashflow_statement__Free Cash Flow",
+            "annuals__Cashflow Statement__Stock Based Compensation",
+            "annuals__cashflow_statement__Stock Based Compensation",
+            "annuals__Cashflow Statement__Capital Expenditure",
+            "annuals__cashflow_statement__Capital Expenditure",
+            "annuals__Cashflow Statement__Purchase Of Property, Plant, Equipment",
+            "annuals__cashflow_statement__Purchase Of Property, Plant, Equipment",
+            "annuals__Cashflow Statement__Cash Flow Depreciation, Depletion and Amortization",
+            "annuals__cashflow_statement__Cash Flow Depreciation, Depletion and Amortization",
+        ]
+        codes = annual + ["quarterly__" + c[len("annuals__"):] for c in annual]
+        codes += ["annual_operating_cash_flow_estimate", "annual_fcf_estimate",
+                  "annual_ebitda_estimate", "annual_ebit_estimate",
+                  # Expected Growth Model: FY1 EPS, current forward P/E, realised dividend yield,
+                  # and the two five-year series used to derive its default exit multiple.
+                  "annual_per_share_eps_estimate", "indicator_q_forward_pe_ratio",
+                  "annuals__Valuation Ratios__Dividend Yield %",
+                  "annuals__valuation_ratios__Dividend Yield %",
+                  "quarterly__Valuation Ratios__Dividend Yield %",
+                  "quarterly__valuation_ratios__Dividend Yield %",
+                  "annuals__Per Share Data__Month End Stock Price",
+                  "annuals__per_share_data__Month End Stock Price",
+                  "annuals__per_share_data_array__Month End Stock Price",
+                  "annuals__Per Share Data__EPS without NRI",
+                  "annuals__per_share_data__EPS without NRI",
+                  "annuals__per_share_data_array__EPS without NRI"]
+        by_company: dict[int, list[dict]] = {cid: [] for cid in cids}
+
+        def collect(query) -> None:
+            offset = 0
+            while True:
+                batch = query().range(offset, offset + 999).execute().data or []
+                for metric in batch:
+                    cid = int(metric.pop("company_id"))
+                    by_company.setdefault(cid, []).append(metric)
+                if len(batch) < 1000:
+                    break
+                offset += 1000
+
+        for start in range(0, len(cids), 50):
+            chunk = cids[start:start + 50]
+            collect(lambda chunk=chunk: supabase.table("metric_data")
+                    .select("company_id,metric_code,target_date,numeric_value,is_prediction,recorded_at")
+                    .in_("company_id", chunk).eq("source_code", "gurufocus")
+                    .in_("metric_code", codes).order("company_id").order("target_date"))
+            # A short close window is enough to identify the latest stored price while avoiding
+            # decades of daily bars for every company in the book.
+            collect(lambda chunk=chunk: supabase.table("metric_data")
+                    .select("company_id,metric_code,target_date,numeric_value,is_prediction,recorded_at")
+                    .in_("company_id", chunk).eq("source_code", "gurufocus")
+                    .eq("metric_code", "close_price")
+                    .gte("target_date", (_date.today() - timedelta(days=45)).isoformat())
+                    .order("company_id").order("target_date"))
+
+        meta: dict[int, dict] = {}
+        for start in range(0, len(cids), 100):
+            for company in (supabase.table("company")
+                            .select("company_id,company_name,isin,financials_fetched_at,"
+                                    "estimates_fetched_at,indicators_fetched_at,"
+                                    "gurufocus_exchange:gurufocus_exchange(currency_code)")
+                            .in_("company_id", cids[start:start + 100]).execute().data or []):
+                meta[int(company["company_id"])] = company
+
+        result_by_company: dict[int, dict] = {}
+        for holding in covered:
+            cid = int(holding["company_id"])
+            if cid in result_by_company:
+                result_by_company[cid]["weight_pct"] += float(holding.get("weight_pct") or 0)
+                continue
+            company = meta.get(cid, {})
+            exchange = company.get("gurufocus_exchange") or {}
+            result_by_company[cid] = {
+                "company_id": cid,
+                "isin": holding["isin"],
+                "name": holding.get("company_name") or holding.get("name")
+                        or company.get("company_name") or holding["isin"],
+                "weight_pct": float(holding.get("weight_pct") or 0),
+                "currency": exchange.get("currency_code"),
+                "source_fetched_at": {
+                    "financials": company.get("financials_fetched_at"),
+                    "estimates": company.get("estimates_fetched_at"),
+                    "indicators": company.get("indicators_fetched_at"),
+                },
+                "metrics": by_company.get(cid, []),
+            }
+        return sorted(result_by_company.values(), key=lambda row: -row["weight_pct"])
+
+    return {"coverage": coverage, "rows": await asyncio.to_thread(_load)}
 
 
 # The metrics the blended view charts. Deliberately short: each is a metric whose portfolio-level

@@ -205,7 +205,8 @@ def feed_flags(force: bool, feeds: str, missing: dict | None = None) -> dict:
 
 def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
                    on_step: Callable[[str, int, int], None] | None = None,
-                   should_stop: Callable[[], bool] | None = None) -> dict:
+                   should_stop: Callable[[], bool] | None = None,
+                   include_key_ratios: bool = False) -> dict:
     """Run the feeds this company is missing. Returns {done: [...], rows: n, error: str|None}.
 
      IT NEVER RAISES. One company's failure must not end a 400-company run, and a caller streaming
@@ -244,7 +245,7 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
     without the calls, and nothing wants the calls without `force`.
     """
     from ingest.earnings import (  # noqa: PLC0415
-        fetch_analyst_estimates, fetch_financials, fetch_indicators,
+        fetch_analyst_estimates, fetch_financials, fetch_indicators, fetch_key_ratios,
     )
 
     exch = ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code")
@@ -263,10 +264,17 @@ def ingest_company(c: dict, *, force: bool = False, refresh_cache: bool = False,
     # carries the real number and this passes it up. The quota is monthly and finite; a caller
     # showing a user "3 API calls" for a run that spent zero teaches them to distrust the figure.
     calls = 0
-    feeds = [(flag, fn, tag) for flag, fn, tag in
-             (("need_fin", fetch_financials, "fin"),
-              ("need_est", fetch_analyst_estimates, "est"),
-              ("need_ind", fetch_indicators, "ind"))
+    candidates = [
+        ("need_fin", fetch_financials, "fin"),
+        ("need_est", fetch_analyst_estimates, "est"),
+    ]
+    # `keyratios` has no fiscal dates of its own. It must run immediately after estimates, whose
+    # stored FY1/FY2/FY3 axis dates the consensus FCF rows, and before indicators so an unrelated
+    # indicator refusal cannot prevent this valuation input from being refreshed.
+    if include_key_ratios:
+        candidates.append(("need_key", fetch_key_ratios, "key ratios"))
+    candidates.append(("need_ind", fetch_indicators, "ind"))
+    feeds = [(flag, fn, tag) for flag, fn, tag in candidates
              if force or c.get(flag, True)]
     try:
         for i, (_flag, fn, tag) in enumerate(feeds, 1):

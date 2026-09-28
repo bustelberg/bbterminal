@@ -211,6 +211,7 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
     "/api/earnings/gross-margin-inputs",
     "/api/earnings/interest-burden-inputs",
     "/api/earnings/margin-inputs",
+    "/api/earnings/portfolio-company-metrics",
     "/api/earnings/portfolio-revenue-matrix",
     "/api/earnings/relative-growth-breakdown",
     "/api/earnings/sbc-ocf-inputs",

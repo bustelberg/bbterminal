@@ -11643,6 +11643,142 @@
         "title": "PortfolioAnalysisRow",
         "type": "object"
       },
+      "PortfolioCompanyMetric": {
+        "properties": {
+          "is_prediction": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Prediction"
+          },
+          "metric_code": {
+            "title": "Metric Code",
+            "type": "string"
+          },
+          "numeric_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Numeric Value"
+          },
+          "recorded_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded At"
+          },
+          "target_date": {
+            "title": "Target Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric_code",
+          "target_date"
+        ],
+        "title": "PortfolioCompanyMetric",
+        "type": "object"
+      },
+      "PortfolioCompanyMetricsResponse": {
+        "description": "The operating companies in a book, with the inputs used by the existing Reverse DCF.",
+        "properties": {
+          "coverage": {
+            "additionalProperties": true,
+            "title": "Coverage",
+            "type": "object"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioCompanyMetricsRow"
+            },
+            "title": "Rows",
+            "type": "array"
+          }
+        },
+        "required": [
+          "coverage",
+          "rows"
+        ],
+        "title": "PortfolioCompanyMetricsResponse",
+        "type": "object"
+      },
+      "PortfolioCompanyMetricsRow": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/PortfolioCompanyMetric"
+            },
+            "title": "Metrics",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_fetched_at": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Source Fetched At",
+            "type": "object"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "company_id",
+          "isin",
+          "name",
+          "weight_pct",
+          "source_fetched_at",
+          "metrics"
+        ],
+        "title": "PortfolioCompanyMetricsRow",
+        "type": "object"
+      },
       "PortfolioConcentration": {
         "description": "`C\u2081\u2080 = \u03a3 w\u208d\u1d62\u208e` and `HHI = \u03a3 w\u1d62\u00b2` \u2014 see `routers/_portfolio_concentration.py`.\n\n ON ISSUERS, NOT LINES. Alphabet A + Alphabet C is ONE position; counting two would\nunderstate concentration exactly at the top, where the ten largest are decided.\n\n BOTH DENOMINATORS ARE RETURNED because the choice changes the number: `top10_pct` is of the\nstock sleeve (comparable across books, the panel's convention) and `top10_of_book_pct` is of\neverything including cash and funds (true in absolute terms). Choosing one silently would be\npicking a side of a real question.",
         "properties": {
@@ -18004,6 +18140,16 @@
               "title": "Prices",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "key_ratios",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Key Ratios",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -18696,6 +18842,16 @@
             "schema": {
               "default": false,
               "title": "Prices",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key_ratios",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Key Ratios",
               "type": "boolean"
             }
           }
@@ -25792,6 +25948,48 @@
           }
         },
         "summary": "Margin Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/portfolio-company-metrics": {
+      "post": {
+        "description": "One bulk read for the portfolio company list and its Reverse-DCF inputs.\n\nThis deliberately returns source observations rather than a second server-side valuation.\nThe client runs the same ``reverseDcfSource`` and ``impliedGrowth`` functions as the existing\nsingle-company Deep Valuation screen, so the portfolio table cannot acquire a subtly different\ndefinition of FCF, WACC, or implied growth. Funds, cash and bonds remain visible in ``coverage``\nbut are not rows: a reverse DCF belongs to an operating company, not to its wrapper.",
+        "operationId": "portfolio_company_metrics_api_earnings_portfolio_company_metrics_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FundamentalCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PortfolioCompanyMetricsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Portfolio Company Metrics",
         "tags": [
           "earnings"
         ]

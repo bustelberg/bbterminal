@@ -94,7 +94,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    * to it — Long Equity's forecast leg is the `est` feed too. A button whose behaviour depended on
    * which tab happened to be open would be a different button wearing the same words.
    *
-   *  The cost is ~4 CALLS PER COMPANY INSTEAD OF 1 (three feeds plus a price fetch), which is why
+   *  The cost is ~5 CALLS PER COMPANY INSTEAD OF 1 (three feeds, the key-ratios/FY1 FCF feed and
+   * a price fetch), which is why
    * this is opt-in rather than the default: the drill-down's per-row press and the index fill have
    * their own, narrower reasons to exist, and a four-figure index spend is not one of them.
    */
@@ -201,7 +202,7 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
     try {
       //  `feeds=all` NARROWS NOTHING and `prices=true` adds the ingest that is not a feed — see
       // the `everything` prop for what the four things are and which chart each one was missing.
-      const q = `?force=true&only_due=${allPeriods ? 'false' : 'true'}${everything ? '&feeds=all&prices=true' : ''}`;
+      const q = `?force=true&only_due=${allPeriods ? 'false' : 'true'}${everything ? '&feeds=all&key_ratios=true&prices=true' : ''}`;
       // A company and a basket post the same body — one holding or many. `/api/airs/basket/…` is
       // already the codebase's shape for "an ad-hoc set of holdings"; a single stock is a set of
       // one, which is exactly how `/api/airs/basket/analysis` treats it.
@@ -270,7 +271,7 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
         // One press, two deliberately SERIAL jobs. Both use the global GuruFocus rate limiter, so
         // parallel jobs cannot finish sooner and would make both progress cards appear stalled.
         const extraQ = `?force=true&only_due=${allPeriods ? 'false' : 'true'}`
-          + `${everything ? '&feeds=all&prices=true' : ''}`;
+          + `${everything ? '&feeds=all&key_ratios=true&prices=true' : ''}`;
         const extraHoldings = extra.kind === 'company' ? [{ isin: extra.isin }]
           : extra.kind === 'basket' ? extra.holdings.map((h) => ({ isin: h.isin })) : null;
         const extraUrl = extra.kind === 'universe'

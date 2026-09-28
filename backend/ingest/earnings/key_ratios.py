@@ -218,10 +218,10 @@ def fetch_key_ratios(
     _log(f"Loaded {result.rows_loaded} rows into DB"
          + (f", {result.rows_unchanged} already identical" if result.rows_unchanged else ""))
     #  NO `_stamp_fetched` HERE, AND THAT IS A DECISION RATHER THAN AN OMISSION. The stamp exists
-    # to stop the SMART REFRESH re-asking a company GuruFocus publishes nothing for; this feed is
-    # on-demand (one company, from the panel that wants it) and is in no such loop, so there is no
-    # decision for a stamp to improve.  Calling it with an unregistered source would have been a
-    # SILENT no-op — `FETCHED_AT_COLUMN.get` returns None and it returns — which is worse than not
-    # calling it: the line would read as though the feed were stamped. Add a
-    # `keyratios_fetched_at` column WITH a migration on the day this joins a bulk pass.
+    # to stop the SMART REFRESH re-asking a company GuruFocus publishes nothing for. This feed is
+    # on-demand: either one company or the portfolio valuation table's explicit forced bulk press.
+    # Neither uses a freshness decision, so there is still no decision for a stamp to improve.
+    # Calling `_stamp_fetched` with an unregistered source would be a SILENT no-op —
+    # `FETCHED_AT_COLUMN.get` returns None. Add a `keyratios_fetched_at` column only if this feed
+    # ever joins the scheduled/smart selection policy.
     return result

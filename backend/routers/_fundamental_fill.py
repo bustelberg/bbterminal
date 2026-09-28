@@ -370,6 +370,7 @@ def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
 
 def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statements",
                      prices: bool = False,
+                     key_ratios: bool = False,
                      force: bool = False, limit: int = 0, only_due: bool = False,
                      today: date | None = None) -> str:
     """Fetch the GuruFocus feeds for `ids`, reporting through the job `ctx`. Returns the summary.
@@ -493,6 +494,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
              else "missing a feed")
     if prices:
         scope += " (+ prices)"
+    if key_ratios:
+        scope += " (+ FY1 FCF)"
     budget = remaining_budget(supabase)
     left = " · ".join(f"{k.upper() if k == 'usa' else k.title()} {v:,}"
                       for k, v in sorted(budget.items()))
@@ -610,8 +613,17 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         # Between feeds is the right boundary and not merely a convenient one: a feed either
         # completes and is written or does not, and a company left with statements but no estimates
         # is a state a half-run backfill has always produced — `needs()` picks it up next time.
-        r = ingest_company(c, refresh_cache=(force or feeds == "smart"), on_step=_step,
-                           should_stop=lambda: ctx.cancelled)
+        ingest_kwargs = {
+            "refresh_cache": force or feeds == "smart",
+            "on_step": _step,
+            "should_stop": lambda: ctx.cancelled,
+        }
+        # Preserve the old call shape for every existing fill (and its test doubles). This
+        # capability is opt-in; passing a false-valued new keyword through every caller would make
+        # an unrelated statements-only run depend on the extension.
+        if key_ratios:
+            ingest_kwargs["include_key_ratios"] = True
+        r = ingest_company(c, **ingest_kwargs)
         #  Retry once on an empty answer. This company was selected because it is missing the feed
         # (or the run is forced), so nothing at all coming back means the fetch returned nothing.
         # It costs one call to correct and, left alone, looks identical to a company that genuinely
@@ -628,7 +640,10 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         # retrying it would spend fresh API calls on the far side of a Cancel — the one moment the
         # reader has explicitly asked us not to.
         if not r["error"] and not r.get("stopped") and r["rows"] == 0 and not r.get("unchanged"):
-            r = ingest_company(c, refresh_cache=(force or feeds == "smart"))
+            retry_kwargs = {"refresh_cache": force or feeds == "smart"}
+            if key_ratios:
+                retry_kwargs["include_key_ratios"] = True
+            r = ingest_company(c, **retry_kwargs)
         first_landed.set()
         with tally_lock:
             rows += r["rows"]

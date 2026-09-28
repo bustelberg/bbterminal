@@ -23,7 +23,6 @@ import {
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import { loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
-import { dialog } from '../../../lib/dialog';
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import AttributionPanel from './AttributionPanel';
 import PanelDialog from './PanelDialog';
@@ -31,7 +30,6 @@ import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
-import OwnerEarningsModal from './OwnerEarningsModal';
 import EtfSectorAllocationModal from './EtfSectorAllocationModal';
 import {
   addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
@@ -1123,14 +1121,7 @@ function useColumnGroups() {
  *  document listener: this lives inside a modal that already stops propagation in places, and a
  *  listener the modal swallows leaves a panel nothing can dismiss. */
 /**
- * The chrome every small control in this modal wears — one declaration, three wearers.
- *
- *  It was copied, and it had already drifted. `FundamentalButton` was restyled on 2026-09-02 to
- * match the allocation class chips, and the two controls beside it in the Holdings header were
- * left behind: "Look through certificates" was a bare `<label>` with no box at all, and `+ columns`
- * a flatter `rounded` / `px-1.5` / `text-fg-subtle` thing with no surface. Three controls on one
- * row, three different ideas of what a button looks like — reported as exactly that
- * (2026-09-03: "this should also have a similar style to the Fundamental button").
+ * The shared chrome for the small controls in this modal.
  *
  *  Split into shape and tone because the picker needs its OPEN state to replace the tone while
  * keeping the shape. Appending an override instead would leave two utilities setting the same
@@ -1309,37 +1300,6 @@ function blendHow(h: BookHolding, heldDirectly = 'held directly', atOpen = 'at t
     `${s.label ?? heldDirectly} ${num2(s.blend_weight_pct!)}% × ${fmtRet(s.return_pct)}`
     + ` (${eur0(s.start_value_eur ?? 0)}${i === 0 ? ` ${atOpen}` : ''}, ${s.book})`);
   return `${parts.join(' + ')} = ${fmtRet(h.own_return_pct)}`;
-}
-
-/** A Fundamental trigger — the same control the /portfolios table carries, for one instrument or
- *  for a whole class as a value-weighted basket.
- *
- *   Only where there is something to look up. Owner earnings are per-COMPANY: cash has no ISIN,
- *  an unresolved line has none either, and a class whose members are all unresolved yields an
- *  empty basket. A button that opens a modal saying "nothing to show" is worse than no button —
- *  it reads as a broken feature rather than an absent one. */
-function FundamentalButton({ onOpen, title, className = '' }: {
-  onOpen: () => void; title: string; className?: string;
-}) {
-  const copy = useAnalyseCopy();
-  return (
-    //  The same chrome as the allocation class chips (2026-09-02, on request) — `rounded-md`,
-    //    a real border, `bg-elevated`, and accent on hover. Three controls in this modal now wear
-    //    it: the class chips, Attribution / Risk, and this. It used to be a flatter, fainter thing
-    //    (`rounded`, `px-1.5 py-0.5`, `text-fg-subtle`) which read as a tag rather than a button,
-    //    and read differently from every other pressable thing on the same screen.
-    //  It carries its own `hover:`, NOT `group-hover:`, and that is the difference from the class
-    //    chips. Those are painted-on labels inside a row that IS the button, so they light with the
-    //    row. This one is a real nested `<button>` with its own `stopPropagation` — it opens the
-    //    Fundamental view instead of selecting the row — so it must light under its OWN cursor, or
-    //    it would promise the row's action.
-    <button type="button"
-      onClick={(e) => { e.stopPropagation(); onOpen(); }}
-      title={title}
-      className={`${CHIP_SHAPE} ${CHIP_IDLE} ${className}`}>
-      {copy.actions.fundamental}
-    </button>
-  );
 }
 
 function SectorAllocationButton({ onOpen, title, className = '' }: {
@@ -1772,7 +1732,7 @@ export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean)
 }
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
-  lookThrough, onLookThroughChange, onTiming, onFundamental, onSectorOverride,
+  lookThrough, onLookThroughChange, onTiming, onSectorOverride,
   onSectorAllocation }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
@@ -1795,7 +1755,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    *  earnings are per company), so its total is the part we can chart, not the part the portfolio
    *  holds. Those are two different numbers and only one of them answers "how much of the book is
    *  this". */
-  onFundamental: (t: { name: string; isin?: string; basket?: Basket; weightPct?: number }) => void;
   /** Only direct company rows have a source sector to override; funds remain opaque. */
   onSectorOverride?: (holding: BookHolding) => void;
   /** Opens official fund look-through. Present only for explicitly supported ETF ISINs. */
@@ -1875,20 +1834,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
         // adds; that is the whole reason the result breakdown is in euros and the weight-based
         // arguments elsewhere in this file do not apply to it.
         sum: sumResults(rows),
-        // The class as a value-weighted basket, for the Fundamental button on its header. ISIN-
-        // bearing rows only: owner earnings are per-company, and cash has no company.
-        //
-        //  And not the funds, which the bucket used to guarantee and no longer does. An ETF has
-        // an ISIN and is not a company; until `Equity ETF` was retired (2026-08-18) it sat in its
-        // own bucket, so filtering on `isin` alone was enough. With ETFs inside Stocks that filter
-        // would hand the blender instruments with no earnings — and it would do it silently, since
-        // a blend simply weights whatever it is given. See `EQUITY_BUCKET`.
-        basket: {
-          label: bucketLabel(bucket),
-          holdings: rows
-            .filter((h) => h.isin && !h.is_fund)
-            .map((h) => ({ isin: h.isin!, weight: h.weight_now_pct ?? 0, name: h.name ?? undefined })),
-        } satisfies Basket,
       };
     })
     //  An empty class is kept when it is one of the four the modal always shows — otherwise the
@@ -2264,27 +2209,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     <span className="ml-2 shrink-0 px-1.5 py-0.5 rounded-md bg-overlay/5 text-[11px] font-normal text-fg-muted">
                       {g.rows.length}
                     </span>
-                    {/*  WEIGHTED BY WHAT IS BEING BLENDED, over the members that CAN be blended.
-                        The basket takes each member's `weight_now_pct` — the same figure this row's
-                        subtotal is summed from — and only the rows with an ISIN, because owner
-                        earnings are per-company and cash has none. Sending the whole class would
-                        hand the blender a weight it cannot attribute to anything.
-                         AND ONLY ON STOCKS. An ISIN is not enough: an ETF has one and is not a
-                        company (this app deliberately does not look through funds, so there is
-                        nothing behind it to measure), Alternatives is crypto and commodities with no
-                        earnings at all, and a bond is a claim on a company rather than a share of
-                        it. The button used to appear on all of them and opened a modal with nothing
-                        in it — which reads as a broken feature rather than an absent one, the exact
-                        thing `FundamentalButton`'s own docstring says not to do. */}
-                    {/*  `ml-auto`, THE SAME PIN AS THE PER-HOLDING BUTTONS — see the note at its
-                        call site. This one is the head of that vertical line rather than an
-                        exception to it. */}
-                    {g.bucket === EQUITY_BUCKET && g.basket.holdings.length > 0 && (
-                      <FundamentalButton className="ml-auto shrink-0"
-                        title={copy.classRow.fundamentalTitle(g.basket.holdings.length, copy.bucket(bucketLabel(g.bucket)))}
-                        onOpen={() => onFundamental({
-                          name: g.basket.label, basket: g.basket, weightPct: g.slice?.pct })} />
-                    )}
                   </span>
                 </td>
                 {/* Via · Sector — a class row has nothing to say in either.  `colSpan={2}`, not
@@ -2468,59 +2392,16 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     onTiming && h.name && !isSynthetic(h)
                       ? 'cursor-pointer hover:bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.03]'}`}>
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[11px] text-fg-faint tabular-nums">{i + 1}</td>
-                  {/*  IN THE NAME CELL, NOT A NEW COLUMN. The header's colSpans are counted by
-                      hand across four places in this table (group row, thead, body, tfoot); a
-                      fourteenth column here shifts every figure one cell right, silently — a
-                      weight renders perfectly well under "Ccy". The button rides with the name it
-                      belongs to and appears on hover so 52 rows are not 52 buttons at rest. */}
                   <td className="py-1.5 pr-3 text-fg max-w-0"
                     title={syntheticAirsName(h) ? `AIRS: ${syntheticAirsName(h)}` : h.name ?? undefined}>
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{h.name ?? '—'}</span>
-                      {/*  SAME GATE AS THE CLASS ROW, and it has to be here too or the rule is
-                          half-applied: an ETF row carries an ISIN, so `h.isin &&` alone put a
-                          Fundamental button on every fund, bond and commodity in the table. Owner
-                          earnings are a property of an operating COMPANY; nothing else has them.
-                           `!h.is_fund` IS NOT BELT-AND-BRACES — it is the half of the rule the
-                          bucket used to carry. Since `Equity ETF` was retired the ETFs are in
-                          Stocks, so the bucket test alone puts the button back on every fund it
-                          was written to keep it off.
-                           ALWAYS VISIBLE, 2026-09-02 ON REQUEST. It was
-                          `opacity-0 group-hover:opacity-100 focus:opacity-100` — present in the
-                          layout, painted only under the cursor. That hides a whole feature from
-                          anyone who does not happen to sweep a row: nothing on screen suggested a
-                          per-holding Fundamental view existed at all, and a control you cannot see
-                          is one you cannot look for.
-                           `focus:opacity-100` WENT WITH IT — it existed solely so a keyboard user
-                          could reach a button the mouse rules had hidden. With the button visible
-                          it describes a state that no longer occurs. */}
-                      {/*  `ml-auto` — PINNED TO THE NAME COLUMN'S RIGHT EDGE, NOT TRAILING THE
-                          NAME (2026-09-03, on request: "align all Fundamental buttons
-                          vertically"). Sitting immediately after the text, each button started
-                          wherever its own instrument's name happened to end, so a column of ~50
-                          identical controls was scattered across ~14rem of the widest column in
-                          the table — the eye had to find each one instead of reading down a line.
-                           IT COSTS THE NAME NOTHING. The name span does not grow, so `ml-auto`
-                          only claims slack the name was not using; on a long name that slack is
-                          zero and the button lands exactly where it did before, against the
-                          truncation. The `min-w-0` + `truncate` pair that makes the cell shrink is
-                          unchanged, so no name loses a character to this.
-                           THE CLASS ROW'S BUTTON CANNOT JOIN THE LINE, and that is structural
-                          rather than an oversight: its cell is `colSpan={3}` (Name · Via · Sector)
-                          so its right edge is two columns further out. Pushing it right would put
-                          it on a DIFFERENT vertical line, which is worse than leaving it beside
-                          the class label it belongs to. */}
                       {onSectorAllocation && (hasEtfSectorAllocation(h) || certificateAllocation) ? (
                         <SectorAllocationButton
                           className="ml-auto shrink-0"
                           title={`Sector allocation inside ${h.name ?? h.isin}`}
                           onOpen={() => onSectorAllocation(h)} />
-                      ) : h.isin && h.bucket === EQUITY_BUCKET && !h.is_fund && (
-                        <FundamentalButton
-                          className="ml-auto shrink-0"
-                          title={copy.row.fundamentalTitle(h.name ?? h.isin ?? copy.row.thisPosition)}
-                          onOpen={() => onFundamental({ name: h.name ?? h.isin!, isin: h.isin! })} />
-                      )}
+                      ) : null}
                     </span>
                   </td>
                   {/*  The cap lives on a wrapper, not on the `<td>`: a second `max-w-0` column
@@ -3459,46 +3340,6 @@ export default function PortfolioAnalysisModal({
   // portfolio, where the modal shows the book's return vs the benchmark and prompts the reader to
   // click a class. Selecting a class replaces that with the class's OWN return + its breakdown.
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
-  /** The instrument or class whose Fundamental is open, over this modal. Null = closed. */
-  const [fund, setFund] = useState<
-    { name: string; isin?: string; basket?: Basket; weightPct?: number } | null>(null);
-  /** Folded TopSelecties first resolve their direct book. The parent book's expanded legs are only
-   * a preview and can have merged positions; using them would make the same TopSelectie produce a
-   * different graph and denominator depending on where it was opened. */
-  const openFundamental = async (target: {
-    name: string; isin?: string; basket?: Basket; weightPct?: number;
-  }) => {
-    const sourceId = target.basket?.sourcePortfolioId;
-    if (sourceId == null) {
-      setFund(target);
-      return;
-    }
-    const key = `id:${sourceId}|${benchmark}|book||0|0`;
-    try {
-      const direct = await loadPrefetchedAnalysis<ModelPortfolioAnalysis>(key, async () => {
-        const response = await apiFetch(
-          `${API_URL}/api/airs/model-portfolios/${sourceId}/analysis`
-          + `?benchmark=${encodeURIComponent(benchmark)}&weight_by=book&source=book`,
-        );
-        const body = await response.json().catch(() => null);
-        if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
-        return body as ModelPortfolioAnalysis;
-      });
-      // This is literally the predicate that renders the direct view's Individual stocks section:
-      // Equity rows which are not fund wrappers. Preserve every row and its direct-book weight.
-      const canonical = individualStocksBasket(direct, target.basket!.label);
-      if (!canonical.holdings.length) {
-        throw new Error('the direct TopSelectie has no Individual stocks');
-      }
-      setFund({ ...target, basket: canonical });
-    } catch (e) {
-      traceError('fundamentals', `could not resolve direct TopSelectie ${target.name}`, e);
-      await dialog.alert(
-        `${target.name}: the direct Individual stocks basket could not be loaded.`,
-        { title: 'Fundamental unavailable' },
-      );
-    }
-  };
   //  The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
   // Transacties sheet joins on — it carries no ISIN.
   const [timingFor, setTimingFor] = useState<string | null>(null);
@@ -4111,7 +3952,6 @@ export default function PortfolioAnalysisModal({
               <>
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 lookThrough={lookThrough} onLookThroughChange={setLookThrough}
-                onFundamental={(target) => { void openFundamental(target); }}
                 onSectorAllocation={(holding) => {
                   const internal = syntheticSectorAllocation(holding);
                   if (!holding.isin && !internal) return;
@@ -4199,34 +4039,8 @@ export default function PortfolioAnalysisModal({
             )}
           </>
         )}
-        {/*  RENDERED INSIDE THE CONTENT BOX, NOT BESIDE IT. This modal's backdrop closes it on
-            click, and a nested modal's own backdrop covers the whole screen — mounted as a sibling
-            of that backdrop, dismissing the Fundamental would bubble up and close the Analyse
-            modal underneath it too. The content box already stops propagation, so putting it here
-            makes the two dismiss independently. It still paints over everything: the nested
-            backdrop is `fixed inset-0`, which escapes this box's layout but not its event tree. */}
-        {/*  ABOVE this modal (z-[60] vs z-50) and stopping propagation, or a click inside it
-          closes the analysis behind it. */}
-      {/*  AND THE BOOK'S FETCH TIME STOPS HERE. These two are about a DIFFERENT source object —
-          one holding's trades, one company's fundamentals — and each carries its own dates. Left
-          inside the provider above they would inherit this book's "we read it at ...", which is
-          precisely the hazard `ProvenanceFetchedAt` warns about: handing one object's fetch time
-          to another's numbers quietly de-ambers a staleness that really is ours to fix. They sit
-          in this box only so their dismissal does not bubble up and close the modal behind them;
-          that is a layout reason, not a claim about where their data came from. */}
-      {/*  RAISED OUT OF THE PAGE FLOW, STILL INSIDE THE CONTENT BOX — the same placement rule the
-          Fundamental and Owner-earnings dialogs below follow, and for the same reason: mounted
-          beside the backdrop instead, dismissing one of these would close the analysis behind it.
-
-           BUT ABOVE THE `at={undefined}` PROVIDER, NOT BELOW IT, AND THAT IS THE OPPOSITE CHOICE
-          FROM THE TWO DIALOGS UNDER IT. Those describe a DIFFERENT source object — one holding's
-          trades, one company's fundamentals — so inheriting this book's "we read it at …" would
-          de-amber a staleness that is not theirs. Risk and Attribution describe THIS book's own
-          holdings and returns, from the payload above, so the book's fetch time is exactly the
-          right provenance for them to inherit.
-
-           Each re-checks `data`: they sit outside the `data && (…)` subtree that renders the
-          charts, so it is genuinely nullable here. */}
+      {/* The book's fetch time stops here. Holding trades carry their own source date. */}
+      {/* Risk and attribution still describe this book, so they retain its provenance. */}
       {sectorFor && (
         <SectorOverrideDialog holding={sectorFor} onClose={() => setSectorFor(null)}
           onSave={saveSectorOverride} />
@@ -4282,24 +4096,6 @@ export default function PortfolioAnalysisModal({
       {timingFor && id && (
         <HoldingTimingModal portfolioId={id} name={timingFor} onClose={() => setTimingFor(null)} />
       )}
-      {fund && (
-          <OwnerEarningsModal isin={fund.isin} basket={fund.basket} name={fund.name}
-            //  Whose book this is. `fund` names the SLICE that was clicked — an ISIN, or a group
-            // like "Stocks" — which is true of every row on the page and identifies none of them.
-            // See `bookName` on the modal.
-            bookName={name} sharePct={fund.weightPct}
-            //  Either scope, because most books on /management-dashboard HAVE NO MODEL ID.
-            // `PortfolioOverviewPanel.openModal` sets `id` only when the account is PAIRED with a
-            // fixed model; every other row resolves its own ISINs into a basket and opens this
-            // same modal. Requiring the id hid the refresh button on exactly those rows — which is
-            // how it came to be invisible on the screen it was built for.
-            refreshScope={id != null
-              ? { kind: 'portfolio', id, name }
-              : basket
-                ? { kind: 'basket', holdings: basket.holdings, name: basket.label || name }
-                : undefined}
-            onClose={() => setFund(null)} />
-        )}
       </ProvenanceFetchedAt>
       </div>
     </div>
