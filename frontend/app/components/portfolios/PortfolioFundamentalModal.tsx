@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { type Basket } from './types';
@@ -116,24 +116,26 @@ function InputObservationRows({ inputs }: { inputs: InputObservation[] }) {
               {input.value}
             </span>
           </span>
-          <span className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-fg-faint">
+          <span className="mt-1 grid gap-1 text-fg-faint">
             <span className="inline-flex items-center gap-1">
               <span>Retrieved</span>
               <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
                 {input.retrievedText ?? (input.retrieved ? onDate(input.retrieved) : 'not recorded')}
               </span>
             </span>
-            <span className="inline-flex items-center gap-1">
-              <span>Applies to</span>
-              {input.appliesText ? (
-                <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
-                  {input.appliesText}
-                </span>
-              ) : (applies.length ? applies : [null]).map((date, index) => (
-                <span key={date ?? index} className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
-                  {date ? onDate(date) : 'not recorded'}
-                </span>
-              ))}
+            <span className="flex items-start gap-1">
+              <span className="shrink-0 pt-0.5">Applies to</span>
+              <span className="flex flex-col items-start gap-1">
+                {input.appliesText ? (
+                  <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+                    {input.appliesText}
+                  </span>
+                ) : (applies.length ? applies : [null]).map((date, index) => (
+                  <span key={date ?? index} className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+                    {date ? onDate(date) : 'not recorded'}
+                  </span>
+                ))}
+              </span>
             </span>
           </span>
         </span>
@@ -309,6 +311,12 @@ export function priceToEpsMultiple(price: number | null, eps: number | null): nu
   return price / eps;
 }
 
+/** How far one fiscal-year P/E sits above or below the completed-ten-year median P/E. */
+export function peDeltaFromHistoricalMedian(pe: number | null, median: number | null): number | null {
+  if (pe == null || median == null || median <= 0) return null;
+  return pe / median - 1;
+}
+
 function epsInput(metric: ApiMetric | null, label: string,
   currency?: string | null): InputObservation[] {
   if (metric?.numeric_value == null) return [];
@@ -351,6 +359,7 @@ function dcfRow(row: ApiRow, today: string) {
   const cagrWorking = estimateCagrWorking(row.metrics, today);
   const estimateDates = dateWindow(cagrWorking.points.map((point) => point.date));
   const medianPeWorking = medianPEWorking(row.metrics);
+  const historicalPe10yWorking = medianPEWorking(row.metrics, 10);
   const medianPeYears = new Set(medianPeWorking.rows.map((point) => String(point.year)));
   const medianPeDates = dateWindow(row.metrics
     .filter((metric) => medianPeYears.has(metric.target_date.slice(0, 4))
@@ -358,7 +367,9 @@ function dcfRow(row: ApiRow, today: string) {
         || metric.metric_code.endsWith('__EPS without NRI')))
     .map((metric) => metric.target_date));
   const medianPeObservations = medianPeInputs(row.metrics, medianPeWorking);
+  const historicalPe10yObservations = medianPeInputs(row.metrics, historicalPe10yWorking);
   const medianPeWorked = medianPeCalculation(medianPeWorking);
+  const historicalPe10yWorked = medianPeCalculation(historicalPe10yWorking);
   const egmAssumptions = {
     growthRate: egm.analystGrowth5Y ?? EGM_DEFAULTS.growthRate,
     dividendYield: egm.dividendYield,
@@ -444,6 +455,11 @@ function dcfRow(row: ApiRow, today: string) {
     2026: priceToEpsMultiple(src.price, epsByYear[2026]),
     2027: priceToEpsMultiple(src.price, epsByYear[2027]),
   } as const;
+  const peDeltaByYear = {
+    2025: peDeltaFromHistoricalMedian(peByYear[2025], historicalPe10yWorking.median),
+    2026: peDeltaFromHistoricalMedian(peByYear[2026], historicalPe10yWorking.median),
+    2027: peDeltaFromHistoricalMedian(peByYear[2027], historicalPe10yWorking.median),
+  } as const;
   const commonInputs = [
     sourceInput(row.metrics, 'Close price', working.price,
       row.currency ? ` ${row.currency}` : ''),
@@ -483,7 +499,8 @@ function dcfRow(row: ApiRow, today: string) {
     dcfInputs,
     stockPriceInputs,
     egm, forwardPE, forwardPeDerived, egmAssumptions, egmResult,
-    eps2025Actual, epsEstimates, epsEstimateCagr, peByYear,
+    eps2025Actual, epsEstimates, epsEstimateCagr, peByYear, peDeltaByYear,
+    historicalPe10yWorking, historicalPe10yObservations, historicalPe10yWorked,
     estimateDates, medianPeDates, medianPeObservations, medianPeWorked, expectedReturnInputs,
   };
 }
@@ -503,6 +520,10 @@ function sortValue(row: ValuationRow, key: string): number | null {
     const year = Number(key.slice('epsPe:'.length)) as 2025 | 2026 | 2027;
     return row.peByYear[year] ?? null;
   }
+  if (key.startsWith('epsPeDelta:')) {
+    const year = Number(key.slice('epsPeDelta:'.length)) as 2025 | 2026 | 2027;
+    return row.peDeltaByYear[year] ?? null;
+  }
   const values: Record<string, number | null> = {
     weight: row.weight_pct,
     price: row.src.price,
@@ -518,6 +539,7 @@ function sortValue(row: ValuationRow, key: string): number | null {
     impliedPrice: row.egmResult.impliedPrice,
     totalReturn: row.egmResult.totalReturn,
     epsEstimateCagr: row.epsEstimateCagr,
+    epsHistoricalPe10y: row.historicalPe10yWorking.median,
   };
   return values[key] ?? null;
 }
@@ -534,7 +556,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<Model>('dcf');
   const [companyFundamental, setCompanyFundamental] = useState<ApiRow | null>(null);
-  const [refreshRevision, setRefreshRevision] = useState(0);
+  const [fundamentalsRevision, setFundamentalsRevision] = useState(0);
+  const partialRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sorts, setSorts] = useState<Record<Model, Sort>>({
     dcf: { key: 'weight', direction: 'desc' },
     egm: { key: 'weight', direction: 'desc' },
@@ -562,7 +585,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
       }
     })();
     return () => controller.abort();
-  }, [basket, name, portfolioId, refreshRevision]);
+  }, [basket, name, portfolioId, fundamentalsRevision]);
 
   // We deliberately take the EUR numerator, total and source dates from the SAME book-analysis
   // payload as Analyse. The metrics endpoint owns fundamentals; it must not grow a second notion
@@ -590,7 +613,20 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
       }
     })();
     return () => controller.abort();
-  }, [portfolioId, refreshRevision]);
+  }, [portfolioId]);
+
+  // The fill is concurrent, so several companies can land within a few milliseconds. Coalesce
+  // those stream events into one re-read, while still showing the first completed batch promptly.
+  const reloadPartialFundamentals = useCallback(() => {
+    if (partialRefreshTimer.current != null) return;
+    partialRefreshTimer.current = setTimeout(() => {
+      partialRefreshTimer.current = null;
+      setFundamentalsRevision((value) => value + 1);
+    }, 300);
+  }, []);
+  useEffect(() => () => {
+    if (partialRefreshTimer.current != null) clearTimeout(partialRefreshTimer.current);
+  }, []);
 
   const rows = useMemo(() => {
     const holdings = bookAnalysis?.book_holdings ?? [];
@@ -627,7 +663,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
     return {
       kind: 'basket',
       holdings: isins.map((isin) => ({ isin })),
-      name: `${name} visible companies`,
+      name,
     };
   }, [data, name]);
   const activeSort = sorts[model];
@@ -698,8 +734,12 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
             </button>
           </div>
           {refreshScope && (
-            <PortfolioFundamentalsRefresh scope={refreshScope} everything allPeriods prominent showNote={false}
-              label="Refresh all companies" onDone={() => setRefreshRevision((value) => value + 1)} />
+            <PortfolioFundamentalsRefresh scope={refreshScope} everything prominent showNote={false}
+              label="Refresh all companies"
+              jobTitle={`${name}: ${model === 'dcf' ? 'Reverse DCF'
+                : model === 'egm' ? 'Expected Growth Model' : 'EPS Estimates'}`}
+              onProgress={reloadPartialFundamentals}
+              onDone={() => setFundamentalsRevision((value) => value + 1)} />
           )}
           <button type="button" onClick={onClose}
             className="shrink-0 rounded-md border border-accent-500 bg-accent-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-accent-500">
@@ -714,22 +754,22 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
             <p className="p-5 text-sm text-fg-muted">No operating companies with stored fundamentals were found.</p>
           )}
           {rows.length > 0 && (
-            <div className="my-4 min-w-max overflow-hidden rounded-xl border border-neutral-800/50">
+            <div className="my-4 min-w-max rounded-xl border border-neutral-800/50">
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card text-xs uppercase tracking-wide text-fg-faint">
                 <tr className="border-b border-neutral-800/40">
                   {/* These three columns are the subject, not the selected valuation model. They
                       stay pinned and unchanged while the switch replaces only the coloured block
                       to their right. Fixed widths make the sticky offsets exact. */}
-                  <th className="sticky left-0 z-20 w-64 min-w-64 bg-page px-3 py-2 text-left font-medium">
+                  <th className="sticky left-0 z-20 w-80 min-w-80 max-w-80 bg-page px-3 py-2 text-left font-medium">
                     Company
                   </th>
                   <NumericHeader sortKey="weight" label="Weight"
                     info="Each row's current share of the paired AIRS book, calculated from VOLK Huidige waarde."
-                    className="sticky left-64 z-20 w-24 min-w-24 bg-page" />
+                    className="sticky left-80 z-20 w-24 min-w-24 max-w-24 bg-page" />
                   <NumericHeader sortKey="price" label="Stock price"
                     info="The latest stored GuruFocus closing price. The currency code is the company's GuruFocus exchange currency; the value is not converted to EUR."
-                    className="sticky left-[22rem] z-20 w-36 min-w-36 border-r-2 border-neutral-700 bg-page" />
+                    className="sticky left-[26rem] z-20 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page" />
                   {model === 'dcf' ? RATES.map((rate) => (
                     <NumericHeader key={rate} sortKey={`rate:${rate}`}
                       label={`${(rate * 100).toFixed(0)}%`} className="bg-accent-500/10" />
@@ -756,12 +796,18 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                       ))}
                       <NumericHeader sortKey="epsEstimateCagr" label="CAGR 2025A–2027E"
                         className="bg-warn-500/10" />
+                      <NumericHeader sortKey="epsHistoricalPe10y" label="10y Historical P/E"
+                        className="bg-warn-500/10" />
                       <NumericHeader sortKey="epsPe:2025" label="P/E 2025A"
                         className="bg-warn-500/10" />
                       <NumericHeader sortKey="epsPe:2026" label="P/E 2026E"
                         className="bg-warn-500/10" />
                       <NumericHeader sortKey="epsPe:2027" label="P/E 2027E"
                         className="bg-warn-500/10" />
+                      {([2025, 2026, 2027] as const).map((year) => (
+                        <NumericHeader key={`peDelta:${year}`} sortKey={`epsPeDelta:${year}`}
+                          label={`${year} % delta`} className="bg-warn-500/10" />
+                      ))}
                     </>
                   )}
                 </tr>
@@ -769,7 +815,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
               <tbody className="divide-y divide-neutral-800/20">
                 {sortedRows.map((row) => (
                   <tr key={row.company_id} className="hover:bg-overlay/[0.03]">
-                    <td className="sticky left-0 z-[2] w-64 min-w-64 bg-page px-3 py-2">
+                    <td className="sticky left-0 z-[2] w-80 min-w-80 max-w-80 bg-page px-3 py-2">
                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-fg-strong" title={row.name}>{row.name}</div>
@@ -782,7 +828,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                         </button>
                       </div>
                     </td>
-                    <td className="sticky left-64 z-[2] w-24 min-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums">
+                    <td className="sticky left-80 z-[2] w-24 min-w-24 max-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums">
                       <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                         <span>{row.book_weight ? `${bookWeightPct(row.book_weight).toFixed(2)}%`
                           : portfolioId != null ? bookAnalysis === undefined ? '…' : '—'
@@ -809,7 +855,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             how={`This company's portfolio weight is ${row.weight_pct.toFixed(2)}%; funds, cash, bonds and uncovered companies are not redistributed over the visible company rows.`} />} />}
                       </span>
                     </td>
-                    <td className="sticky left-[22rem] z-[2] w-36 min-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums">
+                    <td className="sticky left-[26rem] z-[2] w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums">
                       <span className="grid grid-cols-[2.25rem_1fr_auto] items-baseline gap-1.5">
                         <span className="text-left text-[10px] text-fg-faint">{row.currency ?? ''}</span>
                         <span className="text-right">{row.src.price == null ? '—' : row.src.price.toFixed(2)}</span>
@@ -1011,6 +1057,15 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             ...epsInput(row.epsEstimates[2027], 'EPS estimate for FY2027', row.currency),
                           ]}
                           how="Compound the change between positive FY2025 actual EPS and FY2027 estimated EPS over two years." />
+                        <ValuationCell tone="eps"
+                          value={row.historicalPe10yWorking.median == null
+                            ? '—' : `${row.historicalPe10yWorking.median.toFixed(2)}×`}
+                          what="The median P/E across the latest ten completed fiscal years."
+                          where="GuruFocus fiscal year-end prices and EPS without NRI."
+                          retrieved={[row.source_fetched_at.financials]}
+                          applies={row.historicalPe10yWorking.rows.map((point) => `${point.year}-12-31`)}
+                          inputs={row.historicalPe10yObservations}
+                          how={row.historicalPe10yWorked} />
                         {([2025, 2026, 2027] as const).map((year) => {
                           const actual = year === 2025;
                           const epsMetric = actual ? row.eps2025Actual : row.epsEstimates[year];
@@ -1031,6 +1086,39 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                                   row.currency),
                               ]}
                               how={`Divide the latest stored close price by positive ${period} EPS.`} />
+                          );
+                        })}
+                        {([2025, 2026, 2027] as const).map((year) => {
+                          const actual = year === 2025;
+                          const epsMetric = actual ? row.eps2025Actual : row.epsEstimates[year];
+                          const multiple = row.peByYear[year];
+                          const delta = row.peDeltaByYear[year];
+                          const period = `FY${year}${actual ? ' actual' : ' estimate'}`;
+                          return (
+                            <ValuationCell key={`peDelta:${year}`} tone="eps"
+                              value={delta == null ? '—' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(2)}%`}
+                              what={`How far the ${period} P/E differs from the ten-year historical median P/E.`}
+                              where="The current share price, that fiscal year's EPS and the latest ten completed fiscal years of price and EPS history."
+                              retrieved={[actual ? row.source_fetched_at.financials
+                                : row.source_fetched_at.estimates, row.source_fetched_at.financials]}
+                              applies={[row.src.priceDate, epsMetric?.target_date,
+                                ...row.historicalPe10yWorking.rows.map((point) => `${point.year}-12-31`)]}
+                              inputs={[
+                                ...row.stockPriceInputs,
+                                ...epsInput(epsMetric,
+                                  `${actual ? 'Reported EPS' : 'EPS estimate'} for FY${year}`,
+                                  row.currency),
+                                {
+                                  label: '10y historical P/E',
+                                  value: row.historicalPe10yWorking.median == null
+                                    ? 'not available' : `${row.historicalPe10yWorking.median.toFixed(2)}×`,
+                                  retrieved: row.source_fetched_at.financials ?? null,
+                                  applies: row.historicalPe10yWorking.rows.map((point) => `${point.year}-12-31`),
+                                },
+                              ]}
+                              how={`${multiple == null || row.historicalPe10yWorking.median == null
+                                ? 'A delta requires both the fiscal-year P/E and the ten-year historical median P/E.'
+                                : `${multiple.toFixed(2)}× ÷ ${row.historicalPe10yWorking.median.toFixed(2)}× − 1 = ${(delta! * 100).toFixed(2)}%`}`} />
                           );
                         })}
                       </>

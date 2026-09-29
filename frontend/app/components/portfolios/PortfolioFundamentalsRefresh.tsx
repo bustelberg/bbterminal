@@ -70,8 +70,8 @@ export function refreshScopes(scope: RefreshScope, additional?: RefreshScope): R
     ? [scope, additional] : [scope];
 }
 
-export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, everything,
-  allPeriods = false, broadcast = true, prominent = false, showNote = true }: {
+export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, jobTitle, everything,
+  allPeriods = false, broadcast = true, prominent = false, showNote = true, onProgress }: {
   scope: RefreshScope;
   /** A selected benchmark/comparison refreshed after the primary scope by the same button. */
   additionalScope?: RefreshScope;
@@ -108,6 +108,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
   prominent?: boolean;
   /** Show the scope/coverage receipt beside the button. Dense modal headers can leave it to toast. */
   showNote?: boolean;
+  /** Reader-facing title in the job toast; defaults to the scope name. */
+  jobTitle?: string;
   /** Called when the fill ends without failing, so the caller can re-read what it wrote. */
   /**  OPTIONAL, AND THE CACHE DROP IS NOT. `invalidateReadCache` runs beside every call of
    *  this, unconditionally — that is what makes the new data reachable. `onDone` is only for a
@@ -115,6 +117,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    *  modal had one for the Old-charts tab and no longer needs it; a required no-op there would
    *  read as a caller that forgot to do something. */
   onDone?: () => void;
+  /** Called after a company-sized unit of work lands, so an open table can show new data mid-fill. */
+  onProgress?: () => void;
   /**
    * What the button says at rest. Default: "Refresh fundamentals" (the tab row, where it is the
    * only such control on screen), or "Fetch missing fundamentals" for an index.
@@ -147,6 +151,16 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
   const [jobId, setJobId] = useState<string | null>(null);
   /** Cancel has been asked for and the workers have not stopped yet — see `cancel`. */
   const [cancelling, setCancelling] = useState(false);
+  const primaryJobTitle = jobTitle ?? `${scope.name} fundamentals`;
+
+  // A fill writes one company at a time. Drop the GET cache before asking an on-screen reader to
+  // re-read, otherwise the reload can faithfully return the pre-fill response until the job ends.
+  // Informational stream frames have no `done`; only a completed unit can have changed the table.
+  const showPartialResult = (progress: { done?: number }) => {
+    if (typeof progress.done !== 'number') return;
+    invalidateReadCache(`fundamentals fill updated ${scope.name}`);
+    onProgress?.();
+  };
 
   /**
    * The server's identity for the work THIS button does. `null` where there is no stable one.
@@ -185,7 +199,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
     setNote('already running — this button now stops it');
     //  Follow it to the end, or `busy`/`jobId` never clear and the control is stuck on Cancel
     // long after the run finished.
-    void watchJob(live.id, `${indexedScope?.name ?? scope.name} fundamentals`).then((job) => {
+    void watchJob(live.id, primaryJobTitle, 0, undefined,
+      showPartialResult).then((job) => {
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${indexedScope?.name ?? scope.name}`);
         if (broadcast) window.dispatchEvent(new Event('bb:fundamentals-finished'));
@@ -226,11 +241,12 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
             + `/fundamentals/ingest/job${q}`;
       const { id, done, body } = await startJob(
         url,
-        `${scope.name} fundamentals`,
+        primaryJobTitle,
         holdings
           ? { headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ holdings, label: scope.name }) }
-          : undefined);
+          : undefined,
+        showPartialResult);
       setJobId(id);
       //  The unreached remainder is two different absences, and merging them makes a correct
       // Answer look broken. Measured: AITopSelectie reaches 20 of 20, while BUS_Neutraal_FX reaches
@@ -289,7 +305,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
           extraUrl, `${extra.name} fundamentals`, extraHoldings
             ? { headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ holdings: extraHoldings, label: extra.name }) }
-            : undefined);
+            : undefined,
+          showPartialResult);
         setJobId(extraStarted.id);
         const extraJob = await extraStarted.done;
         if (extraJob.summary?.includes(' — unavailable:')) {

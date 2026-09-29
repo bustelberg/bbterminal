@@ -88,11 +88,6 @@ function JobCard({ job }: { job: JobToast }) {
     : (job.summary || job.message);
   const tone = unavailable ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
   const running = job.status === 'running';
-  // A pre-flight refusal is terminal and correctly `done` (nothing crashed and no paid call was
-  // attempted), but its explanation is as important as an error. Let it wrap instead of applying
-  // the compact success receipt style that cut "outside the GuruFocus subscription" down to an
-  // unexplained `TSX…`.
-  const explanation = job.status === 'failed' || fundamentals;
   //  Indeterminate until a total arrives. `done/0` is NaN, and a bar that reads 100% before the
   // first step is worse than one that reads nothing.
   const pct = job.total > 0 ? Math.min(100, (job.done / job.total) * 100) : null;
@@ -161,8 +156,8 @@ function JobCard({ job }: { job: JobToast }) {
                   shadow-lg px-3 py-2.5 space-y-1.5
                   transition-all duration-300 ease-out
                   ${leaving ? 'opacity-0 translate-x-4' : 'opacity-100 translate-x-0'}`}>
-      <div className="flex items-baseline gap-2">
-        <span className="text-xs font-medium text-fg-strong truncate flex-1" title={job.title}>
+      <div className="flex items-start gap-2">
+        <span className="min-w-0 flex-1 break-words text-xs font-medium text-fg-strong">
           {job.title}
         </span>
         {/*  WHAT IT COST, AND ONLY WHEN IT COST SOMETHING. GuruFocus calls come out of a finite
@@ -239,8 +234,7 @@ function JobCard({ job }: { job: JobToast }) {
           </p>
         </div>
       ) : (
-        <p className={`text-[12px] ${tone.text} ${
-          explanation ? 'whitespace-normal break-words' : 'truncate'}`}
+        <p className={`whitespace-normal break-words text-[12px] ${tone.text}`}
           title={[job.summary, job.message].filter(Boolean).join('\n') || undefined}>
           {displayMessage}
         </p>

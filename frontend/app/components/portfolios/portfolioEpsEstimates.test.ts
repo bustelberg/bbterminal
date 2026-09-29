@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   dcfGrowthCellLabel,
   epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear,
-  medianPeCalculation, priceToEpsMultiple,
+  medianPeCalculation, peDeltaFromHistoricalMedian, priceToEpsMultiple,
 } from './PortfolioFundamentalModal';
 
 const estimate = (year: number, value: number | null, code = 'annual_per_share_eps_estimate') => ({
@@ -41,6 +41,13 @@ describe('portfolio EPS estimate view', () => {
     expect(priceToEpsMultiple(150, 6)).toBe(25);
     expect(priceToEpsMultiple(150, null)).toBeNull();
     expect(priceToEpsMultiple(150, -2)).toBeNull();
+  });
+
+  it('measures each fiscal-year P/E against the ten-year historical median', () => {
+    expect(peDeltaFromHistoricalMedian(24, 20)).toBeCloseTo(0.2);
+    expect(peDeltaFromHistoricalMedian(15, 20)).toBeCloseTo(-0.25);
+    expect(peDeltaFromHistoricalMedian(24, null)).toBeNull();
+    expect(peDeltaFromHistoricalMedian(null, 20)).toBeNull();
   });
 });
 
