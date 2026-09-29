@@ -9,6 +9,7 @@ export function fundamentalJobMessage(message: string | null | undefined): strin
   const cleaned = message
     .replace(/^(?:[A-Za-z][\w.]*Error):\s*/, '')
     .replace(/:\s*(?:fin|est|ind):\s*/gi, ': ')
+    .replace(/no change \([\d,]+ rows already stored\)/gi, 'up to date')
     .replace(/\s+[—–]\s+/g, '. ')
     .replace(/\s+\|\s+/g, '; ')
     .replace(/\.\s*;\s*/g, '; ')

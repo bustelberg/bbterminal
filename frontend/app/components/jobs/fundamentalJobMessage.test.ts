@@ -30,4 +30,9 @@ describe('fundamentalJobMessage', () => {
       + 'Please try again later. · prices: 7 refreshed (0 row(s))',
     )).toBe('6 companies refreshed. Could not refresh: BE Semiconductor Industries NV.');
   });
+
+  it('uses a reader-facing status for an unchanged company', () => {
+    expect(fundamentalJobMessage('[3/7] ASML Holding NV â€” no change (10,503 rows already stored)'))
+      .toBe('[3/7] ASML Holding NV. up to date');
+  });
 });
