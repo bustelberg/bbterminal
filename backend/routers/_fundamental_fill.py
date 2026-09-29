@@ -334,6 +334,9 @@ def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
     for n, c in enumerate(comps, 1):
         ctx.check()
         who = c.get("company_name") or c.get("gurufocus_ticker") or str(c["company_id"])
+        # Say what is happening now, before the vendor call. The former completion message stayed
+        # on screen while the next price was already in flight and therefore described the past.
+        ctx.emit("info", f"Refreshing the share price for {who}…")
         outcome: str
         exch = ((c.get("gurufocus_exchange") or {}) or {}).get("exchange_code")
         #  A row with no listing is skipped but still counted. `continue`-ing past the progress
@@ -355,11 +358,10 @@ def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
         else:
             skipped += 1
             outcome = "skipped — no GuruFocus listing"
-        # One named update per company. This is status reporting only: the price fetches remain
-        # serial because the GuruFocus price endpoint's shared rate gate is the throughput limit.
-        # `progress`, rather than a plain info event, also keeps the toast's percentage aligned
-        # with this final price phase instead of leaving it at the preceding fundamentals count.
-        ctx.progress(n, len(comps), f"{label} prices · {n}/{len(comps)} · {who} — {outcome}")
+        # Keep the bar aligned without presenting the completed company as the current operation.
+        next_action = ("Preparing the next share price…" if n < len(comps)
+                       else "Finalising the refresh…")
+        ctx.progress(n, len(comps), next_action, completed_company=who, outcome=outcome)
     #  The skipped count is named, never folded into the total. A holding with no GuruFocus
     # listing (an ETF, a certificate, cash) has no price for us to fetch — which is a different
     # answer from a fetch that failed, and the two send an operator to different places.
@@ -550,19 +552,12 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     # separately in the summary — see `ingest.metric_upsert.changed_rows` for why it is usually the
     # larger of the two by orders of magnitude.
     unchanged = 0
-    #  Narrate the feeds of the first company only, and the "ONLY" IS THE WHOLE DESIGN. A
-    # per-company line is emitted when that company FINISHES, so on a fill whose first unit of work
-    # is three GuruFocus feeds — each gated behind the global 1.5s minimum interval and each
-    # followed by tens of thousands of `metric_data` upserts — the bar sits at 0 for the better part
-    # of a minute with nothing moving. `ingest_company` already offers `on_step`, which fires BEFORE
-    # each feed precisely so that gap is visible.
-    #
-    #  And it stops after the first, for two reasons. Three workers narrating every feed would put
-    # three companies' names through one line at random, which reads as thrashing rather than as
-    # progress — and `job.events` is append-only and re-scanned on every 0.15s stream tick, so
-    # tripling 1,700 events into 5,100 makes the watcher's own cost grow with the run. Once the
-    # first company lands, `[n/total]` is moving and the reader has what they need.
-    first_landed = threading.Event()
+    # Feed names (`fin`, `est`, `ind`) are implementation detail. Each worker now announces the
+    # company before its first request, so the toast is active immediately without briefly leaking
+    # “fetching fin (1 of 4)” before settling on the reader-facing company status.
+    # Companies currently inside a vendor call. The fill is concurrent, so when one completes the
+    # truthful status is another in-flight name, not the name that just finished.
+    active_names: dict[int, str] = {}
 
     def _one(c: dict) -> None:
         """One company, inside ONE direct-Postgres connection.
@@ -593,10 +588,9 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         # `should_stop` below for the one that makes the press feel immediate.
         ctx.check()
         who = c.get("company_name") or c.get("gurufocus_ticker") or c["company_id"]
-
-        def _step(tag: str, i: int, total: int) -> None:
-            if not first_landed.is_set():
-                ctx.emit("info", f"{who}: fetching {tag} ({i} of {total})…")
+        with tally_lock:
+            active_names[int(c["company_id"])] = str(who)
+        ctx.emit("info", f"Refreshing {who}…")
 
         #  `refresh_cache=force` — THE SECOND CACHE. `force` alone only ignores what `metric_data`
         # holds; the GuruFocus blob in Storage would still be replayed, so a forced press over an
@@ -615,7 +609,6 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         # is a state a half-run backfill has always produced — `needs()` picks it up next time.
         ingest_kwargs = {
             "refresh_cache": force or feeds == "smart",
-            "on_step": _step,
             "should_stop": lambda: ctx.cancelled,
         }
         # Preserve the old call shape for every existing fill (and its test doubles). This
@@ -644,7 +637,6 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
             if key_ratios:
                 retry_kwargs["include_key_ratios"] = True
             r = ingest_company(c, **retry_kwargs)
-        first_landed.set()
         with tally_lock:
             rows += r["rows"]
             unchanged += r.get("unchanged", 0)
@@ -672,6 +664,8 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                 # in neither column — the summary reports where the run stopped instead, so nothing
                 # claims this company was finished.
                 ok += 1
+            active_names.pop(int(c["company_id"]), None)
+            current_name = next(reversed(active_names.values()), None)
         ctx.spent(r.get("calls", 0))
         if r.get("stopped"):
             #  The spend is banked before the raise. Those calls came out of the monthly quota
@@ -693,8 +687,12 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                    else f"no change ({r['unchanged']:,} rows already stored)"
                         if r["rows"] == 0 and r.get("unchanged")
                    else "loaded")
-        ctx.progress(n, len(work), f"[{n}/{len(work)}] {who} — {outcome}",
-                     company_id=c["company_id"], failed=bool(r["error"]))
+        next_action = (f"Refreshing {current_name}…" if current_name
+                       else "Starting the next company…" if n < len(work)
+                       else "Finalising the refresh…")
+        ctx.progress(n, len(work), next_action,
+                     company_id=c["company_id"], completed_company=who,
+                     outcome=outcome, failed=bool(r["error"]))
 
     stopped = False
     if work:

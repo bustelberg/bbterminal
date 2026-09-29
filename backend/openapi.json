@@ -7327,7 +7327,7 @@
         "type": "object"
       },
       "FundamentalCoverageRequest": {
-        "description": "Either a model portfolio's id, or an explicit basket of (isin, weight).",
+        "description": "A current AIRS book, model portfolio, or explicit basket of (isin, weight).",
         "properties": {
           "basket_label": {
             "anyOf": [
@@ -7339,6 +7339,17 @@
               }
             ],
             "title": "Basket Label"
+          },
+          "book_portfolio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Portfolio"
           },
           "cadence": {
             "default": "annual",
@@ -7359,6 +7370,11 @@
               }
             ],
             "title": "Holdings"
+          },
+          "look_through_certificates": {
+            "default": false,
+            "title": "Look Through Certificates",
+            "type": "boolean"
           },
           "metrics": {
             "anyOf": [
@@ -13881,6 +13897,17 @@
             ],
             "title": "Basket Label"
           },
+          "book_portfolio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Book Portfolio"
+          },
           "cadence": {
             "default": "annual",
             "title": "Cadence",
@@ -13900,6 +13927,11 @@
               }
             ],
             "title": "Holdings"
+          },
+          "look_through_certificates": {
+            "default": false,
+            "title": "Look Through Certificates",
+            "type": "boolean"
           },
           "metrics": {
             "anyOf": [
@@ -17580,6 +17612,57 @@
           }
         },
         "summary": "Airs Account Set Display Name",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/fundamental-weights": {
+      "get": {
+        "description": "Current AIRS book weights for the portfolio-level Fundamental table.\n\nThis is intentionally not the Analyse payload. Fundamental needs only each operating\ncompany's current EUR numerator, the complete book denominator and the two source dates.\nBuilding the full analysis also loads benchmark membership, returns, classifications,\nrealised trades and chart axes, which made a simple Weight column take seconds in production.\n\nMembership is direct by default. With ``look_through=true``, linked certificates are replaced\nby the companies inside their underlying strategies. The denominator remains the complete\nAIRS book, so cash, bonds, funds and uncovered holdings are not redistributed.",
+        "operationId": "airs_fundamental_weights_api_airs_accounts__portefeuille__fundamental_weights_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "look_through",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Look Through",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Fundamental Weights",
         "tags": [
           "airs"
         ]

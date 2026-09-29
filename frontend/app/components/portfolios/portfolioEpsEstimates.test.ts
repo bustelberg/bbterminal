@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   dcfGrowthCellLabel,
-  epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear,
+  displayedWeightPct,
+  epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear, epsInput,
+  epsObservationForYear, epsYearHow, epsYearWhat,
   medianPeCalculation, peDeltaFromHistoricalMedian, priceToEpsMultiple,
+  sourceInput,
 } from './PortfolioFundamentalModal';
 
 const estimate = (year: number, value: number | null, code = 'annual_per_share_eps_estimate') => ({
@@ -26,6 +29,28 @@ describe('portfolio EPS estimate view', () => {
       .toBe(4);
   });
 
+  it('uses a reported result when available and otherwise falls back to consensus', () => {
+    const rows = [actual(2026, 6), estimate(2026, 5), estimate(2027, 7)];
+    expect(epsObservationForYear(rows, 2026)).toMatchObject({
+      kind: 'actual', metric: { numeric_value: 6 },
+    });
+    expect(epsObservationForYear(rows, 2027)).toMatchObject({
+      kind: 'estimate', metric: { numeric_value: 7 },
+    });
+    expect(epsObservationForYear(rows, 2025)).toBeNull();
+  });
+
+  it('states plainly whether a fiscal-year EPS is actual, estimated or unavailable', () => {
+    expect(epsYearWhat('NVIDIA Corp', 2026, 'actual'))
+      .toBe('Reported FY2026 EPS without NRI for NVIDIA Corp.');
+    expect(epsYearWhat('KLA Corp', 2026, 'estimate'))
+      .toBe('FY2026 consensus EPS estimate for KLA Corp; no actual is stored.');
+    expect(epsYearWhat('KLA Corp', 2026, null))
+      .toBe('No FY2026 actual or consensus EPS is stored for KLA Corp.');
+    expect(epsYearHow(2026, 'estimate', '2026-06-30'))
+      .toBe('No reported FY2026 EPS is stored; use consensus for 30 June 2026.');
+  });
+
   it('compounds the 2025 actual-to-2027 estimate change over two years', () => {
     expect(epsActualToEstimateCagr2025To2027([actual(2025, 4), estimate(2027, 9)]))
       .toBeCloseTo(0.5);
@@ -35,6 +60,28 @@ describe('portfolio EPS estimate view', () => {
     expect(epsActualToEstimateCagr2025To2027([actual(2025, 4)])).toBeNull();
     expect(epsActualToEstimateCagr2025To2027([actual(2025, -1), estimate(2027, 9)]))
       .toBeNull();
+  });
+
+  it('distinguishes a checked estimate feed from an estimate GuruFocus actually supplied', () => {
+    expect(epsInput(null, 'EPS estimate for FY2026', 'USD', '2026-09-29T12:47:56Z'))
+      .toEqual([{
+        label: 'EPS estimate for FY2026',
+        value: 'not supplied by GuruFocus',
+        retrieved: '2026-09-29T12:47:56Z',
+        applies: null,
+        retrievedText: undefined,
+        appliesText: 'No matching fiscal period was returned',
+      }]);
+  });
+
+  it('uses the estimate row own retrieval time and fiscal period when it exists', () => {
+    expect(epsInput(estimate(2026, 5), 'EPS estimate for FY2026', 'USD',
+      '2026-09-29T12:47:56Z')).toEqual([{
+      label: 'EPS estimate for FY2026',
+      value: '5 USD/share',
+      retrieved: '2026-09-28T08:00:00',
+      applies: '2026-12-31',
+    }]);
   });
 
   it('calculates each P/E from the current stock price and the selected EPS', () => {
@@ -51,6 +98,16 @@ describe('portfolio EPS estimate view', () => {
   });
 });
 
+describe('portfolio Weight sorting value', () => {
+  it('uses the displayed AIRS book percentage instead of the hidden model weight', () => {
+    expect(displayedWeightPct(12, {
+      current_value_eur: 50_600,
+      total_current_value_eur: 1_000_000,
+    })).toBeCloseTo(5.06);
+    expect(displayedWeightPct(7.62, null)).toBe(7.62);
+  });
+});
+
 describe('portfolio Reverse DCF refusal labels', () => {
   it('names a non-positive normalised base instead of looking like missing data', () => {
     expect(dcfGrowthCellLabel(null, -1043.28)).toBe('No +FCF');
@@ -58,8 +115,22 @@ describe('portfolio Reverse DCF refusal labels', () => {
   });
 
   it('keeps missing inputs distinct and still formats a solved rate', () => {
-    expect(dcfGrowthCellLabel(null, null)).toBe('—');
+    expect(dcfGrowthCellLabel(null, null)).toBe('Missing inputs');
+    expect(dcfGrowthCellLabel(null, 100, 1_000)).toBe('No solution');
     expect(dcfGrowthCellLabel(0.1236, -1043.28)).toBe('12.4%');
+  });
+
+  it('keeps a missing source operand visible in the info card', () => {
+    expect(sourceInput([], 'Diluted shares outstanding', {
+      raw: null, used: null, date: null, code: null,
+    }, 'm shares')).toEqual({
+      label: 'Diluted shares outstanding',
+      value: 'not available',
+      retrieved: null,
+      applies: null,
+      retrievedText: 'not available',
+      appliesText: 'not available',
+    });
   });
 });
 

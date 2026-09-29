@@ -729,6 +729,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/fundamental-weights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Fundamental Weights
+         * @description Current AIRS book weights for the portfolio-level Fundamental table.
+         *
+         *     This is intentionally not the Analyse payload. Fundamental needs only each operating
+         *     company's current EUR numerator, the complete book denominator and the two source dates.
+         *     Building the full analysis also loads benchmark membership, returns, classifications,
+         *     realised trades and chart axes, which made a simple Weight column take seconds in production.
+         *
+         *     Membership is direct by default. With ``look_through=true``, linked certificates are replaced
+         *     by the companies inside their underlying strategies. The denominator remains the complete
+         *     AIRS book, so cash, bonds, funds and uncovered holdings are not redistributed.
+         */
+        get: operations["airs_fundamental_weights_api_airs_accounts__portefeuille__fundamental_weights_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/holdings": {
         parameters: {
             query?: never;
@@ -10872,11 +10901,13 @@ export interface components {
         };
         /**
          * FundamentalCoverageRequest
-         * @description Either a model portfolio's id, or an explicit basket of (isin, weight).
+         * @description A current AIRS book, model portfolio, or explicit basket of (isin, weight).
          */
         FundamentalCoverageRequest: {
             /** Basket Label */
             basket_label?: string | null;
+            /** Book Portfolio */
+            book_portfolio?: string | null;
             /**
              * Cadence
              * @default annual
@@ -10886,6 +10917,11 @@ export interface components {
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
+            /**
+             * Look Through Certificates
+             * @default false
+             */
+            look_through_certificates?: boolean;
             /** Metrics */
             metrics?: string[] | null;
             /** Portfolio Id */
@@ -13346,6 +13382,8 @@ export interface components {
         RelativeGrowthRequest: {
             /** Basket Label */
             basket_label?: string | null;
+            /** Book Portfolio */
+            book_portfolio?: string | null;
             /**
              * Cadence
              * @default annual
@@ -13355,6 +13393,11 @@ export interface components {
             holdings?: {
                 [key: string]: unknown;
             }[] | null;
+            /**
+             * Look Through Certificates
+             * @default false
+             */
+            look_through_certificates?: boolean;
             /** Metrics */
             metrics?: string[] | null;
             /** Period */
@@ -15018,6 +15061,39 @@ export interface operations {
                 "application/json": components["schemas"]["AirsAccountName"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_fundamental_weights_api_airs_accounts__portefeuille__fundamental_weights_get: {
+        parameters: {
+            query?: {
+                look_through?: boolean;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
