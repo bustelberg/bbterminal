@@ -3,7 +3,7 @@ import {
   dcfGrowthCellLabel,
   displayedWeightPct,
   epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear, epsInput,
-  epsObservationForYear,
+  epsObservationForYear, epsYearHow, epsYearWhat,
   medianPeCalculation, peDeltaFromHistoricalMedian, priceToEpsMultiple,
   sourceInput,
 } from './PortfolioFundamentalModal';
@@ -38,6 +38,17 @@ describe('portfolio EPS estimate view', () => {
       kind: 'estimate', metric: { numeric_value: 7 },
     });
     expect(epsObservationForYear(rows, 2025)).toBeNull();
+  });
+
+  it('states plainly whether a fiscal-year EPS is actual, estimated or unavailable', () => {
+    expect(epsYearWhat('NVIDIA Corp', 2026, 'actual'))
+      .toBe('Reported FY2026 EPS without NRI for NVIDIA Corp.');
+    expect(epsYearWhat('KLA Corp', 2026, 'estimate'))
+      .toBe('FY2026 consensus EPS estimate for KLA Corp; no actual is stored.');
+    expect(epsYearWhat('KLA Corp', 2026, null))
+      .toBe('No FY2026 actual or consensus EPS is stored for KLA Corp.');
+    expect(epsYearHow(2026, 'estimate', '2026-06-30'))
+      .toBe('No reported FY2026 EPS is stored; use consensus for 30 June 2026.');
   });
 
   it('compounds the 2025 actual-to-2027 estimate change over two years', () => {

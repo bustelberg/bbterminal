@@ -336,6 +336,22 @@ export function epsObservationForYear(metrics: ApiMetric[], year: number): EpsYe
   return null;
 }
 
+export function epsYearWhat(name: string, year: number,
+  kind: EpsYearObservation['kind'] | null): string {
+  if (kind === 'actual') return `Reported FY${year} EPS without NRI for ${name}.`;
+  if (kind === 'estimate') return `FY${year} consensus EPS estimate for ${name}; no actual is stored.`;
+  return `No FY${year} actual or consensus EPS is stored for ${name}.`;
+}
+
+export function epsYearHow(year: number, kind: EpsYearObservation['kind'] | null,
+  targetDate: string | null): string {
+  if (kind === 'actual') return 'Use reported EPS without NRI; it takes priority over consensus.';
+  if (kind === 'estimate') {
+    return `No reported FY${year} EPS is stored; use consensus for ${onDate(targetDate)}.`;
+  }
+  return `Neither annual statements nor analyst estimates supplies FY${year} EPS.`;
+}
+
 export function epsActualToEstimateCagr2025To2027(metrics: ApiMetric[]): number | null {
   const start = epsObservationForYear(metrics, 2025)?.metric.numeric_value ?? null;
   const end = epsObservationForYear(metrics, 2027)?.metric.numeric_value ?? null;
@@ -1208,21 +1224,13 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           return (
                             <ValuationCell key={year} tone="eps"
                               value={metric?.numeric_value == null ? '—' : metric.numeric_value.toFixed(2)}
-                              what={kind === 'actual'
-                                ? `The reported EPS without NRI for ${row.name}'s fiscal year ${year}.`
-                                : kind === 'estimate'
-                                  ? `The GuruFocus consensus EPS estimate for ${row.name}'s fiscal year ${year}; no reported FY${year} actual is stored yet.`
-                                  : `Neither reported EPS nor a consensus EPS estimate is stored for ${row.name}'s fiscal year ${year}.`}
+                              what={epsYearWhat(row.name, year, kind)}
                               where={`GuruFocus annual financial statements and analyst estimates stored for ${row.name}.`}
                               retrieved={[metric?.recorded_at]}
                               applies={[metric?.target_date]}
                               inputs={epsYearInputs(observation, year, row.currency,
                                 row.source_fetched_at.financials, row.source_fetched_at.estimates)}
-                              how={kind === 'actual'
-                                ? `Use reported FY${year} EPS without NRI. A reported result takes priority over any consensus estimate for the same fiscal year.`
-                                : kind === 'estimate'
-                                  ? `No reported FY${year} EPS is stored, so use the GuruFocus consensus estimate for the fiscal period ending ${onDate(metric!.target_date)}.`
-                                  : `Check both the annual statements and analyst-estimate feeds for a fiscal period ending in ${year}; neither supplied a usable EPS observation.`} />
+                              how={epsYearHow(year, kind, metric?.target_date ?? null)} />
                           );
                         })}
                         <ValuationCell tone="eps" emphasis
