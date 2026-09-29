@@ -10,6 +10,7 @@ export function fundamentalJobMessage(message: string | null | undefined): strin
     .replace(/^(?:[A-Za-z][\w.]*Error):\s*/, '')
     .replace(/:\s*(?:fin|est|ind):\s*/gi, ': ')
     .replace(/no change \([\d,]+ rows already stored\)/gi, 'up to date')
+    .replace(/\s+(?:\u2014|\u2013|\u00e2\u20ac\u201d|\u00e2\u20ac\u201c)\s+/g, '. ')
     .replace(/\s+[—–]\s+/g, '. ')
     .replace(/\s+\|\s+/g, '; ')
     .replace(/\.\s*;\s*/g, '; ')
