@@ -926,7 +926,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
           {rows.length > 0 && (
             <div className="my-4 min-w-max border-y border-r border-neutral-800/50">
             <table className="isolate w-full border-separate border-spacing-0 text-xs">
-              <thead className="sticky top-0 z-30 text-xs uppercase tracking-wide text-fg-faint">
+              {/* The model-colour cells use translucent tints. Give the sticky header group its
+                  own opaque surface so scrolled body rows cannot show through those tints. */}
+              <thead className="sticky top-4 z-30 bg-page text-xs uppercase tracking-wide text-fg-faint">
                 <tr className="border-b border-neutral-800/40">
                   {/* These identifying columns are the subject, not the selected valuation model. They
                       stay pinned and unchanged while the switch replaces only the coloured block
