@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { track } from '../../../lib/loading';
 import { type Basket } from './types';
 import PanelDialog from './PanelDialog';
 import {
@@ -21,7 +22,10 @@ import { AspectCard, type FormulaSymbol } from '../../../lib/tipCard';
 import { Provenance } from '../../../lib/provenance';
 import { onDate } from './asOfLine';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
-import { workedEgmReturn, workedEgmTotalReturn, workedImpliedPrice } from './valuationFormulas';
+import {
+  workedEgmReturn, workedEgmTotalReturn, workedFairValue, workedFairValueGap,
+  workedImpliedPrice,
+} from './valuationFormulas';
 import { ANALYSE_COPY } from './analyseCopy';
 
 type ApiMetric = MetricRow & { recorded_at?: string | null };
@@ -513,6 +517,28 @@ function dcfRow(row: ApiRow, today: string) {
     },
   ];
   const egmResult = calculateEGM({ ...egm, forwardPE }, egmAssumptions);
+  const fairValueInputs: InputObservation[] = [
+    {
+      label: 'FY1 consensus EPS',
+      value: egm.epsNextFY == null
+        ? 'not available'
+        : `${inputNumber.format(egm.epsNextFY)}${row.currency ? ` ${row.currency}` : ''}/share`,
+      retrieved: egm.epsNextFY == null ? null : row.source_fetched_at.estimates ?? null,
+      applies: egm.epsNextFYDate,
+      retrievedText: egm.epsNextFY == null ? 'not available' : undefined,
+      appliesText: egm.epsNextFYDate == null ? 'not available' : undefined,
+    },
+    {
+      label: 'Maximum starting P/E',
+      value: egmResult.maxPE == null ? 'not available' : `${inputNumber.format(egmResult.maxPE)}×`,
+      retrieved: null,
+      applies: null,
+      retrievedText: egmResult.maxPE == null ? 'not available' : 'Not retrieved; calculated here',
+      appliesText: egmResult.maxPE == null
+        ? 'not available'
+        : 'The current growth, dividend, exit P/E and 10-year hurdle assumptions',
+    },
+  ];
   const epsObservations = Object.fromEntries(EPS_YEARS.map((year) => [
     year, epsObservationForYear(row.metrics, year),
   ])) as Record<EpsYear, EpsYearObservation | null>;
@@ -538,6 +564,27 @@ function dcfRow(row: ApiRow, today: string) {
     sourceInput(row.metrics, 'Diluted shares outstanding', working.shares, 'm shares'),
   ];
   const stockPriceInputs = commonInputs.slice(0, 1);
+  const upsideInputs: InputObservation[] = [
+    {
+      label: 'Model fair value',
+      value: egmResult.fairValue == null
+        ? 'not available'
+        : `${inputNumber.format(egmResult.fairValue)}${row.currency ? ` ${row.currency}` : ''}/share`,
+      retrieved: null,
+      applies: null,
+      retrievedText: egmResult.fairValue == null ? 'not available' : 'Not retrieved; calculated here',
+      appliesText: egmResult.fairValue == null
+        ? 'not available'
+        : 'Current Expected Growth Model valuation',
+    },
+    {
+      ...stockPriceInputs[0],
+      label: 'Current share price',
+      value: stockPriceInputs[0].value === 'not available'
+        ? stockPriceInputs[0].value
+        : `${stockPriceInputs[0].value}/share`,
+    },
+  ];
   // Show the route the model attempted, even when one missing operand prevented that route from
   // becoming the solver's base. L'Oréal, for example, has an FY1 OCF estimate but no capex with
   // which to turn it into FCF; hiding the present OCF made the card show only a close price and
@@ -573,9 +620,10 @@ function dcfRow(row: ApiRow, today: string) {
     dcfStartingFcf: adjusted,
     dcfInputs,
     stockPriceInputs,
+    upsideInputs,
     egm, forwardPE, forwardPeDerived, egmAssumptions, egmResult,
     epsObservations, epsByYear, epsEstimateCagr, peByYear, peDeltaByYear,
-    historicalPe10yWorking, historicalPe10yObservations, historicalPe10yWorked,
+    historicalPe10yWorking, historicalPe10yObservations, historicalPe10yWorked, fairValueInputs,
     estimateDates, medianPeDates, medianPeObservations, medianPeWorked, expectedReturnInputs,
   };
 }
@@ -638,6 +686,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   // immediately instead of repeating both API requests every time.
   const dataByCertificateScope = useRef(new Map<boolean, Payload>());
   const weightsByCertificateScope = useRef(new Map<boolean, BookWeightsPayload | null>());
+  const selectedCertificateScope = useRef(false);
+  const certificateScopeMessages = useRef(new Map<boolean, () => void>());
   const [companyFundamental, setCompanyFundamental] = useState<ApiRow | null>(null);
   const [fundamentalsRevision, setFundamentalsRevision] = useState(0);
   const [loadingDotIndex, setLoadingDotIndex] = useState(0);
@@ -648,6 +698,22 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
     eps: { key: 'weight', direction: 'desc' },
   });
   const today = new Date().toISOString().slice(0, 10);
+
+  const finishCertificateScopeMessage = useCallback((scope: boolean) => {
+    certificateScopeMessages.current.get(scope)?.();
+    certificateScopeMessages.current.delete(scope);
+  }, []);
+  const publishCertificateScope = useCallback((scope: boolean) => {
+    const payload = dataByCertificateScope.current.get(scope);
+    if (!payload || !weightsByCertificateScope.current.has(scope)) return false;
+    if (selectedCertificateScope.current === scope) {
+      setData(payload);
+      setBookWeights(weightsByCertificateScope.current.get(scope) ?? null);
+      setError(null);
+    }
+    finishCertificateScopeMessage(scope);
+    return true;
+  }, [finishCertificateScopeMessage]);
 
   useEffect(() => {
     if (data || error) return;
@@ -660,13 +726,10 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   useEffect(() => {
     const cached = dataByCertificateScope.current.get(lookThroughCertificates);
     if (cached) {
-      if (!bookPortfolio || weightsByCertificateScope.current.has(lookThroughCertificates)) {
+      if (!bookPortfolio) {
         setData(cached);
-        if (bookPortfolio) {
-          setBookWeights(weightsByCertificateScope.current.get(lookThroughCertificates) ?? null);
-        }
         setError(null);
-      }
+      } else publishCertificateScope(lookThroughCertificates);
       return;
     }
     const controller = new AbortController();
@@ -688,18 +751,18 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
         if (!response.ok) throw new Error((body as { detail?: string } | null)?.detail ?? `HTTP ${response.status}`);
         const payload = body as Payload;
         dataByCertificateScope.current.set(lookThroughCertificates, payload);
-        if (!bookPortfolio || weightsByCertificateScope.current.has(lookThroughCertificates)) {
-          if (bookPortfolio) {
-            setBookWeights(weightsByCertificateScope.current.get(lookThroughCertificates) ?? null);
-          }
-          setData(payload);
-        }
+        if (bookPortfolio) publishCertificateScope(lookThroughCertificates);
+        else setData(payload);
       } catch (e) {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+        if (!controller.signal.aborted) {
+          finishCertificateScopeMessage(lookThroughCertificates);
+          setError(e instanceof Error ? e.message : String(e));
+        }
       }
     })();
     return () => controller.abort();
-  }, [basket, bookPortfolio, lookThroughCertificates, name, portfolioId, fundamentalsRevision]);
+  }, [basket, bookPortfolio, finishCertificateScopeMessage, lookThroughCertificates, name,
+    portfolioId, publishCertificateScope, fundamentalsRevision]);
 
   // This lightweight route uses the same AIRS source, complete-book denominator and linked-book
   // expansion as Analyse, without making Weight wait for returns, benchmarks and chart data.
@@ -709,9 +772,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
       return;
     }
     if (weightsByCertificateScope.current.has(lookThroughCertificates)) {
-      setBookWeights(weightsByCertificateScope.current.get(lookThroughCertificates) ?? null);
-      const cachedData = dataByCertificateScope.current.get(lookThroughCertificates);
-      if (cachedData) setData(cachedData);
+      publishCertificateScope(lookThroughCertificates);
       return;
     }
     const controller = new AbortController();
@@ -725,20 +786,16 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
         if (!response.ok) throw new Error((body as { detail?: string } | null)?.detail ?? `HTTP ${response.status}`);
         const payload = body as BookWeightsPayload;
         weightsByCertificateScope.current.set(lookThroughCertificates, payload);
-        setBookWeights(payload);
-        const cachedData = dataByCertificateScope.current.get(lookThroughCertificates);
-        if (cachedData) setData(cachedData);
+        publishCertificateScope(lookThroughCertificates);
       } catch {
         if (!controller.signal.aborted) {
           weightsByCertificateScope.current.set(lookThroughCertificates, null);
-          setBookWeights(null);
-          const cachedData = dataByCertificateScope.current.get(lookThroughCertificates);
-          if (cachedData) setData(cachedData);
+          publishCertificateScope(lookThroughCertificates);
         }
       }
     })();
     return () => controller.abort();
-  }, [bookPortfolio, lookThroughCertificates]);
+  }, [bookPortfolio, lookThroughCertificates, publishCertificateScope]);
 
   // The fill is concurrent, so several companies can land within a few milliseconds. Coalesce
   // those stream events into one re-read, while still showing the first completed batch promptly.
@@ -756,6 +813,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   }, [lookThroughCertificates]);
   useEffect(() => () => {
     if (partialRefreshTimer.current != null) clearTimeout(partialRefreshTimer.current);
+    certificateScopeMessages.current.forEach((resolve) => resolve());
+    certificateScopeMessages.current.clear();
   }, []);
 
   const rows = useMemo(() => {
@@ -886,14 +945,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
               <input type="checkbox" checked={lookThroughCertificates}
                 onChange={(event) => {
                   const checked = event.target.checked;
+                  // End any superseded message immediately; its requests are aborted by the
+                  // effect cleanup. The selected scope is published only after BOTH its company
+                  // metrics and AIRS weights have landed, so the current table cannot become a
+                  // hybrid of old rows and new weights while this message is visible.
+                  certificateScopeMessages.current.forEach((resolve) => resolve());
+                  certificateScopeMessages.current.clear();
+                  selectedCertificateScope.current = checked;
                   setLookThroughCertificates(checked);
-                  // An uncached scope loads behind the current table. Keep the rows usable and
-                  // let the new set replace them only when it arrives; the full-page loading copy
-                  // is reserved for opening the modal when there is genuinely nothing to show.
-                  const cachedData = dataByCertificateScope.current.get(checked);
-                  if (cachedData && weightsByCertificateScope.current.has(checked)) {
-                    setData(cachedData);
-                    setBookWeights(weightsByCertificateScope.current.get(checked) ?? null);
+                  if (!publishCertificateScope(checked)) {
+                    const pending = new Promise<void>((resolve) => {
+                      certificateScopeMessages.current.set(checked, resolve);
+                    });
+                    void track('Updating certificate view…', pending);
                   }
                   setError(null);
                 }}
@@ -1143,7 +1207,17 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials]}
                           applies={[row.egm.epsNextFYDate, row.egm.dividendYieldDate,
                             ...row.estimateDates, ...row.medianPeDates]}
-                          how="Multiply FY1 EPS by the maximum starting P/E compatible with ten years of EPS growth, dividends, the exit multiple and the 10% hurdle rate." />
+                          inputs={row.fairValueInputs}
+                          how="Multiply FY1 EPS by the maximum starting P/E compatible with ten years of EPS growth, dividends, the exit multiple and the 10% hurdle rate."
+                          worked={workedFairValue(
+                            row.egm.epsNextFY,
+                            row.egmResult.maxPE,
+                            row.egmResult.fairValue,
+                          )}
+                          legend={row.egmResult.fairValue == null ? undefined : [
+                            { sym: String.raw`EPS_{\text{FY1}}`, is: 'the FY1 consensus EPS' },
+                            { sym: String.raw`PE_{\max}`, is: 'the maximum starting P/E that meets the hurdle' },
+                          ]} />
                         <ValuationCell tone="egm"
                           value={row.egmResult.upside == null ? '—' : `${row.egmResult.upside >= 0 ? '+' : ''}${(row.egmResult.upside * 100).toFixed(2)}%`}
                           what="The difference between model fair value and the latest stored share price."
@@ -1151,7 +1225,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials]}
                           applies={[row.egm.priceDate, row.egm.epsNextFYDate,
                             row.egm.dividendYieldDate, ...row.estimateDates, ...row.medianPeDates]}
-                          how="Divide fair value by the latest stored share price and subtract one." />
+                          inputs={row.upsideInputs}
+                          how="Divide fair value by the latest stored share price and subtract one."
+                          worked={workedFairValueGap(
+                            row.egmResult.fairValue,
+                            row.egm.price,
+                            row.egmResult.upside == null
+                              ? ''
+                              : `${row.egmResult.upside >= 0 ? '+' : ''}${(row.egmResult.upside * 100).toFixed(2)}%`,
+                          )}
+                          legend={row.egmResult.upside == null ? undefined : [
+                            { sym: 'FV', is: 'the Expected Growth Model fair value today' },
+                            { sym: 'P_0', is: 'the latest stored share price' },
+                          ]} />
                         <ValuationCell tone="egm" emphasis
                           value={row.egmResult.expectedReturn == null ? '—' : `${row.egmResult.expectedReturn >= 0 ? '+' : ''}${(row.egmResult.expectedReturn * 100).toFixed(2)}%`}
                           what="The modelled annualised shareholder return over ten years."
