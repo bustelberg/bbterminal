@@ -759,7 +759,7 @@ async def fundamental_coverage(body: FundamentalCoverageRequest, request: Reques
 @router.post("/api/earnings/portfolio-company-metrics",
              response_model=PortfolioCompanyMetricsResponse)
 async def portfolio_company_metrics(body: FundamentalCoverageRequest):
-    """One bulk read for the portfolio company list and its valuation inputs.
+    """One bulk read for the portfolio company list and its Reverse-DCF inputs.
 
     This deliberately returns source observations rather than a second server-side valuation.
     The client runs the same ``reverseDcfSource`` and ``impliedGrowth`` functions as the existing
