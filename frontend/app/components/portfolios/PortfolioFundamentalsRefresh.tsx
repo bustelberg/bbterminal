@@ -39,6 +39,21 @@ import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
  */
 /** Which GuruFocus feed a UNIVERSE fill spends on. See the  on `run`. */
 export type IndexFeeds = 'statements' | 'estimates' | 'smart';
+export type FundamentalRefreshFeeds = 'statements' | 'estimates' | 'statements_estimates' | 'all';
+
+export function fundamentalRefreshQuery({ allPeriods, everything, feeds, prices, keyRatios }: {
+  allPeriods: boolean;
+  everything: boolean;
+  feeds?: FundamentalRefreshFeeds;
+  prices: boolean;
+  keyRatios: boolean;
+}): string {
+  const selectedFeeds = everything ? 'all' : feeds;
+  return `?force=true&only_due=${allPeriods ? 'false' : 'true'}`
+    + (selectedFeeds ? `&feeds=${selectedFeeds}` : '')
+    + (everything || keyRatios ? '&key_ratios=true' : '')
+    + (everything || prices ? '&prices=true' : '');
+}
 
 export type RefreshScope =
   | { kind: 'portfolio'; id: number; name: string }
@@ -72,7 +87,7 @@ export function refreshScopes(scope: RefreshScope, additional?: RefreshScope): R
 
 export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, jobTitle, everything,
   allPeriods = false, broadcast = true, prominent = false, prominentTone = 'accent', showNote = true,
-  onProgress }: {
+  compact = false, onProgress, feeds, prices = false, keyRatios = false }: {
   scope: RefreshScope;
   /** A selected benchmark/comparison refreshed after the primary scope by the same button. */
   additionalScope?: RefreshScope;
@@ -101,14 +116,22 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    * their own, narrower reasons to exist, and a four-figure index spend is not one of them.
    */
   everything?: boolean;
+  /** Narrow a row-level refresh to the source feeds consumed by the active tab. */
+  feeds?: FundamentalRefreshFeeds;
+  /** Also refresh the latest share price used by valuation tabs. */
+  prices?: boolean;
+  /** Also refresh GuruFocus key ratios used by the forward Reverse DCF base. */
+  keyRatios?: boolean;
   /** Re-download the full source history, including older fiscal years that are already past due. */
   allPeriods?: boolean;
   /** Notify every mounted fundamentals card. A drill-down that reloads itself keeps this false. */
   broadcast?: boolean;
   /** Filled header-action treatment used beside a segmented slider. */
   prominent?: boolean;
+  /** Dense row-action treatment used beside another compact table button. */
+  compact?: boolean;
   /** Colour family of a prominent action, matched to the model currently selected beside it. */
-  prominentTone?: 'accent' | 'positive' | 'warning';
+  prominentTone?: 'accent' | 'positive' | 'warning' | 'info';
   /** Show the scope/coverage receipt beside the button. Dense modal headers can leave it to toast. */
   showNote?: boolean;
   /** Reader-facing title in the job toast; defaults to the scope name. */
@@ -134,9 +157,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    */
   label?: string;
 }) {
-  //  The four states of this button's own label. A caller-supplied `label` still wins — see the
-  // note on that prop: where two of these share a screen they name what they act ON, and that
-  // string comes from the caller's own copy module, not from here.
+  // A caller-supplied resting label still wins. Once pressed, this control has one action and one
+  // label: Cancel. Progress wording belongs to the persistent job pop-up, not this button.
   const chrome = useFundamentalChromeCopy();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -147,14 +169,16 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    * reader who wants to stop it is looking at the button they just pressed — not at the corner of
    * the screen. Same shape as the Overview scan button: one control, two states.
    *
-   *  And it is the job id, not `busy`, THAT DECIDES. There is a gap between the press and the id
-   * coming back, and offering a Cancel in that window would be a button that cannot do what it
-   * says. `busy && !jobId` renders it inert for exactly that gap.
+   *  The label changes immediately, but the job id still decides whether the action is available.
+   * There is a gap between the press and the id coming back, so `busy && !jobId` renders the new
+   * Cancel label inert for exactly that gap.
    */
   const [jobId, setJobId] = useState<string | null>(null);
   /** Cancel has been asked for and the workers have not stopped yet — see `cancel`. */
   const [cancelling, setCancelling] = useState(false);
   const primaryJobTitle = jobTitle ?? `${scope.name} fundamentals`;
+  const restingLabel = label ?? (scope.kind === 'universe' ? chrome.refreshUniverse : chrome.refresh);
+  const buttonLabel = busy || jobId ? chrome.cancel : restingLabel;
 
   // A fill writes one company at a time. Drop the GET cache before asking an on-screen reader to
   // re-read, otherwise the reload can faithfully return the pre-fill response until the job ends.
@@ -224,7 +248,9 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
     try {
       //  `feeds=all` NARROWS NOTHING and `prices=true` adds the ingest that is not a feed — see
       // the `everything` prop for what the four things are and which chart each one was missing.
-      const q = `?force=true&only_due=${allPeriods ? 'false' : 'true'}${everything ? '&feeds=all&key_ratios=true&prices=true' : ''}`;
+      const q = fundamentalRefreshQuery({
+        allPeriods, everything: Boolean(everything), feeds, prices, keyRatios,
+      });
       // A company and a basket post the same body — one holding or many. `/api/airs/basket/…` is
       // already the codebase's shape for "an ad-hoc set of holdings"; a single stock is a set of
       // one, which is exactly how `/api/airs/basket/analysis` treats it.
@@ -293,8 +319,9 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
       if (extra && job.status !== 'cancelled') {
         // One press, two deliberately SERIAL jobs. Both use the global GuruFocus rate limiter, so
         // parallel jobs cannot finish sooner and would make both progress cards appear stalled.
-        const extraQ = `?force=true&only_due=${allPeriods ? 'false' : 'true'}`
-          + `${everything ? '&feeds=all&key_ratios=true&prices=true' : ''}`;
+        const extraQ = fundamentalRefreshQuery({
+          allPeriods, everything: Boolean(everything), feeds, prices, keyRatios,
+        });
         const extraHoldings = extra.kind === 'company' ? [{ isin: extra.isin }]
           : extra.kind === 'basket' ? extra.holdings.map((h) => ({ isin: h.isin })) : null;
         const extraUrl = extra.kind === 'universe'
@@ -354,20 +381,14 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    * instant it is pressed, and that card carries the outcome and how far it got. Two places
    * reporting one job is two places to keep in step.
    *
-   *  But the button itself must acknowledge the press, and it did not. Cancellation is
-   * cooperative: the workers stop at their next feed boundary, which is seconds away, and for that
-   * whole time the button kept saying "Cancel" — unchanged, still clickable, indistinguishable from
-   * a press that went nowhere. This component's own argument for owning a Cancel at all is that the
-   * reader is looking HERE and not at the corner of the screen; the same argument applies to the
-   * acknowledgement. Local state, because the job's `cancel_requested` only comes back on the next
-   * stream tick and the gap is exactly the moment being explained.
+   * Cancellation is cooperative: workers stop at their next feed boundary. Local state disables
+   * the control immediately so it cannot send the same request twice; the always-on-top job card
+   * supplies the changing cancellation status while this button deliberately stays labelled Cancel.
    */
   const cancel = async () => {
     if (!jobId) return;
     setCancelling(true);
-    //  And back out again if the request did not land. A disabled "Cancelling…" over a job that
-    // never heard the press is the worse version of the bug this fixes: the run continues and the
-    // one control that could stop it has switched itself off.
+    // Back out if the request did not land, so Cancel becomes actionable again.
     if (!await cancelJob(jobId)) setCancelling(false);
   };
 
@@ -378,6 +399,7 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
     accent: 'border-accent-500 bg-accent-600 text-white hover:bg-accent-500',
     positive: 'border-pos-500 bg-pos-500 text-white hover:bg-pos-400',
     warning: 'border-warn-500 bg-warn-500 text-white hover:bg-warn-400',
+    info: 'border-sky-500 bg-sky-600 text-white hover:bg-sky-500',
   }[prominentTone];
 
   return (
@@ -423,23 +445,18 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
             + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
             + 'and carry on if you close this.' + extraTitle))}
         className={`${prominent ? 'h-9 rounded-md px-4 text-xs font-medium shadow-sm'
-          : 'rounded-lg px-2.5 py-1 text-[12px]'} border transition-colors
-                    disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
-          ? 'border-warn-500/50 bg-warn-500/10 text-warn-300 hover:bg-warn-500/15'
-          : prominent
-            ? prominentToneClass
-            : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
-        {/*  THE STATES OUTRANK THE CALLER'S LABEL. Whatever the button is named at rest, while it
-            runs it says what pressing it will now DO — a control that keeps its old name while its
-            action has changed underneath is the trap this replaced.
-             AND "Cancelling…" IS A STATE, NOT A THIRD WHEEL. The earlier argument against a
-            transient label (see `busy` in `refreshOne`) was that ~200ms of "Refreshing…" is a state
-            nobody can act on that flickers past; this one lasts as long as the in-flight feeds do
-            and answers the question the reader actually has, which is whether the press landed. */}
-        {jobId ? (cancelling ? chrome.cancelling : chrome.cancel)
-          : busy ? chrome.refreshing
-            : label ?? (scope.kind === 'universe' ? chrome.refreshUniverse
-              : chrome.refresh)}
+          : compact ? 'rounded-md px-2 py-1 text-[10px] font-medium'
+            : 'rounded-lg px-2.5 py-1 text-[12px]'} border transition-colors
+                    disabled:cursor-wait whitespace-nowrap shrink-0 ${prominent
+          ? prominentToneClass
+          : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
+        {/* Both labels stay in the sizing grid in every state. The visible text can therefore
+            switch without changing either the button width or any control beside it. */}
+        <span className="grid place-items-center">
+          <span aria-hidden className="invisible col-start-1 row-start-1">{restingLabel}</span>
+          <span aria-hidden className="invisible col-start-1 row-start-1">{chrome.cancel}</span>
+          <span className="col-start-1 row-start-1">{buttonLabel}</span>
+        </span>
       </button>
     </span>
   );

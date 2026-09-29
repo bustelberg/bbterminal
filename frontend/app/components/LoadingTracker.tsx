@@ -12,7 +12,9 @@ export default function LoadingTracker() {
   if (items.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-72 max-w-[calc(100vw-2rem)] bg-card border border-neutral-800/60 rounded-xl shadow-xl overflow-hidden">
+    // This is global operation feedback, so it must remain above nested dialogs, tooltips and
+    // background-job toasts. In particular, Fundamental is a z-60 dialog and used to cover it.
+    <div className="fixed bottom-4 right-4 z-[11000] w-72 max-w-[calc(100vw-2rem)] bg-card border border-neutral-800/60 rounded-xl shadow-xl overflow-hidden">
       <div className="px-3 py-2 border-b border-neutral-800/60 flex items-center gap-2">
         <span className="inline-block w-2 h-2 rounded-full bg-accent-400 animate-pulse" />
         <span className="text-xs font-medium text-fg-soft">

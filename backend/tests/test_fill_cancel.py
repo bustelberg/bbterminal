@@ -131,6 +131,26 @@ class TestTheStopHookIsPassedAtAll:
             "companies, i.e. after up to three more GuruFocus feeds per worker")
 
 
+class TestActiveTabFeedSelection:
+    def test_statements_and_estimates_skips_indicators(self, rig, monkeypatch):
+        ctx = FakeCtx()
+        seen = []
+
+        def _ingest(company, **_kwargs):
+            seen.append(company)
+            return {"done": ["fin", "est"], "rows": 2, "unchanged": 0, "calls": 2,
+                    "error": None, "stopped": False}
+
+        monkeypatch.setattr("routers._fundamental_backfill.ingest_company", _ingest)
+        fill.fill_company_ids(ctx, "One company", [1],
+                              feeds="statements_estimates", force=True)
+
+        assert len(seen) == 1
+        assert seen[0]["need_fin"] is True
+        assert seen[0]["need_est"] is True
+        assert seen[0]["need_ind"] is False
+
+
 class TestLiveStatusDescribesCurrentWork:
 
     def test_progress_does_not_present_the_last_completion_as_current_work(self, rig, monkeypatch):

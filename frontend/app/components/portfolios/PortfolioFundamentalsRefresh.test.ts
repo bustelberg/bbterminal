@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { refreshScopes, type RefreshScope } from './PortfolioFundamentalsRefresh';
+import {
+  fundamentalRefreshQuery, refreshScopes, type RefreshScope,
+} from './PortfolioFundamentalsRefresh';
 
 describe('refreshScopes', () => {
   const book: RefreshScope = { kind: 'company', isin: 'NL0000000001', name: 'Book company' };
@@ -19,5 +21,37 @@ describe('refreshScopes', () => {
     const a: RefreshScope = { kind: 'basket', name: 'A', holdings: [{ isin: 'B' }, { isin: 'A' }] };
     const b: RefreshScope = { kind: 'basket', name: 'B', holdings: [{ isin: 'A' }, { isin: 'B' }] };
     expect(refreshScopes(a, b)).toEqual([a]);
+  });
+});
+
+describe('fundamentalRefreshQuery', () => {
+  it('requests only statements, estimates and prices for an EPS or OCF row', () => {
+    expect(fundamentalRefreshQuery({
+      allPeriods: true,
+      everything: false,
+      feeds: 'statements_estimates',
+      prices: true,
+      keyRatios: false,
+    })).toBe('?force=true&only_due=false&feeds=statements_estimates&prices=true');
+  });
+
+  it('adds key ratios for Reverse DCF without fetching indicators', () => {
+    expect(fundamentalRefreshQuery({
+      allPeriods: true,
+      everything: false,
+      feeds: 'statements_estimates',
+      prices: true,
+      keyRatios: true,
+    })).toContain('&feeds=statements_estimates&key_ratios=true&prices=true');
+  });
+
+  it('keeps the full-company refresh on every source', () => {
+    expect(fundamentalRefreshQuery({
+      allPeriods: true,
+      everything: true,
+      feeds: 'statements',
+      prices: false,
+      keyRatios: false,
+    })).toContain('&feeds=all&key_ratios=true&prices=true');
   });
 });

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { track } from '../../../lib/loading';
 import { type Basket } from './types';
 import PanelDialog from './PanelDialog';
 import {
@@ -20,8 +21,13 @@ import OwnerEarningsModal from './OwnerEarningsModal';
 import { AspectCard, type FormulaSymbol } from '../../../lib/tipCard';
 import { Provenance } from '../../../lib/provenance';
 import { onDate } from './asOfLine';
-import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
-import { workedEgmReturn, workedEgmTotalReturn, workedImpliedPrice } from './valuationFormulas';
+import PortfolioFundamentalsRefresh, {
+  type FundamentalRefreshFeeds, type RefreshScope,
+} from './PortfolioFundamentalsRefresh';
+import {
+  workedEgmReturn, workedEgmTotalReturn, workedFairValue, workedFairValueGap,
+  workedImpliedPrice,
+} from './valuationFormulas';
 import { ANALYSE_COPY } from './analyseCopy';
 
 type ApiMetric = MetricRow & { recorded_at?: string | null };
@@ -73,6 +79,20 @@ const EPS_ACTUAL_CODES = new Set([
   'annuals__per_share_data__EPS without NRI',
   'annuals__per_share_data_array__EPS without NRI',
 ]);
+const OCF_ESTIMATE_CODE = 'annual_operating_cash_flow_estimate';
+const OCF_ACTUAL_CODES = new Set([
+  'annuals__Cashflow Statement__Cash Flow from Operations',
+  'annuals__cashflow_statement__Cash Flow from Operations',
+]);
+const HISTORICAL_PRICE_CODES = new Set([
+  'annuals__Per Share Data__Month End Stock Price',
+  'annuals__per_share_data__Month End Stock Price',
+  'annuals__per_share_data_array__Month End Stock Price',
+]);
+const DILUTED_SHARE_CODES = new Set([
+  'annuals__Income Statement__Shares Outstanding (Diluted Average)',
+  'annuals__income_statement__Shares Outstanding (Diluted Average)',
+]);
 const EPS_YEARS = [2025, 2026, 2027] as const;
 type EpsYear = typeof EPS_YEARS[number];
 type EpsYearObservation = {
@@ -81,7 +101,33 @@ type EpsYearObservation = {
   actual: ApiMetric | null;
   estimate: ApiMetric | null;
 };
-type Model = 'dcf' | 'egm' | 'eps';
+type OcfYearObservation = EpsYearObservation;
+type HistoricalOcfRow = {
+  year: number;
+  price: ApiMetric | null;
+  shares: ApiMetric | null;
+  ocf: ApiMetric | null;
+  multiple: number | null;
+  used: boolean;
+};
+type HistoricalOcfWorking = { rows: HistoricalOcfRow[]; median: number | null };
+type Model = 'dcf' | 'egm' | 'eps' | 'ocf';
+const MODEL_LABEL: Record<Model, string> = {
+  dcf: 'Reverse DCF',
+  egm: 'Expected Growth Model',
+  eps: 'EPS Estimates',
+  ocf: 'OCF Estimates',
+};
+const COMPANY_REFRESH: Record<Model, {
+  feeds: FundamentalRefreshFeeds;
+  prices: boolean;
+  keyRatios: boolean;
+}> = {
+  dcf: { feeds: 'statements_estimates', prices: true, keyRatios: true },
+  egm: { feeds: 'all', prices: true, keyRatios: false },
+  eps: { feeds: 'statements_estimates', prices: true, keyRatios: false },
+  ocf: { feeds: 'statements_estimates', prices: true, keyRatios: false },
+};
 const LOADING_DOTS = ['...', '..', '.', '..'] as const;
 type Sort = { key: string; direction: 'asc' | 'desc' };
 type InputObservation = {
@@ -191,12 +237,13 @@ function ValuationCell({ value, what, where, how, worked, legend, retrieved, app
   retrieved: (string | null | undefined)[];
   applies: (string | null | undefined)[];
   inputs?: InputObservation[];
-  tone: 'dcf' | 'egm' | 'eps';
+  tone: 'dcf' | 'egm' | 'eps' | 'ocf';
   emphasis?: boolean;
 }) {
   return (
     <td className={`${tone === 'dcf' ? 'bg-accent-500/[0.035]'
-      : tone === 'egm' ? 'bg-pos-500/[0.035]' : 'bg-warn-500/[0.035]'} px-3 py-2 text-right font-mono tabular-nums ${emphasis ? 'font-semibold text-fg-strong' : ''}`}>
+      : tone === 'egm' ? 'bg-pos-500/[0.035]'
+        : tone === 'eps' ? 'bg-warn-500/[0.035]' : 'bg-sky-500/[0.035]'} px-3 py-2 text-right font-mono tabular-nums ${emphasis ? 'font-semibold text-fg-strong' : ''}`}>
       <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
         <span>{value}</span>
         <InfoTip wide className="font-sans text-fg-faint" content={(
@@ -210,9 +257,17 @@ function ValuationCell({ value, what, where, how, worked, legend, retrieved, app
 }
 
 const inputNumber = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 });
+const compactNumber = new Intl.NumberFormat('en-GB', {
+  notation: 'compact', compactDisplay: 'short', maximumFractionDigits: 2,
+});
 const eurWhole = new Intl.NumberFormat('en-GB', {
   style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0,
 });
+
+/** GuruFocus company-level statement values are stored in millions; render their real scale. */
+export function compactMillions(value: number, suffix = ''): string {
+  return `${compactNumber.format(value * 1_000_000)}${suffix}`;
+}
 
 function bookWeightPct(bookWeight: BookWeight): number {
   return bookWeight.current_value_eur / bookWeight.total_current_value_eur * 100;
@@ -286,6 +341,14 @@ export function sourceInput(metrics: ApiMetric[], label: string, observation: So
     retrieved: observationRetrievedAt(metrics, observation),
     applies: observation.date,
   };
+}
+
+function sourceMillionsInput(metrics: ApiMetric[], label: string, observation: SourceObs,
+  suffix = ''): InputObservation {
+  const input = sourceInput(metrics, label, observation);
+  return observation.raw == null
+    ? input
+    : { ...input, value: compactMillions(observation.raw, suffix) };
 }
 
 function medianPeInputs(metrics: ApiMetric[], working: MedianPeWorking): InputObservation[] {
@@ -401,6 +464,123 @@ function epsYearInputs(observation: EpsYearObservation | null, year: EpsYear,
   ];
 }
 
+function latestMetricForYear(metrics: ApiMetric[], codes: ReadonlySet<string>,
+  year: number): ApiMetric | null {
+  return metrics
+    .filter((metric) => codes.has(metric.metric_code) && metric.numeric_value != null
+      && metric.target_date.slice(0, 4) === String(year))
+    .sort((a, b) => b.target_date.localeCompare(a.target_date)
+      || (b.recorded_at ?? '').localeCompare(a.recorded_at ?? ''))[0] ?? null;
+}
+
+export function ocfEstimateForYear(metrics: ApiMetric[], year: number): ApiMetric | null {
+  return latestMetricForYear(metrics, new Set([OCF_ESTIMATE_CODE]), year);
+}
+
+export function ocfActualForYear(metrics: ApiMetric[], year: number): ApiMetric | null {
+  return latestMetricForYear(metrics, OCF_ACTUAL_CODES, year);
+}
+
+/** Prefer reported OCF; use the consensus estimate until the annual statement is available. */
+export function ocfObservationForYear(metrics: ApiMetric[], year: number): OcfYearObservation | null {
+  const actual = ocfActualForYear(metrics, year);
+  const estimate = ocfEstimateForYear(metrics, year);
+  if (actual) return { metric: actual, kind: 'actual', actual, estimate };
+  if (estimate) return { metric: estimate, kind: 'estimate', actual, estimate };
+  return null;
+}
+
+export function ocfActualToEstimateCagr2025To2027(metrics: ApiMetric[]): number | null {
+  const start = ocfObservationForYear(metrics, 2025)?.metric.numeric_value ?? null;
+  const end = ocfObservationForYear(metrics, 2027)?.metric.numeric_value ?? null;
+  if (start == null || start <= 0 || end == null || end <= 0) return null;
+  return Math.pow(end / start, 1 / 2) - 1;
+}
+
+/** Current market capitalisation divided by the selected company-level OCF, all in millions. */
+export function priceToOcfMultiple(price: number | null, dilutedShares: number | null,
+  ocf: number | null): number | null {
+  if (price == null || price <= 0 || dilutedShares == null || dilutedShares <= 0
+    || ocf == null || ocf <= 0) return null;
+  return price * dilutedShares / ocf;
+}
+
+export function historicalOcfMultipleWorking(metrics: ApiMetric[], years = 10): HistoricalOcfWorking {
+  const candidates = new Set<number>();
+  for (const metric of metrics) {
+    if (OCF_ACTUAL_CODES.has(metric.metric_code) && metric.numeric_value != null) {
+      candidates.add(Number(metric.target_date.slice(0, 4)));
+    }
+  }
+  const completedYears = [...candidates].filter(Number.isFinite).sort((a, b) => a - b).slice(-years);
+  const rows = completedYears.map((year): HistoricalOcfRow => {
+    const price = latestMetricForYear(metrics, HISTORICAL_PRICE_CODES, year);
+    const shares = latestMetricForYear(metrics, DILUTED_SHARE_CODES, year);
+    const ocf = ocfActualForYear(metrics, year);
+    const multiple = priceToOcfMultiple(
+      price?.numeric_value ?? null,
+      shares?.numeric_value ?? null,
+      ocf?.numeric_value ?? null,
+    );
+    return { year, price, shares, ocf, multiple, used: multiple != null };
+  });
+  const multiples = rows.filter((row) => row.used).map((row) => row.multiple as number)
+    .sort((a, b) => a - b);
+  if (!multiples.length) return { rows, median: null };
+  const middle = Math.floor(multiples.length / 2);
+  const median = multiples.length % 2
+    ? multiples[middle]
+    : (multiples[middle - 1] + multiples[middle]) / 2;
+  return { rows, median };
+}
+
+function ocfInput(metric: ApiMetric | null, label: string, currency: string | null | undefined,
+  feedCheckedAt: string | null | undefined): InputObservation {
+  if (metric?.numeric_value == null) return {
+    label,
+    value: 'not supplied by GuruFocus',
+    retrieved: feedCheckedAt ?? null,
+    applies: null,
+    retrievedText: feedCheckedAt ? undefined : 'not recorded',
+    appliesText: 'No matching fiscal period was returned',
+  };
+  return {
+    label,
+    value: compactMillions(metric.numeric_value, currency ? ` ${currency}` : ''),
+    retrieved: metric.recorded_at ?? null,
+    applies: metric.target_date,
+  };
+}
+
+function ocfYearInputs(observation: OcfYearObservation | null, year: EpsYear,
+  currency: string | null | undefined, financialsCheckedAt: string | null | undefined,
+  estimatesCheckedAt: string | null | undefined): InputObservation[] {
+  return [
+    ocfInput(observation?.actual ?? null,
+      `Reported OCF for FY${year}${observation?.kind === 'actual' ? ' (used)' : ''}`,
+      currency, financialsCheckedAt),
+    ocfInput(observation?.estimate ?? null,
+      `Consensus OCF estimate for FY${year}${observation?.kind === 'estimate' ? ' (used)' : ''}`,
+      currency, estimatesCheckedAt),
+  ];
+}
+
+function historicalOcfInputs(working: HistoricalOcfWorking,
+  currency: string | null | undefined): InputObservation[] {
+  return working.rows.map((row) => ({
+    label: `FY${row.year}: market value ÷ OCF`,
+    value: row.multiple == null
+      ? 'excluded; one or more positive inputs are missing'
+      : `${inputNumber.format(row.price!.numeric_value!)} × ${compactMillions(row.shares!.numeric_value!, ' shares')}`
+        + ` ÷ ${compactMillions(row.ocf!.numeric_value!, currency ? ` ${currency}` : '')}`
+        + ` = ${inputNumber.format(row.multiple)}×`,
+    retrieved: [row.price?.recorded_at, row.shares?.recorded_at, row.ocf?.recorded_at]
+      .filter((value): value is string => value != null).sort().at(-1) ?? null,
+    applies: [row.price?.target_date, row.shares?.target_date, row.ocf?.target_date],
+    appliesText: currency ? `Price and cash flow reported in ${currency}` : undefined,
+  }));
+}
+
 function dcfRow(row: ApiRow, today: string) {
   const src = reverseDcfSource(row.metrics, today);
   const working = reverseDcfWorking(row.metrics, today);
@@ -513,6 +693,28 @@ function dcfRow(row: ApiRow, today: string) {
     },
   ];
   const egmResult = calculateEGM({ ...egm, forwardPE }, egmAssumptions);
+  const fairValueInputs: InputObservation[] = [
+    {
+      label: 'FY1 consensus EPS',
+      value: egm.epsNextFY == null
+        ? 'not available'
+        : `${inputNumber.format(egm.epsNextFY)}${row.currency ? ` ${row.currency}` : ''}/share`,
+      retrieved: egm.epsNextFY == null ? null : row.source_fetched_at.estimates ?? null,
+      applies: egm.epsNextFYDate,
+      retrievedText: egm.epsNextFY == null ? 'not available' : undefined,
+      appliesText: egm.epsNextFYDate == null ? 'not available' : undefined,
+    },
+    {
+      label: 'Maximum starting P/E',
+      value: egmResult.maxPE == null ? 'not available' : `${inputNumber.format(egmResult.maxPE)}×`,
+      retrieved: null,
+      applies: null,
+      retrievedText: egmResult.maxPE == null ? 'not available' : 'Not retrieved; calculated here',
+      appliesText: egmResult.maxPE == null
+        ? 'not available'
+        : 'The current growth, dividend, exit P/E and 10-year hurdle assumptions',
+    },
+  ];
   const epsObservations = Object.fromEntries(EPS_YEARS.map((year) => [
     year, epsObservationForYear(row.metrics, year),
   ])) as Record<EpsYear, EpsYearObservation | null>;
@@ -532,12 +734,55 @@ function dcfRow(row: ApiRow, today: string) {
     2026: peDeltaFromHistoricalMedian(peByYear[2026], historicalPe10yWorking.median),
     2027: peDeltaFromHistoricalMedian(peByYear[2027], historicalPe10yWorking.median),
   } as const;
+  const ocfObservations = Object.fromEntries(EPS_YEARS.map((year) => [
+    year, ocfObservationForYear(row.metrics, year),
+  ])) as Record<EpsYear, OcfYearObservation | null>;
+  const ocfByYear = {
+    2025: ocfObservations[2025]?.metric.numeric_value ?? null,
+    2026: ocfObservations[2026]?.metric.numeric_value ?? null,
+    2027: ocfObservations[2027]?.metric.numeric_value ?? null,
+  } as const;
+  const ocfEstimateCagr = ocfActualToEstimateCagr2025To2027(row.metrics);
+  const historicalOcfWorking = historicalOcfMultipleWorking(row.metrics);
+  const pOcfByYear = {
+    2025: priceToOcfMultiple(src.price, src.sharesOutstanding, ocfByYear[2025]),
+    2026: priceToOcfMultiple(src.price, src.sharesOutstanding, ocfByYear[2026]),
+    2027: priceToOcfMultiple(src.price, src.sharesOutstanding, ocfByYear[2027]),
+  } as const;
+  const pOcfDeltaByYear = {
+    2025: peDeltaFromHistoricalMedian(pOcfByYear[2025], historicalOcfWorking.median),
+    2026: peDeltaFromHistoricalMedian(pOcfByYear[2026], historicalOcfWorking.median),
+    2027: peDeltaFromHistoricalMedian(pOcfByYear[2027], historicalOcfWorking.median),
+  } as const;
   const commonInputs = [
     sourceInput(row.metrics, 'Close price', working.price,
       row.currency ? ` ${row.currency}` : ''),
-    sourceInput(row.metrics, 'Diluted shares outstanding', working.shares, 'm shares'),
+    sourceMillionsInput(row.metrics, 'Diluted shares outstanding', working.shares, ' shares'),
   ];
   const stockPriceInputs = commonInputs.slice(0, 1);
+  const shareCountInputs = commonInputs.slice(1);
+  const historicalOcfObservations = historicalOcfInputs(historicalOcfWorking, row.currency);
+  const upsideInputs: InputObservation[] = [
+    {
+      label: 'Model fair value',
+      value: egmResult.fairValue == null
+        ? 'not available'
+        : `${inputNumber.format(egmResult.fairValue)}${row.currency ? ` ${row.currency}` : ''}/share`,
+      retrieved: null,
+      applies: null,
+      retrievedText: egmResult.fairValue == null ? 'not available' : 'Not retrieved; calculated here',
+      appliesText: egmResult.fairValue == null
+        ? 'not available'
+        : 'Current Expected Growth Model valuation',
+    },
+    {
+      ...stockPriceInputs[0],
+      label: 'Current share price',
+      value: stockPriceInputs[0].value === 'not available'
+        ? stockPriceInputs[0].value
+        : `${stockPriceInputs[0].value}/share`,
+    },
+  ];
   // Show the route the model attempted, even when one missing operand prevented that route from
   // becoming the solver's base. L'Oréal, for example, has an FY1 OCF estimate but no capex with
   // which to turn it into FCF; hiding the present OCF made the card show only a close price and
@@ -545,24 +790,24 @@ function dcfRow(row: ApiRow, today: string) {
   const attemptedForward = working.fcfEst.raw != null || working.ocfEst.raw != null;
   const cashFlowInputs = !attemptedForward
     ? [
-      sourceInput(row.metrics, 'Free cash flow', working.fcf, 'm'),
-      sourceInput(row.metrics, 'Stock-based compensation', working.sbc, 'm'),
-      sourceInput(row.metrics, 'Capital expenditure', working.capex, 'm'),
-      sourceInput(row.metrics, 'Depreciation and amortisation', working.dep, 'm'),
+      sourceMillionsInput(row.metrics, 'Free cash flow', working.fcf, row.currency ? ` ${row.currency}` : ''),
+      sourceMillionsInput(row.metrics, 'Stock-based compensation', working.sbc, row.currency ? ` ${row.currency}` : ''),
+      sourceMillionsInput(row.metrics, 'Capital expenditure', working.capex, row.currency ? ` ${row.currency}` : ''),
+      sourceMillionsInput(row.metrics, 'Depreciation and amortisation', working.dep, row.currency ? ` ${row.currency}` : ''),
     ]
     : forward.vendor
       ? [
-        sourceInput(row.metrics, 'FY1 free-cash-flow estimate', working.fcfEst, 'm'),
-        sourceInput(row.metrics, 'FY1 operating-cash-flow estimate', working.ocfEst, 'm'),
-        sourceInput(row.metrics, 'FY1 EBITDA estimate', working.ebitdaEst, 'm'),
-        sourceInput(row.metrics, 'FY1 EBIT estimate', working.ebitEst, 'm'),
-        sourceInput(row.metrics, 'Stock-based compensation', working.sbc, 'm'),
+        sourceMillionsInput(row.metrics, 'FY1 free-cash-flow estimate', working.fcfEst, row.currency ? ` ${row.currency}` : ''),
+        sourceMillionsInput(row.metrics, 'FY1 operating-cash-flow estimate', working.ocfEst, row.currency ? ` ${row.currency}` : ''),
+        sourceMillionsInput(row.metrics, 'FY1 EBITDA estimate', working.ebitdaEst, row.currency ? ` ${row.currency}` : ''),
+        sourceMillionsInput(row.metrics, 'FY1 EBIT estimate', working.ebitEst, row.currency ? ` ${row.currency}` : ''),
+        sourceMillionsInput(row.metrics, 'Stock-based compensation', working.sbc, row.currency ? ` ${row.currency}` : ''),
       ]
       : [
-        sourceInput(row.metrics, 'FY1 operating-cash-flow estimate', working.ocfEst, 'm'),
-        sourceInput(row.metrics, 'Capital expenditure', working.capex, 'm'),
-        sourceInput(row.metrics, 'Depreciation and amortisation', working.dep, 'm'),
-        sourceInput(row.metrics, 'Stock-based compensation', working.sbc, 'm'),
+        sourceMillionsInput(row.metrics, 'FY1 operating-cash-flow estimate', working.ocfEst, row.currency ? ` ${row.currency}` : ''),
+        sourceMillionsInput(row.metrics, 'Capital expenditure', working.capex, row.currency ? ` ${row.currency}` : ''),
+        sourceMillionsInput(row.metrics, 'Depreciation and amortisation', working.dep, row.currency ? ` ${row.currency}` : ''),
+        sourceMillionsInput(row.metrics, 'Stock-based compensation', working.sbc, row.currency ? ` ${row.currency}` : ''),
       ];
   const dcfInputs = [...commonInputs, ...cashFlowInputs];
   return {
@@ -573,9 +818,12 @@ function dcfRow(row: ApiRow, today: string) {
     dcfStartingFcf: adjusted,
     dcfInputs,
     stockPriceInputs,
+    upsideInputs,
     egm, forwardPE, forwardPeDerived, egmAssumptions, egmResult,
     epsObservations, epsByYear, epsEstimateCagr, peByYear, peDeltaByYear,
-    historicalPe10yWorking, historicalPe10yObservations, historicalPe10yWorked,
+    ocfObservations, ocfByYear, ocfEstimateCagr, historicalOcfWorking,
+    historicalOcfObservations, pOcfByYear, pOcfDeltaByYear, shareCountInputs,
+    historicalPe10yWorking, historicalPe10yObservations, historicalPe10yWorked, fairValueInputs,
     estimateDates, medianPeDates, medianPeObservations, medianPeWorked, expectedReturnInputs,
   };
 }
@@ -599,6 +847,18 @@ function sortValue(row: ValuationRow, key: string): number | null {
     const year = Number(key.slice('epsPeDelta:'.length)) as 2025 | 2026 | 2027;
     return row.peDeltaByYear[year] ?? null;
   }
+  if (key.startsWith('ocfYear:')) {
+    const year = Number(key.slice('ocfYear:'.length)) as EpsYear;
+    return row.ocfByYear[year];
+  }
+  if (key.startsWith('ocfMultiple:')) {
+    const year = Number(key.slice('ocfMultiple:'.length)) as EpsYear;
+    return row.pOcfByYear[year];
+  }
+  if (key.startsWith('ocfDelta:')) {
+    const year = Number(key.slice('ocfDelta:'.length)) as EpsYear;
+    return row.pOcfDeltaByYear[year];
+  }
   const values: Record<string, number | null> = {
     // Sort the number the reader sees. AIRS book weights can differ from the underlying
     // model-composition weight after certificate and TopSelectie look-through.
@@ -616,6 +876,8 @@ function sortValue(row: ValuationRow, key: string): number | null {
     totalReturn: row.egmResult.totalReturn,
     epsEstimateCagr: row.epsEstimateCagr,
     epsHistoricalPe10y: row.historicalPe10yWorking.median,
+    ocfEstimateCagr: row.ocfEstimateCagr,
+    ocfHistoricalMultiple10y: row.historicalOcfWorking.median,
   };
   return values[key] ?? null;
 }
@@ -638,6 +900,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   // immediately instead of repeating both API requests every time.
   const dataByCertificateScope = useRef(new Map<boolean, Payload>());
   const weightsByCertificateScope = useRef(new Map<boolean, BookWeightsPayload | null>());
+  const selectedCertificateScope = useRef(false);
+  const certificateScopeMessages = useRef(new Map<boolean, () => void>());
   const [companyFundamental, setCompanyFundamental] = useState<ApiRow | null>(null);
   const [fundamentalsRevision, setFundamentalsRevision] = useState(0);
   const [loadingDotIndex, setLoadingDotIndex] = useState(0);
@@ -646,8 +910,25 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
     dcf: { key: 'weight', direction: 'desc' },
     egm: { key: 'weight', direction: 'desc' },
     eps: { key: 'weight', direction: 'desc' },
+    ocf: { key: 'weight', direction: 'desc' },
   });
   const today = new Date().toISOString().slice(0, 10);
+
+  const finishCertificateScopeMessage = useCallback((scope: boolean) => {
+    certificateScopeMessages.current.get(scope)?.();
+    certificateScopeMessages.current.delete(scope);
+  }, []);
+  const publishCertificateScope = useCallback((scope: boolean) => {
+    const payload = dataByCertificateScope.current.get(scope);
+    if (!payload || !weightsByCertificateScope.current.has(scope)) return false;
+    if (selectedCertificateScope.current === scope) {
+      setData(payload);
+      setBookWeights(weightsByCertificateScope.current.get(scope) ?? null);
+      setError(null);
+    }
+    finishCertificateScopeMessage(scope);
+    return true;
+  }, [finishCertificateScopeMessage]);
 
   useEffect(() => {
     if (data || error) return;
@@ -660,13 +941,10 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   useEffect(() => {
     const cached = dataByCertificateScope.current.get(lookThroughCertificates);
     if (cached) {
-      if (!bookPortfolio || weightsByCertificateScope.current.has(lookThroughCertificates)) {
+      if (!bookPortfolio) {
         setData(cached);
-        if (bookPortfolio) {
-          setBookWeights(weightsByCertificateScope.current.get(lookThroughCertificates) ?? null);
-        }
         setError(null);
-      }
+      } else publishCertificateScope(lookThroughCertificates);
       return;
     }
     const controller = new AbortController();
@@ -688,18 +966,18 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
         if (!response.ok) throw new Error((body as { detail?: string } | null)?.detail ?? `HTTP ${response.status}`);
         const payload = body as Payload;
         dataByCertificateScope.current.set(lookThroughCertificates, payload);
-        if (!bookPortfolio || weightsByCertificateScope.current.has(lookThroughCertificates)) {
-          if (bookPortfolio) {
-            setBookWeights(weightsByCertificateScope.current.get(lookThroughCertificates) ?? null);
-          }
-          setData(payload);
-        }
+        if (bookPortfolio) publishCertificateScope(lookThroughCertificates);
+        else setData(payload);
       } catch (e) {
-        if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e));
+        if (!controller.signal.aborted) {
+          finishCertificateScopeMessage(lookThroughCertificates);
+          setError(e instanceof Error ? e.message : String(e));
+        }
       }
     })();
     return () => controller.abort();
-  }, [basket, bookPortfolio, lookThroughCertificates, name, portfolioId, fundamentalsRevision]);
+  }, [basket, bookPortfolio, finishCertificateScopeMessage, lookThroughCertificates, name,
+    portfolioId, publishCertificateScope, fundamentalsRevision]);
 
   // This lightweight route uses the same AIRS source, complete-book denominator and linked-book
   // expansion as Analyse, without making Weight wait for returns, benchmarks and chart data.
@@ -709,9 +987,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
       return;
     }
     if (weightsByCertificateScope.current.has(lookThroughCertificates)) {
-      setBookWeights(weightsByCertificateScope.current.get(lookThroughCertificates) ?? null);
-      const cachedData = dataByCertificateScope.current.get(lookThroughCertificates);
-      if (cachedData) setData(cachedData);
+      publishCertificateScope(lookThroughCertificates);
       return;
     }
     const controller = new AbortController();
@@ -725,20 +1001,16 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
         if (!response.ok) throw new Error((body as { detail?: string } | null)?.detail ?? `HTTP ${response.status}`);
         const payload = body as BookWeightsPayload;
         weightsByCertificateScope.current.set(lookThroughCertificates, payload);
-        setBookWeights(payload);
-        const cachedData = dataByCertificateScope.current.get(lookThroughCertificates);
-        if (cachedData) setData(cachedData);
+        publishCertificateScope(lookThroughCertificates);
       } catch {
         if (!controller.signal.aborted) {
           weightsByCertificateScope.current.set(lookThroughCertificates, null);
-          setBookWeights(null);
-          const cachedData = dataByCertificateScope.current.get(lookThroughCertificates);
-          if (cachedData) setData(cachedData);
+          publishCertificateScope(lookThroughCertificates);
         }
       }
     })();
     return () => controller.abort();
-  }, [bookPortfolio, lookThroughCertificates]);
+  }, [bookPortfolio, lookThroughCertificates, publishCertificateScope]);
 
   // The fill is concurrent, so several companies can land within a few milliseconds. Coalesce
   // those stream events into one re-read, while still showing the first completed batch promptly.
@@ -756,6 +1028,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   }, [lookThroughCertificates]);
   useEffect(() => () => {
     if (partialRefreshTimer.current != null) clearTimeout(partialRefreshTimer.current);
+    certificateScopeMessages.current.forEach((resolve) => resolve());
+    certificateScopeMessages.current.clear();
   }, []);
 
   const rows = useMemo(() => {
@@ -801,16 +1075,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
     dcf: 'border-accent-500 bg-accent-600 text-white shadow-sm hover:bg-accent-500',
     egm: 'border-pos-500 bg-pos-500 text-white shadow-sm hover:bg-pos-400',
     eps: 'border-warn-500 bg-warn-500 text-white shadow-sm hover:bg-warn-400',
+    ocf: 'border-sky-500 bg-sky-600 text-white shadow-sm hover:bg-sky-500',
   }[model];
   const supportingControlClass = {
     dcf: 'border-accent-500/60 text-accent-300 hover:bg-accent-500/10',
     egm: 'border-pos-500/60 text-pos-300 hover:bg-pos-500/10',
     eps: 'border-warn-500/60 text-warn-300 hover:bg-warn-500/10',
+    ocf: 'border-sky-500/60 text-sky-300 hover:bg-sky-500/10',
   }[model];
   const checkboxAccentClass = {
     dcf: 'accent-accent-600',
     egm: 'accent-pos-500',
     eps: 'accent-warn-500',
+    ocf: 'accent-sky-500',
   }[model];
   const headerControlClass = 'inline-flex h-9 shrink-0 items-center justify-center whitespace-nowrap rounded-md border px-4 text-xs font-medium shadow-sm transition-colors';
   const sortedRows = useMemo(() => [...rows].sort((a, b) => {
@@ -838,7 +1115,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
             aria-label={`Sort by ${label} ${active && activeSort.direction === 'desc' ? 'ascending' : 'descending'}`}
             className={`inline-flex cursor-pointer items-center gap-1 whitespace-nowrap hover:text-fg-strong ${active
               ? model === 'dcf' ? 'text-accent-300'
-                : model === 'egm' ? 'text-pos-300' : 'text-warn-400' : ''}`}>
+                : model === 'egm' ? 'text-pos-300'
+                  : model === 'eps' ? 'text-warn-400' : 'text-sky-400' : ''}`}>
             <span>{label}</span>
             <span aria-hidden className="w-2 text-center text-[9px]">
               {active ? (activeSort.direction === 'desc' ? '▼' : '▲') : '↕'}
@@ -878,6 +1156,11 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                 ? activeControlClass : 'border-neutral-700 bg-page text-fg-muted hover:bg-overlay/5 hover:text-fg-strong'}`}>
               EPS Estimates
             </button>
+            <button type="button" onClick={() => setModel('ocf')} aria-pressed={model === 'ocf'}
+              className={`${headerControlClass} ${model === 'ocf'
+                ? activeControlClass : 'border-neutral-700 bg-page text-fg-muted hover:bg-overlay/5 hover:text-fg-strong'}`}>
+              OCF Estimates
+            </button>
           </div>
           {bookPortfolio && (
             <label
@@ -886,14 +1169,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
               <input type="checkbox" checked={lookThroughCertificates}
                 onChange={(event) => {
                   const checked = event.target.checked;
+                  // End any superseded message immediately; its requests are aborted by the
+                  // effect cleanup. The selected scope is published only after BOTH its company
+                  // metrics and AIRS weights have landed, so the current table cannot become a
+                  // hybrid of old rows and new weights while this message is visible.
+                  certificateScopeMessages.current.forEach((resolve) => resolve());
+                  certificateScopeMessages.current.clear();
+                  selectedCertificateScope.current = checked;
                   setLookThroughCertificates(checked);
-                  // An uncached scope loads behind the current table. Keep the rows usable and
-                  // let the new set replace them only when it arrives; the full-page loading copy
-                  // is reserved for opening the modal when there is genuinely nothing to show.
-                  const cachedData = dataByCertificateScope.current.get(checked);
-                  if (cachedData && weightsByCertificateScope.current.has(checked)) {
-                    setData(cachedData);
-                    setBookWeights(weightsByCertificateScope.current.get(checked) ?? null);
+                  if (!publishCertificateScope(checked)) {
+                    const pending = new Promise<void>((resolve) => {
+                      certificateScopeMessages.current.set(checked, resolve);
+                    });
+                    void track('Updating certificate view…', pending);
                   }
                   setError(null);
                 }}
@@ -903,10 +1191,10 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
           )}
           {refreshScope && (
             <PortfolioFundamentalsRefresh scope={refreshScope} everything allPeriods prominent
-              prominentTone={model === 'dcf' ? 'accent' : model === 'egm' ? 'positive' : 'warning'} showNote={false}
+              prominentTone={model === 'dcf' ? 'accent' : model === 'egm'
+                ? 'positive' : model === 'eps' ? 'warning' : 'info'} showNote={false}
               label="Refresh all companies"
-              jobTitle={`${name}: ${model === 'dcf' ? 'Reverse DCF'
-                : model === 'egm' ? 'Expected Growth Model' : 'EPS Estimates'}`}
+              jobTitle={`${name}: ${MODEL_LABEL[model]}`}
               onProgress={reloadPartialFundamentals}
               onDone={reloadFundamentals} />
           )}
@@ -981,7 +1269,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                       <NumericHeader sortKey="impliedPrice" label="Price in 10y" className="bg-pos-500/10" />
                       <NumericHeader sortKey="totalReturn" label="Total return" className="bg-pos-500/10" />
                     </>
-                  ) : (
+                  ) : model === 'eps' ? (
                     <>
                       {EPS_YEARS.map((year) => (
                         <NumericHeader key={year} sortKey={`epsYear:${year}`}
@@ -1002,6 +1290,25 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           label={`${year} % delta`} className="bg-warn-500/10" />
                       ))}
                     </>
+                  ) : (
+                    <>
+                      {EPS_YEARS.map((year) => (
+                        <NumericHeader key={year} sortKey={`ocfYear:${year}`}
+                          label={`OCF FY${year}`} className="bg-sky-500/10" />
+                      ))}
+                      <NumericHeader sortKey="ocfEstimateCagr" label="OCF CAGR FY2025–FY2027"
+                        className="bg-sky-500/10" />
+                      <NumericHeader sortKey="ocfHistoricalMultiple10y" label="10y Historical P/OCF"
+                        className="bg-sky-500/10" />
+                      {EPS_YEARS.map((year) => (
+                        <NumericHeader key={`ocfMultiple:${year}`} sortKey={`ocfMultiple:${year}`}
+                          label={`P/OCF FY${year}`} className="bg-sky-500/10" />
+                      ))}
+                      {EPS_YEARS.map((year) => (
+                        <NumericHeader key={`ocfDelta:${year}`} sortKey={`ocfDelta:${year}`}
+                          label={`${year} % delta`} className="bg-sky-500/10" />
+                      ))}
+                    </>
                   )}
                 </tr>
               </thead>
@@ -1017,11 +1324,23 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           <div className="truncate font-medium text-fg-strong" title={row.name}>{row.name}</div>
                           <div className="font-mono text-[10px] text-fg-faint">{row.isin}</div>
                         </div>
-                        <button type="button" onClick={() => setCompanyFundamental(row)}
-                          title={`Open the full Fundamental view for ${row.name}`}
-                          className="shrink-0 rounded-md border border-neutral-700 px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:bg-overlay/5 hover:text-accent-300">
-                          Fundamental
-                        </button>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <button type="button" onClick={() => setCompanyFundamental(row)}
+                            title={`Open the full Fundamental view for ${row.name}`}
+                            className="shrink-0 rounded-md border border-neutral-700 px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:bg-overlay/5 hover:text-accent-300">
+                            Fundamental
+                          </button>
+                          <PortfolioFundamentalsRefresh
+                            scope={{ kind: 'company', isin: row.isin, name: row.name }}
+                            feeds={COMPANY_REFRESH[model].feeds}
+                            prices={COMPANY_REFRESH[model].prices}
+                            keyRatios={COMPANY_REFRESH[model].keyRatios}
+                            allPeriods compact broadcast={false} showNote={false}
+                            label="Refresh"
+                            jobTitle={`${row.name}: ${MODEL_LABEL[model]}`}
+                            onProgress={reloadPartialFundamentals}
+                            onDone={reloadFundamentals} />
+                        </span>
                       </div>
                     </td>
                     <td className="sticky left-[23rem] z-20 w-24 min-w-24 max-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums">
@@ -1054,7 +1373,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                     <td className="sticky left-[29rem] z-20 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums shadow-[6px_0_8px_-6px_var(--color-neutral-700)]">
                       <span className="grid grid-cols-[2.25rem_1fr_auto] items-baseline gap-1.5">
                         <span className="text-left text-[10px] text-fg-faint">{row.currency ?? ''}</span>
-                        <span className="text-right">{row.src.price == null ? '—' : row.src.price.toFixed(2)}</span>
+                        <span className="text-right">{row.src.price == null ? '—' : inputNumber.format(row.src.price)}</span>
                         <InfoTip wide className="font-sans text-fg-faint" content={<AspectCard
                           what={`The latest stored closing price for ${row.name}.`}
                           where="GuruFocus closing-price history."
@@ -1076,19 +1395,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           row.dcfForward ? row.src.ocfEstimateDate : null]}
                         inputs={row.dcfInputs}
                         how={row.dcfStartingFcf != null && row.dcfStartingFcf <= 0
-                          ? `Base FCF is ${inputNumber.format(row.dcfStartingFcf)}${row.currency ? ` ${row.currency}m` : 'm'}. Non-positive FCF has no growth solution.`
+                          ? `Base FCF is ${compactMillions(row.dcfStartingFcf, row.currency ? ` ${row.currency}` : '')}. Non-positive FCF has no growth solution.`
                           : `Discount FCF and terminal value at ${(cell.discountRate * 100).toFixed(0)}%, then solve growth against market value.`} />
                     )) : model === 'egm' ? (
                       <>
                         <ValuationCell tone="egm"
-                          value={row.egm.epsNextFY == null ? '—' : row.egm.epsNextFY.toFixed(2)}
+                          value={row.egm.epsNextFY == null ? '—' : inputNumber.format(row.egm.epsNextFY)}
                           what="Consensus earnings per share for the next fiscal year."
                           where={`GuruFocus analyst estimates for ${row.name}.`}
                           retrieved={[row.source_fetched_at.estimates]}
                           applies={[row.egm.epsNextFYDate]}
                           how="Select the earliest positive-period EPS estimate whose fiscal period ends after today." />
                         <ValuationCell tone="egm"
-                          value={row.forwardPE == null ? '—' : `${row.forwardPE.toFixed(2)}×`}
+                          value={row.forwardPE == null ? '—' : `${inputNumber.format(row.forwardPE)}×`}
                           what="The forward price-to-earnings multiple used as the model's starting valuation."
                           where={row.forwardPeDerived
                             ? 'Latest stored GuruFocus close price divided by FY1 consensus EPS.'
@@ -1103,7 +1422,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             ? 'Divide the current stored close by the next-fiscal-year EPS estimate.'
                             : 'Use the newest positive Forward PE Ratio observation supplied by GuruFocus.'} />
                         <ValuationCell tone="egm"
-                          value={`${(row.egmAssumptions.growthRate * 100).toFixed(2)}%`}
+                          value={`${inputNumber.format(row.egmAssumptions.growthRate * 100)}%`}
                           what="The annual EPS growth rate assumed for the next ten years."
                           where={row.egm.analystGrowth5Y != null
                             ? 'GuruFocus analyst EPS estimates.'
@@ -1115,7 +1434,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             ? 'Calculate the CAGR from the first to the last positive future EPS estimate.'
                             : 'Apply the 10% house default.'} />
                         <ValuationCell tone="egm"
-                          value={`${((row.egmAssumptions.dividendYield ?? 0) * 100).toFixed(2)}%`}
+                          value={`${inputNumber.format((row.egmAssumptions.dividendYield ?? 0) * 100)}%`}
                           what="The annual dividend yield carried through the model."
                           where="The newest GuruFocus Dividend Yield % observation; an unavailable yield is treated as 0%."
                           retrieved={row.egm.dividendYield != null
@@ -1124,7 +1443,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             ? [row.egm.dividendYieldDate] : []}
                           how="Convert the vendor percentage to a decimal and hold that yield constant for the projection." />
                         <ValuationCell tone="egm"
-                          value={`${row.egmAssumptions.exitPE.toFixed(2)}×`}
+                          value={`${inputNumber.format(row.egmAssumptions.exitPE)}×`}
                           what="The price-to-earnings multiple assumed at the end of year ten."
                           where={row.egm.medianPE5Y != null
                             ? 'GuruFocus fiscal year-end prices and EPS without NRI.'
@@ -1137,13 +1456,23 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             ? row.medianPeWorked
                             : 'Apply the house default of 20 times earnings.'} />
                         <ValuationCell tone="egm" emphasis
-                          value={row.egmResult.fairValue == null ? '—' : row.egmResult.fairValue.toFixed(2)}
+                          value={row.egmResult.fairValue == null ? '—' : inputNumber.format(row.egmResult.fairValue)}
                           what="The highest price today that still meets the model's 10% annual return hurdle."
                           where="FY1 consensus EPS, expected EPS growth, dividend yield and the historical or default exit P/E."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials]}
                           applies={[row.egm.epsNextFYDate, row.egm.dividendYieldDate,
                             ...row.estimateDates, ...row.medianPeDates]}
-                          how="Multiply FY1 EPS by the maximum starting P/E compatible with ten years of EPS growth, dividends, the exit multiple and the 10% hurdle rate." />
+                          inputs={row.fairValueInputs}
+                          how="Multiply FY1 EPS by the maximum starting P/E compatible with ten years of EPS growth, dividends, the exit multiple and the 10% hurdle rate."
+                          worked={workedFairValue(
+                            row.egm.epsNextFY,
+                            row.egmResult.maxPE,
+                            row.egmResult.fairValue,
+                          )}
+                          legend={row.egmResult.fairValue == null ? undefined : [
+                            { sym: String.raw`EPS_{\text{FY1}}`, is: 'the FY1 consensus EPS' },
+                            { sym: String.raw`PE_{\max}`, is: 'the maximum starting P/E that meets the hurdle' },
+                          ]} />
                         <ValuationCell tone="egm"
                           value={row.egmResult.upside == null ? '—' : `${row.egmResult.upside >= 0 ? '+' : ''}${(row.egmResult.upside * 100).toFixed(2)}%`}
                           what="The difference between model fair value and the latest stored share price."
@@ -1151,7 +1480,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials]}
                           applies={[row.egm.priceDate, row.egm.epsNextFYDate,
                             row.egm.dividendYieldDate, ...row.estimateDates, ...row.medianPeDates]}
-                          how="Divide fair value by the latest stored share price and subtract one." />
+                          inputs={row.upsideInputs}
+                          how="Divide fair value by the latest stored share price and subtract one."
+                          worked={workedFairValueGap(
+                            row.egmResult.fairValue,
+                            row.egm.price,
+                            row.egmResult.upside == null
+                              ? ''
+                              : `${row.egmResult.upside >= 0 ? '+' : ''}${(row.egmResult.upside * 100).toFixed(2)}%`,
+                          )}
+                          legend={row.egmResult.upside == null ? undefined : [
+                            { sym: 'FV', is: 'the Expected Growth Model fair value today' },
+                            { sym: 'P_0', is: 'the latest stored share price' },
+                          ]} />
                         <ValuationCell tone="egm" emphasis
                           value={row.egmResult.expectedReturn == null ? '—' : `${row.egmResult.expectedReturn >= 0 ? '+' : ''}${(row.egmResult.expectedReturn * 100).toFixed(2)}%`}
                           what="The modelled annualised shareholder return over ten years."
@@ -1175,7 +1516,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             { sym: 'n', is: `the ${row.egmAssumptions.years}-year forecast horizon` },
                           ]} />
                         <ValuationCell tone="egm"
-                          value={row.egmResult.impliedPrice == null ? '—' : row.egmResult.impliedPrice.toFixed(2)}
+                          value={row.egmResult.impliedPrice == null ? '—' : inputNumber.format(row.egmResult.impliedPrice)}
                           what="The share price implied at the end of year ten."
                           where="Current price and forward P/E, expected EPS growth and the historical or default exit P/E."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials,
@@ -1215,7 +1556,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             { sym: 'n', is: `the ${row.egmAssumptions.years}-year forecast horizon` },
                           ]} />
                       </>
-                    ) : (
+                    ) : model === 'eps' ? (
                       <>
                         {EPS_YEARS.map((year) => {
                           const observation = row.epsObservations[year];
@@ -1223,7 +1564,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           const kind = observation?.kind ?? null;
                           return (
                             <ValuationCell key={year} tone="eps"
-                              value={metric?.numeric_value == null ? '—' : metric.numeric_value.toFixed(2)}
+                              value={metric?.numeric_value == null ? '—' : inputNumber.format(metric.numeric_value)}
                               what={epsYearWhat(row.name, year, kind)}
                               where={`GuruFocus annual financial statements and analyst estimates stored for ${row.name}.`}
                               retrieved={[metric?.recorded_at]}
@@ -1235,7 +1576,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                         })}
                         <ValuationCell tone="eps" emphasis
                           value={row.epsEstimateCagr == null
-                            ? '—' : `${(row.epsEstimateCagr * 100).toFixed(1)}%`}
+                            ? '—' : `${inputNumber.format(row.epsEstimateCagr * 100)}%`}
                           what="The annualised change from the selected FY2025 EPS to the selected FY2027 EPS."
                           where={`GuruFocus financial statements and analyst estimates stored for ${row.name}.`}
                           retrieved={[row.source_fetched_at.financials,
@@ -1251,7 +1592,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           how="For each endpoint, prefer reported EPS without NRI and otherwise use consensus EPS. Compound the change between the two positive selected values over two years." />
                         <ValuationCell tone="eps"
                           value={row.historicalPe10yWorking.median == null
-                            ? '—' : `${row.historicalPe10yWorking.median.toFixed(2)}×`}
+                            ? '—' : `${inputNumber.format(row.historicalPe10yWorking.median)}×`}
                           what="The median P/E across the latest ten completed fiscal years."
                           where="GuruFocus fiscal year-end prices and EPS without NRI."
                           retrieved={[row.source_fetched_at.financials]}
@@ -1265,7 +1606,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           const period = `FY${year} ${observation?.kind ?? 'EPS'}`;
                           return (
                             <ValuationCell key={`pe:${year}`} tone="eps"
-                              value={multiple == null ? '—' : `${multiple.toFixed(1)}×`}
+                              value={multiple == null ? '—' : `${inputNumber.format(multiple)}×`}
                               what={`The latest stock price expressed as a multiple of the ${period} EPS.`}
                               where={`GuruFocus close price, annual statements and analyst estimates stored for ${row.name}.`}
                               retrieved={[epsMetric?.recorded_at]}
@@ -1310,6 +1651,108 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           );
                         })}
                       </>
+                    ) : (
+                      <>
+                        {EPS_YEARS.map((year) => {
+                          const observation = row.ocfObservations[year];
+                          const metric = observation?.metric ?? null;
+                          const kind = observation?.kind ?? null;
+                          return (
+                            <ValuationCell key={year} tone="ocf"
+                              value={metric?.numeric_value == null ? '—' : compactMillions(metric.numeric_value)}
+                              what={kind === 'actual'
+                                ? `Reported FY${year} operating cash flow for ${row.name}.`
+                                : kind === 'estimate'
+                                  ? `FY${year} consensus operating-cash-flow estimate for ${row.name}; no actual is stored.`
+                                  : `No FY${year} actual or consensus operating cash flow is stored for ${row.name}.`}
+                              where={`GuruFocus annual cash-flow statements and analyst estimates stored for ${row.name}.`}
+                              retrieved={[metric?.recorded_at]}
+                              applies={[metric?.target_date]}
+                              inputs={ocfYearInputs(observation, year, row.currency,
+                                row.source_fetched_at.financials, row.source_fetched_at.estimates)}
+                              how={kind === 'actual'
+                                ? 'Use reported operating cash flow; it takes priority over consensus.'
+                                : kind === 'estimate'
+                                  ? `No reported FY${year} OCF is stored; use the consensus estimate.`
+                                  : `Neither annual statements nor analyst estimates supplies FY${year} OCF.`} />
+                          );
+                        })}
+                        <ValuationCell tone="ocf" emphasis
+                          value={row.ocfEstimateCagr == null
+                            ? '—' : `${inputNumber.format(row.ocfEstimateCagr * 100)}%`}
+                          what="The annualised change from selected FY2025 OCF to selected FY2027 OCF."
+                          where={`GuruFocus cash-flow statements and analyst estimates stored for ${row.name}.`}
+                          retrieved={[row.source_fetched_at.financials,
+                            row.source_fetched_at.estimates]}
+                          applies={[row.ocfObservations[2025]?.metric.target_date,
+                            row.ocfObservations[2027]?.metric.target_date]}
+                          inputs={[
+                            ...ocfYearInputs(row.ocfObservations[2025], 2025, row.currency,
+                              row.source_fetched_at.financials, row.source_fetched_at.estimates),
+                            ...ocfYearInputs(row.ocfObservations[2027], 2027, row.currency,
+                              row.source_fetched_at.financials, row.source_fetched_at.estimates),
+                          ]}
+                          how="Prefer reported OCF at each endpoint; otherwise use consensus. Compound the change between the two positive values over two years." />
+                        <ValuationCell tone="ocf"
+                          value={row.historicalOcfWorking.median == null
+                            ? '—' : `${inputNumber.format(row.historicalOcfWorking.median)}×`}
+                          what="The median P/OCF across the latest ten completed fiscal years."
+                          where="GuruFocus fiscal year-end prices, diluted shares and reported operating cash flow."
+                          retrieved={[row.source_fetched_at.financials]}
+                          applies={row.historicalOcfWorking.rows.map((point) => `${point.year}-12-31`)}
+                          inputs={row.historicalOcfObservations}
+                          how="Calculate each positive year-end market-value-to-OCF multiple and take the median." />
+                        {EPS_YEARS.map((year) => {
+                          const observation = row.ocfObservations[year];
+                          const metric = observation?.metric ?? null;
+                          const multiple = row.pOcfByYear[year];
+                          const period = `FY${year} ${observation?.kind ?? 'OCF'}`;
+                          return (
+                            <ValuationCell key={`pOcf:${year}`} tone="ocf"
+                              value={multiple == null ? '—' : `${inputNumber.format(multiple)}×`}
+                              what={`The current market value expressed as a multiple of ${period}.`}
+                              where={`GuruFocus close price, diluted shares, statements and estimates stored for ${row.name}.`}
+                              retrieved={[metric?.recorded_at]}
+                              applies={[row.src.priceDate, metric?.target_date]}
+                              inputs={[
+                                ...row.stockPriceInputs,
+                                ...row.shareCountInputs,
+                                ...ocfYearInputs(observation, year, row.currency,
+                                  row.source_fetched_at.financials, row.source_fetched_at.estimates),
+                              ]}
+                              how={`Multiply share price by diluted shares, then divide by positive ${period}.`} />
+                          );
+                        })}
+                        {EPS_YEARS.map((year) => {
+                          const observation = row.ocfObservations[year];
+                          const metric = observation?.metric ?? null;
+                          const delta = row.pOcfDeltaByYear[year];
+                          const period = `FY${year} ${observation?.kind ?? 'OCF'}`;
+                          return (
+                            <ValuationCell key={`pOcfDelta:${year}`} tone="ocf"
+                              value={delta == null ? '—' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(2)}%`}
+                              what={`How far the ${period} P/OCF differs from the ten-year historical median.`}
+                              where="The current market value, that fiscal year's OCF and ten completed years of P/OCF history."
+                              retrieved={[metric?.recorded_at, row.source_fetched_at.financials]}
+                              applies={[row.src.priceDate, metric?.target_date,
+                                ...row.historicalOcfWorking.rows.map((point) => `${point.year}-12-31`)]}
+                              inputs={[
+                                ...row.stockPriceInputs,
+                                ...row.shareCountInputs,
+                                ...ocfYearInputs(observation, year, row.currency,
+                                  row.source_fetched_at.financials, row.source_fetched_at.estimates),
+                                {
+                                  label: '10y historical P/OCF',
+                                  value: row.historicalOcfWorking.median == null
+                                    ? 'not available' : `${row.historicalOcfWorking.median.toFixed(2)}×`,
+                                  retrieved: row.source_fetched_at.financials ?? null,
+                                  applies: row.historicalOcfWorking.rows.map((point) => `${point.year}-12-31`),
+                                },
+                              ]}
+                              how="Divide the fiscal-year P/OCF by its ten-year historical median and subtract one." />
+                          );
+                        })}
+                      </>
                     )}
                   </tr>
                 ))}
@@ -1324,7 +1767,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
             ? `Implied FCF growth over ${FORECAST_YEARS} years, with 3% perpetual growth. The 7–20% columns are discount rates.`
             : model === 'egm'
               ? 'Expected Growth Model over 10 years. EPS growth and exit P/E use company estimates/history where available, otherwise the 10% growth and 20× house defaults; hurdle rate is 10%.'
-              : 'Each fiscal year uses reported EPS without NRI when available and otherwise uses the GuruFocus consensus estimate. The info icon identifies which value is shown and checks both sources. CAGR compounds the selected FY2025 and FY2027 values over two years; each P/E uses that year’s selected positive EPS.'}
+              : model === 'eps'
+                ? 'Each fiscal year uses reported EPS without NRI when available and otherwise uses the GuruFocus consensus estimate. CAGR compounds FY2025 and FY2027 over two years; each P/E uses that year’s selected positive EPS.'
+                : 'Each fiscal year uses reported operating cash flow when available and otherwise uses the GuruFocus consensus estimate. CAGR compounds FY2025 and FY2027 over two years; each P/OCF divides current market value by that year’s selected positive OCF.'}
         </p>
         {companyFundamental && (
           <OwnerEarningsModal isin={companyFundamental.isin} name={companyFundamental.name}
