@@ -71,7 +71,8 @@ export function refreshScopes(scope: RefreshScope, additional?: RefreshScope): R
 }
 
 export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, jobTitle, everything,
-  allPeriods = false, broadcast = true, prominent = false, showNote = true, onProgress }: {
+  allPeriods = false, broadcast = true, prominent = false, prominentTone = 'accent', showNote = true,
+  onProgress }: {
   scope: RefreshScope;
   /** A selected benchmark/comparison refreshed after the primary scope by the same button. */
   additionalScope?: RefreshScope;
@@ -106,6 +107,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
   broadcast?: boolean;
   /** Filled header-action treatment used beside a segmented slider. */
   prominent?: boolean;
+  /** Colour family of a prominent action, matched to the model currently selected beside it. */
+  prominentTone?: 'accent' | 'positive' | 'warning';
   /** Show the scope/coverage receipt beside the button. Dense modal headers can leave it to toast. */
   showNote?: boolean;
   /** Reader-facing title in the job toast; defaults to the scope name. */
@@ -371,6 +374,11 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
   const extraTitle = refreshScopes(scope, additionalScope)[1]
     ? ` This press then refreshes the active benchmark, ${additionalScope!.name}.`
     : '';
+  const prominentToneClass = {
+    accent: 'border-accent-500 bg-accent-600 text-white hover:bg-accent-500',
+    positive: 'border-pos-500 bg-pos-500 text-white hover:bg-pos-400',
+    warning: 'border-warn-500 bg-warn-500 text-white hover:bg-warn-400',
+  }[prominentTone];
 
   return (
     <span className="flex items-center gap-2 min-w-0">
@@ -414,12 +422,12 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
                 + 'company whose next quarter cannot be out yet.')
             + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
             + 'and carry on if you close this.' + extraTitle))}
-        className={`${prominent ? 'rounded-md px-4 py-1.5 text-sm font-medium shadow-sm'
+        className={`${prominent ? 'h-9 rounded-md px-4 text-xs font-medium shadow-sm'
           : 'rounded-lg px-2.5 py-1 text-[12px]'} border transition-colors
                     disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
           ? 'border-warn-500/50 bg-warn-500/10 text-warn-300 hover:bg-warn-500/15'
           : prominent
-            ? 'border-accent-500 bg-accent-600 text-white hover:bg-accent-500'
+            ? prominentToneClass
             : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
         {/*  THE STATES OUTRANK THE CALLER'S LABEL. Whatever the button is named at rest, while it
             runs it says what pressing it will now DO — a control that keeps its old name while its

@@ -3590,6 +3590,70 @@ async def airs_vermogen_holdings(portfolio_name: str, as_of: str | None = None):
     return await asyncio.to_thread(_q)
 
 
+@router.get("/api/airs/accounts/{portefeuille}/fundamental-weights")
+async def airs_fundamental_weights(portefeuille: str, look_through: bool = False):
+    """Current AIRS book weights for the portfolio-level Fundamental table.
+
+    This is intentionally not the Analyse payload. Fundamental needs only each operating
+    company's current EUR numerator, the complete book denominator and the two source dates.
+    Building the full analysis also loads benchmark membership, returns, classifications,
+    realised trades and chart axes, which made a simple Weight column take seconds in production.
+
+    Membership is direct by default. With ``look_through=true``, linked certificates are replaced
+    by the companies inside their underlying strategies. The denominator remains the complete
+    AIRS book, so cash, bonds, funds and uncovered holdings are not redistributed.
+    """
+    def _q() -> dict:
+        from asset_pipeline.isin_alias import canonical_map  # noqa: PLC0415
+        latest = (supabase.table("airs_holding").select("as_of_date")
+                  .eq("portefeuille", portefeuille).order("as_of_date", desc=True)
+                  .limit(1).execute().data or [])
+        if not latest:
+            return {"portefeuille": portefeuille, "as_of_date": None, "fetched_at": None,
+                    "total_current_value_eur": 0.0, "rows": []}
+        as_of_date = str(latest[0]["as_of_date"])
+        direct_holdings = (supabase.table("airs_holding")
+                    .select("holding_name,isin,current_value_eur")
+                    .eq("portefeuille", portefeuille).eq("as_of_date", as_of_date)
+                    .limit(500).execute().data or [])
+        total = sum(float(row.get("current_value_eur") or 0.0) for row in direct_holdings)
+        holdings = direct_holdings
+        if look_through:
+            from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+            from routers._airs_portfolio_analysis import _expand_book_rows  # noqa: PLC0415
+            resolved = resolve_account_isins(portefeuille, freshen=False).get("rows") or []
+            holdings = _expand_book_rows(resolved)
+        raw_isins = sorted({str(row.get("isin") or "").strip()
+                            for row in holdings if row.get("isin")})
+        aliases = canonical_map(raw_isins)
+        by_isin: dict[str, dict] = {}
+        for row in holdings:
+            raw_isin = str(row.get("isin") or "").strip()
+            if not raw_isin:
+                continue
+            isin = aliases.get(raw_isin, raw_isin)
+            value = float(row.get("current_value_eur") or 0.0)
+            current = by_isin.setdefault(isin, {
+                "isin": isin,
+                "holding_name": row.get("holding_name") or isin,
+                "current_value_eur": 0.0,
+            })
+            current["current_value_eur"] += value
+        roster = (supabase.table("airs_account_roster").select("reports_at")
+                  .eq("portefeuille", portefeuille).order("reports_at", desc=True)
+                  .limit(1).execute().data or [])
+        return {
+            "portefeuille": portefeuille,
+            "as_of_date": as_of_date,
+            "fetched_at": roster[0].get("reports_at") if roster else None,
+            "total_current_value_eur": total,
+            "rows": sorted(by_isin.values(),
+                           key=lambda row: -float(row["current_value_eur"])),
+        }
+
+    return await asyncio.to_thread(_q)
+
+
 @router.post("/api/portfolios/parse")
 async def parse_portfolio(file: UploadFile = File(...)):
     content = await file.read()

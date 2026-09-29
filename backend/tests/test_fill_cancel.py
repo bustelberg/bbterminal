@@ -131,6 +131,22 @@ class TestTheStopHookIsPassedAtAll:
             "companies, i.e. after up to three more GuruFocus feeds per worker")
 
 
+class TestLiveStatusDescribesCurrentWork:
+
+    def test_progress_does_not_present_the_last_completion_as_current_work(self, rig, monkeypatch):
+        ctx = FakeCtx()
+        monkeypatch.setattr("routers._fundamental_backfill.ingest_company",
+                            _fake_ingest(rig, ctx))
+
+        fill.fill_company_ids(ctx, "IDX", [1, 2], feeds="smart")
+
+        messages = [message for _kind, message in ctx.events]
+        assert any(message.startswith("Refreshing Co ") for message in messages)
+        assert not any("fetching fin" in message for message in messages)
+        assert not any(" loaded" in message or "no change" in message
+                       for message in messages)
+
+
 class TestWhereTheStopLands:
 
     def test_the_run_stops_after_the_company_that_was_in_flight(self, rig, monkeypatch):

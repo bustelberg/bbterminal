@@ -45,7 +45,7 @@ export function fundamentalJobMessage(message: string | null | undefined): strin
       .map((entry) => entry.trim().split(':')[0].trim())
       .filter(Boolean);
     const uniqueNames = [...new Set(names)];
-    const refreshedText = `${count} ${count === 1 ? 'company' : 'companies'} refreshed.`;
+    const refreshedText = `Checked ${count} ${count === 1 ? 'company' : 'companies'} and updated the data GuruFocus supplied.`;
     if (uniqueNames.length) {
       return `${refreshedText} Could not refresh: ${uniqueNames.join(', ')}.`;
     }

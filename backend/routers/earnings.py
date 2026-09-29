@@ -530,9 +530,16 @@ def _EMPTY_COVERAGE() -> dict:
 
 
 class FundamentalCoverageRequest(BaseModel):
-    """Either a model portfolio's id, or an explicit basket of (isin, weight)."""
+    """A current AIRS book, model portfolio, or explicit basket of (isin, weight)."""
 
     portfolio_id: int | None = None
+    # The current AIRS book is authoritative for portfolio-level Fundamental. A paired fixed
+    # model can contain a different number of names; using it made Analyse report 25 individual
+    # stocks while Fundamental reported 28 companies for the same Bustelberg Offensief button.
+    book_portfolio: str | None = None
+    # Off by default: the table shows companies directly present in the Dynamic book. When on,
+    # linked in-house certificates are replaced by the companies in their underlying strategies.
+    look_through_certificates: bool = False
     holdings: list[dict] | None = None
     # A folded TopSelectie's human label. It identifies the selected basket for cache identity;
     # membership itself always comes from `holdings`, which is the Individual stocks section the
@@ -584,6 +591,18 @@ class PortfolioCompanyMetricsResponse(BaseModel):
 
     coverage: dict
     rows: list[PortfolioCompanyMetricsRow]
+
+
+def _fundamental_company_rows(coverage: dict) -> list[dict]:
+    """Every resolved company in the selected book, whether metrics exist yet or not.
+
+    `no_metrics` is a data state, not a membership rule. Dropping those rows made Bustelberg
+    Offensief's truthful 25 current companies appear as 18 and hid exactly the seven companies a
+    refresh could populate.
+    """
+    return [row for row in coverage.get("rows", [])
+            if row.get("reason") in {"covered", "no_metrics"}
+            and row.get("company_id") and row.get("isin")]
 
 
 async def _load_and_expand_members(body: FundamentalCoverageRequest, *,
@@ -639,6 +658,32 @@ async def _load_and_expand_members(body: FundamentalCoverageRequest, *,
                                           or (m.get("market_cap_eur") or 0) > 0)]
 
         return await asyncio.to_thread(_load_universe)
+
+    if body.book_portfolio:
+        # Fundamental means the individual companies held DIRECTLY by the current Dynamic book.
+        # A linked certificate remains a wrapper here; expanding its model would add companies
+        # that are not current rows in this book (Bustelberg Offensief: 25 direct companies became
+        # 28 after look-through). The resolver already deduplicates the account's direct lines and
+        # classifies fund/certificate wrappers, so filter that source without model expansion.
+        from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+        def _load_book() -> list[dict]:
+            rows = resolve_account_isins(body.book_portfolio or "", freshen=False).get("rows") or []
+            if body.look_through_certificates:
+                from routers._airs_portfolio_analysis import _expand_book_rows  # noqa: PLC0415
+                rows = _expand_book_rows(rows)
+            return [{
+                "isin": row.get("isin"),
+                "name": row.get("holding_name"),
+                "weight": float(row.get("current_value_eur") or 0),
+            } for row in rows
+                if row.get("isin")
+                and row.get("bucket") == "Equity"
+                and not (row.get("is_fund") if body.look_through_certificates
+                         else row.get("is_etf"))
+                and float(row.get("current_value_eur") or 0) > 0]
+
+        return await asyncio.to_thread(_load_book)
 
     members = body.holdings
     owner_id = 0
@@ -729,13 +774,12 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
     from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
 
     coverage = await coverage_for_async(members)
-    covered = [r for r in coverage["rows"]
-               if r.get("reason") == "covered" and r.get("company_id") and r.get("isin")]
-    if not covered:
+    companies = _fundamental_company_rows(coverage)
+    if not companies:
         return {"coverage": coverage, "rows": []}
 
     def _load() -> list[dict]:
-        cids = sorted({int(r["company_id"]) for r in covered})
+        cids = sorted({int(r["company_id"]) for r in companies})
         # The exact families read by ``egmInputs.reverseDcfSource``. Quarterly twins are needed
         # for its TTM quorum; the four ``annual_*`` rows are the FY1 consensus base. Keeping this
         # allowlist narrow avoids transferring decades of unrelated dashboard metrics.
@@ -808,7 +852,7 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
                 meta[int(company["company_id"])] = company
 
         result_by_company: dict[int, dict] = {}
-        for holding in covered:
+        for holding in companies:
             cid = int(holding["company_id"])
             if cid in result_by_company:
                 result_by_company[cid]["weight_pct"] += float(holding.get("weight_pct") or 0)

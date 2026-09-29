@@ -231,7 +231,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const [analyse, setAnalyse] = useState<
     { id?: number; name: string; basket?: Basket; pf?: string } | null>(null);
   const [fundamental, setFundamental] = useState<
-    { id?: number; name: string; basket?: Basket } | null>(null);
+    { id?: number; name: string; basket?: Basket; bookPortfolio?: string } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
@@ -369,7 +369,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       if (destination === 'analyse') {
         setAnalyse({ id: r.fixed_portfolio_id, name: r.name, pf: r.dynamic_portefeuille });
       } else {
-        setFundamental({ id: r.fixed_portfolio_id, name: r.name });
+        setFundamental({ id: r.fixed_portfolio_id, name: r.name,
+          bookPortfolio: r.dynamic_portefeuille });
       }
       return;
     }
@@ -396,7 +397,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       if (destination === 'analyse') {
         setAnalyse({ ...target, pf: r.dynamic_portefeuille });
       } else {
-        setFundamental(target);
+        setFundamental({ ...target, bookPortfolio: p });
       }
     } catch (e) {
       console.warn(`[AIRS expand] could not build a basket for ${p}`, e);
@@ -1364,6 +1365,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       {fundamental && (
         <PortfolioFundamentalModal key={fundamental.id ?? fundamental.name}
           name={fundamental.name} portfolioId={fundamental.id} basket={fundamental.basket}
+          bookPortfolio={fundamental.bookPortfolio}
           onClose={() => setFundamental(null)} />
       )}
       {showBands && (
