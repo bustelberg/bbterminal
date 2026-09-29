@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  dcfGrowthCellLabel,
   epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear,
-  priceToEpsMultiple,
+  medianPeCalculation, priceToEpsMultiple,
 } from './PortfolioFundamentalModal';
 
 const estimate = (year: number, value: number | null, code = 'annual_per_share_eps_estimate') => ({
@@ -40,5 +41,42 @@ describe('portfolio EPS estimate view', () => {
     expect(priceToEpsMultiple(150, 6)).toBe(25);
     expect(priceToEpsMultiple(150, null)).toBeNull();
     expect(priceToEpsMultiple(150, -2)).toBeNull();
+  });
+});
+
+describe('portfolio Reverse DCF refusal labels', () => {
+  it('names a non-positive normalised base instead of looking like missing data', () => {
+    expect(dcfGrowthCellLabel(null, -1043.28)).toBe('No +FCF');
+    expect(dcfGrowthCellLabel(null, 0)).toBe('No +FCF');
+  });
+
+  it('keeps missing inputs distinct and still formats a solved rate', () => {
+    expect(dcfGrowthCellLabel(null, null)).toBe('—');
+    expect(dcfGrowthCellLabel(0.1236, -1043.28)).toBe('12.4%');
+  });
+});
+
+describe('portfolio Exit P/E working', () => {
+  it('shows the sorted observations and the actual odd-count median', () => {
+    expect(medianPeCalculation({
+      rows: [
+        { year: 2023, price: 90, eps: 3, pe: 30, used: true },
+        { year: 2024, price: 100, eps: 5, pe: 20, used: true },
+        { year: 2025, price: 100, eps: 4, pe: 25, used: true },
+      ],
+      median: 25,
+    })).toBe('Sorted fiscal-year P/Es: 20×, 25×, 30×. Median = middle value 25×.');
+  });
+
+  it('shows the averaging step for an even count and omits an excluded loss year', () => {
+    const text = medianPeCalculation({
+      rows: [
+        { year: 2022, price: 100, eps: -5, pe: null, used: false },
+        { year: 2023, price: 100, eps: 5, pe: 20, used: true },
+        { year: 2024, price: 120, eps: 4, pe: 30, used: true },
+      ],
+      median: 25,
+    });
+    expect(text).toBe('Sorted fiscal-year P/Es: 20×, 30×. Median = (20 + 30) ÷ 2 = 25×.');
   });
 });

@@ -7,7 +7,7 @@ import { type Basket } from './types';
 import PanelDialog from './PanelDialog';
 import {
   egmSource, estimateCagrWorking, medianPEWorking, reverseDcfSource, reverseDcfWorking,
-  type SourceObs,
+  type MedianPeWorking, type SourceObs,
 } from './egmInputs';
 import { calculateEGM, EGM_DEFAULTS } from './egm';
 import { forwardLegs, normalisedFcf } from './normalisedFcf';
@@ -17,17 +17,29 @@ import {
 import { type MetricRow } from './quickValuation';
 import InfoTip from '../InfoTip';
 import OwnerEarningsModal from './OwnerEarningsModal';
-import { AspectCard } from '../../../lib/tipCard';
+import { AspectCard, type FormulaSymbol } from '../../../lib/tipCard';
+import { Provenance } from '../../../lib/provenance';
 import { onDate } from './asOfLine';
 import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
+import { workedEgmReturn, workedEgmTotalReturn, workedImpliedPrice } from './valuationFormulas';
+import { ANALYSE_COPY } from './analyseCopy';
 
 type ApiMetric = MetricRow & { recorded_at?: string | null };
+
+type BookWeight = {
+  holding_name: string;
+  current_value_eur: number;
+  total_current_value_eur: number;
+  as_of_date: string;
+  fetched_at?: string | null;
+};
 
 type ApiRow = {
   company_id: number;
   isin: string;
   name: string;
   weight_pct: number;
+  book_weight?: BookWeight | null;
   currency?: string | null;
   source_fetched_at: {
     financials?: string | null;
@@ -40,6 +52,17 @@ type ApiRow = {
 type Payload = {
   coverage: { covered_pct?: number; holdings?: number; by_reason_pct?: Record<string, number> };
   rows: ApiRow[];
+};
+
+/** The AIRS-book leg of the exact analysis payload that powers the Analyse modal. */
+type BookAnalysis = {
+  holdings_as_of?: string | null;
+  holdings_fetched_at?: string | null;
+  book_holdings?: {
+    name?: string | null;
+    isin?: string | null;
+    current_value_eur?: number | null;
+  }[];
 };
 
 const RATES = Array.from({ length: 14 }, (_, i) => (7 + i) / 100);
@@ -57,7 +80,12 @@ type InputObservation = {
   label: string;
   value: string;
   retrieved: string | null;
-  applies: string | null;
+  applies: string | (string | null | undefined)[] | null;
+  /** Plain-language provenance when a date would be false or ambiguous (for example, a derived
+   *  multiple or a house fallback). */
+  retrievedText?: string;
+  /** Plain-language period semantics for a range or for two operands with different dates. */
+  appliesText?: string;
 };
 
 function uniqueDates(values: (string | null | undefined)[]): string[] {
@@ -78,8 +106,10 @@ function dateWindow(values: (string | null | undefined)[]): string[] {
 function InputObservationRows({ inputs }: { inputs: InputObservation[] }) {
   return (
     <span className="block space-y-2">
-      {inputs.map((input) => (
-        <span key={`${input.label}:${input.applies ?? ''}`} className="block border-b border-neutral-800/50 pb-2 last:border-0 last:pb-0">
+      {inputs.map((input) => {
+        const applies = uniqueDates(Array.isArray(input.applies) ? input.applies : [input.applies]);
+        return (
+        <span key={`${input.label}:${applies.join(',')}`} className="block border-b border-neutral-800/50 pb-2 last:border-0 last:pb-0">
           <span className="flex flex-wrap items-center gap-1.5">
             <span>{input.label}</span>
             <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
@@ -90,18 +120,25 @@ function InputObservationRows({ inputs }: { inputs: InputObservation[] }) {
             <span className="inline-flex items-center gap-1">
               <span>Retrieved</span>
               <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
-                {input.retrieved ? onDate(input.retrieved) : 'not recorded'}
+                {input.retrievedText ?? (input.retrieved ? onDate(input.retrieved) : 'not recorded')}
               </span>
             </span>
             <span className="inline-flex items-center gap-1">
               <span>Applies to</span>
-              <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
-                {input.applies ? onDate(input.applies) : 'not recorded'}
-              </span>
+              {input.appliesText ? (
+                <span className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+                  {input.appliesText}
+                </span>
+              ) : (applies.length ? applies : [null]).map((date, index) => (
+                <span key={date ?? index} className="inline-flex rounded-full border border-neutral-700 bg-overlay/10 px-1.5 py-0.5 font-mono text-[11px] text-fg-soft">
+                  {date ? onDate(date) : 'not recorded'}
+                </span>
+              ))}
             </span>
           </span>
         </span>
-      ))}
+        );
+      })}
     </span>
   );
 }
@@ -133,11 +170,14 @@ function DateBadges({ retrieved, applies, inputs }: {
   );
 }
 
-function ValuationCell({ value, what, where, how, retrieved, applies, inputs, tone, emphasis = false }: {
+function ValuationCell({ value, what, where, how, worked, legend, retrieved, applies, inputs, tone,
+  emphasis = false }: {
   value: ReactNode;
   what: ReactNode;
   where: ReactNode;
   how: ReactNode;
+  worked?: string;
+  legend?: readonly FormulaSymbol[];
   retrieved: (string | null | undefined)[];
   applies: (string | null | undefined)[];
   inputs?: InputObservation[];
@@ -152,7 +192,7 @@ function ValuationCell({ value, what, where, how, retrieved, applies, inputs, to
         <InfoTip wide className="font-sans text-fg-faint" content={(
           <AspectCard what={what} where={where}
             when={<DateBadges retrieved={retrieved} applies={applies} inputs={inputs} />}
-            how={how} />
+            how={how} worked={worked} legend={legend} />
         )} />
       </span>
     </td>
@@ -160,6 +200,44 @@ function ValuationCell({ value, what, where, how, retrieved, applies, inputs, to
 }
 
 const inputNumber = new Intl.NumberFormat('en-GB', { maximumFractionDigits: 2 });
+const eurWhole = new Intl.NumberFormat('en-GB', {
+  style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0,
+});
+
+function bookWeightPct(bookWeight: BookWeight): number {
+  return bookWeight.current_value_eur / bookWeight.total_current_value_eur * 100;
+}
+
+/**
+ * A refusal is an answer, not an empty cell.
+ *
+ * A reverse DCF can only compound a positive starting cash flow. Tesla exposed the otherwise
+ * invisible branch: every source operand was present in the info card, but its FY1 FCF normalised
+ * to a negative number, so `solveGrowth` correctly returned null and fourteen bare dashes made
+ * that look like missing data. Keep a genuinely missing/unsolvable case as a dash; name the one
+ * refusal we can diagnose exactly from the row's own inputs.
+ */
+export function dcfGrowthCellLabel(impliedGrowth: number | null,
+  normalisedStartingFcf: number | null): string {
+  if (impliedGrowth != null) return `${(impliedGrowth * 100).toFixed(1)}%`;
+  return normalisedStartingFcf != null && normalisedStartingFcf <= 0 ? 'No +FCF' : '—';
+}
+
+/** The final line of the worked five-year median shown in the Exit P/E info card. */
+export function medianPeCalculation(working: MedianPeWorking): string {
+  const pes = working.rows
+    .filter((row) => row.used && row.pe != null)
+    .map((row) => row.pe as number)
+    .sort((a, b) => a - b);
+  if (!pes.length || working.median == null) return 'No positive fiscal-year P/E is available.';
+  const shown = pes.map((pe) => `${inputNumber.format(pe)}×`).join(', ');
+  const middle = Math.floor(pes.length / 2);
+  if (pes.length % 2) {
+    return `Sorted fiscal-year P/Es: ${shown}. Median = middle value ${inputNumber.format(pes[middle])}×.`;
+  }
+  const medianStep = `(${inputNumber.format(pes[middle - 1])} + ${inputNumber.format(pes[middle])}) ÷ 2`;
+  return `Sorted fiscal-year P/Es: ${shown}. Median = ${medianStep} = ${inputNumber.format(working.median)}×.`;
+}
 
 function observationRetrievedAt(metrics: ApiMetric[], observation: SourceObs): string | null {
   if (!observation.code || !observation.date) return null;
@@ -180,6 +258,29 @@ function sourceInput(metrics: ApiMetric[], label: string, observation: SourceObs
     retrieved: observationRetrievedAt(metrics, observation),
     applies: observation.date,
   };
+}
+
+function medianPeInputs(metrics: ApiMetric[], working: MedianPeWorking): InputObservation[] {
+  return working.rows.map((point) => {
+    const observations = metrics.filter((metric) =>
+      metric.target_date.slice(0, 4) === String(point.year)
+      && metric.numeric_value != null
+      && (metric.metric_code.endsWith('__Month End Stock Price')
+        || metric.metric_code.endsWith('__EPS without NRI')));
+    const retrieved = observations.map((metric) => metric.recorded_at ?? null)
+      .filter((value): value is string => value != null).sort().at(-1) ?? null;
+    const applies = observations.map((metric) => metric.target_date).sort().at(-1) ?? null;
+    const price = point.price == null ? 'missing price' : inputNumber.format(point.price);
+    const eps = point.eps == null ? 'missing EPS' : inputNumber.format(point.eps);
+    return {
+      label: `FY${point.year}: price ÷ EPS`,
+      value: point.used && point.pe != null
+        ? `${price} ÷ ${eps} = ${inputNumber.format(point.pe)}×`
+        : `${price} ÷ ${eps} = excluded (EPS is not positive)`,
+      retrieved,
+      applies,
+    };
+  });
 }
 
 export function epsEstimateForYear(metrics: ApiMetric[], year: number): ApiMetric | null {
@@ -248,6 +349,7 @@ function dcfRow(row: ApiRow, today: string) {
   const forwardPE = forwardPeDerived
     ? (egm.price as number) / (egm.epsNextFY as number) : egm.forwardPE;
   const cagrWorking = estimateCagrWorking(row.metrics, today);
+  const estimateDates = dateWindow(cagrWorking.points.map((point) => point.date));
   const medianPeWorking = medianPEWorking(row.metrics);
   const medianPeYears = new Set(medianPeWorking.rows.map((point) => String(point.year)));
   const medianPeDates = dateWindow(row.metrics
@@ -255,6 +357,8 @@ function dcfRow(row: ApiRow, today: string) {
       && (metric.metric_code.endsWith('__Month End Stock Price')
         || metric.metric_code.endsWith('__EPS without NRI')))
     .map((metric) => metric.target_date));
+  const medianPeObservations = medianPeInputs(row.metrics, medianPeWorking);
+  const medianPeWorked = medianPeCalculation(medianPeWorking);
   const egmAssumptions = {
     growthRate: egm.analystGrowth5Y ?? EGM_DEFAULTS.growthRate,
     dividendYield: egm.dividendYield,
@@ -262,6 +366,68 @@ function dcfRow(row: ApiRow, today: string) {
     hurdleRate: EGM_DEFAULTS.hurdleRate,
     years: EGM_DEFAULTS.years,
   };
+  const estimateRange = estimateDates.length > 1
+    ? `Forecast ${onDate(estimateDates[0])} → ${onDate(estimateDates[estimateDates.length - 1])}`
+    : undefined;
+  const medianPeRange = medianPeDates.length > 1
+    ? `Completed FYs ${medianPeDates[0].slice(0, 4)}–${medianPeDates[medianPeDates.length - 1].slice(0, 4)}`
+    : undefined;
+  const forwardPeObservations: InputObservation[] = forwardPeDerived ? [
+    {
+      label: 'Current share price',
+      value: egm.price == null ? 'not available'
+        : `${inputNumber.format(egm.price)}${row.currency ? ` ${row.currency}/share` : ''}`,
+      retrieved: row.source_fetched_at.financials ?? null,
+      applies: egm.priceDate,
+    },
+    {
+      label: 'FY1 consensus EPS',
+      value: egm.epsNextFY == null ? 'not available'
+        : `${inputNumber.format(egm.epsNextFY)}${row.currency ? ` ${row.currency}/share` : ''}`,
+      retrieved: row.source_fetched_at.estimates ?? null,
+      applies: egm.epsNextFYDate,
+    },
+    {
+      label: 'Current forward P/E (price ÷ FY1 EPS)',
+      value: forwardPE == null ? 'not available' : `${inputNumber.format(forwardPE)}×`,
+      retrieved: null,
+      retrievedText: 'Not retrieved; calculated here',
+      applies: null,
+      appliesText: 'The price and FY1 EPS observations above',
+    },
+  ] : [{
+    label: 'Current forward P/E',
+    value: forwardPE == null ? 'not available' : `${inputNumber.format(forwardPE)}×`,
+    retrieved: row.source_fetched_at.indicators ?? null,
+    applies: egm.forwardPEDate,
+  }];
+  const expectedReturnInputs: InputObservation[] = [
+    ...forwardPeObservations,
+    {
+      label: 'Expected EPS growth',
+      value: `${(egmAssumptions.growthRate * 100).toFixed(1)}%`,
+      retrieved: egm.analystGrowth5Y != null ? row.source_fetched_at.estimates ?? null : null,
+      applies: egm.analystGrowth5Y != null ? estimateDates : null,
+      retrievedText: egm.analystGrowth5Y == null ? 'House assumption' : undefined,
+      appliesText: egm.analystGrowth5Y != null ? estimateRange : 'Every forecast year',
+    },
+    {
+      label: 'Dividend yield',
+      value: `${((egmAssumptions.dividendYield ?? 0) * 100).toFixed(2)}%`,
+      retrieved: egm.dividendYield != null ? row.source_fetched_at.financials ?? null : null,
+      applies: egm.dividendYield != null ? egm.dividendYieldDate : null,
+      retrievedText: egm.dividendYield == null ? 'Not reported; model uses 0%' : undefined,
+      appliesText: egm.dividendYield == null ? 'Every forecast year' : undefined,
+    },
+    {
+      label: egm.medianPE5Y != null ? 'Historical median Exit P/E' : 'Default Exit P/E',
+      value: `${inputNumber.format(egmAssumptions.exitPE)}×`,
+      retrieved: egm.medianPE5Y != null ? row.source_fetched_at.financials ?? null : null,
+      applies: egm.medianPE5Y != null ? medianPeDates : null,
+      retrievedText: egm.medianPE5Y == null ? 'House assumption' : undefined,
+      appliesText: egm.medianPE5Y != null ? medianPeRange : 'End of year 10',
+    },
+  ];
   const egmResult = calculateEGM({ ...egm, forwardPE }, egmAssumptions);
   const eps2025Actual = epsActualForYear(row.metrics, 2025);
   const epsEstimates = Object.fromEntries(EPS_ESTIMATE_YEARS.map((year) => [
@@ -311,12 +477,14 @@ function dcfRow(row: ApiRow, today: string) {
   return {
     ...row, src, growth,
     dcfForward: useForward,
+    // The base that actually reached the solver distinguishes missing inputs from a complete set
+    // of inputs that says there is no positive cash flow to compound.
+    dcfStartingFcf: adjusted,
     dcfInputs,
     stockPriceInputs,
     egm, forwardPE, forwardPeDerived, egmAssumptions, egmResult,
     eps2025Actual, epsEstimates, epsEstimateCagr, peByYear,
-    estimateDates: dateWindow(cagrWorking.points.map((point) => point.date)),
-    medianPeDates,
+    estimateDates, medianPeDates, medianPeObservations, medianPeWorked, expectedReturnInputs,
   };
 }
 
@@ -361,6 +529,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
   onClose: () => void;
 }) {
   const [data, setData] = useState<Payload | null>(null);
+  // `undefined` is loading; `null` means this model genuinely has no usable paired AIRS book.
+  const [bookAnalysis, setBookAnalysis] = useState<BookAnalysis | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<Model>('dcf');
   const [companyFundamental, setCompanyFundamental] = useState<ApiRow | null>(null);
@@ -394,7 +564,60 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
     return () => controller.abort();
   }, [basket, name, portfolioId, refreshRevision]);
 
-  const rows = useMemo(() => (data?.rows ?? []).map((row) => dcfRow(row, today)), [data, today]);
+  // We deliberately take the EUR numerator, total and source dates from the SAME book-analysis
+  // payload as Analyse. The metrics endpoint owns fundamentals; it must not grow a second notion
+  // of an AIRS weight that can drift from the Analyse table.
+  useEffect(() => {
+    if (portfolioId == null) {
+      setBookAnalysis(null);
+      return;
+    }
+    const controller = new AbortController();
+    setBookAnalysis(undefined);
+    void (async () => {
+      try {
+        const response = await apiFetch(
+          `${API_URL}/api/airs/model-portfolios/${portfolioId}/analysis?benchmark=ACWI&weight_by=book&source=book`,
+          { signal: controller.signal },
+        );
+        const body = await response.json().catch(() => null) as BookAnalysis | { detail?: string } | null;
+        if (!response.ok) throw new Error((body as { detail?: string } | null)?.detail ?? `HTTP ${response.status}`);
+        setBookAnalysis(body as BookAnalysis);
+      } catch {
+        // Fundamental remains useful for an unpaired book; its Weight cell then says exactly that
+        // through the existing model-composition fallback.
+        if (!controller.signal.aborted) setBookAnalysis(null);
+      }
+    })();
+    return () => controller.abort();
+  }, [portfolioId, refreshRevision]);
+
+  const rows = useMemo(() => {
+    const holdings = bookAnalysis?.book_holdings ?? [];
+    const total = holdings.reduce((sum, holding) => sum + (holding.current_value_eur ?? 0), 0);
+    const byIsin = new Map<string, { name: string; currentValue: number }>();
+    for (const holding of holdings) {
+      if (!holding.isin || holding.current_value_eur == null) continue;
+      const present = byIsin.get(holding.isin);
+      byIsin.set(holding.isin, {
+        name: present?.name ?? holding.name ?? holding.isin,
+        currentValue: (present?.currentValue ?? 0) + holding.current_value_eur,
+      });
+    }
+    return (data?.rows ?? []).map((row) => {
+      const holding = byIsin.get(row.isin);
+      const bookWeight = holding && total > 0 && bookAnalysis?.holdings_as_of
+        ? {
+          holding_name: holding.name,
+          current_value_eur: holding.currentValue,
+          total_current_value_eur: total,
+          as_of_date: bookAnalysis.holdings_as_of,
+          fetched_at: bookAnalysis.holdings_fetched_at,
+        }
+        : null;
+      return dcfRow({ ...row, book_weight: bookWeight }, today);
+    });
+  }, [bookAnalysis, data, today]);
   const refreshScope = useMemo<RefreshScope | null>(() => {
     const isins = [...new Set((data?.rows ?? []).map((row) => row.isin).filter(Boolean))];
     if (!isins.length) return null;
@@ -493,7 +716,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
           {rows.length > 0 && (
             <div className="my-4 min-w-max overflow-hidden rounded-xl border border-neutral-800/50">
             <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10 bg-card text-[10px] uppercase tracking-wide text-fg-faint">
+              <thead className="sticky top-0 z-10 bg-card text-xs uppercase tracking-wide text-fg-faint">
                 <tr className="border-b border-neutral-800/40">
                   {/* These three columns are the subject, not the selected valuation model. They
                       stay pinned and unchanged while the switch replaces only the coloured block
@@ -502,11 +725,11 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                     Company
                   </th>
                   <NumericHeader sortKey="weight" label="Weight"
-                    info="This operating company's share of the whole current portfolio after linked certificates and TopSelecties are looked through. Funds, cash, bonds and companies without stored fundamentals are not redistributed over these rows."
+                    info="Each row's current share of the paired AIRS book, calculated from VOLK Huidige waarde."
                     className="sticky left-64 z-20 w-24 min-w-24 bg-page" />
                   <NumericHeader sortKey="price" label="Stock price"
                     info="The latest stored GuruFocus closing price. The currency code is the company's GuruFocus exchange currency; the value is not converted to EUR."
-                    className="sticky left-[22rem] z-20 w-28 min-w-28 border-r-2 border-neutral-700 bg-page" />
+                    className="sticky left-[22rem] z-20 w-36 min-w-36 border-r-2 border-neutral-700 bg-page" />
                   {model === 'dcf' ? RATES.map((rate) => (
                     <NumericHeader key={rate} sortKey={`rate:${rate}`}
                       label={`${(rate * 100).toFixed(0)}%`} className="bg-accent-500/10" />
@@ -519,7 +742,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                       <NumericHeader sortKey="exitPE" label="Exit P/E" className="bg-pos-500/10" />
                       <NumericHeader sortKey="fairValue" label="Fair value" className="bg-pos-500/10" />
                       <NumericHeader sortKey="upside" label="Upside" className="bg-pos-500/10" />
-                      <NumericHeader sortKey="expectedReturn" label="Expected p.a." className="bg-pos-500/10" />
+                      <NumericHeader sortKey="expectedReturn" label="Expected annual return" className="bg-pos-500/10" />
                       <NumericHeader sortKey="impliedPrice" label="Price in 10y" className="bg-pos-500/10" />
                       <NumericHeader sortKey="totalReturn" label="Total return" className="bg-pos-500/10" />
                     </>
@@ -560,25 +783,58 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                       </div>
                     </td>
                     <td className="sticky left-64 z-[2] w-24 min-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums">
-                      {row.weight_pct.toFixed(2)}%
+                      <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
+                        <span>{row.book_weight ? `${bookWeightPct(row.book_weight).toFixed(2)}%`
+                          : portfolioId != null ? bookAnalysis === undefined ? '…' : '—'
+                            : `${row.weight_pct.toFixed(2)}%`}</span>
+                        {row.book_weight
+                          ? <Provenance source="airs_volk" asOf={row.book_weight.as_of_date}
+                            fetchedAt={row.book_weight.fetched_at} kind="formula"
+                            what={ANALYSE_COPY.en.row.weightWhat(row.book_weight.holding_name)}
+                            note={ANALYSE_COPY.en.row.weightNote}
+                            how={ANALYSE_COPY.en.row.weightHow(
+                              eurWhole.format(row.book_weight.current_value_eur),
+                              eurWhole.format(row.book_weight.total_current_value_eur),
+                              `${bookWeightPct(row.book_weight).toFixed(2)}%`,
+                            )} />
+                          : portfolioId != null ? <InfoTip wide className="font-sans text-fg-faint" content={<AspectCard
+                            what={bookAnalysis === undefined ? 'AIRS book weight is loading.' : 'No AIRS book value is available for this company.'}
+                            where="AIRS Vermogensoverzicht (VOLK)."
+                            when={bookAnalysis === undefined ? 'Loading the same AIRS book analysis used by Analyse.' : 'No matching current AIRS book holding was returned.'}
+                            how="A model-composition weight is not substituted for an AIRS book weight." />} />
+                          : <InfoTip wide className="font-sans text-fg-faint" content={<AspectCard
+                            what={`${row.name}'s share of the whole current portfolio.`}
+                            where={`${name}'s current composition after linked certificates and TopSelecties are looked through.`}
+                            when="The portfolio composition loaded for this Fundamental view."
+                            how={`This company's portfolio weight is ${row.weight_pct.toFixed(2)}%; funds, cash, bonds and uncovered companies are not redistributed over the visible company rows.`} />} />}
+                      </span>
                     </td>
-                    <td className="sticky left-[22rem] z-[2] w-28 min-w-28 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums">
-                      <span className="grid grid-cols-[2.25rem_1fr] items-baseline">
+                    <td className="sticky left-[22rem] z-[2] w-36 min-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums">
+                      <span className="grid grid-cols-[2.25rem_1fr_auto] items-baseline gap-1.5">
                         <span className="text-left text-[10px] text-fg-faint">{row.currency ?? ''}</span>
                         <span className="text-right">{row.src.price == null ? '—' : row.src.price.toFixed(2)}</span>
+                        <InfoTip wide className="font-sans text-fg-faint" content={<AspectCard
+                          what={`The latest stored closing price for ${row.name}.`}
+                          where="GuruFocus closing-price history."
+                          when={<InputObservationRows inputs={row.stockPriceInputs} />}
+                          how="Select the newest stored close; the currency shown in the cell is the company's GuruFocus exchange currency." />} />
                       </span>
                     </td>
                     {model === 'dcf' ? row.growth.map((cell) => (
                       <ValuationCell key={cell.discountRate} tone="dcf"
-                        value={cell.impliedGrowth == null ? '—' : `${(cell.impliedGrowth * 100).toFixed(1)}%`}
-                        what={`The annual free-cash-flow growth implied by the current share price at a ${(cell.discountRate * 100).toFixed(0)}% discount rate.`}
+                        value={dcfGrowthCellLabel(cell.impliedGrowth, row.dcfStartingFcf)}
+                        what={row.dcfStartingFcf != null && row.dcfStartingFcf <= 0
+                          ? `No growth rate can be solved at ${(cell.discountRate * 100).toFixed(0)}% because normalised starting FCF is zero or negative.`
+                          : `Annual FCF growth implied by the share price at a ${(cell.discountRate * 100).toFixed(0)}% discount rate.`}
                         where={`GuruFocus close price, diluted shares and ${row.dcfForward ? 'FY1 consensus' : 'latest reported'} cash-flow inputs stored for ${row.name}.`}
                         retrieved={[row.source_fetched_at.financials,
                           row.dcfForward ? row.source_fetched_at.estimates : null]}
                         applies={[row.src.priceDate, row.src.sharesDate, row.src.flowBasis.date,
                           row.dcfForward ? row.src.ocfEstimateDate : null]}
                         inputs={row.dcfInputs}
-                        how={`Project normalised FCF, add the terminal value, discount at ${(cell.discountRate * 100).toFixed(0)}%, then solve for the annual growth rate equalling today's market capitalisation.`} />
+                        how={row.dcfStartingFcf != null && row.dcfStartingFcf <= 0
+                          ? `Base FCF is ${inputNumber.format(row.dcfStartingFcf)}${row.currency ? ` ${row.currency}m` : 'm'}. Non-positive FCF has no growth solution.`
+                          : `Discount FCF and terminal value at ${(cell.discountRate * 100).toFixed(0)}%, then solve growth against market value.`} />
                     )) : model === 'egm' ? (
                       <>
                         <ValuationCell tone="egm"
@@ -589,7 +845,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                           applies={[row.egm.epsNextFYDate]}
                           how="Select the earliest positive-period EPS estimate whose fiscal period ends after today." />
                         <ValuationCell tone="egm"
-                          value={row.forwardPE == null ? '—' : `${row.forwardPE.toFixed(1)}×`}
+                          value={row.forwardPE == null ? '—' : `${row.forwardPE.toFixed(2)}×`}
                           what="The forward price-to-earnings multiple used as the model's starting valuation."
                           where={row.forwardPeDerived
                             ? 'Latest stored GuruFocus close price divided by FY1 consensus EPS.'
@@ -604,7 +860,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             ? 'Divide the current stored close by the next-fiscal-year EPS estimate.'
                             : 'Use the newest positive Forward PE Ratio observation supplied by GuruFocus.'} />
                         <ValuationCell tone="egm"
-                          value={`${(row.egmAssumptions.growthRate * 100).toFixed(1)}%`}
+                          value={`${(row.egmAssumptions.growthRate * 100).toFixed(2)}%`}
                           what="The annual EPS growth rate assumed for the next ten years."
                           where={row.egm.analystGrowth5Y != null
                             ? 'GuruFocus analyst EPS estimates.'
@@ -625,7 +881,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             ? [row.egm.dividendYieldDate] : []}
                           how="Convert the vendor percentage to a decimal and hold that yield constant for the projection." />
                         <ValuationCell tone="egm"
-                          value={`${row.egmAssumptions.exitPE.toFixed(1)}×`}
+                          value={`${row.egmAssumptions.exitPE.toFixed(2)}×`}
                           what="The price-to-earnings multiple assumed at the end of year ten."
                           where={row.egm.medianPE5Y != null
                             ? 'GuruFocus fiscal year-end prices and EPS without NRI.'
@@ -633,8 +889,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                           retrieved={row.egm.medianPE5Y != null
                             ? [row.source_fetched_at.financials] : []}
                           applies={row.medianPeDates}
+                          inputs={row.egm.medianPE5Y != null ? row.medianPeObservations : undefined}
                           how={row.egm.medianPE5Y != null
-                            ? 'Calculate each positive fiscal-year P/E and take the median of the latest five years.'
+                            ? row.medianPeWorked
                             : 'Apply the house default of 20 times earnings.'} />
                         <ValuationCell tone="egm" emphasis
                           value={row.egmResult.fairValue == null ? '—' : row.egmResult.fairValue.toFixed(2)}
@@ -645,7 +902,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             ...row.estimateDates, ...row.medianPeDates]}
                           how="Multiply FY1 EPS by the maximum starting P/E compatible with ten years of EPS growth, dividends, the exit multiple and the 10% hurdle rate." />
                         <ValuationCell tone="egm"
-                          value={row.egmResult.upside == null ? '—' : `${row.egmResult.upside >= 0 ? '+' : ''}${(row.egmResult.upside * 100).toFixed(1)}%`}
+                          value={row.egmResult.upside == null ? '—' : `${row.egmResult.upside >= 0 ? '+' : ''}${(row.egmResult.upside * 100).toFixed(2)}%`}
                           what="The difference between model fair value and the latest stored share price."
                           where="The Expected Growth Model fair value and GuruFocus close price."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials]}
@@ -653,14 +910,27 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             row.egm.dividendYieldDate, ...row.estimateDates, ...row.medianPeDates]}
                           how="Divide fair value by the latest stored share price and subtract one." />
                         <ValuationCell tone="egm" emphasis
-                          value={row.egmResult.expectedReturn == null ? '—' : `${row.egmResult.expectedReturn >= 0 ? '+' : ''}${(row.egmResult.expectedReturn * 100).toFixed(1)}%`}
+                          value={row.egmResult.expectedReturn == null ? '—' : `${row.egmResult.expectedReturn >= 0 ? '+' : ''}${(row.egmResult.expectedReturn * 100).toFixed(2)}%`}
                           what="The modelled annualised shareholder return over ten years."
                           where="Current forward P/E, expected EPS growth, dividend yield and the historical or default exit P/E."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials,
                             row.forwardPeDerived ? null : row.source_fetched_at.indicators]}
                           applies={[row.egm.priceDate, row.egm.epsNextFYDate, row.egm.forwardPEDate,
                             row.egm.dividendYieldDate, ...row.estimateDates, ...row.medianPeDates]}
-                          how="Compound EPS growth and dividends, include the ten-year change from the current forward P/E to the exit P/E, then annualise the result." />
+                          inputs={row.expectedReturnInputs}
+                          how="The three annual factors multiply; the change from the current to the exit P/E is spread across the ten-year horizon."
+                          worked={row.egmResult.bridge == null ? '' : workedEgmReturn(
+                            row.egmResult.bridge,
+                            row.egmAssumptions.years,
+                            `${row.egmResult.expectedReturn != null && row.egmResult.expectedReturn >= 0 ? '+' : ''}${((row.egmResult.expectedReturn ?? 0) * 100).toFixed(2)}%`,
+                          )}
+                          legend={row.egmResult.bridge == null ? undefined : [
+                            { sym: 'g', is: 'the annual EPS growth rate' },
+                            { sym: 'y', is: 'the annual dividend yield' },
+                            { sym: String.raw`PE_{\text{exit}}`, is: 'the assumed P/E after ten years' },
+                            { sym: String.raw`PE_{\text{fwd}}`, is: 'the current forward P/E' },
+                            { sym: 'n', is: `the ${row.egmAssumptions.years}-year forecast horizon` },
+                          ]} />
                         <ValuationCell tone="egm"
                           value={row.egmResult.impliedPrice == null ? '—' : row.egmResult.impliedPrice.toFixed(2)}
                           what="The share price implied at the end of year ten."
@@ -669,16 +939,38 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             row.forwardPeDerived ? null : row.source_fetched_at.indicators]}
                           applies={[row.egm.priceDate, row.egm.epsNextFYDate, row.egm.forwardPEDate,
                             ...row.estimateDates, ...row.medianPeDates]}
-                          how="Grow earnings for ten years and revalue them from today's forward P/E to the exit P/E; dividends are not part of this price." />
+                          inputs={row.expectedReturnInputs.filter((input) => input.label !== 'Dividend yield')}
+                          how="Grow earnings for ten years and revalue them from today's forward P/E to the exit P/E; dividends are not part of this price."
+                          worked={row.egmResult.bridge == null ? '' : workedImpliedPrice(
+                            row.egm.price, row.egmResult.bridge, row.egmAssumptions.years,
+                            row.egmResult.impliedPrice,
+                          )}
+                          legend={row.egmResult.bridge == null ? undefined : [
+                            { sym: 'P_0', is: 'the current share price' },
+                            { sym: 'g', is: 'the annual EPS growth rate' },
+                            { sym: 'n', is: `the ${row.egmAssumptions.years}-year forecast horizon` },
+                            { sym: String.raw`PE_{\text{exit}}`, is: 'the assumed P/E after ten years' },
+                            { sym: String.raw`PE_{\text{fwd}}`, is: 'the current forward P/E' },
+                          ]} />
                         <ValuationCell tone="egm"
-                          value={row.egmResult.totalReturn == null ? '—' : `${row.egmResult.totalReturn >= 0 ? '+' : ''}${(row.egmResult.totalReturn * 100).toFixed(0)}%`}
+                          value={row.egmResult.totalReturn == null ? '—' : `${row.egmResult.totalReturn >= 0 ? '+' : ''}${(row.egmResult.totalReturn * 100).toFixed(2)}%`}
                           what="The cumulative shareholder return modelled over ten years, including dividends."
                           where="The Expected Growth Model's annualised return and ten-year horizon."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials,
                             row.forwardPeDerived ? null : row.source_fetched_at.indicators]}
                           applies={[row.egm.priceDate, row.egm.epsNextFYDate, row.egm.forwardPEDate,
                             row.egm.dividendYieldDate, ...row.estimateDates, ...row.medianPeDates]}
-                          how="Compound the expected annual shareholder return for ten years." />
+                          inputs={row.expectedReturnInputs}
+                          how="Compound the expected annual shareholder return for ten years."
+                          worked={workedEgmTotalReturn(
+                            row.egmResult.expectedReturn,
+                            row.egmAssumptions.years,
+                            `${row.egmResult.totalReturn != null && row.egmResult.totalReturn >= 0 ? '+' : ''}${((row.egmResult.totalReturn ?? 0) * 100).toFixed(2)}%`,
+                          )}
+                          legend={row.egmResult.expectedReturn == null ? undefined : [
+                            { sym: 'R', is: 'the expected annual shareholder return' },
+                            { sym: 'n', is: `the ${row.egmAssumptions.years}-year forecast horizon` },
+                          ]} />
                       </>
                     ) : (
                       <>

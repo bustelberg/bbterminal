@@ -306,7 +306,14 @@ export function medianPEWorking(metrics: MetricRow[], years = 5): MedianPeWorkin
   const price = byYear(metrics, PRICE_PS_CODES);
   const eps = byYear(metrics, EPS_CODES);
   const rows: PeYearRow[] = [];
-  for (const y of [...price.keys()].sort((a, b) => a - b).slice(-years)) {
+  // The latest close is stored under the annual price code too. It must not let a current partial
+  // year with no reported EPS occupy one of the five slots (Tesla's 2026 close used to evict
+  // FY2021 and turn the advertised five-year median into a median of four completed years).
+  const completeYears = [...price.keys()]
+    .filter((y) => eps.has(y))
+    .sort((a, b) => a - b)
+    .slice(-years);
+  for (const y of completeYears) {
     const p = price.get(y) ?? null;
     const e = eps.get(y) ?? null;
     const usable = p != null && e != null && e > 0 && p > 0;

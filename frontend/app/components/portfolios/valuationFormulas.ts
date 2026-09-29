@@ -89,6 +89,15 @@ export function workedImpliedPrice(price: number | null | undefined, bridge: Egm
     + ` = ${subNum(result, 2)}`);
 }
 
+/** `(1 + R)^n − 1` — annualised shareholder return compounded over the full horizon. */
+export function workedEgmTotalReturn(annualReturn: number | null | undefined,
+  years: number, result: string): string {
+  if (!ok(annualReturn) || !(years > 0)) return '';
+  return withWorked(
+    String.raw`(1+R)^{n} - 1`,
+    String.raw`(1+${subNum(annualReturn, 4)})^{${years}} - 1 = ${texEscape(result)}`);
+}
+
 /** `Pₙ ÷ P₀ − 1` — the whole-period price move. */
 export function workedPriceMove(implied: number | null | undefined,
   price: number | null | undefined, result: string): string {
