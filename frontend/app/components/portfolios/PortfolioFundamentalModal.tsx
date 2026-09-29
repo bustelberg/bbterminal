@@ -75,6 +75,7 @@ const EPS_ACTUAL_CODES = new Set([
 const EPS_ESTIMATE_YEARS = [2026, 2027] as const;
 type EpsEstimateYear = typeof EPS_ESTIMATE_YEARS[number];
 type Model = 'dcf' | 'egm' | 'eps';
+const LOADING_DOTS = ['...', '..', '.', '..'] as const;
 type Sort = { key: string; direction: 'asc' | 'desc' };
 type InputObservation = {
   label: string;
@@ -557,6 +558,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
   const [model, setModel] = useState<Model>('dcf');
   const [companyFundamental, setCompanyFundamental] = useState<ApiRow | null>(null);
   const [fundamentalsRevision, setFundamentalsRevision] = useState(0);
+  const [loadingDotIndex, setLoadingDotIndex] = useState(0);
   const partialRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [sorts, setSorts] = useState<Record<Model, Sort>>({
     dcf: { key: 'weight', direction: 'desc' },
@@ -564,6 +566,14 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
     eps: { key: 'weight', direction: 'desc' },
   });
   const today = new Date().toISOString().slice(0, 10);
+
+  useEffect(() => {
+    if (data || error) return;
+    const timer = window.setInterval(
+      () => setLoadingDotIndex((index) => (index + 1) % LOADING_DOTS.length), 360,
+    );
+    return () => window.clearInterval(timer);
+  }, [data, error]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -747,29 +757,36 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-auto px-6">
-          {!data && !error && <p className="p-5 text-sm text-fg-muted">Loading company fundamentals…</p>}
+        <div className="min-h-0 flex-1 overflow-hidden px-6">
+          <div className="h-full overflow-auto">
+          {!data && !error && (
+            <div className="flex min-h-64 items-center justify-center">
+              <p className="text-sm text-fg-muted">
+                Loading company fundamentals{LOADING_DOTS[loadingDotIndex]}
+              </p>
+            </div>
+          )}
           {error && <p className="m-5 rounded-lg border border-neg-500/30 bg-neg-500/10 p-3 text-sm text-neg-300">{error}</p>}
           {data && rows.length === 0 && (
             <p className="p-5 text-sm text-fg-muted">No operating companies with stored fundamentals were found.</p>
           )}
           {rows.length > 0 && (
-            <div className="my-4 min-w-max rounded-xl border border-neutral-800/50">
-            <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10 bg-card text-xs uppercase tracking-wide text-fg-faint">
+            <div className="my-4 min-w-max border-y border-r border-neutral-800/50">
+            <table className="isolate w-full border-separate border-spacing-0 text-xs">
+              <thead className="sticky top-0 z-30 text-xs uppercase tracking-wide text-fg-faint">
                 <tr className="border-b border-neutral-800/40">
                   {/* These three columns are the subject, not the selected valuation model. They
                       stay pinned and unchanged while the switch replaces only the coloured block
                       to their right. Fixed widths make the sticky offsets exact. */}
-                  <th className="sticky left-0 z-20 w-80 min-w-80 max-w-80 bg-page px-3 py-2 text-left font-medium">
+                  <th className="sticky left-0 z-40 w-80 min-w-80 max-w-80 border-l border-neutral-800/50 bg-page px-3 py-2 text-left font-medium">
                     Company
                   </th>
                   <NumericHeader sortKey="weight" label="Weight"
                     info="Each row's current share of the paired AIRS book, calculated from VOLK Huidige waarde."
-                    className="sticky left-80 z-20 w-24 min-w-24 max-w-24 bg-page" />
+                    className="sticky left-80 z-40 w-24 min-w-24 max-w-24 bg-page" />
                   <NumericHeader sortKey="price" label="Stock price"
                     info="The latest stored GuruFocus closing price. The currency code is the company's GuruFocus exchange currency; the value is not converted to EUR."
-                    className="sticky left-[26rem] z-20 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page" />
+                    className="sticky left-[26rem] z-40 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page shadow-[6px_0_8px_-6px_var(--color-neutral-700)]" />
                   {model === 'dcf' ? RATES.map((rate) => (
                     <NumericHeader key={rate} sortKey={`rate:${rate}`}
                       label={`${(rate * 100).toFixed(0)}%`} className="bg-accent-500/10" />
@@ -815,7 +832,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
               <tbody className="divide-y divide-neutral-800/20">
                 {sortedRows.map((row) => (
                   <tr key={row.company_id} className="hover:bg-overlay/[0.03]">
-                    <td className="sticky left-0 z-[2] w-80 min-w-80 max-w-80 bg-page px-3 py-2">
+                    <td className="sticky left-0 z-20 w-80 min-w-80 max-w-80 border-l border-neutral-800/50 bg-page px-3 py-2">
                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="truncate font-medium text-fg-strong" title={row.name}>{row.name}</div>
@@ -828,7 +845,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                         </button>
                       </div>
                     </td>
-                    <td className="sticky left-80 z-[2] w-24 min-w-24 max-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums">
+                    <td className="sticky left-80 z-20 w-24 min-w-24 max-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums">
                       <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                         <span>{row.book_weight ? `${bookWeightPct(row.book_weight).toFixed(2)}%`
                           : portfolioId != null ? bookAnalysis === undefined ? '…' : '—'
@@ -855,7 +872,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
                             how={`This company's portfolio weight is ${row.weight_pct.toFixed(2)}%; funds, cash, bonds and uncovered companies are not redistributed over the visible company rows.`} />} />}
                       </span>
                     </td>
-                    <td className="sticky left-[26rem] z-[2] w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums">
+                    <td className="sticky left-[26rem] z-20 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums shadow-[6px_0_8px_-6px_var(--color-neutral-700)]">
                       <span className="grid grid-cols-[2.25rem_1fr_auto] items-baseline gap-1.5">
                         <span className="text-left text-[10px] text-fg-faint">{row.currency ?? ''}</span>
                         <span className="text-right">{row.src.price == null ? '—' : row.src.price.toFixed(2)}</span>
@@ -1129,6 +1146,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, o
             </table>
             </div>
           )}
+          </div>
         </div>
         <p className="shrink-0 border-t border-neutral-800/40 px-5 py-3 text-xs leading-relaxed text-fg-muted">
           {model === 'dcf'
