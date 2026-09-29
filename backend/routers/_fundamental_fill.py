@@ -438,7 +438,11 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
         #  Probe only the sentinel this run can act on. Each one is its own `metric_data`
         # read, so asking for three when the fill will only run one is two thirds of the work
         # thrown away — and `ind`'s sentinel is the expensive one (~535 rows per company).
-        probe = {"statements": ("fin",), "estimates": ("est",)}.get(feeds)
+        probe = {
+            "statements": ("fin",),
+            "estimates": ("est",),
+            "statements_estimates": ("fin", "est"),
+        }.get(feeds)
         todo = needs(comps, feeds=probe)
     #  Selection and action narrow together, and this is also where `force` is applied — which is
     # why force cannot widen the feeds. A forced run arrives with all three flags true; this clears
@@ -471,6 +475,12 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     elif feeds == "estimates":
         todo = [{**c, "need_fin": False, "need_ind": False}
                 for c in todo if c.get("need_est")]
+    # The EPS and OCF tabs need the filing and consensus feeds, but no indicators. Reverse DCF
+    # uses the same pair plus key ratios. Naming this combination prevents each row-level refresh
+    # from spending a third GuruFocus call on an indicator the active tab never reads.
+    elif feeds == "statements_estimates":
+        todo = [{**c, "need_ind": False}
+                for c in todo if c.get("need_fin") or c.get("need_est")]
     skipped = [(c, eligible(c)) for c in todo]
     work = [c for c, why in skipped if why is None]
     refused = [(c, why) for c, why in skipped if why]
@@ -493,6 +503,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
 
     scope = ("refetching every one" if force
              else "missing statements" if feeds == "statements"
+             else "missing statements or estimates" if feeds == "statements_estimates"
              else "missing a feed")
     if prices:
         scope += " (+ prices)"

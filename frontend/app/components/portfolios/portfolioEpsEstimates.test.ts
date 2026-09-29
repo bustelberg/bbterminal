@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   dcfGrowthCellLabel,
+  compactMillions,
   displayedWeightPct,
   epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear, epsInput,
   epsObservationForYear, epsYearHow, epsYearWhat,
+  historicalOcfMultipleWorking, ocfActualToEstimateCagr2025To2027,
+  ocfObservationForYear, priceToOcfMultiple,
   medianPeCalculation, peDeltaFromHistoricalMedian, priceToEpsMultiple,
   sourceInput,
 } from './PortfolioFundamentalModal';
@@ -14,6 +17,11 @@ const estimate = (year: number, value: number | null, code = 'annual_per_share_e
   numeric_value: value,
   recorded_at: '2026-09-28T08:00:00',
 });
+
+const ocfEstimate = (year: number, value: number | null) =>
+  estimate(year, value, 'annual_operating_cash_flow_estimate');
+const ocfActual = (year: number, value: number | null) =>
+  estimate(year, value, 'annuals__Cashflow Statement__Cash Flow from Operations');
 const actual = (year: number, value: number | null) =>
   estimate(year, value, 'annuals__Per Share Data__EPS without NRI');
 
@@ -95,6 +103,50 @@ describe('portfolio EPS estimate view', () => {
     expect(peDeltaFromHistoricalMedian(15, 20)).toBeCloseTo(-0.25);
     expect(peDeltaFromHistoricalMedian(24, null)).toBeNull();
     expect(peDeltaFromHistoricalMedian(null, 20)).toBeNull();
+  });
+});
+
+describe('portfolio OCF estimate view', () => {
+  it('uses compact real-world units for statement values stored in millions', () => {
+    expect(compactMillions(141_000, ' USD')).toBe('141bn USD');
+    expect(compactMillions(500)).toBe('500m');
+    expect(compactMillions(0.5)).toBe('500k');
+  });
+
+  it('prefers reported OCF and otherwise uses the matching fiscal-year estimate', () => {
+    const rows = [ocfActual(2025, 120), ocfEstimate(2025, 110), ocfEstimate(2026, 140)];
+    expect(ocfObservationForYear(rows, 2025)).toMatchObject({
+      kind: 'actual', metric: { numeric_value: 120 },
+    });
+    expect(ocfObservationForYear(rows, 2026)).toMatchObject({
+      kind: 'estimate', metric: { numeric_value: 140 },
+    });
+  });
+
+  it('compounds the selected FY2025-to-FY2027 OCF change', () => {
+    expect(ocfActualToEstimateCagr2025To2027([ocfActual(2025, 100), ocfEstimate(2027, 144)]))
+      .toBeCloseTo(0.2);
+  });
+
+  it('calculates current P/OCF from price times diluted shares divided by OCF', () => {
+    expect(priceToOcfMultiple(50, 20, 100)).toBe(10);
+    expect(priceToOcfMultiple(50, 20, -100)).toBeNull();
+    expect(priceToOcfMultiple(50, null, 100)).toBeNull();
+  });
+
+  it('takes the median of completed fiscal-year P/OCF observations', () => {
+    const metric = (year: number, value: number, code: string) =>
+      estimate(year, value, code);
+    const working = historicalOcfMultipleWorking([
+      metric(2024, 100, 'annuals__Per Share Data__Month End Stock Price'),
+      metric(2024, 10, 'annuals__Income Statement__Shares Outstanding (Diluted Average)'),
+      ocfActual(2024, 50),
+      metric(2025, 120, 'annuals__Per Share Data__Month End Stock Price'),
+      metric(2025, 10, 'annuals__Income Statement__Shares Outstanding (Diluted Average)'),
+      ocfActual(2025, 40),
+    ]);
+    expect(working.rows.map((row) => row.multiple)).toEqual([20, 30]);
+    expect(working.median).toBe(25);
   });
 });
 

@@ -759,7 +759,7 @@ async def fundamental_coverage(body: FundamentalCoverageRequest, request: Reques
 @router.post("/api/earnings/portfolio-company-metrics",
              response_model=PortfolioCompanyMetricsResponse)
 async def portfolio_company_metrics(body: FundamentalCoverageRequest):
-    """One bulk read for the portfolio company list and its Reverse-DCF inputs.
+    """One bulk read for the portfolio company list and its valuation inputs.
 
     This deliberately returns source observations rather than a second server-side valuation.
     The client runs the same ``reverseDcfSource`` and ``impliedGrowth`` functions as the existing
@@ -780,15 +780,17 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
 
     def _load() -> list[dict]:
         cids = sorted({int(r["company_id"]) for r in companies})
-        # The exact families read by ``egmInputs.reverseDcfSource``. Quarterly twins are needed
-        # for its TTM quorum; the four ``annual_*`` rows are the FY1 consensus base. Keeping this
-        # allowlist narrow avoids transferring decades of unrelated dashboard metrics.
+        # The exact families read by the four Fundamental tabs. Quarterly twins are needed for
+        # the Reverse DCF's TTM quorum; the ``annual_*`` rows supply consensus estimates. Keeping
+        # this allowlist narrow avoids transferring decades of unrelated dashboard metrics.
         annual = [
             "annuals__Income Statement__Shares Outstanding (Diluted Average)",
             "annuals__income_statement__Shares Outstanding (Diluted Average)",
             "annuals__Ratios__WACC %", "annuals__ratios__WACC %",
             "annuals__Cashflow Statement__Free Cash Flow",
             "annuals__cashflow_statement__Free Cash Flow",
+            "annuals__Cashflow Statement__Cash Flow from Operations",
+            "annuals__cashflow_statement__Cash Flow from Operations",
             "annuals__Cashflow Statement__Stock Based Compensation",
             "annuals__cashflow_statement__Stock Based Compensation",
             "annuals__Cashflow Statement__Capital Expenditure",
