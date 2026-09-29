@@ -185,7 +185,8 @@ class TestManagementDashboardForUsers:
                      "/api/asset-pipeline/basket/performance",
                      "/api/earnings/margin-inputs",
                      "/api/earnings/fundamental-blend-metrics",
-                     "/api/earnings/fundamental-coverage"):
+                     "/api/earnings/fundamental-coverage",
+                     "/api/earnings/portfolio-company-metrics"):
             assert _run(monkeypatch, "POST", path, "user") == (200, True), path
 
     def test_the_ingest_sibling_one_segment_down_is_named_in_full(self, monkeypatch):

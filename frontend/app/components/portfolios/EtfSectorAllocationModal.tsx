@@ -13,14 +13,18 @@ import {
   collapseEtfSectors, etfSectorPortfolioContribution, normalizedEtfSectorWeight,
 } from './etfSectorLookThrough';
 
-export default function EtfSectorAllocationModal({ isin, name, portfolioWeightPct, onClose }: {
-  isin: string; name: string; portfolioWeightPct: number; onClose: () => void;
+export default function EtfSectorAllocationModal({
+  isin, name, portfolioWeightPct, initialData, onClose,
+}: {
+  isin?: string; name: string; portfolioWeightPct: number;
+  initialData?: EtfSectorAllocationResponse; onClose: () => void;
 }) {
   const [lang] = useLang();
-  const [data, setData] = useState<EtfSectorAllocationResponse | null>(null);
+  const [data, setData] = useState<EtfSectorAllocationResponse | null>(initialData ?? null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (initialData || !isin) return undefined;
     const controller = new AbortController();
     void (async () => {
       try {
@@ -37,7 +41,7 @@ export default function EtfSectorAllocationModal({ isin, name, portfolioWeightPc
       }
     })();
     return () => controller.abort();
-  }, [isin]);
+  }, [initialData, isin]);
 
   const date = data?.as_of
     ? new Intl.DateTimeFormat(lang === 'nl' ? 'nl-NL' : 'en-GB', {
@@ -49,16 +53,21 @@ export default function EtfSectorAllocationModal({ isin, name, portfolioWeightPc
       providerSector: 'Oorspronkelijke sector', originalWeight: 'Origineel',
       ourSector: 'Onze sector', ourWeight: 'Onze fondsweging', currentWeight: 'Actueel gewicht',
       portfolioWeight: 'In portefeuille',
+      total: 'Totaal',
       holdingWeight: (weight: string) => `Dit fonds is ${weight}% van de actuele portefeuille.`,
       loading: 'Sectorwegingen laden', failed: 'Sectorverdeling kon niet worden geladen.' }
     : { title: 'Sector allocation', asOf: 'As of', source: 'Source', close: 'Close',
       providerSector: 'Original sector', originalWeight: 'Original weight',
       ourSector: 'Our sector', ourWeight: 'Our fund weight', currentWeight: 'Current weight',
       portfolioWeight: 'In portfolio',
+      total: 'Total',
       holdingWeight: (weight: string) => `This fund is ${weight}% of the current portfolio.`,
       loading: 'Loading sector weights', failed: 'Sector allocation could not be loaded.' };
   const mappedSectors = collapseEtfSectors(data?.sectors ?? []);
   const sourceTotal = mappedSectors.reduce((sum, row) => sum + row.weight_pct, 0);
+  const ourTotal = mappedSectors.reduce(
+    (sum, row) => sum + normalizedEtfSectorWeight(row.weight_pct, sourceTotal), 0,
+  );
 
   return (
     <PanelDialog onClose={onClose} labelledBy="etf-sector-allocation-title">
@@ -69,16 +78,18 @@ export default function EtfSectorAllocationModal({ isin, name, portfolioWeightPc
               {labels.title}
             </h4>
             <p className="mt-0.5 truncate text-xs text-fg-muted" title={name}>{name}</p>
-            <p className="mt-1 font-mono text-[11px] text-fg-faint">{isin}</p>
+            {isin && <p className="mt-1 font-mono text-[11px] text-fg-faint">{isin}</p>}
             <p className="mt-1 text-[11px] text-fg-faint">
               {labels.holdingWeight(portfolioWeightPct.toFixed(2))}
             </p>
-            {data && (
+            {data && data.source_url ? (
               <a href={data.source_url} target="_blank" rel="noreferrer"
                 className="mt-1 inline-flex text-[11px] text-accent-300 hover:text-accent-200 hover:underline">
                 {labels.source}: {data.source}
               </a>
-            )}
+            ) : data ? (
+              <p className="mt-1 text-[11px] text-fg-faint">{labels.source}: {data.source}</p>
+            ) : null}
           </div>
           <button type="button" onClick={onClose}
             className="cursor-pointer rounded-lg border border-neutral-700 px-3 py-1.5 text-xs text-fg-muted hover:border-accent-500/50 hover:text-accent-300">
@@ -157,6 +168,20 @@ export default function EtfSectorAllocationModal({ isin, name, portfolioWeightPc
                 </div>
                 );
               })}
+              </div>
+              <div className="mt-3 grid grid-cols-[minmax(9rem,1.2fr)_5.25rem_1.5rem_minmax(9rem,1.2fr)_minmax(6rem,1fr)_5.25rem_5.75rem_5.75rem] items-center gap-3 border-t border-neutral-800/40 pt-2 text-xs font-semibold">
+                <span className="text-fg-muted">{labels.total}</span>
+                <span className="text-right font-mono tabular-nums text-fg-strong">
+                  {sourceTotal.toFixed(2)}%
+                </span>
+                <span aria-hidden />
+                <span className="text-fg-muted">{labels.total}</span>
+                <span aria-hidden />
+                <span className="text-right font-mono tabular-nums text-fg-strong">
+                  {ourTotal.toFixed(2)}%
+                </span>
+                <span aria-hidden />
+                <span aria-hidden />
               </div>
             </div>
           )}

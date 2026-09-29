@@ -70,8 +70,8 @@ export function refreshScopes(scope: RefreshScope, additional?: RefreshScope): R
     ? [scope, additional] : [scope];
 }
 
-export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, everything,
-  allPeriods = false, broadcast = true }: {
+export default function PortfolioFundamentalsRefresh({ scope, additionalScope, onDone, label, jobTitle, everything,
+  allPeriods = false, broadcast = true, prominent = false, showNote = true, onProgress }: {
   scope: RefreshScope;
   /** A selected benchmark/comparison refreshed after the primary scope by the same button. */
   additionalScope?: RefreshScope;
@@ -94,7 +94,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    * to it — Long Equity's forecast leg is the `est` feed too. A button whose behaviour depended on
    * which tab happened to be open would be a different button wearing the same words.
    *
-   *  The cost is ~4 CALLS PER COMPANY INSTEAD OF 1 (three feeds plus a price fetch), which is why
+   *  The cost is ~5 CALLS PER COMPANY INSTEAD OF 1 (three feeds, the key-ratios/FY1 FCF feed and
+   * a price fetch), which is why
    * this is opt-in rather than the default: the drill-down's per-row press and the index fill have
    * their own, narrower reasons to exist, and a four-figure index spend is not one of them.
    */
@@ -103,6 +104,12 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
   allPeriods?: boolean;
   /** Notify every mounted fundamentals card. A drill-down that reloads itself keeps this false. */
   broadcast?: boolean;
+  /** Filled header-action treatment used beside a segmented slider. */
+  prominent?: boolean;
+  /** Show the scope/coverage receipt beside the button. Dense modal headers can leave it to toast. */
+  showNote?: boolean;
+  /** Reader-facing title in the job toast; defaults to the scope name. */
+  jobTitle?: string;
   /** Called when the fill ends without failing, so the caller can re-read what it wrote. */
   /**  OPTIONAL, AND THE CACHE DROP IS NOT. `invalidateReadCache` runs beside every call of
    *  this, unconditionally — that is what makes the new data reachable. `onDone` is only for a
@@ -110,6 +117,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
    *  modal had one for the Old-charts tab and no longer needs it; a required no-op there would
    *  read as a caller that forgot to do something. */
   onDone?: () => void;
+  /** Called after a company-sized unit of work lands, so an open table can show new data mid-fill. */
+  onProgress?: () => void;
   /**
    * What the button says at rest. Default: "Refresh fundamentals" (the tab row, where it is the
    * only such control on screen), or "Fetch missing fundamentals" for an index.
@@ -142,6 +151,16 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
   const [jobId, setJobId] = useState<string | null>(null);
   /** Cancel has been asked for and the workers have not stopped yet — see `cancel`. */
   const [cancelling, setCancelling] = useState(false);
+  const primaryJobTitle = jobTitle ?? `${scope.name} fundamentals`;
+
+  // A fill writes one company at a time. Drop the GET cache before asking an on-screen reader to
+  // re-read, otherwise the reload can faithfully return the pre-fill response until the job ends.
+  // Informational stream frames have no `done`; only a completed unit can have changed the table.
+  const showPartialResult = (progress: { done?: number }) => {
+    if (typeof progress.done !== 'number') return;
+    invalidateReadCache(`fundamentals fill updated ${scope.name}`);
+    onProgress?.();
+  };
 
   /**
    * The server's identity for the work THIS button does. `null` where there is no stable one.
@@ -180,7 +199,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
     setNote('already running — this button now stops it');
     //  Follow it to the end, or `busy`/`jobId` never clear and the control is stuck on Cancel
     // long after the run finished.
-    void watchJob(live.id, `${indexedScope?.name ?? scope.name} fundamentals`).then((job) => {
+    void watchJob(live.id, primaryJobTitle, 0, undefined,
+      showPartialResult).then((job) => {
       if (job.status !== 'failed') {
         invalidateReadCache(`fundamentals fill finished for ${indexedScope?.name ?? scope.name}`);
         if (broadcast) window.dispatchEvent(new Event('bb:fundamentals-finished'));
@@ -201,7 +221,7 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
     try {
       //  `feeds=all` NARROWS NOTHING and `prices=true` adds the ingest that is not a feed — see
       // the `everything` prop for what the four things are and which chart each one was missing.
-      const q = `?force=true&only_due=${allPeriods ? 'false' : 'true'}${everything ? '&feeds=all&prices=true' : ''}`;
+      const q = `?force=true&only_due=${allPeriods ? 'false' : 'true'}${everything ? '&feeds=all&key_ratios=true&prices=true' : ''}`;
       // A company and a basket post the same body — one holding or many. `/api/airs/basket/…` is
       // already the codebase's shape for "an ad-hoc set of holdings"; a single stock is a set of
       // one, which is exactly how `/api/airs/basket/analysis` treats it.
@@ -221,11 +241,12 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
             + `/fundamentals/ingest/job${q}`;
       const { id, done, body } = await startJob(
         url,
-        `${scope.name} fundamentals`,
+        primaryJobTitle,
         holdings
           ? { headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ holdings, label: scope.name }) }
-          : undefined);
+          : undefined,
+        showPartialResult);
       setJobId(id);
       //  The unreached remainder is two different absences, and merging them makes a correct
       // Answer look broken. Measured: AITopSelectie reaches 20 of 20, while BUS_Neutraal_FX reaches
@@ -270,7 +291,7 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
         // One press, two deliberately SERIAL jobs. Both use the global GuruFocus rate limiter, so
         // parallel jobs cannot finish sooner and would make both progress cards appear stalled.
         const extraQ = `?force=true&only_due=${allPeriods ? 'false' : 'true'}`
-          + `${everything ? '&feeds=all&prices=true' : ''}`;
+          + `${everything ? '&feeds=all&key_ratios=true&prices=true' : ''}`;
         const extraHoldings = extra.kind === 'company' ? [{ isin: extra.isin }]
           : extra.kind === 'basket' ? extra.holdings.map((h) => ({ isin: h.isin })) : null;
         const extraUrl = extra.kind === 'universe'
@@ -284,7 +305,8 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
           extraUrl, `${extra.name} fundamentals`, extraHoldings
             ? { headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ holdings: extraHoldings, label: extra.name }) }
-            : undefined);
+            : undefined,
+          showPartialResult);
         setJobId(extraStarted.id);
         const extraJob = await extraStarted.done;
         if (extraJob.summary?.includes(' — unavailable:')) {
@@ -355,8 +377,10 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
       {/* The count sits LEFT of the button so the button keeps a fixed position as the text
           arrives — a control that slides sideways when its own result lands is a control you
           have to chase with the pointer. */}
-      <span className="text-[11px] leading-snug text-fg-faint whitespace-normal break-words max-w-[22rem]"
-        title={note ?? undefined}>{note}</span>
+      {showNote && (
+        <span className="text-[11px] leading-snug text-fg-faint whitespace-normal break-words max-w-[22rem]"
+          title={note ?? undefined}>{note}</span>
+      )}
       {/*  ONE CONTROL, TWO STATES — the button BECOMES the Cancel while the fill runs. The toast
           carries a Cancel too and both are correct, but a fill is minutes and the reader who wants
           to stop it is looking at the button they just pressed, not at the corner of the screen.
@@ -390,10 +414,13 @@ export default function PortfolioFundamentalsRefresh({ scope, additionalScope, o
                 + 'company whose next quarter cannot be out yet.')
             + ' Progress, the running quota spend and a Cancel appear in the pop-ups bottom-right, '
             + 'and carry on if you close this.' + extraTitle))}
-        className={`text-[12px] px-2.5 py-1 rounded-lg border transition-colors
+        className={`${prominent ? 'rounded-md px-4 py-1.5 text-sm font-medium shadow-sm'
+          : 'rounded-lg px-2.5 py-1 text-[12px]'} border transition-colors
                     disabled:opacity-50 disabled:cursor-wait whitespace-nowrap shrink-0 ${jobId
-          ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'
-          : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
+          ? 'border-warn-500/50 bg-warn-500/10 text-warn-300 hover:bg-warn-500/15'
+          : prominent
+            ? 'border-accent-500 bg-accent-600 text-white hover:bg-accent-500'
+            : 'border-neutral-700 text-fg-muted hover:bg-overlay/5'}`}>
         {/*  THE STATES OUTRANK THE CALLER'S LABEL. Whatever the button is named at rest, while it
             runs it says what pressing it will now DO — a control that keeps its old name while its
             action has changed underneath is the trap this replaced.

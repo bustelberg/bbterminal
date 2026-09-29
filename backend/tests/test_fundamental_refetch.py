@@ -64,6 +64,7 @@ def calls(monkeypatch):
 
     monkeypatch.setattr(earnings, "fetch_financials", _make("fin"))
     monkeypatch.setattr(earnings, "fetch_analyst_estimates", _make("est"))
+    monkeypatch.setattr(earnings, "fetch_key_ratios", _make("key"))
     monkeypatch.setattr(earnings, "fetch_indicators", _make("ind"))
     return seen
 
@@ -90,6 +91,13 @@ class TestForceDoesNotWidenTheFeeds:
         fill, where it costs two extra API calls per constituent for nothing on screen."""
         ingest_company(_company(need_fin=True, need_est=False, need_ind=False), force=True)
         assert [t for t, _ in calls] == ["fin", "est", "ind"]
+
+    def test_the_valuation_fill_includes_key_ratios_after_estimates(self, calls):
+        """The FY1 FCF payload borrows its period dates from estimates, so order is data."""
+        ingest_company(_company(), force=True, refresh_cache=True, include_key_ratios=True)
+        assert calls == [
+            ("fin", True), ("est", True), ("key", True), ("ind", True),
+        ]
 
 
 class TestTheStorageCacheIsOnlyBypassedWhenAsked:

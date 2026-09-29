@@ -4500,7 +4500,8 @@ class PortfolioFundamentalsJob(BaseModel):
              response_model=PortfolioFundamentalsJob)
 async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = True,
                                             only_due: bool = True, feeds: str = "statements",
-                                            limit: int = 0, prices: bool = False):
+                                            limit: int = 0, prices: bool = False,
+                                            key_ratios: bool = False):
     """Refresh GuruFocus fundamentals for every company this model portfolio holds.
 
     The portfolio-scoped twin of the benchmark fill.  IT IS THE SAME FILL, not a copy — see
@@ -4550,7 +4551,7 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
         # and charts the multiple off the daily closes, neither of which is one of the three
         # GuruFocus fundamentals feeds. See `_refresh_prices`.
         return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
-                                only_due=only_due, prices=prices)
+                                only_due=only_due, prices=prices, key_ratios=key_ratios)
 
     job, reused = job_registry.start("fundamentals.portfolio", name, _work)
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),
@@ -4562,7 +4563,8 @@ async def ingest_portfolio_fundamentals_job(portfolio_id: int, force: bool = Tru
              response_model=PortfolioFundamentalsJob)
 async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
                                          only_due: bool = True, feeds: str = "statements",
-                                         limit: int = 0, prices: bool = False):
+                                         limit: int = 0, prices: bool = False,
+                                         key_ratios: bool = False):
     """The same fill, for a basket of holdings rather than a stored model portfolio.
 
      IT EXISTS BECAUSE MOST BOOKS ON /management-dashboard HAVE NO FIXED MODEL. `openModal` in
@@ -4592,7 +4594,7 @@ async def ingest_basket_fundamentals_job(req: BasketRequest, force: bool = True,
         # neither working, and in opposite directions — a loud 500 on the rarer path and a silent
         # no-op on the common one.
         return fill_company_ids(ctx, name, ids, feeds=feeds, force=force, limit=limit,
-                                only_due=only_due, prices=prices)
+                                only_due=only_due, prices=prices, key_ratios=key_ratios)
 
     job, reused = job_registry.start("fundamentals.basket", name, _work)
     return {"job_id": job.id, "label": name, "holdings": holdings, "reachable": len(ids),

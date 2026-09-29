@@ -72,6 +72,16 @@ describe('medianPE', () => {
     expect(medianPE(rows, 5)).toBeCloseTo(40, 6);
   });
 
+  it('does not let a current partial-year close displace a completed fiscal year', () => {
+    const rows = [2021, 2022, 2023, 2024, 2025].flatMap((y, i) => [
+      m(PRICE, `${y}-12-31`, 100 + i * 100), m(EPS, `${y}-12-31`, 10),
+    ]);
+    rows.push(m(PRICE, '2026-09-17', 999)); // current close; FY2026 EPS is not reported
+    const working = medianPEWorking(rows, 5);
+    expect(working.rows.map((row) => row.year)).toEqual([2021, 2022, 2023, 2024, 2025]);
+    expect(working.median).toBeCloseTo(30, 6);
+  });
+
   it('is null when nothing is computable', () => {
     expect(medianPE([])).toBeNull();
   });

@@ -10,6 +10,7 @@ import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
+import PortfolioFundamentalModal from './portfolios/PortfolioFundamentalModal';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
@@ -229,6 +230,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    *  Refresh fires the identical scan the row's does. */
   const [analyse, setAnalyse] = useState<
     { id?: number; name: string; basket?: Basket; pf?: string } | null>(null);
+  const [fundamental, setFundamental] = useState<
+    { id?: number; name: string; basket?: Basket } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
@@ -340,9 +343,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   };
 
   /**
-   * What Analyse should open for a row — the model portfolio if it has one, else the book's OWN
-   * holdings. (Fundamental buttons used to share this — one per row, one per holding and one per
-   * segment. All were removed 2026-08-04; this panel opens Analyse only.)
+   * What Analyse and the portfolio-level Fundamental list should open for a row — the model
+   * portfolio if it has one, else the book's OWN holdings. The old per-holding and per-segment
+   * Fundamental buttons remain gone; this new sibling is deliberately one company list per book.
    *
    *  It never needed a model portfolio, and wiring it to one cost days. It accepts a
    * plain basket of `{isin, weight}` — `PortfolioAnalysisModal`'s own comment says "a basket is
@@ -357,13 +360,17 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    *
    * The ISINs come from `/isins`, which an expanded row has already loaded; otherwise one fetch.
    */
-  const openModal = async (r: AirsPortfolioOverview) => {
-    const set = setAnalyse;
+  const openModal = async (r: AirsPortfolioOverview,
+    destination: 'analyse' | 'fundamental' = 'analyse') => {
     //  The portefeuille code travels with the modal. `refreshOne` is keyed on it, not on the
     // fixed portfolio id, so without it the modal's Refresh has nothing to call — the row and the
     // modal must fire the identical scan.
     if (r.fixed_portfolio_id != null) {
-      set({ id: r.fixed_portfolio_id, name: r.name, pf: r.dynamic_portefeuille });
+      if (destination === 'analyse') {
+        setAnalyse({ id: r.fixed_portfolio_id, name: r.name, pf: r.dynamic_portefeuille });
+      } else {
+        setFundamental({ id: r.fixed_portfolio_id, name: r.name });
+      }
       return;
     }
     const p = r.dynamic_portefeuille;
@@ -385,7 +392,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         setRefreshMsg({ text: `${r.name}: no ISIN-bearing holdings to analyse.`, kind: 'warn' });
         return;
       }
-      set({ name: r.name, basket: { holdings, label: r.name }, pf: r.dynamic_portefeuille });
+      const target = { name: r.name, basket: { holdings, label: r.name } };
+      if (destination === 'analyse') {
+        setAnalyse({ ...target, pf: r.dynamic_portefeuille });
+      } else {
+        setFundamental(target);
+      }
     } catch (e) {
       console.warn(`[AIRS expand] could not build a basket for ${p}`, e);
       setRefreshMsg({ text: `${r.name}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
@@ -1110,6 +1122,18 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
                           )}
+                          {canAnalyse(r) && (
+                            <button type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void openModal(r, 'fundamental');
+                              }}
+                              disabled={opening === r.dynamic_portefeuille}
+                              title="List the portfolio's operating companies with the Reverse DCF inputs and implied-growth sensitivity."
+                              className="inline-flex items-center text-[13px] px-2.5 py-1 rounded-md border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 disabled:opacity-50">
+                              {opening === r.dynamic_portefeuille ? '…' : 'Fundamental'}
+                            </button>
+                          )}
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
                               not also toggle the row's holdings. `items-stretch` on the wrapper keeps
                               this exactly the height of the Analyse button beside it. */}
@@ -1336,6 +1360,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           cancelTitle="Cancel this re-scan. It stops at the next account boundary; everything already downloaded is kept, and the toast names the books left un-refreshed."
           refreshSeq={refreshSeq}
           onClose={() => setAnalyse(null)} />
+      )}
+      {fundamental && (
+        <PortfolioFundamentalModal key={fundamental.id ?? fundamental.name}
+          name={fundamental.name} portfolioId={fundamental.id} basket={fundamental.basket}
+          onClose={() => setFundamental(null)} />
       )}
       {showBands && (
         <AllocationBandsModal canEdit={isAdmin} onClose={() => setShowBands(false)} />

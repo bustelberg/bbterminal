@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { INFO_ICON } from '../../lib/infoIcon';
 import { AboutCard } from '../../lib/tipCard';
 
@@ -154,7 +155,7 @@ export default function InfoTip({ text, content, children, className = "", wide 
       >
         {children ?? 'i'}
       </span>
-      {visible && (
+      {visible && typeof document !== 'undefined' && createPortal(
         <span
           ref={tooltipRef}
           // A click/mousedown inside must not bubble to a row handler, and (when pinned) it must
@@ -199,7 +200,8 @@ export default function InfoTip({ text, content, children, className = "", wide 
           {/*  Plain text goes through the SAME card shell the provenance tooltip uses — one edit
               here instead of 44 call sites, and no tooltip can drift back to a bare paragraph. */}
           {content ?? (text ? <AboutCard text={text} /> : null)}
-        </span>
+        </span>,
+        document.body,
       )}
     </span>
   );

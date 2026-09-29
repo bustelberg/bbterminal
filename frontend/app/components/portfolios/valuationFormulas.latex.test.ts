@@ -20,7 +20,7 @@ import katex from 'katex';
 import { type EgmBridge } from './egm';
 import {
   bridgeParts, workedCashFlowValued, workedEgmReturn, workedFairValue, workedForwardFcf,
-  workedGrowthCapex, workedImpliedGrowth, workedImpliedPrice, workedMarketCap, workedMaxPE,
+  workedEgmTotalReturn, workedGrowthCapex, workedImpliedGrowth, workedImpliedPrice, workedMarketCap, workedMaxPE,
   workedFairValueGap, workedPriceMove,
 } from './valuationFormulas';
 
@@ -59,6 +59,7 @@ const BRIDGE: EgmBridge = {
 describe('every Deep Valuation expression parses in strict mode', () => {
   it('the EGM return, implied price and price move', () => {
     expect(() => render(workedEgmReturn(BRIDGE, 10, '+5.8%'))).not.toThrow();
+    expect(() => render(workedEgmTotalReturn(0.0577, 10, '+75.2%'))).not.toThrow();
     expect(() => render(workedImpliedPrice(220.5, BRIDGE, 10, 375.42))).not.toThrow();
     expect(() => render(workedPriceMove(375.42, 220.5, '+70.3%'))).not.toThrow();
     expect(() => render(workedFairValueGap(199, 224.41, '-11.3%'))).not.toThrow();
@@ -120,6 +121,7 @@ describe('the percent signs survive', () => {
   it('no builder leaves a bare percent', () => {
     for (const tex of [
       workedEgmReturn(BRIDGE, 10, '+5.8%'),
+      workedEgmTotalReturn(0.0577, 10, '+75.2%'),
       workedPriceMove(375.42, 220.5, '+70.3%'),
       workedFairValueGap(199, 224.41, '-11.3%'),
       workedImpliedGrowth({
@@ -154,6 +156,7 @@ describe('a missing operand collapses the line rather than guessing', () => {
     expect(workedFairValueGap(null, 224.41, '-11.3%')).toBe('');
     expect(workedFairValueGap(199, 0, '-11.3%')).toBe('');
     expect(workedImpliedPrice(null, BRIDGE, 10, 375.42)).toBe('');
+    expect(workedEgmTotalReturn(null, 10, '+75.2%')).toBe('');
   });
 
   it(' and refuses a non-positive cash flow — there is no growth rate that works', () => {

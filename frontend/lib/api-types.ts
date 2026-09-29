@@ -5226,6 +5226,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/portfolio-company-metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Portfolio Company Metrics
+         * @description One bulk read for the portfolio company list and its Reverse-DCF inputs.
+         *
+         *     This deliberately returns source observations rather than a second server-side valuation.
+         *     The client runs the same ``reverseDcfSource`` and ``impliedGrowth`` functions as the existing
+         *     single-company Deep Valuation screen, so the portfolio table cannot acquire a subtly different
+         *     definition of FCF, WACC, or implied growth. Funds, cash and bonds remain visible in ``coverage``
+         *     but are not rows: a reverse DCF belongs to an operating company, not to its wrapper.
+         */
+        post: operations["portfolio_company_metrics_api_earnings_portfolio_company_metrics_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/portfolio-revenue-matrix": {
         parameters: {
             query?: never;
@@ -12506,6 +12532,50 @@ export interface components {
              */
             portfolio_pct?: number;
         };
+        /** PortfolioCompanyMetric */
+        PortfolioCompanyMetric: {
+            /** Is Prediction */
+            is_prediction?: boolean | null;
+            /** Metric Code */
+            metric_code: string;
+            /** Numeric Value */
+            numeric_value?: number | null;
+            /** Recorded At */
+            recorded_at?: string | null;
+            /** Target Date */
+            target_date: string;
+        };
+        /**
+         * PortfolioCompanyMetricsResponse
+         * @description The operating companies in a book, with the inputs used by the existing Reverse DCF.
+         */
+        PortfolioCompanyMetricsResponse: {
+            /** Coverage */
+            coverage: {
+                [key: string]: unknown;
+            };
+            /** Rows */
+            rows: components["schemas"]["PortfolioCompanyMetricsRow"][];
+        };
+        /** PortfolioCompanyMetricsRow */
+        PortfolioCompanyMetricsRow: {
+            /** Company Id */
+            company_id: number;
+            /** Currency */
+            currency?: string | null;
+            /** Isin */
+            isin: string;
+            /** Metrics */
+            metrics: components["schemas"]["PortfolioCompanyMetric"][];
+            /** Name */
+            name: string;
+            /** Source Fetched At */
+            source_fetched_at: {
+                [key: string]: string | null;
+            };
+            /** Weight Pct */
+            weight_pct: number;
+        };
         /**
          * PortfolioConcentration
          * @description `C₁₀ = Σ w₍ᵢ₎` and `HHI = Σ wᵢ²` — see `routers/_portfolio_concentration.py`.
@@ -15324,6 +15394,7 @@ export interface operations {
                 feeds?: string;
                 limit?: number;
                 prices?: boolean;
+                key_ratios?: boolean;
             };
             header?: never;
             path?: never;
@@ -15724,6 +15795,7 @@ export interface operations {
                 feeds?: string;
                 limit?: number;
                 prices?: boolean;
+                key_ratios?: boolean;
             };
             header?: never;
             path: {
@@ -20308,6 +20380,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    portfolio_company_metrics_api_earnings_portfolio_company_metrics_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PortfolioCompanyMetricsResponse"];
                 };
             };
             /** @description Validation Error */

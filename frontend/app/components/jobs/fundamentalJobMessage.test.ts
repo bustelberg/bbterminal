@@ -18,7 +18,21 @@ describe('fundamentalJobMessage', () => {
 
   it('replaces long dash separators without shortening the message', () => {
     expect(fundamentalJobMessage('AEX — 2 companies refetched — complete')).toBe(
-      'AEX. 2 companies refetched. complete',
+      '2 companies refreshed.',
     );
+  });
+
+  it('names the companies that could not be refreshed, without implementation counters', () => {
+    expect(fundamentalJobMessage(
+      'Bustelberg Offensief visible companies. 6 companies refetched, 1 failed, 20 data points, '
+      + '54,395 already stored, 25 API calls · reported EPS 7/7 · FCF/share 3/7 · '
+      + 'failures: BE Semiconductor Industries NV: GuruFocus did not provide financial statements. '
+      + 'Please try again later. · prices: 7 refreshed (0 row(s))',
+    )).toBe('6 companies refreshed. Could not refresh: BE Semiconductor Industries NV.');
+  });
+
+  it('uses a reader-facing status for an unchanged company', () => {
+    expect(fundamentalJobMessage('[3/7] ASML Holding NV â€” no change (10,503 rows already stored)'))
+      .toBe('[3/7] ASML Holding NV. up to date');
   });
 });

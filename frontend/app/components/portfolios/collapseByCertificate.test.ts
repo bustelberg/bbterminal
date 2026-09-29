@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   airsRiskHoldings, airsRiskWeightContext, applyCompanySectorOverride, collapseByCertificate,
   holdingsForCertificateScope, individualStocksBasket, sectorDiffersFromOriginal, splitByRoute,
-  syntheticAirsName, syntheticBasket,
+  syntheticAirsName, syntheticBasket, syntheticSectorAllocation,
 } from './PortfolioAnalysisModal';
 import { holdingsOnRiskBasis } from './ActiveSharePanel';
 
@@ -67,13 +67,14 @@ describe('collapseByCertificate', () => {
   it('keeps a folded TopSelectie in Stock ETFs when its first underlying row is cash', () => {
     const rows = [
       {
-        name: 'Liquiditeiten', bucket: 'Cash', is_fund: false, weight_now_pct: 2,
+        name: 'Liquiditeiten', bucket: 'Cash', sector: 'Cash', is_fund: false, weight_now_pct: 2,
         current_value_eur: 200, start_value_eur: 200, via_names: ['StarTopSelectie Offensief'],
         via_holding_names: ['Star Selection Index'],
         sources: [{ label: 'StarTopSelectie Offensief', book: 'StarTopSelectie OFF DYN' }],
       },
       {
-        name: 'NVIDIA', isin: 'US-NVDA', bucket: 'Equity', is_fund: false, weight_now_pct: 98,
+        name: 'NVIDIA', isin: 'US-NVDA', bucket: 'Equity', sector: 'Technology',
+        sector_default: 'Information Technology', is_fund: false, weight_now_pct: 98,
         current_value_eur: 9800, start_value_eur: 9000, via_names: ['StarTopSelectie Offensief'],
         via_holding_names: ['Star Selection Index'],
         sources: [{ label: 'StarTopSelectie Offensief', book: 'StarTopSelectie OFF DYN' }],
@@ -96,6 +97,31 @@ describe('collapseByCertificate', () => {
       holdings: [{ isin: 'US-NVDA', weight: 98, name: 'NVIDIA' }],
     });
     expect(syntheticAirsName(folded)).toBe('StarTopSelectie OFF DYN');
+    expect(syntheticSectorAllocation(folded)).toMatchObject({
+      name: 'StarTopSelectie Offensief',
+      source: 'AIRS look-through',
+      sectors: [
+        {
+          sector: 'Technology', weight_pct: 100,
+          provider_weights: [{ sector: 'Information Technology', weight_pct: 100 }],
+        },
+      ],
+    });
+  });
+
+  it('builds a sector mix for every folded TopSelectie, including a one-leg certificate', () => {
+    const [folded] = collapseByCertificate([{
+      name: 'Banco', isin: 'BR-BANCO', bucket: 'Equity', sector: 'Financials',
+      is_fund: false, weight_now_pct: 4, current_value_eur: 400,
+      via_names: ['LatAmTopSelectie'], via_holding_names: ['LatAm Certificate'],
+      sources: [{ label: 'LatAmTopSelectie', value_eur: 400, weight_now_pct: 4 }],
+    }] as never);
+
+    expect(syntheticSectorAllocation(folded)?.sectors).toEqual([{
+      sector: 'Financials', weight_pct: 100,
+      provider_sectors: ['Financials'],
+      provider_weights: [{ sector: 'Financials', weight_pct: 100 }],
+    }]);
   });
 
   it('keeps duplicate selected positions in the Fundamental basket coverage count', () => {
