@@ -911,7 +911,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
         </div>
 
         <div className="min-h-0 flex-1 overflow-hidden px-6">
-          <div className="h-full overflow-auto">
+          <div className="h-full overflow-hidden">
           {!data && !error && (
             <div className="flex min-h-64 items-center justify-center">
               <p className="text-sm text-fg-muted">
@@ -924,16 +924,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
             <p className="p-5 text-sm text-fg-muted">No operating companies with stored fundamentals were found.</p>
           )}
           {rows.length > 0 && (
-            <div className="my-4 min-w-max border-y border-r border-neutral-800/50">
-            <table className="isolate w-full border-separate border-spacing-0 text-xs">
+            // This frame, rather than an ancestor outside the table, owns both scroll axes. Its
+            // border therefore never travels away from the sticky header: frame, header and body
+            // remain one object while only the rows/columns inside it move.
+            <div className="my-4 h-[calc(100%-2rem)] overflow-auto border border-neutral-800/50">
+            <table className="isolate min-w-max w-full border-separate border-spacing-0 text-xs">
               {/* The model-colour cells use translucent tints. Give the sticky header group its
                   own opaque surface so scrolled body rows cannot show through those tints. */}
-              <thead className="sticky top-4 z-30 bg-page text-xs uppercase tracking-wide text-fg-faint">
+              <thead className="sticky top-0 z-30 bg-page text-xs uppercase tracking-wide text-fg-faint">
                 <tr className="border-b border-neutral-800/40">
                   {/* These identifying columns are the subject, not the selected valuation model. They
                       stay pinned and unchanged while the switch replaces only the coloured block
                       to their right. Fixed widths make the sticky offsets exact. */}
-                  <th className="sticky left-0 z-40 w-12 min-w-12 max-w-12 border-l border-neutral-800/50 bg-page px-2 py-2 text-right font-medium"
+                  <th className="sticky left-0 z-40 w-12 min-w-12 max-w-12 bg-page px-2 py-2 text-right font-medium"
                     aria-label="Row number">
                     #
                   </th>
