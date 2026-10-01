@@ -15015,6 +15015,17 @@
             ],
             "title": "Index Universe"
           },
+          "scheduled_strategy_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Strategy Id"
+          },
           "score_normalization": {
             "default": "minmax",
             "title": "Score Normalization",
@@ -29817,6 +29828,125 @@
           }
         },
         "summary": "Prices At",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/sector-timeline": {
+      "get": {
+        "description": "Daily Yahoo-close sector rankings for the liquid equity asset universe.",
+        "operationId": "get_sector_timeline_api_momentum_sector_timeline_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "days",
+            "required": false,
+            "schema": {
+              "default": 252,
+              "maximum": 756,
+              "minimum": 20,
+              "title": "Days",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 1200,
+              "minimum": 100,
+              "title": "Max Assets",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sector Timeline",
+        "tags": [
+          "momentum"
+        ]
+      }
+    },
+    "/api/momentum/sector-timeline/detail": {
+      "get": {
+        "description": "Explain one daily sector rank, including every company in its mean.",
+        "operationId": "get_sector_timeline_detail_api_momentum_sector_timeline_detail_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "date",
+            "required": true,
+            "schema": {
+              "title": "Date",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sector",
+            "required": true,
+            "schema": {
+              "minLength": 1,
+              "title": "Sector",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_assets",
+            "required": false,
+            "schema": {
+              "default": 600,
+              "maximum": 1200,
+              "minimum": 100,
+              "title": "Max Assets",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sector Timeline Detail",
         "tags": [
           "momentum"
         ]
