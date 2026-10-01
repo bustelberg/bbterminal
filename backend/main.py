@@ -21,6 +21,7 @@ way.
 
 import logging
 import os
+import threading
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -229,6 +230,23 @@ def _reset_stale_backfills() -> None:
 def _arm_blend_prewarm() -> None:
     from routers import _blend_prewarm  # noqa: PLC0415
     _blend_prewarm.arm()
+
+
+@app.on_event("startup")
+def _arm_sector_timeline_prewarm() -> None:
+    """Warm /momentum off the request path after a deploy or worker restart."""
+    if os.environ.get("SECTOR_TIMELINE_PREWARM", "1").strip().lower() in {"0", "false", "off"}:
+        return
+
+    def _warm() -> None:
+        try:
+            from routers.momentum.sector_timeline import get_sector_timeline  # noqa: PLC0415
+            get_sector_timeline(days=42, max_assets=600)
+            logging.getLogger(__name__).info("[momentum] sector timeline prewarmed")
+        except Exception as exc:  # noqa: BLE001 — a warm cache must never block serving
+            logging.getLogger(__name__).warning("[momentum] sector timeline prewarm failed: %s", exc)
+
+    threading.Thread(target=_warm, name="sector-timeline-prewarm", daemon=True).start()
 
 @app.on_event("startup")
 async def _size_io_thread_pool() -> None:
