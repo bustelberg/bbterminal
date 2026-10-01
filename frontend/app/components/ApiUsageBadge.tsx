@@ -6,7 +6,7 @@ import { INFO_ICON } from '../../lib/infoIcon';
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
 import { useEventStream } from '../../lib/hooks/useEventStream';
-const LIMIT = 20000;
+const LIMIT = 60000;
 
 type Usage = { usa: number; europe: number; asia: number; month: string };
 
@@ -86,9 +86,9 @@ const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_pr
 
   if (!usage) return null;
 
-  const usaPct = (usage.usa / LIMIT) * 100;
-  const eurPct = (usage.europe / LIMIT) * 100;
-  const asiaPct = ((usage.asia ?? 0) / LIMIT) * 100;
+  const total = usage.usa + usage.europe + (usage.asia ?? 0);
+  const sessionTotal = session.usa + session.europe + session.asia;
+  const totalPct = (total / LIMIT) * 100;
 
   const barColor = (pct: number) =>
     pct >= 90 ? 'bg-neg-500' : pct >= 70 ? 'bg-warn-500' : 'bg-accent-500';
@@ -98,28 +98,11 @@ const ApiUsageBadge = forwardRef<ApiUsageBadgeHandle>(function ApiUsageBadge(_pr
       <span className="text-fg-subtle font-medium">API</span>
       <ApiInfoTip />
       <div className="flex items-center gap-1.5">
-        <span className="text-fg-muted">USA</span>
-        <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${barColor(usaPct)}`} style={{ width: `${Math.min(usaPct, 100)}%` }} />
+        <div className="w-32 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${barColor(totalPct)}`} style={{ width: `${Math.min(totalPct, 100)}%` }} />
         </div>
-        <span className="text-fg-muted font-mono">{usage.usa.toLocaleString()}/{(LIMIT / 1000)}k</span>
-        {session.usa > 0 && <span className="text-accent-400 font-mono">+{session.usa}</span>}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <span className="text-fg-muted">EU</span>
-        <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${barColor(eurPct)}`} style={{ width: `${Math.min(eurPct, 100)}%` }} />
-        </div>
-        <span className="text-fg-muted font-mono">{usage.europe.toLocaleString()}/{(LIMIT / 1000)}k</span>
-        {session.europe > 0 && <span className="text-accent-400 font-mono">+{session.europe}</span>}
-      </div>
-      <div className="flex items-center gap-1.5">
-        <span className="text-fg-muted">Asia</span>
-        <div className="w-20 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${barColor(asiaPct)}`} style={{ width: `${Math.min(asiaPct, 100)}%` }} />
-        </div>
-        <span className="text-fg-muted font-mono">{(usage.asia ?? 0).toLocaleString()}/{(LIMIT / 1000)}k</span>
-        {session.asia > 0 && <span className="text-accent-400 font-mono">+{session.asia}</span>}
+        <span className="text-fg-muted font-mono">{total.toLocaleString()}/60k</span>
+        {sessionTotal > 0 && <span className="text-accent-400 font-mono">+{sessionTotal}</span>}
       </div>
     </div>
   );

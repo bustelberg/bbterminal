@@ -10,7 +10,7 @@ import { INFO_ICON } from '../../../lib/infoIcon';
 
 type Row = { date: string; sector: string; rank: number; score: number | null; companies: number };
 type Payload = {
-  source: string; method: string; universe?: { size?: number };
+  source: string; method: string; universe?: { size?: number; mapped?: number; name?: string; as_of?: string };
   days: number; rows: Row[]; note?: string;
 };
 type Detail = {
@@ -137,6 +137,8 @@ export default function SectorMomentumTimeline() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hover, setHover] = useState<Row | null>(null);
+  const [activeSector, setActiveSector] = useState<string | null>(null);
+  const [pinnedSector, setPinnedSector] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState<Row | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -147,7 +149,7 @@ export default function SectorMomentumTimeline() {
   const today = amsterdamToday();
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null); setHover(null);
+    setLoading(true); setError(null); setHover(null); setActiveSector(null); setPinnedSector(null);
     try {
       const response = await apiFetch(`${API_URL}/api/momentum/sector-timeline?days=${HISTORY_DAYS}`);
       const body = await response.json().catch(() => null);
@@ -247,7 +249,7 @@ export default function SectorMomentumTimeline() {
         <div className="bg-card border border-neutral-800/40 rounded-xl p-4 flex items-center gap-3 flex-wrap">
           <span className="text-xs font-semibold text-fg-strong uppercase tracking-wide">History</span>
           <span className="text-xs text-fg-muted">Last 2 months</span>
-          {data && <span className="text-xs text-fg-faint">{data.universe?.size?.toLocaleString() ?? '—'} liquid equities · {data.days} trading days</span>}
+          {data && <span className="text-xs text-fg-faint">{data.universe?.name ?? 'Universe'} · {data.universe?.size?.toLocaleString() ?? '—'} companies{data.universe?.mapped != null && data.universe.mapped !== data.universe.size ? ` (${data.universe.mapped.toLocaleString()} Yahoo-mapped)` : ''} · {data.days} trading days</span>}
           <button type="button" onClick={() => void load()} className="ml-auto text-xs text-accent-300 hover:text-accent-200">Refresh</button>
         </div>
 
@@ -278,10 +280,10 @@ export default function SectorMomentumTimeline() {
                       const isFuture = futureDateSet.has(d);
                       const color = row ? colorForSector(row.sector, sectors.indexOf(row.sector)) : 'transparent';
                       return <button key={d} type="button" aria-label={row ? `${row.sector}, ${d}, rank ${row.rank}` : isFuture ? `${d}, rank pending` : `${d}, no ranking`}
-                        onMouseEnter={() => setHover(row ?? null)} onFocus={() => setHover(row ?? null)} onMouseLeave={() => setHover(null)}
+                        onMouseEnter={() => setHover(row ?? null)} onFocus={() => setHover(row ?? null)} onMouseLeave={() => setHover(null)} onBlur={() => setHover(null)}
                         onClick={() => { if (row) void openDetail(row); }}
                         disabled={!row}
-                        className="h-6 shrink-0 rounded-sm text-xs text-fg-faint transition-transform hover:scale-110 focus:outline focus:outline-1 focus:outline-fg-strong disabled:cursor-default"
+                        className={`h-6 shrink-0 appearance-none border-0 rounded-sm text-xs text-fg-faint transition-all hover:scale-110 focus:outline focus:outline-1 focus:outline-fg-strong disabled:cursor-default ${row && hover?.date === row.date && hover?.rank === row.rank ? 'scale-110 ring-1 ring-fg-strong/70 z-10' : !hover && activeSector && row?.sector === activeSector ? 'scale-110 ring-1 ring-fg-strong/70 z-10' : !hover && activeSector && row ? 'opacity-35' : ''}`}
                         style={{ width: DATE_TILE_WIDTH, background: row ? color : 'transparent' }}>
                         {isFuture ? '?' : null}
                       </button>;
@@ -291,7 +293,11 @@ export default function SectorMomentumTimeline() {
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-fg-muted">
-              {sectors.map((sector, index) => <span key={sector} className="flex items-center gap-1.5"><i className="w-2 h-2 rounded-sm shrink-0" style={{ background: colorForSector(sector, index) }} />{sector}</span>)}
+              {sectors.map((sector, index) => {
+                const highlightedSector = hover?.sector ?? activeSector;
+                const active = highlightedSector === sector;
+                return <button key={sector} type="button" onMouseEnter={() => { if (!pinnedSector) setActiveSector(sector); }} onMouseLeave={() => setActiveSector(pinnedSector)} onClick={() => { const next = pinnedSector === sector ? null : sector; setPinnedSector(next); setActiveSector(next); }} aria-pressed={pinnedSector === sector} className={`flex items-center gap-1.5 rounded px-1.5 py-0.5 transition-all ${active ? 'bg-overlay/10 text-fg-strong ring-1 ring-fg-strong/30 scale-105' : highlightedSector ? 'opacity-55' : ''}`}><i className="w-2 h-2 rounded-sm shrink-0" style={{ background: colorForSector(sector, index) }} />{sector}</button>;
+              })}
             </div>
             <div className="mt-4 min-h-5 text-xs text-fg-muted">
               {hover ? <span><strong className="text-fg-strong">{hover.sector}</strong> · {hover.date} · rank #{hover.rank} of {maxRank} · score {hover.score?.toFixed(1) ?? '—'} · {hover.companies} companies · click for calculation</span> : 'Hover a square to inspect it, or click to see the calculation and companies.'}
@@ -316,7 +322,9 @@ export default function SectorMomentumTimeline() {
                 {Object.entries(detail.category_scores).map(([category, score]) => <span key={category}>{category}: <strong className="text-fg-strong">{score?.toFixed(1) ?? '—'}</strong></span>)}
               </div>
               <div className="mt-5 overflow-x-auto">
-                <table className="w-full text-sm">
+                <p className="mb-2 text-xs text-fg-faint">Showing {sortedCompanies.length} companies</p>
+                <style>{`.sector-company-table tbody { counter-reset: company-row; } .sector-company-table thead th:first-child::before { content: '#'; display: inline-block; width: 1.75rem; margin-right: 0.75rem; text-align: right; color: var(--fg-faint); } .sector-company-table tbody > tr:not(:has(td[colspan])) { counter-increment: company-row; } .sector-company-table tbody > tr:not(:has(td[colspan])) > td:first-child::before { content: counter(company-row); display: inline-block; width: 1.75rem; margin-right: 0.75rem; text-align: right; color: var(--fg-faint); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; }`}</style>
+                <table className="sector-company-table w-full text-sm">
                   <thead className="text-left text-xs text-fg-faint"><tr><SortableHeader label="Company" column="company" active={companySort} direction={companySortDirection} onSort={sortCompanies} /><th className="pb-2 pr-4"><span className="inline-flex items-center gap-1">Why<InfoTip text="Open the company’s complete score calculation, including raw signals, normalization, weights, category scores, and total-score blend."><span className={INFO_ICON}>i</span></InfoTip></span></th><SortableHeader label="Total score" column="score" active={companySort} direction={companySortDirection} onSort={sortCompanies} className="text-right" /><SortableHeader label="Price score" column="price_score" active={companySort} direction={companySortDirection} onSort={sortCompanies} className="text-right" /><SortableHeader label="Volume score" column="volume_score" active={companySort} direction={companySortDirection} onSort={sortCompanies} className="text-right" />{Object.entries(SIGNALS).map(([key, signal]) => <SortableHeader key={key} label={`${signal.label}${signal.unit === 'pct' ? ' (%)' : signal.unit === 'ratio' ? ' (×)' : ''}`} column={key as keyof typeof SIGNALS} active={companySort} direction={companySortDirection} onSort={sortCompanies} className="text-right" />)}</tr></thead>
                   <tbody>{sortedCompanies.map((company) => <Fragment key={company.analysis_id}><tr className="border-t border-neutral-800/50"><td className="py-2 pr-4 text-fg-strong">{company.ticker ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(company.ticker)}`} target="_blank" rel="noreferrer" className="hover:text-accent-300 hover:underline">{company.name ?? company.ticker} {company.name ? <span className="text-fg-faint">{company.ticker}</span> : null}</a> : company.name ?? `Asset ${company.analysis_id}`}</td><td className="py-2 pr-4"><button type="button" onClick={() => setExpandedCompanyId((current) => current === company.analysis_id ? null : company.analysis_id)} className="text-xs text-accent-300 hover:text-accent-200">{expandedCompanyId === company.analysis_id ? 'Hide' : 'Explain'}</button></td><td className="py-2 pr-4 text-right font-mono text-fg-muted">{company.score.toFixed(2)}</td><td className="py-2 pr-4 text-right font-mono text-fg-muted">{company.price_score?.toFixed(2) ?? '—'}</td><td className="py-2 pr-4 text-right font-mono text-fg-muted">{company.volume_score?.toFixed(2) ?? '—'}</td>{Object.entries(SIGNALS).map(([key, signal]) => <td key={key} className="py-2 pr-4 text-right font-mono text-fg-muted">{formatSignal(company.signals[key], signal.unit)}</td>)}</tr>{expandedCompanyId === company.analysis_id && <tr className="border-t border-neutral-800/50 bg-inset/30"><td colSpan={5 + Object.keys(SIGNALS).length} className="p-4"><CompanyCalculation company={company} categoryWeights={detail.category_weights} /></td></tr>}</Fragment>)}</tbody>
                 </table>

@@ -26,9 +26,42 @@ from signal_engine.daily import evaluate_panel
 router = APIRouter(tags=["momentum"])
 
 _CACHE_TTL_SECONDS = 300.0
-_CALCULATION_VERSION = 2  # invalidate price-only / intraday timeline cache entries
+_CALCULATION_VERSION = 3  # fixed LEONTEQ MomentumTopSelectie universe
 _cache: dict[tuple[int, int, int], tuple[float, dict]] = {}
 _cache_lock = threading.Lock()
+_MOMENTUM_TOP_UNIVERSE = "LEONTEQ (as of 2026-06-17)"
+
+
+def _momentum_top_analysis_ids() -> tuple[list[int], dict, dict[int, str | None]]:
+    """Yahoo ids and LEONTEQ's own sector labels for MomentumTopSelectie."""
+    universe = (supabase.table("universe").select("universe_id,label")
+                .eq("label", _MOMENTUM_TOP_UNIVERSE).limit(1).execute().data) or []
+    if not universe:
+        raise HTTPException(status_code=503, detail=f"Universe {_MOMENTUM_TOP_UNIVERSE!r} is unavailable")
+    universe_id = int(universe[0]["universe_id"])
+    latest = (supabase.table("universe_membership").select("target_month")
+              .eq("universe_id", universe_id).order("target_month", desc=True).limit(1).execute().data) or []
+    if not latest:
+        return [], {"name": _MOMENTUM_TOP_UNIVERSE, "size": 0, "mapped": 0}, {}
+    members = (supabase.table("universe_membership").select("company_id,sector")
+               .eq("universe_id", universe_id).eq("target_month", latest[0]["target_month"]).execute().data) or []
+    company_ids = [int(row["company_id"]) for row in members]
+    sector_by_company = {int(row["company_id"]): row.get("sector") for row in members}
+    analysis_ids: set[int] = set()
+    sectors: dict[int, str | None] = {}
+    for start in range(0, len(company_ids), 200):
+        rows = (supabase.table("asset_grid").select("company_id,analysis_id")
+                .in_("company_id", company_ids[start:start + 200]).execute().data) or []
+        for row in rows:
+            if row.get("analysis_id") is None:
+                continue
+            analysis_id = int(row["analysis_id"])
+            analysis_ids.add(analysis_id)
+            sectors.setdefault(analysis_id, sector_by_company.get(int(row["company_id"])))
+    return sorted(analysis_ids), {
+        "name": _MOMENTUM_TOP_UNIVERSE, "size": len(company_ids), "mapped": len(analysis_ids),
+        "as_of": "2026-06-17",
+    }, sectors
 
 
 def _volume_index(analysis_ids: list[int], since: str) -> dict[int, pd.Series] | None:
@@ -183,13 +216,11 @@ def get_sector_timeline_detail(
 
     # ``load_panel`` gives this one-day calculation the same 1,100-day warm-up
     # as the timeline, so its signals and strict as-of convention agree exactly.
-    panel, secmap, _ = load_panel(
-        min_adv_eur=1_000_000.0,
-        require_sector=True,
-        asset_class="equity",
-        max_assets=max_assets,
-        start=cutoff.date().isoformat(),
+    analysis_ids, _, leonteq_sectors = _momentum_top_analysis_ids()
+    panel, _, _ = load_panel(
+        analysis_ids=analysis_ids, start=cutoff.date().isoformat(),
     )
+    secmap = leonteq_sectors
     if panel is None:
         raise HTTPException(status_code=503, detail="Fast price loader unavailable")
     if panel.empty or cutoff not in panel.index:
@@ -363,13 +394,8 @@ def get_sector_timeline(
     # 12-1 / 200-day signal.  The requested window itself is calendar-based;
     # the final slice below contains exactly `days` available trading dates.
     start = (date.today() - timedelta(days=int(days * 1.8))).isoformat()
-    panel, secmap, universe = load_panel(
-        min_adv_eur=1_000_000.0,
-        require_sector=True,
-        asset_class="equity",
-        max_assets=max_assets,
-        start=start,
-    )
+    analysis_ids, universe, secmap = _momentum_top_analysis_ids()
+    panel, _, _ = load_panel(analysis_ids=analysis_ids, start=start)
     base = {
         "source": "Yahoo Finance close and volume (asset_price.yf.close / yf.volume)",
         "method": "Daily live-momentum price and volume signals, strict as-of, then mean company score by sector",

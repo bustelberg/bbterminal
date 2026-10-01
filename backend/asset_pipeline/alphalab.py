@@ -212,10 +212,11 @@ _panel_lock = threading.Lock()
 
 def _panel_key(
     min_adv_eur: float, require_sector: bool, asset_class: str | None,
-    max_assets: int, universe_id: int | None,
+    max_assets: int, universe_id: int | None, analysis_ids: list[int] | None = None,
     start: str | None = None, end: str | None = None,
 ) -> tuple:
     base = (
+        ("ids", tuple(sorted(set(int(a) for a in analysis_ids))) ) if analysis_ids is not None else
         ("uni", int(universe_id)) if universe_id is not None
         else ("filt", float(min_adv_eur), bool(require_sector), asset_class, int(max_assets))
     )
@@ -231,6 +232,7 @@ def load_panel(
     start: str | None = None,
     end: str | None = None,
     progress: Callable[[str], None] | None = None,
+    analysis_ids: list[int] | None = None,
 ) -> tuple[pd.DataFrame | None, dict, dict]:
     """Load (or reuse) the close-price panel (index=date, columns=analysis_id) for a
     universe — ONE `COPY`, pivoted once, cached in memory by (universe, window).
@@ -248,7 +250,7 @@ def load_panel(
     min_adv_eur = max(0.0, float(min_adv_eur))
     max_assets = max(20, min(int(max_assets), 2500))
     asset_class = asset_class or None
-    key = _panel_key(min_adv_eur, require_sector, asset_class, max_assets, universe_id, start, end)
+    key = _panel_key(min_adv_eur, require_sector, asset_class, max_assets, universe_id, analysis_ids, start, end)
 
     hit = _panel_cache.get(key)
     if hit and (time.time() - hit[0] < _PANEL_TTL):
@@ -261,7 +263,10 @@ def load_panel(
         if hit and (time.time() - hit[0] < _PANEL_TTL):
             return hit[1], hit[2], hit[3]
 
-        if universe_id is not None:
+        if analysis_ids is not None:
+            aids = list(dict.fromkeys(int(a) for a in analysis_ids))
+            uni = {"size": len(aids), "matched": len(aids), "name": "Explicit analysis universe", "sectors": []}
+        elif universe_id is not None:
             aids, uni = _universe_analysis_ids(universe_id)
         else:
             aids, uni = _select_universe(min_adv_eur, require_sector, asset_class, max_assets)
