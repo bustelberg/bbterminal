@@ -114,26 +114,32 @@ class ActualFillsRequest(BaseModel):
 @router.get("/api/scheduled-strategies/{strategy_id}/actual-fills")
 async def get_actual_fills(strategy_id: int, portfolio_date: date, request: Request):
     """The manually recorded broker fills for one scheduled portfolio period."""
-    if not _is_admin(request):
-        raise HTTPException(status_code=403, detail="Actual fills are admin-only")
-    return await asyncio.to_thread(lambda: (
-        supabase.table("scheduled_strategy_actual_fill")
-        .select("company_id,entry_price,entry_date,exit_price,exit_date,updated_at")
-        .eq("scheduled_strategy_id", strategy_id).eq("portfolio_date", portfolio_date.isoformat()).execute().data or []
-    ))
+    admin = _is_admin(request)
+    def _read() -> list[dict]:
+        strategy = (supabase.table("scheduled_strategy").select("id,user_visible")
+                    .eq("id", strategy_id).limit(1).execute().data) or []
+        if not strategy:
+            raise HTTPException(status_code=404, detail="Scheduled strategy not found")
+        if not admin and not strategy[0].get("user_visible"):
+            raise HTTPException(status_code=403, detail="Not available")
+        return (supabase.table("scheduled_strategy_actual_fill")
+                .select("company_id,entry_price,entry_date,exit_price,exit_date,updated_at")
+                .eq("scheduled_strategy_id", strategy_id).eq("portfolio_date", portfolio_date.isoformat()).execute().data or [])
+    return await asyncio.to_thread(_read)
 
 
 @router.put("/api/scheduled-strategies/{strategy_id}/actual-fills")
 async def save_actual_fills(strategy_id: int, body: ActualFillsRequest, request: Request):
     """Upsert one real entry/exit fill pair per holding for slippage review."""
-    if not _is_admin(request):
-        raise HTTPException(status_code=403, detail="Actual fills are admin-only")
+    admin = _is_admin(request)
 
     def _save() -> list[dict]:
-        strategy = (supabase.table("scheduled_strategy").select("id")
+        strategy = (supabase.table("scheduled_strategy").select("id,user_visible")
                     .eq("id", strategy_id).limit(1).execute().data) or []
         if not strategy:
             raise HTTPException(status_code=404, detail="Scheduled strategy not found")
+        if not admin and not strategy[0].get("user_visible"):
+            raise HTTPException(status_code=403, detail="Not available")
         rows = []
         company_ids = set()
         for fill in body.fills:

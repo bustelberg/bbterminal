@@ -1129,7 +1129,7 @@ export default function CurrentPortfolioCard({
             canEdit={canEditCash}
             onDone={refetchAll}
           />
-          {canEditCash && strategyId != null && (
+          {strategyId != null && (
             <button
               type="button"
               onClick={() => setActualFillsOpen(true)}
