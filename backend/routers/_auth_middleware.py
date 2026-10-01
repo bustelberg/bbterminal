@@ -186,6 +186,9 @@ def _is_company_sector_override(path: str) -> bool:
 # hold; `/api/earnings/fundamental-coverage/ingest`, one segment further down, spends GuruFocus
 # quota to go and fetch it. A prefix would hand a user the second along with the first.
 _USER_POST_READ_PATHS: frozenset[str] = frozenset({
+    # /schedule's read-only “Why this was picked?” panel. The endpoint itself
+    # re-checks that the submitted scheduled strategy is user_visible.
+    "/api/momentum/signal-breakdown",
     "/api/airs/basket/analysis",
     #  A read that must be a post — it takes the book's holdings in the body precisely so it can
     # describe the rows the reader is looking at, and a URL cannot carry 49 ISINs and their

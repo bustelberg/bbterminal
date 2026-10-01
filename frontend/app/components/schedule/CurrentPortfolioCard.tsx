@@ -760,6 +760,7 @@ export default function CurrentPortfolioCard({
           // with. `{}` only when a legacy snapshot stored none; the endpoint then
           // falls back to its own defaults rather than failing.
           config={(snap.config ?? {}) as Record<string, unknown>}
+          strategyId={strategyId}
           onClose={() => setBreakdown(null)}
         />
       )}

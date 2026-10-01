@@ -150,7 +150,8 @@ def explain_above_200ma(series: pd.Series) -> SignalExplain:
         return {"value": None, "components": [{"label": "No price history."}]}
     if len(series) >= 200:
         ma = float(series.tail(200).mean())
-        ma_label = "200-day moving average"
+        ma_window = series.tail(200)
+        ma_label = f"200-day moving average ({_date_str(ma_window.index[0])} to {_date_str(ma_window.index[-1])})"
     else:
         ma = float(series.mean())
         ma_label = f"Average over the {len(series)} available days (less than 200)"
@@ -179,8 +180,8 @@ def explain_vol_20d_vs_60d(vol_series: pd.Series) -> SignalExplain:
     return {
         "value": value,
         "components": [
-            {"label": "Avg volume last 20 days", "value_str": _fmt_volume(short_avg)},
-            {"label": "Avg volume last 60 days", "value_str": _fmt_volume(long_avg)},
+            {"label": f"Avg volume last 20 days ({_date_str(vol_series.index[-20])} to {_date_str(vol_series.index[-1])})", "value_str": _fmt_volume(short_avg)},
+            {"label": f"Avg volume last 60 days ({_date_str(vol_series.index[-60])} to {_date_str(vol_series.index[-1])})", "value_str": _fmt_volume(long_avg)},
             {"label": "Formula", "value_str": f"{_fmt_volume(short_avg)} / {_fmt_volume(long_avg)} = {value:.4f}"},
         ],
     }

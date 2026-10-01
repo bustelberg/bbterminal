@@ -26,6 +26,7 @@ export type NavKey =
   | '/schedule'
   | '/earnings'
   | '/backtest'
+  | '/momentum'
   | '/diversifier'
   | '/universe'
   | '/longequity-universe'
@@ -72,6 +73,7 @@ const EN: SidebarCopy = {
     '/schedule': 'Schedule',
     '/earnings': 'Earnings Dashboard',
     '/backtest': 'Backtest',
+    '/momentum': 'Sector Momentum',
     '/diversifier': 'Diversifier',
     '/universe': 'Universe Overview',
     '/longequity-universe': 'LongEquity Universe',
@@ -118,6 +120,7 @@ const NL: SidebarCopy = {
     '/schedule': 'Planning',
     '/earnings': 'Winstdashboard',
     '/backtest': 'Backtest',
+    '/momentum': 'Sectormomentum',
     '/diversifier': 'Diversifier',
     '/universe': 'Universumoverzicht',
     '/longequity-universe': 'LongEquity-universum',

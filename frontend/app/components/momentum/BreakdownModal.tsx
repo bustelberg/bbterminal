@@ -40,9 +40,10 @@ export type BreakdownTarget = {
  * `config` must be the config the pick was MADE with (universe, signal + category weights) — the
  * snapshot's own, not the strategy's current one, which may have been edited since.
  */
-export default function BreakdownModal({ target, config, onClose }: {
+export default function BreakdownModal({ target, config, strategyId, onClose }: {
   target: BreakdownTarget;
   config: Record<string, unknown>;
+  strategyId?: number;
   onClose: () => void;
 }) {
   const [state, setState] = useState<
@@ -77,6 +78,7 @@ export default function BreakdownModal({ target, config, onClose }: {
               index_universe: config.index_universe,
               signal_weights: config.signal_weights,
               category_weights: config.category_weights,
+              scheduled_strategy_id: strategyId,
             }),
           },
           (raw) => {
@@ -97,7 +99,7 @@ export default function BreakdownModal({ target, config, onClose }: {
       }
     })();
     return () => { ac.abort(); };
-  }, [target, config]);
+  }, [target, config, strategyId]);
 
   //  Portalled to `document.body`, NOT RENDERED IN PLACE. This modal is opened from a row inside
   // `CollapsibleCard`, whose root is `overflow-hidden` — and the app's frosted chrome applies

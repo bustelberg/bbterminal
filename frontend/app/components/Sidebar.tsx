@@ -46,6 +46,7 @@ const navItems: NavEntry[] = [
   { href: '/schedule' },
   { href: '/earnings' },
   { href: '/backtest' },
+  { href: '/momentum' },
   { href: '/diversifier' },
   {
     href: '/universe',
