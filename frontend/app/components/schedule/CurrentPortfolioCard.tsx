@@ -1,27 +1,47 @@
-'use client';
+"use client";
 
-import { Fragment, useCallback, useMemo, useState } from 'react';
-import LoadingDots from '../LoadingDots';
-import CellInfoTip from '../momentum/CellInfoTip';
-import { apiFetch } from '../../../lib/apiFetch';
-import { API_URL } from '../../../lib/apiUrl';
-import { useApiData } from '../../../lib/hooks/useApiData';
-import { useBenchmarkCurrencyMap, useBenchmarkIsinMap, useBenchmarks, useCompanyExchangeMap, useCompanyIsinMap } from '../../../lib/hooks/apiData';
-import { fmtSleevePct, parsePct, stockSleevePct, validateSleeves, type SleeveEtfDraft } from './sleeveMath';
-import { displayExchange, EXCHANGE_NAMES, fmtPct, fmtPrice, guruFocusUrl } from '../momentum/utils';
-import TableDownloadButton from '../TableDownloadButton';
-import { holdingsExportName } from './exportName';
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import LoadingDots from "../LoadingDots";
+import CellInfoTip from "../momentum/CellInfoTip";
+import { apiFetch } from "../../../lib/apiFetch";
+import { API_URL } from "../../../lib/apiUrl";
+import { useApiData } from "../../../lib/hooks/useApiData";
+import {
+  useBenchmarkCurrencyMap,
+  useBenchmarkIsinMap,
+  useBenchmarks,
+  useCompanyExchangeMap,
+  useCompanyIsinMap,
+} from "../../../lib/hooks/apiData";
+import {
+  fmtSleevePct,
+  parsePct,
+  stockSleevePct,
+  validateSleeves,
+  type SleeveEtfDraft,
+} from "./sleeveMath";
+import {
+  displayExchange,
+  EXCHANGE_NAMES,
+  fmtPct,
+  fmtPrice,
+  guruFocusUrl,
+} from "../momentum/utils";
+import TableDownloadButton from "../TableDownloadButton";
+import { holdingsExportName } from "./exportName";
 //  The same modal the daily-holdings table opens, not a second one. It reads
 // `POST /api/momentum/signal-breakdown` — one endpoint, one renderer, so "why
 // this was picked" cannot have two answers.
-import BreakdownModal, { type BreakdownTarget } from '../momentum/BreakdownModal';
-import { PriceRefreshPanel, useStockRefresh } from './priceRefresh';
-import type { Column } from '../../../lib/tableExport';
-import type { Holding } from '../../../lib/stores/momentum';
-import type { components } from '../../../lib/api-types';
+import BreakdownModal, {
+  type BreakdownTarget,
+} from "../momentum/BreakdownModal";
+import { PriceRefreshPanel, useStockRefresh } from "./priceRefresh";
+import type { Column } from "../../../lib/tableExport";
+import type { Holding, PeriodRecord } from "../../../lib/stores/momentum";
+import type { components } from "../../../lib/api-types";
 
 /** The reprice endpoint's payload — see `ReloadPrices`. */
-type ReloadResult = components['schemas']['RepriceResult'];
+type ReloadResult = components["schemas"]["RepriceResult"];
 
 /**
  * What `PATCH …/sleeves` reports about the half of the work that happens AFTER the config is
@@ -82,8 +102,14 @@ function AsOfTip({ date }: { date: string | null }) {
  * The detail goes to the console (which holdings moved, and in which fields); the chip says only
  * how many, because "did it change anything?" is the one thing you need at a glance.
  */
-function ReloadPrices({ strategyId, canEdit, onDone }: {
+function ReloadPrices({
+  strategyId,
+  snapshotId,
+  canEdit,
+  onDone,
+}: {
   strategyId?: number;
+  snapshotId?: number;
   canEdit?: boolean;
   onDone?: () => void | Promise<void>;
 }) {
@@ -95,35 +121,48 @@ function ReloadPrices({ strategyId, canEdit, onDone }: {
     setBusy(true);
     setMsg(null);
     try {
-      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}/reprice`,
-        { method: 'POST' });
+      const r = await apiFetch(
+        `${API_URL}/api/scheduled-strategies/${strategyId}/reprice`,
+        { method: "POST" },
+      );
       const b = (await r.json().catch(() => null)) as ReloadResult | null;
       if (!r.ok || !b) {
-        console.warn('[reprice] failed', r.status, b);
+        console.warn("[reprice] failed", r.status, b);
         setMsg(`failed (HTTP ${r.status})`);
         return;
       }
       const moved = (b.holdings ?? []).filter((h) => (h.changed ?? []).length);
       console.groupCollapsed(
-        `[reprice] strategy ${strategyId} — ${b.changed_holdings ?? 0} of `
-        + `${(b.holdings ?? []).length} holding(s) changed`);
+        `[reprice] strategy ${strategyId} — ${b.changed_holdings ?? 0} of ` +
+          `${(b.holdings ?? []).length} holding(s) changed`,
+      );
       if (moved.length) {
-        console.table(moved.map((h) => ({
-          ticker: h.ticker, etf: h.is_etf,
-          'start (local)': h.entry_price_local, 'start (€)': h.entry_price_eur,
-          'end (local)': h.exit_price_local, 'end (€)': h.exit_price_eur,
-          'return %': h.forward_return_pct, changed: (h.changed ?? []).join(', '),
-        })));
+        console.table(
+          moved.map((h) => ({
+            ticker: h.ticker,
+            etf: h.is_etf,
+            "start (local)": h.entry_price_local,
+            "start (€)": h.entry_price_eur,
+            "end (local)": h.exit_price_local,
+            "end (€)": h.exit_price_eur,
+            "return %": h.forward_return_pct,
+            changed: (h.changed ?? []).join(", "),
+          })),
+        );
       } else {
-        console.log(b.note ?? 'every price was already current');
+        console.log(b.note ?? "every price was already current");
       }
-      console.log('full payload', b);
+      console.log("full payload", b);
       console.groupEnd();
-      setMsg(b.changed_holdings ? `${b.changed_holdings} updated` : 'already current');
+      setMsg(
+        b.changed_holdings
+          ? `${b.changed_holdings} updated`
+          : "already current",
+      );
       await onDone?.();
     } catch (e) {
-      console.warn('[reprice] threw', e);
-      setMsg('failed — see the console');
+      console.warn("[reprice] threw", e);
+      setMsg("failed — see the console");
     } finally {
       setBusy(false);
     }
@@ -131,10 +170,14 @@ function ReloadPrices({ strategyId, canEdit, onDone }: {
 
   return (
     <span className="flex items-baseline gap-1.5">
-      <button type="button" onClick={() => void run()} disabled={busy}
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy}
         title="Reload this portfolio's prices — start and end, local and converted — from their sources. Does NOT re-pick the holdings; that is Force re-rebalance. Runs the same function the nightly tick does, so the correction lands now instead of at 05:00 UTC."
-        className="text-[12px] px-2 py-0.5 rounded-lg border border-neutral-700 text-fg-muted hover:bg-overlay/5 disabled:opacity-50">
-        {busy ? 'Reloading…' : 'Reload prices'}
+        className="rounded border border-neutral-700 px-2 py-0.5 text-[12px] text-fg-soft transition-colors hover:bg-overlay/5 disabled:opacity-50"
+      >
+        {busy ? "Reloading…" : "Reload prices"}
       </button>
       {msg && <span className="text-[11px] text-fg-faint">{msg}</span>}
     </span>
@@ -148,10 +191,18 @@ function ReloadPrices({ strategyId, canEdit, onDone }: {
  *
  * The percentages here are ABSOLUTE — shares of the whole portfolio, i.e. the
  * weights the holdings table below actually shows. */
-function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: {
+function SleeveControl({
+  strategyId,
+  snapshotId,
+  cashPct,
+  etfSleeves,
+  canEdit,
+  onChanged,
+}: {
   strategyId?: number;
-  cashPct: number;                                        // 0..100, absolute
-  etfSleeves: { benchmarkId: number; pct: number }[];     // absolute, as held
+  snapshotId?: number;
+  cashPct: number; // 0..100, absolute
+  etfSleeves: { benchmarkId: number; pct: number }[]; // absolute, as held
   canEdit: boolean;
   onChanged?: () => void | Promise<void>;
 }) {
@@ -162,17 +213,25 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
   const [cash, setCash] = useState<string>(fmtSleevePct(cashPct));
   const [etfs, setEtfs] = useState<SleeveEtfDraft[]>([]);
 
-  const nameFor = useCallback((id: number) => {
-    const b = (benchmarks ?? []).find((x) => x.benchmark_id === id);
-    return b ? (b.ticker || b.name || `#${id}`) : `#${id}`;
-  }, [benchmarks]);
+  const nameFor = useCallback(
+    (id: number) => {
+      const b = (benchmarks ?? []).find((x) => x.benchmark_id === id);
+      return b ? b.ticker || b.name || `#${id}` : `#${id}`;
+    },
+    [benchmarks],
+  );
 
   // Open = adopt the CURRENT book as the draft. Deriving it from what's held
   // (rather than from the saved config) means the editor always opens on the
   // numbers in the table beneath it.
   const openEditor = () => {
     setCash(fmtSleevePct(cashPct));
-    setEtfs(etfSleeves.map((e) => ({ benchmarkId: e.benchmarkId, weightPct: fmtSleevePct(e.pct) })));
+    setEtfs(
+      etfSleeves.map((e) => ({
+        benchmarkId: e.benchmarkId,
+        weightPct: fmtSleevePct(e.pct),
+      })),
+    );
     setErr(null);
     setOpen(true);
   };
@@ -185,19 +244,30 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
     setSaving(true);
     setErr(null);
     try {
-      const r = await apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}/sleeves`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          cash_pct: parsePct(cash) / 100,
-          etfs: etfs.map((e) => ({ benchmark_id: e.benchmarkId, weight_pct: parsePct(e.weightPct) })),
-        }),
-      });
+      const r = await apiFetch(
+        `${API_URL}/api/scheduled-strategies/${strategyId}/sleeves`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            cash_pct: parsePct(cash) / 100,
+            snapshot_id: snapshotId,
+            etfs: etfs.map((e) => ({
+              benchmark_id: e.benchmarkId,
+              weight_pct: parsePct(e.weightPct),
+            })),
+          }),
+        },
+      );
       const body = await r.json().catch(() => null);
       if (!r.ok) {
         // Full diagnostic to the console; one short line in the UI.
-        console.warn('[sleeves] save failed', r.status, body);
-        setErr(typeof body?.detail === 'string' ? body.detail : `Save failed (HTTP ${r.status})`);
+        console.warn("[sleeves] save failed", r.status, body);
+        setErr(
+          typeof body?.detail === "string"
+            ? body.detail
+            : `Save failed (HTTP ${r.status})`,
+        );
         return;
       }
       //  A 200 IS NOT "IT WORKED". The endpoint saves the config first and then restates the
@@ -205,18 +275,24 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
       // card renders, and it can fail on its own (it used to fail silently — see
       // `_write_sleeves`). Reporting only the HTTP status is what made a failed edit look like
       // a successful one that simply changed nothing on screen, which is the worst of both.
-      const applied = (body as { sleeve_apply?: SleeveApply } | null)?.sleeve_apply;
+      const applied = (body as { sleeve_apply?: SleeveApply } | null)
+        ?.sleeve_apply;
       if (applied?.error) {
-        console.warn('[sleeves] saved, but the restate/re-price failed', applied);
-        setErr('Saved, but the held book couldn’t be restated — see the console.');
-        return;   // stay open: the panel is the only place this line is visible
+        console.warn(
+          "[sleeves] saved, but the restate/re-price failed",
+          applied,
+        );
+        setErr(
+          "Saved, but the held book couldn’t be restated — see the console.",
+        );
+        return; // stay open: the panel is the only place this line is visible
       }
-      if (applied?.note) console.info('[sleeves]', applied.note);
+      if (applied?.note) console.info("[sleeves]", applied.note);
       setOpen(false);
       await onChanged?.();
     } catch (e) {
-      console.warn('[sleeves] save failed', e);
-      setErr('Save failed — see the console.');
+      console.warn("[sleeves] save failed", e);
+      setErr("Save failed — see the console.");
     } finally {
       setSaving(false);
     }
@@ -224,13 +300,20 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
 
   const summary = [
     cashPct > 0 ? `Cash ${fmtSleevePct(cashPct)}%` : null,
-    ...etfSleeves.map((e) => `${nameFor(e.benchmarkId)} ${fmtSleevePct(e.pct)}%`),
-  ].filter(Boolean).join(' · ');
+    ...etfSleeves.map(
+      (e) => `${nameFor(e.benchmarkId)} ${fmtSleevePct(e.pct)}%`,
+    ),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   if (!canEdit || strategyId == null) {
     if (!summary) return null;
     return (
-      <span className="text-xs" title="Cash + ETF sleeves (the stock picks take the rest)">
+      <span
+        className="text-xs"
+        title="Cash + ETF sleeves (the stock picks take the rest)"
+      >
         <span className="font-mono text-fg-soft">{summary}</span>
       </span>
     );
@@ -240,11 +323,12 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
     <span className="relative flex items-center gap-2 text-xs">
       {summary && <span className="font-mono text-fg-soft">{summary}</span>}
       <button
-        type="button" onClick={() => (open ? setOpen(false) : openEditor())}
+        type="button"
+        onClick={() => (open ? setOpen(false) : openEditor())}
         title="Set the cash % and ETF sleeves by hand — the stock picks take the rest, re-weighted from the strategy's own selection"
         className="text-[12px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5 transition-colors"
       >
-        {open ? 'Close' : summary ? 'Edit sleeves' : 'Add cash / ETFs'}
+        {open ? "Close" : summary ? "Edit sleeves" : "Add cash / ETFs"}
       </button>
 
       {open && (
@@ -257,8 +341,13 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
           <div className="flex items-center gap-2 mb-2">
             <span className="w-28 text-fg-subtle">Cash</span>
             <input
-              type="number" min={0} max={100} step={0.5} value={cash}
-              onChange={(e) => setCash(e.target.value)} disabled={saving}
+              type="number"
+              min={0}
+              max={100}
+              step={0.5}
+              value={cash}
+              onChange={(e) => setCash(e.target.value)}
+              disabled={saving}
               className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-right font-mono text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 disabled:opacity-50"
             />
             <span className="text-fg-faint">%</span>
@@ -267,38 +356,65 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
           {etfs.map((e, i) => (
             <div key={i} className="flex items-center gap-2 mb-2">
               <select
-                value={e.benchmarkId ?? ''} disabled={saving}
-                onChange={(ev) => setEtfs(etfs.map((x, j) => (
-                  j === i ? { ...x, benchmarkId: ev.target.value ? Number(ev.target.value) : null } : x
-                )))}
+                value={e.benchmarkId ?? ""}
+                disabled={saving}
+                onChange={(ev) =>
+                  setEtfs(
+                    etfs.map((x, j) =>
+                      j === i
+                        ? {
+                            ...x,
+                            benchmarkId: ev.target.value
+                              ? Number(ev.target.value)
+                              : null,
+                          }
+                        : x,
+                    ),
+                  )
+                }
                 className="w-28 flex-1 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-fg focus:border-accent-500 disabled:opacity-50"
               >
                 <option value="">Pick an ETF…</option>
                 {(benchmarks ?? []).map((b) => (
                   <option key={b.benchmark_id} value={b.benchmark_id}>
-                    {b.ticker ? `${b.ticker} — ` : ''}{b.name}
+                    {b.ticker ? `${b.ticker} — ` : ""}
+                    {b.name}
                   </option>
                 ))}
               </select>
               <input
-                type="number" min={0} max={100} step={0.5} value={e.weightPct}
-                onChange={(ev) => setEtfs(etfs.map((x, j) => (j === i ? { ...x, weightPct: ev.target.value } : x)))}
+                type="number"
+                min={0}
+                max={100}
+                step={0.5}
+                value={e.weightPct}
+                onChange={(ev) =>
+                  setEtfs(
+                    etfs.map((x, j) =>
+                      j === i ? { ...x, weightPct: ev.target.value } : x,
+                    ),
+                  )
+                }
                 disabled={saving}
                 className="w-20 bg-page border border-neutral-700 rounded px-1.5 py-0.5 text-right font-mono text-fg focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 disabled:opacity-50"
               />
               <span className="text-fg-faint">%</span>
               <button
-                type="button" onClick={() => setEtfs(etfs.filter((_, j) => j !== i))} disabled={saving}
-                title="Remove this ETF" className="text-fg-faint hover:text-neg-400 px-1"
-              >
-
-              </button>
+                type="button"
+                onClick={() => setEtfs(etfs.filter((_, j) => j !== i))}
+                disabled={saving}
+                title="Remove this ETF"
+                className="text-fg-faint hover:text-neg-400 px-1"
+              ></button>
             </div>
           ))}
 
           <button
-            type="button" disabled={saving}
-            onClick={() => setEtfs([...etfs, { benchmarkId: null, weightPct: '0' }])}
+            type="button"
+            disabled={saving}
+            onClick={() =>
+              setEtfs([...etfs, { benchmarkId: null, weightPct: "0" }])
+            }
             className="text-[12px] text-accent-400 hover:underline mb-2"
           >
             + Add ETF
@@ -306,11 +422,15 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
 
           <div className="flex items-center gap-2 border-t border-neutral-800/40 pt-2 mb-2">
             <span className="w-28 text-fg-subtle">Stock picks</span>
-            <span className={`w-20 text-right font-mono ${stocksPct < 0 ? 'text-neg-400' : 'text-fg'}`}>
+            <span
+              className={`w-20 text-right font-mono ${stocksPct < 0 ? "text-neg-400" : "text-fg"}`}
+            >
               {fmtSleevePct(stocksPct)}
             </span>
             <span className="text-fg-faint">%</span>
-            <span className="text-fg-faint ml-1">— the strategy&apos;s own weights, re-scaled</span>
+            <span className="text-fg-faint ml-1">
+              — the strategy&apos;s own weights, re-scaled
+            </span>
           </div>
 
           {(invalid || err) && (
@@ -318,19 +438,25 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
           )}
 
           <div className="flex items-center justify-between">
-            <span className="text-fg-faint">Restates the open period + re-prices.</span>
+            <span className="text-fg-faint">
+              Restates the open period + re-prices.
+            </span>
             <span className="flex gap-2">
               <button
-                type="button" onClick={() => setOpen(false)} disabled={saving}
+                type="button"
+                onClick={() => setOpen(false)}
+                disabled={saving}
                 className="text-[12px] px-2 py-0.5 rounded border border-neutral-700 text-fg-soft hover:bg-overlay/5"
               >
                 Cancel
               </button>
               <button
-                type="button" onClick={() => void save()} disabled={saving || !!invalid}
+                type="button"
+                onClick={() => void save()}
+                disabled={saving || !!invalid}
                 className="text-[12px] px-2 py-0.5 rounded bg-accent-600 hover:bg-accent-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
-                {saving ? 'Saving…' : 'Save'}
+                {saving ? "Saving…" : "Save"}
               </button>
             </span>
           </div>
@@ -345,10 +471,326 @@ function SleeveControl({ strategyId, cashPct, etfSleeves, canEdit, onChanged }: 
  * you hold, target vs current (drifted) weight, the entry/latest prices in
  * local + EUR with the FX rate, the return, and the ISIN. Always sorted by
  * current weight descending. Renders nothing when there's no snapshot yet. */
+type ActualFill = {
+  company_id: number;
+  entry_price: number | null;
+  entry_date: string | null;
+  exit_price: number | null;
+  exit_date: string | null;
+};
+
+function ActualFillsModal({
+  strategyId,
+  holdings,
+  latestPriceDate,
+  portfolioDate,
+  onClose,
+}: {
+  strategyId: number;
+  holdings: Holding[];
+  latestPriceDate: string | null | undefined;
+  portfolioDate: string;
+  onClose: () => void;
+}) {
+  const [fills, setFills] = useState<Record<number, ActualFill>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    apiFetch(`${API_URL}/api/scheduled-strategies/${strategyId}/actual-fills?portfolio_date=${portfolioDate}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows: ActualFill[]) =>
+        setFills(Object.fromEntries(rows.map((row) => [row.company_id, row]))),
+      )
+      .catch(() => setError("Could not load saved fills."));
+  }, [strategyId, portfolioDate]);
+  const edit = (
+    companyId: number,
+    field: "entry_price" | "entry_date" | "exit_price" | "exit_date",
+    value: string,
+  ) =>
+    setFills((current) => ({
+      ...current,
+      [companyId]: {
+        ...(current[companyId] ?? {
+          company_id: companyId,
+          entry_price: null,
+          entry_date: null,
+          exit_price: null,
+          exit_date: null,
+        }),
+        [field]: field.includes("price")
+          ? value === ""
+            ? null
+            : Number(value)
+          : value || null,
+      },
+    }));
+  const save = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const r = await apiFetch(
+        `${API_URL}/api/scheduled-strategies/${strategyId}/actual-fills`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ portfolio_date: portfolioDate, fills: Object.values(fills) }),
+        },
+      );
+      if (!r.ok) throw new Error();
+      onClose();
+    } catch {
+      setError("Could not save actual fills.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const slippage = (
+    actual: number | null | undefined,
+    model: number | null | undefined,
+    side: string | null | undefined,
+    isExit: boolean,
+  ) => {
+    if (actual == null || model == null || model <= 0) return null;
+    const difference = (actual - model) / model;
+    // A positive number always means worse than the model: paying more to buy
+    // or receiving less to sell. Reverse this for shorts.
+    return side === "short"
+      ? (isExit ? difference : -difference) * 100
+      : (isExit ? -difference : difference) * 100;
+  };
+  const stocks = holdings.filter((holding) => !holding.is_cash);
+  const weightedSlippage = (isExit: boolean) => {
+    let weightTotal = 0;
+    let weightedTotal = 0;
+    for (const holding of stocks) {
+      const fill = fills[holding.company_id];
+      const value = slippage(
+        isExit ? fill?.exit_price : fill?.entry_price,
+        isExit ? holding.exit_price_local : holding.entry_price_local,
+        holding.side,
+        isExit,
+      );
+      if (value == null) continue;
+      const weight = holding.weight ?? 0;
+      weightTotal += weight;
+      weightedTotal += value * weight;
+    }
+    return weightTotal > 0 ? weightedTotal / weightTotal : null;
+  };
+  const weightedEntrySlippage = weightedSlippage(false);
+  const weightedExitSlippage = weightedSlippage(true);
+  const asOf = (value: string | null | undefined) => {
+    if (!value) return "as of —";
+    const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+    if (!year || !month || !day) return `as of ${value}`;
+    return `as of ${new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }).format(new Date(Date.UTC(year, month - 1, day)))}`;
+  };
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Actual execution prices"
+    >
+      <div className="max-h-[85vh] w-[80vw] overflow-auto rounded-xl border border-neutral-700 bg-elevated p-5 shadow-2xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold text-fg-strong">
+              Actual execution prices
+            </h2>
+            <p className="mt-1 text-sm text-fg-muted">
+              Enter your real broker fills. Positive slippage means the fill was
+              unfavorable versus the strategy mark.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-fg-muted hover:text-fg-strong"
+          >
+            Close
+          </button>
+        </div>
+        {error && <p className="mt-3 text-sm text-neg-300">{error}</p>}
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-left text-xs text-fg-faint">
+              <tr>
+                <th className="pb-2 pr-3">Holding</th>
+                <th className="pb-2 pr-3 text-right">Weight</th>
+                <th className="pb-2 pr-3 text-right">Model entry</th>
+                <th className="pb-2 pr-3">Actual entry</th>
+                <th className="pb-2 pr-3">Entry date</th>
+                <th className="pb-2 pr-3 text-right">Entry slippage</th>
+                <th className="pb-2 pr-3 text-right">Model exit</th>
+                <th className="pb-2 pr-3">Actual exit</th>
+                <th className="pb-2 pr-3">Exit date</th>
+                <th className="pb-2 text-right">Exit slippage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stocks.map((holding) => {
+                const fill = fills[holding.company_id];
+                const entrySlip = slippage(
+                  fill?.entry_price,
+                  holding.entry_price_local,
+                  holding.side,
+                  false,
+                );
+                const exitSlip = slippage(
+                  fill?.exit_price,
+                  holding.exit_price_local,
+                  holding.side,
+                  true,
+                );
+                return (
+                  <tr
+                    key={holding.company_id}
+                    className="border-t border-neutral-800/50"
+                  >
+                    <td className="py-2 pr-3 text-fg-strong">
+                      {holding.company_name
+                        ? `${holding.company_name} (${holding.ticker})`
+                        : holding.ticker}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-fg-muted">
+                      {((holding.weight ?? 0) * 100).toFixed(1)}%
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-fg-muted">
+                      <div>{fmtPrice(holding.entry_price_local)} {holding.currency}</div>
+                      <div className="mt-0.5 font-sans text-[11px] text-fg-faint">
+                        {asOf(holding.entry_date)}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={fill?.entry_price ?? ""}
+                        onChange={(e) =>
+                          edit(
+                            holding.company_id,
+                            "entry_price",
+                            e.target.value,
+                          )
+                        }
+                        className="w-24 rounded border border-neutral-700 bg-inset px-2 py-1 font-mono"
+                      />
+                    </td>
+                    <td className="py-2 pr-3">
+                      <input
+                        type="date"
+                        value={fill?.entry_date ?? ""}
+                        onChange={(e) =>
+                          edit(holding.company_id, "entry_date", e.target.value)
+                        }
+                        className="rounded border border-neutral-700 bg-inset px-2 py-1"
+                      />
+                    </td>
+                    <td
+                      className={`py-2 pr-3 text-right font-mono ${entrySlip != null && entrySlip > 0 ? "text-neg-300" : "text-pos-400"}`}
+                    >
+                      {entrySlip == null
+                        ? "—"
+                        : `${entrySlip >= 0 ? "+" : ""}${entrySlip.toFixed(2)}%`}
+                    </td>
+                    <td className="py-2 pr-3 text-right font-mono text-fg-muted">
+                      <div>{fmtPrice(holding.exit_price_local)} {holding.currency}</div>
+                      <div className="mt-0.5 font-sans text-[11px] text-fg-faint">
+                        {asOf(holding.exit_date ?? latestPriceDate)}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={fill?.exit_price ?? ""}
+                        onChange={(e) =>
+                          edit(holding.company_id, "exit_price", e.target.value)
+                        }
+                        className="w-24 rounded border border-neutral-700 bg-inset px-2 py-1 font-mono"
+                      />
+                    </td>
+                    <td className="py-2 pr-3">
+                      <input
+                        type="date"
+                        value={fill?.exit_date ?? ""}
+                        onChange={(e) =>
+                          edit(holding.company_id, "exit_date", e.target.value)
+                        }
+                        className="rounded border border-neutral-700 bg-inset px-2 py-1"
+                      />
+                    </td>
+                    <td
+                      className={`py-2 text-right font-mono ${exitSlip != null && exitSlip > 0 ? "text-neg-300" : "text-pos-400"}`}
+                    >
+                      {exitSlip == null
+                        ? "—"
+                        : `${exitSlip >= 0 ? "+" : ""}${exitSlip.toFixed(2)}%`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        <div className="mt-5 flex items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-fg-muted">
+            <span>
+              Weighted entry slippage{" "}
+              <span className={`font-mono font-semibold ${weightedEntrySlippage != null && weightedEntrySlippage > 0 ? "text-neg-300" : "text-pos-400"}`}>
+                {weightedEntrySlippage == null ? "—" : `${weightedEntrySlippage >= 0 ? "+" : ""}${weightedEntrySlippage.toFixed(2)}%`}
+              </span>
+            </span>
+            <span>
+              Weighted exit slippage{" "}
+              <span className={`font-mono font-semibold ${weightedExitSlippage != null && weightedExitSlippage > 0 ? "text-neg-300" : "text-pos-400"}`}>
+                {weightedExitSlippage == null ? "—" : `${weightedExitSlippage >= 0 ? "+" : ""}${weightedExitSlippage.toFixed(2)}%`}
+              </span>
+            </span>
+          </div>
+          <div className="flex gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm text-fg-muted"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void save()}
+            className="rounded bg-accent-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save fills"}
+          </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CurrentPortfolioCard({
-  snapshotId, strategyId, strategyName, canEditCash = false, staleCompanyIds, onCashChanged,
+  snapshotId,
+  portfolioSnapshots = [],
+  strategyId,
+  strategyName,
+  canEditCash = false,
+  staleCompanyIds,
+  onCashChanged,
 }: {
   snapshotId: number | null;
+  /** One latest-marked snapshot per rebalance period, newest first. */
+  portfolioSnapshots?: { snapshotId: number; asOfDate: string; latestPriceDate: string | null; backtestRecord?: PeriodRecord }[];
   strategyId?: number;
   /** The scheduled strategy's own name, used to LABEL THE EXPORT — a downloaded file is the
    * one artefact of this card that outlives the page, and "current-portfolio" says nothing
@@ -368,9 +810,38 @@ export default function CurrentPortfolioCard({
    * snapshot in place and leave the id unchanged. */
   onCashChanged?: () => void | Promise<void>;
 }) {
-  const { data: snap, loading, error, reload: reloadSnapshot } = useApiData<SnapshotResponse>(
-    snapshotId != null ? `/api/momentum/current-picks/${snapshotId}` : null,
+  const [selectedSnapshotId, setSelectedSnapshotId] = useState<number | null>(null);
+  const activeSnapshotId = portfolioSnapshots.some((item) => item.snapshotId === selectedSnapshotId)
+    ? selectedSnapshotId
+    : snapshotId;
+  const activePortfolioIndex = portfolioSnapshots.findIndex((item) => item.snapshotId === activeSnapshotId);
+  const activePortfolio = activePortfolioIndex >= 0 ? portfolioSnapshots[activePortfolioIndex] : null;
+  const backtestRecord = activePortfolio?.backtestRecord;
+  const portfolioMonthLabel = (value: string) => {
+    const [year, month] = value.slice(0, 10).split("-").map(Number);
+    return year && month
+      ? new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric" })
+        .format(new Date(Date.UTC(year, month - 1, 1)))
+      : value;
+  };
+  const {
+    data: liveSnap,
+    loading,
+    error,
+    reload: reloadSnapshot,
+  } = useApiData<SnapshotResponse>(
+    !backtestRecord && activeSnapshotId != null ? `/api/momentum/current-picks/${activeSnapshotId}` : null,
   );
+  const snap: SnapshotResponse | undefined = backtestRecord
+    ? {
+      snapshot_id: activeSnapshotId ?? -1,
+      as_of_date: backtestRecord.date,
+      latest_price_date: backtestRecord.as_of_date ?? backtestRecord.holdings[0]?.exit_date ?? null,
+      period_return_pct: backtestRecord.portfolio_return_pct,
+      holdings: backtestRecord.holdings,
+      config: null,
+    }
+    : liveSnap ?? undefined;
 
   /**
    * Re-read everything after a mutation (sleeve edit, re-price, per-stock refresh).
@@ -397,12 +868,24 @@ export default function CurrentPortfolioCard({
   // "Why was this picked" — the same modal the Daily-holdings table opens, from
   // the same endpoint. Null = closed.
   const [breakdown, setBreakdown] = useState<BreakdownTarget | null>(null);
-  const { refreshing, results: refreshResults, refresh, clear: clearRefresh } = useStockRefresh(refetchAll);
-  const refreshOne = useCallback((companyId: number) => refresh(companyId, strategyId), [refresh, strategyId]);
-  const staleSet = useMemo(() => new Set(staleCompanyIds ?? []), [staleCompanyIds]);
+  const [actualFillsOpen, setActualFillsOpen] = useState(false);
+  const {
+    refreshing,
+    results: refreshResults,
+    refresh,
+    clear: clearRefresh,
+  } = useStockRefresh(refetchAll);
+  const refreshOne = useCallback(
+    (companyId: number) => refresh(companyId, strategyId),
+    [refresh, strategyId],
+  );
+  const staleSet = useMemo(
+    () => new Set(staleCompanyIds ?? []),
+    [staleCompanyIds],
+  );
 
   const isinByCompany = useCompanyIsinMap();
-  const isinByBenchmark = useBenchmarkIsinMap();   // keyed by -benchmark_id (the holding's company_id)
+  const isinByBenchmark = useBenchmarkIsinMap(); // keyed by -benchmark_id (the holding's company_id)
   const ccyByBenchmark = useBenchmarkCurrencyMap(); // ETF currency from the LIVE benchmark, keyed by -benchmark_id
   const exchangeByCompany = useCompanyExchangeMap();
 
@@ -410,10 +893,14 @@ export default function CurrentPortfolioCard({
   // benchmark currency (so a currency set after scheduling is respected now);
   // a stock uses its own stored currency.
   const resolveCcy = useCallback(
-    (h: Holding): string => (
-      ((h.company_id ?? 0) < 0 ? ccyByBenchmark.get(h.company_id) : undefined)
-      ?? h.currency ?? ''
-    ).toUpperCase(),
+    (h: Holding): string =>
+      (
+        ((h.company_id ?? 0) < 0
+          ? ccyByBenchmark.get(h.company_id)
+          : undefined) ??
+        h.currency ??
+        ""
+      ).toUpperCase(),
     [ccyByBenchmark],
   );
 
@@ -431,69 +918,153 @@ export default function CurrentPortfolioCard({
     const derived = holdings.map((h) => {
       const isEtf = (h.company_id ?? 0) < 0;
       const ccy = resolveCcy(h);
-      const isEur = ccy === '' || ccy === 'EUR';
+      const isEur = ccy === "" || ccy === "EUR";
       const entryDate = h.entry_date ? String(h.entry_date).slice(0, 10) : null;
       const endDate = h.exit_date
         ? String(h.exit_date).slice(0, 10)
-        : (snap?.latest_price_date ? String(snap.latest_price_date).slice(0, 10) : null);
+        : snap?.latest_price_date
+          ? String(snap.latest_price_date).slice(0, 10)
+          : null;
       // Stored EUR marks only (treat 0 as "not stored"); EUR sleeves pass the
       // local price through at 1:1.
-      const startEur = (h.entry_price_eur != null && h.entry_price_eur > 0)
-        ? h.entry_price_eur : (isEur ? (h.entry_price_local ?? null) : null);
-      const endEur = (h.exit_price_eur != null && h.exit_price_eur > 0)
-        ? h.exit_price_eur : (isEur ? (h.exit_price_local ?? null) : null);
-      const startFx = startEur != null && h.entry_price_local ? startEur / h.entry_price_local : (isEur ? 1 : null);
-      const endFx = endEur != null && h.exit_price_local ? endEur / h.exit_price_local : (isEur ? 1 : null);
+      const startEur =
+        h.entry_price_eur != null && h.entry_price_eur > 0
+          ? h.entry_price_eur
+          : isEur
+            ? (h.entry_price_local ?? null)
+            : null;
+      const endEur =
+        h.exit_price_eur != null && h.exit_price_eur > 0
+          ? h.exit_price_eur
+          : isEur
+            ? (h.exit_price_local ?? null)
+            : null;
+      const startFx =
+        startEur != null && h.entry_price_local
+          ? startEur / h.entry_price_local
+          : isEur
+            ? 1
+            : null;
+      const endFx =
+        endEur != null && h.exit_price_local
+          ? endEur / h.exit_price_local
+          : isEur
+            ? 1
+            : null;
       // The per-holding return is the engine's stored value — never recomputed.
       const eurReturn = h.forward_return_pct ?? null;
       const weight = h.weight ?? 0;
-      return { h, isEtf, ccy, isEur, entryDate, endDate, startEur, endEur, startFx, endFx, eurReturn, weight, target: weight * 100 };
+      return {
+        h,
+        isEtf,
+        ccy,
+        isEur,
+        entryDate,
+        endDate,
+        startEur,
+        endEur,
+        startFx,
+        endFx,
+        eurReturn,
+        weight,
+        target: weight * 100,
+      };
     });
     // Drifted (current) weights from the engine's per-holding return.
-    const totalFactor = derived.reduce((a, d) => a + d.weight * (1 + (d.eurReturn ?? 0) / 100), 0) || 1;
+    const totalFactor =
+      derived.reduce(
+        (a, d) => a + d.weight * (1 + (d.eurReturn ?? 0) / 100),
+        0,
+      ) || 1;
     return derived
-      .map((d) => ({ ...d, current: (d.weight * (1 + (d.eurReturn ?? 0) / 100) / totalFactor) * 100 }))
+      .map((d) => ({
+        ...d,
+        current:
+          ((d.weight * (1 + (d.eurReturn ?? 0) / 100)) / totalFactor) * 100,
+      }))
       .sort((a, b) => b.current - a.current);
   }, [snap, resolveCcy]);
 
-  // The Total is the engine's `period_return_pct` verbatim — the single source
-  // of truth the /schedule header MTD also reads, so they can't disagree. Only
-  // if it's somehow absent do we fall back to the weighted per-holding returns
-  // (which equal it by construction).
+  // Usually the snapshot total is the engine's authoritative weighted return.
+  // A legacy/restated snapshot can retain 0.00 there while its saved holdings
+  // already carry their real EUR returns. Reconcile against those visible rows
+  // so the headline cannot contradict the table underneath it.
   const totalReturn = useMemo(() => {
-    if (snap?.period_return_pct != null) return snap.period_return_pct;
     let wsum = 0;
     let rsum = 0;
     for (const d of rows) {
-      if (d.eurReturn != null) { rsum += d.eurReturn * d.weight; wsum += d.weight; }
+      if (d.eurReturn != null) {
+        rsum += d.eurReturn * d.weight;
+        wsum += d.weight;
+      }
     }
-    return wsum > 0 ? rsum / wsum : null;
+    const fromHoldings = wsum > 0 ? rsum / wsum : null;
+    return fromHoldings ?? snap?.period_return_pct ?? null;
   }, [snap, rows]);
 
   // Export columns — mirror the on-screen table (same already-sorted `rows`),
   // so a CSV/XLSX download matches exactly what the user sees.
   type Row = (typeof rows)[number];
-  const exportColumns: Column<Row>[] = useMemo(() => [
-    { key: 'ticker', header: 'Ticker', accessor: (d) => d.h.ticker ?? '' },
-    { key: 'exchange', header: 'Exchange', accessor: (d) => displayExchange(exchangeByCompany.get(d.h.company_id) ?? (d.isEtf ? 'ETF' : ''), d.h.ticker) },
-    { key: 'isin', header: 'ISIN', accessor: (d) => d.h.isin ?? isinByCompany.get(d.h.company_id) ?? isinByBenchmark.get(d.h.company_id) ?? '' },
-    { key: 'company', header: 'Company', accessor: (d) => d.h.company_name ?? '' },
-    { key: 'sector', header: 'Sector', accessor: (d) => d.h.sector ?? '' },
-    { key: 'currency', header: 'Currency', accessor: (d) => d.ccy },
-    { key: 'target', header: 'Target %', accessor: (d) => d.target },
-    { key: 'current', header: 'Current %', accessor: (d) => d.current },
-    { key: 'start_loc', header: 'Start (local)', accessor: (d) => d.h.entry_price_local ?? null },
-    { key: 'start_as_of', header: 'Start as of', accessor: (d) => d.entryDate },
-    { key: 'end_loc', header: 'End (local)', accessor: (d) => d.h.exit_price_local ?? null },
-    { key: 'end_as_of', header: 'End as of', accessor: (d) => d.endDate },
-    { key: 'start_fx_eur', header: 'Start FX→€', accessor: (d) => d.startFx },
-    { key: 'end_fx_eur', header: 'End FX→€', accessor: (d) => d.endFx },
-    { key: 'start_eur', header: 'Start (€)', accessor: (d) => d.startEur },
-    { key: 'end_eur', header: 'End (€)', accessor: (d) => d.endEur },
-    { key: 'return_eur', header: 'Return (€) %', accessor: (d) => d.eurReturn },
-  ], [isinByCompany, isinByBenchmark, exchangeByCompany]);
+  const exportColumns: Column<Row>[] = useMemo(
+    () => [
+      { key: "ticker", header: "Ticker", accessor: (d) => d.h.ticker ?? "" },
+      {
+        key: "exchange",
+        header: "Exchange",
+        accessor: (d) =>
+          displayExchange(
+            exchangeByCompany.get(d.h.company_id) ?? (d.isEtf ? "ETF" : ""),
+            d.h.ticker,
+          ),
+      },
+      {
+        key: "isin",
+        header: "ISIN",
+        accessor: (d) =>
+          d.h.isin ??
+          isinByCompany.get(d.h.company_id) ??
+          isinByBenchmark.get(d.h.company_id) ??
+          "",
+      },
+      {
+        key: "company",
+        header: "Company",
+        accessor: (d) => d.h.company_name ?? "",
+      },
+      { key: "sector", header: "Sector", accessor: (d) => d.h.sector ?? "" },
+      { key: "currency", header: "Currency", accessor: (d) => d.ccy },
+      { key: "target", header: "Target %", accessor: (d) => d.target },
+      { key: "current", header: "Current %", accessor: (d) => d.current },
+      {
+        key: "start_loc",
+        header: "Start (local)",
+        accessor: (d) => d.h.entry_price_local ?? null,
+      },
+      {
+        key: "start_as_of",
+        header: "Start as of",
+        accessor: (d) => d.entryDate,
+      },
+      {
+        key: "end_loc",
+        header: "End (local)",
+        accessor: (d) => d.h.exit_price_local ?? null,
+      },
+      { key: "end_as_of", header: "End as of", accessor: (d) => d.endDate },
+      { key: "start_fx_eur", header: "Start FX→€", accessor: (d) => d.startFx },
+      { key: "end_fx_eur", header: "End FX→€", accessor: (d) => d.endFx },
+      { key: "start_eur", header: "Start (€)", accessor: (d) => d.startEur },
+      { key: "end_eur", header: "End (€)", accessor: (d) => d.endEur },
+      {
+        key: "return_eur",
+        header: "Return (€) %",
+        accessor: (d) => d.eurReturn,
+      },
+    ],
+    [isinByCompany, isinByBenchmark, exchangeByCompany],
+  );
 
-  if (snapshotId == null) return null;
+  if (activeSnapshotId == null) return null;
   if (loading) {
     return (
       <div className="bg-card border border-neutral-800/40 rounded-lg px-4 py-3">
@@ -513,42 +1084,107 @@ export default function CurrentPortfolioCard({
   // Reference for "out of date": the portfolio's freshest close. A holding
   // whose latest close (End date) lags this is stale (GuruFocus publish lag /
   // an illiquid name) and gets flagged orange in the As-of column.
-  const referenceDate = snap.latest_price_date ? String(snap.latest_price_date).slice(0, 10) : null;
+  const referenceDate = snap.latest_price_date
+    ? String(snap.latest_price_date).slice(0, 10)
+    : null;
   // The sleeves AS HELD, straight off the snapshot: cash is the cash holding's
   // weight, each ETF is its own (negative company_id = -benchmark_id). Read from
   // the holdings rather than the config so the editor always opens on the
   // numbers in the table below it.
-  const currentCashPct = ((snap.holdings ?? []).find((h) => h.is_cash)?.weight ?? 0) * 100;
+  const currentCashPct =
+    ((snap.holdings ?? []).find((h) => h.is_cash)?.weight ?? 0) * 100;
   const currentEtfSleeves = (snap.holdings ?? [])
     .filter((h) => !h.is_cash && (h.company_id ?? 0) < 0)
-    .map((h) => ({ benchmarkId: -(h.company_id ?? 0), pct: (h.weight ?? 0) * 100 }));
+    .map((h) => ({
+      benchmarkId: -(h.company_id ?? 0),
+      pct: (h.weight ?? 0) * 100,
+    }));
   // "Held since" = the earliest holding entry date — the actual price date the
   // return is measured FROM ("…since it was entered"), which is the close before
   // the rebalance day (e.g. Friday 05-29 for a first-Monday 06-01 rebalance).
   // NOT the snapshot's as_of_date, which can carry a stale/exit date.
-  const heldSince = (snap.holdings ?? [])
-    .map((h) => (h.entry_date ? String(h.entry_date).slice(0, 10) : null))
-    .filter((d): d is string => !!d)
-    .sort()[0] ?? String(snap.as_of_date).slice(0, 10);
+  const heldSince =
+    (snap.holdings ?? [])
+      .map((h) => (h.entry_date ? String(h.entry_date).slice(0, 10) : null))
+      .filter((d): d is string => !!d)
+      .sort()[0] ?? String(snap.as_of_date).slice(0, 10);
 
   return (
     <div className="bg-card border border-neutral-800/40 rounded-xl p-5">
       <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
         <div className="flex items-baseline gap-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-fg-strong">Current portfolio</h3>
+          <h3 className="text-sm font-semibold text-fg-strong">
+            Current portfolio
+          </h3>
           <SleeveControl
             strategyId={strategyId}
+            snapshotId={activeSnapshotId != null && activeSnapshotId > 0 ? activeSnapshotId : undefined}
             cashPct={currentCashPct}
             etfSleeves={currentEtfSleeves}
             canEdit={canEditCash}
             onChanged={refetchAll}
           />
-          <ReloadPrices strategyId={strategyId} canEdit={canEditCash} onDone={refetchAll} />
+          <ReloadPrices
+            strategyId={strategyId}
+            canEdit={canEditCash}
+            onDone={refetchAll}
+          />
+          {canEditCash && strategyId != null && (
+            <button
+              type="button"
+              onClick={() => setActualFillsOpen(true)}
+              className="rounded border border-neutral-700 px-2 py-0.5 text-[12px] text-fg-soft transition-colors hover:bg-overlay/5"
+              title="Record actual broker entry and exit prices, then review slippage"
+            >
+              Actual fills
+            </button>
+          )}
+          <span className="inline-flex items-center gap-1 text-[12px] text-fg-muted">
+            <button
+              type="button"
+              disabled={activePortfolioIndex < 0 || activePortfolioIndex >= portfolioSnapshots.length - 1}
+              onClick={() => {
+                if (activePortfolioIndex >= 0 && activePortfolioIndex < portfolioSnapshots.length - 1) {
+                  setSelectedSnapshotId(portfolioSnapshots[activePortfolioIndex + 1].snapshotId);
+                }
+              }}
+              className="rounded border border-neutral-700 px-2 py-0.5 text-black transition-colors hover:bg-overlay/5 disabled:cursor-not-allowed disabled:opacity-30"
+              title="Previous portfolio"
+              aria-label="Previous portfolio"
+            >
+              &#9664;
+            </button>
+            <span className="px-1" title={`Portfolio opened ${activePortfolio?.asOfDate ?? snap.as_of_date}`}>
+              {portfolioMonthLabel(activePortfolio?.asOfDate ?? String(snap.as_of_date).slice(0, 10))}
+            </span>
+            <button
+              type="button"
+              disabled={activePortfolioIndex <= 0}
+              onClick={() => {
+                if (activePortfolioIndex > 0) {
+                  setSelectedSnapshotId(portfolioSnapshots[activePortfolioIndex - 1].snapshotId);
+                }
+              }}
+              className="rounded border border-neutral-700 px-2 py-0.5 text-black transition-colors hover:bg-overlay/5 disabled:cursor-not-allowed disabled:opacity-30"
+              title="Newer portfolio"
+              aria-label="Newer portfolio"
+            >
+              &#9654;
+            </button>
+          </span>
           {totalReturn != null && (
-            <span className="text-sm" title="Weighted EUR return of the held portfolio since it was entered">
+            <span
+              className="text-sm"
+              title="Weighted EUR return of the held portfolio since it was entered"
+            >
               <span className="text-fg-subtle text-xs">Total (€) </span>
-              <span className={`font-mono font-semibold ${totalReturn >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
-                {totalReturn >= 0 ? '+' : ''}{totalReturn.toFixed(2)}%
+              <span
+                className={`font-mono font-semibold ${totalReturn >= 0 ? "text-pos-400" : "text-neg-400"}`}
+              >
+                {totalReturn >= 0 ? "+" : ""}
+                {Math.abs(totalReturn) > 0 && Math.abs(totalReturn) < 0.01
+                  ? totalReturn.toFixed(3)
+                  : totalReturn.toFixed(2)}%
               </span>
             </span>
           )}
@@ -556,7 +1192,9 @@ export default function CurrentPortfolioCard({
         <div className="flex items-center gap-2">
           <span className="text-xs text-fg-subtle font-mono">
             {rows.length} holdings · held since {heldSince}
-            {snap.latest_price_date && <> · as of {String(snap.latest_price_date).slice(0, 10)}</>}
+            {snap.latest_price_date && (
+              <> · as of {String(snap.latest_price_date).slice(0, 10)}</>
+            )}
           </span>
           <TableDownloadButton
             rows={rows}
@@ -581,62 +1219,166 @@ export default function CurrentPortfolioCard({
               <th className="text-left font-medium py-2 px-2">ISIN</th>
               <th className="text-left font-medium py-2 px-2">Company</th>
               <th className="text-left font-medium py-2 px-2">Sector</th>
-              <th className="text-right font-medium py-2 px-2" title="Target weight set at the rebalance">Target</th>
-              <th className="text-right font-medium py-2 px-2" title="Weight today after price drift, renormalized to 100%">Current</th>
-              <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="Entry price in local trading currency">Start (local)</th>
-              <th className="text-right font-medium py-2 px-2" title="Entry date the Start (local) price reflects">As of</th>
-              <th className="text-right font-medium py-2 px-2" title="Latest close in local trading currency">End (local)</th>
-              <th className="text-right font-medium py-2 px-2" title="Latest-close date the End (local) price reflects. Orange when it lags the portfolio's freshest close (stale price).">As of</th>
-              <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="FX rate locked in at entry: EUR per 1 unit of the local currency (1.00 for EUR)">Start FX→€</th>
-              <th className="text-right font-medium py-2 px-2" title="Entry date the Start FX→€ rate reflects">As of</th>
-              <th className="text-right font-medium py-2 px-2" title="FX rate at the latest close: EUR per 1 unit of the local currency (the engine's exit EUR ÷ local)">End FX→€</th>
-              <th className="text-right font-medium py-2 px-2" title="Date the End FX→€ rate reflects. Orange when it lags the portfolio's freshest close (stale).">As of</th>
-              <th className="text-right font-medium py-2 px-2 border-l border-neutral-800/40" title="Engine's EUR entry mark (converted at the entry-date FX)">Start (€)</th>
-              <th className="text-right font-medium py-2 px-2" title="Engine's EUR exit mark (converted at the close-date FX)">End (€)</th>
-              <th className="text-right font-medium py-2 pl-2 border-l border-neutral-800/40" title="The engine's per-holding EUR return since entry (forward_return_pct) — shown verbatim, not recomputed">Return (€)</th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Target weight set at the rebalance"
+              >
+                Target
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Weight today after price drift, renormalized to 100%"
+              >
+                Current
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2 border-l border-neutral-800/40"
+                title="Entry price in local trading currency"
+              >
+                Start (local)
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Entry date the Start (local) price reflects"
+              >
+                As of
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Latest close in local trading currency"
+              >
+                End (local)
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Latest-close date the End (local) price reflects. Orange when it lags the portfolio's freshest close (stale price)."
+              >
+                As of
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2 border-l border-neutral-800/40"
+                title="FX rate locked in at entry: EUR per 1 unit of the local currency (1.00 for EUR)"
+              >
+                Start FX→€
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Entry date the Start FX→€ rate reflects"
+              >
+                As of
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="FX rate at the latest close: EUR per 1 unit of the local currency (the engine's exit EUR ÷ local)"
+              >
+                End FX→€
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Date the End FX→€ rate reflects. Orange when it lags the portfolio's freshest close (stale)."
+              >
+                As of
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2 border-l border-neutral-800/40"
+                title="Engine's EUR entry mark (converted at the entry-date FX)"
+              >
+                Start (€)
+              </th>
+              <th
+                className="text-right font-medium py-2 px-2"
+                title="Engine's EUR exit mark (converted at the close-date FX)"
+              >
+                End (€)
+              </th>
+              <th
+                className="text-right font-medium py-2 pl-2 border-l border-neutral-800/40"
+                title="The engine's per-holding EUR return since entry (forward_return_pct) — shown verbatim, not recomputed"
+              >
+                Return (€)
+              </th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row) => {
-              const { h, target, current, isEtf, ccy, entryDate, endDate, startEur, endEur, startFx, endFx, eurReturn } = row;
+              const {
+                h,
+                target,
+                current,
+                isEtf,
+                ccy,
+                entryDate,
+                endDate,
+                startEur,
+                endEur,
+                startFx,
+                endFx,
+                eurReturn,
+              } = row;
               // Cash sleeve — a plain row: weights + a flat 0% return, no
               // ticker/ISIN/price/date cells (17 columns, "—" for the rest).
               if (h.is_cash) {
-                const dash = 'py-2 px-2 text-right font-mono whitespace-nowrap text-fg-faint';
+                const dash =
+                  "py-2 px-2 text-right font-mono whitespace-nowrap text-fg-faint";
                 return (
-                  <tr key="cash" className="border-b border-neutral-800/30 bg-overlay/[0.02]">
+                  <tr
+                    key="cash"
+                    className="border-b border-neutral-800/30 bg-overlay/[0.02]"
+                  >
                     <td className="py-2 pr-2 font-mono whitespace-nowrap text-fg-soft">
                       Cash
-                      <span className="ml-1.5 text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-neutral-500/15 text-fg-muted border border-neutral-500/30">CASH</span>
+                      <span className="ml-1.5 text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-neutral-500/15 text-fg-muted border border-neutral-500/30">
+                        CASH
+                      </span>
                     </td>
                     <td className="py-2 px-2 text-fg-faint">—</td>
                     <td className="py-2 px-2 text-fg-soft">Cash</td>
                     <td className="py-2 px-2 text-fg-subtle">—</td>
-                    <td className="py-2 px-2 text-right font-mono text-fg-muted">{target.toFixed(1)}%</td>
-                    <td className="py-2 px-2 text-right font-mono text-fg-strong">{current.toFixed(1)}%</td>
-                    <td className={`${dash} border-l border-neutral-800/40`}>—</td>
+                    <td className="py-2 px-2 text-right font-mono text-fg-muted">
+                      {target.toFixed(1)}%
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono text-fg-strong">
+                      {current.toFixed(1)}%
+                    </td>
+                    <td className={`${dash} border-l border-neutral-800/40`}>
+                      —
+                    </td>
                     <td className={dash}>—</td>
                     <td className={dash}>—</td>
                     <td className={dash}>—</td>
-                    <td className={`${dash} border-l border-neutral-800/40`}>—</td>
+                    <td className={`${dash} border-l border-neutral-800/40`}>
+                      —
+                    </td>
                     <td className={dash}>—</td>
                     <td className={dash}>—</td>
                     <td className={dash}>—</td>
-                    <td className={`${dash} border-l border-neutral-800/40`}>—</td>
+                    <td className={`${dash} border-l border-neutral-800/40`}>
+                      —
+                    </td>
                     <td className={dash}>—</td>
-                    <td className="py-2 pl-2 text-right font-mono border-l border-neutral-800/40 text-fg-faint">0.00%</td>
+                    <td className="py-2 pl-2 text-right font-mono border-l border-neutral-800/40 text-fg-faint">
+                      0.00%
+                    </td>
                   </tr>
                 );
               }
-              const exchRaw = exchangeByCompany.get(h.company_id) ?? '';
+              const exchRaw = exchangeByCompany.get(h.company_id) ?? "";
               const exch = displayExchange(exchRaw, h.ticker);
-              const isin = h.isin ?? isinByCompany.get(h.company_id) ?? isinByBenchmark.get(h.company_id) ?? '';
+              const isin =
+                h.isin ??
+                isinByCompany.get(h.company_id) ??
+                isinByBenchmark.get(h.company_id) ??
+                "";
               const href = guruFocusUrl(h.ticker, exchRaw);
               // Each date-dependent value (Start/End local, Start/End FX) carries
               // its own As-of cell. Entry cells show the entry date (historical —
               // never "stale"); End cells show the close date, orange when this
               // holding lags the portfolio's freshest close.
-              const staleEnd = !!(endDate && referenceDate && endDate < referenceDate);
+              const staleEnd = !!(
+                endDate &&
+                referenceDate &&
+                endDate < referenceDate
+              );
               // Admins can force-refresh ANY holding from here — a stock from
               // metric_data, an ETF overlay from benchmark_price. Stale rows —
               // flagged by the LIVE check (matches the heatmap warning) or the
@@ -646,102 +1388,167 @@ export default function CurrentPortfolioCard({
               const isStale = staleSet.has(h.company_id) || staleEnd;
               const detail = refreshResults.get(h.company_id);
               const entryAsOfCell = () => (
-                <td className="py-2 px-2 text-right font-mono whitespace-nowrap text-fg-subtle" title="Entry date this value reflects">
-                  {entryDate ?? '—'}
+                <td
+                  className="py-2 px-2 text-right font-mono whitespace-nowrap text-fg-subtle"
+                  title="Entry date this value reflects"
+                >
+                  {entryDate ?? "—"}
                 </td>
               );
               const endAsOfCell = () => (
                 <td
-                  className={`py-2 px-2 text-right font-mono whitespace-nowrap ${staleEnd ? 'text-warn-400' : 'text-fg-subtle'}`}
-                  title={staleEnd ? `Stale — this holding's latest close (${endDate}) lags the portfolio's freshest close (${referenceDate})` : 'Latest close date this holding reflects'}
+                  className={`py-2 px-2 text-right font-mono whitespace-nowrap ${staleEnd ? "text-warn-400" : "text-fg-subtle"}`}
+                  title={
+                    staleEnd
+                      ? `Stale — this holding's latest close (${endDate}) lags the portfolio's freshest close (${referenceDate})`
+                      : "Latest close date this holding reflects"
+                  }
                 >
-                  {endDate ?? '—'}
+                  {endDate ?? "—"}
                 </td>
               );
               return (
-                <Fragment key={`${h.side ?? 'long'}-${h.company_id}`}>
-                <tr className="group border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
-                  <td className="py-2 pr-2 font-mono whitespace-nowrap">
-                    <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent-400 hover:text-accent-300 hover:underline">{h.ticker}</a>
-                    {exch && <span className="ml-1 text-[11px] text-fg-subtle" title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}>({exch})</span>}
-                    {isEtf && <span className="ml-1.5 text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">ETF</span>}
-                    {canRefresh && (
-                      <button
-                        type="button"
-                        onClick={() => void refreshOne(h.company_id)}
-                        disabled={refreshing.has(h.company_id)}
-                        title={isStale
-                          ? "Stale price — refresh this stock from GuruFocus now (shows the request + response)"
-                          : "Refresh this stock's price from GuruFocus now (shows the request + response)"}
-                        className={`ml-1.5 text-[12px] disabled:opacity-40 transition-opacity ${
-                          isStale
-                            ? 'text-warn-400 hover:text-warn-300'
-                            : 'text-fg-faint hover:text-accent-300 opacity-0 group-hover:opacity-100 focus:opacity-100'
-                        }`}
+                <Fragment key={`${h.side ?? "long"}-${h.company_id}`}>
+                  <tr className="group border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
+                    <td className="py-2 pr-2 font-mono whitespace-nowrap">
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent-400 hover:text-accent-300 hover:underline"
                       >
-                        {refreshing.has(h.company_id) ? 'Refreshing…' : 'Refresh'}
-                      </button>
-                    )}
-                  </td>
-                  <td className="py-2 px-2 font-mono text-fg-muted whitespace-nowrap">{isin || '—'}</td>
-                  {/* The name opens the arithmetic behind the pick.  ONLY for a
+                        {h.ticker}
+                      </a>
+                      {exch && (
+                        <span
+                          className="ml-1 text-[11px] text-fg-subtle"
+                          title={EXCHANGE_NAMES[exch.toUpperCase()] ?? exch}
+                        >
+                          ({exch})
+                        </span>
+                      )}
+                      {isEtf && (
+                        <span className="ml-1.5 text-[10px] uppercase tracking-wide px-1 py-0.5 rounded bg-accent-500/15 text-accent-300 border border-accent-500/30">
+                          ETF
+                        </span>
+                      )}
+                      {canRefresh && (
+                        <button
+                          type="button"
+                          onClick={() => void refreshOne(h.company_id)}
+                          disabled={refreshing.has(h.company_id)}
+                          title={
+                            isStale
+                              ? "Stale price — refresh this stock from GuruFocus now (shows the request + response)"
+                              : "Refresh this stock's price from GuruFocus now (shows the request + response)"
+                          }
+                          className={`ml-1.5 text-[12px] disabled:opacity-40 transition-opacity ${
+                            isStale
+                              ? "text-warn-400 hover:text-warn-300"
+                              : "text-fg-faint hover:text-accent-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                          }`}
+                        >
+                          {refreshing.has(h.company_id)
+                            ? "Refreshing…"
+                            : "Refresh"}
+                        </button>
+                      )}
+                    </td>
+                    <td className="py-2 px-2 font-mono text-fg-muted whitespace-nowrap">
+                      {isin || "—"}
+                    </td>
+                    {/* The name opens the arithmetic behind the pick.  ONLY for a
                       real company: an ETF sleeve and the cash row were never
                       SELECTED by the engine — they were set by hand — so there is
                       no signal breakdown to show and a clickable name there would
                       promise an explanation that cannot exist. The GuruFocus link
                       is unaffected; it lives on the Ticker cell to the left. */}
-                  <td className="py-2 px-2 truncate max-w-[220px]">
-                    {(h.company_id ?? 0) > 0 && !h.is_cash ? (
-                      <button
-                        type="button"
-                        onClick={() => setBreakdown({
-                          companyId: h.company_id,
-                          date: snap.as_of_date,
-                          name: h.company_name ?? '',
-                          ticker: h.ticker ?? null,
-                        })}
-                        title={`Why was ${h.company_name} picked? — signals, normalisation and the category blend as of ${snap.as_of_date}`}
-                        className="text-fg-soft hover:text-accent-300 hover:underline text-left truncate max-w-full"
-                      >
-                        {h.company_name}
-                      </button>
-                    ) : (
-                      <span className="text-fg-soft">{h.company_name}</span>
-                    )}
-                  </td>
-                  <td className="py-2 px-2 text-fg-subtle">{h.sector}</td>
-                  <td className="py-2 px-2 text-right font-mono text-fg-muted">{target.toFixed(1)}%</td>
-                  <td className="py-2 px-2 text-right font-mono text-fg-strong">{current.toFixed(1)}%</td>
-                  <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">
-                    {fmtPrice(h.entry_price_local)}{ccy && <span className="text-fg-faint text-[11px] ml-1">{ccy}</span>}
-                  </td>
-                  {entryAsOfCell()}
-                  <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap">{fmtPrice(h.exit_price_local)}</td>
-                  {endAsOfCell()}
-                  <td className="py-2 px-2 text-right font-mono text-fg-subtle whitespace-nowrap border-l border-neutral-800/40" title={startFx != null && ccy ? `1 ${ccy} = ${startFx.toFixed(4)} EUR (at entry)` : 'No entry FX (EUR / not converted)'}>
-                    {startFx != null ? startFx.toFixed(4) : '—'}
-                  </td>
-                  {entryAsOfCell()}
-                  <td className="py-2 px-2 text-right font-mono text-fg-subtle whitespace-nowrap" title={endFx != null && ccy ? `1 ${ccy} = ${endFx.toFixed(4)} EUR (latest)` : 'No FX rate available'}>
-                    {endFx != null ? endFx.toFixed(4) : '—'}
-                  </td>
-                  {endAsOfCell()}
-                  <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">{fmtPrice(startEur)}<AsOfTip date={entryDate} /></td>
-                  <td className="py-2 px-2 text-right font-mono text-fg whitespace-nowrap">{fmtPrice(endEur)}</td>
-                  <td className={`py-2 pl-2 text-right font-mono border-l border-neutral-800/40 ${eurReturn != null ? (eurReturn >= 0 ? 'text-pos-400' : 'text-neg-400') : 'text-fg-faint'}`}>
-                    {fmtPct(eurReturn)}
-                  </td>
-                </tr>
-                {detail && (
-                  <tr className="border-b border-neutral-800/30 bg-inset/40">
-                    <td colSpan={17} className="px-3 py-2">
-                      <PriceRefreshPanel
-                        result={detail}
-                        onClose={() => clearRefresh(h.company_id)}
-                      />
+                    <td className="py-2 px-2 truncate max-w-[220px]">
+                      {(h.company_id ?? 0) > 0 && !h.is_cash ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setBreakdown({
+                              companyId: h.company_id,
+                              date: snap.as_of_date,
+                              name: h.company_name ?? "",
+                              ticker: h.ticker ?? null,
+                            })
+                          }
+                          title={`Why was ${h.company_name} picked? — signals, normalisation and the category blend as of ${snap.as_of_date}`}
+                          className="text-fg-soft hover:text-accent-300 hover:underline text-left truncate max-w-full"
+                        >
+                          {h.company_name}
+                        </button>
+                      ) : (
+                        <span className="text-fg-soft">{h.company_name}</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-2 text-fg-subtle">{h.sector}</td>
+                    <td className="py-2 px-2 text-right font-mono text-fg-muted">
+                      {target.toFixed(1)}%
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono text-fg-strong">
+                      {current.toFixed(1)}%
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">
+                      {fmtPrice(h.entry_price_local)}
+                      {ccy && (
+                        <span className="text-fg-faint text-[11px] ml-1">
+                          {ccy}
+                        </span>
+                      )}
+                    </td>
+                    {entryAsOfCell()}
+                    <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap">
+                      {fmtPrice(h.exit_price_local)}
+                    </td>
+                    {endAsOfCell()}
+                    <td
+                      className="py-2 px-2 text-right font-mono text-fg-subtle whitespace-nowrap border-l border-neutral-800/40"
+                      title={
+                        startFx != null && ccy
+                          ? `1 ${ccy} = ${startFx.toFixed(4)} EUR (at entry)`
+                          : "No entry FX (EUR / not converted)"
+                      }
+                    >
+                      {startFx != null ? startFx.toFixed(4) : "—"}
+                    </td>
+                    {entryAsOfCell()}
+                    <td
+                      className="py-2 px-2 text-right font-mono text-fg-subtle whitespace-nowrap"
+                      title={
+                        endFx != null && ccy
+                          ? `1 ${ccy} = ${endFx.toFixed(4)} EUR (latest)`
+                          : "No FX rate available"
+                      }
+                    >
+                      {endFx != null ? endFx.toFixed(4) : "—"}
+                    </td>
+                    {endAsOfCell()}
+                    <td className="py-2 px-2 text-right font-mono text-fg-muted whitespace-nowrap border-l border-neutral-800/40">
+                      {fmtPrice(startEur)}
+                      <AsOfTip date={entryDate} />
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono text-fg whitespace-nowrap">
+                      {fmtPrice(endEur)}
+                    </td>
+                    <td
+                      className={`py-2 pl-2 text-right font-mono border-l border-neutral-800/40 ${eurReturn != null ? (eurReturn >= 0 ? "text-pos-400" : "text-neg-400") : "text-fg-faint"}`}
+                    >
+                      {fmtPct(eurReturn)}
                     </td>
                   </tr>
-                )}
+                  {detail && (
+                    <tr className="border-b border-neutral-800/30 bg-inset/40">
+                      <td colSpan={17} className="px-3 py-2">
+                        <PriceRefreshPanel
+                          result={detail}
+                          onClose={() => clearRefresh(h.company_id)}
+                        />
+                      </td>
+                    </tr>
+                  )}
                 </Fragment>
               );
             })}
@@ -749,9 +1556,27 @@ export default function CurrentPortfolioCard({
         </table>
       </div>
       <p className="text-xs text-fg-subtle mt-3 leading-relaxed">
-        Sorted by current weight. <span className="font-medium">Target</span> is the last-rebalance weight; <span className="font-medium">Current</span> is the drifted weight, renormalized to 100%. <span className="font-medium">Start/End</span> are entry and latest-close prices in local currency. <span className="font-medium">Return (€)</span> and <span className="font-medium">Total</span> are the engine&apos;s figures (per-holding and weighted portfolio return), matching the headline MTD. <span className="font-medium">Start/End (€)</span>{' '}are the engine&apos;s EUR marks — &quot;—&quot; until priced (ETFs self-heal on the next price update).
-        {canEditCash && <> A stale (<span className="text-warn-400">orange</span>) close date shows a <span className="text-warn-400">Refresh</span> button for that holding, with the request and response inline.</>}
-        {' '}Click a <span className="font-medium">company name</span> for the arithmetic behind its selection.
+        Sorted by current weight. <span className="font-medium">Target</span> is
+        the last-rebalance weight; <span className="font-medium">Current</span>{" "}
+        is the drifted weight, renormalized to 100%.{" "}
+        <span className="font-medium">Start/End</span> are entry and
+        latest-close prices in local currency.{" "}
+        <span className="font-medium">Return (€)</span> and{" "}
+        <span className="font-medium">Total</span> are the engine&apos;s figures
+        (per-holding and weighted portfolio return), matching the headline MTD.{" "}
+        <span className="font-medium">Start/End (€)</span> are the engine&apos;s
+        EUR marks — &quot;—&quot; until priced (ETFs self-heal on the next price
+        update).
+        {canEditCash && (
+          <>
+            {" "}
+            A stale (<span className="text-warn-400">orange</span>) close date
+            shows a <span className="text-warn-400">Refresh</span> button for
+            that holding, with the request and response inline.
+          </>
+        )}{" "}
+        Click a <span className="font-medium">company name</span> for the
+        arithmetic behind its selection.
       </p>
       {breakdown && (
         <BreakdownModal
@@ -762,6 +1587,15 @@ export default function CurrentPortfolioCard({
           config={(snap.config ?? {}) as Record<string, unknown>}
           strategyId={strategyId}
           onClose={() => setBreakdown(null)}
+        />
+      )}
+      {actualFillsOpen && strategyId != null && (
+        <ActualFillsModal
+          strategyId={strategyId}
+          holdings={snap.holdings ?? []}
+          latestPriceDate={snap.latest_price_date}
+          portfolioDate={String(snap.as_of_date).slice(0, 10)}
+          onClose={() => setActualFillsOpen(false)}
         />
       )}
     </div>

@@ -319,7 +319,8 @@ export default function SectorMomentumTimeline() {
             {detailError && <p className="mt-5 text-sm text-neg-300">{detailError}</p>}
             {detail && <>
               <p className="mt-4 text-sm text-fg-muted">{detail.method}</p>
-              <div className="mt-3 flex gap-4 text-xs text-fg-muted">
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-xs text-fg-muted">
+                <span>Total: <strong className="text-fg-strong">{detail.score?.toFixed(1) ?? '—'}</strong></span>
                 {Object.entries(detail.category_scores).map(([category, score]) => <span key={category}>{category}: <strong className="text-fg-strong">{score?.toFixed(1) ?? '—'}</strong></span>)}
               </div>
               <div className="mt-5 overflow-x-auto">

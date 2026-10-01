@@ -109,6 +109,19 @@ export default function ScheduledStrategyDetail({
   useEffect(() => { onLoadedRef.current = onLoaded; }, [onLoaded]);
   const [showConfig, setShowConfig] = useState(false);
   const [savingStartDate, setSavingStartDate] = useState(false);
+  const [backtestRecords, setBacktestRecords] = useState<PeriodRecord[]>([]);
+
+  useEffect(() => {
+    if (data?.backtest_run_id == null) { setBacktestRecords([]); return; }
+    let cancelled = false;
+    apiFetch(`${API_URL}/api/momentum/backtests/${data.backtest_run_id}`)
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => {
+        if (!cancelled) setBacktestRecords((body?.result?.monthly_records ?? []) as PeriodRecord[]);
+      })
+      .catch(() => { if (!cancelled) setBacktestRecords([]); });
+    return () => { cancelled = true; };
+  }, [data?.backtest_run_id]);
 
   const load = useCallback(async () => {
     try {
@@ -172,6 +185,31 @@ export default function ScheduledStrategyDetail({
   // Go-live cutoff (YYYY-MM-DD): the configured start_date, or the
   // strategy's scheduled date when unset.
   const effectiveStart = (data.start_date ?? data.created_at).slice(0, 10);
+  // `runs` is newest first and includes daily price marks. Keep its first
+  // snapshot for each rebalance date: that is the latest valuation of each
+  // portfolio the strategy has actually held, rather than a noisy list of
+  // every daily refresh.
+  const portfoliosByStart = new Map<string, RunHistoryEntry>();
+  for (const run of data.runs) {
+    const start = run.as_of_date.slice(0, 10);
+    if (!portfoliosByStart.has(start)) portfoliosByStart.set(start, run);
+  }
+  const portfolioSnapshots: { snapshotId: number; asOfDate: string; latestPriceDate: string | null; backtestRecord?: PeriodRecord }[] = Array.from(portfoliosByStart.values()).map((run) => ({
+    snapshotId: run.snapshot_id,
+    asOfDate: run.as_of_date.slice(0, 10),
+    latestPriceDate: run.latest_price_date,
+  }));
+  for (const record of backtestRecords) {
+    const asOfDate = record.date.slice(0, 10);
+    if (!record.holdings.length || portfoliosByStart.has(asOfDate)) continue;
+    portfolioSnapshots.push({
+      snapshotId: -Number(asOfDate.replaceAll('-', '')),
+      asOfDate,
+      latestPriceDate: record.as_of_date ?? null,
+      backtestRecord: record,
+    });
+  }
+  portfolioSnapshots.sort((a, b) => b.asOfDate.localeCompare(a.asOfDate));
 
   return (
     <div className="px-5 py-4 bg-sidebar border-t border-neutral-800/30 space-y-4">
@@ -179,6 +217,7 @@ export default function ScheduledStrategyDetail({
           you hold, target vs drifted weight, the rebalance action, and ISIN. */}
       <CurrentPortfolioCard
         snapshotId={data.runs?.[0]?.snapshot_id ?? null}
+        portfolioSnapshots={portfolioSnapshots}
         strategyId={strategyId}
         strategyName={data.name}
         canEditCash={!readOnly}

@@ -7555,6 +7555,30 @@ export interface paths {
         patch: operations["patch_scheduled_strategy_api_scheduled_strategies__strategy_id__patch"];
         trace?: never;
     };
+    "/api/scheduled-strategies/{strategy_id}/actual-fills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Actual Fills
+         * @description The manually recorded broker fills for a scheduled strategy.
+         */
+        get: operations["get_actual_fills_api_scheduled_strategies__strategy_id__actual_fills_get"];
+        /**
+         * Save Actual Fills
+         * @description Upsert one real entry/exit fill pair per holding for slippage review.
+         */
+        put: operations["save_actual_fills_api_scheduled_strategies__strategy_id__actual_fills_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduled-strategies/{strategy_id}/cash": {
         parameters: {
             query?: never;
@@ -8517,6 +8541,29 @@ export interface components {
              * @default 0
              */
             weight_pct?: number;
+        };
+        /** ActualFill */
+        ActualFill: {
+            /** Company Id */
+            company_id: number;
+            /** Entry Date */
+            entry_date?: string | null;
+            /** Entry Price */
+            entry_price?: number | null;
+            /** Exit Date */
+            exit_date?: string | null;
+            /** Exit Price */
+            exit_price?: number | null;
+        };
+        /** ActualFillsRequest */
+        ActualFillsRequest: {
+            /** Fills */
+            fills: components["schemas"]["ActualFill"][];
+            /**
+             * Portfolio Date
+             * Format: date
+             */
+            portfolio_date: string;
         };
         /**
          * AirsAccount
@@ -13803,6 +13850,8 @@ export interface components {
              * @default []
              */
             etfs?: components["schemas"]["SleeveEtf"][];
+            /** Snapshot Id */
+            snapshot_id?: number | null;
         };
         /** SignalBreakdownRequest */
         SignalBreakdownRequest: {
@@ -23620,6 +23669,74 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ScheduledStrategyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_actual_fills_api_scheduled_strategies__strategy_id__actual_fills_get: {
+        parameters: {
+            query: {
+                portfolio_date: string;
+            };
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_actual_fills_api_scheduled_strategies__strategy_id__actual_fills_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActualFillsRequest"];
             };
         };
         responses: {

@@ -314,6 +314,87 @@
         "title": "ActiveShareUnmatched",
         "type": "object"
       },
+      "ActualFill": {
+        "properties": {
+          "company_id": {
+            "title": "Company Id",
+            "type": "integer"
+          },
+          "entry_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Date"
+          },
+          "entry_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Price"
+          },
+          "exit_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Date"
+          },
+          "exit_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Price"
+          }
+        },
+        "required": [
+          "company_id"
+        ],
+        "title": "ActualFill",
+        "type": "object"
+      },
+      "ActualFillsRequest": {
+        "properties": {
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/ActualFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "portfolio_date": {
+            "format": "date",
+            "title": "Portfolio Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "portfolio_date",
+          "fills"
+        ],
+        "title": "ActualFillsRequest",
+        "type": "object"
+      },
       "AirsAccount": {
         "description": "One AIRS account's YEAR, on AIRS's own numbers.\n\n EVERY MONEY FIELD HERE IS THE YEAR'S, SUMMED ACROSS AIRS'S MONTHLY ROWS. One ATT row is\none MONTH \u2014 reading the freshest as \"the year\" served AITopSelectie's July price result of\n-130,063 where the year made +420,225: wrong sign, third of the size, beside a +42% YTD.\n`_airs_accounts._year_perf` does the assembly; read it before adding a field here.\n\n `ytd_pct` IS `cumulatief_rendement` \u2014 AIRS's own, flow-aware, and never\n`end_value_eur / begin_value_eur - 1`.\n\n `latest_month_pct` IS NOT A RIVAL YTD. It is AIRS's `rendement` off the newest row: the\nlatest month's return. It was once served as `value_ratio_pct` and described as \"the wrong\nnumber\", on the theory that deposits inflated it \u2014 but AITopSelectie has zero deposits in\nevery month of 2026 and still reads -5.85% there against +46.12% for the year. Different\nwindows, both correct.",
         "properties": {
@@ -14975,6 +15056,17 @@
             },
             "title": "Etfs",
             "type": "array"
+          },
+          "snapshot_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Snapshot Id"
           }
         },
         "title": "SetSleevesRequest",
@@ -30332,6 +30424,106 @@
           }
         },
         "summary": "Patch Scheduled Strategy",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}/actual-fills": {
+      "get": {
+        "description": "The manually recorded broker fills for a scheduled strategy.",
+        "operationId": "get_actual_fills_api_scheduled_strategies__strategy_id__actual_fills_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "portfolio_date",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Portfolio Date",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Actual Fills",
+        "tags": [
+          "schedule"
+        ]
+      },
+      "put": {
+        "description": "Upsert one real entry/exit fill pair per holding for slippage review.",
+        "operationId": "save_actual_fills_api_scheduled_strategies__strategy_id__actual_fills_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActualFillsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Actual Fills",
         "tags": [
           "schedule"
         ]
