@@ -7224,6 +7224,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/momentum/sector-timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sector Timeline
+         * @description Daily Yahoo-close sector rankings for the liquid equity asset universe.
+         */
+        get: operations["get_sector_timeline_api_momentum_sector_timeline_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/sector-timeline/detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sector Timeline Detail
+         * @description Explain one daily sector rank, including every company in its mean.
+         */
+        get: operations["get_sector_timeline_detail_api_momentum_sector_timeline_detail_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/signal-breakdown": {
         parameters: {
             query?: never;
@@ -13776,6 +13816,8 @@ export interface components {
             company_id: number;
             /** Index Universe */
             index_universe?: string | null;
+            /** Scheduled Strategy Id */
+            scheduled_strategy_id?: number | null;
             /**
              * Score Normalization
              * @default minmax
@@ -23171,6 +23213,71 @@ export interface operations {
             query?: {
                 as_of?: string | null;
                 company_ids?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sector_timeline_api_momentum_sector_timeline_get: {
+        parameters: {
+            query?: {
+                days?: number;
+                max_assets?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_sector_timeline_detail_api_momentum_sector_timeline_detail_get: {
+        parameters: {
+            query: {
+                date: string;
+                sector: string;
+                max_assets?: number;
             };
             header?: never;
             path?: never;
