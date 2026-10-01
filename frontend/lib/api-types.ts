@@ -7564,7 +7564,7 @@ export interface paths {
         };
         /**
          * Get Actual Fills
-         * @description The manually recorded broker fills for a scheduled strategy.
+         * @description The manually recorded broker fills for one scheduled portfolio period.
          */
         get: operations["get_actual_fills_api_scheduled_strategies__strategy_id__actual_fills_get"];
         /**
