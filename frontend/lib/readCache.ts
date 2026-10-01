@@ -79,6 +79,12 @@ const CACHEABLE: RegExp[] = [
   /^\/api\/earnings\/portfolio-revenue-matrix$/,
   /^\/api\/asset-pipeline\/latest-close\/isin\/[^/]+$/,
   /^\/api\/asset-pipeline\/fundamentals\/isin\/[^/]+$/,
+  // The sector-momentum ranks are a completed-close calculation. The backend
+  // has its own daily persistent cache; keeping the response here avoids even
+  // the cross-origin round trip when navigating away and back or reopening a
+  // tile in the same browser session.
+  /^\/api\/momentum\/sector-timeline$/,
+  /^\/api\/momentum\/sector-timeline\/detail$/,
 
   /**
    * The analyse modal's risk and attribution panels.

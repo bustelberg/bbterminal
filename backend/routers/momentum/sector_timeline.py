@@ -39,6 +39,37 @@ _calculation_lock = threading.Lock()
 _MOMENTUM_TOP_UNIVERSE = "LEONTEQ (as of 2026-06-17)"
 
 
+def _persistent_timeline_cache_get(
+    calculation_date: str, days: int, max_assets: int,
+) -> dict | None:
+    """Best-effort cross-process cache; missing migrations degrade to recompute."""
+    try:
+        rows = (supabase.table("sector_timeline_cache").select("payload")
+                .eq("calculation_version", _CALCULATION_VERSION)
+                .eq("history_days", days).eq("max_assets", max_assets)
+                .eq("calculation_date", calculation_date).limit(1).execute().data) or []
+        payload = rows[0].get("payload") if rows else None
+        return payload if isinstance(payload, dict) else None
+    except Exception:  # cache availability must never take /momentum down
+        return None
+
+
+def _persistent_timeline_cache_put(
+    calculation_date: str, days: int, max_assets: int, payload: dict,
+) -> None:
+    try:
+        supabase.table("sector_timeline_cache").upsert({
+            "calculation_version": _CALCULATION_VERSION,
+            "history_days": days,
+            "max_assets": max_assets,
+            "calculation_date": calculation_date,
+            "payload": payload,
+            "computed_at": datetime.now(ZoneInfo("UTC")).isoformat(),
+        }, on_conflict="calculation_version,history_days,max_assets,calculation_date").execute()
+    except Exception:
+        return
+
+
 def _momentum_top_analysis_ids() -> tuple[list[int], dict, dict[int, str | None]]:
     """Yahoo ids and LEONTEQ's own sector labels for MomentumTopSelectie."""
     universe = (supabase.table("universe").select("universe_id,label")
@@ -433,6 +464,7 @@ def get_sector_timeline(
 ):
     """Daily Yahoo-close sector rankings for the liquid equity asset universe."""
     key = (_CALCULATION_VERSION, days, max_assets)
+    calculation_date = datetime.now(ZoneInfo("Europe/Amsterdam")).date().isoformat()
     with _cache_lock:
         hit = _cache.get(key)
         if hit and time.time() - hit[0] < _CACHE_TTL_SECONDS:
@@ -446,6 +478,11 @@ def get_sector_timeline(
             hit = _cache.get(key)
             if hit and time.time() - hit[0] < _CACHE_TTL_SECONDS:
                 return hit[1]
+        persisted = _persistent_timeline_cache_get(calculation_date, days, max_assets)
+        if persisted is not None:
+            with _cache_lock:
+                _cache[key] = (time.time(), persisted)
+            return persisted
 
         # ``load_panel`` adds its own 1,100-calendar-day warm-up, enough for every
     # 12-1 / 200-day signal.  The requested window itself is calendar-based;
@@ -484,4 +521,6 @@ def get_sector_timeline(
             result["note"] = "Not enough price history to calculate the daily price signals."
         with _cache_lock:
             _cache[key] = (time.time(), result)
+        if rows:
+            _persistent_timeline_cache_put(calculation_date, days, max_assets, result)
         return result
