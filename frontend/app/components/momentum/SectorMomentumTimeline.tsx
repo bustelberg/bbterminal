@@ -139,6 +139,7 @@ export default function SectorMomentumTimeline() {
   const [hover, setHover] = useState<Row | null>(null);
   const [activeSector, setActiveSector] = useState<string | null>(null);
   const [pinnedSector, setPinnedSector] = useState<string | null>(null);
+  const [mappingOpen, setMappingOpen] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState<Row | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -241,16 +242,16 @@ export default function SectorMomentumTimeline() {
     <div className="min-h-screen bg-page text-fg">
       <div className="px-8 py-5 border-b border-neutral-800/40">
         <h1 className="text-xl font-semibold text-fg-strong">Sector Momentum</h1>
-        <p className="text-sm text-fg-subtle mt-1">
-          Daily sector rankings from Yahoo Finance closing prices.
-        </p>
       </div>
       <div className="px-8 py-6 space-y-4">
-        <div className="bg-card border border-neutral-800/40 rounded-xl p-4 flex items-center gap-3 flex-wrap">
+        <div className="mapping-header bg-card border border-neutral-800/40 rounded-xl p-4 flex items-center gap-3 flex-wrap">
+          <style>{`.mapping-header > span:nth-of-type(4) { display: none; }`}</style>
           <span className="text-xs font-semibold text-fg-strong uppercase tracking-wide">History</span>
           <span className="text-xs text-fg-muted">Last 2 months</span>
+          {data && <><span className="text-xs text-fg-faint">{data.universe?.name ?? 'Universe'}</span><button type="button" onClick={() => setMappingOpen((open) => !open)} className="text-xs text-accent-300 hover:text-accent-200">{mappingOpen ? 'Hide mapping' : 'Inspect mapping'}</button></>}
           {data && <span className="text-xs text-fg-faint">{data.universe?.name ?? 'Universe'} · {data.universe?.size?.toLocaleString() ?? '—'} companies{data.universe?.mapped != null && data.universe.mapped !== data.universe.size ? ` (${data.universe.mapped.toLocaleString()} Yahoo-mapped)` : ''} · {data.days} trading days</span>}
           <button type="button" onClick={() => void load()} className="ml-auto text-xs text-accent-300 hover:text-accent-200">Refresh</button>
+          {data && mappingOpen && <div className="w-full border-t border-neutral-800/50 pt-3 text-xs text-fg-muted">{data.universe?.size?.toLocaleString() ?? '—'} LEONTEQ constituents; {data.universe?.mapped?.toLocaleString() ?? '—'} map to Yahoo analysis instruments and are included in these ranks. The remaining constituents have no Yahoo instrument mapping yet.</div>}
         </div>
 
         {loading && <SectionLoader label="daily sector momentum" />}
@@ -259,13 +260,13 @@ export default function SectorMomentumTimeline() {
         {!loading && !error && sectors.length > 0 && (
           <div className="bg-card border border-neutral-800/40 rounded-xl p-5 overflow-hidden">
             <div className="flex items-baseline justify-between gap-4 mb-4">
-              <div><h2 className="font-medium text-fg-strong">Daily sector ranks</h2><p className="text-xs text-fg-faint mt-1">Each date is ordered vertically: strongest sector at the top, weakest at the bottom. Colors identify sectors; ranks blend Yahoo price and volume signals.</p></div>
+              <div><h2 className="font-medium text-fg-strong">Daily sector ranks</h2></div>
               <span className="text-xs text-fg-faint shrink-0">Latest completed close</span>
             </div>
             <div ref={rankTableRef} className="overflow-x-auto">
               <div className="min-w-max">
-                <div className="flex h-8 text-[10px] text-fg-faint">
-                  <div className="w-16 shrink-0" />
+                <div className="flex h-8 text-[10px] font-medium text-neutral-900">
+                  <div className="sticky left-0 z-20 h-full shrink-0 bg-white" style={{ width: DATE_TILE_WIDTH }} />
                   <div className="flex gap-3">
                     {displayDates.map((d) => (
                       <div key={d} className="shrink-0 text-center whitespace-nowrap" style={{ width: DATE_TILE_WIDTH }} title={d}>{formatDate(d)}</div>
@@ -274,7 +275,7 @@ export default function SectorMomentumTimeline() {
                 </div>
                 {Array.from({ length: maxRank }, (_, index) => index + 1).map((rank) => {
                   return <div key={rank} className="flex items-center h-8">
-                    <div className="w-16 shrink-0 text-[11px] uppercase tracking-wide text-fg-faint">Rank {rank}</div>
+                    <div className="sticky left-0 z-20 flex h-full shrink-0 items-center bg-white text-[11px] font-medium uppercase tracking-wide text-neutral-900" style={{ width: DATE_TILE_WIDTH }}>Rank {rank}</div>
                     <div className="flex gap-3">{displayDates.map((d) => {
                       const row = rankLookup.get(`${d}|${rank}`);
                       const isFuture = futureDateSet.has(d);
