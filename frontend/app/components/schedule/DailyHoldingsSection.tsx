@@ -701,7 +701,7 @@ export default function DailyHoldingsSection({ strategies }: {
       )}
 
       {breakdown && selected && (
-        <BreakdownModal target={breakdown} config={selected.config}
+        <BreakdownModal target={breakdown} config={selected.config} strategyId={selected.id}
           onClose={() => setBreakdown(null)} />
       )}
     </CollapsibleCard>

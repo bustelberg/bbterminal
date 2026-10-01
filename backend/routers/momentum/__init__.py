@@ -25,6 +25,7 @@ from . import _helpers as _helpers  # noqa: F401  (startup hook side-effect)
 from .backtest_crud import router as _backtest_crud_router
 from .backtest_stream import router as _backtest_stream_router
 from .current_picks import router as _current_picks_router
+from .sector_timeline import router as _sector_timeline_router
 from .signals import router as _signals_router
 
 routers = [
@@ -32,4 +33,5 @@ routers = [
     _backtest_stream_router,
     _backtest_crud_router,
     _current_picks_router,
+    _sector_timeline_router,
 ]

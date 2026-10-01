@@ -98,6 +98,69 @@ class ScheduledStrategyPatch(BaseModel):
     # snapshots already produced. Re-create the strategy to change it.
 
 
+class ActualFill(BaseModel):
+    company_id: int
+    entry_price: float | None = None
+    entry_date: date | None = None
+    exit_price: float | None = None
+    exit_date: date | None = None
+
+
+class ActualFillsRequest(BaseModel):
+    portfolio_date: date
+    fills: list[ActualFill]
+
+
+@router.get("/api/scheduled-strategies/{strategy_id}/actual-fills")
+async def get_actual_fills(strategy_id: int, portfolio_date: date, request: Request):
+    """The manually recorded broker fills for one scheduled portfolio period."""
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Actual fills are admin-only")
+    return await asyncio.to_thread(lambda: (
+        supabase.table("scheduled_strategy_actual_fill")
+        .select("company_id,entry_price,entry_date,exit_price,exit_date,updated_at")
+        .eq("scheduled_strategy_id", strategy_id).eq("portfolio_date", portfolio_date.isoformat()).execute().data or []
+    ))
+
+
+@router.put("/api/scheduled-strategies/{strategy_id}/actual-fills")
+async def save_actual_fills(strategy_id: int, body: ActualFillsRequest, request: Request):
+    """Upsert one real entry/exit fill pair per holding for slippage review."""
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Actual fills are admin-only")
+
+    def _save() -> list[dict]:
+        strategy = (supabase.table("scheduled_strategy").select("id")
+                    .eq("id", strategy_id).limit(1).execute().data) or []
+        if not strategy:
+            raise HTTPException(status_code=404, detail="Scheduled strategy not found")
+        rows = []
+        company_ids = set()
+        for fill in body.fills:
+            if fill.company_id == 0:
+                raise HTTPException(status_code=422, detail="Cash does not have a fill price")
+            if fill.company_id in company_ids:
+                raise HTTPException(status_code=422, detail="A holding can only appear once")
+            company_ids.add(fill.company_id)
+            if ((fill.entry_price is not None and fill.entry_price <= 0)
+                    or (fill.exit_price is not None and fill.exit_price <= 0)):
+                raise HTTPException(status_code=422, detail="Actual prices must be positive")
+            if fill.entry_date and fill.exit_date and fill.exit_date < fill.entry_date:
+                raise HTTPException(status_code=422, detail="Exit date cannot precede entry date")
+            rows.append({"scheduled_strategy_id": strategy_id, "company_id": fill.company_id,
+                         "portfolio_date": body.portfolio_date.isoformat(),
+                         "entry_price": fill.entry_price, "entry_date": fill.entry_date.isoformat() if fill.entry_date else None,
+                         "exit_price": fill.exit_price, "exit_date": fill.exit_date.isoformat() if fill.exit_date else None,
+                         "updated_at": datetime.now(timezone.utc).isoformat()})
+        if rows:
+            supabase.table("scheduled_strategy_actual_fill").upsert(
+                rows, on_conflict="scheduled_strategy_id,portfolio_date,company_id").execute()
+        return (supabase.table("scheduled_strategy_actual_fill")
+                .select("company_id,entry_price,entry_date,exit_price,exit_date,updated_at")
+                .eq("scheduled_strategy_id", strategy_id).eq("portfolio_date", body.portfolio_date.isoformat()).execute().data or [])
+    return await asyncio.to_thread(_save)
+
+
 # ─── Shared creation helper ───────────────────────────────────────
 
 
@@ -623,6 +686,9 @@ class SetSleevesRequest(BaseModel):
     # Cash as a fraction 0..1; ETFs as absolute percentages of the whole book.
     cash_pct: float = 0.0
     etfs: list[SleeveEtf] = []
+    # When supplied, restate this specific historical portfolio only instead
+    # of modifying the strategy's default sleeves for future rebalances.
+    snapshot_id: int | None = None
 
 
 def _write_sleeves(strategy_id: int, cash: float, overlay: list[dict]) -> dict:
@@ -836,6 +902,30 @@ async def set_strategy_sleeves(strategy_id: int, body: SetSleevesRequest):
             }
             for e in etfs
         ]
+        if body.snapshot_id is not None:
+            snapshot = (
+                supabase.table("current_picks_snapshot")
+                .select("snapshot_id")
+                .eq("snapshot_id", body.snapshot_id)
+                .eq("scheduled_strategy_id", strategy_id)
+                .limit(1)
+                .execute()
+            ).data or []
+            if not snapshot:
+                raise HTTPException(404, "Portfolio snapshot not found for this strategy")
+            from routers._schedule_snapshots import apply_sleeves_to_snapshot  # noqa: PLC0415
+            count = apply_sleeves_to_snapshot(
+                body.snapshot_id, etf_overlay=overlay, cash_pct=cash,
+            )
+            return {
+                "sleeve_apply": {
+                    "restated": count is not None,
+                    "repriced": False,
+                    "snapshot_id": body.snapshot_id,
+                    "error": None,
+                    "note": "Saved for this portfolio only.",
+                }
+            }
         return _write_sleeves(strategy_id, cash, overlay)
     return await asyncio.to_thread(_apply)
 

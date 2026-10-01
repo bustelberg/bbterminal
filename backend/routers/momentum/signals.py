@@ -20,13 +20,14 @@ from collections import OrderedDict
 from datetime import date, timedelta
 
 import pandas as pd
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from deps import fetch_in_chunks, supabase
 from momentum.data import load_all_prices, load_all_volumes, load_universe
 from momentum.signals import EXTRA_SIGNAL_DEFS, PRICE_SIGNAL_DEFS, TREND_SIGNAL_DEFS
+from routers._authz import is_admin_request
 from routers._cache_headers import CACHE_STATIC
 
 router = APIRouter(tags=["momentum"])
@@ -64,6 +65,15 @@ class SignalBreakdownRequest(BaseModel):
     # used would produce a breakdown that explains a ranking which never happened. The caller sends
     # the run's own value; the default is the legacy one, matching a request that omits it.
     score_normalization: str = "minmax"
+    # Required for a regular user so this read can be tied to the specific
+    # scheduled strategy the /schedule page has already exposed to them.
+    scheduled_strategy_id: int | None = None
+
+
+def _strategy_is_user_visible(strategy_id: int) -> bool:
+    row = (supabase.table("scheduled_strategy").select("user_visible")
+           .eq("id", strategy_id).limit(1).execute().data)
+    return bool(row and row[0].get("user_visible"))
 
 
 # In-process LRU cache for (loaded universe, computed signal panel) at a
@@ -774,11 +784,16 @@ async def _signal_breakdown_stream(req: SignalBreakdownRequest):
 
 
 @router.post("/api/momentum/signal-breakdown")
-async def signal_breakdown(req: SignalBreakdownRequest):
+async def signal_breakdown(req: SignalBreakdownRequest, request: Request):
     """SSE stream of step-by-step signal-breakdown computation. Emits
     `progress` events with pct + message during the heavy universe load,
     then a final `result` event with the full breakdown payload (or an
     `error` event on failure). On cache hit the slow steps are skipped."""
+    if not is_admin_request(request):
+        if req.scheduled_strategy_id is None or not await asyncio.to_thread(
+            _strategy_is_user_visible, req.scheduled_strategy_id,
+        ):
+            raise HTTPException(status_code=403, detail="This strategy is not user-visible")
     return StreamingResponse(
         _signal_breakdown_stream(req),
         media_type="text/event-stream",
