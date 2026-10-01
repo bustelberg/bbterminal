@@ -33,6 +33,10 @@ type Detail = {
     }>;
   }>;
 };
+
+const CLIENT_CACHE_TTL_MS = 60 * 60 * 1000;
+let timelineClientCache: { at: number; payload: Payload } | null = null;
+const detailClientCache = new Map<string, { at: number; payload: Detail }>();
 type CompanyReference = { analysis_id: number; name: string | null; ticker: string | null };
 type PriceLegs = { start_date: string; start_price: number; end_date: string; end_price: number; return_pct: number };
 type RawExplanation = { value: number | null; components: Array<{ label: string; value_str?: string }> };
@@ -133,8 +137,11 @@ function upcomingTradingDates(first: string, count: number): string[] {
 }
 
 export default function SectorMomentumTimeline() {
-  const [data, setData] = useState<Payload | null>(null);
-  const [loading, setLoading] = useState(true);
+  const freshTimeline = timelineClientCache && Date.now() - timelineClientCache.at < CLIENT_CACHE_TTL_MS
+    ? timelineClientCache.payload : null;
+  const [data, setData] = useState<Payload | null>(freshTimeline);
+  const [loading, setLoading] = useState(!freshTimeline);
+  const [timelineStage, setTimelineStage] = useState('LEONTEQ universe mapping');
   const [error, setError] = useState<string | null>(null);
   const [hover, setHover] = useState<Row | null>(null);
   const [activeSector, setActiveSector] = useState<string | null>(null);
@@ -142,6 +149,7 @@ export default function SectorMomentumTimeline() {
   const [mappingOpen, setMappingOpen] = useState(false);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailLoading, setDetailLoading] = useState<Row | null>(null);
+  const [detailStage, setDetailStage] = useState('Yahoo price and volume history');
   const [detailError, setDetailError] = useState<string | null>(null);
   const [expandedCompanyId, setExpandedCompanyId] = useState<number | null>(null);
   const [companySort, setCompanySort] = useState<CompanySortKey>('score');
@@ -150,18 +158,36 @@ export default function SectorMomentumTimeline() {
   const today = amsterdamToday();
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null); setHover(null); setActiveSector(null); setPinnedSector(null);
+    if (timelineClientCache && Date.now() - timelineClientCache.at < CLIENT_CACHE_TTL_MS) {
+      setData(timelineClientCache.payload);
+      setLoading(false);
+      return;
+    }
+    setLoading(true); setTimelineStage('LEONTEQ universe mapping'); setError(null); setHover(null); setActiveSector(null); setPinnedSector(null);
     try {
       const response = await apiFetch(`${API_URL}/api/momentum/sector-timeline?days=${HISTORY_DAYS}`);
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
-      setData(body as Payload);
+      const payload = body as Payload;
+      timelineClientCache = { at: Date.now(), payload };
+      setData(payload);
     } catch (e) {
       setData(null); setError(e instanceof Error ? e.message : String(e));
     } finally { setLoading(false); }
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!loading) return;
+    const stages = ['LEONTEQ universe mapping', 'Yahoo close and volume history', 'Daily momentum signals', 'Ranking sectors across 42 trading days'];
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index = Math.min(index + 1, stages.length - 1);
+      setTimelineStage(stages[index]);
+    }, 1800);
+    return () => window.clearInterval(timer);
+  }, [loading]);
 
   const { dates, sectors, rankLookup, maxRank } = useMemo(() => {
     // Never paint an in-progress Amsterdam trading day, even if a cached API
@@ -202,18 +228,38 @@ export default function SectorMomentumTimeline() {
   }, [displayDates]);
 
   const openDetail = useCallback(async (row: Row) => {
-    setDetail(null); setDetailError(null); setDetailLoading(row); setExpandedCompanyId(null);
+    setDetail(null); setDetailError(null); setDetailStage('Yahoo price and volume history'); setDetailLoading(row); setExpandedCompanyId(null);
+    const cacheKey = `${row.date}|${row.sector}`;
+    const cached = detailClientCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < CLIENT_CACHE_TTL_MS) {
+      setDetail(cached.payload);
+      setDetailLoading(null);
+      return;
+    }
     try {
       const response = await apiFetch(`${API_URL}/api/momentum/sector-timeline/detail?date=${encodeURIComponent(row.date)}&sector=${encodeURIComponent(row.sector)}`);
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
-      setDetail(body as Detail);
+      const parsed = body as Detail;
+      detailClientCache.set(cacheKey, { at: Date.now(), payload: parsed });
+      setDetail(parsed);
     } catch (error) {
       setDetailError(error instanceof Error ? error.message : String(error));
     } finally {
       setDetailLoading(null);
     }
   }, []);
+
+  useEffect(() => {
+    if (!detailLoading) return;
+    const stages = ['Yahoo price and volume history', 'Reusing daily sector scores', 'Normalizing company signals', 'Building company-level explanations'];
+    let index = 0;
+    const timer = window.setInterval(() => {
+      index = Math.min(index + 1, stages.length - 1);
+      setDetailStage(stages[index]);
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [detailLoading]);
 
   const sortCompanies = useCallback((column: CompanySortKey) => {
     setCompanySortDirection((current) => companySort === column
@@ -254,7 +300,7 @@ export default function SectorMomentumTimeline() {
           {data && mappingOpen && <div className="w-full border-t border-neutral-800/50 pt-3 text-xs text-fg-muted">{data.universe?.size?.toLocaleString() ?? '—'} LEONTEQ constituents; {data.universe?.mapped?.toLocaleString() ?? '—'} map to Yahoo analysis instruments and are included in these ranks. The remaining constituents have no Yahoo instrument mapping yet.</div>}
         </div>
 
-        {loading && <SectionLoader label="daily sector momentum" />}
+        {loading && <SectionLoader label={timelineStage} />}
         {error && <div className="text-sm text-neg-300 py-4">Could not load momentum: {error}</div>}
         {!loading && !error && data?.note && <div className="text-sm text-warn-300 py-4">{data.note}</div>}
         {!loading && !error && sectors.length > 0 && (
@@ -312,7 +358,7 @@ export default function SectorMomentumTimeline() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-fg-strong">{detail?.sector ?? detailLoading?.sector ?? 'Sector calculation'}</h2>
-                <p className="mt-1 text-sm text-fg-muted">{detail ? `${formatDate(detail.date)} · rank ${detail.rank} · sector score ${detail.score?.toFixed(2) ?? '—'}` : detailLoading ? <span className="inline-flex items-center gap-2"><i className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-fg-faint border-t-accent-400" aria-hidden="true" />Loading {formatDate(detailLoading.date)}…</span> : 'Could not load calculation.'}</p>
+                <p className="mt-1 text-sm text-fg-muted">{detail ? `${formatDate(detail.date)} · rank ${detail.rank} · sector score ${detail.score?.toFixed(2) ?? '—'}` : detailLoading ? <span className="inline-flex items-center gap-2"><i className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-fg-faint border-t-accent-400" aria-hidden="true" />{detailStage} · {formatDate(detailLoading.date)}</span> : 'Could not load calculation.'}</p>
               </div>
               <button type="button" onClick={() => { setDetail(null); setDetailLoading(null); setDetailError(null); }} className="text-fg-muted hover:text-fg-strong" aria-label="Close calculation">Close</button>
             </div>

@@ -25,10 +25,17 @@ from signal_engine.daily import evaluate_panel
 
 router = APIRouter(tags=["momentum"])
 
-_CACHE_TTL_SECONDS = 300.0
+_CACHE_TTL_SECONDS = 3600.0
+_DETAIL_CACHE_TTL_SECONDS = 3600.0
 _CALCULATION_VERSION = 3  # fixed LEONTEQ MomentumTopSelectie universe
+_VISIBLE_HISTORY_DAYS = 42
 _cache: dict[tuple[int, int, int], tuple[float, dict]] = {}
+_detail_cache: dict[tuple[int, str, str, int], tuple[float, dict]] = {}
+_volume_cache: dict[tuple[tuple[int, ...], str], tuple[float, dict[int, pd.Series]]] = {}
+_scored_cache: dict[tuple[int, str], tuple[float, pd.DataFrame]] = {}
+_label_cache: dict[int, tuple[float, dict[str, str | None]]] = {}
 _cache_lock = threading.Lock()
+_calculation_lock = threading.Lock()
 _MOMENTUM_TOP_UNIVERSE = "LEONTEQ (as of 2026-06-17)"
 
 
@@ -66,15 +73,23 @@ def _momentum_top_analysis_ids() -> tuple[list[int], dict, dict[int, str | None]
 
 def _volume_index(analysis_ids: list[int], since: str) -> dict[int, pd.Series] | None:
     """Yahoo volume series keyed like the close panel, from the same COPY path."""
+    key = (tuple(sorted(set(int(analysis_id) for analysis_id in analysis_ids))), since)
+    with _cache_lock:
+        hit = _volume_cache.get(key)
+        if hit and time.time() - hit[0] < _CACHE_TTL_SECONDS:
+            return hit[1]
     raw = _load_close_volume(analysis_ids, since=since)
     if raw is None:
         return None
     panel = _panel(raw, "volume")
-    return {
+    result = {
         analysis_id: panel[analysis_id].dropna().astype("float64")
         for analysis_id in analysis_ids
         if analysis_id in panel.columns and panel[analysis_id].notna().any()
     }
+    with _cache_lock:
+        _volume_cache[key] = (time.time(), result)
+    return result
 
 
 def build_sector_timeline(
@@ -117,6 +132,10 @@ def build_sector_timeline(
         if signals.empty:
             continue
         scored = score_universe(signals, weights, signal_defs=PRICE_SIGNAL_DEFS)
+        with _cache_lock:
+            _scored_cache[(_CALCULATION_VERSION, display_date.date().isoformat())] = (
+                time.time(), scored,
+            )
         for sector in sector_pool_scores(scored):
             rows.append({
                 "date": display_date.date().isoformat(),
@@ -131,11 +150,21 @@ def build_sector_timeline(
 def _instrument_labels(analysis_ids: list[int]) -> dict[int, dict[str, str | None]]:
     """Most-liquid execution's display identity for a set of analysis ids."""
     analysis_ids = list(dict.fromkeys(int(analysis_id) for analysis_id in analysis_ids))
+    now = time.time()
+    with _cache_lock:
+        cached = {
+            analysis_id: _label_cache[analysis_id][1]
+            for analysis_id in analysis_ids
+            if analysis_id in _label_cache and now - _label_cache[analysis_id][0] < _CACHE_TTL_SECONDS
+        }
+    unresolved = [analysis_id for analysis_id in analysis_ids if analysis_id not in cached]
+    if not unresolved:
+        return cached
     best: dict[int, tuple[float, dict[str, str | None]]] = {}
-    for start in range(0, len(analysis_ids), 200):
+    for start in range(0, len(unresolved), 200):
         rows = (supabase.table("asset_grid")
                 .select("analysis_id,name,yahoo_symbol,med_adv_eur")
-                .in_("analysis_id", analysis_ids[start:start + 200]).execute().data) or []
+                .in_("analysis_id", unresolved[start:start + 200]).execute().data) or []
         for row in rows:
             analysis_id = int(row["analysis_id"])
             adv = float(row.get("med_adv_eur") or 0)
@@ -150,7 +179,8 @@ def _instrument_labels(analysis_ids: list[int]) -> dict[int, dict[str, str | Non
     # extrema in the normalization trace.
     missing_ids = [
         analysis_id for analysis_id in analysis_ids
-        if not (labels.get(analysis_id, {}).get("name") or labels.get(analysis_id, {}).get("ticker"))
+        if analysis_id in unresolved
+        and not (labels.get(analysis_id, {}).get("name") or labels.get(analysis_id, {}).get("ticker"))
     ]
     for start in range(0, len(missing_ids), 200):
         rows = (supabase.table("asset_analysis")
@@ -161,6 +191,10 @@ def _instrument_labels(analysis_ids: list[int]) -> dict[int, dict[str, str | Non
             symbol = row.get("symbol")
             if symbol:
                 labels[analysis_id] = {"name": symbol, "ticker": symbol}
+    labels = {**cached, **labels}
+    with _cache_lock:
+        for analysis_id, label in labels.items():
+            _label_cache[analysis_id] = (now, label)
     return labels
 
 
@@ -213,13 +247,19 @@ def get_sector_timeline_detail(
         cutoff = pd.Timestamp(date_).normalize()
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD") from exc
+    cache_key = (_CALCULATION_VERSION, cutoff.date().isoformat(), sector, max_assets)
+    with _cache_lock:
+        hit = _detail_cache.get(cache_key)
+        if hit and time.time() - hit[0] < _DETAIL_CACHE_TTL_SECONDS:
+            return hit[1]
 
     # ``load_panel`` gives this one-day calculation the same 1,100-day warm-up
     # as the timeline, so its signals and strict as-of convention agree exactly.
     analysis_ids, _, leonteq_sectors = _momentum_top_analysis_ids()
-    panel, _, _ = load_panel(
-        analysis_ids=analysis_ids, start=cutoff.date().isoformat(),
-    )
+    # Tiles are always opened from the 42-day chart. Reuse its exact panel
+    # cache key instead of building the same 1,100-day Yahoo panel again.
+    timeline_start = (date.today() - timedelta(days=int(_VISIBLE_HISTORY_DAYS * 1.8))).isoformat()
+    panel, _, _ = load_panel(analysis_ids=analysis_ids, start=timeline_start)
     secmap = leonteq_sectors
     if panel is None:
         raise HTTPException(status_code=503, detail="Fast price loader unavailable")
@@ -232,26 +272,31 @@ def get_sector_timeline_detail(
         for analysis_id in ids if panel[analysis_id].notna().any()
     }
     volume_index = _volume_index(
-        ids, (cutoff - pd.Timedelta(days=90)).date().isoformat(),
+        ids, (pd.Timestamp(timeline_start) - pd.Timedelta(days=1100)).date().isoformat(),
     )
     if volume_index is None:
         raise HTTPException(status_code=503, detail="Yahoo volume loader unavailable")
-    raw = evaluate_panel(
-        list(price_index), [(cutoff + pd.Timedelta(days=1)).date()],
-        price_index=price_index, volume_index=volume_index, id_col="analysis_id",
-    )
-    values = next((rows for day, rows in raw.items()
-                   if day.date() == (cutoff + pd.Timedelta(days=1)).date()), [])
-    if not values:
-        raise HTTPException(status_code=404, detail="Not enough history to calculate this date")
-
-    signals = pd.DataFrame(values)
-    signals["sector"] = signals["analysis_id"].map(secmap)
-    scored = score_universe(
-        signals.dropna(subset=["sector"]),
-        {signal["key"]: signal["default_weight"] for signal in PRICE_SIGNAL_DEFS},
-        signal_defs=PRICE_SIGNAL_DEFS,
-    )
+    with _cache_lock:
+        scored_hit = _scored_cache.get((_CALCULATION_VERSION, cutoff.date().isoformat()))
+        scored = (scored_hit[1] if scored_hit and time.time() - scored_hit[0] < _CACHE_TTL_SECONDS else None)
+    if scored is None:
+        raw = evaluate_panel(
+            list(price_index), [(cutoff + pd.Timedelta(days=1)).date()],
+            price_index=price_index, volume_index=volume_index, id_col="analysis_id",
+        )
+        values = next((rows for day, rows in raw.items()
+                       if day.date() == (cutoff + pd.Timedelta(days=1)).date()), [])
+        if not values:
+            raise HTTPException(status_code=404, detail="Not enough history to calculate this date")
+        signals = pd.DataFrame(values)
+        signals["sector"] = signals["analysis_id"].map(secmap)
+        scored = score_universe(
+            signals.dropna(subset=["sector"]),
+            {signal["key"]: signal["default_weight"] for signal in PRICE_SIGNAL_DEFS},
+            signal_defs=PRICE_SIGNAL_DEFS,
+        )
+        with _cache_lock:
+            _scored_cache[(_CALCULATION_VERSION, cutoff.date().isoformat())] = (time.time(), scored)
     sector_scores = sector_pool_scores(scored)
     summary = next((row for row in sector_scores if row["sector"] == sector), None)
     if summary is None:
@@ -369,13 +414,16 @@ def get_sector_timeline_detail(
                 for signal in PRICE_SIGNAL_DEFS
             },
         })
-    return {
+    result = {
         "date": cutoff.date().isoformat(), "sector": sector,
         "rank": summary["rank"], "score": summary["momentum_score"],
         "category_scores": summary["category_scores"], "companies": companies,
         "category_weights": category_weights,
         "method": "Sector score is the arithmetic mean of the company momentum scores below.",
     }
+    with _cache_lock:
+        _detail_cache[cache_key] = (time.time(), result)
+    return result
 
 
 @router.get("/api/momentum/sector-timeline")
@@ -390,41 +438,50 @@ def get_sector_timeline(
         if hit and time.time() - hit[0] < _CACHE_TTL_SECONDS:
             return hit[1]
 
-    # ``load_panel`` adds its own 1,100-calendar-day warm-up, enough for every
+    # A cold timeline is expensive. Serialize only cache misses so concurrent
+    # page opens share one computation instead of independently reading and
+    # scoring the same Yahoo panel.
+    with _calculation_lock:
+        with _cache_lock:
+            hit = _cache.get(key)
+            if hit and time.time() - hit[0] < _CACHE_TTL_SECONDS:
+                return hit[1]
+
+        # ``load_panel`` adds its own 1,100-calendar-day warm-up, enough for every
     # 12-1 / 200-day signal.  The requested window itself is calendar-based;
     # the final slice below contains exactly `days` available trading dates.
-    start = (date.today() - timedelta(days=int(days * 1.8))).isoformat()
-    analysis_ids, universe, secmap = _momentum_top_analysis_ids()
-    panel, _, _ = load_panel(analysis_ids=analysis_ids, start=start)
-    base = {
+        start = (date.today() - timedelta(days=int(days * 1.8))).isoformat()
+        analysis_ids, universe, secmap = _momentum_top_analysis_ids()
+        panel, _, _ = load_panel(analysis_ids=analysis_ids, start=start)
+        base = {
         "source": "Yahoo Finance close and volume (asset_price.yf.close / yf.volume)",
         "method": "Daily live-momentum price and volume signals, strict as-of, then mean company score by sector",
         "universe": universe,
         "days": days,
         "rows": [],
-    }
-    if panel is None:
-        return {**base, "note": "Fast price loader unavailable (set SUPABASE_DB_URL)."}
-    if panel.empty:
-        return {**base, "note": "No liquid, sector-classified Yahoo-priced equities found."}
+        }
+        if panel is None:
+            return {**base, "note": "Fast price loader unavailable (set SUPABASE_DB_URL)."}
+        if panel.empty:
+            return {**base, "note": "No liquid, sector-classified Yahoo-priced equities found."}
 
-    volume_index = _volume_index(
+        volume_index = _volume_index(
         [int(i) for i in panel.columns if secmap.get(int(i))],
         (pd.Timestamp(start) - pd.Timedelta(days=1100)).date().isoformat(),
-    )
-    if volume_index is None:
-        return {**base, "note": "Yahoo volume data is unavailable for this calculation."}
+        )
+        if volume_index is None:
+            return {**base, "note": "Yahoo volume data is unavailable for this calculation."}
 
     # An intraday bar must never be presented as a completed daily close.
     # Waiting until the following UTC day is conservative across the global
     # equity universe and leaves today's column as a future `?` in the UI.
-    amsterdam_today = datetime.now(ZoneInfo("Europe/Amsterdam")).date()
-    completed = panel.index[panel.index < pd.Timestamp(amsterdam_today)]
-    dates = list(completed[-days:])
-    rows = build_sector_timeline(panel, secmap, dates, volume_index)
-    result = {**base, "days": len(dates), "rows": rows}
-    if not rows:
-        result["note"] = "Not enough price history to calculate the daily price signals."
-    with _cache_lock:
-        _cache[key] = (time.time(), result)
-    return result
+        amsterdam_today = datetime.now(ZoneInfo("Europe/Amsterdam")).date()
+        completed = panel.index[panel.index < pd.Timestamp(amsterdam_today)]
+        dates = list(completed[-days:])
+        rows = build_sector_timeline(panel, secmap, dates, volume_index)
+        result = {**base, "days": len(dates), "rows": rows}
+        if not rows:
+            result["note"] = "Not enough price history to calculate the daily price signals."
+        with _cache_lock:
+            _cache[key] = (time.time(), result)
+        return result
