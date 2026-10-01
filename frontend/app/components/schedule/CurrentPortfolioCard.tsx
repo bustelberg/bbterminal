@@ -503,17 +503,16 @@ function ActualFillsModal({
       )
       .catch(() => setError("Could not load saved fills."));
   }, [strategyId, portfolioDate]);
-  const firstMondayAfter = (value: string | null | undefined) => {
-    if (!value) return null;
-    const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-    if (!year || !month || !day) return null;
-    const date = new Date(Date.UTC(year, month - 1, day));
-    // Sunday is 0; `after` is deliberately strict, so a Monday maps to the
-    // following Monday rather than the same day.
-    const daysUntilMonday = ((8 - date.getUTCDay()) % 7) || 7;
+  const firstMondayOfMonth = (value: string, followingMonth = false) => {
+    const [year, month] = value.slice(0, 10).split("-").map(Number);
+    if (!year || !month) return null;
+    const date = new Date(Date.UTC(year, month - 1 + (followingMonth ? 1 : 0), 1));
+    const daysUntilMonday = (8 - date.getUTCDay()) % 7;
     date.setUTCDate(date.getUTCDate() + daysUntilMonday);
     return date.toISOString().slice(0, 10);
   };
+  const defaultEntryDate = firstMondayOfMonth(portfolioDate);
+  const defaultExitDate = firstMondayOfMonth(portfolioDate, true);
   const edit = (
     companyId: number,
     field: "entry_price" | "entry_date" | "exit_price" | "exit_date",
@@ -688,8 +687,7 @@ function ActualFillsModal({
                         value={fill?.entry_price ?? ""}
                         onChange={(e) =>
                           edit(holding.company_id, "entry_price", e.target.value,
-                            firstMondayAfter(holding.entry_date),
-                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
+                            defaultEntryDate, defaultExitDate)
                         }
                         className="w-24 rounded border border-neutral-700 bg-inset px-2 py-1 font-mono"
                       />
@@ -697,11 +695,10 @@ function ActualFillsModal({
                     <td className="py-2 pr-3">
                       <input
                         type="date"
-                        value={fill?.entry_date ?? firstMondayAfter(holding.entry_date) ?? ""}
+                        value={fill?.entry_date ?? defaultEntryDate ?? ""}
                         onChange={(e) =>
                           edit(holding.company_id, "entry_date", e.target.value,
-                            firstMondayAfter(holding.entry_date),
-                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
+                            defaultEntryDate, defaultExitDate)
                         }
                         className="rounded border border-neutral-700 bg-inset px-2 py-1"
                       />
@@ -727,8 +724,7 @@ function ActualFillsModal({
                         value={fill?.exit_price ?? ""}
                         onChange={(e) =>
                           edit(holding.company_id, "exit_price", e.target.value,
-                            firstMondayAfter(holding.entry_date),
-                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
+                            defaultEntryDate, defaultExitDate)
                         }
                         className="w-24 rounded border border-neutral-700 bg-inset px-2 py-1 font-mono"
                       />
@@ -736,11 +732,10 @@ function ActualFillsModal({
                     <td className="py-2 pr-3">
                       <input
                         type="date"
-                        value={fill?.exit_date ?? firstMondayAfter(holding.exit_date ?? latestPriceDate) ?? ""}
+                        value={fill?.exit_date ?? defaultExitDate ?? ""}
                         onChange={(e) =>
                           edit(holding.company_id, "exit_date", e.target.value,
-                            firstMondayAfter(holding.entry_date),
-                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
+                            defaultEntryDate, defaultExitDate)
                         }
                         className="rounded border border-neutral-700 bg-inset px-2 py-1"
                       />
