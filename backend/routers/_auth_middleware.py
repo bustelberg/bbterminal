@@ -166,6 +166,8 @@ _USER_WRITE_PATHS: frozenset[str] = frozenset({
     "/api/asset-pipeline/external-store",
 })
 
+_USER_ACTUAL_FILLS = re.compile(r"^/api/scheduled-strategies/\d+/actual-fills$")
+
 # The one editorial override every authenticated user may make. The sector pencil is present in
 # the user-visible Analyse modal, and sector corrections feed its allocation and attribution
 # views. Keep this narrower than `/api/companies`: that namespace also contains company identity
@@ -318,6 +320,9 @@ def _is_user_refresh(path: str) -> bool:
 _USER_GET_RESOURCE_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"^/api/momentum/current-picks/\d+$"),
     re.compile(r"^/api/momentum/backtests/\d+$"),
+    # Read-only sector-rank heatmap and its per-tile explanation on /momentum.
+    re.compile(r"^/api/momentum/sector-timeline$"),
+    re.compile(r"^/api/momentum/sector-timeline/detail$"),
     re.compile(r"^/api/asset-pipeline/search$"),
     re.compile(r"^/api/asset-pipeline/external-search$"),
 )
@@ -496,6 +501,7 @@ async def enforce_api_auth(
         allowed = (
             _starts_with_any(path, _USER_WRITE_PREFIXES)
             or path in _USER_WRITE_PATHS
+            or _USER_ACTUAL_FILLS.match(path) is not None
             or (request.method == "PUT" and _is_company_sector_override(path))
             or _is_earnings_refresh(path)
             or _is_latest_close_refresh(path)

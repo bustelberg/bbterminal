@@ -503,10 +503,23 @@ function ActualFillsModal({
       )
       .catch(() => setError("Could not load saved fills."));
   }, [strategyId, portfolioDate]);
+  const firstMondayAfter = (value: string | null | undefined) => {
+    if (!value) return null;
+    const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+    if (!year || !month || !day) return null;
+    const date = new Date(Date.UTC(year, month - 1, day));
+    // Sunday is 0; `after` is deliberately strict, so a Monday maps to the
+    // following Monday rather than the same day.
+    const daysUntilMonday = ((8 - date.getUTCDay()) % 7) || 7;
+    date.setUTCDate(date.getUTCDate() + daysUntilMonday);
+    return date.toISOString().slice(0, 10);
+  };
   const edit = (
     companyId: number,
     field: "entry_price" | "entry_date" | "exit_price" | "exit_date",
     value: string,
+    entryDateDefault?: string | null,
+    exitDateDefault?: string | null,
   ) =>
     setFills((current) => ({
       ...current,
@@ -514,9 +527,9 @@ function ActualFillsModal({
         ...(current[companyId] ?? {
           company_id: companyId,
           entry_price: null,
-          entry_date: null,
+          entry_date: entryDateDefault ?? null,
           exit_price: null,
-          exit_date: null,
+          exit_date: exitDateDefault ?? null,
         }),
         [field]: field.includes("price")
           ? value === ""
@@ -674,11 +687,9 @@ function ActualFillsModal({
                         step="any"
                         value={fill?.entry_price ?? ""}
                         onChange={(e) =>
-                          edit(
-                            holding.company_id,
-                            "entry_price",
-                            e.target.value,
-                          )
+                          edit(holding.company_id, "entry_price", e.target.value,
+                            firstMondayAfter(holding.entry_date),
+                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
                         }
                         className="w-24 rounded border border-neutral-700 bg-inset px-2 py-1 font-mono"
                       />
@@ -686,9 +697,11 @@ function ActualFillsModal({
                     <td className="py-2 pr-3">
                       <input
                         type="date"
-                        value={fill?.entry_date ?? ""}
+                        value={fill?.entry_date ?? firstMondayAfter(holding.entry_date) ?? ""}
                         onChange={(e) =>
-                          edit(holding.company_id, "entry_date", e.target.value)
+                          edit(holding.company_id, "entry_date", e.target.value,
+                            firstMondayAfter(holding.entry_date),
+                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
                         }
                         className="rounded border border-neutral-700 bg-inset px-2 py-1"
                       />
@@ -713,7 +726,9 @@ function ActualFillsModal({
                         step="any"
                         value={fill?.exit_price ?? ""}
                         onChange={(e) =>
-                          edit(holding.company_id, "exit_price", e.target.value)
+                          edit(holding.company_id, "exit_price", e.target.value,
+                            firstMondayAfter(holding.entry_date),
+                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
                         }
                         className="w-24 rounded border border-neutral-700 bg-inset px-2 py-1 font-mono"
                       />
@@ -721,9 +736,11 @@ function ActualFillsModal({
                     <td className="py-2 pr-3">
                       <input
                         type="date"
-                        value={fill?.exit_date ?? ""}
+                        value={fill?.exit_date ?? firstMondayAfter(holding.exit_date ?? latestPriceDate) ?? ""}
                         onChange={(e) =>
-                          edit(holding.company_id, "exit_date", e.target.value)
+                          edit(holding.company_id, "exit_date", e.target.value,
+                            firstMondayAfter(holding.entry_date),
+                            firstMondayAfter(holding.exit_date ?? latestPriceDate))
                         }
                         className="rounded border border-neutral-700 bg-inset px-2 py-1"
                       />
@@ -1129,7 +1146,7 @@ export default function CurrentPortfolioCard({
             canEdit={canEditCash}
             onDone={refetchAll}
           />
-          {canEditCash && strategyId != null && (
+          {strategyId != null && (
             <button
               type="button"
               onClick={() => setActualFillsOpen(true)}
