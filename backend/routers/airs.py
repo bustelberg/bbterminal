@@ -903,7 +903,7 @@ class PortfolioAnalysisReturns(BaseModel):
 
     # Where the PRIMARY portfolio numbers come from: "model" (yfinance reconstruction) or "book"
     # (AIRS's own cumulatief_rendement).  The BENCHMARK no longer follows it: since 2026-08-19 the
-    # headline benchmark is the index ETF's own price series from GuruFocus where one exists —
+    # headline ACWI benchmark is the index ETF's own Yahoo Finance price series —
     # see `benchmark_source` below.
     source: str = "model"
     # True when a paired AIRS book exists — so the UI can explain a blank 'book' return as "no
@@ -941,6 +941,10 @@ class PortfolioAnalysisReturns(BaseModel):
     # The yfinance model YTD, ALWAYS carried (even when `source=book` makes the primary the book),
     # so the Book-vs-strategy drift tile reads the strategy number regardless of the toggle.
     strategy_ytd_pct: float | None = None
+    # The scorecard's like-for-like sleeve comparison. Both composite returns use these same
+    # portfolio weights: stocks versus ACWI, bonds versus AGGH.AS, alternatives versus HYEA.L,
+    # and cash at 0%.
+    block_returns: list[dict] = []
     benchmark_ytd_pct: float | None = None
     ytd_excess_pct: float | None = None
     portfolio_since_pct: float | None = None

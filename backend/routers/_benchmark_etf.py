@@ -67,9 +67,15 @@ _log = logging.getLogger(__name__)
 PROXY: dict[str, str] = {
     "ACWI": "ACWI",     # iShares MSCI ACWI ETF (NASDAQ), 4,627 bars from 2008-03-28
     "SP500": "SPY",     # SPDR S&P 500 ETF Trust, 8,445 bars from 1993-01-29
+    "BONDS": "AGGH.AS",  # iShares Core Global Aggregate Bond UCITS ETF
+    "ALTERNATIVES": "HYEA.L",  # iShares EUR High Yield Corporate Bond UCITS ETF
 }
 
-_NAMES = {"ACWI": "iShares MSCI ACWI ETF", "SPY": "SPDR S&P 500 ETF Trust"}
+_NAMES = {"ACWI": "iShares MSCI ACWI ETF", "SPY": "SPDR S&P 500 ETF Trust",
+          "AGGH.AS": "iShares Core Global Aggregate Bond UCITS ETF",
+          "HYEA.L": "iShares EUR High Yield Corporate Bond UCITS ETF"}
+_CURRENCY = {"ACWI": "USD", "SPY": "USD", "AGGH.AS": "EUR", "HYEA.L": "EUR"}
+_YAHOO_TICKERS = frozenset(PROXY.values())
 
 #  The fallback rule only. How far behind TODAY the newest stored bar may be before we go back to
 # the vendor, used when the market anchor below cannot be had. Three days clears a normal weekend;
@@ -80,6 +86,9 @@ _STALE_DAYS = 3
 # re-fetched by every Analyse-modal open that missed the leg cache — and the modal is ONE request
 # with no partial paint, so a vendor round trip lands directly in the wait the reader sees.
 _fetched_today: dict[tuple[str, str], bool] = {}
+# The stored proxy table predates adjusted closes. A current last date does not prove that the old
+# rows use the new convention, so each Yahoo proxy must be rewritten once per running process.
+_adjusted_history_loaded: set[str] = set()
 
 
 def _behind_the_market(last: tuple[str, float] | None) -> bool:
@@ -137,7 +146,8 @@ def _benchmark_id(ticker: str) -> int | None:
         if got:
             return got[0]["benchmark_id"]
         ins = (supabase.table("benchmark")
-               .insert({"ticker": ticker, "name": _NAMES.get(ticker, ticker), "currency": "USD"})
+               .insert({"ticker": ticker, "name": _NAMES.get(ticker, ticker),
+                        "currency": _CURRENCY.get(ticker, "USD")})
                .execute().data or [])
         return ins[0]["benchmark_id"] if ins else None
     except Exception as exc:                                    # noqa: BLE001
@@ -174,6 +184,46 @@ def _at_or_before(bid: int, anchor: str) -> tuple[str, float] | None:
 
 
 def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
+    """Fetch adjusted daily ETF closes from Yahoo Finance and replace the stored series.
+
+    The scorecard benchmark now uses the same Yahoo Finance source as portfolio returns. All bars
+    are upserted deliberately, replacing legacy GuruFocus bars as well as adding the newest close.
+    Adjusted close includes distributions, matching yfinance's standard total-return series.
+    """
+    if ticker not in _YAHOO_TICKERS:
+        return _refresh_gurufocus(ticker, bid, have_max)
+
+    from asset_pipeline import yahoo  # noqa: PLC0415
+    from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
+    from time import time  # noqa: PLC0415
+
+    # Yahoo coarsens range=max. An explicit range gives daily bars, as in the asset pipeline.
+    chart = yahoo.chart_window(ticker, 0, int(time()), "1d")
+    if not chart:
+        _log.warning("[bench-etf] %s: Yahoo Finance returned no price history", ticker)
+        return 0
+    timestamps = chart.get("timestamp") or []
+    quote = ((chart.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    adjusted = ((chart.get("indicators") or {}).get("adjclose") or [{}])[0].get("adjclose") or []
+    rows = [
+        {"benchmark_id": bid, "target_date": yahoo.utc_dt(ts).date().isoformat(),
+         "price": adjusted[i] if i < len(adjusted) and adjusted[i] is not None else close}
+        for i, (ts, close) in enumerate(zip(timestamps, closes))
+        if (adjusted[i] if i < len(adjusted) else close) is not None
+        and yahoo.is_closed_bar(ts)
+        and yahoo.utc_dt(ts).date() >= DATA_CUTOFF
+    ]
+    for i in range(0, len(rows), 500):
+        supabase.table("benchmark_price").upsert(
+            rows[i:i + 500], on_conflict="benchmark_id,target_date").execute()
+    if rows:
+        _log.warning("[bench-etf] %s: stored %d Yahoo Finance bar(s), newest %s",
+                     ticker, len(rows), rows[-1]["target_date"])
+    return len(rows)
+
+
+def _refresh_gurufocus(ticker: str, bid: int, have_max: str | None) -> int:
     """Fetch the ETF from GuruFocus and store the bars we do not have. Returns rows written.
 
      THE FULL HISTORY COMES BACK IN ONE CALL and we upsert only what is NEWER than `have_max`.
@@ -250,10 +300,13 @@ def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, fl
     #   callers are the scheduled pass and a button somebody pressed, both of which run where
     #   nobody is waiting on the round trip. The guard is still SET, so a later lazy read in the
     #   same process cannot spend a second call.
-    if (force or stale) and (force or not _fetched_today.get(guard)):
+    needs_adjusted_history = ticker in _YAHOO_TICKERS and ticker not in _adjusted_history_loaded
+    if (force or stale or needs_adjusted_history) and (force or needs_adjusted_history or not _fetched_today.get(guard)):
         _fetched_today[guard] = True
         try:
-            if _refresh(ticker, bid, last[0] if last else None):
+            written = _refresh(ticker, bid, last[0] if last else None)
+            if written:
+                _adjusted_history_loaded.add(ticker)
                 last = _latest(bid)
             #  Stamped whether or not a new bar arrived, and that is the point. The question this
             # answers is "is our copy current", and asking a vendor that has published nothing since
@@ -346,7 +399,7 @@ def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
     if not fresh or not starts:
         return {}
     bid, (end_d, end_p) = fresh
-    ticker, ccy = PROXY[label], "USD"
+    ticker, ccy = PROXY[label], _CURRENCY.get(PROXY[label], "USD")
     fetched_at = _proxy_fetched_at(bid)
 
     wanted = sorted(set(starts))
@@ -390,7 +443,7 @@ def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
             # Named so a consumer can say WHERE the number came from rather than implying it is
             # the reconstruction's. `members` mirrors the rebuild's key and is 1 by construction:
             # an ETF is one instrument, and pretending otherwise would let a caller divide by it.
-            "source": "etf",
+            "source": "yfinance_etf",
             "members": 1,
         }
     return out
@@ -424,7 +477,7 @@ def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
     if not marks:
         return {}
 
-    ticker, ccy = PROXY[label], "USD"
+    ticker, ccy = PROXY[label], _CURRENCY.get(PROXY[label], "USD")
     fx = _fx_to_eur({ccy}, start_d, end_limit)
     r_start = _rate(fx, ccy, start_d)
     if start_p <= 0 or not r_start:

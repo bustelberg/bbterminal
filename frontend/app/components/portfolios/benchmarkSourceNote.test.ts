@@ -14,7 +14,7 @@ describe('benchmarkProvenance', () => {
 
   it('states the rule, then the same rule with this window’s own numbers', () => {
     const c = benchmarkProvenance(etf);
-    expect(c.sourceKey).toBe('benchmark_etf');
+    expect(c.sourceKey).toBe('benchmark_etf_yfinance');
     const [rule, blank, worked] = c.how.split('\n');
     expect(rule).toContain('FX is USD per EUR');
     //  The blank line. It is what makes the two read as one thing said twice rather than one long
@@ -45,6 +45,15 @@ describe('benchmarkProvenance', () => {
     expect(c.how).toContain('FX is USD per EUR');
     expect(c.how).not.toContain('\n');
     expect(c.how).not.toMatch(/NaN|undefined|null/);
+  });
+
+  it("labels ACWI's direct ETF price as yfinance", () => {
+    expect(benchmarkProvenance({ ...etf, source: 'yfinance_etf' }).sourceKey)
+      .toBe('benchmark_etf_yfinance');
+  });
+
+  it('labels a cached ACWI ETF payload as yfinance too', () => {
+    expect(benchmarkProvenance(etf).sourceKey).toBe('benchmark_etf_yfinance');
   });
 
   it('refuses a zero rate rather than dividing by it', () => {

@@ -192,7 +192,10 @@ def _index_returns(label: str, starts: list[str]) -> dict[str, dict]:
     reconstruction. Two benchmark numbers one click apart is survivable ONLY because that panel
     already carries both and the gap between them — see `_airs_portfolio_attribution`.
     """
-    key = ("index_returns", label, tuple(sorted(set(starts))), _today())
+    # Version the leg when the direct ACWI feed changes. The cache fingerprint sees data writes,
+    # not a code deployment, so retaining the old key would keep returning the former GuruFocus
+    # provenance until another table happened to change.
+    key = ("index_returns_yfinance_adjusted_v3", label, tuple(sorted(set(starts))), _today())
     return _leg(key, lambda: _index_returns_now(label, starts))
 
 
@@ -769,6 +772,58 @@ def _apply_book_source(result: dict, benchmark_label: str) -> None:
         "since_excess_pct": None,
         "ytd_is_since": False,
     })
+
+
+_SCORECARD_BLOCKS = (
+    ("Stocks", ("Equity", "ETF Equity"), "ACWI"),
+    ("Bonds", ("Bonds",), "BONDS"),
+    ("Alternatives", ("Alternatives",), "ALTERNATIVES"),
+    ("Cash", ("Cash",), None),
+)
+
+
+def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, float],
+                             anchor: str | None) -> dict:
+    """Like-for-like block returns and composites for the scorecard.
+
+    The portfolio's current allocation weights are deliberately used on BOTH sides. Comparing a
+    70/20/10 portfolio to a 100% ACWI benchmark confuses allocation with security selection.
+    """
+    from routers._benchmark_etf import etf_returns  # noqa: PLC0415
+
+    proxy_labels = [proxy for _name, _buckets, proxy in _SCORECARD_BLOCKS if proxy]
+    proxy = {label: etf_returns(label, [anchor]).get(anchor) for label in proxy_labels} if anchor else {}
+    blocks: list[dict] = []
+    for name, buckets, proxy_label in _SCORECARD_BLOCKS:
+        slices = [s for s in allocation if s.get("bucket") in buckets]
+        weight = sum(float(s.get("pct") or 0.0) for s in slices)
+        # A sleeve can consist of direct and ETF equities. Its return is weighted only over the
+        # constituent slices that have a measured return; unknown is kept visible as null.
+        measured = [(float(s.get("pct") or 0.0), bucket_returns.get(s.get("bucket"))) for s in slices]
+        known = [(w, r) for w, r in measured if r is not None]
+        portfolio_return = (0.0 if name == "Cash" and weight else
+                            (sum(w * float(r) for w, r in known) / sum(w for w, _r in known)
+                             if known and sum(w for w, _r in known) > 0 else None))
+        benchmark_return = 0.0 if name == "Cash" and weight else ((proxy.get(proxy_label) or {}).get("eur_pct") if proxy_label else None)
+        blocks.append({"bucket": name, "weight_pct": weight, "portfolio_return_pct": portfolio_return,
+                       "benchmark_return_pct": benchmark_return,
+                       "benchmark_ticker": (proxy.get(proxy_label) or {}).get("ticker") if proxy_label else "Cash",
+                       "benchmark_start_value": (proxy.get(proxy_label) or {}).get("start_price") if proxy_label else 1.0,
+                       "benchmark_end_value": (proxy.get(proxy_label) or {}).get("end_price") if proxy_label else 1.0,
+                       "benchmark_currency": (proxy.get(proxy_label) or {}).get("currency") if proxy_label else "EUR",
+                       "benchmark_fx_start": (proxy.get(proxy_label) or {}).get("fx_start") if proxy_label else 1.0,
+                       "benchmark_fx_end": (proxy.get(proxy_label) or {}).get("fx_end") if proxy_label else 1.0})
+    def composite(key: str) -> float | None:
+        usable = [b for b in blocks if b["weight_pct"] > 0 and b.get(key) is not None]
+        covered = sum(b["weight_pct"] for b in usable)
+        return (sum(b["weight_pct"] * float(b[key]) for b in usable) / covered
+                if covered >= 99.5 else None)
+    portfolio_ytd = composite("portfolio_return_pct")
+    benchmark_ytd = composite("benchmark_return_pct")
+    return {"block_returns": blocks, "portfolio_ytd_pct": portfolio_ytd,
+            "benchmark_ytd_pct": benchmark_ytd,
+            "ytd_excess_pct": (portfolio_ytd - benchmark_ytd
+                               if portfolio_ytd is not None and benchmark_ytd is not None else None)}
 
 
 def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
@@ -2778,6 +2833,11 @@ def compute_portfolio_analysis(portfolio_id: int,
             _log.warning("[analysis] could not queue missing asset data (%s: %s)",
                          type(e).__name__, e)
 
+    allocation = _weigh_alloc(allocation_items)
+    score_returns = _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
+                                   source, _phase)
+    score_returns.update(_scorecard_block_returns(allocation, bucket_returns,
+                                                  score_returns.get("ytd_from")))
     return {
         "portfolio_id": portfolio_id,
         "name": p["name"],
@@ -2846,8 +2906,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         #   Empty means "could not work it out", which the copy renders as no sentence rather than
         #   as "nothing missing"; the magnitude is always in `benchmark_coverage_pct`.
         "benchmark_missing_countries": bench_coverage.get("missing_countries") or [],
-        "returns": _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
-                                  source, _phase),
+        "returns": score_returns,
         # Expansion metadata follows the same checkbox as the charts. Off means certificate
         # constituents are absent; on reports which wrappers supplied the added stocks.
         "looked_through_pct": lookthrough["looked_through_pct"],
@@ -2860,7 +2919,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         # the bucket's value-weighted YTD price return (from the paired book), for the pie legend.
         "allocation": [{**s, "return_pct": bucket_returns.get(s["bucket"]),
                         "contribution_pct": _contrib.get(s["bucket"])}
-                       for s in _weigh_alloc(allocation_items)],
+                       for s in allocation],
         # Per-holding book detail (bucket / currency / start-weight / return) — the source for a
         # non-equity sleeve's contribution + currency view, where sector-vs-SP500 says nothing.
         # Empty when no book is paired (a model with no book has no per-holding returns).
@@ -3234,7 +3293,7 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:v9"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:scorecard-blocks:adjusted:v12"
 
 
 _INSTRUMENT_NAME_SUFFIXES = frozenset({

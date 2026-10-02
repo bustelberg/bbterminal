@@ -33,7 +33,8 @@ export type SourceKey =
   | 'yfinance'       // our yfinance daily closes (asset_price)
   | 'fx'             // ECB/Yahoo FX rate (fx_rate)
   | 'benchmark'      // yfinance close, benchmark constituents (the reconstructed index)
-  | 'benchmark_etf'  // GuruFocus close for the index ETF itself (ACWI, SPY)
+  | 'benchmark_etf'  // legacy GuruFocus close for an index ETF
+  | 'benchmark_etf_yfinance' // yfinance close for the ACWI index ETF itself
   | 'benchmark_caps' // yfinance market cap per constituent — the index's WEIGHTS, not its prices
   | 'derived';       // computed from the above (no single source of its own)
 
@@ -73,6 +74,7 @@ const SOURCE: Record<SourceKey, { vendor: string; field: string; qualifier?: str
   // "yfinance close" over a GuruFocus number, which is precisely the mislabel this whole component
   // exists to make impossible.
   benchmark_etf: { vendor: 'GuruFocus', field: 'daily close', qualifier: 'index ETF' },
+  benchmark_etf_yfinance: { vendor: 'yfinance', field: 'daily close', qualifier: 'index ETF' },
   //  A key of its own for the same reason `benchmark_etf` IS. A cap-weighted index has two
   // separate yfinance inputs — the daily CLOSES that give it a return, and the per-constituent
   // Market caps that give it its weights (`_benchmark_refresh._caps`, refreshed by its own job and
