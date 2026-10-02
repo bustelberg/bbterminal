@@ -36,6 +36,7 @@ export type NavKey =
   | '/fx-rates'
   | '/timezone'
   | '/airs-portfolio'
+  | '/debet-calculation'
   | '/request_gurufocus'
   | '/benchmarks'
   | '/isin-compare'
@@ -83,6 +84,7 @@ const EN: SidebarCopy = {
     '/fx-rates': 'FX Rates',
     '/timezone': 'Trading Hours',
     '/airs-portfolio': 'AIRS Portfolio',
+    '/debet-calculation': 'Debet calculations',
     '/request_gurufocus': 'Request GuruFocus',
     '/benchmarks': 'Benchmarks',
     '/isin-compare': 'ISIN Compare',
@@ -130,6 +132,7 @@ const NL: SidebarCopy = {
     '/fx-rates': 'Wisselkoersen',
     '/timezone': 'Handelstijden',
     '/airs-portfolio': 'AIRS-portefeuille',
+    '/debet-calculation': 'Debetberekeningen',
     '/request_gurufocus': 'GuruFocus opvragen',
     '/benchmarks': 'Benchmarks',
     '/isin-compare': 'ISIN vergelijken',
