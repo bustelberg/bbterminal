@@ -180,7 +180,7 @@ async def refresh_index_proxy(label: str):
     AEX deliberately has none — every European UCITS line 404s at the vendor — so "nothing
     happened" is a real answer that a caller must be able to tell from "wrong name".
     """
-    from routers._benchmark_etf import PROXY, ensure_fresh  # noqa: PLC0415
+    from routers._benchmark_etf import PROXY, ensure_fresh, refresh_index_proxies  # noqa: PLC0415
 
     if label not in PROXY:
         raise HTTPException(
@@ -189,7 +189,11 @@ async def refresh_index_proxy(label: str):
             "the others are rebuilt from constituents and refresh with the index.",
         )
     try:
-        got = await asyncio.to_thread(ensure_fresh, label, force=True)
+        # All direct scorecard proxies share one adjusted-close convention. Refresh the complete
+        # set here so a reader correcting one stale tile does not leave AGGH.AS, HYEA.L or SPY on
+        # a legacy/raw series until each happens to be opened separately.
+        await asyncio.to_thread(refresh_index_proxies)
+        got = await asyncio.to_thread(ensure_fresh, label)
     except Exception as e:                                          # noqa: BLE001
         #  502, NOT 500. The vendor did not answer; nothing here is broken and a retry may work.
         raise HTTPException(502, f"Could not refresh {label}: {type(e).__name__}: {e}")

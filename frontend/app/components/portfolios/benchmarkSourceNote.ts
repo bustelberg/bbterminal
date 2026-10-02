@@ -16,7 +16,7 @@ import type { Lang } from '../../../lib/i18n';
  * to be discovered.
  *
  *  The source key is part of the answer, not decoration. `benchmark` renders as "yfinance close
- * (benchmark constituents)" and `benchmark_etf` as "GuruFocus daily close (index ETF)". Getting
+ * (benchmark constituents)" and the two ETF keys as their respective daily-close source. Getting
  * that wrong prints one vendor's name over the other's number, which is the single failure the
  * provenance badge exists to make impossible.
  *
@@ -92,11 +92,15 @@ function etfFormula(
 
 export function benchmarkProvenance(p: BenchmarkProvenance, lang: Lang = 'en'): BenchmarkProvenanceCard {
   const { source, label } = p;
-  if (source === 'etf') {
+  // Older cached analysis payloads labelled ACWI's direct ETF leg only as `etf`. ACWI now has one
+  // direct-feed policy — yfinance — so keep its provenance true while the server retires those
+  // payloads; non-ACWI ETF labels retain their explicit provider marker.
+  const isYahooEtf = source === 'yfinance_etf' || (source === 'etf' && label === 'ACWI');
+  if (source === 'etf' || isYahooEtf) {
     return {
-      sourceKey: 'benchmark_etf',
-      what: lang === 'nl' ? `Het eigen EUR-rendement van ${label} over dezelfde periode — koersrendement, dus zonder uitkeringen.`
-        : `What ${label} itself returned over the same window, in EUR — a price return, so distributions are not included.`,
+      sourceKey: isYahooEtf ? 'benchmark_etf_yfinance' : 'benchmark_etf',
+      what: lang === 'nl' ? `Het totale EUR-rendement van ${label} over dezelfde periode, inclusief uitkeringen.`
+        : `What ${label} returned over the same window, in EUR — a total return including distributions.`,
       note: lang === 'nl' ? `rendement van ${label} sinds jaarbegin` : `${label}'s return, year to date`,
       how: etfFormula(p, lang),
     };

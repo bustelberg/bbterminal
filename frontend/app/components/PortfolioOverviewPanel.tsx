@@ -11,6 +11,7 @@ import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
 import PortfolioFundamentalModal from './portfolios/PortfolioFundamentalModal';
+import PortfolioEarningsModal from './portfolios/PortfolioEarningsModal';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
@@ -232,6 +233,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     { id?: number; name: string; basket?: Basket; pf?: string } | null>(null);
   const [fundamental, setFundamental] = useState<
     { id?: number; name: string; basket?: Basket; bookPortfolio?: string } | null>(null);
+  const [earnings, setEarnings] = useState<
+    { id?: number; name: string; basket?: Basket; bookPortfolio?: string } | null>(null);
   // Refresh state: the fleet job is running; a status/error line; which single rows are re-scanning.
   const [refreshingAll, setRefreshingAll] = useState(false);
   /**
@@ -361,15 +364,18 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * The ISINs come from `/isins`, which an expanded row has already loaded; otherwise one fetch.
    */
   const openModal = async (r: AirsPortfolioOverview,
-    destination: 'analyse' | 'fundamental' = 'analyse') => {
+    destination: 'analyse' | 'fundamental' | 'earnings' = 'analyse') => {
     //  The portefeuille code travels with the modal. `refreshOne` is keyed on it, not on the
     // fixed portfolio id, so without it the modal's Refresh has nothing to call — the row and the
     // modal must fire the identical scan.
     if (r.fixed_portfolio_id != null) {
       if (destination === 'analyse') {
         setAnalyse({ id: r.fixed_portfolio_id, name: r.name, pf: r.dynamic_portefeuille });
-      } else {
+      } else if (destination === 'fundamental') {
         setFundamental({ id: r.fixed_portfolio_id, name: r.name,
+          bookPortfolio: r.dynamic_portefeuille });
+      } else {
+        setEarnings({ id: r.fixed_portfolio_id, name: r.name,
           bookPortfolio: r.dynamic_portefeuille });
       }
       return;
@@ -396,8 +402,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       const target = { name: r.name, basket: { holdings, label: r.name } };
       if (destination === 'analyse') {
         setAnalyse({ ...target, pf: r.dynamic_portefeuille });
-      } else {
+      } else if (destination === 'fundamental') {
         setFundamental({ ...target, bookPortfolio: p });
+      } else {
+        setEarnings({ ...target, bookPortfolio: p });
       }
     } catch (e) {
       console.warn(`[AIRS expand] could not build a basket for ${p}`, e);
@@ -1135,6 +1143,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               {opening === r.dynamic_portefeuille ? '…' : 'Fundamental'}
                             </button>
                           )}
+                          {canAnalyse(r) && (
+                            <button type="button"
+                              onClick={(e) => { e.stopPropagation(); void openModal(r, 'earnings'); }}
+                              disabled={opening === r.dynamic_portefeuille}
+                              title="Show each operating company's latest three reported revenue quarters and year-over-year growth."
+                              className="inline-flex items-center text-[13px] px-2.5 py-1 rounded-md border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-accent-300 disabled:opacity-50">
+                              {opening === r.dynamic_portefeuille ? '...' : 'Earnings'}
+                            </button>
+                          )}
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
                               not also toggle the row's holdings. `items-stretch` on the wrapper keeps
                               this exactly the height of the Analyse button beside it. */}
@@ -1367,6 +1384,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           name={fundamental.name} portfolioId={fundamental.id} basket={fundamental.basket}
           bookPortfolio={fundamental.bookPortfolio}
           onClose={() => setFundamental(null)} />
+      )}
+      {earnings && (
+        <PortfolioEarningsModal key={earnings.id ?? earnings.name}
+          name={earnings.name} portfolioId={earnings.id} basket={earnings.basket}
+          bookPortfolio={earnings.bookPortfolio}
+          onClose={() => setEarnings(null)} />
       )}
       {showBands && (
         <AllocationBandsModal canEdit={isAdmin} onClose={() => setShowBands(false)} />

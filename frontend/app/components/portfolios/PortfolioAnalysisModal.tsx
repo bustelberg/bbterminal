@@ -131,7 +131,7 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
    *  It returns a message, never throws on a 4xx. The card prints what comes back, so "this index
    * has no proxy" and "the vendor had nothing newer" both land where the press happened.
    */
-  const refreshBenchmark = returns?.benchmark_source === 'etf'
+  const refreshBenchmark = ['etf', 'yfinance_etf'].includes(returns?.benchmark_source ?? '')
     ? async (): Promise<string | null> => {
       try {
         const res = await apiFetch(
@@ -165,6 +165,43 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
     : undefined;
   const copy = useAnalyseCopy();
   const r = returns;
+  type ScorecardBlock = {
+    bucket: string; weight_pct: number; portfolio_return_pct: number | null;
+    benchmark_return_pct: number | null; benchmark_ticker: string | null;
+    benchmark_start_value: number | null; benchmark_end_value: number | null;
+    benchmark_currency: string | null; benchmark_fx_start: number | null; benchmark_fx_end: number | null;
+  };
+  const blocks = ((r as (typeof r & { block_returns?: ScorecardBlock[] }) | undefined)
+    ?.block_returns ?? []);
+  const shortReturn = (value: number | null) => (value == null ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`);
+  const priceRange = (block: ScorecardBlock) => block.benchmark_start_value == null || block.benchmark_end_value == null
+    ? 'n/a' : `${block.benchmark_start_value.toFixed(2)} → ${block.benchmark_end_value.toFixed(2)} ${block.benchmark_currency ?? ''}`;
+  const fxRange = (block: ScorecardBlock) => block.benchmark_fx_start == null || block.benchmark_fx_end == null
+    ? 'n/a' : `${block.benchmark_fx_start.toFixed(4)} → ${block.benchmark_fx_end.toFixed(4)}`;
+  const blockCalculation = blocks.length ? (
+    <div className="mt-3 space-y-1.5 border-t border-neutral-800/50 pt-3 text-[12px] leading-relaxed text-fg-soft">
+      <div className="grid grid-cols-[minmax(5rem,1fr)_3.5rem_4.5rem_minmax(5rem,1fr)_4.5rem_minmax(9rem,1fr)_minmax(8rem,1fr)] gap-x-2 px-2 text-[10px] font-medium uppercase tracking-wide text-fg-faint">
+        <span>Block</span><span className="text-right">Weight</span><span className="text-right">Portfolio</span><span>Benchmark</span><span className="text-right">EUR return</span><span className="text-right">Price start → end</span><span className="text-right">FX start → end</span>
+      </div>
+      {blocks.map((block) => {
+        const ticker = block.benchmark_ticker;
+        const href = ticker && ticker !== 'Cash'
+          ? `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/`
+          : null;
+        return <div key={block.bucket} className="grid grid-cols-[minmax(5rem,1fr)_3.5rem_4.5rem_minmax(5rem,1fr)_4.5rem_minmax(9rem,1fr)_minmax(8rem,1fr)] items-center gap-x-2 rounded-md bg-elevated/70 px-2 py-1.5">
+          <span className="font-medium text-fg">{block.bucket}</span>
+          <span className="text-right font-mono tabular-nums">{block.weight_pct.toFixed(1)}%</span>
+          <span className="text-right font-mono tabular-nums text-fg">{shortReturn(block.portfolio_return_pct)}</span>
+          {href ? <a href={href} target="_blank" rel="noreferrer" className="w-fit text-accent-300 underline decoration-accent-500/50 underline-offset-2 hover:text-accent-200">{ticker}</a> : <span>Cash</span>}
+          <span className="text-right font-mono tabular-nums text-fg">{shortReturn(block.benchmark_return_pct)}</span>
+          <span className="text-right font-mono tabular-nums text-fg-muted">{priceRange(block)}</span>
+          <span className="text-right font-mono tabular-nums text-fg-muted">{fxRange(block)}</span>
+        </div>;
+      })}
+      <div className="pt-2 text-fg-muted">EUR return = (end price ÷ end FX) ÷ (start price ÷ start FX) - 1</div>
+      <div className="text-fg-muted">Weighted return = sum of each weight multiplied by its block return</div>
+    </div>
+  ) : undefined;
   const sp = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
   // The excess is a DIFFERENCE of two returns, so it is in percentage POINTS (pp), not percent.
   //  It no longer equals the attribution "TOTAL", and that used to be written here as an
@@ -222,12 +259,12 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
           exist. The Strategy side genuinely IS a formula (Σ weightᵢ × returnᵢ over our own
           yfinance closes), so the two cannot share a tag. */}
       <Chip label={copy.score.returnYtd} value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
-        prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of}
-          kind={r?.source === 'book' ? 'copied' : 'formula'}
-          what={copy.score.portfolioWhat}
-          note={copy.score.portfolioNote}
-          how={r?.source === 'book'
-            ? copy.score.portfolioHowBook : copy.score.portfolioHowModel} />} />
+        prov={<Provenance source={blocks.length ? 'derived' : pSrc} asOf={r?.portfolio_as_of}
+          kind={blocks.length ? undefined : (r?.source === 'book' ? 'copied' : 'formula')}
+          what={blocks.length ? 'Weighted portfolio return across stocks, bonds, alternatives and cash.' : copy.score.portfolioWhat}
+          note={blocks.length ? 'Uses the portfolio allocation weights shown below.' : copy.score.portfolioNote}
+          how={blocks.length ? 'Weighted from the same allocation blocks as the benchmark.' : (r?.source === 'book'
+            ? copy.score.portfolioHowBook : copy.score.portfolioHowModel)} calculation={blockCalculation} />} />
       <span className={op} aria-hidden>−</span>
       {/*  `at={undefined}` SO THIS BADGE DOES NOT INHERIT THE HOLDINGS' SCAN TIME. The subtree is
           wrapped in `ProvenanceFetchedAt at={holdings_fetched_at}` — which is when we last read
@@ -235,10 +272,13 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
           price. Handing one object's fetch time to another is the exact hazard that provider
           documents; `fetchedAt={null}` cannot express it, because `??` treats null as "inherit". */}
       <ProvenanceFetchedAt at={undefined}>
-        <Chip label={copy.score.versusReturn(benchmark)} value={sp(r?.benchmark_ytd_pct)}
+        <Chip label={blocks.length ? copy.score.weightedBenchmark : copy.score.versusReturn(benchmark)} value={sp(r?.benchmark_ytd_pct)}
           valueClass={tone(r?.benchmark_ytd_pct)}
-          prov={<Provenance source={bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind="formula"
-            what={bp.what} note={bp.note} how={bp.how} onRefresh={refreshBenchmark}
+          prov={<Provenance source={blocks.length ? 'derived' : bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind={blocks.length ? undefined : 'formula'}
+            what={blocks.length ? 'Weighted benchmark return across the same portfolio allocation blocks.' : bp.what}
+            note={blocks.length ? 'Each market proxy is weighted to match this portfolio allocation.' : bp.note}
+            how={blocks.length ? 'Each benchmark proxy is weighted by the portfolio allocation shown above.' : bp.how}
+            calculation={blockCalculation} onRefresh={refreshBenchmark}
             fetchedAt={r?.benchmark_fetched_at} />} />
       </ProvenanceFetchedAt>
       <span className={op} aria-hidden>=</span>

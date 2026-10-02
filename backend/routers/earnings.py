@@ -786,6 +786,19 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
         annual = [
             "annuals__Income Statement__Shares Outstanding (Diluted Average)",
             "annuals__income_statement__Shares Outstanding (Diluted Average)",
+            # The portfolio Earnings view needs the same reported revenue quarters.
+            # The quarterly-twin expansion below fetches their `quarterly__` counterparts.
+            "annuals__Income Statement__Revenue",
+            "annuals__income_statement__Revenue",
+            # Keep these before `codes` creates its quarterly twins. The portfolio Earnings
+            # table shows filed quarter EPS without NRI beside quarterly revenue.
+            "annuals__Per Share Data__EPS without NRI",
+            "annuals__per_share_data__EPS without NRI",
+            "annuals__per_share_data_array__EPS without NRI",
+            # GuruFocus commonly publishes quarterly diluted EPS while withholding the
+            # normalised (without-NRI) version. It is the Earnings view's fallback.
+            "annuals__Per Share Data__Earnings per Share (Diluted)",
+            "annuals__per_share_data__Earnings per Share (Diluted)",
             "annuals__Ratios__WACC %", "annuals__ratios__WACC %",
             "annuals__Cashflow Statement__Free Cash Flow",
             "annuals__cashflow_statement__Free Cash Flow",
