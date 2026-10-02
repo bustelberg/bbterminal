@@ -338,7 +338,7 @@ describe('sourceVendor / sourceField', () => {
 
   it('composes back into the label for every source', () => {
     for (const k of ['airs_volk', 'airs_att', 'airs_model', 'yfinance', 'fx',
-      'benchmark', 'benchmark_etf', 'benchmark_caps', 'derived'] as const) {
+      'benchmark', 'benchmark_etf', 'benchmark_etf_yfinance', 'benchmark_caps', 'derived'] as const) {
       const label = sourceLabel(k);
       expect(label).toContain(sourceField(k));
       if (sourceVendor(k)) expect(label).toContain(sourceVendor(k));

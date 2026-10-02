@@ -25,7 +25,7 @@ const en = {
     loadError: 'The composition could not be loaded.' },
   bucket: (name: string) => name,
   score: {
-    returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return (YTD) €`, excess: 'Excess',
+    returnYtd: 'Return (YTD) €', versusReturn: (benchmark: string) => `vs ${benchmark} return (YTD) €`, weightedBenchmark: 'Weighted benchmark return (YTD) €', excess: 'Excess',
     portfolioWhat: 'What this portfolio returned year to date, in EUR.', portfolioNote: "the portfolio's return, year to date",
     /**  THE CAVEAT ONLY. `where` names AIRS Rendementen (ATT) and `note` names the field, so
      *  repeating both here was two thirds of a sentence the reader had already had — and it read
@@ -243,7 +243,7 @@ const nl: AnalyseCopy = {
   bucket: (name) => (({ Stocks: 'Aandelen', Bonds: 'Obligaties', Alternatives: 'Alternatieven', Cash: 'Liquiditeiten',
     Unclassified: 'Niet geclassificeerd' } as Record<string, string>)[name] ?? name),
   score: {
-    returnYtd: 'Rendement (YTD) €', versusReturn: (benchmark) => `vs. rendement ${benchmark} (YTD) €`, excess: 'Meerrendement',
+    returnYtd: 'Rendement (YTD) €', versusReturn: (benchmark) => `vs. rendement ${benchmark} (YTD) €`, weightedBenchmark: 'Gewogen benchmarkrendement (YTD) €', excess: 'Meerrendement',
     portfolioWhat: 'Wat deze portefeuille sinds het begin van het jaar in euro heeft gerendeerd.', portfolioNote: 'het rendement van de portefeuille sinds het begin van het jaar',
     portfolioHowBook: 'Houdt rekening met stortingen en onttrekkingen en bevat inkomsten, over het kalenderjaar — een storting vleit dit cijfer dus niet.',
     portfolioHowModel: 'Σ(gewichtᵢ × rendementᵢ) over de posities van het model. Elke positie gebruikt yfinance-slotkoersen en wordt op elke datum tegen de eigen koers naar EUR omgerekend, zodat het valuta-effect is inbegrepen. Koersrendement: dividenden zijn uitgesloten.',
