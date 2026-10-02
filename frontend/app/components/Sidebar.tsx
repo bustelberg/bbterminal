@@ -60,6 +60,7 @@ const navItems: NavEntry[] = [
   { href: '/fx-rates' },
   { href: '/timezone' },
   { href: '/airs-portfolio' },
+  { href: '/debet-calculation' },
   { href: '/request_gurufocus' },
   { href: '/benchmarks' },
   { href: '/isin-compare' },
