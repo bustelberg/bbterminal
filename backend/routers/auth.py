@@ -55,15 +55,13 @@ router = APIRouter(tags=["auth"])
 # SHA-256(lower(email)) hex of the hardcoded admin email.
 #
 #  Two copies, changed together: this set and the LATEST migration that redefines
-# `set_admin_role_on_signup()` — currently 20260908150000_single_hardcoded_admin.sql. Earlier
+# `set_admin_role_on_signup()` — currently 20261004150000_restore_second_hardcoded_admin.sql. Earlier
 # migrations still carry the OLD list and must not be edited: they record what already ran.
 # Pinned by tests/test_admin_email_hashes.py, which reads the newest definition.
 #
-#  It went from two addresses to one (2026-09-08, on request): `5db5e759…` keeps the automatic
-# grant, `9fe083c7…` was demoted to a plain user by that migration. Dropping the hash alone would
-# have done nothing — the row carried an EXPLICIT role, and `_resolve_role` prefers an explicit
-# role to this allowlist on purpose.  The cost is that there is now ONE admin, so the two-account
-# 2FA recovery path (one admin resetting the other's authenticator) is gone.
+#  The latest migration restores the second administrator after it had been deliberately demoted
+# on 2026-09-08.  It changes both the trigger for future signups and existing metadata; changing
+# only this fallback would leave the frontend treating the restored account as a regular user.
 #
 #  Refer to them by hash prefix, never by address. 20260527010000 moved to SHA-256 "so admin
 # emails no longer appear in source", and a comment naming the preimage hands that straight back —
@@ -78,6 +76,7 @@ router = APIRouter(tags=["auth"])
 # on every screen.
 _ADMIN_EMAIL_HASHES: frozenset[str] = frozenset({
     "5db5e75947119ef23451bc46919479a90b6bd51cd2e81815f2c7083e20fde36f",
+    "9fe083c7c1b2b6273a30b369870280d9cdfd3a89e165e6c2d68035cf1f7f144f",
 })
 
 

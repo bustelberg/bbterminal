@@ -79,12 +79,10 @@ class TestTheAllowlistIsTheSameEverywhere:
         body = sql[sql.index("admin_hashes"):sql.index("BEGIN")]
         assert set(_HASH_RE.findall(body)) == set(_ADMIN_EMAIL_HASHES)
 
-    def test_there_is_exactly_one_hardcoded_admin(self):
-        """ NARROWED FROM TWO TO ONE (2026-09-08, on request). Pinned as a COUNT because the
-        second address was not merely dropped — with one admin there is no longer a second account
-        able to reset the first's authenticator, so re-adding one is a decision about 2FA recovery
-        and not a tidy-up."""
-        assert len(_ADMIN_EMAIL_HASHES) == 1
+    def test_there_are_exactly_two_hardcoded_admins(self):
+        """Pinned as a count: both account identities are deliberate, including the second 2FA
+        recovery path. A future change must update the trigger and metadata repair too."""
+        assert len(_ADMIN_EMAIL_HASHES) == 2
 
 
 class TestTheTriggerIsActuallyAttached:
@@ -145,7 +143,7 @@ class TestTheRealAddressesIfYouSupplyThem:
     Checking that costs the preimage, which is exactly what must not be committed — so the
     addresses come from the environment and these two skip when it is empty:
 
-        BB_TEST_ADMIN_EMAIL=... BB_TEST_DEMOTED_EMAIL=... uv run pytest tests/test_admin_email_hashes.py
+        BB_TEST_ADMIN_EMAIL=... BB_TEST_SECOND_ADMIN_EMAIL=... uv run pytest tests/test_admin_email_hashes.py
 
      Skipped in CI by design. The identity is a one-time fact; what regresses is the mechanism
     above and the three-way agreement pinned at the top of this file, and both of those run always.
@@ -158,15 +156,12 @@ class TestTheRealAddressesIfYouSupplyThem:
         assert _is_hardcoded_admin_email(email)
         assert _resolve_role(None, email) == "admin"
 
-    def test_the_configured_demoted_address_does_not(self):
-        """ Pinned in BOTH directions because the two halves fail differently: dropping the hash
-        alone leaves an account that carries an EXPLICIT `role: admin` from an earlier backfill
-        admin for ever, since `_resolve_role` prefers an explicit role to this list on purpose."""
-        email = os.environ.get("BB_TEST_DEMOTED_EMAIL")
+    def test_the_configured_second_admin_address_matches(self):
+        email = os.environ.get("BB_TEST_SECOND_ADMIN_EMAIL")
         if not email:
-            pytest.skip("set BB_TEST_DEMOTED_EMAIL to check the demoted address")
-        assert not _is_hardcoded_admin_email(email)
-        assert _resolve_role(None, email) == "user"
+            pytest.skip("set BB_TEST_SECOND_ADMIN_EMAIL to check the real address")
+        assert _is_hardcoded_admin_email(email)
+        assert _resolve_role(None, email) == "admin"
 
 
 class TestNoAdminAddressIsCommittedInPlaintext:
