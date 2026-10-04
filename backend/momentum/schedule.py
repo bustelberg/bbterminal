@@ -4,17 +4,18 @@ Extracted from `routers.scheduled_strategies` so the pipeline + tests can
 import the date math without pulling in the HTTP router (FastAPI, the
 backfill worker, the backtest stream). No I/O, no DB — just `datetime`.
 
-The smart daily pipeline fires every day at 05:00 UTC and rebalances a
+The smart daily pipeline fires every day at 05:00 Amsterdam and rebalances a
 strategy when `next_due_at <= now`. A strategy's rebalance lands on the first
 occurrence of its baked `rebalance_weekday` (Mon=0..Sun=6) in its period — e.g.
 monthly + weekday=0 → the first Monday of the month — and is decided ENTIRELY
 by the prior trading day's close (Friday for a Monday): we both signal on and
-enter at that bar. So `next_due_at` is stamped at 02:00 UTC on the day AFTER
-that deciding close — the Saturday after Friday's settled close for a Monday
-rebalance — letting the tick fire ~2 days early with picks identical to running
-on the Monday itself (a mid-week grid's deciding bar is the day before, so it
-still fires on the grid date). `next_date`/the period the engine anchors to
-stays the rebalance day. The grid is
+enter at that bar. `next_due_at` is therefore stamped at 02:00 UTC on the
+rebalance date itself. The few extra hours after Friday's close matter: a
+vendor can publish one exchange's Friday bar after the early-Saturday window.
+The rebalance pipeline refreshes the COMPLETE candidate universe first, then
+never has to admit that individual lagging bar as a one-session holiday
+fallback. `next_date`/the period the engine anchors to stays the rebalance day.
+The grid is
 anchored to Jan 2000 so bi-/quarterly periods land on the same calendar
 months the backtest engine uses (`momentum/backtest/dates.py`); the two
 pure-date helpers below mirror that module so importing it (and pandas)
@@ -78,10 +79,9 @@ def compute_next_due_at(
 ) -> datetime:
     """Given a strategy just rebalanced at `just_ran_at_utc`, return the
     next rebalance due time: the rebalance day at 02:00 UTC. This is a
-    THRESHOLD, deliberately 3h before the 05:00 UTC daily tick — so the tick
-    always sees `next_due_at <= now` and rebalances the strategy that day
-    (don't "align" it to 05:00; the early threshold is what guarantees the
-    catch). Cadence follows `frequency` + the strategy's baked
+    threshold before the 05:00 Amsterdam daily tick, so the tick refreshes the
+    complete universe through the deciding bar before it selects. Cadence
+    follows `frequency` + the strategy's baked
     `rebalance_weekday`.
 
     - daily: the next calendar day (the engine's daily grid ignores weekday).
@@ -101,15 +101,13 @@ def compute_next_due_at(
     else:
         stride = _STRIDE_BY_FREQUENCY.get(frequency, 1)
         next_date = _next_anchored_rebalance_date(just_ran_date, stride, weekday)
-    # Fire the day after the DECIDING bar — the prior trading day's close
-    # (strict-< the rebalance date), which is the bar we both signal on and
-    # enter at. For a first-Monday rebalance that bar is Friday's close, settled
-    # by Saturday, so the daily tick fires ~2 days early with picks identical to
-    # running it on the Monday. For a mid-week grid the prior trading day is the
-    # day before, so `fire_date == next_date` (no shift). `next_date` itself
-    # stays the rebalance/grid date the engine anchors the period to.
-    fire_date = _expected_latest_trading_day(next_date) + timedelta(days=1)
-    return datetime.combine(fire_date, time(2, 0), tzinfo=timezone.utc)
+    # The deciding bar is the prior trading day's close. Do not promote a
+    # first-Monday strategy to Saturday merely because Friday's close *could*
+    # be settled: slower exchange feeds can publish it later, and the
+    # one-session entry tolerance is for a real exchange holiday, not for one
+    # vendor-lagging company. Monday's ordinary 05:00 Amsterdam tick has time
+    # to fetch the full universe through Friday before selection.
+    return datetime.combine(next_date, time(2, 0), tzinfo=timezone.utc)
 
 
 def _initial_next_due_at(

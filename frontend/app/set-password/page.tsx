@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { createClient } from '../../lib/supabase/client'
+import { takePendingPasswordSession } from '@/lib/pendingPasswordSession'
 import AuthShell, {
   AuthNotice,
   authButtonClass,
@@ -41,6 +42,11 @@ export default function SetPasswordPage() {
   useEffect(() => {
     let alive = true
     void (async () => {
+      const pending = takePendingPasswordSession()
+      if (pending) {
+        const { error } = await supabase.auth.setSession(pending)
+        if (error) console.warn('[set-password] could not restore verified session:', error)
+      }
       //  `getUser`, NOT `getSession` — the same rule `proxy.ts` states. `getSession` returns
       // whatever is in storage without asking whether it is still valid, so an expired session
       // would render the form and fail at submit exactly as before.

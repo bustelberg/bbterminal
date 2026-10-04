@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createBrowserClient } from '@supabase/ssr'
 import { describeAuthError, hasAuthError } from '@/lib/authError'
+import { storePendingPasswordSession } from '@/lib/pendingPasswordSession'
 import AuthShell, {
   AuthNotice,
   authButtonClass,
@@ -98,7 +99,7 @@ function Confirm() {
     setBusy(true)
     setFailed(null)
     try {
-      const { error } = tokenHash && isOtpType(type)
+      const { data, error } = tokenHash && isOtpType(type)
         //  `token_hash` FIRST. `?code=` is PKCE — only the browser that REQUESTED the link holds
         // the verifier, so a phone opening a laptop's email cannot complete it. `verifyOtp` carries
         // no such state.
@@ -119,6 +120,10 @@ function Confirm() {
         setBusy(false)
         return
       }
+      // The cookie is still the durable session.  This is only a one-navigation bridge for
+      // browser/client-router timing: `/set-password` restores this verified session before it
+      // calls `updateUser`, rather than discovering a missing cookie after the person typed.
+      storePendingPasswordSession(data.session)
     } catch (e) {
       console.warn('[auth/confirm] verification threw:', e)
       setFailed(describeAuthError({ message: e instanceof Error ? e.message : String(e) }))
