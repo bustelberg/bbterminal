@@ -12589,6 +12589,13 @@ export interface components {
             benchmark_ytd_open_price?: number | null;
             /** Benchmark Ytd Pct */
             benchmark_ytd_pct?: number | null;
+            /**
+             * Block Returns
+             * @default []
+             */
+            block_returns?: {
+                [key: string]: unknown;
+            }[];
             /** Book As Of */
             book_as_of?: string | null;
             /** Book Available */

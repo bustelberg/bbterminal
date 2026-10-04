@@ -24,10 +24,12 @@ at request time isn't needed.
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 _ANCHOR_YEAR = 2000
 _ANCHOR_MONTH = 1
 _STRIDE_BY_FREQUENCY = {"monthly": 1, "bimonthly": 2, "quarterly": 3}
+_AMSTERDAM = ZoneInfo("Europe/Amsterdam")
 
 
 def _first_weekday_on_or_after(d: date, weekday: int = 0) -> date:
@@ -74,14 +76,20 @@ def _expected_latest_trading_day(today: date) -> date:
     return d
 
 
+def _sunday_preflight_at(rebalance_date: date) -> datetime:
+    """10:00 Amsterdam on the Sunday before a Monday rebalance, in UTC."""
+    sunday = rebalance_date - timedelta(days=1)
+    return datetime.combine(sunday, time(10, 0), tzinfo=_AMSTERDAM).astimezone(timezone.utc)
+
+
 def compute_next_due_at(
     frequency: str, just_ran_at_utc: datetime, rebalance_weekday: int = 0,
 ) -> datetime:
     """Given a strategy just rebalanced at `just_ran_at_utc`, return the
-    next rebalance due time: the rebalance day at 02:00 UTC. This is a
-    threshold before the 05:00 Amsterdam daily tick, so the tick refreshes the
-    complete universe through the deciding bar before it selects. Cadence
-    follows `frequency` + the strategy's baked
+    next rebalance due time. Monthly first-Monday strategies are due at 10:00
+    Amsterdam on the preceding Sunday, allowing a full-universe vendor refresh
+    after Friday's close has settled. Other grids retain their rebalance-day
+    02:00 UTC threshold. Cadence follows `frequency` + the strategy's baked
     `rebalance_weekday`.
 
     - daily: the next calendar day (the engine's daily grid ignores weekday).
@@ -101,12 +109,12 @@ def compute_next_due_at(
     else:
         stride = _STRIDE_BY_FREQUENCY.get(frequency, 1)
         next_date = _next_anchored_rebalance_date(just_ran_date, stride, weekday)
-    # The deciding bar is the prior trading day's close. Do not promote a
-    # first-Monday strategy to Saturday merely because Friday's close *could*
-    # be settled: slower exchange feeds can publish it later, and the
-    # one-session entry tolerance is for a real exchange holiday, not for one
-    # vendor-lagging company. Monday's ordinary 05:00 Amsterdam tick has time
-    # to fetch the full universe through Friday before selection.
+    # A Sunday 10:00 Amsterdam preflight gives GuruFocus the whole weekend to
+    # publish Friday closes, then refreshes every candidate before selection.
+    # This is intentionally only the first-Monday monthly grids: a Wednesday
+    # strategy needs Tuesday's close and cannot truthfully be selected Sunday.
+    if frequency in _STRIDE_BY_FREQUENCY and weekday == 0:
+        return _sunday_preflight_at(next_date)
     return datetime.combine(next_date, time(2, 0), tzinfo=timezone.utc)
 
 

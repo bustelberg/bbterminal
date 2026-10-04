@@ -998,6 +998,23 @@ def _fire_daily_sequence() -> None:
     _submit_scheduled_work("daily_pipeline", _seq)
 
 
+def _fire_sunday_rebalance_preflight() -> None:
+    """Refresh and rebalance first-Monday strategies at Sunday 10:00 Amsterdam."""
+    def _run() -> None:
+        from ingest.phases import _create_run, _run_rebalance_pipeline_sync  # noqa: PLC0415
+
+        try:
+            run_id = _create_run("rebalance", "auto")
+            _log.info("[scheduler] Sunday rebalance preflight → run_id=%s", run_id)
+            _run_rebalance_pipeline_sync(run_id, sunday_preflight=True)
+        except Exception as e:
+            _log.exception(
+                "[scheduler] Sunday rebalance preflight failed: %s: %s", type(e).__name__, e,
+            )
+
+    _submit_scheduled_work("sunday_rebalance_preflight", _run)
+
+
 def _fire_price_update_retry() -> None:
     """One-shot stale-held-price retry fired by APScheduler. Runs a fresh
     `price_update` op in its own daemon thread; that op's completion hook
@@ -1997,6 +2014,7 @@ def _register_bodies() -> None:
     # daemon threads and narrate into `ingest_run`, which is where /schedule already watches them.
     _WATCHDOG_STARTERS.update({
         "daily_pipeline": _fire_daily_sequence,
+        "sunday_rebalance_preflight": _fire_sunday_rebalance_preflight,
         "daily_price_slice": _fire_daily_price_slice,
     })
 
@@ -2296,6 +2314,7 @@ def register_scheduler(app) -> None:
         # `coalesce=True` collapses any backlog into a single run and
         # `misfire_grace_time` gives 10 min of slack — both declared with the schedule.
         _register("daily_pipeline", _fire_daily_sequence)
+        _register("sunday_rebalance_preflight", _fire_sunday_rebalance_preflight)
         # Daily price slice — the most-stale companies, every day, so the whole book cycles in
         # ~19 days and no series ever ages into the signal engine's 30-day staleness drop.
         # Replaced the gated month-end full pass (2026-09-02): one pass a month against a 30-day

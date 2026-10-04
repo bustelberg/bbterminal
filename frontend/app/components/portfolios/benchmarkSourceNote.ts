@@ -99,7 +99,7 @@ export function benchmarkProvenance(p: BenchmarkProvenance, lang: Lang = 'en'): 
   if (source === 'etf' || isYahooEtf) {
     return {
       sourceKey: isYahooEtf ? 'benchmark_etf_yfinance' : 'benchmark_etf',
-      what: lang === 'nl' ? `Het totale EUR-rendement van ${label} over dezelfde periode, inclusief uitkeringen.`
+      what: lang === 'nl' ? `Het eigen EUR-rendement van ${label} over dezelfde periode, inclusief uitkeringen.`
         : `What ${label} returned over the same window, in EUR — a total return including distributions.`,
       note: lang === 'nl' ? `rendement van ${label} sinds jaarbegin` : `${label}'s return, year to date`,
       how: etfFormula(p, lang),

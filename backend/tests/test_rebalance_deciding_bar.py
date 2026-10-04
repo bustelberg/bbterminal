@@ -51,6 +51,16 @@ class TestTheBarARebalanceNeeds:
         assert wed == date(2026, 8, 4)                  # first Wed is the 5th
         assert max(mon, wed) == wed
 
+    def test_a_late_published_deciding_bar_repairs_only_an_early_entry(self):
+        from routers._schedule_snapshots import _late_entry_anchor
+
+        # The October-period snapshot stores October 1, but its first-Monday
+        # rebalance is decided on Friday October 2.
+        # An October 1 fallback is repairable once an *exact* October 2 bar is
+        # in the database; an October 2 entry is already correct.
+        assert _late_entry_anchor("2026-10-01", "2026-10-01") == "2026-10-02"
+        assert _late_entry_anchor("2026-10-01", "2026-10-02") is None
+
 
 class TestTheCalendarMonthGateWasUnsatisfiable:
     def test_sunday_the_2nd_on_fridays_close_is_decidable(self):

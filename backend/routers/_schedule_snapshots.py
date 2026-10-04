@@ -94,6 +94,36 @@ def _benchmark_asof(benchmark_id: int, day: str) -> float | None:
     return float(p) if p is not None else None
 
 
+def _deciding_bar_anchor(as_of_date_iso: str, rebalance_weekday: int = 0) -> str | None:
+    """Return a snapshot period's configured deciding-bar date, if valid.
+
+    Snapshots store the calendar period start (``YYYY-MM-01``), while the
+    strategy can actually rebalance on the first configured weekday of that
+    month.  Derive that grid date before stepping back to the deciding bar.
+    """
+    try:
+        from momentum.backtest.dates import current_rebalance_date, deciding_bar  # noqa: PLC0415
+
+        period_start = date.fromisoformat(as_of_date_iso[:10])
+        rebalance_date = current_rebalance_date(period_start, rebalance_weekday)
+        return deciding_bar(rebalance_date).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _late_entry_anchor(
+    as_of_date_iso: str, entry_date_iso: str, rebalance_weekday: int = 0,
+) -> str | None:
+    """Return the missing deciding-bar date for an early entry, if any.
+
+    This deliberately only identifies a *calendar* discrepancy.  The caller
+    must still prove that it has an exact close on this date before changing an
+    entry: an exchange holiday legitimately leaves an entry on the prior close.
+    """
+    anchor = _deciding_bar_anchor(as_of_date_iso, rebalance_weekday)
+    return anchor if anchor and entry_date_iso and entry_date_iso < anchor else None
+
+
 def compute_and_save_price_update(
     strategy_id: int,
     ingest_run_id: int | None,
@@ -236,6 +266,49 @@ def compute_and_save_price_update(
         if bid not in latest_by_bid:
             latest_by_bid[bid] = r
 
+    # An early scheduled rebalance can persist a prior-day fallback when a
+    # vendor has not published the deciding-bar close yet.  Once that exact
+    # close arrives, repair just the entry mark on the ordinary price-update
+    # path.  Do not use an "as of or before" lookup here: a missing exact bar
+    # is a real exchange holiday, and its prior close is the correct entry.
+    rebal_iso = str(rebal.get("as_of_date") or "")[:10]
+    rebalance_weekday = int((rebal.get("config") or {}).get("rebalance_weekday", 0) or 0)
+    entry_anchor = _deciding_bar_anchor(rebal_iso, rebalance_weekday)
+    early_company_ids = [
+        int(h["company_id"]) for h in holdings
+        if h.get("company_id") is not None and h["company_id"] > 0
+        and _late_entry_anchor(rebal_iso, str(h.get("entry_date") or "")[:10], rebalance_weekday)
+    ]
+    early_benchmark_ids = [
+        -int(h["company_id"]) for h in holdings
+        if h.get("company_id") is not None and h["company_id"] < 0
+        and _late_entry_anchor(rebal_iso, str(h.get("entry_date") or "")[:10], rebalance_weekday)
+    ]
+    exact_entry_by_cid: dict[int, float] = {}
+    exact_entry_by_bid: dict[int, float] = {}
+    if entry_anchor:
+        for r in fetch_in_chunks(
+            early_company_ids,
+            lambda chunk: supabase.table("metric_data")
+            .select("company_id, numeric_value")
+            .eq("metric_code", "close_price")
+            .eq("target_date", entry_anchor)
+            .in_("company_id", chunk)
+            .execute(),
+        ):
+            if r.get("numeric_value") is not None:
+                exact_entry_by_cid[int(r["company_id"])] = float(r["numeric_value"])
+        for r in fetch_in_chunks(
+            early_benchmark_ids,
+            lambda chunk: supabase.table("benchmark_price")
+            .select("benchmark_id, price")
+            .eq("target_date", entry_anchor)
+            .in_("benchmark_id", chunk)
+            .execute(),
+        ):
+            if r.get("price") is not None:
+                exact_entry_by_bid[int(r["benchmark_id"])] = float(r["price"])
+
     # ETF currency from the `benchmark` table (the AUTHORITATIVE ISO code). The
     # `currency` stored on the holding is unreliable — often None or a raw symbol
     # like '$' — which left ETF EUR marks blank (the '$' case) or silently
@@ -292,6 +365,27 @@ def compute_and_save_price_update(
         entry_local = h.get("entry_price_local")
         ccy = _hold_ccy(h)
         entry_date_iso = str(h.get("entry_date") or rebal.get("as_of_date") or "")[:10]
+        repaired_entry = False
+
+        # This is intentionally narrower than re-running a rebalance: preserve
+        # the original basket, weights and signal decision, and revise an entry
+        # only if the precise deciding-bar close has subsequently appeared.
+        if entry_anchor and _late_entry_anchor(rebal_iso, entry_date_iso, rebalance_weekday):
+            exact = (
+                exact_entry_by_bid.get(-int(cid)) if is_etf
+                else exact_entry_by_cid.get(int(cid)) if cid is not None else None
+            )
+            if exact is not None:
+                _log.info(
+                    "[price_update] %s entry repaired %s/%s -> %s/%s",
+                    h.get("ticker") or cid, entry_local, entry_date_iso, exact, entry_anchor,
+                )
+                entry_local = exact
+                entry_date_iso = entry_anchor
+                repaired_entry = True
+                new_h["entry_price_local"] = exact
+                new_h["entry_date"] = entry_anchor
+                new_h.pop("entry_price_eur", None)
 
         #  An ETF's entry price is re-derived every run, like its entry EUR already is.
         #
@@ -339,7 +433,7 @@ def compute_and_save_price_update(
         # and mixing that unconverted entry with the now-converted exit corrupts
         # the return. Derive-if-missing for everyone else.
         entry_eur = new_h.get("entry_price_eur")
-        if is_etf or not entry_eur or entry_eur <= 0:
+        if is_etf or repaired_entry or not entry_eur or entry_eur <= 0:
             derived = _to_eur(entry_local, ccy, entry_date_iso, fx_rates)
             if derived is not None:
                 entry_eur = derived

@@ -108,6 +108,31 @@ const pct = formatPct;
 
 type Axis = NonNullable<ModelPortfolioAnalysis['axes']>[number];
 type Row = Axis['rows'][number];
+type ScorecardBlock = {
+  bucket: string; weight_pct: number; portfolio_return_pct: number | null;
+  benchmark_return_pct: number | null; benchmark_ticker: string | null;
+  benchmark_start_value: number | null; benchmark_end_value: number | null;
+  benchmark_currency: string | null; benchmark_fx_start: number | null; benchmark_fx_end: number | null;
+};
+
+function isNullableNumber(value: unknown): value is number | null {
+  return value === null || typeof value === 'number';
+}
+
+function isScorecardBlock(value: unknown): value is ScorecardBlock {
+  if (!value || typeof value !== 'object') return false;
+  const block = value as Record<string, unknown>;
+  return typeof block.bucket === 'string'
+    && typeof block.weight_pct === 'number'
+    && isNullableNumber(block.portfolio_return_pct)
+    && isNullableNumber(block.benchmark_return_pct)
+    && (block.benchmark_ticker === null || typeof block.benchmark_ticker === 'string')
+    && isNullableNumber(block.benchmark_start_value)
+    && isNullableNumber(block.benchmark_end_value)
+    && (block.benchmark_currency === null || typeof block.benchmark_currency === 'string')
+    && isNullableNumber(block.benchmark_fx_start)
+    && isNullableNumber(block.benchmark_fx_end);
+}
 
 /** The headline band: return + excess (both sources), so the "did it earn its excess?" read is
  *  answered before scrolling. */
@@ -165,14 +190,9 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
     : undefined;
   const copy = useAnalyseCopy();
   const r = returns;
-  type ScorecardBlock = {
-    bucket: string; weight_pct: number; portfolio_return_pct: number | null;
-    benchmark_return_pct: number | null; benchmark_ticker: string | null;
-    benchmark_start_value: number | null; benchmark_end_value: number | null;
-    benchmark_currency: string | null; benchmark_fx_start: number | null; benchmark_fx_end: number | null;
-  };
-  const blocks = ((r as (typeof r & { block_returns?: ScorecardBlock[] }) | undefined)
-    ?.block_returns ?? []);
+  // The generated schema intentionally exposes this JSON payload as records
+  // with unknown fields. Validate it before rendering the optional detail.
+  const blocks = (r?.block_returns ?? []).filter(isScorecardBlock);
   const shortReturn = (value: number | null) => (value == null ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`);
   const priceRange = (block: ScorecardBlock) => block.benchmark_start_value == null || block.benchmark_end_value == null
     ? 'n/a' : `${block.benchmark_start_value.toFixed(2)} → ${block.benchmark_end_value.toFixed(2)} ${block.benchmark_currency ?? ''}`;

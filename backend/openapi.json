@@ -11525,6 +11525,15 @@
             ],
             "title": "Benchmark Ytd Pct"
           },
+          "block_returns": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Block Returns",
+            "type": "array"
+          },
           "book_as_of": {
             "anyOf": [
               {

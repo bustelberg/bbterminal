@@ -112,6 +112,21 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "time stays 05:00 through DST changes.",
     ),
     JobSpec(
+        id="sunday_rebalance_preflight",
+        label="Momentum rebalance preflight",
+        fills="full selected universe price/volume refresh · current_picks rebalance snapshots",
+        cadence="Every Sunday, 10:00 Amsterdam (due first-Monday strategies)",
+        trigger={"day_of_week": "sun", "hour": 10, "minute": 0,
+                 "timezone": "Europe/Amsterdam"},
+        options={"coalesce": True, "misfire_grace_time": 3600},
+        max_age_hours=192,
+        evidence=("rebalance",),
+        records=False,
+        note="Only rebalances strategies due for the following first Monday. It gives GuruFocus "
+             "the full weekend to publish Friday's closes, then refreshes every candidate before "
+             "ranking. Other Sundays are intentional no-ops.",
+    ),
+    JobSpec(
         id="job_watchdog",
         label="Watchdog — re-run broken jobs",
         fills="nothing directly; it re-runs the jobs the automatic-jobs page reports as broken",
