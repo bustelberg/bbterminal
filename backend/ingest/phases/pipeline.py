@@ -17,7 +17,7 @@ import logging
 import os
 import threading
 from contextlib import contextmanager
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from .acquisition import _run_acquisition_phase
 from .momentum import _run_momentum_phase, _run_smart_momentum_phase
@@ -644,7 +644,9 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
         )
 
 
-def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
+def _run_rebalance_pipeline_sync(
+    run_id: int, force: bool = False, sunday_preflight: bool = False,
+) -> None:
     """Operation 2 of the split pipeline — rebalance the DUE scheduled
     strategies (re-select holdings from the current universe).
 
@@ -684,14 +686,41 @@ def _run_rebalance_pipeline_sync(run_id: int, force: bool = False) -> None:
     log = logging.getLogger(__name__)
     accumulated_errors: list[str] = []
 
-    log_step(run_id, f"Rebalance op starting (force={force})", phase="start")
+    log_step(
+        run_id, f"Rebalance op starting (force={force}, sunday_preflight={sunday_preflight})",
+        phase="start",
+    )
     with _serialized(run_id):
         # ── Phase: plan — which strategies are due ─────────────────
         _update_run(run_id, current_phase="plan", current_message="Checking which strategies are due…")
         log_step(run_id, "Phase: plan — deciding which strategies are due", phase="plan")
         plan = None
         try:
-            plan = build_plan(datetime.now(timezone.utc))
+            now = datetime.now(timezone.utc)
+            plan = build_plan(now)
+            # Existing rows may still carry the former Monday 02:00 UTC due
+            # time when this deployment first lands. At the dedicated Sunday
+            # preflight, treat only those next-Monday monthly grids as due;
+            # after this successful rebalance their next_due_at is written by
+            # the new Sunday-10:00 schedule. This is not force-rebalance.
+            if sunday_preflight and now.weekday() == 6:
+                tomorrow = now.date() + timedelta(days=1)
+                for sp in plan.strategies:
+                    try:
+                        legacy_due = datetime.fromisoformat(
+                            str(sp.next_due_at or "").replace("Z", "+00:00")
+                        ).date()
+                    except ValueError:
+                        continue
+                    if (
+                        not sp.is_due
+                        and sp.frequency in ("monthly", "bimonthly", "quarterly")
+                        and sp.rebalance_weekday == 0
+                        and legacy_due == tomorrow
+                    ):
+                        sp.is_due = True
+                        sp.due_reason = "sunday_preflight"
+                plan.due_strategy_ids = [sp.strategy_id for sp in plan.strategies if sp.is_due]
             _update_run(run_id, plan_summary=plan.to_summary())
             for sp in plan.strategies:
                 log_step(
