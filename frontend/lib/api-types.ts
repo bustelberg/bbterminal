@@ -807,6 +807,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/isins/refresh-prices/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Account Isin Prices Job
+         * @description Refresh stale Yahoo closes after an expanded row has already rendered.
+         *
+         *     ``resolve_account_isins`` owns the stale-price test and writes any newly fetched closes to
+         *     the normal cache. A tracked, keyed job makes repeated expands join one refresh instead of
+         *     creating concurrent Yahoo work for the same account.
+         */
+        post: operations["refresh_account_isin_prices_job_api_airs_accounts__portefeuille__isins_refresh_prices_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/link": {
         parameters: {
             query?: never;
@@ -15360,6 +15384,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AirsAccountIsins"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_account_isin_prices_job_api_airs_accounts__portefeuille__isins_refresh_prices_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

@@ -283,6 +283,8 @@ _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
     # Overview → one row's Refresh (re-scan this book's AIRS reports).
     re.compile(r"^/api/airs/portfolios/[^/]+/refresh/job$"),
+    # Overview's stale Yahoo price checks run after the expanded row renders from its cache.
+    re.compile(r"^/api/airs/accounts/[^/]+/isins/refresh-prices/job$"),
     # Analyse modal → the fundamentals fill over a PAIRED model portfolio's holdings.
     re.compile(r"^/api/airs/model-portfolios/\d+/fundamentals/ingest/job$"),
     # Benchmarks → per-index Refresh and "Refresh all" (constituents, caps, prices).

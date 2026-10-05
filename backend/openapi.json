@@ -17896,6 +17896,47 @@
         ]
       }
     },
+    "/api/airs/accounts/{portefeuille}/isins/refresh-prices/job": {
+      "post": {
+        "description": "Refresh stale Yahoo closes after an expanded row has already rendered.\n\n``resolve_account_isins`` owns the stale-price test and writes any newly fetched closes to\nthe normal cache. A tracked, keyed job makes repeated expands join one refresh instead of\ncreating concurrent Yahoo work for the same account.",
+        "operationId": "refresh_account_isin_prices_job_api_airs_accounts__portefeuille__isins_refresh_prices_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Account Isin Prices Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/accounts/{portefeuille}/link": {
       "delete": {
         "description": "Forget the human decision for this holding and fall back to the automatic guess. NOT the\nsame as linking it to nothing \u2014 that is a decision too, and is stored as a null.\n\n`portefeuille` names which table the request came from; the row it clears is the same one the\nmodel-portfolio screen writes, because the link is keyed on the holding.",
