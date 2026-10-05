@@ -92,37 +92,6 @@ const EPS_ESTIMATE_CODES = new Set([
   "quarterly_per_share_eps_estimate",
   "quarterly_eps_nri_estimate",
 ]);
-function matchingEstimate(
-  actual: Quarter,
-  estimates: Quarter[],
-  preferredCode?: string,
-): Quarter | null {
-  const matching = estimates.filter(
-    (estimate) => estimate.date === actual.date,
-  );
-  if (!matching.length) return null;
-  if (preferredCode)
-    return (
-      matching.find((estimate) => estimate.metricCode === preferredCode) ?? null
-    );
-  return matching[0];
-}
-function surpriseLabel(
-  actual: number,
-  estimate: Quarter | null,
-  label: string,
-  value: (value: number) => string,
-): Surprise | null {
-  if (!estimate || estimate.value === 0) return null;
-  const difference = actual - estimate.value;
-  const pct = (difference / Math.abs(estimate.value)) * 100;
-  return {
-    text: `${difference >= 0 ? "Beat" : "Missed"} ${label} by ${difference >= 0 ? "+" : ""}${value(difference)} (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`,
-    positive: difference >= 0,
-    consensus: estimate.value,
-  };
-}
-
 function historicalSurprise(
   company: Company,
   date: string,
@@ -438,27 +407,17 @@ export default function PortfolioEarningsModal({
                                 100
                               : null;
                           const revenueSurprise = revenuePoint
-                            ? (historicalSurprise(
+                            ? historicalSurprise(
                                 company,
                                 revenuePoint.date,
                                 revenuePoint.value,
                                 "revenue_estimate",
                                 "revenue",
                                 (value) => revenue(value, company.currency),
-                              ) ??
-                              surpriseLabel(
-                                revenuePoint.value,
-                                matchingEstimate(
-                                  revenuePoint,
-                                  revenueEstimates,
-                                ),
-                                "revenue",
-                                (value) =>
-                                  revenue(Math.abs(value), company.currency),
-                              ))
+                              )
                             : null;
                           const epsSurprise = epsPoint
-                            ? (historicalSurprise(
+                            ? historicalSurprise(
                                 company,
                                 epsPoint.date,
                                 epsPoint.value,
@@ -467,22 +426,7 @@ export default function PortfolioEarningsModal({
                                   : "per_share_eps_estimate",
                                 "EPS",
                                 (value) => eps(value, company.currency),
-                              ) ??
-                              surpriseLabel(
-                                epsPoint.value,
-                                matchingEstimate(
-                                  epsPoint,
-                                  epsEstimates,
-                                  epsPoint.metricCode.includes(
-                                    "EPS without NRI",
-                                  )
-                                    ? "quarterly_eps_nri_estimate"
-                                    : "quarterly_per_share_eps_estimate",
-                                ),
-                                "EPS",
-                                (value) =>
-                                  eps(Math.abs(value), company.currency),
-                              ))
+                              )
                             : null;
                           return (
                             <td
