@@ -555,6 +555,19 @@ async def universe_template_refresh_status():
     return _refresh_status.get_all()
 
 
+@router.get("/api/universe-templates/QUALITY/source-companies")
+async def get_quality_source_companies():
+    """Every company in the Quality source union.
+
+    Unlike template membership, this list intentionally includes companies
+    that have not yet been linked to an existing database listing. Stored Yahoo
+    symbols enrich the rows when available but never determine membership.
+    """
+    from index_universe.templates.quality import source_companies  # noqa: PLC0415
+
+    return await asyncio.to_thread(source_companies, supabase)
+
+
 @router.get("/api/universe-templates/{template_key}")
 async def get_universe_template(template_key: str, response: Response):
     """Single template summary + the full list of captured months. The

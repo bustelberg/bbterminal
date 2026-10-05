@@ -35,7 +35,8 @@ type Detail = {
 };
 
 const CLIENT_CACHE_TTL_MS = 60 * 60 * 1000;
-let timelineClientCache: { at: number; payload: Payload } | null = null;
+type UniverseKey = 'leonteq' | 'quality';
+const timelineClientCache = new Map<UniverseKey, { at: number; payload: Payload }>();
 const detailClientCache = new Map<string, { at: number; payload: Detail }>();
 type CompanyReference = { analysis_id: number; name: string | null; ticker: string | null };
 type PriceLegs = { start_date: string; start_price: number; end_date: string; end_price: number; return_pct: number };
@@ -137,11 +138,13 @@ function upcomingTradingDates(first: string, count: number): string[] {
 }
 
 export default function SectorMomentumTimeline() {
-  const freshTimeline = timelineClientCache && Date.now() - timelineClientCache.at < CLIENT_CACHE_TTL_MS
-    ? timelineClientCache.payload : null;
+  const [universe, setUniverse] = useState<UniverseKey>('leonteq');
+  const cachedTimeline = timelineClientCache.get(universe);
+  const freshTimeline = cachedTimeline && Date.now() - cachedTimeline.at < CLIENT_CACHE_TTL_MS
+    ? cachedTimeline.payload : null;
   const [data, setData] = useState<Payload | null>(freshTimeline);
   const [loading, setLoading] = useState(!freshTimeline);
-  const [timelineStage, setTimelineStage] = useState('LEONTEQ universe mapping');
+  const [timelineStage, setTimelineStage] = useState('Universe mapping');
   const [error, setError] = useState<string | null>(null);
   const [hover, setHover] = useState<Row | null>(null);
   const [activeSector, setActiveSector] = useState<string | null>(null);
@@ -158,23 +161,24 @@ export default function SectorMomentumTimeline() {
   const today = amsterdamToday();
 
   const load = useCallback(async () => {
-    if (timelineClientCache && Date.now() - timelineClientCache.at < CLIENT_CACHE_TTL_MS) {
-      setData(timelineClientCache.payload);
+    const cached = timelineClientCache.get(universe);
+    if (cached && Date.now() - cached.at < CLIENT_CACHE_TTL_MS) {
+      setData(cached.payload);
       setLoading(false);
       return;
     }
-    setLoading(true); setTimelineStage('LEONTEQ universe mapping'); setError(null); setHover(null); setActiveSector(null); setPinnedSector(null);
+    setLoading(true); setTimelineStage('Universe mapping'); setError(null); setHover(null); setActiveSector(null); setPinnedSector(null);
     try {
-      const response = await apiFetch(`${API_URL}/api/momentum/sector-timeline?days=${HISTORY_DAYS}`);
+      const response = await apiFetch(`${API_URL}/api/momentum/sector-timeline?days=${HISTORY_DAYS}&universe=${universe}`);
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
       const payload = body as Payload;
-      timelineClientCache = { at: Date.now(), payload };
+      timelineClientCache.set(universe, { at: Date.now(), payload });
       setData(payload);
     } catch (e) {
       setData(null); setError(e instanceof Error ? e.message : String(e));
     } finally { setLoading(false); }
-  }, []);
+  }, [universe]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -229,7 +233,7 @@ export default function SectorMomentumTimeline() {
 
   const openDetail = useCallback(async (row: Row) => {
     setDetail(null); setDetailError(null); setDetailStage('Yahoo price and volume history'); setDetailLoading(row); setExpandedCompanyId(null);
-    const cacheKey = `${row.date}|${row.sector}`;
+    const cacheKey = `${universe}|${row.date}|${row.sector}`;
     const cached = detailClientCache.get(cacheKey);
     if (cached && Date.now() - cached.at < CLIENT_CACHE_TTL_MS) {
       setDetail(cached.payload);
@@ -237,7 +241,7 @@ export default function SectorMomentumTimeline() {
       return;
     }
     try {
-      const response = await apiFetch(`${API_URL}/api/momentum/sector-timeline/detail?date=${encodeURIComponent(row.date)}&sector=${encodeURIComponent(row.sector)}`);
+      const response = await apiFetch(`${API_URL}/api/momentum/sector-timeline/detail?date=${encodeURIComponent(row.date)}&sector=${encodeURIComponent(row.sector)}&universe=${universe}`);
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
       const parsed = body as Detail;
@@ -248,7 +252,7 @@ export default function SectorMomentumTimeline() {
     } finally {
       setDetailLoading(null);
     }
-  }, []);
+  }, [universe]);
 
   useEffect(() => {
     if (!detailLoading) return;
@@ -292,6 +296,17 @@ export default function SectorMomentumTimeline() {
       <div className="px-8 py-6 space-y-4">
         <div className="mapping-header bg-card border border-neutral-800/40 rounded-xl p-4 flex items-center gap-3 flex-wrap">
           <style>{`.mapping-header > span:nth-of-type(4) { display: none; }`}</style>
+          <label className="text-xs text-fg-muted">
+            <span className="sr-only">Universe</span>
+            <select
+              value={universe}
+              onChange={(event) => setUniverse(event.target.value as UniverseKey)}
+              className="bg-page border border-neutral-700 rounded-md px-2 py-1 text-xs text-fg focus:border-accent-500 outline-none"
+            >
+              <option value="leonteq">Leonteq Universe</option>
+              <option value="quality">Quality Universe</option>
+            </select>
+          </label>
           <span className="text-xs font-semibold text-fg-strong uppercase tracking-wide">History</span>
           <span className="text-xs text-fg-muted">Last 2 months</span>
           {data && <><span className="text-xs text-fg-faint">{data.universe?.name ?? 'Universe'}</span><button type="button" onClick={() => setMappingOpen((open) => !open)} className="text-xs text-accent-300 hover:text-accent-200">{mappingOpen ? 'Hide mapping' : 'Inspect mapping'}</button></>}

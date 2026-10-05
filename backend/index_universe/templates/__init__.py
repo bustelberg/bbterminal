@@ -26,6 +26,7 @@ from .base import (
 )
 from .leonteq import LeonteqTemplate
 from .longequity import LongEquityTemplate
+from .quality import QualityUniverseTemplate
 
 # LongEquity is listed first because its refresh() probes upstream for newer
 # data; running it before the other templates means the pipeline's effective
@@ -42,6 +43,7 @@ TEMPLATES: dict[str, type[UniverseTemplate]] = {
     ACWITemplate.template_key: ACWITemplate,
     LeonteqTemplate.template_key: LeonteqTemplate,
     AEXTemplate.template_key: AEXTemplate,
+    QualityUniverseTemplate.template_key: QualityUniverseTemplate,
 }
 
 
@@ -66,6 +68,7 @@ __all__ = [
     "ACWILeonteqTemplate",
     "LeonteqTemplate",
     "LongEquityTemplate",
+    "QualityUniverseTemplate",
     "ProgressCallback",
     "RefreshResult",
     "TEMPLATES",

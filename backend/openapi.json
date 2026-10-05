@@ -30079,6 +30079,20 @@
           },
           {
             "in": "query",
+            "name": "universe",
+            "required": false,
+            "schema": {
+              "default": "leonteq",
+              "enum": [
+                "leonteq",
+                "quality"
+              ],
+              "title": "Universe",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "max_assets",
             "required": false,
             "schema": {
@@ -30137,6 +30151,20 @@
             "schema": {
               "minLength": 1,
               "title": "Sector",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "universe",
+            "required": false,
+            "schema": {
+              "default": "leonteq",
+              "enum": [
+                "leonteq",
+                "quality"
+              ],
+              "title": "Universe",
               "type": "string"
             }
           },
@@ -30937,6 +30965,26 @@
           }
         },
         "summary": "List Universe Templates",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
+    "/api/universe-templates/QUALITY/source-companies": {
+      "get": {
+        "description": "Every company in the Quality source union.\n\nUnlike template membership, this list intentionally includes companies\nthat have not yet been linked to an existing database listing. Stored Yahoo\nsymbols enrich the rows when available but never determine membership.",
+        "operationId": "get_quality_source_companies_api_universe_templates_QUALITY_source_companies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Quality Source Companies",
         "tags": [
           "universe-templates"
         ]

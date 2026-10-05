@@ -33,6 +33,7 @@ export type NavKey =
   | '/sp500'
   | '/acwi'
   | '/leonteq'
+  | '/quality-universe'
   | '/fx-rates'
   | '/timezone'
   | '/airs-portfolio'
@@ -81,6 +82,7 @@ const EN: SidebarCopy = {
     '/sp500': 'S&P 500 Universe',
     '/acwi': 'ACWI Universe',
     '/leonteq': 'Leonteq Universe',
+    '/quality-universe': 'Quality Universe',
     '/fx-rates': 'FX Rates',
     '/timezone': 'Trading Hours',
     '/airs-portfolio': 'AIRS Portfolio',
@@ -129,6 +131,7 @@ const NL: SidebarCopy = {
     '/sp500': 'S&P 500-universum',
     '/acwi': 'ACWI-universum',
     '/leonteq': 'Leonteq-universum',
+    '/quality-universe': 'Quality-universum',
     '/fx-rates': 'Wisselkoersen',
     '/timezone': 'Handelstijden',
     '/airs-portfolio': 'AIRS-portefeuille',

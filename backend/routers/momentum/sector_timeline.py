@@ -8,9 +8,12 @@ aggregation.
 """
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 import threading
 import time
+from typing import Literal
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -27,7 +30,8 @@ router = APIRouter(tags=["momentum"])
 
 _CACHE_TTL_SECONDS = 3600.0
 _DETAIL_CACHE_TTL_SECONDS = 3600.0
-_CALCULATION_VERSION = 3  # fixed LEONTEQ MomentumTopSelectie universe
+_LEONTEQ_CALCULATION_VERSION = 3
+_QUALITY_CALCULATION_VERSION = 5
 _VISIBLE_HISTORY_DAYS = 42
 _cache: dict[tuple[int, int, int], tuple[float, dict]] = {}
 _detail_cache: dict[tuple[int, str, str, int], tuple[float, dict]] = {}
@@ -37,15 +41,32 @@ _label_cache: dict[int, tuple[float, dict[str, str | None]]] = {}
 _cache_lock = threading.Lock()
 _calculation_lock = threading.Lock()
 _MOMENTUM_TOP_UNIVERSE = "LEONTEQ (as of 2026-06-17)"
+_QUALITY_SECTOR_GROUPS_FILE = (
+    Path(__file__).resolve().parents[2] / "data" / "company-lists" / "quality_sector_groups.json"
+)
+
+UniverseKey = Literal["leonteq", "quality"]
+
+
+def _calculation_version(universe_key: UniverseKey) -> int:
+    return _QUALITY_CALCULATION_VERSION if universe_key == "quality" else _LEONTEQ_CALCULATION_VERSION
+
+
+def _quality_sector_groups() -> dict[str, str]:
+    with _QUALITY_SECTOR_GROUPS_FILE.open(encoding="utf-8") as handle:
+        groups = json.load(handle)
+    if not isinstance(groups, dict) or not all(isinstance(key, str) and isinstance(value, str) for key, value in groups.items()):
+        raise ValueError("quality_sector_groups.json must map source-sector strings to group names")
+    return groups
 
 
 def _persistent_timeline_cache_get(
-    calculation_date: str, days: int, max_assets: int,
+    calculation_version: int, calculation_date: str, days: int, max_assets: int,
 ) -> dict | None:
     """Best-effort cross-process cache; missing migrations degrade to recompute."""
     try:
         rows = (supabase.table("sector_timeline_cache").select("payload")
-                .eq("calculation_version", _CALCULATION_VERSION)
+                .eq("calculation_version", calculation_version)
                 .eq("history_days", days).eq("max_assets", max_assets)
                 .eq("calculation_date", calculation_date).limit(1).execute().data) or []
         payload = rows[0].get("payload") if rows else None
@@ -55,11 +76,11 @@ def _persistent_timeline_cache_get(
 
 
 def _persistent_timeline_cache_put(
-    calculation_date: str, days: int, max_assets: int, payload: dict,
+    calculation_version: int, calculation_date: str, days: int, max_assets: int, payload: dict,
 ) -> None:
     try:
         supabase.table("sector_timeline_cache").upsert({
-            "calculation_version": _CALCULATION_VERSION,
+            "calculation_version": calculation_version,
             "history_days": days,
             "max_assets": max_assets,
             "calculation_date": calculation_date,
@@ -102,6 +123,44 @@ def _momentum_top_analysis_ids() -> tuple[list[int], dict, dict[int, str | None]
     }, sectors
 
 
+def _quality_analysis_ids() -> tuple[list[int], dict, dict[int, str | None]]:
+    """Quality-source members with a stored Yahoo analysis instrument.
+
+    The Quality workbook determines membership; its reviewed Yahoo symbols map
+    directly to ``asset_analysis``. GuruFocus data is never used here.
+    """
+    from index_universe.templates.quality import source_companies  # noqa: PLC0415
+
+    source = source_companies(supabase)
+    sector_groups = _quality_sector_groups()
+    members = [row for row in source["companies"] if row.get("yahoo_ticker")]
+    source_sectors = {str(row.get("sector")) for row in members if row.get("sector")}
+    missing_groups = source_sectors - set(sector_groups)
+    if missing_groups:
+        raise ValueError(f"Quality sector groups missing: {', '.join(sorted(missing_groups))}")
+    sector_by_symbol = {
+        str(row["yahoo_ticker"]).upper(): sector_groups.get(row.get("sector"))
+        for row in members
+    }
+    by_symbol: dict[str, int] = {}
+    symbols = list(sector_by_symbol)
+    for start in range(0, len(symbols), 200):
+        rows = (supabase.table("asset_analysis").select("analysis_id,symbol")
+                .in_("symbol", symbols[start:start + 200]).execute().data) or []
+        for row in rows:
+            if row.get("analysis_id") is not None and row.get("symbol"):
+                by_symbol.setdefault(str(row["symbol"]).upper(), int(row["analysis_id"]))
+    sectors = {analysis_id: sector_by_symbol[symbol] for symbol, analysis_id in by_symbol.items()}
+    return sorted(set(by_symbol.values())), {
+        "name": "Quality Universe", "size": len(source["companies"]),
+        "mapped": len(set(by_symbol.values())), "as_of": source.get("as_of_date"),
+    }, sectors
+
+
+def _universe_analysis_ids(universe_key: UniverseKey) -> tuple[list[int], dict, dict[int, str | None]]:
+    return _quality_analysis_ids() if universe_key == "quality" else _momentum_top_analysis_ids()
+
+
 def _volume_index(analysis_ids: list[int], since: str) -> dict[int, pd.Series] | None:
     """Yahoo volume series keyed like the close panel, from the same COPY path."""
     key = (tuple(sorted(set(int(analysis_id) for analysis_id in analysis_ids))), since)
@@ -125,7 +184,7 @@ def _volume_index(analysis_ids: list[int], since: str) -> dict[int, pd.Series] |
 
 def build_sector_timeline(
     panel: pd.DataFrame, secmap: dict[int, str | None], dates: list[pd.Timestamp],
-    volume_index: dict[int, pd.Series],
+    volume_index: dict[int, pd.Series], calculation_version: int,
 ) -> list[dict]:
     """Score each daily as-of cross-section and return its sector ranking.
 
@@ -164,7 +223,7 @@ def build_sector_timeline(
             continue
         scored = score_universe(signals, weights, signal_defs=PRICE_SIGNAL_DEFS)
         with _cache_lock:
-            _scored_cache[(_CALCULATION_VERSION, display_date.date().isoformat())] = (
+            _scored_cache[(calculation_version, display_date.date().isoformat())] = (
                 time.time(), scored,
             )
         for sector in sector_pool_scores(scored):
@@ -271,6 +330,7 @@ def _price_return_legs(
 def get_sector_timeline_detail(
     date_: str = Query(alias="date"),
     sector: str = Query(min_length=1),
+    universe: UniverseKey = Query("leonteq"),
     max_assets: int = Query(600, ge=100, le=1200),
 ):
     """Explain one daily sector rank, including every company in its mean."""
@@ -278,7 +338,8 @@ def get_sector_timeline_detail(
         cutoff = pd.Timestamp(date_).normalize()
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail="date must be YYYY-MM-DD") from exc
-    cache_key = (_CALCULATION_VERSION, cutoff.date().isoformat(), sector, max_assets)
+    calculation_version = _calculation_version(universe)
+    cache_key = (calculation_version, cutoff.date().isoformat(), sector, max_assets)
     with _cache_lock:
         hit = _detail_cache.get(cache_key)
         if hit and time.time() - hit[0] < _DETAIL_CACHE_TTL_SECONDS:
@@ -286,12 +347,12 @@ def get_sector_timeline_detail(
 
     # ``load_panel`` gives this one-day calculation the same 1,100-day warm-up
     # as the timeline, so its signals and strict as-of convention agree exactly.
-    analysis_ids, _, leonteq_sectors = _momentum_top_analysis_ids()
+    analysis_ids, _, universe_sectors = _universe_analysis_ids(universe)
     # Tiles are always opened from the 42-day chart. Reuse its exact panel
     # cache key instead of building the same 1,100-day Yahoo panel again.
     timeline_start = (date.today() - timedelta(days=int(_VISIBLE_HISTORY_DAYS * 1.8))).isoformat()
     panel, _, _ = load_panel(analysis_ids=analysis_ids, start=timeline_start)
-    secmap = leonteq_sectors
+    secmap = universe_sectors
     if panel is None:
         raise HTTPException(status_code=503, detail="Fast price loader unavailable")
     if panel.empty or cutoff not in panel.index:
@@ -308,7 +369,7 @@ def get_sector_timeline_detail(
     if volume_index is None:
         raise HTTPException(status_code=503, detail="Yahoo volume loader unavailable")
     with _cache_lock:
-        scored_hit = _scored_cache.get((_CALCULATION_VERSION, cutoff.date().isoformat()))
+        scored_hit = _scored_cache.get((calculation_version, cutoff.date().isoformat()))
         scored = (scored_hit[1] if scored_hit and time.time() - scored_hit[0] < _CACHE_TTL_SECONDS else None)
     if scored is None:
         raw = evaluate_panel(
@@ -327,7 +388,7 @@ def get_sector_timeline_detail(
             signal_defs=PRICE_SIGNAL_DEFS,
         )
         with _cache_lock:
-            _scored_cache[(_CALCULATION_VERSION, cutoff.date().isoformat())] = (time.time(), scored)
+            _scored_cache[(calculation_version, cutoff.date().isoformat())] = (time.time(), scored)
     sector_scores = sector_pool_scores(scored)
     summary = next((row for row in sector_scores if row["sector"] == sector), None)
     if summary is None:
@@ -460,10 +521,12 @@ def get_sector_timeline_detail(
 @router.get("/api/momentum/sector-timeline")
 def get_sector_timeline(
     days: int = Query(252, ge=20, le=756),
+    universe: UniverseKey = Query("leonteq"),
     max_assets: int = Query(600, ge=100, le=1200),
 ):
     """Daily Yahoo-close sector rankings for the liquid equity asset universe."""
-    key = (_CALCULATION_VERSION, days, max_assets)
+    calculation_version = _calculation_version(universe)
+    key = (calculation_version, days, max_assets)
     calculation_date = datetime.now(ZoneInfo("Europe/Amsterdam")).date().isoformat()
     with _cache_lock:
         hit = _cache.get(key)
@@ -478,7 +541,7 @@ def get_sector_timeline(
             hit = _cache.get(key)
             if hit and time.time() - hit[0] < _CACHE_TTL_SECONDS:
                 return hit[1]
-        persisted = _persistent_timeline_cache_get(calculation_date, days, max_assets)
+        persisted = _persistent_timeline_cache_get(calculation_version, calculation_date, days, max_assets)
         if persisted is not None:
             with _cache_lock:
                 _cache[key] = (time.time(), persisted)
@@ -488,12 +551,12 @@ def get_sector_timeline(
     # 12-1 / 200-day signal.  The requested window itself is calendar-based;
     # the final slice below contains exactly `days` available trading dates.
         start = (date.today() - timedelta(days=int(days * 1.8))).isoformat()
-        analysis_ids, universe, secmap = _momentum_top_analysis_ids()
+        analysis_ids, universe_meta, secmap = _universe_analysis_ids(universe)
         panel, _, _ = load_panel(analysis_ids=analysis_ids, start=start)
         base = {
         "source": "Yahoo Finance close and volume (asset_price.yf.close / yf.volume)",
         "method": "Daily live-momentum price and volume signals, strict as-of, then mean company score by sector",
-        "universe": universe,
+        "universe": universe_meta,
         "days": days,
         "rows": [],
         }
@@ -515,12 +578,12 @@ def get_sector_timeline(
         amsterdam_today = datetime.now(ZoneInfo("Europe/Amsterdam")).date()
         completed = panel.index[panel.index < pd.Timestamp(amsterdam_today)]
         dates = list(completed[-days:])
-        rows = build_sector_timeline(panel, secmap, dates, volume_index)
+        rows = build_sector_timeline(panel, secmap, dates, volume_index, calculation_version)
         result = {**base, "days": len(dates), "rows": rows}
         if not rows:
             result["note"] = "Not enough price history to calculate the daily price signals."
         with _cache_lock:
             _cache[key] = (time.time(), result)
         if rows:
-            _persistent_timeline_cache_put(calculation_date, days, max_assets, result)
+            _persistent_timeline_cache_put(calculation_version, calculation_date, days, max_assets, result)
         return result

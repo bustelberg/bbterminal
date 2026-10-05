@@ -135,11 +135,16 @@ describe('the two gates together', () => {
 })
 
 describe('mfaEnforced', () => {
-  it(' is TRUE in production whatever the environment says', () => {
+  it(' is TRUE in production unless it is a loopback Supabase development stack', () => {
     // The property the whole design rests on: `NODE_ENV` is inlined at build time and is
     // `production` for every Vercel deployment, so no variable — however misspelled, copied from
     // a local .env, or set in a panic — can turn the gate off on the deployed app.
     expect(mfaEnforced({ NODE_ENV: 'production', NEXT_PUBLIC_DISABLE_MFA: '1' })).toBe(true)
+    expect(mfaEnforced({
+      NODE_ENV: 'production',
+      NEXT_PUBLIC_DISABLE_MFA: '1',
+      NEXT_PUBLIC_SUPABASE_URL: 'http://127.0.0.1:54321',
+    })).toBe(false)
     expect(mfaEnforced({ NODE_ENV: 'production' })).toBe(true)
   })
 

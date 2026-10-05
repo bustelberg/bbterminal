@@ -7832,6 +7832,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/universe-templates/QUALITY/source-companies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quality Source Companies
+         * @description Every company in the Quality source union.
+         *
+         *     Unlike template membership, this list intentionally includes companies
+         *     that have not yet been linked to an existing database listing. Stored Yahoo
+         *     symbols enrich the rows when available but never determine membership.
+         */
+        get: operations["get_quality_source_companies_api_universe_templates_QUALITY_source_companies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/universe-templates/refresh-status": {
         parameters: {
             query?: never;
@@ -23407,6 +23431,7 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                universe?: "leonteq" | "quality";
                 max_assets?: number;
             };
             header?: never;
@@ -23440,6 +23465,7 @@ export interface operations {
             query: {
                 date: string;
                 sector: string;
+                universe?: "leonteq" | "quality";
                 max_assets?: number;
             };
             header?: never;
@@ -24060,6 +24086,26 @@ export interface operations {
         };
     };
     list_universe_templates_api_universe_templates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    get_quality_source_companies_api_universe_templates_QUALITY_source_companies_get: {
         parameters: {
             query?: never;
             header?: never;
