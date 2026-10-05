@@ -110,8 +110,13 @@ export function safeNext(next: string | null | undefined, fallback = '/'): strin
  * to fail, but it will look like a bug.
  */
 export function mfaEnforced(
-  env: { NODE_ENV?: string; NEXT_PUBLIC_DISABLE_MFA?: string } = process.env,
+  env: { NODE_ENV?: string; NEXT_PUBLIC_DISABLE_MFA?: string; NEXT_PUBLIC_SUPABASE_URL?: string } = process.env,
 ): boolean {
+  // `next start` is production-mode even on a laptop. Permit the switch
+  // there only when the public auth endpoint is unambiguously loopback.
+  const localSupabase = /^https?:\/\/(localhost|127\.0\.0\.1)(?::\d+)?(?:\/|$)/i
+    .test(env.NEXT_PUBLIC_SUPABASE_URL ?? '');
+  if (env.NEXT_PUBLIC_DISABLE_MFA === '1' && localSupabase) return false;
   if (env.NODE_ENV === 'production') return true;
   //  EXACTLY `'1'`. "true", "yes" and "" are the spellings people reach for, and a control that
   // silently accepts them turns a typo into an unguarded app.

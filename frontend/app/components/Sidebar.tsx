@@ -55,6 +55,7 @@ const navItems: NavEntry[] = [
       { href: '/sp500' },
       { href: '/acwi' },
       { href: '/leonteq' },
+      { href: '/quality-universe' },
     ],
   },
   { href: '/fx-rates' },

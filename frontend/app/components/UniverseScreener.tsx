@@ -1,5 +1,3 @@
-'use client';
-
 import CriteriaCard from './universe/CriteriaCard';
 import SavedUniverses from './universe/SavedUniverses';
 import { useUniverses } from './universe/useUniverses';

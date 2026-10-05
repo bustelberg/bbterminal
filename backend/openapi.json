@@ -30942,6 +30942,26 @@
         ]
       }
     },
+    "/api/universe-templates/QUALITY/source-companies": {
+      "get": {
+        "description": "Every company in the Quality source union.\n\nUnlike template membership, this list intentionally includes companies\nthat have not yet been linked to an existing database listing. Stored Yahoo\nsymbols enrich the rows when available but never determine membership.",
+        "operationId": "get_quality_source_companies_api_universe_templates_QUALITY_source_companies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Quality Source Companies",
+        "tags": [
+          "universe-templates"
+        ]
+      }
+    },
     "/api/universe-templates/refresh-status": {
       "get": {
         "description": "Live per-template refresh status from the in-process registry.\n\nCheap (no DB) so the frontend can poll it every couple seconds to drive\nthe busy spinner + progress bar. Returns only templates touched since\nprocess start; absent keys mean \"idle\". Shape: `{template_key:\n{status, message, pct, started_at, finished_at, error}}`.\n\nNOTE: declared BEFORE `/{template_key}` so this static path isn't\nswallowed by the path-param route.",
