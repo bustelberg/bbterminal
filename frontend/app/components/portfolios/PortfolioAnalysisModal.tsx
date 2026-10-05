@@ -279,12 +279,10 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
           exist. The Strategy side genuinely IS a formula (Σ weightᵢ × returnᵢ over our own
           yfinance closes), so the two cannot share a tag. */}
       <Chip label={copy.score.returnYtd} value={sp(r?.portfolio_ytd_pct)} valueClass={tone(r?.portfolio_ytd_pct)}
-        prov={<Provenance source={blocks.length ? 'derived' : pSrc} asOf={r?.portfolio_as_of}
-          kind={blocks.length ? undefined : (r?.source === 'book' ? 'copied' : 'formula')}
-          what={blocks.length ? 'Weighted portfolio return across stocks, bonds, alternatives and cash.' : copy.score.portfolioWhat}
-          note={blocks.length ? 'Uses the portfolio allocation weights shown below.' : copy.score.portfolioNote}
-          how={blocks.length ? 'Weighted from the same allocation blocks as the benchmark.' : (r?.source === 'book'
-            ? copy.score.portfolioHowBook : copy.score.portfolioHowModel)} calculation={blockCalculation} />} />
+        prov={<Provenance source={pSrc} asOf={r?.portfolio_as_of}
+          kind={r?.source === 'book' ? undefined : 'formula'}
+          what={copy.score.portfolioWhat} note={copy.score.portfolioNote}
+          how={r?.source === 'book' ? undefined : copy.score.portfolioHowModel} />} />
       <span className={op} aria-hidden>−</span>
       {/*  `at={undefined}` SO THIS BADGE DOES NOT INHERIT THE HOLDINGS' SCAN TIME. The subtree is
           wrapped in `ProvenanceFetchedAt at={holdings_fetched_at}` — which is when we last read
@@ -1376,6 +1374,129 @@ function SectorAllocationButton({ onOpen, title, className = '' }: {
   );
 }
 
+/** A user's own investment notes for one company. */
+function CompanyNotesModal({ holding, onClose }: {
+  holding: BookHolding;
+  onClose: () => void;
+}) {
+  const [thesis, setThesis] = useState('');
+  const [pillars, setPillars] = useState<string[]>(['']);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      if (holding.company_id == null) return;
+      setLoading(true); setStatus(null);
+      try {
+        const response = await apiFetch(`${API_URL}/api/companies/${holding.company_id}/investment-note`);
+        const note = await response.json().catch(() => null) as {
+          thesis?: string; pillars?: string[];
+        } | null;
+        if (!response.ok) throw new Error(note && 'detail' in note ? String(note.detail) : `HTTP ${response.status}`);
+        if (!active) return;
+        setThesis(note?.thesis ?? '');
+        setPillars(note?.pillars?.length ? note.pillars : ['']);
+      } catch (error) {
+        if (active) setStatus(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, [holding.company_id]);
+
+  const save = async () => {
+    if (holding.company_id == null) return;
+    setSaving(true); setStatus(null);
+    try {
+      const response = await apiFetch(`${API_URL}/api/companies/${holding.company_id}/investment-note`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thesis, pillars }),
+      });
+      const note = await response.json().catch(() => null) as { thesis?: string; pillars?: string[]; detail?: string } | null;
+      if (!response.ok) throw new Error(note?.detail ?? `HTTP ${response.status}`);
+      setThesis(note?.thesis ?? thesis);
+      setPillars(note?.pillars?.length ? note.pillars : ['']);
+      setStatus('Saved');
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <PanelDialog onClose={onClose} labelledBy="company-summary-title">
+      <div className="m-auto w-full max-w-3xl overflow-auto rounded-xl border border-neutral-800/40 bg-card shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-800/40 px-6 py-5">
+          <div className="min-w-0">
+            <p className="text-[11px] uppercase tracking-wider text-fg-faint">Company notes</p>
+            <h2 id="company-summary-title" className="mt-1 truncate text-xl font-semibold text-fg-strong">
+              {holding.name ?? holding.isin ?? 'Company'}
+            </h2>
+            <p className="mt-1 text-[12px] text-fg-muted">
+              <span className="font-mono">{holding.isin ?? '—'}</span>
+              {sectorLabel(holding.sector) && <> · {sectorLabel(holding.sector)}</>}
+              {holding.currency && <> · {holding.currency}</>}
+            </p>
+          </div>
+          <button type="button" onClick={onClose}
+            className="rounded-lg border border-neutral-800 px-3 py-1.5 text-sm text-fg-muted hover:text-fg">
+            Close
+          </button>
+        </div>
+
+        <div className="space-y-5 p-6">
+          <section>
+            <h3 className="text-sm font-semibold text-fg">Investment thesis</h3>
+            <textarea value={thesis} disabled={loading || saving}
+              onChange={(event) => setThesis(event.target.value)}
+              placeholder="Write your investment hypothesis…"
+              className="mt-2 min-h-28 w-full resize-y rounded-lg border border-neutral-800 bg-page px-3 py-2 text-sm leading-6 text-fg outline-none placeholder:text-fg-faint focus:border-accent-500 disabled:opacity-60" />
+          </section>
+
+          <section>
+            <h3 className="text-sm font-semibold text-fg">Key investment pillars</h3>
+            <div className="mt-2 space-y-2">
+              {pillars.map((pillar, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent-400" />
+                  <input value={pillar} disabled={loading || saving}
+                    onChange={(event) => setPillars((current) => current.map(
+                      (value, i) => i === index ? event.target.value : value,
+                    ))}
+                    placeholder="Add an investment pillar…"
+                    className="min-w-0 flex-1 rounded-lg border border-neutral-800 bg-page px-3 py-2 text-sm text-fg outline-none placeholder:text-fg-faint focus:border-accent-500 disabled:opacity-60" />
+                  <button type="button" disabled={loading || saving || pillars.length === 1}
+                    onClick={() => setPillars((current) => current.filter((_value, i) => i !== index))}
+                    className="rounded-md px-2 py-1 text-fg-faint hover:text-neg-300 disabled:opacity-30"
+                    aria-label="Remove investment pillar">×</button>
+                </div>
+              ))}
+              <button type="button" disabled={loading || saving || pillars.length >= 12}
+                onClick={() => setPillars((current) => [...current, ''])}
+                className="text-sm text-accent-300 hover:text-accent-200 disabled:opacity-40">
+                + Add pillar
+              </button>
+            </div>
+          </section>
+
+          {status && <p className={`text-sm ${status === 'Saved' ? 'text-pos-400' : 'text-neg-300'}`}>{status}</p>}
+          <div className="flex justify-end border-t border-neutral-800/40 pt-4">
+            <button type="button" onClick={() => void save()} disabled={loading || saving}
+              className="rounded-lg bg-accent-600 px-3 py-1.5 text-sm text-white hover:bg-accent-500 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save summary'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </PanelDialog>
+  );
+}
+
 /**
  * One position → one row per ROUTE IN: what the book holds outright, and what it holds through
  * each certificate.
@@ -1793,7 +1914,7 @@ export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean)
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
   lookThrough, onLookThroughChange, onTiming, onSectorOverride,
-  onSectorAllocation }: {
+  onSectorAllocation, onSummary }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
   lookThrough: boolean;
@@ -1819,6 +1940,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   onSectorOverride?: (holding: BookHolding) => void;
   /** Opens official fund look-through. Present only for explicitly supported ETF ISINs. */
   onSectorAllocation?: (holding: BookHolding) => void;
+  /** Opens the signed-in user's investment notes for a direct operating-company holding. */
+  onSummary?: (holding: BookHolding) => void;
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
    *  render as one sentence, next to a portfolios list that visibly has rows. */
   note?: string | null;
@@ -2456,9 +2579,17 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     title={syntheticAirsName(h) ? `AIRS: ${syntheticAirsName(h)}` : h.name ?? undefined}>
                     <span className="flex items-center gap-1.5 min-w-0">
                       <span className="truncate">{h.name ?? '—'}</span>
+                      {onSummary && h.company_id != null && h.isin && !h.is_fund && !isSynthetic(h) ? (
+                        <button type="button" onClick={(event) => {
+                          event.stopPropagation();
+                          onSummary(h);
+                        }} className={`${CHIP_SHAPE} ${CHIP_IDLE} ml-auto shrink-0`}>
+                          Notes
+                        </button>
+                      ) : null}
                       {onSectorAllocation && (hasEtfSectorAllocation(h) || certificateAllocation) ? (
                         <SectorAllocationButton
-                          className="ml-auto shrink-0"
+                          className={`${!onSummary || h.company_id == null || !h.isin || h.is_fund || isSynthetic(h) ? 'ml-auto ' : ''}shrink-0`}
                           title={`Sector allocation inside ${h.name ?? h.isin}`}
                           onOpen={() => onSectorAllocation(h)} />
                       ) : null}
@@ -3404,6 +3535,7 @@ export default function PortfolioAnalysisModal({
   // Transacties sheet joins on — it carries no ISIN.
   const [timingFor, setTimingFor] = useState<string | null>(null);
   const [sectorFor, setSectorFor] = useState<BookHolding | null>(null);
+  const [notesFor, setNotesFor] = useState<BookHolding | null>(null);
   const [sectorAllocationFor, setSectorAllocationFor] = useState<{
     isin?: string; name: string; portfolioWeightPct: number;
     allocation?: EtfSectorAllocationResponse;
@@ -3971,7 +4103,8 @@ export default function PortfolioAnalysisModal({
                     {!isBasket && id != null && (
                       <div className="w-0 min-w-full">
                         <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
-                          benchmark={benchmark} />
+                          benchmark={benchmark}
+                          benchmarkBlocks={(data.returns?.block_returns ?? []).filter(isScorecardBlock)} />
                       </div>
                     )}
                   </div>
@@ -4012,6 +4145,7 @@ export default function PortfolioAnalysisModal({
               <>
               <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 lookThrough={lookThrough} onLookThroughChange={setLookThrough}
+                onSummary={setNotesFor}
                 onSectorAllocation={(holding) => {
                   const internal = syntheticSectorAllocation(holding);
                   if (!holding.isin && !internal) return;
@@ -4104,6 +4238,9 @@ export default function PortfolioAnalysisModal({
       {sectorFor && (
         <SectorOverrideDialog holding={sectorFor} onClose={() => setSectorFor(null)}
           onSave={saveSectorOverride} />
+      )}
+      {notesFor && (
+        <CompanyNotesModal holding={notesFor} onClose={() => setNotesFor(null)} />
       )}
       {risk && data && (
         <PanelDialog onClose={() => setRisk(false)}>

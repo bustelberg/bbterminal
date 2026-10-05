@@ -10,7 +10,7 @@ import {
   egmSource, estimateCagrWorking, medianPEWorking, reverseDcfSource, reverseDcfWorking,
   type MedianPeWorking, type SourceObs,
 } from './egmInputs';
-import { calculateEGM, EGM_DEFAULTS } from './egm';
+import { calculateEGM, egmStorageKey, EGM_DEFAULTS, type EgmOverrides } from './egm';
 import { forwardLegs, normalisedFcf } from './normalisedFcf';
 import {
   FORECAST_YEARS, impliedGrowth, marketCapOf, PERPETUITY_GROWTH,
@@ -581,7 +581,7 @@ function historicalOcfInputs(working: HistoricalOcfWorking,
   }));
 }
 
-function dcfRow(row: ApiRow, today: string) {
+function dcfRow(row: ApiRow, today: string, egmOverrides?: EgmOverrides) {
   const src = reverseDcfSource(row.metrics, today);
   const working = reverseDcfWorking(row.metrics, today);
   const forward = forwardLegs({
@@ -624,18 +624,12 @@ function dcfRow(row: ApiRow, today: string) {
   const medianPeWorked = medianPeCalculation(medianPeWorking);
   const historicalPe10yWorked = medianPeCalculation(historicalPe10yWorking);
   const egmAssumptions = {
-    growthRate: egm.analystGrowth5Y ?? EGM_DEFAULTS.growthRate,
+    growthRate: egmOverrides?.growthRate ?? null,
     dividendYield: egm.dividendYield,
-    exitPE: egm.medianPE5Y ?? EGM_DEFAULTS.exitPE,
+    exitPE: egmOverrides?.exitPE ?? null,
     hurdleRate: EGM_DEFAULTS.hurdleRate,
     years: EGM_DEFAULTS.years,
   };
-  const estimateRange = estimateDates.length > 1
-    ? `Forecast ${onDate(estimateDates[0])} → ${onDate(estimateDates[estimateDates.length - 1])}`
-    : undefined;
-  const medianPeRange = medianPeDates.length > 1
-    ? `Completed FYs ${medianPeDates[0].slice(0, 4)}–${medianPeDates[medianPeDates.length - 1].slice(0, 4)}`
-    : undefined;
   const forwardPeObservations: InputObservation[] = forwardPeDerived ? [
     {
       label: 'Current share price',
@@ -669,27 +663,27 @@ function dcfRow(row: ApiRow, today: string) {
     ...forwardPeObservations,
     {
       label: 'Expected EPS growth',
-      value: `${(egmAssumptions.growthRate * 100).toFixed(1)}%`,
-      retrieved: egm.analystGrowth5Y != null ? row.source_fetched_at.estimates ?? null : null,
-      applies: egm.analystGrowth5Y != null ? estimateDates : null,
-      retrievedText: egm.analystGrowth5Y == null ? 'House assumption' : undefined,
-      appliesText: egm.analystGrowth5Y != null ? estimateRange : 'Every forecast year',
+      value: egmAssumptions.growthRate == null ? 'not set' : `${(egmAssumptions.growthRate * 100).toFixed(1)}%`,
+      retrieved: null,
+      applies: null,
+      retrievedText: 'Enter this assumption in the EGM tab',
+      appliesText: 'Every forecast year',
     },
     {
       label: 'Dividend yield',
       value: `${((egmAssumptions.dividendYield ?? 0) * 100).toFixed(2)}%`,
       retrieved: egm.dividendYield != null ? row.source_fetched_at.financials ?? null : null,
-      applies: egm.dividendYield != null ? egm.dividendYieldDate : null,
+      applies: egm.dividendYield != null ? egm.dividendYieldDate ?? null : null,
       retrievedText: egm.dividendYield == null ? 'Not reported; model uses 0%' : undefined,
       appliesText: egm.dividendYield == null ? 'Every forecast year' : undefined,
     },
     {
-      label: egm.medianPE5Y != null ? 'Historical median Exit P/E' : 'Default Exit P/E',
-      value: `${inputNumber.format(egmAssumptions.exitPE)}×`,
-      retrieved: egm.medianPE5Y != null ? row.source_fetched_at.financials ?? null : null,
-      applies: egm.medianPE5Y != null ? medianPeDates : null,
-      retrievedText: egm.medianPE5Y == null ? 'House assumption' : undefined,
-      appliesText: egm.medianPE5Y != null ? medianPeRange : 'End of year 10',
+      label: 'Exit P/E',
+      value: egmAssumptions.exitPE == null ? 'not set' : `${inputNumber.format(egmAssumptions.exitPE)}×`,
+      retrieved: null,
+      applies: null,
+      retrievedText: 'Enter this assumption in the EGM tab',
+      appliesText: 'End of year 5',
     },
   ];
   const egmResult = calculateEGM({ ...egm, forwardPE }, egmAssumptions);
@@ -843,10 +837,6 @@ function sortValue(row: ValuationRow, key: string): number | null {
     const year = Number(key.slice('epsPe:'.length)) as 2025 | 2026 | 2027;
     return row.peByYear[year] ?? null;
   }
-  if (key.startsWith('epsPeDelta:')) {
-    const year = Number(key.slice('epsPeDelta:'.length)) as 2025 | 2026 | 2027;
-    return row.peDeltaByYear[year] ?? null;
-  }
   if (key.startsWith('ocfYear:')) {
     const year = Number(key.slice('ocfYear:'.length)) as EpsYear;
     return row.ocfByYear[year];
@@ -854,10 +844,6 @@ function sortValue(row: ValuationRow, key: string): number | null {
   if (key.startsWith('ocfMultiple:')) {
     const year = Number(key.slice('ocfMultiple:'.length)) as EpsYear;
     return row.pOcfByYear[year];
-  }
-  if (key.startsWith('ocfDelta:')) {
-    const year = Number(key.slice('ocfDelta:'.length)) as EpsYear;
-    return row.pOcfDeltaByYear[year];
   }
   const values: Record<string, number | null> = {
     // Sort the number the reader sees. AIRS book weights can differ from the underlying
@@ -890,6 +876,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   onClose: () => void;
 }) {
   const [data, setData] = useState<Payload | null>(null);
+  const [egmOverrides, setEgmOverrides] = useState<Record<string, EgmOverrides>>({});
   // `undefined` is loading; `null` means this view genuinely has no usable AIRS book.
   const [bookWeights, setBookWeights] = useState<BookWeightsPayload | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -1032,6 +1019,43 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
     certificateScopeMessages.current.clear();
   }, []);
 
+  // The EGM tab owns these two assumptions. Until a reader sets them there, this portfolio view
+  // deliberately leaves the columns and dependent valuation outputs empty.
+  useEffect(() => {
+    if (!data || typeof window === 'undefined') return;
+    const next: Record<string, EgmOverrides> = {};
+    for (const { isin } of data.rows) {
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(egmStorageKey(isin)) ?? '{}') as EgmOverrides;
+        const growthRate = saved.growthRate;
+        const exitPE = saved.exitPE;
+        if ((typeof growthRate === 'number' && Number.isFinite(growthRate))
+          || (typeof exitPE === 'number' && Number.isFinite(exitPE))) {
+          next[isin] = {
+            ...(typeof growthRate === 'number' && Number.isFinite(growthRate) ? { growthRate } : {}),
+            ...(typeof exitPE === 'number' && Number.isFinite(exitPE) ? { exitPE } : {}),
+          };
+        }
+      } catch { /* malformed browser storage is equivalent to no assumptions */ }
+    }
+    setEgmOverrides(next);
+  }, [data]);
+
+  const updateEgmOverride = useCallback((isin: string, field: keyof EgmOverrides, raw: string) => {
+    const number = raw.trim() === '' ? null : Number(raw);
+    if (number != null && !Number.isFinite(number)) return;
+    setEgmOverrides((current) => ({
+      ...current,
+      [isin]: { ...current[isin], ...(number == null ? { [field]: undefined } : { [field]: number }) },
+    }));
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(egmStorageKey(isin)) ?? '{}') as Record<string, unknown>;
+      if (number == null) delete stored[field];
+      else stored[field] = number;
+      window.localStorage.setItem(egmStorageKey(isin), JSON.stringify(stored));
+    } catch { /* browser storage being unavailable must not block editing */ }
+  }, []);
+
   const rows = useMemo(() => {
     const holdings = bookWeights?.rows ?? [];
     const total = bookWeights?.total_current_value_eur ?? 0;
@@ -1055,9 +1079,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
           fetched_at: bookWeights.fetched_at,
         }
         : null;
-      return dcfRow({ ...row, book_weight: bookWeight }, today);
+      return dcfRow({ ...row, book_weight: bookWeight }, today, egmOverrides[row.isin]);
     });
-  }, [bookWeights, data, today]);
+  }, [bookWeights, data, egmOverrides, today]);
   const refreshScope = useMemo<RefreshScope | null>(() => {
     const isins = [...new Set((data?.rows ?? []).map((row) => row.isin).filter(Boolean))];
     if (!isins.length) return null;
@@ -1266,7 +1290,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                       <NumericHeader sortKey="fairValue" label="Fair value" className="bg-pos-500/10" />
                       <NumericHeader sortKey="upside" label="Upside" className="bg-pos-500/10" />
                       <NumericHeader sortKey="expectedReturn" label="Expected annual return" className="bg-pos-500/10" />
-                      <NumericHeader sortKey="impliedPrice" label="Price in 10y" className="bg-pos-500/10" />
+                      <NumericHeader sortKey="impliedPrice" label="Price in 5y" className="bg-pos-500/10" />
                       <NumericHeader sortKey="totalReturn" label="Total return" className="bg-pos-500/10" />
                     </>
                   ) : model === 'eps' ? (
@@ -1285,10 +1309,6 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                         className="bg-warn-500/10" />
                       <NumericHeader sortKey="epsPe:2027" label="P/E FY2027"
                         className="bg-warn-500/10" />
-                      {([2025, 2026, 2027] as const).map((year) => (
-                        <NumericHeader key={`peDelta:${year}`} sortKey={`epsPeDelta:${year}`}
-                          label={`${year} % delta`} className="bg-warn-500/10" />
-                      ))}
                     </>
                   ) : (
                     <>
@@ -1303,10 +1323,6 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                       {EPS_YEARS.map((year) => (
                         <NumericHeader key={`ocfMultiple:${year}`} sortKey={`ocfMultiple:${year}`}
                           label={`P/OCF FY${year}`} className="bg-sky-500/10" />
-                      ))}
-                      {EPS_YEARS.map((year) => (
-                        <NumericHeader key={`ocfDelta:${year}`} sortKey={`ocfDelta:${year}`}
-                          label={`${year} % delta`} className="bg-sky-500/10" />
                       ))}
                     </>
                   )}
@@ -1422,17 +1438,18 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             ? 'Divide the current stored close by the next-fiscal-year EPS estimate.'
                             : 'Use the newest positive Forward PE Ratio observation supplied by GuruFocus.'} />
                         <ValuationCell tone="egm"
-                          value={`${inputNumber.format(row.egmAssumptions.growthRate * 100)}%`}
-                          what="The annual EPS growth rate assumed for the next ten years."
-                          where={row.egm.analystGrowth5Y != null
-                            ? 'GuruFocus analyst EPS estimates.'
-                            : '10% house assumption because a usable estimate series is unavailable.'}
-                          retrieved={row.egm.analystGrowth5Y != null
-                            ? [row.source_fetched_at.estimates] : []}
-                          applies={row.estimateDates}
-                          how={row.egm.analystGrowth5Y != null
-                            ? 'Calculate the CAGR from the first to the last positive future EPS estimate.'
-                            : 'Apply the 10% house default.'} />
+                          value={<input type="number" step="0.1"
+                            aria-label={`EPS growth for ${row.name}`}
+                            value={row.egmAssumptions.growthRate == null ? '' : row.egmAssumptions.growthRate * 100}
+                            placeholder="—"
+                            onChange={(event) => updateEgmOverride(row.isin, 'growthRate', event.target.value === ''
+                              ? '' : String(Number(event.target.value) / 100))}
+                            className="w-16 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />}
+                          what="The annual EPS growth rate. Enter it here or in the EGM tab."
+                          where="This assumption is saved per company and shared with the EGM tab."
+                          retrieved={[]}
+                          applies={['Every forecast year']}
+                          how="This portfolio view uses only the EPS growth rate entered in the EGM tab." />
                         <ValuationCell tone="egm"
                           value={`${inputNumber.format((row.egmAssumptions.dividendYield ?? 0) * 100)}%`}
                           what="The annual dividend yield carried through the model."
@@ -1443,18 +1460,17 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             ? [row.egm.dividendYieldDate] : []}
                           how="Convert the vendor percentage to a decimal and hold that yield constant for the projection." />
                         <ValuationCell tone="egm"
-                          value={`${inputNumber.format(row.egmAssumptions.exitPE)}×`}
-                          what="The price-to-earnings multiple assumed at the end of year ten."
-                          where={row.egm.medianPE5Y != null
-                            ? 'GuruFocus fiscal year-end prices and EPS without NRI.'
-                            : 'House assumption of 20 times earnings because usable five-year history is unavailable.'}
-                          retrieved={row.egm.medianPE5Y != null
-                            ? [row.source_fetched_at.financials] : []}
-                          applies={row.medianPeDates}
-                          inputs={row.egm.medianPE5Y != null ? row.medianPeObservations : undefined}
-                          how={row.egm.medianPE5Y != null
-                            ? row.medianPeWorked
-                            : 'Apply the house default of 20 times earnings.'} />
+                          value={<input type="number" step="0.1"
+                            aria-label={`Exit P/E for ${row.name}`}
+                            value={row.egmAssumptions.exitPE == null ? '' : row.egmAssumptions.exitPE}
+                            placeholder="—"
+                            onChange={(event) => updateEgmOverride(row.isin, 'exitPE', event.target.value)}
+                            className="w-16 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />}
+                          what="The P/E multiple assumed at the end of year five. Enter it here or in the EGM tab."
+                          where="This assumption is saved per company and shared with the EGM tab."
+                          retrieved={[]}
+                          applies={['End of year five']}
+                          how="This portfolio view uses only the exit P/E entered in the EGM tab." />
                         <ValuationCell tone="egm" emphasis
                           value={row.egmResult.fairValue == null ? '—' : inputNumber.format(row.egmResult.fairValue)}
                           what="The highest price today that still meets the model's 10% annual return hurdle."
@@ -1524,7 +1540,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           applies={[row.egm.priceDate, row.egm.epsNextFYDate, row.egm.forwardPEDate,
                             ...row.estimateDates, ...row.medianPeDates]}
                           inputs={row.expectedReturnInputs.filter((input) => input.label !== 'Dividend yield')}
-                          how="Grow earnings for ten years and revalue them from today's forward P/E to the exit P/E; dividends are not part of this price."
+                          how="Grow earnings for five years and revalue them from today's forward P/E to the exit P/E; dividends are not part of this price."
                           worked={row.egmResult.bridge == null ? '' : workedImpliedPrice(
                             row.egm.price, row.egmResult.bridge, row.egmAssumptions.years,
                             row.egmResult.impliedPrice,
@@ -1619,37 +1635,6 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                               how={`Divide the latest stored close price by positive ${period} EPS.`} />
                           );
                         })}
-                        {([2025, 2026, 2027] as const).map((year) => {
-                          const observation = row.epsObservations[year];
-                          const epsMetric = observation?.metric ?? null;
-                          const multiple = row.peByYear[year];
-                          const delta = row.peDeltaByYear[year];
-                          const period = `FY${year} ${observation?.kind ?? 'EPS'}`;
-                          return (
-                            <ValuationCell key={`peDelta:${year}`} tone="eps"
-                              value={delta == null ? '—' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(2)}%`}
-                              what={`How far the ${period} P/E differs from the ten-year historical median P/E.`}
-                              where="The current share price, that fiscal year's EPS and the latest ten completed fiscal years of price and EPS history."
-                              retrieved={[epsMetric?.recorded_at, row.source_fetched_at.financials]}
-                              applies={[row.src.priceDate, epsMetric?.target_date,
-                                ...row.historicalPe10yWorking.rows.map((point) => `${point.year}-12-31`)]}
-                              inputs={[
-                                ...row.stockPriceInputs,
-                                ...epsYearInputs(observation, year, row.currency,
-                                  row.source_fetched_at.financials, row.source_fetched_at.estimates),
-                                {
-                                  label: '10y historical P/E',
-                                  value: row.historicalPe10yWorking.median == null
-                                    ? 'not available' : `${row.historicalPe10yWorking.median.toFixed(2)}×`,
-                                  retrieved: row.source_fetched_at.financials ?? null,
-                                  applies: row.historicalPe10yWorking.rows.map((point) => `${point.year}-12-31`),
-                                },
-                              ]}
-                              how={`${multiple == null || row.historicalPe10yWorking.median == null
-                                ? 'A delta requires both the fiscal-year P/E and the ten-year historical median P/E.'
-                                : `${multiple.toFixed(2)}× ÷ ${row.historicalPe10yWorking.median.toFixed(2)}× − 1 = ${(delta! * 100).toFixed(2)}%`}`} />
-                          );
-                        })}
                       </>
                     ) : (
                       <>
@@ -1723,35 +1708,6 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                               how={`Multiply share price by diluted shares, then divide by positive ${period}.`} />
                           );
                         })}
-                        {EPS_YEARS.map((year) => {
-                          const observation = row.ocfObservations[year];
-                          const metric = observation?.metric ?? null;
-                          const delta = row.pOcfDeltaByYear[year];
-                          const period = `FY${year} ${observation?.kind ?? 'OCF'}`;
-                          return (
-                            <ValuationCell key={`pOcfDelta:${year}`} tone="ocf"
-                              value={delta == null ? '—' : `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(2)}%`}
-                              what={`How far the ${period} P/OCF differs from the ten-year historical median.`}
-                              where="The current market value, that fiscal year's OCF and ten completed years of P/OCF history."
-                              retrieved={[metric?.recorded_at, row.source_fetched_at.financials]}
-                              applies={[row.src.priceDate, metric?.target_date,
-                                ...row.historicalOcfWorking.rows.map((point) => `${point.year}-12-31`)]}
-                              inputs={[
-                                ...row.stockPriceInputs,
-                                ...row.shareCountInputs,
-                                ...ocfYearInputs(observation, year, row.currency,
-                                  row.source_fetched_at.financials, row.source_fetched_at.estimates),
-                                {
-                                  label: '10y historical P/OCF',
-                                  value: row.historicalOcfWorking.median == null
-                                    ? 'not available' : `${row.historicalOcfWorking.median.toFixed(2)}×`,
-                                  retrieved: row.source_fetched_at.financials ?? null,
-                                  applies: row.historicalOcfWorking.rows.map((point) => `${point.year}-12-31`),
-                                },
-                              ]}
-                              how="Divide the fiscal-year P/OCF by its ten-year historical median and subtract one." />
-                          );
-                        })}
                       </>
                     )}
                   </tr>
@@ -1766,7 +1722,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
           {model === 'dcf'
             ? `Implied FCF growth over ${FORECAST_YEARS} years, with 3% perpetual growth. The 7–20% columns are discount rates.`
             : model === 'egm'
-              ? 'Expected Growth Model over 10 years. EPS growth and exit P/E use company estimates/history where available, otherwise the 10% growth and 20× house defaults; hurdle rate is 10%.'
+              ? 'Expected Growth Model over 5 years. Enter EPS growth and exit P/E for each company in its EGM tab; the hurdle rate is 10%.'
               : model === 'eps'
                 ? 'Each fiscal year uses reported EPS without NRI when available and otherwise uses the GuruFocus consensus estimate. CAGR compounds FY2025 and FY2027 over two years; each P/E uses that year’s selected positive EPS.'
                 : 'Each fiscal year uses reported operating cash flow when available and otherwise uses the GuruFocus consensus estimate. CAGR compounds FY2025 and FY2027 over two years; each P/OCF divides current market value by that year’s selected positive OCF.'}

@@ -8,7 +8,7 @@ import { cancelJob, jobsStore, startLocalJob } from '../../../lib/stores/jobs';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard, TipCardLanguageProvider } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { calculateEGM, EGM_DEFAULTS, type EgmAssumptions } from './egm';
+import { calculateEGM, egmStorageKey, EGM_DEFAULTS, type EgmAssumptions, type EgmCalculationAssumptions } from './egm';
 import { egmSource, reverseDcfSource, SOURCE_CODES, vendorName } from './egmInputs';
 import EgmAssumptionsModal from './EgmAssumptionsModal';
 import ReverseDcfPanel, { type GrowthEstimates } from './ReverseDcfPanel';
@@ -34,7 +34,7 @@ import { useDeepValuationCopy } from './deepValuationCopy';
 /**
  * The "Deep Valuation" tab — an Earnings Growth Model panel for ONE company.
  *
- * A 10-year annualised return and a fair value from three drivers: earnings growth, dividend yield
+ * A 5-year annualised return and a fair value from three drivers: earnings growth, dividend yield
  * and the change in the P/E multiple. The maths lives in `egm.ts` (pure) and the inputs come out of
  * the metrics payload in `egmInputs.ts` (pure); this file fetches once, renders, and recalculates
  * in the browser as the assumptions change — no server round-trip.
@@ -48,7 +48,7 @@ import { useDeepValuationCopy } from './deepValuationCopy';
  * quietly seeds the model is an assumption nobody made.
  */
 
-const KEY = (isin: string) => `egm:${isin}`;
+const KEY = egmStorageKey;
 
 /** Overrides are stored per instrument, keyed by ISIN — the identity every other surface in this
  *  app uses, and stable where a ticker is not (the same issuer trades under several). */
@@ -269,9 +269,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   // remounts and re-reads rather than needing a reset effect.
   const savedAssumptions = useRef(loadSaved(isin));
   const [growthStr, setGrowthStr] = useState(
-    () => ((savedAssumptions.current.growthRate ?? EGM_DEFAULTS.growthRate) * 100).toFixed(1));
+    () => savedAssumptions.current.growthRate == null ? '' : (savedAssumptions.current.growthRate * 100).toFixed(1));
   const [exitStr, setExitStr] = useState(
-    () => String(savedAssumptions.current.exitPE ?? EGM_DEFAULTS.exitPE));
+    () => savedAssumptions.current.exitPE == null ? '' : String(savedAssumptions.current.exitPE));
   const [hurdleStr, setHurdleStr] = useState(
     () => ((savedAssumptions.current.hurdleRate ?? EGM_DEFAULTS.hurdleRate) * 100).toFixed(1));
   //  Blank means "USE THE MEASURED YIELD" — the same convention as the reverse DCF's starting
@@ -587,16 +587,12 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const yieldUsed = divOverride != null && Number.isFinite(divOverride)
     ? divOverride : src.dividendYield;
 
-  const assumptions: EgmAssumptions = useMemo(() => {
-    const n = (s: string, fallback: number) => {
-      const v = parseFloat(s);
-      return Number.isFinite(v) ? v : fallback;
-    };
+  const assumptions: EgmCalculationAssumptions = useMemo(() => {
     return {
-      growthRate: n(growthStr, EGM_DEFAULTS.growthRate * 100) / 100,
+      growthRate: numOrNull(growthStr) == null ? null : (numOrNull(growthStr) as number) / 100,
       dividendYield: yieldUsed,
-      exitPE: n(exitStr, EGM_DEFAULTS.exitPE),
-      hurdleRate: n(hurdleStr, EGM_DEFAULTS.hurdleRate * 100) / 100,
+      exitPE: numOrNull(exitStr),
+      hurdleRate: (numOrNull(hurdleStr) ?? EGM_DEFAULTS.hurdleRate * 100) / 100,
       years: EGM_DEFAULTS.years,
     };
   }, [growthStr, exitStr, hurdleStr, yieldUsed]);
@@ -607,8 +603,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     if (typeof window === 'undefined' || metrics == null) return;
     try {
       window.localStorage.setItem(KEY(isin), JSON.stringify({
-        growthRate: assumptions.growthRate, exitPE: assumptions.exitPE,
         hurdleRate: assumptions.hurdleRate,
+        ...(assumptions.growthRate != null ? { growthRate: assumptions.growthRate } : {}),
+        ...(assumptions.exitPE != null ? { exitPE: assumptions.exitPE } : {}),
         // Only the override — see `loadSaved`.
         ...(divOverride != null && Number.isFinite(divOverride) ? { dividendYield: divOverride } : {}),
       }));
@@ -617,14 +614,6 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
     // `assumptions.dividendYield` unchanged — same number — so without this the effect would not
     // re-run and the override would never be written; it would silently revert on reopen.
   }, [isin, assumptions, metrics, divOverride]);
-
-  const resetOldDefaults = useCallback(() => {
-    setGrowthStr((EGM_DEFAULTS.growthRate * 100).toFixed(1));
-    setExitStr(String(EGM_DEFAULTS.exitPE));
-    setHurdleStr((EGM_DEFAULTS.hurdleRate * 100).toFixed(1));
-    setDivStr('');                                  // back to the measured yield, not to zero
-    setPriceStr(''); setFwdPeStr('');               // …and back to the measured price and multiple
-  }, []);
 
   /**
    * The price the panel shows and the model computes from, and where it came from.
@@ -733,8 +722,8 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   const hurdleDefaultInfo = defaultInfo(
     `${(EGM_DEFAULTS.hurdleRate * 100).toFixed(1)}%`, 'house assumption', null);
   const r = calculateEGM({ ...src, price, forwardPE }, assumptions);
-  const isDefault = growthStr === suggestedGrowth
-    && exitStr === suggestedExitPE
+  const isDefault = growthStr === ''
+    && exitStr === ''
     && hurdleStr === (EGM_DEFAULTS.hurdleRate * 100).toFixed(1)
     && divStr === suggestedDividend
     //  The two measured fields count as dirty too. Reset means "back to what the data says", and
@@ -749,12 +738,10 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   useEffect(() => {
     if (metrics == null || defaultsSeeded.current) return;
     defaultsSeeded.current = true;
-    if (savedAssumptions.current.growthRate == null) setGrowthStr(suggestedGrowth);
-    if (savedAssumptions.current.exitPE == null) setExitStr(suggestedExitPE);
     if (savedAssumptions.current.dividendYield == null) setDivStr(suggestedDividend);
     setPriceStr(suggestedPrice);
     setFwdPeStr(suggestedForwardPE);
-  }, [metrics, suggestedGrowth, suggestedExitPE, suggestedDividend, suggestedPrice,
+  }, [metrics, suggestedDividend, suggestedPrice,
     suggestedForwardPE]);
 
   // A refresh should update a value that was still following the source, but never overwrite a
@@ -779,13 +766,13 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
   }, [metrics, suggestedExitPE]);
 
   const reset = useCallback(() => {
-    setGrowthStr(suggestedGrowth);
-    setExitStr(suggestedExitPE);
+    setGrowthStr('');
+    setExitStr('');
     setHurdleStr((EGM_DEFAULTS.hurdleRate * 100).toFixed(1));
     setDivStr(suggestedDividend);
     setPriceStr(suggestedPrice);
     setFwdPeStr(suggestedForwardPE);
-  }, [suggestedGrowth, suggestedExitPE, suggestedDividend, suggestedPrice, suggestedForwardPE]);
+  }, [suggestedDividend, suggestedPrice, suggestedForwardPE]);
 
 
   const ccy = currency ? `${currency} ` : '';
@@ -1060,7 +1047,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 when={hurdleUsesDefault ? hurdleDefaultInfo.when : t.egm.cards.hurdle.when}
                 how={t.egm.hurdleHow(
                   t.egm.houseDefault(`${(EGM_DEFAULTS.hurdleRate * 100).toFixed(0)}%`))} />} />} />
-            <Field label={t.egm.growthRate} value={growthStr} onChange={setGrowthStr} suffix="%"
+            <Field label={t.egm.growthRate} value={growthStr} onChange={setGrowthStr} suffix="%" placeholder="e.g. 10.0"
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.growth.what}
                 where={growthUsesDefault ? growthDefaultInfo.where : t.egm.yoursTypedHere}
@@ -1125,7 +1112,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             {/*  THE CHIP IS THE FIGURE, NOT A SENTENCE ABOUT IT. `5y median P/E: 57.3` under a
                 field labelled `Exit P/E` repeated the label an inch above it and named a source
                 the hover can carry. */}
-            <Field label={t.egm.exitPE} value={exitStr} onChange={setExitStr} step="0.5"
+            <Field label={t.egm.exitPE} value={exitStr} onChange={setExitStr} step="0.5" placeholder="e.g. 20.0"
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.exitPE.what}
                 where={exitPEUsesDefault ? exitDefaultInfo.where : t.egm.yoursTypedHere}
@@ -1135,7 +1122,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                   : t.egm.houseDefault(`${EGM_DEFAULTS.exitPE}x`))
                   + (forwardPE != null && forwardPE > 0
                     ? t.egm.reratingRuns(`${forwardPE.toFixed(1)}x`,
-                      `${assumptions.exitPE.toFixed(1)}x`) : '')} />} />}
+                      `${assumptions.exitPE?.toFixed(1) ?? '—'}x`) : '')} />} />}
               action={(
                 <button type="button"
                   onClick={() => (exitRefreshing && exitJobId
@@ -1493,8 +1480,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                       what={t.egm.cards.maxPE.what}
                       where={t.egm.cards.maxPE.where}
                       when={t.egm.today}
-                      worked={workedMaxPE(assumptions.exitPE, assumptions.growthRate,
-                        yieldUsed ?? 0, assumptions.hurdleRate, assumptions.years, r.maxPE)}
+                      worked={assumptions.exitPE == null || assumptions.growthRate == null ? ''
+                        : workedMaxPE(assumptions.exitPE, assumptions.growthRate,
+                          yieldUsed ?? 0, assumptions.hurdleRate, assumptions.years, r.maxPE)}
                       legend={r.maxPE == null ? undefined : [
                         { sym: String.raw`PE_{\text{exit}}`, is: t.egm.legend.peExit },
                         { sym: 'g', is: t.egm.legend.g },

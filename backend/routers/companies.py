@@ -92,6 +92,19 @@ class SectorOverrideRequest(BaseModel):
     sector: str | None = None
 
 
+class InvestmentNoteRequest(BaseModel):
+    """A user's own thesis and investment pillars for one company."""
+    thesis: str = ""
+    pillars: list[str] = []
+
+
+def _investment_note_actor(request: Request) -> dict:
+    actor = getattr(request.state, "auth", None) or {}
+    if not actor.get("id"):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return actor
+
+
 _GICS_SECTORS = frozenset({
     "Communication Services", "Consumer Discretionary", "Consumer Staples",
     "Energy", "Financials", "Health Care", "Industrials", "Information Technology",
@@ -466,6 +479,42 @@ async def update_company(company_id: int, req: UpdateCompanyRequest):
     if not resp.data:
         raise HTTPException(status_code=404, detail="Company not found")
     return resp.data[0]
+
+
+@router.get("/api/companies/{company_id}/investment-note")
+async def get_company_investment_note(company_id: int, request: Request):
+    """The signed-in user's private research note for one company."""
+    actor = _investment_note_actor(request)
+    row = (supabase.table("company_investment_note")
+           .select("thesis,pillars,updated_at")
+           .eq("company_id", company_id).eq("user_id", actor["id"]).limit(1).execute().data or [])
+    if not row:
+        return {"thesis": "", "pillars": [], "updated_at": None}
+    return row[0]
+
+
+@router.put("/api/companies/{company_id}/investment-note")
+async def set_company_investment_note(company_id: int, req: InvestmentNoteRequest,
+                                      request: Request):
+    """Save a user's own thesis and investment pillars without changing shared company data."""
+    actor = _investment_note_actor(request)
+    thesis = req.thesis.strip()
+    pillars = [pillar.strip() for pillar in req.pillars if pillar.strip()]
+    if len(thesis) > 12_000 or len(pillars) > 12 or any(len(pillar) > 1_500 for pillar in pillars):
+        raise HTTPException(status_code=422, detail="Keep the thesis and pillars concise.")
+    exists = (supabase.table("company").select("company_id")
+              .eq("company_id", company_id).limit(1).execute().data or [])
+    if not exists:
+        raise HTTPException(status_code=404, detail="Company not found")
+    row = (supabase.table("company_investment_note").upsert({
+        "company_id": company_id,
+        "user_id": actor["id"],
+        "user_email": actor.get("email"),
+        "thesis": thesis,
+        "pillars": pillars,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }, on_conflict="company_id,user_id").execute().data or [])
+    return row[0] if row else {"thesis": thesis, "pillars": pillars, "updated_at": None}
 
 
 @router.put("/api/companies/{company_id}/sector-override")

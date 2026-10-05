@@ -8868,6 +8868,26 @@
         "title": "IndicatorRequest",
         "type": "object"
       },
+      "InvestmentNoteRequest": {
+        "description": "A user's own thesis and investment pillars for one company.",
+        "properties": {
+          "pillars": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Pillars",
+            "type": "array"
+          },
+          "thesis": {
+            "default": "",
+            "title": "Thesis",
+            "type": "string"
+          }
+        },
+        "title": "InvestmentNoteRequest",
+        "type": "object"
+      },
       "IsinCompareRequest": {
         "properties": {
           "isins": {
@@ -19560,6 +19580,22 @@
               "title": "Benchmark",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "benchmark_weights",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark Weights"
+            }
           }
         ],
         "responses": {
@@ -24956,6 +24992,96 @@
           }
         },
         "summary": "Update Company",
+        "tags": [
+          "companies"
+        ]
+      }
+    },
+    "/api/companies/{company_id}/investment-note": {
+      "get": {
+        "description": "The signed-in user's private research note for one company.",
+        "operationId": "get_company_investment_note_api_companies__company_id__investment_note_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Company Investment Note",
+        "tags": [
+          "companies"
+        ]
+      },
+      "put": {
+        "description": "Save a user's own thesis and investment pillars without changing shared company data.",
+        "operationId": "set_company_investment_note_api_companies__company_id__investment_note_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvestmentNoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Company Investment Note",
         "tags": [
           "companies"
         ]

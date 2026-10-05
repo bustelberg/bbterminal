@@ -34,8 +34,8 @@ import { cancelJob, jobsStore, startLocalJob } from '../../../lib/stores/jobs';
 import { onDate } from './asOfLine';
 
 /**
- * The "Quick Valuation" tab: a company's SHARE PRICE against its FREE CASH FLOW PER SHARE over the
- * last ten fiscal years, as one indexed chart with the two growth rates above it.
+ * The "Quick Valuation" tab: a company's SHARE PRICE against its FREE CASH FLOW PER SHARE over a
+ * five-year window, as one indexed chart with the two growth rates above it.
  *
  * The question: has the price followed the cash the business throws off per share, or has the
  * MULTIPLE done the work? Both give the same total return and they are not the same investment —
@@ -85,26 +85,16 @@ import { onDate } from './asOfLine';
  * of EVERY forecast on this tab: the dotted projection on the chart, the forecast per-share
  * figure, the forecast share price, and the CAGR quoted against them.
  *
- *  RAISED 2 → 10 (2026-08-04). Ten years is the horizon the question is actually asked over,
- * and it makes the CAGR mean something: over two years the answer was dominated by the rerating
- * (today's yield to the assumed one) rather than by the business compounding.
+ *  Five years is the forecast horizon for this valuation. It gives the business time to compound
+ * without extending the extrapolation too far beyond the reported data.
  *
- *  It used to be the history window too — a matching `YEARS = 10` — so half the chart was
- * extrapolation. That is why the projected stretch is drawn as a separate, thinner, dotted series
- * and the panel's info card says in as many words that it is an extrapolation nobody forecast: a
- * decade of compounding an exponential fit is a big claim, and the chart must not let it read as
- * data.  THE HISTORY CAP IS GONE (see `priceVsMetric`) and this constant did NOT follow it: the
- * history is now every fiscal year the company reports, as on the Graphs tab, while the forecast
- * stays ten years. So the extrapolated share of the chart SHRINKS on a long history — which is
- * the direction this note was worried about — and never grows.
+ *  The reported data, fitted trend, yield average and forward-multiple chart all use this same
+ * five-year window. The projected stretch remains visibly dotted because it is a scenario, not
+ * reported data.
  */
-const PROJECT_YEARS = 10;
+const PROJECT_YEARS = 5;
 /** All three charts share it, so the grid cells match without any card padding out the gap. */
 const CHART_HEIGHT = 320;
-/** Where the multiple-history chart opens. GuruFocus's forward-P/E indicator starts 2015-11-30 —
- *  earlier years would draw a trailing line with no forward beside it, which is the one comparison
- *  that chart exists to make. */
-const MULTIPLE_FROM_YEAR = 2017;
 
 /** `GET /api/asset-pipeline/latest-close/isin/{isin}` — the fields this tab reads. */
 type LatestClose = {
@@ -318,9 +308,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // as a rendering fault. See `quickValuationCopy`.
   const t = useQuickValuationCopy();
   const bl = t.basis[basis];
-  //  No year cap — every fiscal year the company reports, which is what the Graphs tab draws
-  // from this same payload. See the  on `priceVsMetric` for the year the old 10-year slice ate.
-  const points = useMemo(() => priceVsMetric(metrics ?? [], b.codes), [metrics, b.codes]);
+  const points = useMemo(
+    () => priceVsMetric(metrics ?? [], b.codes, PROJECT_YEARS), [metrics, b.codes]);
+  const historyFromYear = points[0]?.year ?? new Date().getFullYear() - PROJECT_YEARS;
   const idx = useMemo(() => rebase(points), [points]);
 
   /**
@@ -449,7 +439,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
    * The forecast per-share figure everything downstream is built on, from whichever of the pair is
    * live — and the rate that figure implies, which is what the projected line is drawn at.
    *
-   *  The rate compounds over `PROJECT_YEARS`, NEVER `horizonYears`. They are 10 and ~9.2 and both
+   *  The rate compounds over `PROJECT_YEARS`, NEVER `horizonYears`. They are 5 and roughly 4.2 and both
    * get called "the horizon" within a few lines of each other. `PROJECT_YEARS` is how far the
    * FUNDAMENTAL is carried past the last REPORTED year — the axis the trend is drawn on and the
    * only window this rate describes. `horizonYears` runs from the live PRICE's date, is shorter by
@@ -557,7 +547,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const lastPriceYear = [...points].reverse().find((p) => p.price != null)?.year ?? null;
 
   /**
-   * The multiple THROUGH TIME — weekly, back to `MULTIPLE_FROM_YEAR`.
+   * The multiple THROUGH TIME — weekly, over the same five-year window.
    *
    *  Computed from rows this tab already has. `/api/earnings/by-isin/{isin}/metrics` returns
    * 12,375 rows for ASML — 6,933 daily closes, 513 forward-P/E points, 113 quarterly FCF rows —
@@ -584,14 +574,16 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // "for now". They are named here so the next reader knows the module is deliberately wider than
   // its callers rather than half-cleaned.
   const forwardHistory = useMemo(
-    () => (basis === 'eps' ? since(forwardSeries(metrics ?? []), MULTIPLE_FROM_YEAR) : []),
-    [metrics, basis]);
+    () => (basis === 'eps' ? since(forwardSeries(metrics ?? []), historyFromYear) : []),
+    [metrics, basis, historyFromYear]);
 
   //  Derived from the same two lines the chart above plots, not from GuruFocus's own
   // `Valuation Ratios__FCF Yield %` (or its P/E) — whose denominator convention (year-end price?
   // average market cap?) we do not control. One source, so the two charts cannot disagree.
   const yields = useMemo(
-    () => dailyYieldHistory(metrics ?? [], b.codes), [metrics, b.codes]);
+    () => dailyYieldHistory(metrics ?? [], b.codes)
+      .filter((point) => Number(point.date.slice(0, 4)) >= historyFromYear),
+    [metrics, b.codes, historyFromYear]);
   const yieldValues = yields.map((y) => y.yld).filter((v): v is number => v != null);
   const avgYield = meanOf(yieldValues);
   /**
@@ -1193,7 +1185,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
     <MultipleHistoryChart height={CHART_HEIGHT} basis={b} basisKey={basis} currency={currency}
-      forward={forwardHistory} fromYear={MULTIPLE_FROM_YEAR}
+      forward={forwardHistory} fromYear={historyFromYear}
       name={name} isin={isin}
       onRefresh={refreshQuickValuation} canRefresh={companyId != null}
       refreshing={refreshingQuickValuation} cancelling={refreshingQuickValuation && !!refreshJob?.cancelRequested}

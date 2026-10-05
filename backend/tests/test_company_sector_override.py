@@ -52,3 +52,20 @@ def test_automatic_removes_the_active_override(monkeypatch):
     assert result == {"company_id": 42, "sector": None}
     assert fake.tables["company_sector_override"] == []
     assert invalidations == [True]
+
+
+def test_investment_note_is_saved_for_the_authenticated_user(monkeypatch):
+    fake = FakeSupabase({"company": [{"company_id": 42}], "company_investment_note": []})
+    monkeypatch.setattr(companies, "supabase", fake)
+
+    saved = asyncio.run(companies.set_company_investment_note(
+        42, companies.InvestmentNoteRequest(
+            thesis="The cash engine can compound for years.",
+            pillars=["Recurring revenue", "High switching costs", ""],
+        ), _request()))
+
+    assert saved["thesis"] == "The cash engine can compound for years."
+    assert saved["pillars"] == ["Recurring revenue", "High switching costs"]
+    row = fake.tables["company_investment_note"][0]
+    assert row["user_id"] == "b29a8667-87e6-4a66-a5dc-1bfb462c885e"
+    assert row["user_email"] == "editor@example.com"

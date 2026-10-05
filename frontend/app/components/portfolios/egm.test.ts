@@ -3,7 +3,11 @@ import { calculateEGM, EGM_DEFAULTS, type EgmInputs } from './egm';
 
 const CASE: EgmInputs = { price: 281.365, forwardPE: 25, epsNextFY: 11.46 };
 // The known-good case's 0.3% yield is now an ASSUMPTION, so it rides here rather than in CASE.
-const A = { ...EGM_DEFAULTS, dividendYield: 0.003 };
+const A = { ...EGM_DEFAULTS, years: 10, dividendYield: 0.003 };
+
+it('uses a five-year horizon by default', () => {
+  expect(EGM_DEFAULTS.years).toBe(5);
+});
 
 describe('calculateEGM — the known-good case', () => {
   const r = calculateEGM(CASE, A);

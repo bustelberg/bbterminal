@@ -1,5 +1,5 @@
 /**
- * Earnings Growth Model (EGM) — a 10-year annualised return and a fair value from three drivers:
+ * Earnings Growth Model (EGM) — a 5-year annualised return and a fair value from three drivers:
  * earnings growth, dividend yield, and the change in the P/E multiple.
  *
  * Pure and dependency-free on purpose: no React, no fetching, no formatting. The panel renders what
@@ -47,6 +47,15 @@ export type EgmAssumptions = {
   hurdleRate: number;             // decimal — 0.10 is 10%
   years: number;
 };
+
+export type EgmCalculationAssumptions = Omit<EgmAssumptions, 'growthRate' | 'exitPE'> & {
+  growthRate: number | null;
+  exitPE: number | null;
+};
+export type EgmOverrides = Partial<Pick<EgmCalculationAssumptions, 'growthRate' | 'exitPE'>>;
+
+/** Versioned so the previous auto-filled defaults do not become user-entered assumptions. */
+export const egmStorageKey = (isin: string) => `egm:v2:${isin}`;
 
 /**
  * One driver of the expected return, as a rate AND as the thing it really is — a multiplier.
@@ -138,14 +147,14 @@ export const EGM_DEFAULTS: EgmAssumptions = {
   dividendYield: 0,
   exitPE: 20,
   hurdleRate: 0.10,
-  years: 10,
+  years: 5,
 };
 
 /** Finite numbers only. `Infinity` and `NaN` are what a division by a zero input produces, and
  *  either one rendered as a figure is worse than a blank. */
 const ok = (v: number | null | undefined): v is number => v != null && Number.isFinite(v);
 
-export function calculateEGM(inputs: EgmInputs, a: EgmAssumptions): EgmResult {
+export function calculateEGM(inputs: EgmInputs, a: EgmCalculationAssumptions): EgmResult {
   const empty: EgmResult = {
     maxPE: null, fairValue: null, upside: null, expectedReturn: null, peRatio: null, bridge: null,
     impliedPrice: null, priceReturn: null, priceCagr: null, totalReturn: null,

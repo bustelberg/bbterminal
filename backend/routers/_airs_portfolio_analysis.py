@@ -784,7 +784,7 @@ _SCORECARD_BLOCKS = (
 
 def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, float],
                              anchor: str | None) -> dict:
-    """Like-for-like block returns and composites for the scorecard.
+    """The scorecard's allocation blocks and its weighted benchmark.
 
     The portfolio's current allocation weights are deliberately used on BOTH sides. Comparing a
     70/20/10 portfolio to a 100% ACWI benchmark confuses allocation with security selection.
@@ -818,12 +818,8 @@ def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, f
         covered = sum(b["weight_pct"] for b in usable)
         return (sum(b["weight_pct"] * float(b[key]) for b in usable) / covered
                 if covered >= 99.5 else None)
-    portfolio_ytd = composite("portfolio_return_pct")
     benchmark_ytd = composite("benchmark_return_pct")
-    return {"block_returns": blocks, "portfolio_ytd_pct": portfolio_ytd,
-            "benchmark_ytd_pct": benchmark_ytd,
-            "ytd_excess_pct": (portfolio_ytd - benchmark_ytd
-                               if portfolio_ytd is not None and benchmark_ytd is not None else None)}
+    return {"block_returns": blocks, "benchmark_ytd_pct": benchmark_ytd}
 
 
 def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
@@ -2836,8 +2832,21 @@ def compute_portfolio_analysis(portfolio_id: int,
     allocation = _weigh_alloc(allocation_items)
     score_returns = _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
                                    source, _phase)
-    score_returns.update(_scorecard_block_returns(allocation, bucket_returns,
-                                                  score_returns.get("ytd_from")))
+    block_score = _scorecard_block_returns(allocation, bucket_returns,
+                                           score_returns.get("ytd_from"))
+    # The book return is AIRS's own flow-aware `cumulatief_rendement`; it is the exact same
+    # quantity drawn by the YTD chart. Never replace it with a weighted holding reconstruction:
+    # purchases, sales and cash flows make that reconstruction a different answer. The benchmark,
+    # however, has no AIRS equivalent and is deliberately weighted to the portfolio allocation.
+    score_returns["block_returns"] = block_score["block_returns"]
+    if block_score["benchmark_ytd_pct"] is not None:
+        score_returns["benchmark_ytd_pct"] = block_score["benchmark_ytd_pct"]
+    portfolio_ytd = score_returns.get("portfolio_ytd_pct")
+    benchmark_ytd = score_returns.get("benchmark_ytd_pct")
+    score_returns["ytd_excess_pct"] = (
+        portfolio_ytd - benchmark_ytd
+        if portfolio_ytd is not None and benchmark_ytd is not None else None
+    )
     return {
         "portfolio_id": portfolio_id,
         "name": p["name"],

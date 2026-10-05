@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import io
+import json
 import re
 from io import StringIO
 from routers import _airs_portfolio_store as store
@@ -1819,7 +1820,8 @@ class BookValueSeries(BaseModel):
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/value-series",
             response_model=BookValueSeries)
-async def airs_model_portfolio_value_series(portfolio_id: int, benchmark: str = "SP500"):
+async def airs_model_portfolio_value_series(portfolio_id: int, benchmark: str = "SP500",
+                                            benchmark_weights: str | None = None):
     """The paired book's cumulative return through the year, and its value on every date we hold.
 
      THE RETURN IS AIRS'S OWN `cumulatief_rendement`, READ AND NOT RECOMPUTED — it is flow-aware,
@@ -1838,13 +1840,24 @@ async def airs_model_portfolio_value_series(portfolio_id: int, benchmark: str = 
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_value_series import value_series  # noqa: PLC0415
 
+    weights: dict[str, float] | None = None
+    if benchmark_weights:
+        try:
+            raw_weights = json.loads(benchmark_weights)
+            if isinstance(raw_weights, dict):
+                weights = {str(name): float(weight) for name, weight in raw_weights.items()}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            # The fixed benchmark remains a useful fallback when an older client sends a malformed
+            # optional weights query. Never reject the book's own return curve for that reason.
+            weights = None
+
     link = await asyncio.to_thread(
         lambda: next((a for a in list_account_links()["accounts"]
                       if a.get("model_portfolio_id") == portfolio_id), None))
     if not link:
         return BookValueSeries(reason="No Dynamic portfolio is paired with this one.")
     return BookValueSeries(**await asyncio.to_thread(
-        value_series, link["portefeuille"], benchmark))
+        value_series, link["portefeuille"], benchmark, weights))
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/price-series",
