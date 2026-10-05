@@ -828,7 +828,21 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
                   "annuals__per_share_data_array__Month End Stock Price",
                   "annuals__Per Share Data__EPS without NRI",
                   "annuals__per_share_data__EPS without NRI",
-                  "annuals__per_share_data_array__EPS without NRI"]
+                  "annuals__per_share_data_array__EPS without NRI",
+                  # Portfolio Earnings: current quarter outlook and the
+                  # retained pre-report consensus used for beat/miss labels.
+                  "quarterly_revenue_estimate",
+                  "quarterly_per_share_eps_estimate",
+                  "quarterly_eps_nri_estimate",
+                  "quarterly_estimate_history__revenue_estimate__consensus",
+                  "quarterly_estimate_history__revenue_estimate__difference",
+                  "quarterly_estimate_history__revenue_estimate__surprise_pct",
+                  "quarterly_estimate_history__per_share_eps_estimate__consensus",
+                  "quarterly_estimate_history__per_share_eps_estimate__difference",
+                  "quarterly_estimate_history__per_share_eps_estimate__surprise_pct",
+                  "quarterly_estimate_history__eps_nri_estimate__consensus",
+                  "quarterly_estimate_history__eps_nri_estimate__difference",
+                  "quarterly_estimate_history__eps_nri_estimate__surprise_pct"]
         by_company: dict[int, list[dict]] = {cid: [] for cid in cids}
 
         def collect(query) -> None:

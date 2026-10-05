@@ -156,4 +156,16 @@ def fetch_analyst_estimates(
     #  Even when `rows` IS EMPTY — a company analysts do not cover is the case this records. See
     # `_stamp_fetched`: without it the smart refresh re-asks that company on every press, for ever.
     _stamp_fetched(supabase, company_id, "analyst_estimates", _log)
+    # Current consensus only answers the outlook. The historical feed carries
+    # the pre-release consensus and actual needed for a truthful beat/miss.
+    from .estimate_history import fetch_estimate_history  # noqa: PLC0415
+    history = fetch_estimate_history(
+        supabase, company_id, ticker, exchange, force_refresh=force_refresh, on_log=_log,
+    )
+    result.api_calls += history.api_calls
+    result.rows_loaded += history.rows_loaded
+    result.rows_unchanged += history.rows_unchanged
+    result.metrics_found += history.metrics_found
+    if history.error:
+        _log(f"Historical estimate data unavailable: {history.error}")
     return result
