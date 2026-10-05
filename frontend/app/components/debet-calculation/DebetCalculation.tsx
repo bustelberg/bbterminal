@@ -2,21 +2,23 @@
 
 import { ChangeEvent, DragEvent, Fragment, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
+import { downloadCalculationXlsx } from './calculationExport';
+import { type DebetCopy, useDebetCopy } from './debetCopy';
 
 type ClientTotal = {
   portfolio: string;
   name: string;
   cash: number;
   tradeTotal: number;
-  files: number;
-  cashMismatch: boolean;
 };
+
+type SortKey = 'portfolio' | 'name' | 'cash' | 'tradeTotal' | 'projectedCash';
+type SortDirection = 'asc' | 'desc';
 
 type ParsedFile = {
   name: string;
   sheetName: string;
-  hiddenRows: number[];
-  rows: { portfolio: string; name: string; cash: number; trade: number; portfolioCell: string }[];
+  rows: { portfolio: string; name: string; cash: number; trade: number; portfolioCell: string; hidden: boolean }[];
 };
 
 const REQUIRED_COLUMNS = {
@@ -56,8 +58,8 @@ function numberFromCell(value: unknown): number | null {
   return Number.isFinite(parsed) ? (negative ? -Math.abs(parsed) : parsed) : null;
 }
 
-function eur(value: number): string {
-  return new Intl.NumberFormat('nl-NL', { style: 'currency', currency: 'EUR' }).format(value);
+function eur(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR' }).format(value);
 }
 
 function portfolioKey(portfolio: string): string {
@@ -66,18 +68,20 @@ function portfolioKey(portfolio: string): string {
   return portfolio.trim();
 }
 
-async function parseFile(file: File): Promise<ParsedFile> {
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false });
+async function parseFile(file: File, t: DebetCopy): Promise<ParsedFile> {
+  // SheetJS drops row metadata by default. `cellStyles` is what retains the
+  // `!rows[index].hidden` state that Excel uses for hidden/filter-hidden rows,
+  // allowing the checked "only unhidden rows" option below to do real work.
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false, cellStyles: true });
   if (workbook.SheetNames.length !== 1) {
-    throw new Error(`${file.name} has ${workbook.SheetNames.length} tabs; exactly one tab is required.`);
+    throw new Error(t.wrongTabCount(file.name, workbook.SheetNames.length));
   }
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
   const rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true });
   const rowMetadata = sheet['!rows'] ?? [];
   // SheetJS uses zero-based row metadata; Excel displays one-based row numbers.
-  const hiddenRows = rowMetadata.flatMap((metadata, index) => metadata?.hidden ? [index + 1] : []);
   const headerIndex = rawRows.findIndex((row) => Array.isArray(row) && row.some((cell) => String(cell ?? '').trim()));
-  if (headerIndex < 0) throw new Error(`${file.name} is empty.`);
+  if (headerIndex < 0) throw new Error(t.emptyFile(file.name));
 
   const header = rawRows[headerIndex].map(normaliseHeader);
   const column = (label: string) => header.indexOf(normaliseHeader(label));
@@ -92,48 +96,62 @@ async function parseFile(file: File): Promise<ParsedFile> {
       cashColumn < 0 && REQUIRED_COLUMNS.cash,
       tradeColumn < 0 && REQUIRED_COLUMNS.trade,
     ].filter(Boolean).join(', ');
-    throw new Error(`${file.name} is missing column(s): ${missing}.`);
+    throw new Error(t.missingColumns(file.name, missing));
   }
 
   const rows: ParsedFile['rows'] = [];
   rawRows.slice(headerIndex + 1).forEach((row, offset) => {
-    // SheetJS reads hidden rows too. For an order export, a client hidden by
-    // an Excel filter must not silently affect the visible calculation.
-    if (rowMetadata[headerIndex + offset + 1]?.hidden) return;
     const portfolio = String(row[portfolioColumn] ?? '').trim();
     if (!portfolio) return; // Blank trailing rows are normal in exported workbooks.
     const name = String(row[nameColumn] ?? '').trim();
     const cash = numberFromCell(row[cashColumn]);
     const trade = numberFromCell(row[tradeColumn]);
     if (cash === null || trade === null) {
-      throw new Error(`${file.name}, row ${headerIndex + offset + 2}: cash and purchase value must both be numbers.`);
+      throw new Error(t.invalidValues(file.name, headerIndex + offset + 2));
     }
     const excelRow = headerIndex + offset + 2; // Excel's row numbers are one-based.
-    rows.push({ portfolio, name, cash, trade, portfolioCell: `${XLSX.utils.encode_col(portfolioColumn)}${excelRow}` });
+    rows.push({
+      portfolio,
+      name,
+      cash,
+      trade,
+      portfolioCell: `${XLSX.utils.encode_col(portfolioColumn)}${excelRow}`,
+      hidden: Boolean(rowMetadata[headerIndex + offset + 1]?.hidden),
+    });
   });
-  if (rows.length === 0) throw new Error(`${file.name} has no client rows.`);
-  return { name: file.name, sheetName: workbook.SheetNames[0], hiddenRows, rows };
+  if (rows.length === 0) throw new Error(t.noClientRows(file.name));
+  return { name: file.name, sheetName: workbook.SheetNames[0], rows };
 }
 
 export default function DebetCalculation() {
+  const t = useDebetCopy();
   const input = useRef<HTMLInputElement>(null);
   const [files, setFiles] = useState<ParsedFile[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [expandedClients, setExpandedClients] = useState<Set<string>>(() => new Set());
+  const [useHiddenRows, setUseHiddenRows] = useState(false);
+  const [search, setSearch] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('portfolio');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
 
-  const totals = Array.from(files.reduce((clients, file) => {
+  // Keep the imported source intact. Toggling the filter must re-run the
+  // calculation immediately, without making the user upload every file again.
+  const calculationFiles = useHiddenRows
+    ? files
+    : files.map((file) => ({ ...file, rows: file.rows.filter((row) => !row.hidden) }));
+
+  const totals = Array.from(calculationFiles.reduce((clients, file) => {
     // First collapse THIS workbook only. A workbook can contribute to a client
     // only when it has an explicit row with that exact Portefeuille value.
-    const fileClients = new Map<string, { portfolio: string; name: string; cash: number; trade: number; rows: number }>();
+    const fileClients = new Map<string, { portfolio: string; name: string; cash: number; trade: number }>();
     for (const row of file.rows) {
       const key = portfolioKey(row.portfolio);
       const current = fileClients.get(key);
       if (current) {
         current.trade += row.trade;
-        current.rows += 1;
       } else {
-        fileClients.set(key, { portfolio: row.portfolio, name: row.name, cash: row.cash, trade: row.trade, rows: 1 });
+        fileClients.set(key, { portfolio: row.portfolio, name: row.name, cash: row.cash, trade: row.trade });
       }
     }
 
@@ -141,41 +159,59 @@ export default function DebetCalculation() {
       const current = clients.get(key);
       if (current) {
         current.tradeTotal += fileClient.trade;
-        current.files += fileClient.rows;
-        current.cashMismatch ||= Math.abs(current.cash - fileClient.cash) > 0.005;
       } else {
         clients.set(key, {
           portfolio: fileClient.portfolio,
           name: fileClient.name,
           cash: fileClient.cash,
           tradeTotal: fileClient.trade,
-          files: fileClient.rows,
-          cashMismatch: false,
         });
       }
     }
     return clients;
   }, new Map<string, ClientTotal>()).values()).sort((a, b) => a.portfolio.localeCompare(b.portfolio, 'nl'));
+  const searchTerm = search.trim().toLocaleLowerCase('nl-NL');
+  const filteredTotals = searchTerm
+    ? totals.filter((client) => [client.portfolio, client.name].some((value) => value.toLocaleLowerCase('nl-NL').includes(searchTerm)))
+    : totals;
+  const sortedTotals = [...filteredTotals].sort((a, b) => {
+    const value = (client: ClientTotal): string | number => {
+      switch (sortKey) {
+        case 'portfolio': return client.portfolio;
+        case 'name': return client.name;
+        case 'cash': return client.cash;
+        case 'tradeTotal': return client.tradeTotal;
+        case 'projectedCash': return client.cash - client.tradeTotal;
+      }
+    };
+    const left = value(a);
+    const right = value(b);
+    const compared = typeof left === 'string' && typeof right === 'string'
+      ? left.localeCompare(right, 'nl-NL')
+      : Number(left) - Number(right);
+    return (compared || a.portfolio.localeCompare(b.portfolio, 'nl-NL')) * (sortDirection === 'asc' ? 1 : -1);
+  });
 
-  const totalCash = totals.reduce((sum, client) => sum + client.cash, 0);
-  const tradeTotal = totals.reduce((sum, client) => sum + client.tradeTotal, 0);
-  const projectedCash = totals.reduce((sum, client) => sum + client.cash - client.tradeTotal, 0);
-  const negativeClients = totals.filter((client) => client.cash - client.tradeTotal < -0.005);
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDirection((current) => current === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDirection('asc'); }
+  }
+
 
   async function addFiles(incoming: FileList | File[]) {
     const selected = Array.from(incoming);
     if (!selected.length) return;
     const invalid = selected.find((file) => !/\.(xlsx|xlsm|xls)$/i.test(file.name));
     if (invalid) {
-      setError(`${invalid.name} is not an Excel file. Upload .xlsx, .xlsm, or .xls files.`);
+      setError(t.invalidFile(invalid.name));
       return;
     }
     try {
-      const parsed = await Promise.all(selected.map(parseFile));
+      const parsed = await Promise.all(selected.map((file) => parseFile(file, t)));
       setFiles((current) => [...current, ...parsed]);
       setError(null);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'The Excel file could not be read.');
+      setError(reason instanceof Error ? reason.message : t.unreadableFile);
     } finally {
       if (input.current) input.current.value = '';
     }
@@ -190,12 +226,9 @@ export default function DebetCalculation() {
   return (
     <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       <div className="mb-7">
-        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-400">Cash control</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-fg-strong">Debet calculations</h1>
-        <p className="mt-2 max-w-3xl text-sm text-fg-muted">
-          Upload one or more order files to combine each client&apos;s purchases and sales with their liquid cash position.
-          A positive purchase value reduces cash; a negative value is a sale and increases it.
-        </p>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-400">{t.cashControl}</p>
+        <h1 className="mt-1 text-2xl font-semibold tracking-tight text-fg-strong">{t.title}</h1>
+        <p className="mt-2 max-w-3xl text-sm text-fg-muted">{t.intro}</p>
       </div>
 
       <input ref={input} type="file" className="sr-only" multiple accept=".xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" onChange={(event: ChangeEvent<HTMLInputElement>) => void addFiles(event.target.files ?? [])} />
@@ -210,8 +243,8 @@ export default function DebetCalculation() {
         className={`cursor-pointer rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors ${dragging ? 'border-accent-400 bg-accent-500/10' : 'border-neutral-700 bg-panel hover:border-accent-500/70 hover:bg-accent-500/[0.04]'}`}
       >
         <div className="mx-auto mb-3 flex h-11 w-11 items-center justify-center rounded-full bg-accent-500/15 text-xl text-accent-300">↑</div>
-        <p className="text-sm font-medium text-fg-strong">Drop Excel files here, or click to upload</p>
-        <p className="mt-1 text-xs text-fg-subtle">.xlsx, .xlsm, or .xls · one tab per file</p>
+        <p className="text-sm font-medium text-fg-strong">{t.dropFiles}</p>
+        <p className="mt-1 text-xs text-fg-subtle">{t.acceptedFiles}</p>
       </div>
 
       {error && <div role="alert" className="mt-4 rounded-lg border border-neg-500/40 bg-neg-500/10 px-4 py-3 text-sm text-neg-300">{error}</div>}
@@ -220,42 +253,50 @@ export default function DebetCalculation() {
         <section className="mt-5 rounded-xl border border-neutral-800/70 bg-panel p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-fg-strong">Uploaded files ({files.length})</h2>
-              <p className="mt-0.5 text-xs text-fg-subtle">All processing happens locally in this browser.</p>
+              <h2 className="text-sm font-semibold text-fg-strong">{t.uploadedFiles(files.length)}</h2>
+              <p className="mt-0.5 text-xs text-fg-subtle">{t.localProcessing}</p>
             </div>
-            <button type="button" onClick={() => { setFiles([]); setError(null); }} className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-neutral-500 hover:text-fg-strong">Clear all</button>
+            <button type="button" onClick={() => { setFiles([]); setError(null); }} className="rounded-md border border-neutral-700 px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-neutral-500 hover:text-fg-strong">{t.clearAll}</button>
           </div>
           <div className="mt-3 flex flex-wrap gap-2">
             {files.map((file, index) => (
               <div key={`${file.name}-${index}`} className="flex items-center gap-2 rounded-md bg-overlay/5 py-1.5 pl-2.5 pr-1.5 text-xs text-fg-muted">
                 <span>{file.name} <span className="text-fg-subtle">({file.rows.length})</span></span>
-                <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, i) => i !== index))} className="rounded px-1 text-fg-subtle hover:bg-overlay/10 hover:text-neg-300">×</button>
+                <button type="button" aria-label={t.removeFile(file.name)} onClick={() => setFiles((current) => current.filter((_, i) => i !== index))} className="rounded px-1 text-fg-subtle hover:bg-overlay/10 hover:text-neg-300">×</button>
               </div>
             ))}
           </div>
-          {files.some((file) => (file.hiddenRows?.length ?? 0) > 0) && <div className="mt-4 rounded-lg border border-warn-500/30 bg-warn-500/[0.07] px-3 py-2.5 text-xs text-warn-200"><p className="font-semibold">Hidden Excel rows ignored</p>{files.filter((file) => (file.hiddenRows?.length ?? 0) > 0).map((file) => <p key={`${file.name}-hidden`} className="mt-1 text-warn-100/90"><span className="font-medium">{file.name} — {file.sheetName}:</span> rows {file.hiddenRows.join(', ')}</p>)}</div>}
+          <label className="mt-4 flex w-fit cursor-pointer items-center gap-2 text-xs text-fg-muted">
+            <input type="checkbox" checked={useHiddenRows} onChange={(event) => setUseHiddenRows(event.target.checked)} className="h-3.5 w-3.5 accent-accent-500" />
+            {t.useHiddenRows}
+          </label>
         </section>
       )}
 
       {totals.length > 0 && <>
-        <section className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat label="Clients" value={String(totals.length)} />
-          <Stat label="Starting liquid cash" value={eur(totalCash)} />
-          <Stat label="Net purchases / sales" value={eur(tradeTotal)} tone={tradeTotal > 0 ? 'warn' : 'good'} />
-          <Stat label="Projected liquid cash" value={eur(projectedCash)} tone={projectedCash < 0 ? 'bad' : 'good'} />
-        </section>
-
-        {negativeClients.length > 0 && <div className="mt-5 rounded-xl border border-neg-500/40 bg-neg-500/10 px-4 py-3 text-sm text-neg-200"><span className="font-semibold">{negativeClients.length} client{negativeClients.length === 1 ? '' : 's'} below zero.</span> Their projected cash position is highlighted in the table.</div>}
-
         <section className="mt-5 overflow-hidden rounded-xl border border-neutral-800/70 bg-panel">
-          <div className="border-b border-neutral-800/70 px-4 py-3"><h2 className="text-sm font-semibold text-fg-strong">Client calculation</h2></div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-neutral-800/70 px-4 py-3">
+            <h2 className="text-sm font-semibold text-fg-strong">{t.clientCalculation}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="sr-only" htmlFor="debet-client-search">{t.searchLabel}</label>
+              <input id="debet-client-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t.searchPlaceholder} className="h-7 w-52 rounded-md border border-neutral-700 bg-page px-2 text-xs text-fg-strong placeholder:text-fg-subtle outline-none transition-colors focus:border-accent-400" />
+              <button type="button" onClick={() => downloadCalculationXlsx(sortedTotals, calculationFiles)} className="rounded-md border border-neutral-700 px-2 py-1 text-xs font-medium text-fg-muted hover:border-neutral-500 hover:text-fg-strong">{t.downloadExcel}</button>
+            </div>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-sm">
               <thead className="bg-overlay/[0.035] text-left text-xs font-medium text-fg-subtle">
-                <tr><th className="px-4 py-3">Portefeuille</th><th className="px-4 py-3">Naam</th><th className="px-4 py-3 text-right">Liquid cash</th><th className="px-4 py-3 text-right">Purchases / sales</th><th className="px-4 py-3 text-right">Projected cash</th><th className="px-4 py-3 text-right">Rows</th><th className="px-4 py-3">Status</th><th className="px-4 py-3"><span className="sr-only">Calculation details</span></th></tr>
+                <tr>
+                  <SortableHeader label={t.portfolio} column="portfolio" active={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableHeader label={t.name} column="name" active={sortKey} direction={sortDirection} onSort={toggleSort} />
+                  <SortableHeader label={t.liquidCash} column="cash" active={sortKey} direction={sortDirection} onSort={toggleSort} align="right" />
+                  <SortableHeader label={t.purchasesSales} column="tradeTotal" active={sortKey} direction={sortDirection} onSort={toggleSort} align="right" />
+                  <SortableHeader label={t.projectedCash} column="projectedCash" active={sortKey} direction={sortDirection} onSort={toggleSort} align="right" />
+                  <th className="px-4 py-3"><span className="sr-only">{t.calculationDetails}</span></th>
+                </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800/60">
-                {totals.map((client) => {
+                {sortedTotals.map((client) => {
                   const remaining = client.cash - client.tradeTotal;
                   const negative = remaining < -0.005;
                   const isExpanded = expandedClients.has(client.portfolio);
@@ -263,7 +304,7 @@ export default function DebetCalculation() {
                   // retaining a second aggregated source map. That makes it
                   // impossible for a file to appear unless it has this exact
                   // Portefeuille value itself.
-                  const sourceTrades = files.flatMap((file) => {
+                  const sourceTrades = calculationFiles.flatMap((file) => {
                     const matchingRows = file.rows.filter((row) => portfolioKey(row.portfolio) === portfolioKey(client.portfolio));
                     if (matchingRows.length === 0) return [];
                     return [{
@@ -276,27 +317,35 @@ export default function DebetCalculation() {
                     <tr className={negative ? 'bg-neg-500/[0.07]' : ''}>
                       <td className="px-4 py-3 font-medium text-fg-strong">{client.portfolio}</td>
                       <td className="px-4 py-3 text-fg-muted">{client.name || '—'}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-fg-muted">{eur(client.cash)}</td>
-                      <td className={`px-4 py-3 text-right tabular-nums ${client.tradeTotal > 0 ? 'text-warn-300' : 'text-good-300'}`}>{eur(client.tradeTotal)}</td>
-                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${negative ? 'text-neg-300' : 'text-good-300'}`}>{eur(remaining)}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-fg-muted">{client.files}</td>
-                      <td className="px-4 py-3">{negative ? <span className="rounded-full bg-neg-500/15 px-2 py-1 text-xs font-medium text-neg-300">Below zero</span> : client.cashMismatch ? <span className="rounded-full bg-warn-500/15 px-2 py-1 text-xs font-medium text-warn-300">Cash differs</span> : <span className="rounded-full bg-good-500/15 px-2 py-1 text-xs font-medium text-good-300">Covered</span>}</td>
-                      <td className="px-4 py-3 text-right"><button type="button" aria-expanded={isExpanded} onClick={() => setExpandedClients((current) => { const next = new Set(current); if (next.has(client.portfolio)) next.delete(client.portfolio); else next.add(client.portfolio); return next; })} className="rounded-md border border-neutral-700 px-2 py-1 text-xs font-medium text-fg-muted hover:border-neutral-500 hover:text-fg-strong">{isExpanded ? 'Hide calculation' : 'Show calculation'}</button></td>
+                      <td className="px-4 py-3 text-right tabular-nums text-fg-muted">{eur(client.cash, t.locale)}</td>
+                      <td className={`px-4 py-3 text-right tabular-nums ${client.tradeTotal > 0 ? 'text-warn-300' : 'text-good-300'}`}>{eur(client.tradeTotal, t.locale)}</td>
+                      <td className={`px-4 py-3 text-right font-semibold tabular-nums ${negative ? 'text-neg-300' : 'text-good-300'}`}>{eur(remaining, t.locale)}</td>
+                      <td className="px-4 py-3 text-right"><button type="button" aria-expanded={isExpanded} onClick={() => setExpandedClients((current) => { const next = new Set(current); if (next.has(client.portfolio)) next.delete(client.portfolio); else next.add(client.portfolio); return next; })} className="rounded-md border border-neutral-700 px-2 py-1 text-xs font-medium text-fg-muted hover:border-neutral-500 hover:text-fg-strong">{isExpanded ? t.hideCalculation : t.showCalculation}</button></td>
                     </tr>
-                    {isExpanded && <tr className="bg-overlay/[0.035]"><td colSpan={8} className="px-4 py-4"><div className="max-w-2xl rounded-lg border border-neutral-800/70 bg-page px-4 py-3 text-xs"><p className="font-semibold text-fg-strong">Calculation</p><div className="mt-2 space-y-1.5 tabular-nums"><div className="flex justify-between gap-8 text-fg-muted"><span>Starting liquid cash</span><span>{eur(client.cash)}</span></div>{sourceTrades.map(({ source, trade, locations }) => <div key={source} className="flex justify-between gap-8 text-fg-muted"><span className="min-w-0"><span className="block truncate" title={source}>{trade >= 0 ? '−' : '+'} Buy / sell from {source}</span><span className="block pt-0.5 font-mono text-[11px] text-fg-subtle">Found at {locations.join(', ')}</span></span><span className={trade >= 0 ? 'text-warn-300' : 'text-good-300'}>{trade >= 0 ? '−' : '+'}{eur(Math.abs(trade))}</span></div>)}<div className={`mt-2 flex justify-between gap-8 border-t border-neutral-800/70 pt-2 font-semibold ${negative ? 'text-neg-300' : 'text-good-300'}`}><span>Projected liquid cash</span><span>{eur(remaining)}</span></div></div></div></td></tr>}
+                    {isExpanded && <tr className="bg-overlay/[0.035]"><td colSpan={6} className="px-4 py-4"><div className="max-w-2xl rounded-lg border border-neutral-800/70 bg-page px-4 py-3 text-xs"><p className="font-semibold text-fg-strong">{t.calculation}</p><div className="mt-2 space-y-1.5 tabular-nums"><div className="flex justify-between gap-8 text-fg-muted"><span>{t.startingLiquidCash}</span><span>{eur(client.cash, t.locale)}</span></div>{sourceTrades.map(({ source, trade, locations }) => <div key={source} className="flex justify-between gap-8 text-fg-muted"><span className="min-w-0"><span className="block truncate" title={source}>{trade >= 0 ? '−' : '+'} {t.buySellFrom(source)}</span><span className="block pt-0.5 font-mono text-[11px] text-fg-subtle">{t.foundAt(locations.join(', '))}</span></span><span className={trade >= 0 ? 'text-warn-300' : 'text-good-300'}>{trade >= 0 ? '−' : '+'}{eur(Math.abs(trade), t.locale)}</span></div>)}<div className={`mt-2 flex justify-between gap-8 border-t border-neutral-800/70 pt-2 font-semibold ${negative ? 'text-neg-300' : 'text-good-300'}`}><span>{t.projectedCash}</span><span>{eur(remaining, t.locale)}</span></div></div></div></td></tr>}
                   </Fragment>;
                 })}
               </tbody>
             </table>
           </div>
-          <p className="border-t border-neutral-800/70 px-4 py-3 text-xs text-fg-subtle">“Cash differs” means the client&apos;s liquid-cash value was not identical across uploaded rows; the first encountered value is used for the calculation.</p>
         </section>
       </>}
     </main>
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'warn' | 'bad' }) {
-  const color = tone === 'bad' ? 'text-neg-300' : tone === 'warn' ? 'text-warn-300' : tone === 'good' ? 'text-good-300' : 'text-fg-strong';
-  return <div className="rounded-xl border border-neutral-800/70 bg-panel px-4 py-4"><p className="text-xs font-medium text-fg-subtle">{label}</p><p className={`mt-1 text-xl font-semibold tracking-tight tabular-nums ${color}`}>{value}</p></div>;
+function SortableHeader({ label, column, active, direction, onSort, align = 'left' }: {
+  label: string;
+  column: SortKey;
+  active: SortKey;
+  direction: SortDirection;
+  onSort: (column: SortKey) => void;
+  align?: 'left' | 'right';
+}) {
+  const isActive = active === column;
+  return <th aria-sort={isActive ? (direction === 'asc' ? 'ascending' : 'descending') : 'none'} className={`px-4 py-3 ${align === 'right' ? 'text-right' : ''}`}>
+    <button type="button" onClick={() => onSort(column)} className={`inline-flex items-center gap-1 hover:text-fg-strong ${align === 'right' ? 'justify-end' : ''}`}>
+      {label}<span aria-hidden="true" className={isActive ? 'text-accent-300' : 'text-fg-faint'}>{isActive ? (direction === 'asc' ? '↑' : '↓') : '↕'}</span>
+    </button>
+  </th>;
 }
