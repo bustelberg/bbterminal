@@ -23431,6 +23431,7 @@ export interface operations {
         parameters: {
             query?: {
                 days?: number;
+                universe?: "leonteq" | "quality";
                 max_assets?: number;
             };
             header?: never;
@@ -23464,6 +23465,7 @@ export interface operations {
             query: {
                 date: string;
                 sector: string;
+                universe?: "leonteq" | "quality";
                 max_assets?: number;
             };
             header?: never;

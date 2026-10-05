@@ -30079,6 +30079,20 @@
           },
           {
             "in": "query",
+            "name": "universe",
+            "required": false,
+            "schema": {
+              "default": "leonteq",
+              "enum": [
+                "leonteq",
+                "quality"
+              ],
+              "title": "Universe",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "max_assets",
             "required": false,
             "schema": {
@@ -30137,6 +30151,20 @@
             "schema": {
               "minLength": 1,
               "title": "Sector",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "universe",
+            "required": false,
+            "schema": {
+              "default": "leonteq",
+              "enum": [
+                "leonteq",
+                "quality"
+              ],
+              "title": "Universe",
               "type": "string"
             }
           },

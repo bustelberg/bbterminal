@@ -104,11 +104,12 @@ export default function QualityUniverse() {
           <div className="max-h-[620px] overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-card text-xs text-fg-subtle border-b border-neutral-800/40">
-                <tr><th className="text-left font-medium px-5 py-3">Yahoo ticker</th><th className="text-left font-medium px-3 py-3">Source ticker</th><th className="text-left font-medium px-3 py-3">Company</th><th className="text-left font-medium px-3 py-3">Country</th><th className="text-left font-medium px-3 py-3">Sources</th><th className="text-left font-medium px-5 py-3">Sector</th></tr>
+                <tr><th className="text-right font-medium px-3 py-3">#</th><th className="text-left font-medium px-5 py-3">Yahoo ticker</th><th className="text-left font-medium px-3 py-3">Source ticker</th><th className="text-left font-medium px-3 py-3">Company</th><th className="text-left font-medium px-3 py-3">Country</th><th className="text-left font-medium px-3 py-3">Sources</th><th className="text-left font-medium px-5 py-3">Sector</th></tr>
               </thead>
               <tbody>
-                {filtered.map((member) => (
+                {filtered.map((member, index) => (
                   <tr key={member.ticker} className="border-b border-neutral-800/30 hover:bg-overlay/[0.02]">
+                    <td className="px-3 py-2.5 text-right text-fg-faint tabular-nums">{index + 1}</td>
                     <td className="px-5 py-2.5 font-medium">
                       {member.yahoo_ticker ? (
                         <a
