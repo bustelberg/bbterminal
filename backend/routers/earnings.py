@@ -35,6 +35,7 @@ from fastapi.responses import StreamingResponse
 from deps import IN_CHUNK_SIZE, supabase
 from ingest.earnings import (
     fetch_analyst_estimates,
+    fetch_estimate_history,
     fetch_financials,
     fetch_indicators,
     fetch_key_ratios,
@@ -754,6 +755,57 @@ async def fundamental_coverage(body: FundamentalCoverageRequest, request: Reques
     if not members:
         return _EMPTY_COVERAGE()
     return await coverage_for_async(members)
+
+
+@router.post("/api/earnings/portfolio-historical-estimates/ingest/job")
+async def ingest_portfolio_historical_estimates(body: FundamentalCoverageRequest):
+    """Backfill historical analyst consensus for every visible operating company.
+
+    This deliberately fetches only ``estimate_history``.  The Earnings modal needs
+    the pre-release consensus for its Beat/Missed badges, not another full financial
+    statements refresh for every company each time it opens.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+    from routers._fundamental_coverage import coverage_for_async  # noqa: PLC0415
+
+    members = await _load_and_expand_members(body)
+    coverage = await coverage_for_async(members) if members else _EMPTY_COVERAGE()
+    company_ids = sorted({int(row["company_id"])
+                          for row in _fundamental_company_rows(coverage)})
+    label = body.book_portfolio or body.basket_label or f"portfolio {body.portfolio_id}"
+
+    def _work(ctx) -> str:
+        if not company_ids:
+            return "No operating companies to refresh."
+        records = (supabase.table("company")
+                   .select("company_id,company_name,gurufocus_ticker,"
+                           "gurufocus_exchange:gurufocus_exchange(exchange_code)")
+                   .in_("company_id", company_ids).execute().data or [])
+        by_id = {int(row["company_id"]): row for row in records}
+        loaded = failed = 0
+        for position, company_id in enumerate(company_ids, 1):
+            ctx.check()
+            row = by_id.get(company_id)
+            if not row or not row.get("gurufocus_ticker"):
+                continue
+            exchange = (row.get("gurufocus_exchange") or {}).get("exchange_code") or "UNKNOWN"
+            name = row.get("company_name") or row["gurufocus_ticker"]
+            ctx.emit("info", f"Loading historical estimates for {name}…")
+            result = fetch_estimate_history(
+                supabase, company_id, row["gurufocus_ticker"], exchange,
+                on_log=lambda _message: None,
+            )
+            ctx.spent(result.api_calls)
+            if result.error:
+                failed += 1
+            else:
+                loaded += result.rows_loaded
+            ctx.progress(position, len(company_ids), f"Historical estimates: {name}",
+                         company_id=company_id, failed=bool(result.error))
+        return f"Historical estimates ready for {len(company_ids) - failed} companies ({loaded} rows loaded)."
+
+    job, reused = job_registry.start("earnings.estimate-history", label, _work)
+    return {"job_id": job.id, "label": label, "already_running": reused}
 
 
 @router.post("/api/earnings/portfolio-company-metrics",

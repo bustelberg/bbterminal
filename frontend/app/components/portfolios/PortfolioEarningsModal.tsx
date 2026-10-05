@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../../../lib/apiFetch";
 import { API_URL } from "../../../lib/apiUrl";
+import { startJob } from "../../../lib/stores/jobs";
 import PanelDialog from "./PanelDialog";
 import PortfolioFundamentalsRefresh from "./PortfolioFundamentalsRefresh";
 import type { Basket } from "./types";
@@ -170,6 +171,27 @@ function quarterLabel(date: string): string {
   const [year, month] = date.split("-");
   return `Q${Math.ceil(Number(month) / 3)} ${year}`;
 }
+
+/** Some companies (for example Adyen) report and receive consensus only half-yearly. */
+function estimatePeriodLabel(date: string, estimates: Quarter[]): string {
+  const dates = [...new Set(estimates.map((estimate) => estimate.date))].sort();
+  const monthNumbers = dates.map((value) => {
+    const [year, month] = value.split("-").map(Number);
+    return year * 12 + month;
+  });
+  const shortestGap = monthNumbers.slice(1).reduce<number | null>(
+    (smallest, month, index) => {
+      const gap = month - monthNumbers[index];
+      return smallest == null || gap < smallest ? gap : smallest;
+    },
+    null,
+  );
+  if (shortestGap != null && shortestGap >= 5) {
+    const [year, month] = date.split("-").map(Number);
+    return `H${month <= 6 ? 1 : 2} ${year}`;
+  }
+  return quarterLabel(date);
+}
 function revenue(value: number, currency?: string | null): string {
   return `${new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(value)}m${currency ? ` ${currency}` : ""}`;
 }
@@ -203,6 +225,7 @@ export default function PortfolioEarningsModal({
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revision, setRevision] = useState(0);
+  const historyRequested = useRef<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     void (async () => {
@@ -240,6 +263,46 @@ export default function PortfolioEarningsModal({
     })();
     return () => controller.abort();
   }, [basket, bookPortfolio, name, portfolioId, revision]);
+
+  useEffect(() => {
+    const missing = (data?.rows ?? []).filter((company) =>
+      company.metrics.some(
+        (metric) =>
+          EPS_CODES.has(metric.metric_code) &&
+          !metric.is_prediction &&
+          !company.metrics.some(
+            (history) =>
+              history.metric_code ===
+                `quarterly_estimate_history__${metric.metric_code.includes("EPS without NRI") ? "eps_nri_estimate" : "per_share_eps_estimate"}__consensus` &&
+              history.target_date === metric.target_date,
+          ),
+      ),
+    );
+    if (!missing.length) return;
+    const key = missing.map((company) => company.company_id).sort().join(",");
+    if (historyRequested.current === key) return;
+    historyRequested.current = key;
+    const body = bookPortfolio
+      ? { book_portfolio: bookPortfolio }
+      : portfolioId != null
+        ? { portfolio_id: portfolioId }
+        : {
+            holdings: basket?.holdings ?? [],
+            basket_label: basket?.label ?? name,
+          };
+    void startJob(
+      `${API_URL}/api/earnings/portfolio-historical-estimates/ingest/job`,
+      `${name}: historical earnings estimates`,
+      {
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ).then(({ done }) => done).then((job) => {
+      if (job.status !== "failed") setRevision((value) => value + 1);
+    }).catch(() => {
+      // The table remains useful without consensus history; the job toast carries the error.
+    });
+  }, [basket, bookPortfolio, data, name, portfolioId]);
 
   const rows = useMemo(
     () =>
@@ -419,7 +482,7 @@ export default function PortfolioEarningsModal({
                           return (
                             <td
                               key={index}
-                              className={`border-b border-neutral-800/50 p-0 align-top tabular-nums ${index === 0 ? "border-r-2 border-neutral-700/70" : ""}`}
+                              className={`border-b border-neutral-800/50 p-0 tabular-nums ${revenuePoint || epsPoint ? "align-top" : "align-middle text-center"} ${index === 0 ? "border-r-2 border-neutral-700/70" : ""}`}
                             >
                               {revenuePoint || epsPoint ? (
                                 <>
@@ -512,7 +575,7 @@ export default function PortfolioEarningsModal({
                                   )}
                                 </>
                               ) : (
-                                <span className="text-fg-faint">
+                                <span className="block px-3 text-fg-faint">
                                   No reported quarter
                                 </span>
                               )}
@@ -575,7 +638,10 @@ export default function PortfolioEarningsModal({
                               {date ? (
                                 <>
                                   <div className="px-3 pt-3 text-xs text-fg-subtle">
-                                    {quarterLabel(date)} consensus
+                                    {estimatePeriodLabel(
+                                      date,
+                                      [...revenueEstimates, ...epsEstimates],
+                                    )} consensus
                                   </div>
                                   <div className="px-3">
                                     {revenueEstimate ? (

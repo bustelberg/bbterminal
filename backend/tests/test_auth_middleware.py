@@ -256,6 +256,8 @@ class TestManagementDashboardRefreshesAreOpen:
         ("POST", "/api/airs/basket/fundamentals/ingest/job"),
         # Analyse modal input tables → one `no_data` holding's financials.
         ("POST", "/api/earnings/fundamental-coverage/ingest"),
+        # Earnings modal → historical consensus for Beat/Missed badges.
+        ("POST", "/api/earnings/portfolio-historical-estimates/ingest/job"),
         # Benchmarks → per-index Refresh and "Refresh all" (both halves of each).
         ("POST", "/api/benchmarks/index/S%26P%20500/refresh/job"),
         ("POST", "/api/benchmarks/index/S%26P%20500/fundamentals/ingest/job"),

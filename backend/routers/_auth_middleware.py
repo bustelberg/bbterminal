@@ -266,6 +266,8 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     #  `/ingest`, one segment below the read `/api/earnings/fundamental-coverage` that is already
     # in `_USER_POST_READ_PATHS`. Both are named in full, on purpose.
     "/api/earnings/fundamental-coverage/ingest",
+    # Earnings modal → fetch the historical consensus behind Beat/Missed badges.
+    "/api/earnings/portfolio-historical-estimates/ingest/job",
 })
 
 #  The benchmark proxy refresh, by pattern because the index label sits in the middle of the path.
