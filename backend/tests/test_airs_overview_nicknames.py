@@ -121,3 +121,40 @@ class TestManagementGroups:
         assert [(r["dynamic_portefeuille"], r["name"]) for r in rows] == [
             ("BUS_FTS_OFF_DYN", "FamilieTopSelectie"),
         ]
+
+
+class TestOverviewRpcAssembly:
+    def test_rpc_payload_is_the_only_database_input_for_the_fast_path(self, monkeypatch):
+        """The SQL RPC owns all relational reads; Python only applies reviewed naming rules."""
+        payload = {
+            "accounts": [{
+                "portefeuille": "BUS_Offensief_Dyn",
+                "account_display_name": None,
+                "has_stored_link": True,
+                "stored_model_portfolio_id": 7,
+                "stored_link_note": "reviewed",
+                "isins": 4,
+                "missing_reports": [],
+                "periode": "2026-10-01",
+            }],
+            "models": [{
+                "id": 7,
+                "name": "BUS_Offensief_AFS",
+                "display_name": "Bustelberg Offensief",
+                "omschrijving": "Test model",
+                "portfolio_type": "fixed",
+                "scanned_at": "2026-10-01T00:00:00+00:00",
+                "positions": 4,
+            }],
+        }
+        monkeypatch.setattr(ov, "_overview_payload", lambda: payload)
+        monkeypatch.setattr(ov, "_list_overview_legacy",
+                            lambda: pytest.fail("the one-RPC path must not fall back to PostgREST"))
+
+        rows = ov.list_overview()
+
+        assert len(rows) == 1
+        assert rows[0]["name"] == "Bustelberg Offensief"
+        assert rows[0]["link_source"] == "manual"
+        assert rows[0]["link_reason"] == "reviewed"
+        assert rows[0]["fixed_portfolio_id"] == 7
