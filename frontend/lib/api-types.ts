@@ -11072,6 +11072,11 @@ export interface components {
              * @default annual
              */
             cadence?: string;
+            /**
+             * Earnings Only
+             * @default false
+             */
+            earnings_only?: boolean;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
@@ -13571,6 +13576,11 @@ export interface components {
              * @default annual
              */
             cadence?: string;
+            /**
+             * Earnings Only
+             * @default false
+             */
+            earnings_only?: boolean;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;

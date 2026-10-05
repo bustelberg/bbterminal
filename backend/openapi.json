@@ -7437,6 +7437,11 @@
             "title": "Cadence",
             "type": "string"
           },
+          "earnings_only": {
+            "default": false,
+            "title": "Earnings Only",
+            "type": "boolean"
+          },
           "holdings": {
             "anyOf": [
               {
@@ -14022,6 +14027,11 @@
             "default": "annual",
             "title": "Cadence",
             "type": "string"
+          },
+          "earnings_only": {
+            "default": false,
+            "title": "Earnings Only",
+            "type": "boolean"
           },
           "holdings": {
             "anyOf": [

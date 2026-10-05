@@ -567,6 +567,9 @@ class FundamentalCoverageRequest(BaseModel):
     # chunked, paged query per metric across all constituents — the same 400x that
     # `_metrics_by_company` documents. Omitted = every code, i.e. the behaviour a book still gets.
     metrics: list[str] | None = None
+    # The Earnings modal does not render valuation, cash-flow, or price rows. Keeping this narrow
+    # avoids transferring those decades of data before it can show three reported quarters.
+    earnings_only: bool = False
 
 
 class PortfolioCompanyMetric(BaseModel):
@@ -886,15 +889,42 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
                   "quarterly_revenue_estimate",
                   "quarterly_per_share_eps_estimate",
                   "quarterly_eps_nri_estimate",
+                  "quarterly_estimate_history__revenue_estimate__actual",
                   "quarterly_estimate_history__revenue_estimate__consensus",
                   "quarterly_estimate_history__revenue_estimate__difference",
                   "quarterly_estimate_history__revenue_estimate__surprise_pct",
+                  "quarterly_estimate_history__per_share_eps_estimate__actual",
                   "quarterly_estimate_history__per_share_eps_estimate__consensus",
                   "quarterly_estimate_history__per_share_eps_estimate__difference",
                   "quarterly_estimate_history__per_share_eps_estimate__surprise_pct",
+                  "quarterly_estimate_history__eps_nri_estimate__actual",
                   "quarterly_estimate_history__eps_nri_estimate__consensus",
                   "quarterly_estimate_history__eps_nri_estimate__difference",
                   "quarterly_estimate_history__eps_nri_estimate__surprise_pct"]
+        if body.earnings_only:
+            codes = [
+                "quarterly__Income Statement__Revenue",
+                "quarterly__income_statement__Revenue",
+                "quarterly__Per Share Data__EPS without NRI",
+                "quarterly__per_share_data__EPS without NRI",
+                "quarterly__per_share_data_array__EPS without NRI",
+                "quarterly__Per Share Data__Earnings per Share (Diluted)",
+                "quarterly__per_share_data__Earnings per Share (Diluted)",
+                "quarterly_revenue_estimate",
+                "quarterly_per_share_eps_estimate",
+                "quarterly_eps_nri_estimate",
+                "quarterly_estimate_history__revenue_estimate__actual",
+                "quarterly_estimate_history__revenue_estimate__consensus",
+                "quarterly_estimate_history__revenue_estimate__difference",
+                "quarterly_estimate_history__revenue_estimate__surprise_pct",
+                "quarterly_estimate_history__per_share_eps_estimate__consensus",
+                "quarterly_estimate_history__per_share_eps_estimate__difference",
+                "quarterly_estimate_history__per_share_eps_estimate__surprise_pct",
+                "quarterly_estimate_history__eps_nri_estimate__actual",
+                "quarterly_estimate_history__eps_nri_estimate__consensus",
+                "quarterly_estimate_history__eps_nri_estimate__difference",
+                "quarterly_estimate_history__eps_nri_estimate__surprise_pct",
+            ]
         by_company: dict[int, list[dict]] = {cid: [] for cid in cids}
 
         def collect(query) -> None:
@@ -914,14 +944,15 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
                     .select("company_id,metric_code,target_date,numeric_value,is_prediction,recorded_at")
                     .in_("company_id", chunk).eq("source_code", "gurufocus")
                     .in_("metric_code", codes).order("company_id").order("target_date"))
-            # A short close window is enough to identify the latest stored price while avoiding
-            # decades of daily bars for every company in the book.
-            collect(lambda chunk=chunk: supabase.table("metric_data")
-                    .select("company_id,metric_code,target_date,numeric_value,is_prediction,recorded_at")
-                    .in_("company_id", chunk).eq("source_code", "gurufocus")
-                    .eq("metric_code", "close_price")
-                    .gte("target_date", (_date.today() - timedelta(days=45)).isoformat())
-                    .order("company_id").order("target_date"))
+            if not body.earnings_only:
+                # A short close window is enough to identify the latest stored price while avoiding
+                # decades of daily bars for every company in the book.
+                collect(lambda chunk=chunk: supabase.table("metric_data")
+                        .select("company_id,metric_code,target_date,numeric_value,is_prediction,recorded_at")
+                        .in_("company_id", chunk).eq("source_code", "gurufocus")
+                        .eq("metric_code", "close_price")
+                        .gte("target_date", (_date.today() - timedelta(days=45)).isoformat())
+                        .order("company_id").order("target_date"))
 
         meta: dict[int, dict] = {}
         for start in range(0, len(cids), 100):

@@ -143,14 +143,18 @@ function historicalSurprise(
       .map((row) => [row.metric_code.slice(prefix.length), row.numeric_value!]),
   );
   const consensus = values.get("consensus");
-  const difference =
-    values.get("difference") ?? (consensus == null ? null : actual - consensus);
-  const pct =
-    values.get("surprise_pct") ??
-    (difference == null || !consensus
-      ? null
-      : (difference / Math.abs(consensus)) * 100);
-  if (difference == null) return null;
+  const providerActual = values.get("actual");
+  // A statement's line item can use a different definition from the vendor's
+  // estimate series (Adyen's half-year revenue is one example). Never call a
+  // result a Beat/Missed unless both actuals describe the same value.
+  if (
+    consensus == null ||
+    providerActual == null ||
+    Math.abs(providerActual - actual) > Math.max(0.01, Math.abs(actual) * 0.005)
+  )
+    return null;
+  const difference = actual - consensus;
+  const pct = consensus === 0 ? null : (difference / Math.abs(consensus)) * 100;
   return {
     text: `${difference >= 0 ? "Beat" : "Missed"} ${label} by ${difference >= 0 ? "+" : ""}${value(Math.abs(difference))}${pct == null ? "" : ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)`}${consensus == null ? "" : ` vs ${value(consensus)} consensus`}`,
     positive: difference >= 0,
@@ -237,12 +241,13 @@ export default function PortfolioEarningsModal({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(
               bookPortfolio
-                ? { book_portfolio: bookPortfolio }
+                ? { book_portfolio: bookPortfolio, earnings_only: true }
                 : portfolioId != null
-                  ? { portfolio_id: portfolioId }
+                  ? { portfolio_id: portfolioId, earnings_only: true }
                   : {
                       holdings: basket?.holdings ?? [],
                       basket_label: basket?.label ?? name,
+                      earnings_only: true,
                     },
             ),
             signal: controller.signal,
