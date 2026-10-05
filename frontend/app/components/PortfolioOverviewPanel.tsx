@@ -1,6 +1,7 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { trace, traceEmpty, traceError, traceRows, traceScope } from '../../lib/debugTrace';
@@ -9,9 +10,6 @@ import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
-import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
-import PortfolioFundamentalModal from './portfolios/PortfolioFundamentalModal';
-import PortfolioEarningsModal from './portfolios/PortfolioEarningsModal';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
@@ -31,6 +29,19 @@ import type {
   AirsPortfolioOverview,
 } from '../../lib/types/api';
 import { useMgmtCopy } from './management/managementCopy';
+
+// These are substantial, self-contained workspaces that only exist after a row action. Keeping
+// them out of the overview chunk makes opening /management-dashboard about the table, rather than
+// about charts, valuation models and earnings history the reader may never request.
+const PortfolioAnalysisModal = dynamic(() => import('./portfolios/PortfolioAnalysisModal'), {
+  ssr: false,
+});
+const PortfolioFundamentalModal = dynamic(() => import('./portfolios/PortfolioFundamentalModal'), {
+  ssr: false,
+});
+const PortfolioEarningsModal = dynamic(() => import('./portfolios/PortfolioEarningsModal'), {
+  ssr: false,
+});
 
 function prefetchModelAnalysis(id: number) {
   const key = `id:${id}|ACWI|book||0|0`;
