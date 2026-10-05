@@ -5305,6 +5305,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/portfolio-historical-estimates/ingest/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Portfolio Historical Estimates
+         * @description Backfill historical analyst consensus for every visible operating company.
+         *
+         *     This deliberately fetches only ``estimate_history``.  The Earnings modal needs
+         *     the pre-release consensus for its Beat/Missed badges, not another full financial
+         *     statements refresh for every company each time it opens.
+         */
+        post: operations["ingest_portfolio_historical_estimates_api_earnings_portfolio_historical_estimates_ingest_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/portfolio-revenue-matrix": {
         parameters: {
             query?: never;
@@ -20718,6 +20742,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PortfolioCompanyMetricsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_portfolio_historical_estimates_api_earnings_portfolio_historical_estimates_ingest_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundamentalCoverageRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
