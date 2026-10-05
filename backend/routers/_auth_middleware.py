@@ -174,10 +174,15 @@ _USER_ACTUAL_FILLS = re.compile(r"^/api/scheduled-strategies/\d+/actual-fills$")
 # edits, creates and deletes, which remain admin-only. Numeric id + anchored suffix mirror the
 # FastAPI route exactly, so neither a neighbouring mutation nor a future child route inherits it.
 _COMPANY_SECTOR_OVERRIDE = re.compile(r"^/api/companies/\d+/sector-override$")
+_COMPANY_INVESTMENT_NOTE = re.compile(r"^/api/companies/\d+/investment-note$")
 
 
 def _is_company_sector_override(path: str) -> bool:
     return _COMPANY_SECTOR_OVERRIDE.match(path) is not None
+
+
+def _is_company_investment_note(path: str) -> bool:
+    return _COMPANY_INVESTMENT_NOTE.match(path) is not None
 
 #  Reads that arrive as post. This gate splits on HTTP method, so a compute-and-return endpoint
 # whose input is a LIST OF ISINS — too long for a URL — lands in the write tier and 403s for a user
@@ -503,6 +508,7 @@ async def enforce_api_auth(
             or path in _USER_WRITE_PATHS
             or _USER_ACTUAL_FILLS.match(path) is not None
             or (request.method == "PUT" and _is_company_sector_override(path))
+            or (request.method == "PUT" and _is_company_investment_note(path))
             or _is_earnings_refresh(path)
             or _is_latest_close_refresh(path)
             or (request.method == "POST" and _is_user_refresh(path))

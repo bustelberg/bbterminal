@@ -63,6 +63,16 @@ import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
 import type { BookValueSeries } from '../../../lib/types/api';
 
+type WeightedBenchmarkBlock = { bucket: string; weight_pct: number };
+
+const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[]) => {
+  const names = new Set(['Stocks', 'Bonds', 'Alternatives', 'Cash']);
+  const weights = Object.fromEntries(blocks
+    .filter((block) => names.has(block.bucket) && Number.isFinite(block.weight_pct))
+    .map((block) => [block.bucket, block.weight_pct]));
+  return Object.keys(weights).length === 4 ? weights : null;
+};
+
 /** `2026-08-26` → a UTC timestamp.  UTC, not local: a date-only string parsed as local time
  *  shifts by an hour twice a year, which is enough to move a point across a tick. */
 const ts = (d: string) => Date.parse(`${d}T00:00:00Z`);
@@ -137,10 +147,13 @@ export default function BookReturnChart(
      */
     refreshSeq = 0,
     benchmark,
-  }: { portfolioId: number; refreshSeq?: number; benchmark: string },
+    benchmarkBlocks = [],
+  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[] },
 ) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const weights = weightedBenchmarkWeights(benchmarkBlocks);
+  const weightsQuery = weights ? `&benchmark_weights=${encodeURIComponent(JSON.stringify(weights))}` : '';
 
   useEffect(() => {
     let alive = true;
@@ -149,7 +162,7 @@ export default function BookReturnChart(
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/model-portfolios/${portfolioId}/value-series`
-          + `?benchmark=${encodeURIComponent(benchmark)}`);
+          + `?benchmark=${encodeURIComponent(benchmark)}${weightsQuery}`);
         const b = await r.json().catch(() => null);
         if (!alive) return;
         if (!r.ok) { setErr(b?.detail ?? `HTTP ${r.status}`); return; }
@@ -161,7 +174,7 @@ export default function BookReturnChart(
       }
     })();
     return () => { alive = false; };
-  }, [portfolioId, refreshSeq, benchmark]);
+  }, [portfolioId, refreshSeq, benchmark, weightsQuery]);
 
   // Do not trust storage order for a charting rule. The server normally returns periods in date
   // order, but the latest observation must mean the latest DATE, never merely the final array

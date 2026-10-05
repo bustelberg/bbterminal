@@ -45,6 +45,7 @@ evenly spaced.
 from __future__ import annotations
 
 from collections import defaultdict
+from math import isfinite
 
 from deps import supabase
 
@@ -168,7 +169,71 @@ def book_return_window(portefeuille: str, benchmark_label: str | None = None) ->
     }
 
 
-def value_series(portefeuille: str, benchmark_label: str | None = None) -> dict:
+_WEIGHTED_BENCHMARK_SLEEVES = {
+    "Stocks": "ACWI",
+    "Bonds": "BONDS",
+    "Alternatives": "ALTERNATIVES",
+    "Cash": None,
+}
+_WEIGHTED_BENCHMARK_LABEL = "Weighted benchmark return (YTD) €"
+
+
+def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
+                               dates: list[str]) -> dict:
+    """The scorecard's allocation benchmark, sampled on the book curve's dates.
+
+    The weights come from the same four sleeves the scorecard displays.  Cash contributes a
+    measured 0%, while every invested sleeve must have a price at every requested point: silently
+    renormalising a missing sleeve would turn a 70/30 benchmark into an all-equity one.
+    """
+    recognised = {name: float(weights.get(name, 0.0))
+                  for name in _WEIGHTED_BENCHMARK_SLEEVES}
+    if (any(not isfinite(weight) or weight < 0 for weight in recognised.values())
+            or not 99.5 <= sum(recognised.values()) <= 100.5):
+        return {}
+
+    from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
+
+    sleeves = {
+        name: etf_return_series(proxy, anchor, dates)
+        for name, proxy in _WEIGHTED_BENCHMARK_SLEEVES.items()
+        if proxy and recognised[name] > 0
+    }
+    # A benchmark is only comparable when every non-cash sleeve is fully observed.
+    if any(not series for series in sleeves.values()):
+        return {}
+    by_sleeve = {
+        name: {point["date"]: point for point in series.get("points") or []}
+        for name, series in sleeves.items()
+    }
+    points: list[dict] = []
+    for target in dates:
+        marks = [by_sleeve[name].get(target) for name in by_sleeve]
+        if any(mark is None for mark in marks):
+            return {}
+        points.append({
+            "date": target,
+            "cum_pct": sum(recognised[name] * float(by_sleeve[name][target]["cum_pct"])
+                           for name in by_sleeve) / 100.0,
+            # The composite cannot have one literal close date. The oldest component mark is the
+            # honest as-of date: every sleeve was known by then.
+            "price_date": (min(str(mark["price_date"]) for mark in marks if mark is not None)
+                           if marks else target),
+        })
+    if not points:
+        return {}
+    return {
+        "label": _WEIGHTED_BENCHMARK_LABEL,
+        "ticker": None,
+        "source": "weighted_etf",
+        "points": points,
+        "return_pct": points[-1]["cum_pct"],
+        "as_of": points[-1]["price_date"],
+    }
+
+
+def value_series(portefeuille: str, benchmark_label: str | None = None,
+                 benchmark_weights: dict[str, float] | None = None) -> dict:
     """`{points, flows, …}` — the book's value on every date we hold a snapshot for."""
     rows = _page("airs_holding", "as_of_date,current_value_eur",
                  eq={"portefeuille": portefeuille}, order="as_of_date")
@@ -231,7 +296,10 @@ def value_series(portefeuille: str, benchmark_label: str | None = None) -> dict:
 
     returns, anchor = _return_series(perf, by_date, counts)
     benchmark: dict = {}
-    if benchmark_label and anchor and returns:
+    if benchmark_weights and anchor and returns:
+        benchmark = _weighted_benchmark_series(
+            benchmark_weights, anchor, [str(point["date"]) for point in returns])
+    if not benchmark and benchmark_label and anchor and returns:
         from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
 
         benchmark = etf_return_series(

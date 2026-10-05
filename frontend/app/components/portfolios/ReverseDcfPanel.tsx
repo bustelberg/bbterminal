@@ -746,7 +746,7 @@ Type a figure here to bypass them and value it directly.`
           <div className="flex flex-1 flex-col justify-center">
             {/**
               *  The answer is a table row, not a sentence. It was a paragraph — "That market cap
-              * implies 24.3% annual FCF growth for 10 years" — with a 2xl number inside it, which
+              * implies 24.3% annual FCF growth for 5 years" — with a 2xl number inside it, which
               * reflowed on every keystroke and could not line up with anything. The refusals below
               * were four more paragraphs of DIFFERENT lengths, so the panel changed height
               * depending on which input was missing.

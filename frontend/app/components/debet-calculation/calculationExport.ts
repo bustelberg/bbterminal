@@ -85,7 +85,9 @@ export function downloadCalculationXlsx(clients: CalculationClient[], files: Cal
     const projectedCell = `${columnName(projectedCashColumn)}${excelRow}`;
     const firstTradeCell = `${columnName(firstTradeColumn)}${excelRow}`;
     const lastTradeCell = `${columnName(totalTradeColumn - 1)}${excelRow}`;
-    const totalTrades = row.slice(firstTradeColumn).reduce((sum, value) => sum + Number(value), 0);
+    const totalTrades = row.slice(firstTradeColumn).reduce<number>((sum, value) => (
+      sum + (typeof value === 'number' ? value : 0)
+    ), 0);
     // A portfolio can be calculated from liquid cash alone when every uploaded
     // source filtered it out. SUM of an empty range would be malformed, so use 0.
     worksheet[totalCell] = sourceCount

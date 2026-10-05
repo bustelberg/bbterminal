@@ -37,7 +37,7 @@ const EN = {
   noClientRows: (name: string) => `${name} has no client rows.`,
   invalidFile: (name: string) => `${name} is not an Excel file. Upload .xlsx, .xlsm, or .xls files.`,
   unreadableFile: 'The Excel file could not be read.',
-} as const;
+};
 
 const NL: typeof EN = {
   locale: 'nl-NL',
