@@ -4427,6 +4427,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/companies/{company_id}/investment-note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Company Investment Note
+         * @description The signed-in user's private research note for one company.
+         */
+        get: operations["get_company_investment_note_api_companies__company_id__investment_note_get"];
+        /**
+         * Set Company Investment Note
+         * @description Save a user's own thesis and investment pillars without changing shared company data.
+         */
+        put: operations["set_company_investment_note_api_companies__company_id__investment_note_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/companies/{company_id}/openfigi-verify": {
         parameters: {
             query?: never;
@@ -11552,6 +11576,22 @@ export interface components {
             /** To Date */
             to_date?: string | null;
         };
+        /**
+         * InvestmentNoteRequest
+         * @description A user's own thesis and investment pillars for one company.
+         */
+        InvestmentNoteRequest: {
+            /**
+             * Pillars
+             * @default []
+             */
+            pillars?: string[];
+            /**
+             * Thesis
+             * @default
+             */
+            thesis?: string;
+        };
         /** IsinCompareRequest */
         IsinCompareRequest: {
             /** Isins */
@@ -16295,6 +16335,7 @@ export interface operations {
         parameters: {
             query?: {
                 benchmark?: string;
+                benchmark_weights?: string | null;
             };
             header?: never;
             path: {
@@ -19649,6 +19690,72 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_company_investment_note_api_companies__company_id__investment_note_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_company_investment_note_api_companies__company_id__investment_note_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvestmentNoteRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
