@@ -62,10 +62,18 @@ import { v } from '../../../lib/dynamicValue';
 import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
 import type { BookValueSeries } from '../../../lib/types/api';
+import allocationProfiles from '../../config/weightedBenchmarkAllocations.json';
 
 type WeightedBenchmarkBlock = { bucket: string; weight_pct: number };
 
-const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[]) => {
+const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[], variant?: string | null) => {
+  // Policy benchmark weights are an explicit product promise, not a reflection
+  // of whatever the book happens to hold today. The JSON is shipped with the
+  // frontend, so changing the policy is a normal deploy with no DB migration.
+  const configured = variant && variant in allocationProfiles
+    ? allocationProfiles[variant as keyof typeof allocationProfiles]
+    : null;
+  if (configured) return configured;
   const names = new Set(['Stocks', 'Bonds', 'Alternatives', 'Cash']);
   const weights = Object.fromEntries(blocks
     .filter((block) => names.has(block.bucket) && Number.isFinite(block.weight_pct))
@@ -148,11 +156,12 @@ export default function BookReturnChart(
     refreshSeq = 0,
     benchmark,
     benchmarkBlocks = [],
-  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[] },
+    variant,
+  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; variant?: string | null },
 ) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const weights = weightedBenchmarkWeights(benchmarkBlocks);
+  const weights = weightedBenchmarkWeights(benchmarkBlocks, variant);
   const weightsQuery = weights ? `&benchmark_weights=${encodeURIComponent(JSON.stringify(weights))}` : '';
 
   useEffect(() => {
