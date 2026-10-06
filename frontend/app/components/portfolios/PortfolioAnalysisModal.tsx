@@ -194,6 +194,12 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
   // with unknown fields. Validate it before rendering the optional detail.
   const blocks = (r?.block_returns ?? []).filter(isScorecardBlock);
   const shortReturn = (value: number | null) => (value == null ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`);
+  const weightedTerms = blocks
+    .filter((block) => block.weight_pct > 0 && block.benchmark_return_pct != null)
+    .map((block) => `${block.weight_pct.toFixed(1)}% × ${shortReturn(block.benchmark_return_pct)}`);
+  const weightedResult = weightedTerms.length === blocks.filter((block) => block.weight_pct > 0).length
+    ? blocks.reduce((sum, block) => sum + block.weight_pct * Number(block.benchmark_return_pct ?? 0) / 100, 0)
+    : null;
   const priceRange = (block: ScorecardBlock) => block.benchmark_start_value == null || block.benchmark_end_value == null
     ? 'n/a' : `${block.benchmark_start_value.toFixed(2)} → ${block.benchmark_end_value.toFixed(2)} ${block.benchmark_currency ?? ''}`;
   const fxRange = (block: ScorecardBlock) => block.benchmark_fx_start == null || block.benchmark_fx_end == null
@@ -219,7 +225,10 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
         </div>;
       })}
       <div className="pt-2 text-fg-muted">EUR return = (end price ÷ end FX) ÷ (start price ÷ start FX) - 1</div>
-      <div className="text-fg-muted">Weighted return = sum of each weight multiplied by its block return</div>
+      <div className="text-fg-muted">
+        Weighted return = {weightedTerms.join(' + ')}
+        {weightedResult != null && ` = ${shortReturn(weightedResult)}`}
+      </div>
     </div>
   ) : undefined;
   const sp = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
@@ -293,9 +302,9 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
         <Chip label={blocks.length ? copy.score.weightedBenchmark : copy.score.versusReturn(benchmark)} value={sp(r?.benchmark_ytd_pct)}
           valueClass={tone(r?.benchmark_ytd_pct)}
           prov={<Provenance source={blocks.length ? 'derived' : bp.sourceKey} asOf={r?.benchmark_ytd_as_of} kind={blocks.length ? undefined : 'formula'}
-            what={blocks.length ? 'Weighted benchmark return across the same portfolio allocation blocks.' : bp.what}
-            note={blocks.length ? 'Each market proxy is weighted to match this portfolio allocation.' : bp.note}
-            how={blocks.length ? 'Each benchmark proxy is weighted by the portfolio allocation shown above.' : bp.how}
+            what={blocks.length ? 'Weighted stock-and-bond benchmark return for this risk profile.' : bp.what}
+            note={blocks.length ? 'Uses the fixed policy mix for the risk profile, not the portfolio’s current allocation.' : bp.note}
+            how={blocks.length ? 'ACWI and the bond proxy are combined at the configured risk-profile weights; alternatives and cash are excluded.' : bp.how}
             calculation={blockCalculation} onRefresh={refreshBenchmark}
             fetchedAt={r?.benchmark_fetched_at} />} />
       </ProvenanceFetchedAt>
