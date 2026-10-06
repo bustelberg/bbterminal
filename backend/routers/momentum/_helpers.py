@@ -404,6 +404,7 @@ def save_current_picks_snapshot(
         "latest_price_date": payload.get("latest_price_date"),
         "config": config,
         "holdings": payload["holdings"],
+        "selection_reserves": payload.get("selection_reserves") or [],
         "daily_picks": payload.get("daily_picks") or [],
         "strategy_hash": strategy_hash,
         "kind": kind,

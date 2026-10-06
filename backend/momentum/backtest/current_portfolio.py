@@ -17,6 +17,7 @@ from ..scoring import (  # noqa: F401 — sector_pool_scores backs the ranking t
     extract_category_scores,
     score_and_select,
     score_universe,
+    selection_pool,
     sector_pool_scores,
     select_from_scored,
     signal_defs_for_mode,
@@ -66,6 +67,45 @@ _logger = logging.getLogger(__name__)
 # something different: a SIGNAL may be computed from a slightly older bar; a
 # PURCHASE may not.
 MAX_ENTRY_GAP_SESSIONS = 1
+
+
+def _selection_reserves(scored: pd.DataFrame, selected: pd.DataFrame, *,
+                        min_price_score: float | None,
+                        backfill_below_min_score: bool) -> list[dict]:
+    """Capture the ordered replacements for the selected sectors.
+
+    A forced replacement must use the contemporaneous decision, never a new
+    mid-period score.  The list deliberately excludes the selected names and
+    is capped per sector so a snapshot remains a compact audit record.
+    """
+    if scored.empty or selected.empty:
+        return []
+    picked_ids = set(selected["company_id"].astype(int))
+    ranks = (selected[["sector", "sector_rank"]].drop_duplicates()
+             .set_index("sector")["sector_rank"].to_dict())
+    pool = selection_pool(
+        scored, min_price_score=min_price_score,
+        backfill_below_min_score=backfill_below_min_score,
+    )
+    pool = pool[pool["sector"].isin(ranks)].copy()
+    pool = pool[~pool["company_id"].astype(int).isin(picked_ids)]
+    if pool.empty:
+        return []
+    pool["sector_rank"] = pool["sector"].map(ranks)
+    pool = pool.sort_values(["sector_rank", "momentum_score"], ascending=[True, False])
+    reserves: list[dict] = []
+    for sector_rank, group in pool.groupby("sector_rank", sort=True):
+        for reserve_rank, (_, row) in enumerate(group.head(50).iterrows(), start=1):
+            reserves.append({
+                "company_id": int(row["company_id"]),
+                "ticker": str(row.get("gurufocus_ticker") or ""),
+                "company_name": str(row.get("company_name") or ""),
+                "sector": str(row.get("sector") or ""),
+                "sector_rank": int(sector_rank),
+                "reserve_rank": reserve_rank,
+                "score": round(float(row["momentum_score"]), 2),
+            })
+    return reserves
 
 
 def _next_month_start(d: date) -> date:
@@ -431,16 +471,18 @@ def run_current_portfolio(
 
     # Score and select — same path as backtest momentum mode
     t_month_start_select = time.perf_counter()
-    selected = score_and_select(
+    scored = score_universe(
         signals_df,
         config.signal_weights,
-        top_n_sectors=config.top_n_sectors,
-        top_n_per_sector=config.top_n_per_sector,
         category_weights=config.category_weights,
-        min_price_score=config.min_price_score,
-        backfill_below_min_score=config.backfill_below_min_score,
         signal_defs=signal_defs_for_mode(config.selection_mode),
         normalization=config.score_normalization,
+    )
+    selected = select_from_scored(
+        scored, top_n_sectors=config.top_n_sectors,
+        top_n_per_sector=config.top_n_per_sector,
+        min_price_score=config.min_price_score,
+        backfill_below_min_score=config.backfill_below_min_score,
     )
     t_month_start_select_elapsed = time.perf_counter() - t_month_start_select
 
@@ -461,13 +503,7 @@ def run_current_portfolio(
             # Re-scoring here costs a vectorized pass over ~1.5k rows; it must be
             # given the SAME arguments, or the table explains a ranking that
             # never happened.
-            scored_for_log = score_universe(
-                signals_df, config.signal_weights,
-                category_weights=config.category_weights,
-                signal_defs=signal_defs_for_mode(config.selection_mode),
-                normalization=config.score_normalization,
-            )
-            ranked = sector_pool_scores(scored_for_log)
+            ranked = sector_pool_scores(scored)
             chosen = set(selected["sector"].tolist())
             line = " | ".join(
                 f"{'*' if r['sector'] in chosen else ''}{r['sector']} "
@@ -762,4 +798,8 @@ def run_current_portfolio(
         daily_picks=daily_picks,
         entry_anchor_date=entry_anchor.isoformat(),
         excluded_stale_count=len(stale_ids),
+        selection_reserves=_selection_reserves(
+            scored, selected, min_price_score=config.min_price_score,
+            backfill_below_min_score=config.backfill_below_min_score,
+        ),
     )

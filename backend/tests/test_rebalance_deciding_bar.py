@@ -152,7 +152,7 @@ class TestNoNameIsBoughtAtAStalePrice:
         `top_n_sectors × top_n_per_sector`; dropping them before means the next
         eligible name takes the slot."""
         src = inspect.getsource(current_portfolio.run_current_portfolio)
-        assert src.index("stale_ids") < src.index("score_and_select(")
+        assert src.index("stale_ids") < src.index("score_universe(")
 
     def test_it_reports_what_it_excluded(self):
         """A rebalance that quietly selected from 900 of 1,479 names looks exactly
