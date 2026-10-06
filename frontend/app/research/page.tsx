@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { API_URL } from '../../lib/apiUrl';
 import { apiFetch } from '../../lib/apiFetch';
+import { startLocalJob } from '../../lib/stores/jobs';
 
 type ResearchSection = {
   key: string;
@@ -44,6 +45,28 @@ export default function ResearchPage() {
   const [result, setResult] = useState<ResearchResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+
+  async function copy(text: string, key: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const area = document.createElement('textarea');
+        area.value = text;
+        area.style.position = 'fixed';
+        area.style.opacity = '0';
+        document.body.appendChild(area);
+        area.select();
+        if (!document.execCommand('copy')) throw new Error('Clipboard access was denied.');
+        area.remove();
+      }
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => current === key ? null : current), 1800);
+    } catch (caught) {
+      setError(caught instanceof Error ? `Could not copy: ${caught.message}` : 'Could not copy to the clipboard.');
+    }
+  }
 
   async function load(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -53,19 +76,23 @@ export default function ResearchPage() {
     setLoading(true);
     setError(null);
     setResult(null);
-    try {
-      const response = await apiFetch(
-        `${API_URL}/api/admin/gurufocus-research?symbol=${encodeURIComponent(cleaned)}`,
-        { noReadCache: true },
-      );
-      if (!response.ok) throw new Error(await responseError(response));
-      setResult(await response.json() as ResearchResponse);
-      setSymbol(cleaned);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setLoading(false);
-    }
+    startLocalJob('Loading research data', 'gurufocus-research', async (signal, report) => {
+      try {
+        report({ done: 0, total: 1, message: 'Fetching research data…' });
+        const response = await apiFetch(
+          `${API_URL}/api/admin/gurufocus-research?symbol=${encodeURIComponent(cleaned)}`,
+          { noReadCache: true, signal },
+        );
+        if (!response.ok) throw new Error(await responseError(response));
+        const data = await response.json() as ResearchResponse;
+        setResult(data);
+        setSymbol(cleaned);
+        report({ done: 1, total: 1, message: 'Research data loaded.' });
+        return 'Research data loaded';
+      } finally {
+        setLoading(false);
+      }
+    }, { cancellable: false });
   }
 
   return (
@@ -93,7 +120,7 @@ export default function ResearchPage() {
           disabled={loading || !symbol.trim()}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? 'Loading 14 endpoints…' : 'Load company'}
+          Load company
         </button>
       </form>
 
@@ -111,7 +138,7 @@ export default function ResearchPage() {
 
       {result && (
         <section className="mt-8">
-          <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <div className="mb-3 flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <h2 className="text-xl font-semibold text-fg">{result.symbol}</h2>
             <span className="text-xs text-fg-subtle">
               fetched {new Date(result.fetched_at).toLocaleString()} · {result.guru_focus_requests}
@@ -119,6 +146,12 @@ export default function ResearchPage() {
             </span>
           </div>
 
+          <div className="mb-4 flex justify-end">
+            <button type="button" onClick={() => void copy(JSON.stringify(result, null, 2), 'all')}
+              className="rounded-md border border-neutral-700 px-3 py-1.5 text-sm font-medium text-fg-soft hover:border-neutral-500 hover:bg-overlay/5">
+              {copied === 'all' ? 'Copied all outputs' : 'Copy all outputs'}
+            </button>
+          </div>
           <div className="space-y-3">
             {result.sections.map((section, index) => (
               <details
@@ -126,7 +159,7 @@ export default function ResearchPage() {
                 open={index < 4}
                 className="overflow-hidden rounded-md border border-neutral-800 bg-panel"
               >
-                <summary className="cursor-pointer px-4 py-3 text-sm text-fg marker:text-fg-subtle">
+                <summary className="relative cursor-pointer px-4 py-3 pr-20 text-sm text-fg marker:text-fg-subtle">
                   <span className="font-medium">{section.label}</span>
                   <span className="ml-2 font-mono text-xs text-fg-subtle">
                     /{section.endpoint}
@@ -134,6 +167,10 @@ export default function ResearchPage() {
                   <span className={`ml-2 text-xs ${section.ok ? 'text-emerald-400' : 'text-red-400'}`}>
                     {section.ok ? payloadSize(section.data) : `failed${section.status_code ? ` (${section.status_code})` : ''}`}
                   </span>
+                  <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void copy(JSON.stringify(section.data, null, 2), section.key); }}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 rounded border border-neutral-700 px-2 py-1 text-xs font-medium text-fg-soft hover:border-neutral-500 hover:bg-overlay/5">
+                    {copied === section.key ? 'Copied' : 'Copy'}
+                  </button>
                 </summary>
                 {section.ok ? (
                   <pre className="max-h-[70vh] overflow-auto border-t border-neutral-800 bg-black/20 p-4 font-mono text-xs leading-5 text-fg-muted">

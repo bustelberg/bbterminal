@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addYears, BASIS, cagrBetween, cagrOf, dailyYieldHistory, EPS_EST_CODES, EPS_PS_CODES, FCF_PS_CODES, forwardEstimates,
+  addYears, BASIS, cagrBetween, cagrOf, dailyYieldHistory, EPS_EST_CODES, EPS_PS_CODES, OCF_PS_CODE, OCF_PS_CODES, forwardEstimates,
   compoundFrom, latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
   rebase, yearsBetween, yieldOf, type MetricRow,
 } from './quickValuation';
 
 const PRICE = 'annuals__Per Share Data__Month End Stock Price';
-const FCF = 'annuals__Per Share Data__Free Cash Flow per Share';
+const FCF = OCF_PS_CODE;
 const EPS = 'annuals__Per Share Data__EPS without NRI';
 
 const m = (metric_code: string, year: number, numeric_value: number | null): MetricRow =>
@@ -37,7 +37,7 @@ describe('priceVsMetric', () => {
 
   it('takes the LAST n fiscal years when a cap is asked for', () => {
     const rows = [2015, 2016, 2017, 2018].flatMap((y) => [m(PRICE, y, y), m(FCF, y, 1)]);
-    expect(priceVsMetric(rows, FCF_PS_CODES, 2).map((p) => p.year)).toEqual([2017, 2018]);
+    expect(priceVsMetric(rows, OCF_PS_CODES, 2).map((p) => p.year)).toEqual([2017, 2018]);
   });
 
   it('draws EVERY paired year from the floor when no cap is asked for', () => {
@@ -135,7 +135,7 @@ describe('BASIS — the two bases the tab switches between', () => {
   ];
 
   it('reads a DIFFERENT series per basis off the same payload', () => {
-    expect(priceVsMetric(rows, BASIS.fcf.codes)[0].value).toBe(5);
+    expect(priceVsMetric(rows, BASIS.ocf.codes)[0].value).toBe(5);
     expect(priceVsMetric(rows, BASIS.eps.codes)[0].value).toBe(8);
   });
 
@@ -148,7 +148,7 @@ describe('BASIS — the two bases the tab switches between', () => {
 
   it('covers all three section spellings on both bases', () => {
     // Match one spelling and a whole cohort of companies reads as having no data.
-    for (const codes of [FCF_PS_CODES, EPS_PS_CODES]) {
+    for (const codes of [OCF_PS_CODES, EPS_PS_CODES]) {
       expect(codes).toHaveLength(3);
       expect(new Set(codes.map((c) => c.split('__')[1]))).toEqual(
         new Set(['Per Share Data', 'per_share_data', 'per_share_data_array']));
@@ -158,7 +158,7 @@ describe('BASIS — the two bases the tab switches between', () => {
   it('never lets the two bases share a label', () => {
     // The failure mode is an earnings yield rendered under an FCF label: not a broken panel, a
     // plausible valuation of a company nobody analysed.
-    const f = BASIS.fcf; const e = BASIS.eps;
+    const f = BASIS.ocf; const e = BASIS.eps;
     for (const k of ['tab', 'perShare', 'yieldTitle', 'yieldInline', 'negativeYear'] as const) {
       expect(f[k]).not.toBe(e[k]);
     }
@@ -175,7 +175,7 @@ describe('BASIS — the two bases the tab switches between', () => {
     // Not a gap in our ingest — nobody forecasts capex, so no free-cash-flow consensus exists to
     // fetch. `null` is what makes the forward half of the chart absent rather than modelled.
     expect(BASIS.eps.estimateCodes).toEqual(EPS_EST_CODES);
-    expect(BASIS.fcf.estimateCodes).toBeNull();
+    expect(BASIS.ocf.estimateCodes).toEqual(['annual_operating_cash_flow_per_share_estimate']);
   });
 
   it(' prefers the NRI-stripped estimate, matching the NRI-stripped history', () => {
@@ -197,7 +197,7 @@ describe('dailyYieldHistory', () => {
       { metric_code: FCF, target_date: '2026-01-03', numeric_value: 6 },
       { metric_code: 'close_price', target_date: '2026-01-04', numeric_value: 100 },
     ];
-    expect(dailyYieldHistory(rows, FCF_PS_CODES)).toEqual([
+    expect(dailyYieldHistory(rows, OCF_PS_CODES)).toEqual([
       { date: '2026-01-01', value: null, price: 100, yld: null },
       { date: '2026-01-02', value: 5, price: 125, yld: 4 },
       { date: '2026-01-03', value: 6, price: 100, yld: 6 },
@@ -211,7 +211,7 @@ describe('dailyYieldHistory', () => {
       { metric_code: 'close_price', target_date: '2016-12-30', numeric_value: 100 },
       { metric_code: 'close_price', target_date: '2017-01-03', numeric_value: 100 },
     ];
-    expect(dailyYieldHistory(rows, FCF_PS_CODES).map((p) => p.date)).toEqual(['2017-01-03']);
+    expect(dailyYieldHistory(rows, OCF_PS_CODES).map((p) => p.date)).toEqual(['2017-01-03']);
   });
 });
 

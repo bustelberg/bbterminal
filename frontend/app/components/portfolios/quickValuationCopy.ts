@@ -68,7 +68,7 @@ export type QuickValuationCopy = {
   forwardTile: (multiple: string) => string;
   asOf: string;
   loading: string;
-  noForwardFcf: string;
+  noForwardOcf: string;
   noForwardPublished: (multiple: string, year: string) => string;
   /**
    * The Price target card beside the chart.
@@ -100,12 +100,12 @@ export type QuickValuationCopy = {
 
 const EN: QuickValuationCopy = {
   basis: {
-    fcf: {
-      tab: 'FCF',
-      perShare: 'FCF per share',
-      yieldTitle: 'FCF yield',
-      yieldInline: 'FCF yield',
-      multiple: 'P/FCF',
+    ocf: {
+      tab: 'OCF',
+      perShare: 'Operating cash flow per share',
+      yieldTitle: 'OCF yield',
+      yieldInline: 'OCF yield',
+      multiple: 'P/OCF',
       negativeYear: 'cash-burn',
     },
     eps: {
@@ -143,7 +143,7 @@ const EN: QuickValuationCopy = {
   forwardTile: (multiple) => `Forward ${multiple}`,
   asOf: 'As of',
   loading: 'Loading…',
-  noForwardFcf: 'GuruFocus has no historical forward-FCF series.',
+  noForwardOcf: 'GuruFocus has no historical forward-P/OCF series.',
   noForwardPublished: (multiple, year) =>
     `No forward ${multiple} published for this listing since ${year}.`,
   pt: {
@@ -177,14 +177,14 @@ const EN: QuickValuationCopy = {
  */
 const NL: QuickValuationCopy = {
   basis: {
-    fcf: {
-      tab: 'FCF',
-      perShare: 'FCF per aandeel',
+    ocf: {
+      tab: 'OCF',
+      perShare: 'Operationele kasstroom per aandeel',
       // "Yield" is the established term in Dutch portfolio reporting too.  Keeping it means
-      // the price-target rows read "Current FCF yield" / "Forecast FCF yield" in either language.
-      yieldTitle: 'FCF yield',
-      yieldInline: 'FCF yield',
-      multiple: 'P/FCF',
+      // the price-target rows read "Current OCF yield" / "Forecast OCF yield" in either language.
+      yieldTitle: 'OCF yield',
+      yieldInline: 'OCF yield',
+      multiple: 'P/OCF',
       negativeYear: 'cash-burn',
     },
     eps: {
@@ -226,7 +226,7 @@ const NL: QuickValuationCopy = {
   forwardTile: (multiple) => `Forward ${multiple}`,
   asOf: 'Per',
   loading: 'Laden…',
-  noForwardFcf: 'GuruFocus heeft geen historische forward-FCF-reeks.',
+  noForwardOcf: 'GuruFocus heeft geen historische forward-P/OCF-reeks.',
   noForwardPublished: (multiple, year) =>
     `Geen forward ${multiple} gepubliceerd voor deze notering sinds ${year}.`,
   pt: {

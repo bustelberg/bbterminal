@@ -24,7 +24,7 @@ import {
 } from './multiplesSeries';
 import {
   addYears, BASIS, cagrBetween, cagrOf, compoundFrom, dailyYieldHistory, latestDateOf, priceTarget, priceVsMetric,
-  PRICE_CODES, rebase, yearsBetween, yieldOf, type Basis, type MetricRow,
+  PRICE_CODES, rebase, withDerivedOcfPerShare, yearsBetween, yieldOf, type Basis, type MetricRow,
 } from './quickValuation';
 import { runSSE } from '../../../lib/stream';
 import { invalidateReadCache } from '../../../lib/readCache';
@@ -107,7 +107,7 @@ type SourceFetchedAt = { financials?: string | null; estimates?: string | null; 
 
 export default function QuickValuationTab({ isin, name }: { isin: string; name?: string | null }) {
   const [metrics, setMetrics] = useState<MetricRow[] | null>(null);
-  const [basis, setBasis] = useState<Basis>('fcf');
+  const [basis, setBasis] = useState<Basis>('ocf');
   const [currency, setCurrency] = useState<string | null>(null);
   const [sourceFetchedAt, setSourceFetchedAt] = useState<SourceFetchedAt>({});
   /**  THE ANSWER CARRIES THE QUESTION IT ANSWERED. "Have we looked yet?" is derived from whether
@@ -308,8 +308,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // as a rendering fault. See `quickValuationCopy`.
   const t = useQuickValuationCopy();
   const bl = t.basis[basis];
+  const valuationMetrics = useMemo(() => withDerivedOcfPerShare(metrics ?? []), [metrics]);
   const points = useMemo(
-    () => priceVsMetric(metrics ?? [], b.codes, PROJECT_YEARS), [metrics, b.codes]);
+    () => priceVsMetric(valuationMetrics, b.codes, PROJECT_YEARS), [valuationMetrics, b.codes]);
   const historyFromYear = points[0]?.year ?? new Date().getFullYear() - PROJECT_YEARS;
   const idx = useMemo(() => rebase(points), [points]);
 
@@ -581,9 +582,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // `Valuation Ratios__FCF Yield %` (or its P/E) — whose denominator convention (year-end price?
   // average market cap?) we do not control. One source, so the two charts cannot disagree.
   const yields = useMemo(
-    () => dailyYieldHistory(metrics ?? [], b.codes)
+    () => dailyYieldHistory(valuationMetrics, b.codes)
       .filter((point) => Number(point.date.slice(0, 4)) >= historyFromYear),
-    [metrics, b.codes, historyFromYear]);
+    [valuationMetrics, b.codes, historyFromYear]);
   const yieldValues = yields.map((y) => y.yld).filter((v): v is number => v != null);
   const avgYield = meanOf(yieldValues);
   /**
@@ -782,10 +783,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   if (!points.some((p) => p.price != null) || !points.some((p) => p.value != null)) {
     return (
       <div className="py-16 flex flex-col items-center gap-3">
-        <p className="text-xs text-fg-faint text-center">
-          {t.noHistory(bl.perShare, name ?? isin)}
-        </p>
-        {basisSwitch}
+         <p className="text-xs text-fg-faint text-center">
+           {t.noHistory(bl.perShare, name ?? isin)}
+         </p>
+         {basisSwitch}
       </div>
     );
   }

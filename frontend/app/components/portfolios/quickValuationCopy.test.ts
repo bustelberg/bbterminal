@@ -15,7 +15,7 @@ import { QUICK_VALUATION_COPY as C } from './quickValuationCopy';
 import { BASIS } from './quickValuation';
 
 const LANGS = ['en', 'nl'] as const;
-const BASES = ['fcf', 'eps'] as const;
+const BASES = ['ocf', 'eps'] as const;
 
 describe('Quick Valuation copy', () => {
   it('covers both bases in both languages, with nothing blank', () => {
@@ -50,23 +50,23 @@ describe('Quick Valuation copy', () => {
     expect(C.nl.avg).not.toBe(C.en.avg);
     expect(C.nl.latest).not.toBe(C.en.latest);
     expect(C.nl.legendSharePrice).not.toBe(C.en.legendSharePrice);
-    expect(C.nl.noForwardFcf).not.toBe(C.en.noForwardFcf);
+    expect(C.nl.noForwardOcf).not.toBe(C.en.noForwardOcf);
     expect(C.nl.priceVs('X')).not.toBe(C.en.priceVs('X'));
   });
 
   it(' but keeps the terms a Dutch wealth manager actually says', () => {
     // The counterweight: `FCF`, `EPS`, `P/FCF`, `P/E` are what these are CALLED — the same
     // exception `managementCopy` records for "active share", "tracking error" and "Sharpe".
-    expect(C.nl.basis.fcf.tab).toBe('FCF');
+    expect(C.nl.basis.ocf.tab).toBe('OCF');
     expect(C.nl.basis.eps.tab).toBe('EPS');
-    expect(C.nl.basis.fcf.multiple).toBe('P/FCF');
+    expect(C.nl.basis.ocf.multiple).toBe('P/OCF');
     expect(C.nl.basis.eps.multiple).toBe('P/E');
-    expect(C.nl.basis.fcf.perShare).toContain('FCF');
-    expect(C.nl.basis.fcf.yieldTitle).toBe('FCF yield');
-    expect(C.nl.basis.fcf.yieldInline).toBe('FCF yield');
+    expect(C.nl.basis.ocf.perShare).toContain('kasstroom');
+    expect(C.nl.basis.ocf.yieldTitle).toBe('OCF yield');
+    expect(C.nl.basis.ocf.yieldInline).toBe('OCF yield');
     expect(C.nl.basis.eps.yieldInline).toBe('earnings yield');
-    expect(C.nl.pt.currentYield(C.nl.basis.fcf.yieldInline)).toBe('Huidige FCF yield');
-    expect(C.nl.pt.forecastYield(C.nl.basis.fcf.yieldInline)).toBe('Verwachte FCF yield');
+    expect(C.nl.pt.currentYield(C.nl.basis.ocf.yieldInline)).toBe('Huidige OCF yield');
+    expect(C.nl.pt.forecastYield(C.nl.basis.ocf.yieldInline)).toBe('Verwachte OCF yield');
   });
 
   it(' the singular/plural switch works in both languages', () => {

@@ -239,8 +239,8 @@ export default function MultipleHistoryChart({
                 there is no vendor forward series to read at all — a fact about the market, not
                 about this company. On EPS it means GuruFocus publishes no forward P/E for this
                 listing, which a re-ingest might. */}
-            {b.multiple === 'P/FCF'
-              ? t.noForwardFcf
+            {b.multiple === 'P/OCF'
+              ? t.noForwardOcf
               : t.noForwardPublished(bl.multiple, String(fromYear))}
           </p>
         ) : (
