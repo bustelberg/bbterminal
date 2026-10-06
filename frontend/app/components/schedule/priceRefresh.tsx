@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { startLocalJob } from '../../../lib/stores/jobs';
 
 /** The compact result of a single-stock GuruFocus price refresh
  * (`POST /api/admin/company-price-refresh`). */
@@ -37,25 +38,31 @@ export function useStockRefresh(onSuccess?: () => void | Promise<void>) {
   const [refreshing, setRefreshing] = useState<Set<number>>(new Set());
   const [results, setResults] = useState<Map<number, PriceRefreshResult | { error: string }>>(new Map());
 
-  const refresh = useCallback(async (companyId: number, strategyId?: number | null) => {
-    setRefreshing((s) => new Set(s).add(companyId));
-    try {
-      const r = await apiFetch(`${API_URL}/api/admin/company-price-refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_id: companyId, strategy_id: strategyId ?? null }),
-      });
-      const body = await r.json().catch(() => null);
-      setResults((m) => new Map(m).set(
-        companyId,
-        r.ok ? (body as PriceRefreshResult) : { error: body?.detail ?? `HTTP ${r.status}` },
-      ));
-      if (r.ok) await onSuccess?.();
-    } catch (e) {
-      setResults((m) => new Map(m).set(companyId, { error: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setRefreshing((s) => { const n = new Set(s); n.delete(companyId); return n; });
-    }
+  const refresh = useCallback((companyId: number, strategyId?: number | null) => {
+    startLocalJob("Refreshing price", "portfolio-price-refresh", async (signal, report) => {
+      setRefreshing((s) => new Set(s).add(companyId));
+      report({ done: 0, total: 0, message: "Fetching the latest market price…" });
+      try {
+        const r = await apiFetch(`${API_URL}/api/admin/company-price-refresh`, {
+          method: 'POST', signal,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ company_id: companyId, strategy_id: strategyId ?? null }),
+        });
+        const body = await r.json().catch(() => null);
+        if (!r.ok) {
+          const message = body?.detail ?? `HTTP ${r.status}`;
+          setResults((m) => new Map(m).set(companyId, { error: message }));
+          throw new Error(message);
+        }
+        const result = body as PriceRefreshResult;
+        setResults((m) => new Map(m).set(companyId, result));
+        await onSuccess?.();
+        report({ done: 1, total: 1, message: "Price data updated" });
+        return result.db.advanced ? "Price data updated" : "Price data already current";
+      } finally {
+        setRefreshing((s) => { const n = new Set(s); n.delete(companyId); return n; });
+      }
+    }, { cancellable: false });
   }, [onSuccess]);
 
   const clear = useCallback((companyId: number) => {

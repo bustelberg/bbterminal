@@ -36,7 +36,7 @@ import { holdingsExportName } from "./exportName";
 import BreakdownModal, {
   type BreakdownTarget,
 } from "../momentum/BreakdownModal";
-import { PriceRefreshPanel, useStockRefresh } from "./priceRefresh";
+import { useStockRefresh } from "./priceRefresh";
 import type { Column } from "../../../lib/tableExport";
 import type { Holding, PeriodRecord } from "../../../lib/stores/momentum";
 import type { components } from "../../../lib/api-types";
@@ -959,9 +959,7 @@ export default function CurrentPortfolioCard({
   const [actualFillsOpen, setActualFillsOpen] = useState(false);
   const {
     refreshing,
-    results: refreshResults,
     refresh,
-    clear: clearRefresh,
   } = useStockRefresh(refetchAll);
   const refreshOne = useCallback(
     (companyId: number) => refresh(companyId, strategyId),
@@ -1479,7 +1477,6 @@ export default function CurrentPortfolioCard({
               // colour; healthy rows show it subtly on hover.
               const canRefresh = canEditCash;
               const isStale = staleSet.has(h.company_id) || staleEnd;
-              const detail = refreshResults.get(h.company_id);
               const entryAsOfCell = () => (
                 <td
                   className="py-2 px-2 text-right font-mono whitespace-nowrap text-fg-subtle"
@@ -1632,16 +1629,6 @@ export default function CurrentPortfolioCard({
                       {fmtPct(eurReturn)}
                     </td>
                   </tr>
-                  {detail && (
-                    <tr className="border-b border-neutral-800/30 bg-inset/40">
-                      <td colSpan={17} className="px-3 py-2">
-                        <PriceRefreshPanel
-                          result={detail}
-                          onClose={() => clearRefresh(h.company_id)}
-                        />
-                      </td>
-                    </tr>
-                  )}
                 </Fragment>
               );
             })}
