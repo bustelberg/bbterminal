@@ -7679,6 +7679,32 @@ export interface paths {
         patch: operations["set_strategy_cash_api_scheduled_strategies__strategy_id__cash_patch"];
         trace?: never;
     };
+    "/api/scheduled-strategies/{strategy_id}/corporate-actions/reconstruct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconstruct Corporate Action Reserves
+         * @description Repair one pre-reserve live book, then apply its confirmed action.
+         *
+         *     Reserves did not exist when October's Qorvo basket was locked.  This
+         *     deliberately reconstructs only the original deciding-bar selection, checks
+         *     that it agrees with the stored non-Qorvo holdings, and writes *only* its
+         *     reserve list.  A disagreement is a hard failure: revised history must not
+         *     turn this repair endpoint into a retrospective rebalance.
+         */
+        post: operations["reconstruct_corporate_action_reserves_api_scheduled_strategies__strategy_id__corporate_actions_reconstruct_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduled-strategies/{strategy_id}/reprice": {
         parameters: {
             query?: never;
@@ -9755,6 +9781,8 @@ export interface components {
             end_date?: string;
             /** Etf Overlay */
             etf_overlay?: components["schemas"]["EtfOverlayHolding"][] | null;
+            /** Evaluation Date */
+            evaluation_date?: string | null;
             /**
              * Force Recompute
              * @default false
@@ -24036,6 +24064,37 @@ export interface operations {
                 "application/json": components["schemas"]["SetCashRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconstruct_corporate_action_reserves_api_scheduled_strategies__strategy_id__corporate_actions_reconstruct_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

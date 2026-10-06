@@ -3957,6 +3957,18 @@
             ],
             "title": "Etf Overlay"
           },
+          "evaluation_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Date"
+          },
           "force_recompute": {
             "default": false,
             "title": "Force Recompute",
@@ -30829,6 +30841,47 @@
           }
         },
         "summary": "Set Strategy Cash",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}/corporate-actions/reconstruct": {
+      "post": {
+        "description": "Repair one pre-reserve live book, then apply its confirmed action.\n\nReserves did not exist when October's Qorvo basket was locked.  This\ndeliberately reconstructs only the original deciding-bar selection, checks\nthat it agrees with the stored non-Qorvo holdings, and writes *only* its\nreserve list.  A disagreement is a hard failure: revised history must not\nturn this repair endpoint into a retrospective rebalance.",
+        "operationId": "reconstruct_corporate_action_reserves_api_scheduled_strategies__strategy_id__corporate_actions_reconstruct_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconstruct Corporate Action Reserves",
         "tags": [
           "schedule"
         ]
