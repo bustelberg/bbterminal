@@ -807,6 +807,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/isins/refresh-prices/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Account Isin Prices Job
+         * @description Refresh stale Yahoo closes after an expanded row has already rendered.
+         *
+         *     ``resolve_account_isins`` owns the stale-price test and writes any newly fetched closes to
+         *     the normal cache. A tracked, keyed job makes repeated expands join one refresh instead of
+         *     creating concurrent Yahoo work for the same account.
+         */
+        post: operations["refresh_account_isin_prices_job_api_airs_accounts__portefeuille__isins_refresh_prices_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/link": {
         parameters: {
             query?: never;
@@ -7655,6 +7679,32 @@ export interface paths {
         patch: operations["set_strategy_cash_api_scheduled_strategies__strategy_id__cash_patch"];
         trace?: never;
     };
+    "/api/scheduled-strategies/{strategy_id}/corporate-actions/reconstruct": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconstruct Corporate Action Reserves
+         * @description Repair one pre-reserve live book, then apply its confirmed action.
+         *
+         *     Reserves did not exist when October's Qorvo basket was locked.  This
+         *     deliberately reconstructs only the original deciding-bar selection, checks
+         *     that it agrees with the stored non-Qorvo holdings, and writes *only* its
+         *     reserve list.  A disagreement is a hard failure: revised history must not
+         *     turn this repair endpoint into a retrospective rebalance.
+         */
+        post: operations["reconstruct_corporate_action_reserves_api_scheduled_strategies__strategy_id__corporate_actions_reconstruct_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/scheduled-strategies/{strategy_id}/reprice": {
         parameters: {
             query?: never;
@@ -9731,6 +9781,8 @@ export interface components {
             end_date?: string;
             /** Etf Overlay */
             etf_overlay?: components["schemas"]["EtfOverlayHolding"][] | null;
+            /** Evaluation Date */
+            evaluation_date?: string | null;
             /**
              * Force Recompute
              * @default false
@@ -11072,6 +11124,11 @@ export interface components {
              * @default annual
              */
             cadence?: string;
+            /**
+             * Earnings Only
+             * @default false
+             */
+            earnings_only?: boolean;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
@@ -13571,6 +13628,11 @@ export interface components {
              * @default annual
              */
             cadence?: string;
+            /**
+             * Earnings Only
+             * @default false
+             */
+            earnings_only?: boolean;
             /** Holdings */
             holdings?: {
                 [key: string]: unknown;
@@ -15350,6 +15412,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AirsAccountIsins"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_account_isin_prices_job_api_airs_accounts__portefeuille__isins_refresh_prices_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -23971,6 +24064,37 @@ export interface operations {
                 "application/json": components["schemas"]["SetCashRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconstruct_corporate_action_reserves_api_scheduled_strategies__strategy_id__corporate_actions_reconstruct_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

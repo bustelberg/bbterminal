@@ -4132,7 +4132,35 @@ async def airs_account_isins(portefeuille: str):
     """
     from routers._airs_holding_isin import resolve_account_isins_async  # noqa: PLC0415
 
-    return await resolve_account_isins_async(portefeuille)
+    # An expand must be bounded by database reads, not by a vendor call for a stale Yahoo close.
+    # The UI starts the price refresh as a job after it has rendered this cached answer. Keeping
+    # the blocking mode off this public route also prevents a query parameter from reintroducing
+    # the very expand delay it is meant to remove.
+    return await resolve_account_isins_async(portefeuille, freshen=False)
+
+
+@router.post("/api/airs/accounts/{portefeuille}/isins/refresh-prices/job")
+async def refresh_account_isin_prices_job(portefeuille: str):
+    """Refresh stale Yahoo closes after an expanded row has already rendered.
+
+    ``resolve_account_isins`` owns the stale-price test and writes any newly fetched closes to
+    the normal cache. A tracked, keyed job makes repeated expands join one refresh instead of
+    creating concurrent Yahoo work for the same account.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        ctx.progress(0, 0, f"Refreshing stale price checks for {portefeuille}...")
+        ctx.check()
+        result = resolve_account_isins(portefeuille, freshen=True)
+        ctx.check()
+        count = len(result.get("rows") or [])
+        ctx.progress(1, 1, f"Price checks refreshed for {count} holdings")
+        return f"Price checks refreshed for {count} holdings"
+
+    job, reused = job_registry.start("airs.account-price-check", portefeuille, _work)
+    return {"job_id": job.id, "label": portefeuille, "already_running": reused}
 
 
 class AirsAccountTransactions(BaseModel):

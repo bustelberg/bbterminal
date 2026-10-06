@@ -338,6 +338,11 @@ class TestExpandingAnAccountIsAdminOnly:
         (`openModal` in PortfolioOverviewPanel). A prefix would take that away silently."""
         assert _run(monkeypatch, "GET", "/api/airs/accounts/BUS_X/isins", "user") == (200, True)
 
+    def test_background_isin_price_refresh_is_allowed(self, monkeypatch):
+        """It only refreshes vendor closes; it cannot alter the account's stored book."""
+        assert _run(monkeypatch, "POST",
+                    "/api/airs/accounts/BUS_X/isins/refresh-prices/job", "user") == (200, True)
+
     def test_the_account_name_may_contain_anything_url_safe(self, monkeypatch):
         """ AIRS's `Portefeuille` is a 24-char legacy code with underscores and digits, and it
         arrives percent-encoded. A pattern anchored on a narrower character class would match the

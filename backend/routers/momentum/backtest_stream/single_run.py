@@ -165,7 +165,7 @@ def _attach_exchanges(daily_picks: list[dict]) -> None:
                     h["exchange"] = ex
 
 
-def _daily_from(months_back: int):
+def _daily_from(months_back: int, today=None):
     """First day of the month `months_back` months ago, or None for "this period".
 
      WHOLE MONTHS, ANCHORED TO A MONTH START — not `today - 60 days`. The picks
@@ -177,7 +177,7 @@ def _daily_from(months_back: int):
         return None
     from datetime import date  # noqa: PLC0415
 
-    t = date.today()
+    t = today or date.today()
     y, m = t.year, t.month - months_back
     while m <= 0:
         m += 12
@@ -283,7 +283,8 @@ async def run_single(
                     monthly_eligible=monthly_eligible,
                     prices_local_df=prices_local_df,
                     company_currency=company_currency,
-                    daily_from=_daily_from(req.daily_months_back),
+                    today=req.evaluation_date,
+                    daily_from=_daily_from(req.daily_months_back, req.evaluation_date),
                     cached_selections=_cached_frames or None,
                     cached_sector_scores=_cached_sectors or None,
                 )

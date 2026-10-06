@@ -3957,6 +3957,18 @@
             ],
             "title": "Etf Overlay"
           },
+          "evaluation_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluation Date"
+          },
           "force_recompute": {
             "default": false,
             "title": "Force Recompute",
@@ -7436,6 +7448,11 @@
             "default": "annual",
             "title": "Cadence",
             "type": "string"
+          },
+          "earnings_only": {
+            "default": false,
+            "title": "Earnings Only",
+            "type": "boolean"
           },
           "holdings": {
             "anyOf": [
@@ -14023,6 +14040,11 @@
             "title": "Cadence",
             "type": "string"
           },
+          "earnings_only": {
+            "default": false,
+            "title": "Earnings Only",
+            "type": "boolean"
+          },
           "holdings": {
             "anyOf": [
               {
@@ -17881,6 +17903,47 @@
           }
         },
         "summary": "Airs Account Isins",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/isins/refresh-prices/job": {
+      "post": {
+        "description": "Refresh stale Yahoo closes after an expanded row has already rendered.\n\n``resolve_account_isins`` owns the stale-price test and writes any newly fetched closes to\nthe normal cache. A tracked, keyed job makes repeated expands join one refresh instead of\ncreating concurrent Yahoo work for the same account.",
+        "operationId": "refresh_account_isin_prices_job_api_airs_accounts__portefeuille__isins_refresh_prices_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Account Isin Prices Job",
         "tags": [
           "airs"
         ]
@@ -30778,6 +30841,47 @@
           }
         },
         "summary": "Set Strategy Cash",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/scheduled-strategies/{strategy_id}/corporate-actions/reconstruct": {
+      "post": {
+        "description": "Repair one pre-reserve live book, then apply its confirmed action.\n\nReserves did not exist when October's Qorvo basket was locked.  This\ndeliberately reconstructs only the original deciding-bar selection, checks\nthat it agrees with the stored non-Qorvo holdings, and writes *only* its\nreserve list.  A disagreement is a hard failure: revised history must not\nturn this repair endpoint into a retrospective rebalance.",
+        "operationId": "reconstruct_corporate_action_reserves_api_scheduled_strategies__strategy_id__corporate_actions_reconstruct_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_id",
+            "required": true,
+            "schema": {
+              "title": "Strategy Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reconstruct Corporate Action Reserves",
         "tags": [
           "schedule"
         ]

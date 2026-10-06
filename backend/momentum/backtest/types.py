@@ -423,6 +423,10 @@ class CurrentPortfolio:
     # anchor. A rebalance that quietly selected from 900 of 1,479 names because
     # the rest were stale looks exactly like one that selected from all of them.
     excluded_stale_count: int = 0
+    # Ordered, same-sector fallbacks captured at the rebalance decision.  These
+    # are evidence of what the strategy would have bought *then*, not a fresh
+    # recommendation calculated after a corporate action.
+    selection_reserves: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -430,6 +434,7 @@ class CurrentPortfolio:
             "latest_price_date": self.latest_price_date,
             "entry_anchor_date": self.entry_anchor_date,
             "excluded_stale_count": self.excluded_stale_count,
+            "selection_reserves": self.selection_reserves,
             "holdings": [
                 {
                     "company_id": h.company_id,

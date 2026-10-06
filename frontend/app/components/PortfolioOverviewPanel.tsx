@@ -1,6 +1,7 @@
 'use client';
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import { apiFetch } from '../../lib/apiFetch';
 import { API_URL } from '../../lib/apiUrl';
 import { trace, traceEmpty, traceError, traceRows, traceScope } from '../../lib/debugTrace';
@@ -9,9 +10,6 @@ import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
-import PortfolioAnalysisModal from './portfolios/PortfolioAnalysisModal';
-import PortfolioFundamentalModal from './portfolios/PortfolioFundamentalModal';
-import PortfolioEarningsModal from './portfolios/PortfolioEarningsModal';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
@@ -31,6 +29,19 @@ import type {
   AirsPortfolioOverview,
 } from '../../lib/types/api';
 import { useMgmtCopy } from './management/managementCopy';
+
+// These are substantial, self-contained workspaces that only exist after a row action. Keeping
+// them out of the overview chunk makes opening /management-dashboard about the table, rather than
+// about charts, valuation models and earnings history the reader may never request.
+const PortfolioAnalysisModal = dynamic(() => import('./portfolios/PortfolioAnalysisModal'), {
+  ssr: false,
+});
+const PortfolioFundamentalModal = dynamic(() => import('./portfolios/PortfolioFundamentalModal'), {
+  ssr: false,
+});
+const PortfolioEarningsModal = dynamic(() => import('./portfolios/PortfolioEarningsModal'), {
+  ssr: false,
+});
 
 function prefetchModelAnalysis(id: number) {
   const key = `id:${id}|ACWI|book||0|0`;
@@ -101,6 +112,50 @@ type ScanStep = {
 /**  / — /  per report outcome. `no_data` is AIRS ANSWERING (this book has no such report), so it
  *  must not wear the failure mark: 14 of 44 books have no fixed model and never will. */
 const STEP_MARK: Record<string, string> = { ok: '', no_data: '—', failed: '' };
+
+// The overview is a read-only snapshot and takes a noticeable round trip even after the backend
+// cache has done its work. Keep a very short per-tab copy so returning to this page can paint the
+// last known table first, then replace it with the server's current answer. sessionStorage is
+// deliberately used rather than localStorage: this is navigation polish, not durable data.
+const OVERVIEW_CACHE_KEY = 'bbterminal:airs-overview:v1';
+const OVERVIEW_CACHE_TTL_MS = 30_000;
+
+type OverviewCache = { cachedAt: number; rows: AirsPortfolioOverview[] };
+
+function readOverviewCache(): AirsPortfolioOverview[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(OVERVIEW_CACHE_KEY) ?? 'null') as
+      Partial<OverviewCache> | null;
+    if (!parsed || !Array.isArray(parsed.rows) || typeof parsed.cachedAt !== 'number'
+      || Date.now() - parsed.cachedAt > OVERVIEW_CACHE_TTL_MS) {
+      window.sessionStorage.removeItem(OVERVIEW_CACHE_KEY);
+      return null;
+    }
+    return parsed.rows;
+  } catch {
+    // Private browsing and a malformed old cache are both cache misses, never page failures.
+    return null;
+  }
+}
+
+function writeOverviewCache(rows: AirsPortfolioOverview[]) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(OVERVIEW_CACHE_KEY, JSON.stringify({ cachedAt: Date.now(), rows }));
+  } catch {
+    // Storage is optional. The fresh server response has already rendered.
+  }
+}
+
+function invalidateOverviewCache() {
+  if (typeof window === 'undefined') return;
+  try { window.sessionStorage.removeItem(OVERVIEW_CACHE_KEY); } catch { /* storage is optional */ }
+}
+
+// Preserve the server's loading markup during hydration, then install a cached table before the
+// browser's first client-side paint. A plain useEffect would leave a visible loading flash.
+const useBrowserLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 /**
  * Print every scan step the console has not seen yet; returns the new high-water mark.
@@ -219,6 +274,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, AirsAccountDetail>>({});
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
+  // One cache refresh per account per mounted dashboard. The server also de-duplicates jobs, but
+  // this avoids attaching a second toast every time somebody collapses and re-expands the row.
+  const priceRefreshStartedRef = useRef<Set<string>>(new Set());
   const [hideSmall, setHideSmall] = useState(true);
   // The allocation-policy editor. Mounted only while open — it fetches its own grid, and a policy
   // nobody asked to see is not worth a request on every page load.
@@ -515,6 +573,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           text: `${portefeuille}: deleted. Run Refresh all to rebuild it.`,
           kind: 'warn',
         });
+        invalidateOverviewCache();
       }
       await loadOverview();
     } catch (e) {
@@ -530,11 +589,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // re-fetching left the open row on "Loading holdings…" for ever, since nothing re-requests until
   // the next click — the row had to be collapsed and re-expanded by hand to recover.
   const loadDetail = useCallback(async (p: string) => {
-    //  Timed, because "IT TAKES A WHILE" IS NOT A BUG REPORT. Expanding a row fires three
-    // requests and the slow one is not the obvious one: measured 2026-07-30, `/isins` spent
-    // 11,537 ms of 11,793 ms inside a single step (refreshing stale prices from Yahoo) while
-    // every DB read was under 60 ms. The backend returns its own per-phase breakdown; this
-    // logs the wall time around it so network and server time are told apart.
+    // Timed because the cached response must stay quick. The former 11.5-second Yahoo
+    // freshening runs below as a job only after this response has painted the expanded row.
     const t0 = performance.now();
     // Fetched together: a holding briefly showing its value without its identity, or worse with
     // the wrong one, is not an improvement over showing neither.
@@ -556,6 +612,30 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     }
     setDetail((d) => ({ ...d, [p]: holdings }));
     if (resolved) setIsins((m) => ({ ...m, [p]: resolved }));
+
+    if (!resolved || priceRefreshStartedRef.current.has(p)) return;
+    priceRefreshStartedRef.current.add(p);
+    void (async () => {
+      try {
+        const { done } = await startJob(
+          `${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins/refresh-prices/job`,
+          `${p}: price validation`,
+        );
+        const job = await done;
+        if (job.status === 'failed') return;
+
+        // The job writes the normal close cache. Re-read just this account so the already-open
+        // row adopts the fresher validation without reloading its holdings or the overview.
+        const refreshed = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`);
+        if (!refreshed.ok) return;
+        const fresh = (await refreshed.json()) as AirsAccountIsins;
+        setIsins((m) => ({ ...m, [p]: fresh }));
+      } catch (error) {
+        // The cached answer remains useful; a failed optional freshness upgrade must not hide it.
+        priceRefreshStartedRef.current.delete(p);
+        logDetail(`background price validation for ${p} failed`, error);
+      }
+    })();
   }, []);
 
   const loadOverview = useCallback(async () => {
@@ -585,6 +665,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               + 'never been scraped. Every return column on this page will be blank.');
           }
         }
+        writeOverviewCache(body);
         setRows(body);
         setErr(null);
       } catch (e) {
@@ -592,6 +673,13 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         setErr(e instanceof Error ? e.message : String(e));
       }
     });
+  }, []);
+
+  // Paint the last short-lived snapshot before the browser shows the client render, then always
+  // revalidate against the backend. That is stale-while-revalidate rather than a cache-only view.
+  useBrowserLayoutEffect(() => {
+    const cached = readOverviewCache();
+    if (cached) setRows(cached);
   }, []);
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
@@ -618,6 +706,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     // and therefore a second toast, which is the duplicate card this guard exists to prevent. The
     // ref, not `refreshingRows`: React batches, so two clicks in one tick see the same stale Set.
     if (refreshingRef.current.has(portefeuille)) return;
+    // Do not let a route return during this manual refresh paint a snapshot that it is replacing.
+    invalidateOverviewCache();
     refreshingRef.current = new Set(refreshingRef.current).add(portefeuille);
     setRefreshingRows((s) => new Set(s).add(portefeuille));
     try {
@@ -725,6 +815,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
 
   const refreshAll = async (force = false) => {
     if (refreshingAll) return;
+    // See refreshOne: this run changes the source of every overview row.
+    invalidateOverviewCache();
     setRefreshingAll(true);
     try {
       //  A fresh one per run. Its `seen` high-water mark is per-scan; reusing it would make the

@@ -27,9 +27,14 @@ WHAT IT JOINS, AND WHY EACH SIDE IS THERE
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import re
 
 from deps import supabase
+
+
+_log = logging.getLogger(__name__)
 
 
 _MANAGEMENT_GROUPS = {
@@ -127,8 +132,104 @@ def _overview_name(account_name: str | None, account_nicknames: dict[str, str],
     return account_name, False
 
 
+def _overview_payload() -> dict | None:
+    """The one-RPC overview input bundle, or ``None`` while a migration is still rolling out."""
+    try:
+        data = supabase.rpc("airs_overview_payload").execute().data
+        payload = data[0].get("payload") if isinstance(data, list) and data else data
+        if isinstance(payload, str):
+            payload = json.loads(payload)
+        if not isinstance(payload, dict):
+            raise ValueError("RPC returned no object payload")
+        if not isinstance(payload.get("accounts"), list) or not isinstance(payload.get("models"), list):
+            raise ValueError("RPC payload is missing accounts or models")
+        return payload
+    except Exception as exc:  # noqa: BLE001 - old deployed schemas retain the correct fallback
+        _log.warning("[airs overview] one-RPC payload unavailable; using legacy reads: %s", exc)
+        return None
+
+
+def _list_overview_from_payload(payload: dict) -> list[dict]:
+    """Apply reviewed Python-only pairing and naming rules to one database snapshot."""
+    from ._airs_account_links import guess_model, mapped_model  # noqa: PLC0415
+    from ._management_topselecties import topselectie_for_account  # noqa: PLC0415
+
+    accounts = payload["accounts"]
+    model_rows = payload["models"]
+    models = {m["id"]: m for m in model_rows}
+    models_with_positions = [m for m in model_rows if (m.get("positions") or 0) > 0]
+    account_nicknames = {
+        (a.get("portefeuille") or "").strip().lower(): a["account_display_name"]
+        for a in accounts if a.get("account_display_name")
+    }
+    direct_model_nicknames = {
+        (m.get("name") or "").strip().lower(): m["display_name"]
+        for m in model_rows if (m.get("name") or "").strip() and m.get("display_name")
+    }
+
+    out: list[dict] = []
+    for a in accounts:
+        account = a["portefeuille"]
+        stored = bool(a.get("has_stored_link"))
+        guessed, why = guess_model(account, models_with_positions)
+        if guessed is None and (mapped := mapped_model(account, model_rows)):
+            guessed, why = mapped, "reviewed strategy-map pairing"
+        model_id = a.get("stored_model_portfolio_id") if stored else (
+            guessed.get("id") if guessed else None)
+        model = models.get(model_id) if model_id else None
+        source = "manual" if stored else ("guess" if guessed else "none")
+        reason = a.get("stored_link_note") if stored else why
+
+        display_name, name_is_custom = _overview_name(
+            account, account_nicknames, direct_model_nicknames, model)
+        management_group = _management_group(account)
+        if management_group == "topselecties" and not topselectie_for_account(account):
+            continue
+        display_name = _management_name(display_name, management_group, account)
+        out.append({
+            "name": display_name,
+            "management_group": management_group,
+            "name_is_custom": name_is_custom,
+            "description": (model or {}).get("omschrijving"),
+            "dynamic_portefeuille": account,
+            "fixed_name": (model or {}).get("name"),
+            "fixed_portfolio_id": (model or {}).get("id"),
+            "fixed_type": (model or {}).get("portfolio_type"),
+            "model_fetched_at": (model or {}).get("scanned_at"),
+            "isins": a.get("isins"),
+            "link_source": source,
+            "link_reason": reason,
+            "as_of": a.get("as_of"),
+            "periode": a.get("periode"),
+            "months": a.get("months"),
+            "ytd_pct": a.get("ytd_pct"),
+            "latest_month_pct": a.get("latest_month_pct"),
+            "price_result_eur": a.get("price_result_eur"),
+            "income_eur": a.get("income_eur"),
+            "investment_result_eur": a.get("investment_result_eur"),
+            "deposits_eur": a.get("deposits_eur"),
+            "withdrawals_eur": a.get("withdrawals_eur"),
+            "begin_value_eur": a.get("begin_value_eur"),
+            "end_value_eur": a.get("end_value_eur"),
+            "holdings": a.get("holdings"),
+            "reconciles": a.get("reconciles"),
+            "missing_reports": a.get("missing_reports") or [],
+            "fetched_at": a.get("fetched_at"),
+            "residual_eur": a.get("residual_eur"),
+        })
+    out.sort(key=lambda r: (r["fixed_name"] is None, (r["name"] or "").lower()))
+    return out
+
+
 def list_overview() -> list[dict]:
-    """One row per AIRS Dynamic portfolio, named by the Fixed portfolio it runs."""
+    """One row per AIRS Dynamic portfolio, from one database RPC where available."""
+    if (payload := _overview_payload()) is not None:
+        return _list_overview_from_payload(payload)
+    return _list_overview_legacy()
+
+
+def _list_overview_legacy() -> list[dict]:
+    """Pre-RPC fallback kept only for a rolling migration window."""
     from ._airs_account_links import list_account_links  # noqa: PLC0415  (circular at import)
     from ._airs_accounts import list_accounts  # noqa: PLC0415
     from ._management_topselecties import topselectie_for_account  # noqa: PLC0415

@@ -133,7 +133,10 @@ async def _momentum_backtest_stream(req: BacktestRequest):
     # so price loading covers ~14 months of history (12m momentum + buffer)
     # without requiring the caller to pick the right window.
     if req.mode == "current_portfolio":
-        _today = date.today()
+        # A corporate-action repair may reconstruct one already-locked
+        # decision.  It passes its effective date explicitly; ordinary runs
+        # retain the wall-clock behaviour.
+        _today = req.evaluation_date or date.today()
         #  The load window has to reach behind the walk, not just behind today. The
         # signals need ~12 months before the EARLIEST cutoff, so a retrospective
         # walk needs its months added on top — otherwise the oldest days in the

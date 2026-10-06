@@ -185,11 +185,11 @@ class TestItLogsWhatTheRunActuallyDID:
         from momentum.backtest import current_portfolio
 
         src = inspect.getsource(current_portfolio.run_current_portfolio)
-        block = src.split("Sector ranking", 1)[0][-1400:]
-        assert "score_universe(" in block
+        block = src.split("Sector ranking", 1)[0][-1800:]
+        assert "scored = score_universe(" in src
         # the CALL, not the comment that explains why it isn't used
         assert "= selection_pool(" not in block
-        assert "sector_pool_scores(scored_for_log)" in src
+        assert "sector_pool_scores(scored)" in src
 
     def test_a_diagnostic_can_never_fail_the_rebalance(self):
         from momentum.backtest import current_portfolio

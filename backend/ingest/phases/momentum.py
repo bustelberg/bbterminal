@@ -540,7 +540,7 @@ def _read_base_snapshot(snapshot_id: int) -> dict:
     cash applied yet)."""
     r = (
         supabase.table("current_picks_snapshot")
-        .select("holdings, as_of_date, latest_price_date, daily_picks, strategy_hash, name")
+        .select("holdings, selection_reserves, as_of_date, latest_price_date, daily_picks, strategy_hash, name")
         .eq("snapshot_id", snapshot_id)
         .limit(1)
         .execute()
@@ -568,6 +568,7 @@ def _clone_rebalance_snapshot(
         "latest_price_date": base.get("latest_price_date"),
         "config": config,
         "holdings": base.get("holdings") or [],
+        "selection_reserves": base.get("selection_reserves") or [],
         "daily_picks": base.get("daily_picks") or [],
         "strategy_hash": base.get("strategy_hash"),
         "name": base.get("name"),

@@ -865,5 +865,11 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     }
 
 
-async def resolve_account_isins_async(portefeuille: str) -> dict:
-    return await asyncio.to_thread(resolve_account_isins, portefeuille)
+async def resolve_account_isins_async(portefeuille: str, *, freshen: bool = True) -> dict:
+    """Run the cache-backed ISIN resolution away from the event loop.
+
+    Callers opening a row use ``freshen=False`` so a slow Yahoo request can never hold the row
+    hostage. The separate refresh job performs the optional freshening and the client re-reads
+    this same cached response when that work is complete.
+    """
+    return await asyncio.to_thread(resolve_account_isins, portefeuille, freshen=freshen)
