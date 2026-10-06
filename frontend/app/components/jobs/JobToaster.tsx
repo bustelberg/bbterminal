@@ -241,7 +241,7 @@ function JobCard({ job }: { job: JobToast }) {
       )}
 
       <div className="flex justify-end gap-2">
-        {running && !job.cancelRequested && (
+        {running && job.cancellable !== false && !job.cancelRequested && (
           <button type="button" onClick={() => void cancelJob(job.id)}
             title="Stop this job at its next safe point. Whatever has already been written stays
 written — it is not rolled back — and re-running picks up where it left off."

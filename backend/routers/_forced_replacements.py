@@ -60,7 +60,9 @@ def apply_confirmed_actions(today: date | None = None, *,
                 replacement = {**victim, "company_id": replacement_id,
                                "ticker": reserve.get("ticker"), "company_name": reserve.get("company_name"),
                                "sector": reserve.get("sector"), "score": reserve.get("score"),
-                               "entry_date": day, "entry_price_local": None, "entry_price_eur": None,
+                               # It belongs to the locked period, so retain the original
+                               # deciding-bar entry date rather than the later takeover date.
+                               "entry_date": victim.get("entry_date"), "entry_price_local": None, "entry_price_eur": None,
                                "exit_date": None, "exit_price_local": None, "exit_price_eur": None,
                                "forward_return_pct": None}
             else:

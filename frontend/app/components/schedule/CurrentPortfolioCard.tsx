@@ -5,6 +5,7 @@ import LoadingDots from "../LoadingDots";
 import CellInfoTip from "../momentum/CellInfoTip";
 import { apiFetch } from "../../../lib/apiFetch";
 import { API_URL } from "../../../lib/apiUrl";
+import { startLocalJob } from "../../../lib/stores/jobs";
 import { useApiData } from "../../../lib/hooks/useApiData";
 import {
   useBenchmarkCurrencyMap,
@@ -42,6 +43,81 @@ import type { components } from "../../../lib/api-types";
 
 /** The reprice endpoint's payload — see `ReloadPrices`. */
 type ReloadResult = components["schemas"]["RepriceResult"];
+
+type CorporateActionRepairResult = {
+  reconstructed_reserves: number;
+  replacements_applied: number;
+  current_snapshot?: { snapshot_id: number; holdings?: Holding[] } | null;
+};
+
+/** One-time repair for a holding removed by a confirmed corporate action.
+ *
+ * This is intentionally NOT the normal Rebalance button: it replays the
+ * locked deciding-bar calculation only to recover the frozen reserve order,
+ * validates that replay against the stored basket, then replaces the affected
+ * holding at its existing weight. Keeping it beside the live holdings gives
+ * the operator an obvious, authenticated portfolio-recalculation path rather
+ * than a Qorvo-specific hidden API URL.
+ */
+function RepairCorporateAction({
+  strategyId,
+  canEdit,
+  onDone,
+}: {
+  strategyId?: number;
+  canEdit?: boolean;
+  onDone?: () => void | Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  if (!canEdit || strategyId == null) return null;
+
+  const run = async () => {
+    setBusy(true);
+    startLocalJob(
+      "Updating portfolio", "portfolio-recalculation",
+      async (signal, report) => {
+        report({ done: 0, total: 0, message: "Checking holdings and applying any required updates…" });
+        try {
+          const response = await apiFetch(
+            `${API_URL}/api/scheduled-strategies/${strategyId}/corporate-actions/reconstruct`,
+            { method: "POST", signal },
+          );
+          const body = (await response.json().catch(() => null)) as
+            | CorporateActionRepairResult
+            | { detail?: string }
+            | null;
+          if (!response.ok || !body || !("replacements_applied" in body)) {
+            const detail = body && "detail" in body ? body.detail : null;
+            throw new Error(typeof detail === "string" ? detail : `HTTP ${response.status}`);
+          }
+          await onDone?.();
+          report({ done: 1, total: 1, message: "Portfolio updated" });
+          return body.replacements_applied ? "Portfolio updated" : "No changes required";
+        } finally {
+          setBusy(false);
+        }
+      },
+      // The server-side calculation is atomic but not cancellable. Hiding
+      // Cancel is more honest than aborting the browser request while the
+      // server may still finish and persist the replacement.
+      { cancellable: false },
+    );
+  };
+
+  return (
+    <span className="flex items-baseline gap-1.5">
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy}
+        title="Recalculate this portfolio's pending corporate-action fix from its original deciding-bar ranking. It validates the locked basket before applying a same-sector reserve, rather than rebalancing every holding using revised historical data."
+        className="rounded border border-neutral-700 px-2 py-0.5 text-[12px] text-fg-soft transition-colors hover:bg-overlay/5 disabled:opacity-50"
+      >
+        {busy ? "Recalculating portfolio…" : "Recalculate portfolio"}
+      </button>
+    </span>
+  );
+}
 
 /**
  * What `PATCH …/sleeves` reports about the half of the work that happens AFTER the config is
@@ -1137,6 +1213,11 @@ export default function CurrentPortfolioCard({
             onChanged={refetchAll}
           />
           <ReloadPrices
+            strategyId={strategyId}
+            canEdit={canEditCash}
+            onDone={refetchAll}
+          />
+          <RepairCorporateAction
             strategyId={strategyId}
             canEdit={canEditCash}
             onDone={refetchAll}

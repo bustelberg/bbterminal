@@ -1208,7 +1208,7 @@ async def reconstruct_corporate_action_reserves(strategy_id: int, request: Reque
     if not _is_admin(request):
         raise HTTPException(status_code=403, detail="Admin access required")
 
-    def _prepare() -> tuple[dict, dict, dict]:
+    def _prepare() -> tuple[dict, dict, dict, dict]:
         strategy_rows = (supabase.table("scheduled_strategy").select("id,name,config")
                          .eq("id", strategy_id).limit(1).execute().data or [])
         if not strategy_rows:
@@ -1224,13 +1224,15 @@ async def reconstruct_corporate_action_reserves(strategy_id: int, request: Reque
             for snapshot in snapshots:
                 if any(int(h.get("company_id") or 0) == removed
                        for h in (snapshot.get("holdings") or [])):
-                    return strategy_rows[0], action, snapshot
+                    # `snapshot` is the immutable source basket (it still has
+                    # Qorvo); `snapshots[0]` is the book currently displayed.
+                    return strategy_rows[0], action, snapshot, snapshots[0]
         raise HTTPException(
             status_code=422,
             detail="No current holding for a confirmed corporate action was found.",
         )
 
-    strategy, action, snapshot = await asyncio.to_thread(_prepare)
+    strategy, action, snapshot, current_snapshot = await asyncio.to_thread(_prepare)
     config = dict(strategy.get("config") or {})
     if not config:
         raise HTTPException(status_code=422, detail="Strategy has no saved selection config")
@@ -1301,9 +1303,40 @@ async def reconstruct_corporate_action_reserves(strategy_id: int, request: Reque
         ).eq("corporate_action_id", action["corporate_action_id"]).eq(
             "removed_company_id", removed
         ).eq("status", "cash").execute()
-        from routers._forced_replacements import apply_confirmed_actions  # noqa: PLC0415
-        applied = apply_confirmed_actions(
-            date.fromisoformat(action["effective_date"]), strategy_ids={strategy_id})
+        prior = (supabase.table("scheduled_strategy_forced_replacement")
+                 .select("replacement_company_id").eq("scheduled_strategy_id", strategy_id)
+                 .eq("corporate_action_id", action["corporate_action_id"])
+                 .eq("removed_company_id", removed).limit(1).execute().data or [])
+        if prior and prior[0].get("replacement_company_id"):
+            # Repair a replacement made by an earlier deployment, which stamped
+            # it at the action date. Its period belongs to Qorvo's original
+            # deciding bar. A normal re-price below fills the blank exact mark.
+            replacement_id = int(prior[0]["replacement_company_id"])
+            source_holding = next(h for h in (snapshot.get("holdings") or [])
+                                  if int(h.get("company_id") or 0) == removed)
+            repaired = []
+            for h in (current_snapshot.get("holdings") or []):
+                if int(h.get("company_id") or 0) == replacement_id:
+                    h = {**h, "entry_date": source_holding.get("entry_date"),
+                         "entry_price_local": None, "entry_price_eur": None,
+                         "exit_price_local": None, "exit_price_eur": None,
+                         "exit_date": None, "forward_return_pct": None}
+                repaired.append(h)
+            supabase.table("current_picks_snapshot").insert({
+                "triggered_by": "auto", "as_of_date": current_snapshot["as_of_date"],
+                "latest_price_date": current_snapshot.get("latest_price_date"),
+                "config": current_snapshot.get("config"), "holdings": repaired,
+                "selection_reserves": reserves, "daily_picks": [],
+                "strategy_hash": current_snapshot.get("strategy_hash"), "name": current_snapshot.get("name"),
+                "kind": "price_update", "scheduled_strategy_id": strategy_id,
+            }).execute()
+            from routers._schedule_snapshots import compute_and_save_price_update  # noqa: PLC0415
+            compute_and_save_price_update(strategy_id, ingest_run_id=None)
+            applied = 1
+        else:
+            from routers._forced_replacements import apply_confirmed_actions  # noqa: PLC0415
+            applied = apply_confirmed_actions(
+                date.fromisoformat(action["effective_date"]), strategy_ids={strategy_id})
         latest = (supabase.table("current_picks_snapshot").select("snapshot_id,holdings")
                   .eq("scheduled_strategy_id", strategy_id).order("created_at", desc=True)
                   .limit(1).execute().data or [])

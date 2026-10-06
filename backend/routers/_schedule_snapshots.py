@@ -311,6 +311,30 @@ def compute_and_save_price_update(
             if r.get("price") is not None:
                 exact_entry_by_bid[int(r["benchmark_id"])] = float(r["price"])
 
+    # A corporate-action reserve enters the locked period at the removed
+    # holding's original deciding-bar date. It has no historical entry mark in
+    # the snapshot yet, so fetch that exact already-recorded close once. This
+    # is deliberately limited to blank marks; ordinary company entries remain
+    # immutable history.
+    missing_entry_pairs = {
+        (int(h["company_id"]), str(h.get("entry_date") or "")[:10])
+        for h in holdings
+        if h.get("company_id") is not None and int(h["company_id"]) > 0
+        and h.get("entry_date") and not h.get("entry_price_local")
+    }
+    missing_entry_by_pair: dict[tuple[int, str], float] = {}
+    for entry_day in sorted({d for _, d in missing_entry_pairs}):
+        ids = [cid for cid, d in missing_entry_pairs if d == entry_day]
+        for r in fetch_in_chunks(
+            ids,
+            lambda chunk, d=entry_day: supabase.table("metric_data")
+            .select("company_id, numeric_value")
+            .eq("metric_code", "close_price").eq("target_date", d)
+            .in_("company_id", chunk).execute(),
+        ):
+            if r.get("numeric_value") is not None:
+                missing_entry_by_pair[(int(r["company_id"]), entry_day)] = float(r["numeric_value"])
+
     # ETF currency from the `benchmark` table (the AUTHORITATIVE ISO code). The
     # `currency` stored on the holding is unreliable — often None or a raw symbol
     # like '$' — which left ETF EUR marks blank (the '$' case) or silently
@@ -388,6 +412,13 @@ def compute_and_save_price_update(
                 new_h["entry_price_local"] = exact
                 new_h["entry_date"] = entry_anchor
                 new_h.pop("entry_price_eur", None)
+
+        if not is_etf and not entry_local and cid is not None:
+            exact = missing_entry_by_pair.get((int(cid), entry_date_iso))
+            if exact is not None:
+                entry_local = exact
+                new_h["entry_price_local"] = exact
+                repaired_entry = True
 
         #  An ETF's entry price is re-derived every run, like its entry EUR already is.
         #

@@ -50,6 +50,8 @@ export type JobToast = {
    *  the button is pressed while the job is still finishing its current feed. The card reads
    *  "cancelling…" in that window; without it the button would look inert for several seconds. */
   cancelRequested: boolean;
+  /** Local quick actions may report progress without a truthful cancel boundary. */
+  cancellable?: boolean;
   dismissed: boolean;
 };
 
@@ -149,15 +151,17 @@ const localCancels = new Map<string, () => void>();
 export function startLocalJob(
   title: string, kind: string,
   run: (signal: AbortSignal, report: (progress: { done: number; total: number; message?: string }) => void) => Promise<string | void>,
+  options: { cancellable?: boolean } = {},
 ): string {
   const id = `local:${kind}:${
     typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${performance.now()}`}`;
   const ctrl = new AbortController();
-  localCancels.set(id, () => ctrl.abort());
+  const cancellable = options.cancellable !== false;
+  if (cancellable) localCancels.set(id, () => ctrl.abort());
   jobsStore.set((st) => ({
     jobs: [...st.jobs, {
       id, title, kind, label: title, status: 'running' as JobStatus, done: 0, total: 0,
-      message: '', summary: null, apiCalls: 0, cancelRequested: false, dismissed: false,
+      message: '', summary: null, apiCalls: 0, cancelRequested: false, cancellable, dismissed: false,
     }],
   }));
   void (async () => {
