@@ -160,12 +160,14 @@ def compute_and_save_price_update(
     # backfill loop). Ordering by `as_of_date desc` deterministically
     # picks the most-recent rebalance, which is what "the strategy's
     # current open period" actually means.
+    # Start from the newest live book, not unconditionally from the original
+    # rebalance.  A corporate-action replacement is persisted as a price_update
+    # snapshot; reverting to the rebalance here would resurrect a delisted name
+    # on the following daily mark.
     rebal_resp = (
         supabase.table("current_picks_snapshot")
         .select("*")
         .eq("scheduled_strategy_id", strategy_id)
-        .eq("kind", "rebalance")
-        .order("as_of_date", desc=True)
         .order("created_at", desc=True)
         .limit(1)
         .execute()

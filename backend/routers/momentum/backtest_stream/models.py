@@ -5,6 +5,7 @@ the giant SSE orchestrator and lets `current_picks.py` import
 `BacktestRequest` without dragging in the whole pipeline."""
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel
@@ -129,6 +130,10 @@ class BacktestRequest(BaseModel):
     # eligible.
     sector_etfs: dict[str, int] | None = None
     mode: Literal["backtest", "current_portfolio"] = "backtest"
+    # Internal repair anchor.  Scheduled corporate-action recovery uses this
+    # to reconstruct the selection on its original deciding bar; normal UI
+    # requests leave it unset and therefore use today's date.
+    evaluation_date: date | None = None
     force_recompute: bool = False  # ignore cached result and recompute (applies to backtest + current_portfolio)
     # Retrospective daily-picks walk: "what would this strategy have held on each
     # trading day over the last N months". 0 (default) = the current period only,

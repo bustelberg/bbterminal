@@ -22,6 +22,7 @@ router:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import date, datetime, timezone
 
@@ -1192,6 +1193,132 @@ async def list_strategy_runs(strategy_id: int, request: Request, limit: int = 50
         }
 
     return await asyncio.to_thread(_query)
+
+
+@router.post("/api/scheduled-strategies/{strategy_id}/corporate-actions/reconstruct")
+async def reconstruct_corporate_action_reserves(strategy_id: int, request: Request):
+    """Repair one pre-reserve live book, then apply its confirmed action.
+
+    Reserves did not exist when October's Qorvo basket was locked.  This
+    deliberately reconstructs only the original deciding-bar selection, checks
+    that it agrees with the stored non-Qorvo holdings, and writes *only* its
+    reserve list.  A disagreement is a hard failure: revised history must not
+    turn this repair endpoint into a retrospective rebalance.
+    """
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    def _prepare() -> tuple[dict, dict, dict]:
+        strategy_rows = (supabase.table("scheduled_strategy").select("id,name,config")
+                         .eq("id", strategy_id).limit(1).execute().data or [])
+        if not strategy_rows:
+            raise HTTPException(status_code=404, detail="Scheduled strategy not found")
+        action_rows = (supabase.table("corporate_action").select("*")
+                       .eq("action_type", "takeover").order("effective_date", desc=True)
+                       .limit(20).execute().data or [])
+        snapshots = (supabase.table("current_picks_snapshot").select("*")
+                     .eq("scheduled_strategy_id", strategy_id)
+                     .order("created_at", desc=True).execute().data or [])
+        for action in action_rows:
+            removed = int(action["company_id"])
+            for snapshot in snapshots:
+                if any(int(h.get("company_id") or 0) == removed
+                       for h in (snapshot.get("holdings") or [])):
+                    return strategy_rows[0], action, snapshot
+        raise HTTPException(
+            status_code=422,
+            detail="No current holding for a confirmed corporate action was found.",
+        )
+
+    strategy, action, snapshot = await asyncio.to_thread(_prepare)
+    config = dict(strategy.get("config") or {})
+    if not config:
+        raise HTTPException(status_code=422, detail="Strategy has no saved selection config")
+
+    # This is the same current-portfolio loader used by a scheduled rebalance.
+    # `daily_months_back=1` is intentional: it makes the stream read-only, so
+    # it cannot create an unrelated manual snapshot while doing the audit.
+    from routers.momentum.backtest_stream import BacktestRequest, _momentum_backtest_stream  # noqa: PLC0415
+    config.update({
+        "mode": "current_portfolio", "force_recompute": True, "db_only": True,
+        "daily_months_back": 1, "evaluation_date": action["effective_date"],
+    })
+    config.pop("variants", None)
+    config.pop("n_trials", None)
+    try:
+        rebuilt_request = BacktestRequest(**config)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Saved strategy config is invalid: {exc}") from exc
+
+    rebuilt: dict | None = None
+    stream_error: str | None = None
+    async for chunk in _momentum_backtest_stream(rebuilt_request):
+        if not isinstance(chunk, str) or not chunk.startswith("data: "):
+            continue
+        try:
+            event = json.loads(chunk[len("data: "):].strip())
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "current_portfolio":
+            rebuilt = event.get("data") or {}
+        elif event.get("type") == "error":
+            stream_error = event.get("message") or "selection reconstruction failed"
+    if stream_error or rebuilt is None:
+        raise HTTPException(status_code=422, detail=stream_error or "No reconstructed portfolio returned")
+
+    removed = int(action["company_id"])
+    stored_ids = {
+        int(h["company_id"]) for h in (snapshot.get("holdings") or [])
+        if h.get("company_id") is not None and int(h["company_id"]) > 0
+        and int(h["company_id"]) != removed
+    }
+    rebuilt_ids = {
+        int(h["company_id"]) for h in (rebuilt.get("holdings") or [])
+        if h.get("company_id") is not None and int(h["company_id"]) > 0
+        and int(h["company_id"]) != removed
+    }
+    rebuilt_has_removed = any(int(h.get("company_id") or 0) == removed
+                              for h in (rebuilt.get("holdings") or []))
+    reserves = rebuilt.get("selection_reserves") or []
+    if not rebuilt_has_removed or stored_ids != rebuilt_ids or not reserves:
+        raise HTTPException(
+            status_code=409,
+            detail=("Historical selection no longer matches the stored basket; no replacement was "
+                    "written. This requires an explicit reviewed replacement."),
+        )
+
+    def _apply() -> dict:
+        # Update the precise current book which contains Qorvo, not an older
+        # rebalance snapshot. The ensuing replacement price-update inherits it.
+        supabase.table("current_picks_snapshot").update({"selection_reserves": reserves}).eq(
+            "snapshot_id", snapshot["snapshot_id"]
+        ).execute()
+        # An earlier deployment may have recorded this legacy case as cash
+        # before reserves could be reconstructed. It made no holding change;
+        # remove that retry guard now that the ranked evidence exists.
+        supabase.table("scheduled_strategy_forced_replacement").delete().eq(
+            "scheduled_strategy_id", strategy_id
+        ).eq("corporate_action_id", action["corporate_action_id"]).eq(
+            "removed_company_id", removed
+        ).eq("status", "cash").execute()
+        from routers._forced_replacements import apply_confirmed_actions  # noqa: PLC0415
+        applied = apply_confirmed_actions(
+            date.fromisoformat(action["effective_date"]), strategy_ids={strategy_id})
+        latest = (supabase.table("current_picks_snapshot").select("snapshot_id,holdings")
+                  .eq("scheduled_strategy_id", strategy_id).order("created_at", desc=True)
+                  .limit(1).execute().data or [])
+        return {"applied": applied, "snapshot": latest[0] if latest else None}
+
+    outcome = await asyncio.to_thread(_apply)
+    return {
+        "strategy_id": strategy_id,
+        "strategy_name": strategy.get("name"),
+        "corporate_action_id": action["corporate_action_id"],
+        "removed_company_id": removed,
+        "reconstructed_reserves": len(reserves),
+        "replacements_applied": outcome["applied"],
+        "current_snapshot": outcome["snapshot"],
+    }
 
 
 class RepricedHolding(BaseModel):

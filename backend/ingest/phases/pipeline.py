@@ -620,6 +620,11 @@ def _run_price_update_pipeline_sync(run_id: int) -> None:
                 include_rebalances=False,
                 dedupe_price_updates=True,
             )
+            from routers._forced_replacements import apply_confirmed_actions  # noqa: PLC0415
+            replaced = apply_confirmed_actions()
+            if replaced:
+                log_step(run_id, f"Applied {replaced} confirmed corporate-action replacement(s)",
+                         phase="momentum")
         except Exception as e:
             msg = f"Momentum price-update phase failed: {type(e).__name__}: {e}"
             log.warning("[price_update] run_id=%s %s", run_id, msg)
