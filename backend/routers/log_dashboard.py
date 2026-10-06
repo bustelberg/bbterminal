@@ -50,6 +50,21 @@ async def create_entry(body: LogEntryIn):
     return await asyncio.to_thread(create)
 
 
+@router.put("/api/log-dashboard/entries/{entry_id}")
+async def update_entry(entry_id: int, body: LogEntryIn):
+    """Update a recorded decision without changing its original meeting date."""
+    def update() -> dict:
+        try:
+            result = (supabase.table("bc_log_entry").update(body.model_dump(mode="json"))
+                      .eq("id", entry_id).execute().data or [])
+        except Exception as exc:
+            raise HTTPException(500, f"Could not update log entry: {exc}") from exc
+        if not result:
+            raise HTTPException(404, "Log entry not found")
+        return result[0]
+    return await asyncio.to_thread(update)
+
+
 @router.delete("/api/log-dashboard/entries/{entry_id}")
 async def delete_entry(entry_id: int):
     def delete() -> None:
