@@ -130,7 +130,7 @@ const SHARED = new Set([...FINANCE_EN, ...AIRS_FIELDS, ...SAME_WORD, ...IDENTIFI
 // Proper names and labels kept in English in both languages.
 const SHARED_PATHS: Record<string, Set<string>> = {
   managementCopy: new Set([
-    'page.tabs.bustelberg.label', 'page.tabs.toppenberg.label', 'page.tabs.topselecties.label',
+    'page.tabs.bustelberg.label', 'page.tabs.toppenberg.label', 'page.tabs.topselecties.label', 'page.tabs.test_topselecties.label',
   ]),
   deepValuationCopy: new Set([
     'egm.forwardPE', 'egm.fairValue', 'dcf.rowSbc', 'dcf.correctionSbc',

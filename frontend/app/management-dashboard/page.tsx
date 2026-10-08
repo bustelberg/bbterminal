@@ -22,7 +22,7 @@ import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
  * row can answer. Benchmarks are not portfolios at all — they are indices rebuilt from our own
  * constituents, the yardstick the other two are measured against rather than another thing we hold.
  */
-type TabKey = 'bustelberg' | 'toppenberg' | 'topselecties';
+type TabKey = 'bustelberg' | 'toppenberg' | 'topselecties' | 'test_topselecties';
 
 /**
  *  The order lives here, the words live in `managementCopy`. A tab's label and its hover are
@@ -46,7 +46,7 @@ type TabKey = 'bustelberg' | 'toppenberg' | 'topselecties';
  * does remove the only on-demand "fill this now" control. The schedule is what keeps it current;
  * a gap now waits for the next tick instead of a button. See `docs/airs-portfolios.md`.
  */
-const TAB_ORDER: TabKey[] = ['bustelberg', 'toppenberg', 'topselecties'];
+const TAB_ORDER: TabKey[] = ['bustelberg', 'toppenberg', 'topselecties', 'test_topselecties'];
 
 export default function Page() {
   const t = useMgmtCopy();

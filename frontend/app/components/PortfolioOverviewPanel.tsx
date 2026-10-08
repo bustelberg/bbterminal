@@ -223,18 +223,20 @@ const REPORT_LABELS: Record<string, string> = {
 };
 
 
-export type PortfolioCollection = 'bustelberg' | 'toppenberg' | 'topselecties';
+export type PortfolioCollection = 'bustelberg' | 'toppenberg' | 'topselecties' | 'test_topselecties';
 
 const collectionTitle: Record<PortfolioCollection, string> = {
   bustelberg: 'Bustelberg portfolios',
   toppenberg: 'Toppenberg portfolios',
   topselecties: 'Building blocks',
+  test_topselecties: 'Test TopSelecties',
 };
 
 const collectionNameOrder: Record<PortfolioCollection, string[]> = {
   bustelberg: ['Bustelberg Defensief', 'Bustelberg Neutraal', 'Bustelberg Beperkt Offensief', 'Bustelberg Offensief'],
   toppenberg: ['Toppenberg Defensief', 'Toppenberg Beperkt Offensief', 'Toppenberg Offensief'],
   topselecties: [],
+  test_topselecties: [],
 };
 
 // The management override deliberately uses the standard GICS taxonomy. The

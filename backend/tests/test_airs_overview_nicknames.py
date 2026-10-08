@@ -105,7 +105,8 @@ class TestManagementGroups:
     def test_the_allowlist_supplies_the_topselecties_display_name(self):
         assert ov._management_name("FamilieTopSelectie Offensief", "topselecties", "BUS_FTS_OFF_DYN") == "FamilieTopSelectie"
         assert ov._management_name("MerkenTopSelectie Offensief", "topselecties", "BUS_MTS_OFF_AFS_DYN") == "MerkenTopSelectie"
-        assert ov._management_name("TolpoortenSelectie", "topselecties", "TolpoortenSelect OFF DYN") == "TolpoortenSelectie"
+        assert ov._management_name("TolpoortenSelectie", "test_topselecties", "TolpoortenSelect OFF DYN") == "TolpoortenTopSelectie"
+        assert ov._management_group("DealmakersTopSel OFF DYN") == "test_topselecties"
 
     def test_the_topselecties_tab_is_an_explicit_allowlist(self, monkeypatch, stub):
         stub(rows=[])

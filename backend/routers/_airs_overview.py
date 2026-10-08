@@ -62,14 +62,21 @@ _RISK_PROFILE_SUFFIX = re.compile(r"\s+(?:beperkt\s+offensief|offensief|neutraal
 
 def _management_group(account_name: str | None) -> str:
     """The dashboard collection for an AIRS dynamic portfolio."""
+    from airs_portfolio_exclusions import topselectie_test_entry_for_account  # noqa: PLC0415
+
+    if topselectie_test_entry_for_account(account_name):
+        return "test_topselecties"
     key = re.sub(r"[^a-z0-9]+", "", (account_name or "").casefold())
     return _MANAGEMENT_GROUPS.get(key, "topselecties")
 
 
 def _management_name(name: str | None, group: str, account_name: str | None) -> str | None:
     """Remove a redundant risk suffix only from single-variant building blocks."""
+    from airs_portfolio_exclusions import topselectie_test_entry_for_account  # noqa: PLC0415
     from routers._management_topselecties import topselectie_for_account  # noqa: PLC0415
 
+    if group == "test_topselecties" and (entry := topselectie_test_entry_for_account(account_name)):
+        return entry["display_name"]
     if group == "topselecties" and (entry := topselectie_for_account(account_name)):
         return entry["display_name"]
     key = re.sub(r"[^a-z0-9]+", "", (account_name or "").casefold())
@@ -183,7 +190,8 @@ def _list_overview_from_payload(payload: dict) -> list[dict]:
         display_name, name_is_custom = _overview_name(
             account, account_nicknames, direct_model_nicknames, model)
         management_group = _management_group(account)
-        if management_group == "topselecties" and not topselectie_for_account(account):
+        if (management_group == "topselecties" and not topselectie_for_account(account)) or (
+                management_group == "test_topselecties" and not topselectie_test_entry_for_account(account)):
             continue
         display_name = _management_name(display_name, management_group, account)
         out.append({
@@ -233,6 +241,7 @@ def _list_overview_legacy() -> list[dict]:
     from ._airs_account_links import list_account_links  # noqa: PLC0415  (circular at import)
     from ._airs_accounts import list_accounts  # noqa: PLC0415
     from ._management_topselecties import topselectie_for_account  # noqa: PLC0415
+    from airs_portfolio_exclusions import topselectie_test_entry_for_account  # noqa: PLC0415
 
     links = {a["portefeuille"]: a for a in list_account_links()["accounts"]}
     #  The account's own nickname beats the model's. A human typed it for THIS book; the model's
@@ -265,8 +274,10 @@ def _list_overview_legacy() -> list[dict]:
         management_group = _management_group(a.get("portefeuille"))
         # This tab is a reviewed product list, not the catch-all bucket for every Dynamic account
         # that is neither Bustelberg nor Toppenberg. Keep only its explicit JSON allowlist.
-        if (management_group == "topselecties"
-                and not topselectie_for_account(a.get("portefeuille"))):
+        if ((management_group == "topselecties"
+                and not topselectie_for_account(a.get("portefeuille")))
+                or (management_group == "test_topselecties"
+                    and not topselectie_test_entry_for_account(a.get("portefeuille")))):
             continue
         display_name = _management_name(display_name, management_group, a.get("portefeuille"))
         out.append({
