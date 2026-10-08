@@ -571,6 +571,18 @@ function ocfYearInputs(observation: OcfYearObservation | null, year: EpsYear,
   ];
 }
 
+function ocfPerShareWhat(name: string, year: EpsYear, kind: OcfYearObservation['kind'] | null): string {
+  if (kind === 'actual') return `FY${year} reported OCF/share for ${name}.`;
+  if (kind === 'estimate') return `FY${year} consensus OCF/share for ${name}; no actual is stored.`;
+  return `No FY${year} actual or consensus OCF is stored for ${name}.`;
+}
+
+function ocfPerShareHow(year: EpsYear, kind: OcfYearObservation['kind'] | null): string {
+  if (kind === 'actual') return 'Divide reported OCF by current diluted shares.';
+  if (kind === 'estimate') return `Divide consensus OCF by current diluted shares; no FY${year} actual is stored.`;
+  return `Neither statements nor consensus supplies FY${year} OCF.`;
+}
+
 function historicalOcfInputs(working: HistoricalOcfWorking,
   currency: string | null | undefined): InputObservation[] {
   return working.rows.map((row) => ({
@@ -1659,22 +1671,14 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             <ValuationCell key={year} tone="ocf"
                               value={row.ocfPerShareByYear[year] == null
                                 ? '—' : inputNumber.format(row.ocfPerShareByYear[year]!)}
-                              what={kind === 'actual'
-                                ? `Reported FY${year} operating cash flow per diluted share for ${row.name}.`
-                                : kind === 'estimate'
-                                  ? `FY${year} consensus operating-cash-flow estimate per diluted share for ${row.name}; no actual is stored.`
-                                  : `No FY${year} actual or consensus operating cash flow is stored for ${row.name}.`}
+                              what={ocfPerShareWhat(row.name, year, kind)}
                               where={`GuruFocus annual cash-flow statements and analyst estimates stored for ${row.name}.`}
                               retrieved={[metric?.recorded_at]}
                               applies={[metric?.target_date]}
                               inputs={ocfYearInputs(observation, year, row.currency,
                                 row.source_fetched_at.financials, row.source_fetched_at.estimates)
                                 .concat(row.shareCountInputs)}
-                              how={kind === 'actual'
-                                ? 'Divide reported operating cash flow by current diluted shares; reported OCF takes priority over consensus.'
-                                : kind === 'estimate'
-                                  ? `Divide the consensus OCF estimate by current diluted shares; no reported FY${year} OCF is stored.`
-                                  : `Neither annual statements nor analyst estimates supplies FY${year} OCF.`} />
+                              how={ocfPerShareHow(year, kind)} />
                           );
                         })}
                         <ValuationCell tone="ocf" emphasis

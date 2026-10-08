@@ -136,7 +136,7 @@ const SHARED_PATHS: Record<string, Set<string>> = {
     'egm.forwardPE', 'egm.fairValue', 'dcf.rowSbc', 'dcf.correctionSbc',
   ]),
   quickValuationCopy: new Set([
-    'basis.fcf.yieldTitle', 'basis.fcf.yieldInline',
+    'basis.ocf.yieldTitle', 'basis.ocf.yieldInline',
     'basis.eps.yieldTitle', 'basis.eps.yieldInline',
   ]),
 };

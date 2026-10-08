@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   addYears, BASIS, cagrBetween, cagrOf, dailyYieldHistory, EPS_EST_CODES, EPS_PS_CODES, OCF_PS_CODE, OCF_PS_CODES, forwardEstimates,
   compoundFrom, latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
-  rebase, yearsBetween, yieldOf, type MetricRow,
+  rebase, withDerivedOcfPerShare, yearsBetween, yieldOf, type MetricRow,
 } from './quickValuation';
 
 const PRICE = 'annuals__Per Share Data__Month End Stock Price';
@@ -21,11 +21,12 @@ describe('priceVsMetric', () => {
     ]);
   });
 
-  it('reads every section spelling — one cohort each', () => {
-    const out = priceVsMetric([
+  it('derives OCF per share from the cash-flow statement and diluted shares', () => {
+    const out = priceVsMetric(withDerivedOcfPerShare([
       m('annuals__per_share_data__Month End Stock Price', 2024, 100),
-      m('annuals__per_share_data_array__Free Cash Flow per Share', 2024, 4),
-    ]);
+      m('annuals__cashflow_statement__Cash Flow from Operations', 2024, 400),
+      m('annuals__income_statement__Shares Outstanding (Diluted Average)', 2024, 100),
+    ]));
     expect(out).toEqual([{ year: 2024, price: 100, value: 4 }]);
   });
 
@@ -146,13 +147,11 @@ describe('BASIS — the two bases the tab switches between', () => {
     expect(EPS_PS_CODES.some((c) => c.includes('Diluted'))).toBe(false);
   });
 
-  it('covers all three section spellings on both bases', () => {
-    // Match one spelling and a whole cohort of companies reads as having no data.
-    for (const codes of [OCF_PS_CODES, EPS_PS_CODES]) {
-      expect(codes).toHaveLength(3);
-      expect(new Set(codes.map((c) => c.split('__')[1]))).toEqual(
-        new Set(['Per Share Data', 'per_share_data', 'per_share_data_array']));
-    }
+  it('uses the derived OCF/share code and every EPS section spelling', () => {
+    expect(OCF_PS_CODES).toEqual([OCF_PS_CODE]);
+    expect(EPS_PS_CODES).toHaveLength(3);
+    expect(new Set(EPS_PS_CODES.map((c) => c.split('__')[1]))).toEqual(
+      new Set(['Per Share Data', 'per_share_data', 'per_share_data_array']));
   });
 
   it('never lets the two bases share a label', () => {
