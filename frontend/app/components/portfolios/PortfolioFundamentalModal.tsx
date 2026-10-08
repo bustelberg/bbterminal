@@ -497,12 +497,18 @@ export function ocfActualToEstimateCagr2025To2027(metrics: ApiMetric[]): number 
   return Math.pow(end / start, 1 / 2) - 1;
 }
 
+/** Operating cash flow and diluted shares are both in millions, leaving cash flow per share. */
+export function operatingCashFlowPerShare(ocf: number | null, dilutedShares: number | null): number | null {
+  if (ocf == null || dilutedShares == null || dilutedShares <= 0) return null;
+  return ocf / dilutedShares;
+}
+
 /** Current market capitalisation divided by the selected company-level OCF, all in millions. */
 export function priceToOcfMultiple(price: number | null, dilutedShares: number | null,
   ocf: number | null): number | null {
-  if (price == null || price <= 0 || dilutedShares == null || dilutedShares <= 0
-    || ocf == null || ocf <= 0) return null;
-  return price * dilutedShares / ocf;
+  const ocfPerShare = operatingCashFlowPerShare(ocf, dilutedShares);
+  if (price == null || price <= 0 || ocfPerShare == null || ocfPerShare <= 0) return null;
+  return price / ocfPerShare;
 }
 
 export function historicalOcfMultipleWorking(metrics: ApiMetric[], years = 10): HistoricalOcfWorking {
@@ -736,7 +742,14 @@ function dcfRow(row: ApiRow, today: string, egmOverrides?: EgmOverrides) {
     2026: ocfObservations[2026]?.metric.numeric_value ?? null,
     2027: ocfObservations[2027]?.metric.numeric_value ?? null,
   } as const;
-  const ocfEstimateCagr = ocfActualToEstimateCagr2025To2027(row.metrics);
+  const ocfPerShareByYear = {
+    2025: operatingCashFlowPerShare(ocfByYear[2025], src.sharesOutstanding),
+    2026: operatingCashFlowPerShare(ocfByYear[2026], src.sharesOutstanding),
+    2027: operatingCashFlowPerShare(ocfByYear[2027], src.sharesOutstanding),
+  } as const;
+  const ocfEstimateCagr = ocfPerShareByYear[2025] == null || ocfPerShareByYear[2025]! <= 0
+    || ocfPerShareByYear[2027] == null || ocfPerShareByYear[2027]! <= 0
+    ? null : Math.pow(ocfPerShareByYear[2027]! / ocfPerShareByYear[2025]!, 1 / 2) - 1;
   const historicalOcfWorking = historicalOcfMultipleWorking(row.metrics);
   const pOcfByYear = {
     2025: priceToOcfMultiple(src.price, src.sharesOutstanding, ocfByYear[2025]),
@@ -815,7 +828,7 @@ function dcfRow(row: ApiRow, today: string, egmOverrides?: EgmOverrides) {
     upsideInputs,
     egm, forwardPE, forwardPeDerived, egmAssumptions, egmResult,
     epsObservations, epsByYear, epsEstimateCagr, peByYear, peDeltaByYear,
-    ocfObservations, ocfByYear, ocfEstimateCagr, historicalOcfWorking,
+    ocfObservations, ocfByYear, ocfPerShareByYear, ocfEstimateCagr, historicalOcfWorking,
     historicalOcfObservations, pOcfByYear, pOcfDeltaByYear, shareCountInputs,
     historicalPe10yWorking, historicalPe10yObservations, historicalPe10yWorked, fairValueInputs,
     estimateDates, medianPeDates, medianPeObservations, medianPeWorked, expectedReturnInputs,
@@ -839,7 +852,7 @@ function sortValue(row: ValuationRow, key: string): number | null {
   }
   if (key.startsWith('ocfYear:')) {
     const year = Number(key.slice('ocfYear:'.length)) as EpsYear;
-    return row.ocfByYear[year];
+    return row.ocfPerShareByYear[year];
   }
   if (key.startsWith('ocfMultiple:')) {
     const year = Number(key.slice('ocfMultiple:'.length)) as EpsYear;
@@ -1314,9 +1327,9 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                     <>
                       {EPS_YEARS.map((year) => (
                         <NumericHeader key={year} sortKey={`ocfYear:${year}`}
-                          label={`OCF FY${year}`} className="bg-sky-500/10" />
+                          label={`OCF/share FY${year}`} className="bg-sky-500/10" />
                       ))}
-                      <NumericHeader sortKey="ocfEstimateCagr" label="OCF CAGR FY2025–FY2027"
+                      <NumericHeader sortKey="ocfEstimateCagr" label="OCF/share CAGR FY2025–FY2027"
                         className="bg-sky-500/10" />
                       <NumericHeader sortKey="ocfHistoricalMultiple10y" label="10y Historical P/OCF"
                         className="bg-sky-500/10" />
@@ -1644,28 +1657,30 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           const kind = observation?.kind ?? null;
                           return (
                             <ValuationCell key={year} tone="ocf"
-                              value={metric?.numeric_value == null ? '—' : compactMillions(metric.numeric_value)}
+                              value={row.ocfPerShareByYear[year] == null
+                                ? '—' : inputNumber.format(row.ocfPerShareByYear[year]!)}
                               what={kind === 'actual'
-                                ? `Reported FY${year} operating cash flow for ${row.name}.`
+                                ? `Reported FY${year} operating cash flow per diluted share for ${row.name}.`
                                 : kind === 'estimate'
-                                  ? `FY${year} consensus operating-cash-flow estimate for ${row.name}; no actual is stored.`
+                                  ? `FY${year} consensus operating-cash-flow estimate per diluted share for ${row.name}; no actual is stored.`
                                   : `No FY${year} actual or consensus operating cash flow is stored for ${row.name}.`}
                               where={`GuruFocus annual cash-flow statements and analyst estimates stored for ${row.name}.`}
                               retrieved={[metric?.recorded_at]}
                               applies={[metric?.target_date]}
                               inputs={ocfYearInputs(observation, year, row.currency,
-                                row.source_fetched_at.financials, row.source_fetched_at.estimates)}
+                                row.source_fetched_at.financials, row.source_fetched_at.estimates)
+                                .concat(row.shareCountInputs)}
                               how={kind === 'actual'
-                                ? 'Use reported operating cash flow; it takes priority over consensus.'
+                                ? 'Divide reported operating cash flow by current diluted shares; reported OCF takes priority over consensus.'
                                 : kind === 'estimate'
-                                  ? `No reported FY${year} OCF is stored; use the consensus estimate.`
+                                  ? `Divide the consensus OCF estimate by current diluted shares; no reported FY${year} OCF is stored.`
                                   : `Neither annual statements nor analyst estimates supplies FY${year} OCF.`} />
                           );
                         })}
                         <ValuationCell tone="ocf" emphasis
                           value={row.ocfEstimateCagr == null
                             ? '—' : `${inputNumber.format(row.ocfEstimateCagr * 100)}%`}
-                          what="The annualised change from selected FY2025 OCF to selected FY2027 OCF."
+                          what="The annualised change from selected FY2025 OCF per diluted share to selected FY2027 OCF per diluted share."
                           where={`GuruFocus cash-flow statements and analyst estimates stored for ${row.name}.`}
                           retrieved={[row.source_fetched_at.financials,
                             row.source_fetched_at.estimates]}
@@ -1676,17 +1691,18 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                               row.source_fetched_at.financials, row.source_fetched_at.estimates),
                             ...ocfYearInputs(row.ocfObservations[2027], 2027, row.currency,
                               row.source_fetched_at.financials, row.source_fetched_at.estimates),
+                            ...row.shareCountInputs,
                           ]}
-                          how="Prefer reported OCF at each endpoint; otherwise use consensus. Compound the change between the two positive values over two years." />
+                          how="Divide each selected OCF by current diluted shares, then compound the change between the two positive per-share values over two years." />
                         <ValuationCell tone="ocf"
                           value={row.historicalOcfWorking.median == null
                             ? '—' : `${inputNumber.format(row.historicalOcfWorking.median)}×`}
-                          what="The median P/OCF across the latest ten completed fiscal years."
+                          what="The median price-to-operating-cash-flow-per-share multiple across the latest ten completed fiscal years."
                           where="GuruFocus fiscal year-end prices, diluted shares and reported operating cash flow."
                           retrieved={[row.source_fetched_at.financials]}
                           applies={row.historicalOcfWorking.rows.map((point) => `${point.year}-12-31`)}
                           inputs={row.historicalOcfObservations}
-                          how="Calculate each positive year-end market-value-to-OCF multiple and take the median." />
+                          how="Divide each year-end share price by that year's positive OCF per diluted share, then take the median." />
                         {EPS_YEARS.map((year) => {
                           const observation = row.ocfObservations[year];
                           const metric = observation?.metric ?? null;
@@ -1695,7 +1711,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           return (
                             <ValuationCell key={`pOcf:${year}`} tone="ocf"
                               value={multiple == null ? '—' : `${inputNumber.format(multiple)}×`}
-                              what={`The current market value expressed as a multiple of ${period}.`}
+                              what={`The latest stock price expressed as a multiple of ${period} per diluted share.`}
                               where={`GuruFocus close price, diluted shares, statements and estimates stored for ${row.name}.`}
                               retrieved={[metric?.recorded_at]}
                               applies={[row.src.priceDate, metric?.target_date]}
@@ -1705,7 +1721,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                                 ...ocfYearInputs(observation, year, row.currency,
                                   row.source_fetched_at.financials, row.source_fetched_at.estimates),
                               ]}
-                              how={`Multiply share price by diluted shares, then divide by positive ${period}.`} />
+                              how={`Divide the latest stock price by positive ${period} divided by diluted shares.`} />
                           );
                         })}
                       </>
@@ -1725,7 +1741,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
               ? 'Expected Growth Model over 5 years. Enter EPS growth and exit P/E for each company in its EGM tab; the hurdle rate is 10%.'
               : model === 'eps'
                 ? 'Each fiscal year uses reported EPS without NRI when available and otherwise uses the GuruFocus consensus estimate. CAGR compounds FY2025 and FY2027 over two years; each P/E uses that year’s selected positive EPS.'
-                : 'Each fiscal year uses reported operating cash flow when available and otherwise uses the GuruFocus consensus estimate. CAGR compounds FY2025 and FY2027 over two years; each P/OCF divides current market value by that year’s selected positive OCF.'}
+                : 'Each fiscal year divides reported operating cash flow, or otherwise the GuruFocus consensus estimate, by current diluted shares. CAGR compounds FY2025 and FY2027 OCF per share over two years; each P/OCF divides the latest stock price by that year’s selected positive OCF per share.'}
         </p>
         {companyFundamental && (
           <OwnerEarningsModal isin={companyFundamental.isin} name={companyFundamental.name}

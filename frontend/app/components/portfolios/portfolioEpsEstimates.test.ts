@@ -6,7 +6,7 @@ import {
   epsActualForYear, epsActualToEstimateCagr2025To2027, epsEstimateForYear, epsInput,
   epsObservationForYear, epsYearHow, epsYearWhat,
   historicalOcfMultipleWorking, ocfActualToEstimateCagr2025To2027,
-  ocfObservationForYear, priceToOcfMultiple,
+  ocfObservationForYear, operatingCashFlowPerShare, priceToOcfMultiple,
   medianPeCalculation, peDeltaFromHistoricalMedian, priceToEpsMultiple,
   sourceInput,
 } from './PortfolioFundamentalModal';
@@ -128,7 +128,13 @@ describe('portfolio OCF estimate view', () => {
       .toBeCloseTo(0.2);
   });
 
-  it('calculates current P/OCF from price times diluted shares divided by OCF', () => {
+  it('converts total OCF in millions to OCF per share using diluted shares in millions', () => {
+    expect(operatingCashFlowPerShare(100, 20)).toBe(5);
+    expect(operatingCashFlowPerShare(100, null)).toBeNull();
+    expect(operatingCashFlowPerShare(100, 0)).toBeNull();
+  });
+
+  it('calculates current P/OCF from price divided by OCF per diluted share', () => {
     expect(priceToOcfMultiple(50, 20, 100)).toBe(10);
     expect(priceToOcfMultiple(50, 20, -100)).toBeNull();
     expect(priceToOcfMultiple(50, null, 100)).toBeNull();
