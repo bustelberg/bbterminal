@@ -6694,7 +6694,11 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /**
+         * Update Entry
+         * @description Update a recorded decision without changing its original meeting date.
+         */
+        put: operations["update_entry_api_log_dashboard_entries__entry_id__put"];
         post?: never;
         /** Delete Entry */
         delete: operations["delete_entry_api_log_dashboard_entries__entry_id__delete"];
@@ -22610,6 +22614,41 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogEntryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_entry_api_log_dashboard_entries__entry_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
             cookie?: never;
         };
         requestBody: {

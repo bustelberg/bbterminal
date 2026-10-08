@@ -28952,6 +28952,55 @@
         "tags": [
           "log dashboard"
         ]
+      },
+      "put": {
+        "description": "Update a recorded decision without changing its original meeting date.",
+        "operationId": "update_entry_api_log_dashboard_entries__entry_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LogEntryIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Entry",
+        "tags": [
+          "log dashboard"
+        ]
       }
     },
     "/api/log-dashboard/news/{ticker}": {
