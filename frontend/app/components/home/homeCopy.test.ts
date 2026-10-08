@@ -34,7 +34,14 @@ describe('HOME_TILE_ORDER', () => {
     // cannot drift — that drift is why this filter exists (the page once advertised admin-only
     // pages while hiding /schedule). `/earnings` left the user tier on 2026-09-07.
     expect(ORDER.filter((h) => isUserAllowedPath(h)))
-      .toEqual(['/management-dashboard', '/schedule']);
+      .toEqual([
+        '/management-dashboard',
+        '/research-dashboard',
+        '/log-dashboard',
+        '/schedule',
+        '/momentum',
+        '/debet-calculation',
+      ]);
   });
 });
 
