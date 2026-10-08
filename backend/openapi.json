@@ -13525,6 +13525,73 @@
         "title": "QualityMetric",
         "type": "object"
       },
+      "QuickValuationPricePoint": {
+        "description": "One daily yfinance close expressed in the company's reporting currency.",
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "close"
+        ],
+        "title": "QuickValuationPricePoint",
+        "type": "object"
+      },
+      "QuickValuationPriceSeriesResponse": {
+        "description": "The complete daily close history Quick Valuation is allowed to divide by.\n\nThe numerator of a valuation multiple must be in the same currency as the\nper-share denominator.  `asset_price` is quoted in the Yahoo listing's\nnative currency, so this response performs that dated conversion before a\nclient can use the series.  Returning the native number and asking the UI\nto relabel it would make a secondary listing look like a valuation change.",
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "native_currency": {
+            "title": "Native Currency",
+            "type": "string"
+          },
+          "points": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/QuickValuationPricePoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source": {
+            "default": "yfinance",
+            "title": "Source",
+            "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          }
+        },
+        "required": [
+          "isin",
+          "native_currency",
+          "currency"
+        ],
+        "title": "QuickValuationPriceSeriesResponse",
+        "type": "object"
+      },
       "RealisedBlock": {
         "description": "What the paired book realised on sales this year \u2014 the leg the holdings table cannot show.\n\n EVERY FIGURE SITS ON ONE DENOMINATOR, `basis_eur` (the book's own `beginvermogen`), so\n`held_pct + realised_pct + sold_income_pct == book_ytd_pct` exactly. The holdings table weights\nby each position's share of the PRICED HELD book, which is right for a class return and cannot\ncarry a sold position at all \u2014 different question, different denominator.\n\n `available: false` IS NOT \"SOLD NOTHING\". No pairing, no cached Transacties sheet, or a\nsheet we could not read \u2014 each has its own `note`, and an empty list presented as an answer\nwould hide EUR 28,656 of realised loss on the book this was measured against.",
         "properties": {
@@ -22716,6 +22783,66 @@
         },
         "summary": "Queue Status",
         "tags": [
+          "asset-pipeline"
+        ]
+      }
+    },
+    "/api/asset-pipeline/quick-valuation-prices/isin/{isin}": {
+      "get": {
+        "description": "All daily split-adjusted yfinance closes for Quick Valuation.\n\n`currency` is the GuruFocus reporting currency of the per-share financial\nseries.  Each close is converted on its own date, so the response can be\nused directly as the numerator of P/OCF, P/E, and yield calculations.",
+        "operationId": "quick_valuation_prices_by_isin_api_asset_pipeline_quick_valuation_prices_isin__isin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "currency",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Currency"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuickValuationPriceSeriesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Quick Valuation Prices By Isin",
+        "tags": [
+          "asset-pipeline",
           "asset-pipeline"
         ]
       }

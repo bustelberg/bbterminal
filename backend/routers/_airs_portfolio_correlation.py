@@ -33,6 +33,7 @@ from datetime import date, timedelta
 import numpy as np
 import pandas as pd
 
+from airs_portfolio_exclusions import is_excluded_portfolio
 from deps import IN_CHUNK_SIZE, supabase
 from routers._airs_ref import positions as ref_positions
 from routers._airs_portfolio_links import _load_context, link_key, resolve_links
@@ -246,6 +247,7 @@ def compute_portfolio_correlations(year: int | None = None) -> dict:
     grid = (supabase.table("airs_model_portfolio_grid")
             .select("id,name,display_name,omschrijving,positions_datum,has_fixed_model,holdings")
             .execute().data or [])
+    grid = [g for g in grid if not is_excluded_portfolio(g.get("name"))]
     ports = [g for g in grid
              if g.get("has_fixed_model")
              and isinstance(g.get("holdings"), int) and g["holdings"] > _MIN_HOLDINGS

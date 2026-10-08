@@ -150,9 +150,13 @@ def load_portfolios() -> list[dict]:
     would put the same portfolio in different filters on two panels of the same page.
     """
     from routers._airs_portfolio_variant import portfolio_variant  # noqa: PLC0415
+    from airs_portfolio_exclusions import include_portfolios  # noqa: PLC0415
 
     rows = (supabase.table("airs_model_portfolio_grid")
             .select("*").order("name").execute().data or [])
+    # Rows saved before a portfolio was retired remain in the database for audit/history, but
+    # must not reappear on an ordinary page load.
+    rows = include_portfolios(rows, lambda row: row.get("name"))
     for r in rows:
         #  AIRS's `name`, never the chosen `display_name`: a label you picked must not be able
         # to invent or destroy a risk profile.

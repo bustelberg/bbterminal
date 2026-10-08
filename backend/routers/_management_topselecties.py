@@ -6,6 +6,8 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+from airs_portfolio_exclusions import is_excluded_portfolio
+
 
 def _key(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").casefold())
@@ -16,7 +18,9 @@ def _load(path_text: str, modified_ns: int) -> dict[str, dict]:
     path = Path(path_text)
     rows = json.loads(path.read_text(encoding="utf-8")).get("topselecties") or []
     return {_key(row.get("dynamic_portefeuille")): row for row in rows
-            if row.get("dynamic_portefeuille") and row.get("display_name")}
+            if row.get("dynamic_portefeuille") and row.get("display_name")
+            and not is_excluded_portfolio(row.get("dynamic_portefeuille"))
+            and not is_excluded_portfolio(row.get("display_name"))}
 
 
 def topselectie_for_account(account_name: str | None) -> dict | None:

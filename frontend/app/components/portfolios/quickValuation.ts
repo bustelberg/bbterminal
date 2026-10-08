@@ -452,7 +452,9 @@ export function forwardEstimates(
  */
 export function dailyForwardOcfMultiples(
   metrics: MetricRow[], codes: string[],
-): { t: number; value: number }[] {
+): {
+  t: number; value: number; price: number; estimate: number; forecastTargetDate: string;
+}[] {
   // Code order is source priority. Keep one consensus per fiscal target date, then shift its
   // effective window back exactly one calendar year (NVIDIA: FY2027 estimate -> FY2026 prices).
   const estimates = new Map<string, number>();
@@ -476,14 +478,18 @@ export function dailyForwardOcfMultiples(
     .sort((a, b) => a.target_date.localeCompare(b.target_date));
   let next = 0;
   let active: { start: string; targetDate: string; estimate: number } | null = null;
-  const points: { t: number; value: number }[] = [];
+  const points: {
+    t: number; value: number; price: number; estimate: number; forecastTargetDate: string;
+  }[] = [];
   for (const close of closes) {
     while (next < windows.length && windows[next].start <= close.target_date) active = windows[next++];
     if (active == null || close.target_date >= active.targetDate) continue;
+    const price = close.numeric_value;
+    if (price == null || !(price > 0)) continue;
     points.push({
       t: Date.parse(`${close.target_date}T00:00:00Z`),
-      value: close.numeric_value / active.estimate,
-      price: close.numeric_value,
+      value: price / active.estimate,
+      price,
       estimate: active.estimate,
       forecastTargetDate: active.targetDate,
     });

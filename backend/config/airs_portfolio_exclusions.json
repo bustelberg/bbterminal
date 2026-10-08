@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "note": "AIRS portfolios retired from BB Terminal. They are excluded before display and before any per-portfolio refresh or composition download.",
+  "excluded_portfolios": [
+    "DealmakersTopSel OFF DYN",
+    "DealmakersTopSel OFF FX",
+    "DealmakersTopSelectie",
+    "TolpoortenSelect OFF DYN",
+    "TolpoortenSelect OFF FX",
+    "TolpoortenSelectie",
+    "TolpoortenTopSelectie"
+  ]
+}

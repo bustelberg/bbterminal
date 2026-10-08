@@ -14,6 +14,7 @@ import { medianOf, type BASIS, type Basis } from './quickValuation';
 import { type Point } from './multiplesSeries';
 import MultipleHistoryModal from './MultipleHistoryModal';
 import { useQuickValuationCopy } from './quickValuationCopy';
+import { workedRatio } from './workedFormula';
 
 /**
  * The multiple through time — a decade of it, at the resolution the price moves.
@@ -130,7 +131,6 @@ export default function MultipleHistoryChart({
   const estimateRetrievedDate = estimateRetrievedAt
     ? new Date(estimateRetrievedAt).toISOString().slice(0, 10) : null;
   const estimateTarget = latestPoint?.forecastTargetDate ?? null;
-  const money = (value: number | undefined) => value == null ? '—' : value.toFixed(2);
   /**
    * The date of the newest observation, for the As-of tile.
    *
@@ -235,11 +235,14 @@ export default function MultipleHistoryChart({
             info={<InfoTip content={<AspectCard
               what={vendorSeries
                 ? `Forward ${b.multiple} for the current fiscal year.`
-                : `Latest forward P/OCF: ${money(latestPoint?.price)} price ÷ ${money(latestPoint?.estimate)} OCF/share = ${x(latestFwd)}.`}
+                : 'Latest forward P/OCF from the current daily close and next fiscal-year OCF/share consensus.'}
               where={vendorSeries ? 'GuruFocus forward P/E series.' : `GuruFocus estimate_history annual OCF consensus (converted to per share); ${yahooWhere}`}
               when={vendorSeries ? `Weekly since ${fromYear}.`
                 : `Price applies on ${priceDate ?? '—'}; consensus applies to the fiscal year ending ${estimateTarget ?? '—'}${estimateRetrievedDate ? ` and was retrieved ${estimateRetrievedDate}` : ''}.`}
-              how={vendorSeries ? 'Uses consensus EPS for the current fiscal year.' : 'Divide each daily price by the next fiscal year’s OCF/share consensus.'} />} />} />
+              how={vendorSeries ? 'Uses consensus EPS for the current fiscal year.' : 'Divide each daily price by the next fiscal year’s OCF/share consensus.'}
+              worked={vendorSeries ? undefined : workedRatio(
+                latestPoint?.price, latestPoint?.estimate, x(latestFwd),
+                ` ${currency ?? ''}`, ` ${currency ?? ''}/share`)} />} />} />
         )}
         {/*  THE VENDOR'S OWN PUBLICATION DATE, WHICH NOTHING ON THIS CARD USED TO SHOW. Every
             figure here descends from a series read from GuruFocus with a multi-week lag, and the
@@ -258,7 +261,7 @@ export default function MultipleHistoryChart({
         <Stat label={t.median} value={x(median)} color={MEDIAN_COLOR}
           info={<InfoTip content={<AspectCard
             what={`Median forward ${b.multiple}.`}
-            where={vendorSeries ? 'The forward series shown above.' : 'Every daily price ÷ next-fiscal-year OCF/share consensus observation shown above.'}
+            where={vendorSeries ? 'The forward series shown above.' : 'Every daily price divided by the next-fiscal-year OCF/share consensus observation shown above.'}
             when={`${fVals.length} ${vendorSeries ? 'weekly' : 'daily'} observations since ${fromYear}${!vendorSeries && estimateRetrievedDate ? `; estimate history retrieved ${estimateRetrievedDate}` : ''}.`}
             how={vendorSeries ? 'The median is less affected by extreme values than the average.' : 'Sort all daily forward P/OCF values and take the middle one; the annual OCF consensus is shifted back one fiscal year before each daily division.'} />} />} />
       </div>

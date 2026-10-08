@@ -210,6 +210,7 @@ def _expire_valuation_memo() -> None:
 def _discover_portfolios() -> list[str]:
     """Current live AirSPMS portfolio names, scraped fresh (Playwright)."""
     from airs_scanner import scan_portfolios_sync  # noqa: PLC0415
+    from airs_portfolio_exclusions import is_excluded_portfolio  # noqa: PLC0415
 
     captured: list[dict] = []
 
@@ -232,7 +233,7 @@ def _discover_portfolios() -> list[str]:
     names: list[str] = []
     for r in rows:
         n = (r.get("portefeuille") or "").strip()
-        if n:
+        if n and not is_excluded_portfolio(n):
             names.append(n)
     _record_roster(names)
     return names
@@ -644,8 +645,11 @@ def _roster_names() -> list[str]:
         _log.warning("[airs_vermogen] could not read the stored roster: %s: %s",
                      type(e).__name__, e)
         return []
-    return sorted({(r.get("portefeuille") or "").strip()
-                   for r in (resp.data or []) if (r.get("portefeuille") or "").strip()})
+    from airs_portfolio_exclusions import is_excluded_portfolio  # noqa: PLC0415
+
+    return sorted({name for r in (resp.data or [])
+                   if (name := (r.get("portefeuille") or "").strip())
+                   and not is_excluded_portfolio(name)})
 
 
 def _roster_verdicts() -> dict[str, dict]:
