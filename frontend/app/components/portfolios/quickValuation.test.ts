@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addYears, BASIS, cagrBetween, cagrOf, dailyForwardOcfMultiples, dailyYieldHistory, EPS_EST_CODES, EPS_PS_CODES, OCF_PS_CODE, OCF_PS_CODES, OCF_PS_ESTIMATE_CODE, forwardEstimates,
+  addYears, BASIS, cagrBetween, cagrOf, dailyForwardOcfMultiples, dailyYieldHistory, EPS_EST_CODES, EPS_ESTIMATE_HISTORY_CODES, EPS_PS_CODES, OCF_PS_CODE, OCF_PS_CODES, OCF_PS_ESTIMATE_CODE, forwardEstimates,
   compoundFrom, latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
-  rebase, withDerivedOcfPerShare, yearsBetween, yieldOf, type MetricRow,
+  rebase, withDerivedHistoricalEpsConsensus, withDerivedOcfPerShare, yearsBetween, yieldOf, type MetricRow,
 } from './quickValuation';
 
 // Quick Valuation receives every close under this code from yfinance's daily
@@ -60,6 +60,36 @@ describe('priceVsMetric', () => {
       target_date: '2023-12-31',
       numeric_value: 8,
     });
+  });
+
+  it('sums four historical quarterly EPS consensuses into a fiscal-year forward P/E denominator', () => {
+    const quarterly = 'quarterly_estimate_history__eps_nri_estimate__consensus';
+    const rows = withDerivedHistoricalEpsConsensus([
+      { metric_code: quarterly, target_date: '2022-04-30', numeric_value: 1 },
+      { metric_code: quarterly, target_date: '2022-07-31', numeric_value: 2 },
+      { metric_code: quarterly, target_date: '2022-10-31', numeric_value: 3 },
+      { metric_code: quarterly, target_date: '2023-01-31', numeric_value: 4 },
+    ]);
+    expect(rows).toContainEqual({
+      metric_code: 'derived__annual_eps_nri_estimate_history_consensus',
+      target_date: '2023-01-31',
+      numeric_value: 10,
+    });
+  });
+
+  it('uses that derived fiscal-year EPS for daily P/E before the live 2026 estimate horizon', () => {
+    const quarterly = 'quarterly_estimate_history__eps_nri_estimate__consensus';
+    const rows = withDerivedHistoricalEpsConsensus([
+      { metric_code: 'close_price', target_date: '2022-02-01', numeric_value: 100 },
+      { metric_code: quarterly, target_date: '2022-04-30', numeric_value: 1 },
+      { metric_code: quarterly, target_date: '2022-07-31', numeric_value: 2 },
+      { metric_code: quarterly, target_date: '2022-10-31', numeric_value: 3 },
+      { metric_code: quarterly, target_date: '2023-01-31', numeric_value: 4 },
+    ]);
+    expect(dailyForwardOcfMultiples(rows, BASIS.eps.estimateCodes ?? [])
+      .map(({ t, value }) => ({ t, value }))).toEqual([
+      { t: Date.parse('2022-02-01T00:00:00Z'), value: 10 },
+    ]);
   });
 
   it('takes the LAST n fiscal years when a cap is asked for', () => {
@@ -199,7 +229,7 @@ describe('BASIS — the two bases the tab switches between', () => {
   it(' has an analyst consensus for EPS and NONE for FCF', () => {
     // Not a gap in our ingest — nobody forecasts capex, so no free-cash-flow consensus exists to
     // fetch. `null` is what makes the forward half of the chart absent rather than modelled.
-    expect(BASIS.eps.estimateCodes).toEqual(EPS_EST_CODES);
+    expect(BASIS.eps.estimateCodes).toEqual([...EPS_ESTIMATE_HISTORY_CODES, ...EPS_EST_CODES]);
     expect(BASIS.ocf.estimateCodes).toEqual([
       'annual_operating_cash_flow_per_share_estimate', OCF_PS_ESTIMATE_CODE,
     ]);
@@ -211,6 +241,15 @@ describe('BASIS — the two bases the tab switches between', () => {
     // that is pure bookkeeping.
     expect(EPS_EST_CODES[0]).toBe('annual_eps_nri_estimate');
     expect(BASIS.eps.codes[0]).toContain('EPS without NRI');
+  });
+
+  it('uses historical EPS consensus before the current estimate horizon', () => {
+    // The annual estimate-history feed is what lets daily P/E reach the same reported fiscal
+    // years as daily P/OCF, rather than beginning at the current FY2026 analyst series.
+    expect(EPS_ESTIMATE_HISTORY_CODES[0])
+      .toBe('annual_estimate_history__eps_nri_estimate__consensus');
+    expect(BASIS.eps.estimateCodes?.slice(0, EPS_ESTIMATE_HISTORY_CODES.length))
+      .toEqual(EPS_ESTIMATE_HISTORY_CODES);
   });
 });
 

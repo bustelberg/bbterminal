@@ -19,12 +19,10 @@ import PriceTargetCalculator from './PriceTargetCalculator';
 import { meanOf, paddedDomain, paddedLogDomain } from './marginData';
 import { logLinearFit, trendValueAt } from '../../../lib/trendFit';
 import MultipleHistoryChart from './MultipleHistoryChart';
+import { since } from './multiplesSeries';
 import {
-  forwardSeries, since,
-} from './multiplesSeries';
-import {
-  addYears, BASIS, cagrBetween, cagrOf, compoundFrom, dailyForwardOcfMultiples, dailyYieldHistory, latestDateOf, priceTarget, priceVsMetric,
-  rebase, withDerivedOcfPerShare, yearsBetween, yieldOf, type Basis, type MetricRow,
+  addYears, BASIS, cagrBetween, cagrOf, compoundFrom, dailyForwardMultiples, dailyYieldHistory, latestDateOf, priceTarget, priceVsMetric,
+  rebase, withDerivedHistoricalEpsConsensus, withDerivedOcfPerShare, yearsBetween, yieldOf, type Basis, type MetricRow,
 } from './quickValuation';
 import { runSSE } from '../../../lib/stream';
 import { invalidateReadCache } from '../../../lib/readCache';
@@ -95,6 +93,8 @@ import { onDate } from './asOfLine';
 const PROJECT_YEARS = 5;
 /** All three charts share it, so the grid cells match without any card padding out the gap. */
 const CHART_HEIGHT = 320;
+const OCF_CHART_COLOR = chartTheme.accent;
+const EPS_CHART_COLOR = chartTheme.warn;
 
 /** `GET /api/asset-pipeline/latest-close/isin/{isin}` — the fields this tab reads. */
 type LatestClose = {
@@ -231,7 +231,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     //  The same builder the chart uses, on the same rows, so the toast's date and the As-of tile
     // can never name different points. Read here rather than off `forwardHistory`, which is a memo
     // computed during the NEXT render and therefore still the old series at this line.
-    const fwd = forwardSeries(rows);
+    const fwd = dailyForwardMultiples(rows, BASIS.eps.estimateCodes ?? []);
     fwdDateRef.current = fwd.length
       ? new Date(fwd[fwd.length - 1].t).toISOString().slice(0, 10) : null;
   }, [isin]);
@@ -365,7 +365,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // as a rendering fault. See `quickValuationCopy`.
   const t = useQuickValuationCopy();
   const bl = t.basis[basis];
-  const valuationMetrics = useMemo(() => withDerivedOcfPerShare(metrics ?? []), [metrics]);
+  const valuationMetrics = useMemo(
+    () => withDerivedHistoricalEpsConsensus(withDerivedOcfPerShare(metrics ?? [])), [metrics]);
   const points = useMemo(
     () => priceVsMetric(valuationMetrics, b.codes, PROJECT_YEARS), [valuationMetrics, b.codes]);
   const historyFromYear = points[0]?.year ?? new Date().getFullYear() - PROJECT_YEARS;
@@ -631,22 +632,41 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // arithmetic to satisfy an import list would be the wrong direction on a change described as
   // "for now". They are named here so the next reader knows the module is deliberately wider than
   // its callers rather than half-cleaned.
-  const forwardHistory = useMemo(
-    () => basis === 'eps'
-      ? since(forwardSeries(metrics ?? []), historyFromYear)
-      : since(dailyForwardOcfMultiples(valuationMetrics, b.estimateCodes ?? []), historyFromYear),
-    [metrics, valuationMetrics, basis, b.estimateCodes, historyFromYear]);
+  const ocfForwardHistory = useMemo(
+    () => since(dailyForwardMultiples(valuationMetrics, BASIS.ocf.estimateCodes ?? []), historyFromYear),
+    [valuationMetrics, historyFromYear]);
+  const epsForwardHistory = useMemo(
+    () => since(dailyForwardMultiples(valuationMetrics, BASIS.eps.estimateCodes ?? []), historyFromYear),
+    [valuationMetrics, historyFromYear]);
+  const forwardHistory = basis === 'eps' ? epsForwardHistory : ocfForwardHistory;
+  const comparisonForwardHistory = basis === 'eps' ? ocfForwardHistory : epsForwardHistory;
   const multipleFromYear = forwardHistory[0]
     ? new Date(forwardHistory[0].t).getUTCFullYear() : historyFromYear;
 
   //  Derived from the same two lines the chart above plots, not from GuruFocus's own
   // `Valuation Ratios__FCF Yield %` (or its P/E) — whose denominator convention (year-end price?
   // average market cap?) we do not control. One source, so the two charts cannot disagree.
-  const yields = useMemo(
-    () => dailyYieldHistory(valuationMetrics, b.codes)
-      .filter((point) => Number(point.date.slice(0, 4)) >= historyFromYear),
-    [valuationMetrics, b.codes, historyFromYear]);
+  const yieldHistories = useMemo(() => ({
+    ocf: dailyYieldHistory(valuationMetrics, BASIS.ocf.codes),
+    eps: dailyYieldHistory(valuationMetrics, BASIS.eps.codes),
+  }), [valuationMetrics]);
+  const yieldRows = useMemo(() => {
+    const byDate = new Map<string, { date: string; ocf: number | null; eps: number | null }>();
+    for (const key of ['ocf', 'eps'] as const) {
+      for (const point of yieldHistories[key]) {
+        if (Number(point.date.slice(0, 4)) < historyFromYear) continue;
+        const row = byDate.get(point.date) ?? { date: point.date, ocf: null, eps: null };
+        row[key] = point.yld;
+        byDate.set(point.date, row);
+      }
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }, [yieldHistories, historyFromYear]);
+  const yields = yieldHistories[basis]
+    .filter((point) => Number(point.date.slice(0, 4)) >= historyFromYear);
   const yieldValues = yields.map((y) => y.yld).filter((v): v is number => v != null);
+  const yieldScaleValues = yieldRows.flatMap((row) => [row.ocf, row.eps])
+    .filter((v): v is number => v != null);
   const avgYield = meanOf(yieldValues);
   /**
    *  The point the latest yield came from, not just the yield — because its ⓘ works the division
@@ -1157,8 +1177,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
 
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
-        <h4 className="text-base font-semibold text-fg-strong">{bl.yieldTitle}</h4>
-        <span className="text-xs text-fg-faint">{t.yieldCaption(bl.perShare)}</span>
+        <h4 className="text-base font-semibold text-fg-strong">{t.yieldComparisonTitle}</h4>
+        <span className="text-xs text-fg-faint">{t.yieldComparisonCaption}</span>
         <button type="button"
           onClick={() => (refreshingQuickValuation
             ? (refreshJobId ? void cancelJob(refreshJobId) : undefined)
@@ -1218,24 +1238,28 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           cheap year on the axis, as though it were the bargain of the decade. */}
       <div>
         <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-          <ComposedChart data={yields} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
+          <ComposedChart data={yieldRows} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
             style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
             <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
             <XAxis dataKey="date" {...tiltedAxis()} tickFormatter={(date: string) => date.slice(0, 7)} />
-            <YAxis domain={paddedDomain(yieldValues)} tick={{ fontSize: 12, fill: chartTheme.axisTick }}
+            <YAxis domain={paddedDomain(yieldScaleValues)} tick={{ fontSize: 12, fill: chartTheme.axisTick }}
               width={52} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
             <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-              formatter={(v) => [typeof v === 'number' ? `${v.toFixed(2)}%` : '—', b.yieldTitle]} />
+              formatter={(v, label) => [typeof v === 'number' ? `${v.toFixed(2)}%` : '—', label]} />
             <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
             {avgYield != null && (
-              <ReferenceLine y={avgYield} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />
+              <ReferenceLine y={avgYield} stroke={basis === 'ocf' ? OCF_CHART_COLOR : EPS_CHART_COLOR}
+                strokeDasharray="5 3" strokeOpacity={0.6} />
             )}
-            <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent}
+            <Line dataKey="ocf" name={t.basis.ocf.yieldTitle} type="monotone" stroke={OCF_CHART_COLOR}
+              strokeWidth={2} dot={false} connectNulls />
+            <Line dataKey="eps" name={t.basis.eps.yieldTitle} type="monotone" stroke={EPS_CHART_COLOR}
               strokeWidth={2} dot={false} connectNulls />
           </ComposedChart>
         </ResponsiveContainer>
         <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{t.yieldLegend(bl.yieldTitle)}</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: OCF_CHART_COLOR }} />{t.yieldLegend(t.basis.ocf.yieldTitle)}</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: EPS_CHART_COLOR }} />{t.yieldLegend(t.basis.eps.yieldTitle)}</span>
         </div>
       </div>
     </div>
@@ -1243,7 +1267,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
     <MultipleHistoryChart height={CHART_HEIGHT} basis={b} basisKey={basis} currency={currency}
-      forward={forwardHistory} fromYear={multipleFromYear}
+      forward={forwardHistory} comparisonForward={comparisonForwardHistory} fromYear={multipleFromYear}
       estimateRetrievedAt={sourceFetchedAt.estimates}
       priceSource={yahooPrices}
       name={name} isin={isin}

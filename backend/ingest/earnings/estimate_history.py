@@ -24,10 +24,12 @@ from ._common import (
 
 _DISPLAY_METRICS = {
     "quarterly": frozenset({"revenue_estimate", "per_share_eps_estimate", "eps_nri_estimate"}),
-    # GuruFocus supplies annual OCF surprise history too. Its `surprisemean` is the consensus
-    # available before the fiscal result, which is precisely the missing denominator for the
-    # historical forward P/OCF series.
-    "annual": frozenset({"operating_cash_flow_estimate"}),
+    # `surprisemean` is the consensus available before the fiscal result.  These annual rows are
+    # the denominators for historical daily forward multiples: OCF for P/OCF and NRI-stripped EPS
+    # for P/E.  Keep the ordinary EPS series too as a vendor fallback where the NRI line is absent.
+    "annual": frozenset({
+        "operating_cash_flow_estimate", "eps_nri_estimate", "per_share_eps_estimate",
+    }),
 }
 _VALUES = {
     "actual": "actual",

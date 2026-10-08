@@ -70,6 +70,19 @@ export const EPS_PS_CODES = [
 // anything and stops. Filling 2027 from one series and 2028 from the other would put that same
 // convention step INSIDE the forecast, where nothing marks it at all.
 export const EPS_EST_CODES = ['annual_eps_nri_estimate', 'annual_per_share_eps_estimate'];
+// The pre-release consensus for fiscal years that have since reported. It is the same type of
+// point-in-time estimate history that extends P/OCF; without it P/E begins only at the current
+// live estimate horizon. NRI stays first so its denominator continues the EPS-without-NRI history.
+export const EPS_ESTIMATE_HISTORY_CODES = [
+  'annual_estimate_history__eps_nri_estimate__consensus',
+  'derived__annual_eps_nri_estimate_history_consensus',
+  'annual_estimate_history__per_share_eps_estimate__consensus',
+  'derived__annual_per_share_eps_estimate_history_consensus',
+];
+const QUARTERLY_EPS_NRI_ESTIMATE_HISTORY_CODE = 'quarterly_estimate_history__eps_nri_estimate__consensus';
+const QUARTERLY_EPS_ESTIMATE_HISTORY_CODE = 'quarterly_estimate_history__per_share_eps_estimate__consensus';
+const ANNUAL_EPS_NRI_ESTIMATE_HISTORY_CODE = 'derived__annual_eps_nri_estimate_history_consensus';
+const ANNUAL_EPS_ESTIMATE_HISTORY_CODE = 'derived__annual_per_share_eps_estimate_history_consensus';
 
 /**  `value`, NOT `fcf` — it holds EPS half the time. See the module note. */
 export type YearPoint = { year: number; price: number | null; value: number | null };
@@ -185,7 +198,7 @@ export const BASIS: Record<Basis, {
     caveat: 'EPS is accounting profit, not cash flow. Its yield is the inverse of P/E.',
     negativeYear: 'loss',
     multiple: 'P/E',
-    estimateCodes: EPS_EST_CODES,
+    estimateCodes: [...EPS_ESTIMATE_HISTORY_CODES, ...EPS_EST_CODES],
     forwardSource: 'GuruFocus analyst consensus — the `EPS without NRI` estimate, the same basis as the history it continues.',
   },
 };
@@ -300,6 +313,38 @@ export function withDerivedOcfPerShare(metrics: MetricRow[]): MetricRow[] {
   };
   derive(ocf, OCF_PS_CODE);
   derive(estimates, OCF_PS_ESTIMATE_CODE);
+  return derived.length ? [...metrics, ...derived] : metrics;
+}
+
+/**
+ * GuruFocus's historical EPS consensus is quarterly, unlike its annual OCF consensus. Sum four
+ * consecutive pre-release quarterly estimates into the fiscal-year denominator that a forward P/E
+ * needs. The target remains the fourth quarter's actual fiscal end, so the shared daily-multiple
+ * builder applies it over the preceding fiscal year exactly as it does an annual OCF consensus.
+ */
+export function withDerivedHistoricalEpsConsensus(metrics: MetricRow[]): MetricRow[] {
+  const derived: MetricRow[] = [];
+  const derive = (inputCode: string, outputCode: string) => {
+    const byMonth = new Map<number, MetricRow>();
+    for (const row of metrics) {
+      if (row.metric_code !== inputCode || row.numeric_value == null || !Number.isFinite(row.numeric_value)) continue;
+      const year = Number(row.target_date.slice(0, 4));
+      const month = Number(row.target_date.slice(5, 7));
+      if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) continue;
+      byMonth.set(year * 12 + month, row);
+    }
+    for (const [key, target] of byMonth) {
+      const quarters = [9, 6, 3, 0].map((offset) => byMonth.get(key - offset));
+      if (quarters.some((row) => row == null || row.numeric_value == null)) continue;
+      derived.push({
+        metric_code: outputCode,
+        target_date: target.target_date,
+        numeric_value: quarters.reduce((sum, row) => sum + (row!.numeric_value as number), 0),
+      });
+    }
+  };
+  derive(QUARTERLY_EPS_NRI_ESTIMATE_HISTORY_CODE, ANNUAL_EPS_NRI_ESTIMATE_HISTORY_CODE);
+  derive(QUARTERLY_EPS_ESTIMATE_HISTORY_CODE, ANNUAL_EPS_ESTIMATE_HISTORY_CODE);
   return derived.length ? [...metrics, ...derived] : metrics;
 }
 
@@ -446,11 +491,11 @@ export function forwardEstimates(
 }
 
 /**
- * Daily historical forward P/OCF. An annual estimate for FY N is applied from the corresponding
- * FY N-1 date until its own fiscal date, so every price is divided by the OCF consensus investors
+ * Daily historical forward multiple. An annual estimate for FY N is applied from the corresponding
+ * FY N-1 date until its own fiscal date, so every price is divided by the OCF or EPS consensus investors
  * were looking one fiscal year ahead to — never by a future fiscal-year share price.
  */
-export function dailyForwardOcfMultiples(
+export function dailyForwardMultiples(
   metrics: MetricRow[], codes: string[],
 ): {
   t: number; value: number; price: number; estimate: number; forecastTargetDate: string;
@@ -496,6 +541,9 @@ export function dailyForwardOcfMultiples(
   }
   return points;
 }
+
+/** Backward-compatible OCF name for callers/tests added before the shared EPS calculation. */
+export const dailyForwardOcfMultiples = dailyForwardMultiples;
 
 /**
  * The middle multiple, not the average one.

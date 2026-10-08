@@ -425,15 +425,21 @@ def load_company_metric_rows(company_id: int, metric_keys: list[str] | None = No
             .order("target_date")
         )))
 
-        # Point-in-time annual OCF consensus from GuruFocus's estimate-history feed. These rows
-        # are marked as historical observations (not live predictions), so they are outside the
-        # annual_% prediction read above but required for daily historical forward P/OCF.
+        # Point-in-time annual consensus from GuruFocus's estimate-history feed. These rows are
+        # marked as historical observations (not live predictions), so they are outside the
+        # annual_% prediction read above but required for daily historical forward P/OCF and P/E.
         rows.extend(_paginate(lambda: (
             supabase.table("metric_data")
             .select("metric_code,target_date,numeric_value,is_prediction")
             .eq("company_id", company_id)
             .eq("source_code", "gurufocus")
-            .eq("metric_code", "annual_estimate_history__operating_cash_flow_estimate__consensus")
+            .in_("metric_code", [
+                "annual_estimate_history__operating_cash_flow_estimate__consensus",
+                "annual_estimate_history__eps_nri_estimate__consensus",
+                "annual_estimate_history__per_share_eps_estimate__consensus",
+                "quarterly_estimate_history__eps_nri_estimate__consensus",
+                "quarterly_estimate_history__per_share_eps_estimate__consensus",
+            ])
             .gte("target_date", "1998-01-01")
             .order("target_date")
         )))

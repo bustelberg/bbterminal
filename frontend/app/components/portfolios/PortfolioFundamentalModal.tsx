@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { defaultLookThroughCertificates } from './portfolioDefaults';
 import { track } from '../../../lib/loading';
 import { type Basket } from './types';
 import PanelDialog from './PanelDialog';
@@ -906,13 +907,17 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   const [bookWeights, setBookWeights] = useState<BookWeightsPayload | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [model, setModel] = useState<Model>('dcf');
-  const [lookThroughCertificates, setLookThroughCertificates] = useState(false);
+  // A Toppenberg book is normally read through its linked certificates. This is a default only:
+  // the reader can still toggle back to the wrappers for the lifetime of this modal.
+  const [lookThroughCertificates, setLookThroughCertificates] = useState(
+    () => defaultLookThroughCertificates(name, bookPortfolio),
+  );
   // Direct holdings and certificate look-through are two views of the same book. Keep each
   // completed response for the lifetime of the modal so the checkbox can switch between them
   // immediately instead of repeating both API requests every time.
   const dataByCertificateScope = useRef(new Map<boolean, Payload>());
   const weightsByCertificateScope = useRef(new Map<boolean, BookWeightsPayload | null>());
-  const selectedCertificateScope = useRef(false);
+  const selectedCertificateScope = useRef(lookThroughCertificates);
   const certificateScopeMessages = useRef(new Map<boolean, () => void>());
   const [companyFundamental, setCompanyFundamental] = useState<ApiRow | null>(null);
   const [fundamentalsRevision, setFundamentalsRevision] = useState(0);

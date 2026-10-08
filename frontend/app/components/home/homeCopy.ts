@@ -48,7 +48,7 @@ const EN: HomeCopy = {
     },
     '/log-dashboard': {
       label: 'BC Logbook',
-      description: 'Review the Bustelberg Capital logbook and its recorded updates.',
+      description: 'Review investment decisions recorded by the Beleggingscommissie (BC).',
     },
     '/earnings': {
       label: 'Earnings Dashboard',
@@ -105,8 +105,8 @@ const EN: HomeCopy = {
         + 'returns in EUR and local currency.',
     },
     '/debet-calculation': {
-      label: 'Debet calculations',
-      description: 'Calculate debet interest for an account over a selected period.',
+      label: 'Debit calculations',
+      description: 'Check whether planned buys, sales, and cash leave a client with a debit balance.',
     },
     '/request_gurufocus': {
       label: 'Request GuruFocus',
@@ -138,7 +138,7 @@ const NL: HomeCopy = {
     },
     '/log-dashboard': {
       label: 'BC-logboek',
-      description: 'Bekijk het Bustelberg Capital-logboek en de vastgelegde updates.',
+      description: 'Bekijk beleggingsbeslissingen die de Beleggingscommissie (BC) heeft vastgelegd.',
     },
     '/earnings': {
       label: 'Winstdashboard',
@@ -196,7 +196,7 @@ const NL: HomeCopy = {
     },
     '/debet-calculation': {
       label: 'Debetberekeningen',
-      description: 'Bereken debetrente voor een rekening over een gekozen periode.',
+      description: 'Controleer of geplande aankopen, verkopen en kasgeld een cliënt debet zetten.',
     },
     '/request_gurufocus': {
       label: 'GuruFocus opvragen',

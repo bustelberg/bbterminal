@@ -58,10 +58,15 @@ export type QuickValuationCopy = {
   legendTrend: (r2: string, years: string) => string;
   yieldCaption: (perShare: string) => string;
   yieldLegend: (yieldTitle: string) => string;
+  /** The yield chart always compares OCF with EPS, regardless of the selected calculator basis. */
+  yieldComparisonTitle: string;
+  yieldComparisonCaption: string;
   avg: string;
   latest: string;
   /** The forward-multiple card. */
   multipleForward: (multiple: string) => string;
+  /** The forward-multiple chart always compares P/OCF with P/E. */
+  forwardMultipleComparison: string;
   sinceMedian: (year: string) => string;
   vendorIndicator: string;
   median: string;
@@ -134,9 +139,12 @@ const EN: QuickValuationCopy = {
   legendTrend: (r2, years) => `Trend (R² ${r2}), dotted = ${years}y projection`,
   yieldCaption: (perShare) => `${perShare} ÷ daily close · average dashed`,
   yieldLegend: (yieldTitle) => `${yieldTitle} (avg dashed)`,
+  yieldComparisonTitle: 'OCF- en EPS-yield',
+  yieldComparisonCaption: 'OCF/share and EPS ÷ daily close · selected average dashed',
   avg: 'Avg',
   latest: 'Latest',
   multipleForward: (multiple) => `${multiple} — forward`,
+  forwardMultipleComparison: 'Forward P/OCF en P/E',
   sinceMedian: (year) => `since ${year} · median dashed`,
   vendorIndicator: 'vendor indicator',
   median: 'Median',
@@ -217,9 +225,12 @@ const NL: QuickValuationCopy = {
   legendTrend: (r2, years) => `Trend (R² ${r2}), gestippeld = projectie van ${years} jaar`,
   yieldCaption: (perShare) => `${perShare} ÷ dagelijkse slotkoers · gemiddelde gestippeld`,
   yieldLegend: (yieldTitle) => `${yieldTitle} (gemiddelde gestippeld)`,
+  yieldComparisonTitle: 'OCF & EPS yield',
+  yieldComparisonCaption: 'OCF/aandeel en EPS ÷ dagelijkse slotkoers · gemiddelde van geselecteerde basis gestippeld',
   avg: 'Gem.',
   latest: 'Laatste',
   multipleForward: (multiple) => `${multiple} — forward`,
+  forwardMultipleComparison: 'Forward P/OCF & P/E',
   sinceMedian: (year) => `vanaf ${year} · mediaan gestippeld`,
   vendorIndicator: 'indicator van de leverancier',
   median: 'Mediaan',

@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
+import { defaultLookThroughCertificates } from './portfolioDefaults';
 import { chartTheme } from '../../../lib/chartTheme';
 import { ValueBadge } from '../../../lib/dynamicValue';
 import { track } from '../../../lib/loading';
@@ -3535,7 +3536,9 @@ export default function PortfolioAnalysisModal({
    * wrapper, not its constituent stocks; turning it on expands those constituents in Holdings,
    * Attribution, Risk, Sector, Region and Currency together.
    */
-  const [lookThrough, setLookThrough] = useState(false);
+  // Toppenberg is normally analysed through the companies inside its linked certificates. This
+  // only seeds the modal; the visible checkbox remains the reader's choice afterwards.
+  const [lookThrough, setLookThrough] = useState(() => defaultLookThroughCertificates(name));
   // Which allocation class the reader picked, to break down. Null = NOTHING selected — the whole
   // portfolio, where the modal shows the book's return vs the benchmark and prompts the reader to
   // click a class. Selecting a class replaces that with the class's OWN return + its breakdown.
