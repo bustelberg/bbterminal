@@ -55,7 +55,13 @@ export const QUARTERLY_EPS_CODES = [
  */
 export const REPORT_LAG_DAYS = 75;
 
-export type Point = { t: number; value: number };   // t = epoch ms
+export type Point = {
+  t: number; value: number;   // t = epoch ms
+  /** Inputs carried by the calculated daily forward-P/OCF series for its provenance cards. */
+  price?: number;
+  estimate?: number;
+  forecastTargetDate?: string;
+};
 
 /**
  * A trailing point WITH the two numbers it was divided from.

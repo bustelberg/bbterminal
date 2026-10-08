@@ -43,10 +43,6 @@ import { useQuickValuationCopy } from './quickValuationCopy';
  * three years, on real capex swings), which is what made a forward line desirable there.
  */
 
-/** A multiple this far above the median is a collapsed denominator, not a valuation. Still drawn;
- *  just not allowed to flatten the other decade of points into a line. */
-const OUTLIER_MULT = 5;
-
 /**
  *  The two series are blue and amber, and that pair was measured, not chosen.
  *
@@ -76,6 +72,7 @@ const MEDIAN_COLOR = chartTheme.axisTick;
 
 export default function MultipleHistoryChart({
   basis: b, basisKey, forward, currency, fromYear, name, isin, height = 320, className = '',
+  estimateRetrievedAt, priceSource,
   onRefresh, onCancel, canRefresh = false, refreshing = false, cancelling = false,
 }: {
   basis: (typeof BASIS)[keyof typeof BASIS];
@@ -86,6 +83,12 @@ export default function MultipleHistoryChart({
   forward: Point[];
   currency?: string | null;
   fromYear: number;
+  /** When the GuruFocus estimate/estimate-history payload was most recently loaded. */
+  estimateRetrievedAt?: string | null;
+  priceSource?: {
+    symbol?: string | null; nativeCurrency: string; currency: string;
+    from: string | null; through: string | null;
+  } | null;
   name?: string | null;
   isin: string;
   height?: number;
@@ -119,9 +122,15 @@ export default function MultipleHistoryChart({
   // Click-to-inspect, the same affordance the two charts beside it carry.
   const [showData, setShowData] = useState(false);
   const hasForward = forward.length > 0;
+  const vendorSeries = basisKey === 'eps';
   const fVals = forward.map((p) => p.value);
   const median = medianOf(fVals);
   const latestFwd = forward.at(-1)?.value ?? null;
+  const latestPoint = forward.at(-1);
+  const estimateRetrievedDate = estimateRetrievedAt
+    ? new Date(estimateRetrievedAt).toISOString().slice(0, 10) : null;
+  const estimateTarget = latestPoint?.forecastTargetDate ?? null;
+  const money = (value: number | undefined) => value == null ? '—' : value.toFixed(2);
   /**
    * The date of the newest observation, for the As-of tile.
    *
@@ -135,6 +144,13 @@ export default function MultipleHistoryChart({
    */
   const asOf = forward.at(-1)
     ? new Date(forward.at(-1)!.t).toISOString().slice(0, 10) : null;
+  const priceDate = asOf;
+  const yahooWhere = priceSource
+    ? `yfinance asset_price daily closes${priceSource.symbol ? ` (${priceSource.symbol})` : ''}, ${priceSource.nativeCurrency} listing currency converted on each date to ${priceSource.currency}.`
+    : 'yfinance asset_price daily closes are unavailable for this ISIN.';
+  const yahooWhen = priceSource
+    ? `Yahoo close history spans ${priceSource.from ?? '—'} to ${priceSource.through ?? '—'}; this price applies on ${priceDate ?? '—'}.`
+    : 'No yfinance daily close series was returned.';
 
   /**
    *  NO `align` ANY MORE, AND THAT IS THE ONE SIMPLIFICATION THE REMOVAL ACTUALLY BUYS. It
@@ -143,18 +159,29 @@ export default function MultipleHistoryChart({
    * null for the other, alternating, which `connectNulls={false}` then drew as isolated dots. One
    * series has nothing to be aligned against.
    */
-  const data = forward.map((p) => ({ t: p.t, fwd: p.value }));
+  const data = forward.map((p) => ({
+    t: p.t, fwd: p.value, price: p.price, estimate: p.estimate,
+    forecastTargetDate: p.forecastTargetDate,
+  }));
 
-  // Scale over the multiples that describe a valuation; an outlier still plots and overflows.
-  const scaleSet = median == null ? fVals
-    : fVals.filter((v) => v <= median * OUTLIER_MULT);
-  const clipped = fVals.filter((v) => median != null && v > median * OUTLIER_MULT).length;
+  // The domain must cover every plotted multiple. A high P/OCF is information about the annual
+  // denominator, not a reason to draw a point beyond the chart boundary.
+  const scaleSet = fVals;
 
   const years: number[] = [];
   if (data.length) {
-    const y0 = new Date(Number(data[0].t)).getUTCFullYear();
-    const y1 = new Date(Number(data[data.length - 1].t)).getUTCFullYear();
-    for (let y = y0; y <= y1; y++) years.push(Date.UTC(y, 0, 1));
+    const start = Number(data[0].t);
+    const end = Number(data[data.length - 1].t);
+    const y0 = new Date(start).getUTCFullYear();
+    const y1 = new Date(end).getUTCFullYear();
+    // Keep the chart clipped to its actual observations. If its first 1 January falls before the
+    // first price (as in NVIDIA's February-starting FY2026 window), tick the first observation as
+    // that year instead of extending the plot with an empty January margin.
+    years.push(start);
+    for (let y = y0 + 1; y <= y1; y++) {
+      const jan1 = Date.UTC(y, 0, 1);
+      if (jan1 <= end) years.push(jan1);
+    }
   }
   const x = (v: number | null) => (v == null ? '—' : `${v.toFixed(1)}×`);
 
@@ -167,7 +194,7 @@ export default function MultipleHistoryChart({
             here explaining why there is no forward series; the empty state below already says it,
             and saying it twice in one card — once in the header, once across the middle of it —
             was the redundancy, not the sentence. Removed on request. */}
-        {hasForward && (
+        {hasForward && vendorSeries && (
           <span className="text-xs text-fg-muted"
             title="GuruFocus's own published forward-P/E indicator, not our arithmetic. Dividing the close by it recovers the CURRENT fiscal year's consensus EPS — so early in a year it looks ~12 months ahead, and by December it prices earnings nearly banked.">
             {t.vendorIndicator}
@@ -183,7 +210,7 @@ export default function MultipleHistoryChart({
             exist — see the note beside `hasForward`.
              DISABLED, NOT ABSENT, WITH NO COMPANY: a control that vanishes takes its space with
             it, and the header reflows on a state the reader cannot see the cause of. */}
-        {hasForward && onRefresh && (
+        {hasForward && vendorSeries && onRefresh && (
           <button type="button"
             onClick={() => (refreshing ? onCancel?.() : onRefresh())}
             disabled={cancelling || !canRefresh}
@@ -206,10 +233,13 @@ export default function MultipleHistoryChart({
         {hasForward && (
           <Stat label={t.forwardTile(bl.multiple)} value={x(latestFwd)} color={FORWARD_COLOR}
             info={<InfoTip content={<AspectCard
-              what={`Forward ${b.multiple} for the current fiscal year.`}
-              where="GuruFocus forward P/E series."
-              when={`Weekly since ${fromYear}.`}
-              how="Uses consensus EPS for the current fiscal year." />} />} />
+              what={vendorSeries
+                ? `Forward ${b.multiple} for the current fiscal year.`
+                : `Latest forward P/OCF: ${money(latestPoint?.price)} price ÷ ${money(latestPoint?.estimate)} OCF/share = ${x(latestFwd)}.`}
+              where={vendorSeries ? 'GuruFocus forward P/E series.' : `GuruFocus estimate_history annual OCF consensus (converted to per share); ${yahooWhere}`}
+              when={vendorSeries ? `Weekly since ${fromYear}.`
+                : `Price applies on ${priceDate ?? '—'}; consensus applies to the fiscal year ending ${estimateTarget ?? '—'}${estimateRetrievedDate ? ` and was retrieved ${estimateRetrievedDate}` : ''}.`}
+              how={vendorSeries ? 'Uses consensus EPS for the current fiscal year.' : 'Divide each daily price by the next fiscal year’s OCF/share consensus.'} />} />} />
         )}
         {/*  THE VENDOR'S OWN PUBLICATION DATE, WHICH NOTHING ON THIS CARD USED TO SHOW. Every
             figure here descends from a series read from GuruFocus with a multi-week lag, and the
@@ -219,17 +249,18 @@ export default function MultipleHistoryChart({
         {hasForward && (
           <Stat label={t.asOf} value={asOf ?? '—'}
             info={<InfoTip content={<AspectCard
-              what="Latest publication date."
-              where="Newest point in this series."
-              when={`Weekly since ${fromYear}.`}
-              how="GuruFocus may publish this series with a delay." />} />} />
+              what={vendorSeries ? 'Latest publication date.' : 'As-of date of the market-price numerator.'}
+              where={vendorSeries ? 'Newest point in this series.' : yahooWhere}
+              when={vendorSeries ? `Weekly since ${fromYear}.`
+                : `The price is ${priceDate ?? '—'}; its denominator is the consensus OCF/share for fiscal year ending ${estimateTarget ?? '—'}${estimateRetrievedDate ? `, retrieved ${estimateRetrievedDate}` : ''}.`}
+              how={vendorSeries ? 'GuruFocus may publish this series with a delay.' : 'The date is the daily price date, not the forecast fiscal-year end.'} />} />} />
         )}
         <Stat label={t.median} value={x(median)} color={MEDIAN_COLOR}
           info={<InfoTip content={<AspectCard
             what={`Median forward ${b.multiple}.`}
-            where="The forward series shown above."
-            when={`${fVals.length} weekly observations since ${fromYear}.`}
-            how="The median is less affected by extreme values than the average." />} />} />
+            where={vendorSeries ? 'The forward series shown above.' : 'Every daily price ÷ next-fiscal-year OCF/share consensus observation shown above.'}
+            when={`${fVals.length} ${vendorSeries ? 'weekly' : 'daily'} observations since ${fromYear}${!vendorSeries && estimateRetrievedDate ? `; estimate history retrieved ${estimateRetrievedDate}` : ''}.`}
+            how={vendorSeries ? 'The median is less affected by extreme values than the average.' : 'Sort all daily forward P/OCF values and take the middle one; the annual OCF consensus is shifted back one fiscal year before each daily division.'} />} />} />
       </div>
 
       <div>
@@ -255,7 +286,7 @@ export default function MultipleHistoryChart({
                   ticks={years} interval="preserveStartEnd"
                   tickFormatter={(t: number) => String(new Date(t).getUTCFullYear())}
                   {...tiltedAxis()} />
-                <YAxis domain={paddedDomain(scaleSet)} allowDataOverflow width={52}
+                <YAxis domain={paddedDomain(scaleSet)} width={52}
                   tick={{ fontSize: 12, fill: chartTheme.axisTick }}
                   tickFormatter={(v: number) => `${v.toFixed(0)}×`} />
                 <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle}
@@ -277,14 +308,8 @@ export default function MultipleHistoryChart({
             <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
               <span className="flex items-center gap-1.5">
                 <span className="w-3 h-0.5 inline-block rounded" style={{ background: FORWARD_COLOR }} />
-                Forward {b.multiple} — GuruFocus{currency ? ` (${currency})` : ''}
+                {vendorSeries ? `Forward ${b.multiple} — GuruFocus` : `Forward ${b.multiple} — daily price / next FY OCF consensus`}{currency ? ` (${currency})` : ''}
               </span>
-              {clipped > 0 && (
-                <span className="text-warn-300"
-                  title={`Above ${OUTLIER_MULT}x the median. Still drawn, only excluded from the axis range — one collapsed-FCF year would otherwise flatten the whole decade.`}>
-                   {clipped} point{clipped > 1 ? 's' : ''} off the top of the axis
-                </span>
-              )}
               {/*  THE "reporting lag applied" NOTE WENT WITH THE TRAILING LINE, deliberately. It
                   was about holding a fiscal figure back until it was plausibly public — a property
                   of a multiple WE computed from reported accounts. This line is read from the
@@ -298,12 +323,10 @@ export default function MultipleHistoryChart({
       {showData && (
         //  HANDED `data` — the exact rows plotted above. Nothing is recomputed, so the table
         // cannot disagree with the line that opened it. Same rule as `QuickValuationInputsModal`.
-        //  No inputs columns any more, and that is a property of the data rather than lost detail:
-        // the trailing multiple was OUR division and carried its two operands; a vendor's published
-        // indicator has nothing to decompose.
         <MultipleHistoryModal rows={data} basis={b} median={median}
           currency={currency} name={name} isin={isin}
-          fromYear={fromYear} onClose={() => setShowData(false)} />
+          fromYear={fromYear} estimateRetrievedAt={estimateRetrievedAt} priceSource={priceSource}
+          onClose={() => setShowData(false)} />
       )}
     </div>
   );

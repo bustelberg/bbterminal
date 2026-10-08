@@ -143,7 +143,7 @@ const EN: QuickValuationCopy = {
   forwardTile: (multiple) => `Forward ${multiple}`,
   asOf: 'As of',
   loading: 'Loading…',
-  noForwardOcf: 'GuruFocus has no historical forward-P/OCF series.',
+  noForwardOcf: 'No positive annual OCF-per-share and daily share-price history are stored.',
   noForwardPublished: (multiple, year) =>
     `No forward ${multiple} published for this listing since ${year}.`,
   pt: {
@@ -226,7 +226,7 @@ const NL: QuickValuationCopy = {
   forwardTile: (multiple) => `Forward ${multiple}`,
   asOf: 'Per',
   loading: 'Laden…',
-  noForwardOcf: 'GuruFocus heeft geen historische forward-P/OCF-reeks.',
+  noForwardOcf: 'Er zijn geen positieve jaarlijkse OCF per aandeel en dagelijkse koershistorie opgeslagen.',
   noForwardPublished: (multiple, year) =>
     `Geen forward ${multiple} gepubliceerd voor deze notering sinds ${year}.`,
   pt: {

@@ -33,6 +33,9 @@ export const PRICE_CODES = [
 ];
 export const OCF_PS_CODE = 'derived__operating_cash_flow_per_share';
 export const OCF_PS_CODES = [OCF_PS_CODE];
+export const OCF_PS_ESTIMATE_CODE = 'derived__operating_cash_flow_per_share_estimate';
+const OCF_ESTIMATE_CODE = 'annual_operating_cash_flow_estimate';
+const OCF_ESTIMATE_HISTORY_CODE = 'annual_estimate_history__operating_cash_flow_estimate__consensus';
 const OCF_CODES = [
   'annuals__Cashflow Statement__Cash Flow from Operations',
   'annuals__cashflow_statement__Cash Flow from Operations',
@@ -168,7 +171,7 @@ export const BASIS: Record<Basis, {
      * own price — the way `FCFyield` demonstrably works. A yield whose numerator is one of two years
      * depending on the date is not a number this app can put beside its own.
      */
-    estimateCodes: ['annual_operating_cash_flow_per_share_estimate'],
+    estimateCodes: ['annual_operating_cash_flow_per_share_estimate', OCF_PS_ESTIMATE_CODE],
     forwardSource: 'GuruFocus analyst consensus for operating cash flow per share. Historical reported OCF is derived from the cash-flow statement and diluted-average shares.',
   },
   eps: {
@@ -281,17 +284,22 @@ export const HISTORY_FROM_YEAR = 2017;
  */
 export function withDerivedOcfPerShare(metrics: MetricRow[]): MetricRow[] {
   const ocf = byYear(metrics, OCF_CODES);
+  const estimates = byYear(metrics, [OCF_ESTIMATE_CODE, OCF_ESTIMATE_HISTORY_CODE]);
   const shares = byYear(metrics, DILUTED_SHARES_CODES);
   const derived: MetricRow[] = [];
-  for (const [year, value] of ocf) {
-    const count = shares.get(year);
-    if (count == null || !(count > 0) || !Number.isFinite(value)) continue;
-    derived.push({
-      metric_code: OCF_PS_CODE,
-      target_date: `${year}-12-31`,
-      numeric_value: value / count,
-    });
-  }
+  const derive = (values: Map<number, number>, metric_code: string) => {
+    for (const [year, value] of values) {
+      const count = shares.get(year);
+      if (count == null || !(count > 0) || !Number.isFinite(value)) continue;
+      derived.push({
+        metric_code,
+        target_date: `${year}-12-31`,
+        numeric_value: value / count,
+      });
+    }
+  };
+  derive(ocf, OCF_PS_CODE);
+  derive(estimates, OCF_PS_ESTIMATE_CODE);
   return derived.length ? [...metrics, ...derived] : metrics;
 }
 
@@ -339,18 +347,40 @@ export function withDerivedOcfPerShare(metrics: MetricRow[]): MetricRow[] {
 export function priceVsMetric(
   metrics: MetricRow[], codes: string[] = OCF_PS_CODES, years?: number,
 ): YearPoint[] {
-  const price = byYear(metrics, PRICE_CODES);
+  const valueRows = metrics
+    .filter((m) => codes.includes(m.metric_code) && m.numeric_value != null)
+    .sort((a, b) => a.target_date.localeCompare(b.target_date));
   const value = byYear(metrics, codes);
+  // Quick Valuation's prices are all yfinance daily closes.  Select the last
+  // trading close on or before the fiscal observation, rather than taking a
+  // calendar-year-end close for a company whose fiscal year closes in January.
+  const closes = metrics
+    .filter((m) => m.metric_code === 'close_price' && m.numeric_value != null && m.numeric_value > 0)
+    .sort((a, b) => a.target_date.localeCompare(b.target_date));
+  // Keep price-only calendar years visible too; a daily close can be current
+  // while the latest annual filing has not arrived.  A fiscal observation below
+  // replaces that year's calendar close with the close at its actual year end.
+  const closeAtFiscalEnd = byYear(metrics, ['close_price']);
+  let closeIndex = 0;
+  let close: number | null = null;
+  for (const row of valueRows) {
+    while (closeIndex < closes.length && closes[closeIndex].target_date <= row.target_date) {
+      close = closes[closeIndex].numeric_value;
+      closeIndex += 1;
+    }
+    const year = Number(row.target_date.slice(0, 4));
+    if (close != null && Number.isFinite(year)) closeAtFiscalEnd.set(year, close);
+  }
   // No per-share figure anywhere ⇒ there is no comparison to draw, and a bare price line is not
   // this chart. The tab's own empty state already says so; handing it years would draw one series.
   if (!value.size) return [];
   const start = Math.max(HISTORY_FROM_YEAR, Math.min(...value.keys()));
-  const all = [...new Set([...price.keys(), ...value.keys()])]
+  const all = [...new Set([...closeAtFiscalEnd.keys(), ...value.keys()])]
     .filter((y) => y >= start)
     .sort((a, b) => a - b);
   const window = years == null ? all : all.slice(-years);
   return window.map((year) => ({
-    year, price: price.get(year) ?? null, value: value.get(year) ?? null,
+    year, price: closeAtFiscalEnd.get(year) ?? null, value: value.get(year) ?? null,
   }));
 }
 
@@ -413,6 +443,52 @@ export function forwardEstimates(
     if (rows.length) return rows;
   }
   return [];
+}
+
+/**
+ * Daily historical forward P/OCF. An annual estimate for FY N is applied from the corresponding
+ * FY N-1 date until its own fiscal date, so every price is divided by the OCF consensus investors
+ * were looking one fiscal year ahead to — never by a future fiscal-year share price.
+ */
+export function dailyForwardOcfMultiples(
+  metrics: MetricRow[], codes: string[],
+): { t: number; value: number }[] {
+  // Code order is source priority. Keep one consensus per fiscal target date, then shift its
+  // effective window back exactly one calendar year (NVIDIA: FY2027 estimate -> FY2026 prices).
+  const estimates = new Map<string, number>();
+  for (const code of codes) {
+    for (const row of metrics) {
+      if (row.metric_code !== code || row.numeric_value == null || !(row.numeric_value > 0)) continue;
+      if (!estimates.has(row.target_date)) estimates.set(row.target_date, row.numeric_value);
+    }
+  }
+  const windows = [...estimates.entries()]
+    .map(([targetDate, estimate]) => {
+      const year = Number(targetDate.slice(0, 4));
+      return { start: `${String(year - 1).padStart(4, '0')}${targetDate.slice(4)}`, targetDate, estimate };
+    })
+    .filter((window) => Number.isFinite(Number(window.targetDate.slice(0, 4))))
+    .sort((a, b) => a.start.localeCompare(b.start));
+  if (!windows.length) return [];
+
+  const closes = metrics
+    .filter((row) => row.metric_code === 'close_price' && row.numeric_value != null && row.numeric_value > 0)
+    .sort((a, b) => a.target_date.localeCompare(b.target_date));
+  let next = 0;
+  let active: { start: string; targetDate: string; estimate: number } | null = null;
+  const points: { t: number; value: number }[] = [];
+  for (const close of closes) {
+    while (next < windows.length && windows[next].start <= close.target_date) active = windows[next++];
+    if (active == null || close.target_date >= active.targetDate) continue;
+    points.push({
+      t: Date.parse(`${close.target_date}T00:00:00Z`),
+      value: close.numeric_value / active.estimate,
+      price: close.numeric_value,
+      estimate: active.estimate,
+      forecastTargetDate: active.targetDate,
+    });
+  }
+  return points;
 }
 
 /**
