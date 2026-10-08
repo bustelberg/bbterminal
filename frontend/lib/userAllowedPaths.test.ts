@@ -14,6 +14,7 @@ describe('isUserAllowedPath', () => {
     expect(isUserAllowedPath('/research-dashboard')).toBe(true)
     expect(isUserAllowedPath('/log-dashboard')).toBe(true)
     expect(isUserAllowedPath('/momentum')).toBe(true)
+    expect(isUserAllowedPath('/debet-calculation')).toBe(true)
     expect(isUserAllowedPath('/account/security')).toBe(true)
     expect(isUserAllowedPath('/forbidden')).toBe(true)
   })
@@ -25,7 +26,7 @@ describe('isUserAllowedPath', () => {
     //  And the removal half is pinned by the cases below. Taking a page away leaves any API path
     // it alone needed open — a permission nobody can see, because it grants no reachable screen.
     expect([...USER_ALLOWED_PATHS].sort()).toEqual([
-      '/', '/account', '/forbidden', '/log-dashboard', '/management-dashboard', '/mfa', '/momentum', '/research-dashboard', '/schedule',
+      '/', '/account', '/debet-calculation', '/forbidden', '/log-dashboard', '/management-dashboard', '/mfa', '/momentum', '/research-dashboard', '/schedule',
     ])
   })
 
