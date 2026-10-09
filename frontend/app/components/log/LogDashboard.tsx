@@ -1,11 +1,12 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
 import { useLang } from '../../../lib/i18n';
 import CompanyPicker, { type AssetPick } from '../research/CompanyPicker';
-import { INFO_ICON } from '../../../lib/infoIcon';
+import { Provenance } from '../../../lib/provenance';
+import { startLocalJob } from '../../../lib/stores/jobs';
 
 type Entry = {
   id: number; meeting_date: string; company_name: string; isin: string; decision: string;
@@ -53,6 +54,7 @@ export default function LogDashboard() {
   const [editForm, setEditForm] = useState({ company_name: '', isin: '', decision: 'Hold', notes: '', conviction: '3', portfolio_weight: '', review_on: '' });
   const [editing, setEditing] = useState(false);
   const [yahooReturns, setYahooReturns] = useState<Record<number, YahooReturn>>({});
+  const [refreshingYahoo, setRefreshingYahoo] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Entry | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({ decision: 'Hold', notes: '', conviction: '3', portfolio_weight: '', review_on: new Date().toISOString().slice(0, 10) });
@@ -94,8 +96,23 @@ export default function LogDashboard() {
     return () => ctrl.abort();
   }, [company, nl]);
 
-  const reviewDue = useMemo(() => entries.filter((e) => e.review_on && e.review_on <= new Date().toISOString().slice(0, 10)), [entries]);
   const openYahooReturn = openTarget ? yahooReturns[openTarget.id] : null;
+  async function refreshYahooReturns() {
+    if (refreshingYahoo) return;
+    setRefreshingYahoo(true);
+    startLocalJob(nl ? 'Yahoo-rendementen verversen' : 'Refresh Yahoo returns', 'log-yahoo-returns', async (signal) => {
+      try {
+        const r = await apiFetch(`${API_URL}/api/log-dashboard/yahoo-returns/refresh`, { method: 'POST', signal });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error((body.detail as string) || 'Could not refresh Yahoo returns.');
+        setYahooReturns((body.returns || {}) as Record<number, YahooReturn>);
+        const moved = Number(body.prices?.moved || 0);
+        return nl
+          ? `${body.entries || 0} rendementen bijgewerkt${moved ? `; ${moved} koersreeksen verlengd` : ''}.`
+          : `${body.entries || 0} returns updated${moved ? `; ${moved} price series extended` : ''}.`;
+      } finally { setRefreshingYahoo(false); }
+    }, { cancellable: false });
+  }
   async function save() {
     if (!company) return;
     setSaving(true);
@@ -154,14 +171,14 @@ export default function LogDashboard() {
         <section className={`${card} flex h-full min-h-0 flex-col overflow-hidden xl:h-[clamp(420px,calc(100vh-14rem),560px)]`}><div className="flex items-baseline justify-between gap-3"><h2 className="text-base font-semibold text-fg-strong">{nl ? 'Nieuws' : 'News'}</h2></div><div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">{articles.map((a, i) => <a key={a.id || i} href={a.link} target="_blank" rel="noreferrer" className="block rounded-lg border border-neutral-800/60 p-3 hover:bg-overlay/[0.04]"><p className="text-sm font-medium text-fg-strong">{a.subject}</p>{a.subtitle && <p className="mt-1 text-xs text-fg-muted">{a.subtitle}</p>}<p className="mt-2 text-xs text-fg-faint">{formatDate(a.publish_time)}</p></a>)}{newsMessage && <p className="py-8 text-center text-sm text-fg-muted">{newsMessage}</p>}</div></section>
       </div>
       <section className={card}>
-        <div className="flex items-baseline justify-between">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 className="text-base font-semibold text-fg-strong">{nl ? 'Besluitlog' : 'Decision log'}</h2>
-          {reviewDue.length > 0 && <span className="text-sm text-warn-400">{reviewDue.length} {nl ? 'evaluatie' : `review${reviewDue.length === 1 ? '' : 's'}`} {nl ? 'open' : 'due'}</span>}
+          <div className="flex items-center gap-3"><button type="button" disabled={!entries.length || refreshingYahoo} onClick={() => void refreshYahooReturns()} className="rounded-lg border border-neutral-700 bg-card px-3 py-1.5 text-sm font-medium text-fg-soft transition-colors hover:border-neutral-500 hover:bg-overlay/[0.05] disabled:cursor-not-allowed disabled:opacity-50">{nl ? 'Yahoo-rendementen verversen' : 'Refresh Yahoo returns'}</button></div>
         </div>
         <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[740px] text-left text-sm [&_tbody_button]:rounded-lg [&_tbody_button]:border [&_tbody_button]:border-neutral-700 [&_tbody_button]:bg-card [&_tbody_button]:px-2.5 [&_tbody_button]:py-1.5 [&_tbody_button]:font-medium [&_tbody_button]:transition-colors [&_tbody_button:hover]:border-neutral-500 [&_tbody_button:hover]:bg-overlay/[0.05]">
+          <table className="w-full min-w-[900px] text-left text-sm [&_th]:px-3 [&_td]:px-3 [&_th:first-child]:pl-0 [&_td:first-child]:pl-0 [&_th:last-child]:pr-0 [&_td:last-child]:pr-0 [&_tbody_button]:rounded-lg [&_tbody_button]:border [&_tbody_button]:border-neutral-700 [&_tbody_button]:bg-card [&_tbody_button]:px-2.5 [&_tbody_button]:py-1.5 [&_tbody_button]:font-medium [&_tbody_button]:transition-colors [&_tbody_button:hover]:border-neutral-500 [&_tbody_button:hover]:bg-overlay/[0.05]">
             <thead className="border-b border-neutral-800 text-fg-faint"><tr><th className="pb-2 font-medium">{nl ? 'Bedrijf' : 'Company'}</th><th className="pb-2 font-medium">{nl ? 'Besluit' : 'Decision'}</th><th className="pb-2 font-medium">{nl ? 'Convictie' : 'Conviction'}</th><th className="pb-2 font-medium">{nl ? 'Weging' : 'Weight'}</th><th className="pb-2 font-medium">{nl ? 'Evaluatie' : 'Review'}</th><th className="pb-2 font-medium">{nl ? 'Yahoo-rendement' : 'Yahoo return'}</th><th className="pb-2 font-medium">{nl ? 'Notities' : 'Notes'}</th><th className="pb-2 font-medium"><span className="sr-only">{nl ? 'Acties' : 'Actions'}</span></th></tr></thead>
-            <tbody>{entries.map(e => { const result = yahooReturns[e.id]; return <tr key={e.id} className="border-b border-neutral-800/50 align-top"><td className="py-3"><div className="font-medium text-fg-strong">{e.company_name}</div><div className="font-mono text-xs text-fg-faint">{e.isin}</div></td><td className="py-3">{decisionLabel(e.decision)}</td><td className="py-3">{e.conviction}/5</td><td className="py-3">{e.portfolio_weight == null ? '—' : `${e.portfolio_weight}%`}</td><td className="py-3">{formatDate(e.review_on)}</td><td className={`py-3 font-medium ${result?.available && (result.return_pct ?? 0) >= 0 ? 'text-pos-400' : result?.available ? 'text-neg-400' : 'text-fg-muted'}`}>{!e.review_on ? '—' : !result ? '…' : result.available ? <span>{(result.return_pct ?? 0) >= 0 ? '+' : ''}{result.return_pct}% <span className={`ml-1 ${INFO_ICON}`} title={`${nl ? 'Yahoo-koersrendement vanaf' : 'Yahoo price return from'} ${formatDate(result.start_date)} ${nl ? 'tot en met' : 'through'} ${formatDate(result.as_of)}. ${nl ? 'Opgehaald:' : 'Retrieved:'} ${result.retrieved_at ? new Date(result.retrieved_at).toLocaleString(nl ? 'nl-NL' : 'en-GB') : '—'}`}>i</span></span> : '—'}</td><td className="max-w-sm py-3 text-fg-muted"><p className="line-clamp-2 whitespace-pre-wrap">{e.notes || '—'}</p></td><td className="py-3 text-right"><div className="flex justify-end gap-3"><button type="button" onClick={() => setOpenTarget(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Openen' : 'Open'}</button><button type="button" onClick={() => beginEdit(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Bewerken' : 'Edit'}</button><button type="button" onClick={() => setDeleteTarget(e)} className="text-xs text-fg-subtle hover:text-neg-400">{nl ? 'Verwijderen' : 'Delete'}</button></div></td></tr>})}{!entries.length && <tr><td colSpan={8} className="py-8 text-center text-fg-muted">{nl ? 'Nog geen besluiten vastgelegd.' : 'No decisions recorded yet.'}</td></tr>}</tbody>
+            <tbody>{entries.map(e => { const result = yahooReturns[e.id]; return <tr key={e.id} className="border-b border-neutral-800/50 align-top"><td className="py-3"><div className="font-medium text-fg-strong">{e.company_name}</div><div className="font-mono text-xs text-fg-faint">{e.isin}</div></td><td className="py-3">{decisionLabel(e.decision)}</td><td className="py-3">{e.conviction}/5</td><td className="py-3">{e.portfolio_weight == null ? '—' : `${e.portfolio_weight}%`}</td><td className="py-3">{formatDate(e.review_on)}</td><td className={`py-3 font-medium ${result?.available && (result.return_pct ?? 0) >= 0 ? 'text-pos-400' : result?.available ? 'text-neg-400' : 'text-fg-muted'}`}>{!e.review_on ? '—' : !result ? '…' : result.available ? <span>{(result.return_pct ?? 0) >= 0 ? '+' : ''}{result.return_pct}%<Provenance source="yfinance" asOf={result.as_of} fetchedAt={result.retrieved_at} kind="formula" what={nl ? 'Het koersrendement sinds de evaluatiedatum, exclusief dividenden.' : 'The price return since the review date, excluding dividends.'} how={nl ? 'Eerste beschikbare Yahoo-slotkoers op of na de evaluatiedatum, vergeleken met de nieuwste opgeslagen Yahoo-slotkoers.' : 'The first available Yahoo close on or after the review date, compared with the newest stored Yahoo close.'} /></span> : '—'}</td><td className="max-w-sm py-3 text-fg-muted"><p className="line-clamp-2 whitespace-pre-wrap">{e.notes || '—'}</p></td><td className="py-3 text-right"><div className="flex justify-end gap-3"><button type="button" onClick={() => setOpenTarget(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Openen' : 'Open'}</button><button type="button" onClick={() => beginEdit(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Bewerken' : 'Edit'}</button><button type="button" onClick={() => setDeleteTarget(e)} className="text-xs text-fg-subtle hover:text-neg-400">{nl ? 'Verwijderen' : 'Delete'}</button></div></td></tr>})}{!entries.length && <tr><td colSpan={8} className="py-8 text-center text-fg-muted">{nl ? 'Nog geen besluiten vastgelegd.' : 'No decisions recorded yet.'}</td></tr>}</tbody>
           </table>
         </div>
       </section>

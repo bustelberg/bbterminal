@@ -1521,6 +1521,83 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
         + (f": {last_err}" if last_err else ""))
 
 
+def scheduled_account_refresh_decision() -> dict:
+    """Say whether the scheduled fleet pass needs to re-read AIRS today.
+
+    The scheduler checks AIRS four times because its end-of-day valuation is
+    published at an uncertain time. ``force=False`` cannot make that cheap: it
+    tests our fetch time, not whether AIRS has published a newer valuation.
+
+    First re-read AIRS's lightweight live roster. A new selection must force a
+    full pass even when its valuation date is unchanged; otherwise a date gate
+    would never discover it. Then probe a real account from the newest stored
+    snapshot and compare its current AIRS as-of date with that snapshot. The
+    canary only discovers a newer fleet-wide valuation; accounts with slower
+    cadences keep their own dates during a real refresh. Missing state or a
+    failed probe always means a full scan, because redundant work is safer than
+    missing new data.
+    """
+    try:
+        rows = (
+            supabase.table("airs_holding")
+            .select("portefeuille,as_of_date")
+            .order("as_of_date", desc=True).limit(1).execute().data or []
+        )
+        row = rows[0] if rows else None
+        stored_date = str(row.get("as_of_date") or "")[:10] if row else ""
+        canary = str(row.get("portefeuille") or "").strip() if row else ""
+        if not stored_date or not canary:
+            return {"run": True, "reason": "no stored AIRS holdings snapshot yet"}
+        roster = (supabase.table("airs_account_roster")
+                  .select("portefeuille,last_seen_at").limit(2000).execute().data or [])
+        stamps = [str(r.get("last_seen_at") or "") for r in roster if r.get("last_seen_at")]
+        if not stamps:
+            return {"run": True, "reason": "no stored AIRS roster yet"}
+        latest_roster_stamp = max(stamps)
+        known_roster = {
+            str(r.get("portefeuille") or "").strip().casefold()
+            for r in roster if str(r.get("last_seen_at") or "") == latest_roster_stamp
+        }
+    except Exception as e:
+        _log.warning("[airs_vermogen] cannot read scheduled-refresh gate; scanning safely: %s", e)
+        return {"run": True, "reason": f"stored snapshot lookup failed: {type(e).__name__}"}
+
+    # The probe and a fleet refresh share one authenticated Playwright session.
+    # If an interactive action has it, defer this scheduler pass rather than
+    # drive the same cookie jar concurrently.
+    if not _acquire_session():
+        return {"run": False, "session_busy": True,
+                "reason": "another AIRS refresh is using the browser session"}
+    try:
+        # This is list discovery only — no per-account report downloads. It is
+        # the necessary inexpensive check that makes a newly selected AIRS book
+        # such as TOPS_NEU_BEH_DYN appear without waiting for a changed date.
+        live_names = _discover_portfolios()
+        new_names = [name for name in live_names if name.strip().casefold() not in known_roster]
+        if new_names:
+            return {"run": True, "stored_date": stored_date, "canary": canary,
+                    "new_portfolios": new_names,
+                    "reason": f"AIRS roster has {len(new_names)} new portfolio(s): "
+                              f"{', '.join(new_names[:3])}"}
+        # AIRS may have completed its batch since an earlier morning pass.
+        _reset_valuation_memo()
+        observed_date, _blob = _vermogen_most_recent(
+            canary, f"{date.today().year}-01-01")
+    except Exception as e:
+        _log.warning("[airs_vermogen] scheduled-refresh probe for %s failed; scanning safely: %s",
+                     canary, e)
+        return {"run": True, "stored_date": stored_date, "canary": canary,
+                "reason": f"AIRS valuation probe failed: {type(e).__name__}"}
+    finally:
+        _LOCK.release()
+
+    if observed_date > stored_date:
+        return {"run": True, "stored_date": stored_date, "observed_date": observed_date,
+                "canary": canary, "reason": "AIRS has a newer valuation"}
+    return {"run": False, "stored_date": stored_date, "observed_date": observed_date,
+            "canary": canary, "reason": "AIRS valuation is already stored"}
+
+
 def dependent_accounts(portefeuille: str) -> list[str]:
     """The accounts this one's figures are BUILT FROM — transitively, nearest first.
 

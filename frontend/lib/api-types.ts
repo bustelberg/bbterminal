@@ -6775,6 +6775,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/log-dashboard/yahoo-returns/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Yahoo Returns
+         * @description Refresh each dated log entry's Yahoo series, then return all recalculated returns.
+         *
+         *     This is deliberately an explicit batch action. Rendering the log only reads
+         *     stored closes; a page view must never cause a burst of vendor requests.
+         */
+        post: operations["refresh_yahoo_returns_api_log_dashboard_yahoo_returns_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/longequity/companies": {
         parameters: {
             query?: never;
@@ -22865,6 +22888,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_yahoo_returns_api_log_dashboard_yahoo_returns_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

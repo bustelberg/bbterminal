@@ -72,6 +72,10 @@ class TestNicknames:
 
 
 class TestOverviewName:
+    def test_toppenberg_neutraal_uses_the_reviewed_name(self):
+        name, custom = ov._overview_name("TOPS_NEU_BEH_DYN", {}, {}, None)
+        assert (name, custom) == ("Toppenberg Neutraal", True)
+
     def test_exact_dynamic_model_nickname_beats_its_fixed_pair(self):
         """Saving `AITopSelectie` on the DYN row must name that overview row."""
         name, custom = ov._overview_name(
@@ -96,6 +100,7 @@ class TestManagementGroups:
 
     def test_only_the_named_toppenberg_profiles_are_in_toppenberg(self):
         assert ov._management_group("TOPS_DEF_BEH_DYN") == "toppenberg"
+        assert ov._management_group("TOPS_NEU_BEH_DYN") == "toppenberg"
         assert ov._management_group("TOPS_KM") == "topselecties"
 
     def test_only_single_variant_building_blocks_lose_a_risk_suffix(self):

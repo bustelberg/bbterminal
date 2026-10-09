@@ -43,6 +43,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -1834,6 +1835,16 @@ def _fire_airs_vermogen() -> None:
     _spawn_body("airs_vermogen_refresh")
 
 
+def _amsterdam_now() -> datetime:
+    """Kept small and injectable so the morning-slot policy is testable."""
+    return datetime.now(ZoneInfo("Europe/Amsterdam"))
+
+
+def _airs_models_due(now: datetime | None = None) -> bool:
+    """The expensive model scan and pricing phase belongs to the last morning tick."""
+    return (now or _amsterdam_now()).hour >= 11
+
+
 def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
       """ CANCEL LANDS BETWEEN ACCOUNTS, NEVER INSIDE ONE — `run_airs_vermogen_refresh_sync`
       already takes the `should_stop` hook and checks it at exactly that boundary, because an
@@ -1847,25 +1858,42 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
       failures: list[str] = []
       stop = (lambda: bool(getattr(ctx, "cancelled", False))) if ctx is not None else None
       step = _reporter(ctx)
+      models_due = _airs_models_due()
       if True:
         try:
-            from airs_vermogen import run_airs_vermogen_refresh_sync  # noqa: PLC0415
+            from airs_vermogen import (  # noqa: PLC0415
+                run_airs_vermogen_refresh_sync,
+                scheduled_account_refresh_decision,
+            )
             #  Two phases, two counters, and the message says which. The accounts pass counts
             # accounts and the model pass counts models; the totals are only known when each starts,
             # so the bar restarts between them. A restarting bar reads as a failure unless the line
             # under it names the phase — hence the prefixes below.
-            res = run_airs_vermogen_refresh_sync(
-                triggered_by="auto", force=True, should_stop=stop,
-                on_step=lambda d, t, m: step(d, t, f"Accounts · {m}")) or {}
-            summary.update(accounts=res.get("complete_accounts"),
-                           portfolios_found=res.get("portfolios_found"),
-                           holdings_rows=res.get("holdings_rows"),
-                           cancelled_at=res.get("cancelled_at"))
+            gate = scheduled_account_refresh_decision()
+            summary["account_gate"] = gate
+            if gate.get("session_busy"):
+                step(0, 0, f"Accounts · deferred: {gate['reason']}")
+                return ("AIRS browser session is busy; scheduled refresh deferred", summary)
+            if gate.get("run"):
+                res = run_airs_vermogen_refresh_sync(
+                    triggered_by="auto", force=True, should_stop=stop,
+                    on_step=lambda d, t, m: step(d, t, f"Accounts · {m}")) or {}
+                summary.update(accounts=res.get("complete_accounts"),
+                               portfolios_found=res.get("portfolios_found"),
+                               holdings_rows=res.get("holdings_rows"),
+                               cancelled_at=res.get("cancelled_at"))
+            else:
+                summary.update(accounts=0, accounts_skipped=True)
+                step(0, 0, f"Accounts · skipped: {gate['reason']}")
         except Exception as e:
             failures.append(f"accounts: {type(e).__name__}: {e}")
             _log.exception(
                 "[scheduler] airs_vermogen refresh failed: %s: %s", type(e).__name__, e,
             )
+        if not models_due:
+            summary.update(models_deferred=True, pricing_deferred=True)
+            return (f"{summary.get('accounts', 0)} account(s) refreshed; "
+                    "models and pricing deferred to 11:00 Amsterdam", summary)
         #  The model portfolios too — nothing scheduled has ever scanned them, and the pairing
         # Silently depends on them. This tick refreshes the ACCOUNTS (Rendement,
         # Vermogensoverzicht); the model COMPOSITIONS were only ever populated by pressing "Scan

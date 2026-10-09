@@ -29221,6 +29221,26 @@
         ]
       }
     },
+    "/api/log-dashboard/yahoo-returns/refresh": {
+      "post": {
+        "description": "Refresh each dated log entry's Yahoo series, then return all recalculated returns.\n\nThis is deliberately an explicit batch action. Rendering the log only reads\nstored closes; a page view must never cause a burst of vendor requests.",
+        "operationId": "refresh_yahoo_returns_api_log_dashboard_yahoo_returns_refresh_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh Yahoo Returns",
+        "tags": [
+          "log dashboard"
+        ]
+      }
+    },
     "/api/longequity/companies": {
       "get": {
         "description": "Companies present in the LongEquity snapshot for `target_date`, plus\nadd/remove diff vs the previous snapshot.",

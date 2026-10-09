@@ -279,6 +279,15 @@
       "look_through_target": null
     },
     {
+      "nickname": "Toppenberg Neutraal",
+      "airs_names": [
+        "TOPS_NEU_BEH_DYN",
+        "TOPS_NEU_BEH"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
       "nickname": "Toppenberg Offensief",
       "airs_names": [
         "TOPS_OFF_BEH_DYN",

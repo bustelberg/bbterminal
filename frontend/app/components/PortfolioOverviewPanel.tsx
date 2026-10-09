@@ -234,7 +234,7 @@ const collectionTitle: Record<PortfolioCollection, string> = {
 
 const collectionNameOrder: Record<PortfolioCollection, string[]> = {
   bustelberg: ['Bustelberg Defensief', 'Bustelberg Neutraal', 'Bustelberg Beperkt Offensief', 'Bustelberg Offensief'],
-  toppenberg: ['Toppenberg Defensief', 'Toppenberg Beperkt Offensief', 'Toppenberg Offensief'],
+  toppenberg: ['Toppenberg Defensief', 'Toppenberg Neutraal', 'Toppenberg Beperkt Offensief', 'Toppenberg Offensief'],
   topselecties: [],
   test_topselecties: [],
 };
@@ -262,10 +262,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // and `_auth_middleware.py::_USER_REFRESH_PATHS` is the same split on the server.
   const isAdmin = useIsAdmin();
   const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
-  // Sort. Name ascending by default: the list is read to FIND a portfolio far more often than to
-  // rank one, and alphabetical is the only order you can navigate without reading every row.
+  // Bustelberg and Toppenberg open from Offensief down to Defensief; TopSelecties open A–Z.
+  // The name comparator still uses the explicit profile order.
   const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
+    () => collection === 'bustelberg' || collection === 'toppenberg' ? 'desc' : 'asc');
   const toggleSort = (k: SortKey) => {
     // Same column -> flip. New column -> its own natural first direction: A-Z for a name, but
     // biggest-first for a number, because nobody opens a returns column to see the worst.
@@ -996,12 +997,16 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           : r.latest_month_pct ?? null);
     return [...base].sort((a, b) => {
       const x = val(a), y = val(b);
-      if (sortKey === 'name' && sortDir === 'asc') {
+      if (sortKey === 'name') {
         const order = collectionNameOrder[collection];
         const aRank = order.indexOf(a.name);
         const bRank = order.indexOf(b.name);
         if (aRank !== bRank && (aRank >= 0 || bRank >= 0)) {
-          return (aRank < 0 ? order.length : aRank) - (bRank < 0 ? order.length : bRank);
+          // Named risk profiles always stay together. The arrow reverses their
+          // logical order; unrelated/fallback names remain after that sequence.
+          if (aRank < 0) return 1;
+          if (bRank < 0) return -1;
+          return (aRank - bRank) * dir;
         }
       }
       //  Absent sorts to the bottom in both directions. A portfolio with no return has no

@@ -76,6 +76,34 @@ async def delete_entry(entry_id: int):
     return {"deleted": True}
 
 
+def _yahoo_return_since(isin: str, start: date) -> dict:
+    """Read one already-persisted Yahoo price return without calling Yahoo."""
+    execution = (supabase.table("asset_execution").select("analysis_id")
+                 .eq("isin", isin.strip().upper()).limit(1).execute().data or [])
+    if not execution or not execution[0].get("analysis_id"):
+        return {"available": False, "message": "No Yahoo price series is linked to this ISIN."}
+    aid = execution[0]["analysis_id"]
+    first = (supabase.table("asset_price").select("target_date,close")
+             .eq("analysis_id", aid).gte("target_date", start.isoformat())
+             .not_.is_("close", "null").order("target_date").limit(1).execute().data or [])
+    latest = (supabase.table("asset_price").select("target_date,close")
+              .eq("analysis_id", aid).not_.is_("close", "null")
+              .order("target_date", desc=True).limit(1).execute().data or [])
+    if not first or not latest or not first[0].get("close"):
+        return {"available": False, "message": "No Yahoo close is available from that date."}
+    start_row, end_row = first[0], latest[0]
+    start_close, end_close = float(start_row["close"]), float(end_row["close"])
+    if start_close <= 0:
+        return {"available": False, "message": "The starting Yahoo close is invalid."}
+    return {
+        "available": True,
+        "return_pct": round((end_close / start_close - 1) * 100, 2),
+        "start_date": start_row["target_date"], "start_close": start_close,
+        "as_of": end_row["target_date"], "end_close": end_close,
+        "retrieved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @router.get("/api/log-dashboard/yahoo-return/{isin}")
 async def yahoo_return_since(isin: str, since: str = Query(...)):
     """Stored Yahoo close-price return from the first close on/after ``since``.
@@ -88,34 +116,35 @@ async def yahoo_return_since(isin: str, since: str = Query(...)):
         start = date.fromisoformat(since)
     except ValueError as exc:
         raise HTTPException(422, "since must be an ISO date") from exc
+    return await asyncio.to_thread(_yahoo_return_since, isin, start)
 
-    def _return() -> dict:
-        execution = (supabase.table("asset_execution").select("analysis_id")
-                     .eq("isin", isin.strip().upper()).limit(1).execute().data or [])
-        if not execution or not execution[0].get("analysis_id"):
-            return {"available": False, "message": "No Yahoo price series is linked to this ISIN."}
-        aid = execution[0]["analysis_id"]
-        first = (supabase.table("asset_price").select("target_date,close")
-                 .eq("analysis_id", aid).gte("target_date", start.isoformat())
-                 .not_.is_("close", "null").order("target_date").limit(1).execute().data or [])
-        latest = (supabase.table("asset_price").select("target_date,close")
-                  .eq("analysis_id", aid).not_.is_("close", "null")
-                  .order("target_date", desc=True).limit(1).execute().data or [])
-        if not first or not latest or not first[0].get("close"):
-            return {"available": False, "message": "No Yahoo close is available from that date."}
-        start_row, end_row = first[0], latest[0]
-        start_close, end_close = float(start_row["close"]), float(end_row["close"])
-        if start_close <= 0:
-            return {"available": False, "message": "The starting Yahoo close is invalid."}
-        return {
-            "available": True,
-            "return_pct": round((end_close / start_close - 1) * 100, 2),
-            "start_date": start_row["target_date"], "start_close": start_close,
-            "as_of": end_row["target_date"], "end_close": end_close,
-            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+
+@router.post("/api/log-dashboard/yahoo-returns/refresh")
+async def refresh_yahoo_returns():
+    """Refresh each dated log entry's Yahoo series, then return all recalculated returns.
+
+    This is deliberately an explicit batch action. Rendering the log only reads
+    stored closes; a page view must never cause a burst of vendor requests.
+    """
+    def _refresh() -> dict:
+        from asset_pipeline.price_refresh import backfill_missing, refresh_stale  # noqa: PLC0415
+
+        dated = [entry for entry in _entries() if entry.get("review_on")]
+        isins = {str(entry.get("isin") or "").strip().upper() for entry in dated}
+        isins.discard("")
+        # An already-resolved entry can legitimately have no historical rows
+        # yet; backfill it before the incremental update below.
+        backfill = backfill_missing(isins) if isins else {"missing": 0, "backfilled": 0, "failed": 0}
+        prices = (refresh_stale(held_only=False, stale_days=0, isins=isins)
+                  if isins else {"considered": 0, "moved": 0, "unchanged": 0, "failed": 0})
+        returns = {
+            str(entry["id"]): _yahoo_return_since(
+                str(entry["isin"]), date.fromisoformat(str(entry["review_on"])[:10]))
+            for entry in dated
         }
+        return {"entries": len(dated), "prices": prices, "backfill": backfill, "returns": returns}
 
-    return await asyncio.to_thread(_return)
+    return await asyncio.to_thread(_refresh)
 
 
 @router.get("/api/log-dashboard/news/{ticker}")
