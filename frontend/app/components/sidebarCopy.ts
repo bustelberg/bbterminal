@@ -86,7 +86,7 @@ const EN: SidebarCopy = {
     '/fx-rates': 'FX Rates',
     '/timezone': 'Trading Hours',
     '/airs-portfolio': 'AIRS Portfolio',
-    '/debet-calculation': 'Debet calculations',
+    '/debet-calculation': 'Debit calculations',
     '/request_gurufocus': 'Request GuruFocus',
     '/benchmarks': 'Benchmarks',
     '/isin-compare': 'ISIN Compare',
