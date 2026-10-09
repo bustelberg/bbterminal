@@ -111,3 +111,12 @@ describe(' no DRAWN label is built from the English basis', () => {
     expect(/\bwhat=\{?[^\n]*\bb\.\w/.test(src) || /\bhow=\{?[^\n]*\bb\.\w/.test(src)).toBe(true);
   });
 });
+
+describe('Forward P/OCF and P/E comparison chart', () => {
+  it('stays on both fixed measures when the OCF/EPS valuation switch changes', () => {
+    const src = readFileSync(join(__dirname, 'QuickValuationTab.tsx'), 'utf8');
+    expect(src).toContain('basis={BASIS.ocf} basisKey="ocf"');
+    expect(src).toContain('forward={ocfForwardHistory} comparisonForward={epsForwardHistory}');
+    expect(src).not.toContain('forward={forwardHistory} comparisonForward={comparisonForwardHistory}');
+  });
+});

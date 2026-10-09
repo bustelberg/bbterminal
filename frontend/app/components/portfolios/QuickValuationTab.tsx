@@ -638,10 +638,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const epsForwardHistory = useMemo(
     () => since(dailyForwardMultiples(valuationMetrics, BASIS.eps.estimateCodes ?? []), historyFromYear),
     [valuationMetrics, historyFromYear]);
-  const forwardHistory = basis === 'eps' ? epsForwardHistory : ocfForwardHistory;
-  const comparisonForwardHistory = basis === 'eps' ? ocfForwardHistory : epsForwardHistory;
-  const multipleFromYear = forwardHistory[0]
-    ? new Date(forwardHistory[0].t).getUTCFullYear() : historyFromYear;
+  // This is a comparison chart, not a view of the selected valuation basis. Keep its OCF and
+  // EPS lines fixed while the switch changes the price/metric, yield, and calculator panels.
+  const multipleFromYear = ocfForwardHistory[0]
+    ? new Date(ocfForwardHistory[0].t).getUTCFullYear() : historyFromYear;
 
   //  Derived from the same two lines the chart above plots, not from GuruFocus's own
   // `Valuation Ratios__FCF Yield %` (or its P/E) — whose denominator convention (year-end price?
@@ -1266,8 +1266,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
 
     {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
-    <MultipleHistoryChart height={CHART_HEIGHT} basis={b} basisKey={basis} currency={currency}
-      forward={forwardHistory} comparisonForward={comparisonForwardHistory} fromYear={multipleFromYear}
+    <MultipleHistoryChart height={CHART_HEIGHT} basis={BASIS.ocf} basisKey="ocf" currency={currency}
+      forward={ocfForwardHistory} comparisonForward={epsForwardHistory} fromYear={multipleFromYear}
       estimateRetrievedAt={sourceFetchedAt.estimates}
       priceSource={yahooPrices}
       name={name} isin={isin}

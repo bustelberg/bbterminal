@@ -270,11 +270,12 @@ export function endpointCagr(
  * index whose drawn periods stop in 2019) and not something to paper over with the newer of the two.
  */
 export function commonEndPeriod(
-  a: Record<string, { value: number }>, b: Record<string, { value: number }>,
+  ...levels: Record<string, { value: number }>[]
 ): string | null {
-  const inB = new Set(Object.keys(b));
-  const shared = Object.keys(a)
-    .filter((p) => inB.has(p) && periodYear(p) !== null)
+  if (!levels.length) return null;
+  const otherPeriods = levels.slice(1).map((level) => new Set(Object.keys(level)));
+  const shared = Object.keys(levels[0])
+    .filter((p) => otherPeriods.every((periods) => periods.has(p)) && periodYear(p) !== null)
     .sort(periodOrder);
   return shared.length ? shared[shared.length - 1] : null;
 }

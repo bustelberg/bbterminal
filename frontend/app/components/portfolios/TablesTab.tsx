@@ -693,6 +693,16 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
   const bookInvCap = useMemo(
     () => (roicData ? investedCapitalBlend(roicData.rows) : null), [roicData]);
   const idxInvCap = useMemo(() => (bRoic ? investedCapitalBlend(bRoic.rows) : null), [bRoic]);
+  // A table column is one comparison window. Some series can already contain a filed 2026 while
+  // others still end in 2025; measuring them on their individual latest years makes the rows look
+  // comparable while answering different questions. Use the newest reported period all available
+  // level lines share, so every historical rate currently spans 2020–2025.
+  const historicalStatsEnd = commonEndPeriod(...[
+    bookRev, idxRev, bookEps, idxEps, bookBlend, idxBlend,
+    bookPrice, idxPrice, bookInvCap, idxInvCap, bookShares, idxShares,
+  ].filter((line): line is Line => line != null).map((line) => line.level));
+  const historicalRate = (level: Line['level'], years: number) =>
+    lineCagr(level, years, historicalStatsEnd ?? undefined);
 
   /**
    * Is this row's answer still on its WAY? — the gate on every animated loading indicator here.
@@ -1069,16 +1079,16 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
               {on('revCagr') && rateRow('revCagr', bookRev, idxRev,
                 // A side with a current 5y history must remain visible when the other side is
                 // thinner. `cagrExcess` below still refuses to subtract mismatched windows.
-                (lvl, y) => lineCagr(lvl, y),
+                historicalRate,
                 arriving(bookLine, benchLine))}
               {/*  THE HISTORY OF THE SERIES THE LAST ROW FORECASTS, on the same shared end period
                   (`epsBase`) — so the rate hands over to the expectation instead of ending
                   somewhere else. See the  where `epsBase` is computed. */}
               {on('epsCagr') && rateRow('epsCagr', bookEps, idxEps,
-                (lvl, y) => lineCagr(lvl, y),
+                historicalRate,
                 arriving(bookLine, benchLine))}
               {on('fcfCagr') && rateRow('fcfCagr', bookBlend, idxBlend,
-                (lvl, y) => lineCagr(lvl, y),
+                historicalRate,
                 arriving(bookLine, benchLine))}
               {/*  ITS OWN `priceEnd`, NOT `fcfEnd`. Every row on this table pins both sides to the
                   latest period THEY share, and the price line does not end where the FCF line does:
@@ -1087,7 +1097,7 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
                   share FCF may not). Borrowing the neighbouring row's window would silently measure
                   one row over a span its own line does not reach — see `lineCagr`'s . */}
               {on('priceCagr') && rateRow('priceCagr', bookPrice, idxPrice,
-                (lvl, y) => lineCagr(lvl, y),
+                historicalRate,
                 arriving(bookLine, benchLine))}
               {/*  THE DENOMINATOR OF THE ROIC ROW BELOW, deliberately adjacent to it: capital
                   growing faster than the return on it is a book buying its growth, and neither row
@@ -1095,11 +1105,11 @@ export default function TablesTab({ holdingsTarget, holdingsName, sbcCorrection,
               {/*  `roicData`/`bRoic` — invested capital is DERIVED from the ROIC payload (see
                   `bookInvCap`), so this row waits on that fetch and not on one of its own. */}
               {on('invCapCagr') && rateRow('invCapCagr', bookInvCap, idxInvCap,
-                (lvl, y) => lineCagr(lvl, y),
+                historicalRate,
                 arriving(roicData, bRoic))}
               {/*  THE WEDGE BETWEEN THE REVENUE ROW AND THE PER-SHARE ROWS — see its note. */}
               {on('sharesCagr') && rateRow('sharesCagr', bookShares, idxShares,
-                (lvl, y) => lineCagr(lvl, y),
+                historicalRate,
                 arriving(bookLine, benchLine))}
               {on('grossMargin')
                 && meanRow('grossMargin', book.grossMargin, index.grossMargin,

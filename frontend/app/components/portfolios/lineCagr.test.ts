@@ -209,6 +209,13 @@ describe('both rows measured over ONE window', () => {
     expect(commonEndPeriod(book, index)).toBe('2024');
   });
 
+  it('uses the latest period every displayed statistic shares', () => {
+    const fcf = lvl([['2020', 100], ['2025', 200]]);
+    const price = lvl([['2020', 100], ['2025', 180], ['2026', 220]]);
+    const eps = lvl([['2020', 100], ['2025', 160], ['2026', 190]]);
+    expect(commonEndPeriod(fcf, price, eps)).toBe('2025');
+  });
+
   it('pinning it makes both rows span the same years', () => {
     const end = commonEndPeriod(book, index) as string;
     const a = lineCagr(book, 5, end);

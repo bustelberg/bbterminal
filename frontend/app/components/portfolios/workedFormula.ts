@@ -192,13 +192,17 @@ export function workedCagr(got: Cagr): string {
  * which would hand `Array.map`'s INDEX to the `digits` parameter and print the first addend at zero
  * decimals — silently, and only visibly wrong to a reader who added them up.
  */
-export function workedMean(vals: readonly number[], unit = '%'): string {
+export function workedMean(vals: readonly number[], unit = '%', periods?: readonly string[]): string {
   if (!vals.length) return '';
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
   const d = subDigits(mean);
   //  `\dfrac`, NOT `a ÷ b`. A displayed fraction is the whole reason to typeset this at all: the
   // addends sit over their own count instead of trailing off to the right of a division sign.
-  return `\\dfrac{${vals.map((v) => subNum(v, d)).join(' + ')}}{${vals.length}}`
+  const addends = vals.map((v, i) => {
+    const period = periods?.[i];
+    return period == null ? subNum(v, d) : `${subNum(v, d)}_{\\,${tex(period)}}`;
+  });
+  return `\\dfrac{${addends.join(' + ')}}{${vals.length}}`
     + ` = ${subNum(mean, d)}${tex(unit)}`;
 }
 
