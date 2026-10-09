@@ -41,6 +41,26 @@ type Overview = {
   sectors: Sector[];
 };
 
+type YahooMapping = {
+  company_id: number;
+  company_name: string;
+  isin: string | null;
+  universe_ticker: string | null;
+  gurufocus_url: string | null;
+  yahoo_ticker: string | null;
+  execution_ticker: string | null;
+  identity_status: string | null;
+  bars: number | null;
+  mapping_status: 'verified' | 'review' | 'unmapped';
+};
+
+type YahooMappingsResponse = {
+  label: string;
+  target_month: string | null;
+  count: number;
+  rows: YahooMapping[];
+};
+
 /** /leonteq — hierarchical view of Leonteq's underlying equities,
  * grouped by sector → industry → company. Each company carries a
  * direct GuruFocus link when we resolved them to a known company row.
@@ -52,6 +72,9 @@ export default function LeonteqUniverse() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [expandedSectors, setExpandedSectors] = useState<Set<string>>(new Set());
+  const [yahooMappings, setYahooMappings] = useState<YahooMappingsResponse | null>(null);
+  const [yahooMappingError, setYahooMappingError] = useState<string | null>(null);
+  const [yahooStatusFilter, setYahooStatusFilter] = useState<'all' | YahooMapping['mapping_status']>('all');
 
   const [refreshing, setRefreshing] = useState(false);
   const [refreshLog, setRefreshLog] = useState<string[]>([]);
@@ -71,13 +94,22 @@ export default function LeonteqUniverse() {
 
   const load = useCallback(async () => {
     try {
-      const r = await apiFetch(`${API_URL}/api/leonteq/overview`);
+      const [r, mappingResponse] = await Promise.all([
+        apiFetch(`${API_URL}/api/leonteq/overview`),
+        apiFetch(`${API_URL}/api/leonteq/frozen-yahoo-mappings`),
+      ]);
       if (!r.ok) {
         setError(`Failed to load (${r.status})`);
         return;
       }
       setData((await r.json()) as Overview);
       setError(null);
+      if (mappingResponse.ok) {
+        setYahooMappings((await mappingResponse.json()) as YahooMappingsResponse);
+        setYahooMappingError(null);
+      } else {
+        setYahooMappingError(`Failed to load Yahoo mappings (${mappingResponse.status})`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -142,6 +174,24 @@ export default function LeonteqUniverse() {
       })
       .filter((x): x is Sector => x !== null);
   }, [data, search]);
+
+  const filteredYahooMappings = useMemo(() => {
+    const rows = yahooMappings?.rows ?? [];
+    const q = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      const searchMatch = !q || `${row.company_name} ${row.isin ?? ''} ${row.universe_ticker ?? ''} ${row.yahoo_ticker ?? ''}`.toLowerCase().includes(q);
+      return searchMatch && (yahooStatusFilter === 'all' || row.mapping_status === yahooStatusFilter);
+    });
+  }, [yahooMappings, search, yahooStatusFilter]);
+
+  const yahooMappingCounts = useMemo(() => {
+    const rows = yahooMappings?.rows ?? [];
+    return {
+      verified: rows.filter((row) => row.mapping_status === 'verified').length,
+      review: rows.filter((row) => row.mapping_status === 'review').length,
+      unmapped: rows.filter((row) => row.mapping_status === 'unmapped').length,
+    };
+  }, [yahooMappings]);
 
   const flatLeonteqRows = useMemo<FlatLeonteqRow[]>(() => {
     const out: FlatLeonteqRow[] = [];
@@ -392,6 +442,95 @@ export default function LeonteqUniverse() {
           reloadSignal={freezeCount}
         />
 
+        <section className="bg-card rounded-xl border border-neutral-800/40 overflow-hidden">
+          <div className="px-5 py-4 border-b border-neutral-800/40 flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-sm font-medium text-fg-strong">Yahoo Finance mapping</h2>
+              <p className="text-xs text-fg-subtle mt-1">
+                {yahooMappings
+                  ? `${yahooMappings.label} · ${yahooMappings.count} companies. The linked ticker is the yfinance series used by /backtest.`
+                  : 'Loading the frozen backtest snapshot…'}
+              </p>
+            </div>
+            {yahooMappings && (
+              <div className="flex gap-3 text-xs font-mono">
+                <span className="text-pos-300">{yahooMappingCounts.verified} verified</span>
+                <span className="text-warn-300">{yahooMappingCounts.review} review</span>
+                <span className="text-neg-300">{yahooMappingCounts.unmapped} unmapped</span>
+              </div>
+            )}
+          </div>
+          {yahooMappingError ? (
+            <div className="px-5 py-4 text-sm text-neg-300">{yahooMappingError}</div>
+          ) : yahooMappings && (
+            <div className="max-h-[32rem] overflow-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="sticky top-0 bg-card text-fg-subtle border-b border-neutral-800/40">
+                  <tr>
+                    <th className="px-5 py-2.5 font-medium">Company</th>
+                    <th className="px-3 py-2.5 font-medium">ISIN</th>
+                    <th className="px-3 py-2.5 font-medium">GuruFocus</th>
+                    <th className="px-3 py-2.5 font-medium">Yahoo Finance ticker</th>
+                    <th className="px-3 py-2.5 font-medium">
+                      <label className="flex items-center gap-1.5">
+                        <span>Status</span>
+                        <select
+                          value={yahooStatusFilter}
+                          onChange={(event) => setYahooStatusFilter(event.target.value as typeof yahooStatusFilter)}
+                          className="bg-page border border-neutral-700 rounded px-1.5 py-1 text-[11px] font-normal text-fg focus:border-accent-500 focus:outline-none"
+                          aria-label="Filter Yahoo mappings by status"
+                        >
+                          <option value="all">All</option>
+                          <option value="verified">Verified</option>
+                          <option value="review">Review</option>
+                          <option value="unmapped">Unmapped</option>
+                        </select>
+                      </label>
+                    </th>
+                    <th className="px-5 py-2.5 font-medium text-right">Bars</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-neutral-800/30">
+                  {filteredYahooMappings.map((row) => (
+                    <tr key={row.company_id} className="hover:bg-overlay/[0.02]">
+                      <td className="px-5 py-2 text-fg-soft">{row.company_name}</td>
+                      <td className="px-3 py-2 font-mono text-fg-faint">{row.isin ?? '—'}</td>
+                      <td className="px-3 py-2">
+                        {row.gurufocus_url ? (
+                          <a
+                            href={row.gurufocus_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-accent-400 hover:underline"
+                            title={`Open ${row.company_name} on GuruFocus`}
+                          >
+                            link ↗
+                          </a>
+                        ) : <span className="text-fg-faint">—</span>}
+                      </td>
+                      <td className="px-3 py-2 font-mono">
+                        {row.yahoo_ticker ? (
+                          <a
+                            href={`https://finance.yahoo.com/quote/${encodeURIComponent(row.yahoo_ticker)}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-accent-400 hover:underline"
+                            title={`Open ${row.yahoo_ticker} on Yahoo Finance`}
+                          >
+                            {row.yahoo_ticker} ↗
+                          </a>
+                        ) : <span className="text-fg-faint">—</span>}
+                      </td>
+                      <td className="px-3 py-2"><YahooMappingBadge status={row.mapping_status} /></td>
+                      <td className="px-5 py-2 text-right font-mono text-fg-faint">{row.bars?.toLocaleString() ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
         {(refreshLog.length > 0 || refreshResult) && (
           <ProgressTimeline
             steps={[]}
@@ -522,6 +661,15 @@ function Stat({ label, value }: { label: string; value: string }) {
       <div className="font-mono text-sm text-fg mt-0.5 truncate">{value}</div>
     </div>
   );
+}
+
+function YahooMappingBadge({ status }: { status: YahooMapping['mapping_status'] }) {
+  const styles = {
+    verified: 'bg-pos-500/10 text-pos-300 border-pos-500/20',
+    review: 'bg-warn-500/10 text-warn-300 border-warn-500/20',
+    unmapped: 'bg-neg-500/10 text-neg-300 border-neg-500/20',
+  };
+  return <span className={`inline-flex rounded border px-1.5 py-0.5 text-[10px] ${styles[status]}`}>{status}</span>;
 }
 
 function CompanyChip({ c }: { c: Company }) {

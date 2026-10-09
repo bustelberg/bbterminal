@@ -140,7 +140,7 @@ def _load_all_companies() -> list[dict]:
     return out
 
 
-def _run_prices_phase(
+def _retired_gurufocus_prices_phase(
     run_id: int,
     accumulated_errors: list[str],
     companies_override: list[dict] | None = None,
@@ -555,6 +555,58 @@ def _run_prices_phase(
     _refresh_price_coverage(_step)
 
 
+def _run_prices_phase(
+    run_id: int,
+    accumulated_errors: list[str],
+    companies_override: list[dict] | None = None,
+    budget_by_region: dict[str, int] | None = None,
+) -> None:
+    """Refresh company market data from Yahoo through the asset pipeline.
+
+    This replaced the former GuruFocus price/volume phase.  Existing mappings
+    are gap-refreshed; unresolved ISINs are sent through the single throttled
+    resolver, which writes both close and volume into ``asset_price``.
+    ``budget_by_region`` is intentionally ignored: Yahoo has no subscription
+    regions or per-region quota.
+    """
+    from asset_pipeline import price_refresh, queue  # noqa: PLC0415
+
+    def _step(message: str, *, level: str = "info") -> None:
+        log_step(run_id, message, level=level, phase="prices")
+
+    companies = companies_override if companies_override is not None else _load_all_companies()
+    cids = sorted({int(c["cid"]) for c in companies if c.get("cid") is not None})
+    if not cids:
+        _update_run(run_id, current_message="No companies to refresh.")
+        return
+    isins: list[str] = []
+    for chunk in (cids[i:i + 800] for i in range(0, len(cids), 800)):
+        rows = (supabase.table("company").select("isin").in_("company_id", chunk).execute().data or [])
+        isins.extend(str(r["isin"]).upper() for r in rows if r.get("isin"))
+    _update_run(run_id, companies_total=len(cids),
+                current_message=f"Refreshing Yahoo prices for {len(isins)} company ISINs…")
+    _step("Yahoo market-data refresh started. No GuruFocus quota exhausted or 403 unsubscribed "
+          "states apply; unmapped/delisted instruments are reported by the resolver.")
+    queue.enqueue(isins, skip_existing=True)
+    resolved = queue.process_slice(limit=len(isins), isins=isins)
+    scoped = set(isins)
+    backfilled = price_refresh.backfill_missing(scoped)
+    refreshed = price_refresh.refresh_stale(held_only=False, isins=scoped, sleep_s=0)
+    errors = int(resolved.get("failed", 0)) + int(backfilled.get("failed", 0)) + int(refreshed.get("failed", 0))
+    _update_run(run_id, companies_processed=len(cids), prices_refreshed=(
+        int(resolved.get("ok", 0)) + int(backfilled.get("backfilled", 0)) + int(refreshed.get("moved", 0))),
+        volumes_refreshed=(int(resolved.get("ok", 0)) + int(backfilled.get("backfilled", 0)) + int(refreshed.get("moved", 0))),
+        forbidden_count=0, delisted_count=int(resolved.get("unmapped", 0)), error_count=errors,
+        current_message=(f"Yahoo refresh complete: {refreshed.get('moved', 0)} updated, "
+                         f"{resolved.get('ok', 0)} resolved, {errors} errors."))
+    if errors:
+        accumulated_errors.append(f"Yahoo price refresh had {errors} failed instrument(s).")
+    _step(f"Yahoo refresh complete: {refreshed.get('moved', 0)} updated, "
+          f"{refreshed.get('unchanged', 0)} already current, "
+          f"{resolved.get('unmapped', 0)} delisted or unmapped, {errors} errors.",
+          level="error" if errors else "info")
+
+
 def _refresh_price_coverage(step=None) -> None:
     """Re-aggregate `company_price_coverage` — the GuruFocus price/volume summary `asset_grid`
     reads to show its `gf_price_*` columns.
@@ -663,9 +715,8 @@ def refresh_held_benchmarks(run_id: int) -> int:
 
     Best-effort per benchmark (a fetch/upsert failure is logged + skipped).
     Returns the count refreshed."""
-    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
-    from ingest.prices import _fetch_price_from_api, _parse_price_series  # noqa: PLC0415
+    from asset_pipeline.yahoo import closed_daily_bars  # noqa: PLC0415
 
     bids = _collect_held_benchmark_ids()
     if not bids:
@@ -684,19 +735,13 @@ def refresh_held_benchmarks(run_id: int) -> int:
             if not bm.data:
                 continue
             ticker = bm.data[0]["ticker"]
-            # ETFs are US-listed — same fetch the /api/benchmarks refresh uses.
-            data, fetch_log, _status = _fetch_price_from_api(ticker, "NYSE")
-            track_api_call(supabase, "NYSE", job="held_benchmark_price",
-                           outcome=classify_outcome(_status, has_data=data is not None))
-            if not data:
-                log.warning("[price_update] benchmark %s (%s) fetch failed: %s", bid, ticker, fetch_log)
-                continue
-            parsed = _parse_price_series(data)
-            if not parsed:
+            bars = closed_daily_bars(ticker)
+            if not bars:
+                log.warning("[price_update] benchmark %s (%s) Yahoo returned no closed bars", bid, ticker)
                 continue
             rows = [
-                {"benchmark_id": bid, "target_date": d.isoformat(), "price": p}
-                for d, p in parsed if d >= DATA_CUTOFF
+                {"benchmark_id": bid, "target_date": day.isoformat(), "price": close}
+                for day, close, _volume in bars if day >= DATA_CUTOFF
             ]
             for i in range(0, len(rows), 500):
                 supabase.table("benchmark_price").upsert(

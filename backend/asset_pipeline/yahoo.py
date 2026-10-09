@@ -9,7 +9,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote as _urlquote
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -517,6 +517,33 @@ def chart_window(symbol: str, period1: int, period2: int, interval: str = "1d") 
         f"&events=div%2Csplits"
     )
     return _parse_chart(s, t)
+
+
+def closed_daily_bars(symbol: str) -> list[tuple[date, float, float | None]]:
+    """All completed Yahoo daily bars as ``(date, close, volume)``.
+
+    This is the common price/volume feed for user-added ETF benchmarks. It
+    deliberately uses the raw close (not adjusted close): Diversifier reports
+    price returns and must not quietly turn into a dividend-inclusive series.
+    """
+    chart_data = chart_window(symbol, 0, int(time.time()), "1d")
+    if not chart_data:
+        return []
+    timestamps = chart_data.get("timestamp") or []
+    quote = ((chart_data.get("indicators") or {}).get("quote") or [{}])[0]
+    closes = quote.get("close") or []
+    volumes = quote.get("volume") or []
+    out: list[tuple[date, float, float | None]] = []
+    for index, (timestamp, close) in enumerate(zip(timestamps, closes)):
+        if close is None or not is_closed_bar(timestamp):
+            continue
+        try:
+            volume = volumes[index] if index < len(volumes) else None
+            out.append((utc_dt(timestamp).date(), float(close),
+                        float(volume) if volume is not None else None))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 _FX: dict[str, float | None] = {"EUR": 1.0}

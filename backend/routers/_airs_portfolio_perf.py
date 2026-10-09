@@ -1064,8 +1064,8 @@ async def explain_portfolio_ytd_async(portfolio_id: int, year: int | None = None
     return await asyncio.to_thread(explain_portfolio_ytd, portfolio_id, year)
 
 
-def compute_holding_marks(isins: list[str], anchor: str,
-                          *, linked: dict[str, int] | None = None) -> dict[str, dict]:
+def compute_holding_marks(isins: list[str], anchor: str, *, end: str | None = None,
+                          linked: dict[str, int] | None = None) -> dict[str, dict]:
     """Per-ISIN entry/exit marks over the window opening at `anchor`: what each holding was
     worth when the window opened, what it is worth now, and the EUR return between them.
 
@@ -1089,7 +1089,7 @@ def compute_holding_marks(isins: list[str], anchor: str,
     linked = linked or {}
     lookback = (date.fromisoformat(anchor)
                 - timedelta(days=_ANCHOR_LOOKBACK_DAYS)).isoformat()
-    today = date.today().isoformat()
+    today = end or date.today().isoformat()
 
     # A certificate is priced from the model it wraps, so those models' compositions join the
     # price load — their member ISINs are what the look-through basket is built from.

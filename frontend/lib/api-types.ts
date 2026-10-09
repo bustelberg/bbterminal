@@ -1481,6 +1481,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/monthly-yahoo-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Monthly Yahoo Performance
+         * @description One chart interval, decomposed into each current holding's Yahoo close return.
+         *
+         *     The book curve remains AIRS's flow-aware account return.  This drill-down intentionally answers
+         *     the different question a click asks: how the model's named instruments moved between these two
+         *     displayed marks, alongside that *same* interval's benchmark return.
+         */
+        get: operations["airs_model_portfolio_monthly_yahoo_performance_api_airs_model_portfolios__portfolio_id__monthly_yahoo_performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream": {
         parameters: {
             query?: never;
@@ -3666,7 +3690,7 @@ export interface paths {
         put?: never;
         /**
          * Create Benchmark
-         * @description Create a benchmark and fetch its prices from GuruFocus.
+         * @description Create a benchmark and fetch its price history from Yahoo Finance.
          */
         post: operations["create_benchmark_api_benchmarks_post"];
         delete?: never;
@@ -4619,7 +4643,7 @@ export interface paths {
          *     /schedule month-end refresh can show prices actually moved.
          *
          *     Reads each company's latest close date from the
-         *     `company_latest_close_price_dates` RPC (the same source the prices phase
+         *     `company_yahoo_latest_close_dates` RPC (the same source the Yahoo refresh
          *     sorts on), then enriches the min/max companies with name / ticker /
          *     exchange. `newest` = the most recent price held anywhere (should be the last
          *     trading day right after a refresh); `oldest` = the company whose latest
@@ -6644,6 +6668,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/leonteq/frozen-yahoo-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Frozen Yahoo Mappings
+         * @description Yahoo tickers for the immutable Leonteq snapshot selected in backtests.
+         *
+         *     ``analysis_symbol`` is the yfinance instrument whose stored price series is
+         *     used by the backtester.  Rows with a non-verified identity are deliberately
+         *     returned as ``review`` rather than silently treated as correct.
+         */
+        get: operations["frozen_yahoo_mappings_api_leonteq_frozen_yahoo_mappings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/leonteq/overview": {
         parameters: {
             query?: never;
@@ -7117,6 +7165,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/momentum/diversifier/comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pair Comparison */
+        post: operations["pair_comparison_api_momentum_diversifier_comparison_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/diversifier/correlation": {
         parameters: {
             query?: never;
@@ -7133,6 +7198,27 @@ export interface paths {
          *     ascending (lowest = best diversifier first).
          */
         post: operations["correlation_api_momentum_diversifier_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/etf-correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Etf Correlation
+         * @deprecated
+         * @description Legacy ETF-pair path; use /comparison for new clients.
+         */
+        post: operations["etf_correlation_api_momentum_diversifier_etf_correlation_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10600,6 +10686,34 @@ export interface components {
              */
             weight_pct_sum?: number;
         };
+        /**
+         * CorrelationMatrix
+         * @description Pairwise monthly-return correlations and their own overlap counts.
+         *
+         *     Each cell is calculated over the two series' shared months, rather than a
+         *     fleet-wide intersection. A young ETF must not make every other comparison
+         *     throw away its older history.
+         */
+        CorrelationMatrix: {
+            /** Labels */
+            labels: components["schemas"]["CorrelationMatrixLabel"][];
+            /** Overlaps */
+            overlaps: number[][];
+            /** Values */
+            values: (number | null)[][];
+        };
+        /**
+         * CorrelationMatrixLabel
+         * @description One row/column in the selected-strategy-and-funds correlation matrix.
+         */
+        CorrelationMatrixLabel: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Name */
+            name?: string | null;
+        };
         /** CorrelationPair */
         CorrelationPair: {
             /** A */
@@ -10635,6 +10749,7 @@ export interface components {
         };
         /** CorrelationResponse */
         CorrelationResponse: {
+            matrix: components["schemas"]["CorrelationMatrix"];
             /** Results */
             results: components["schemas"]["DiversifierResult"][];
             strategy: components["schemas"]["StrategyStats"];
@@ -10995,6 +11110,80 @@ export interface components {
             benchmark_id: number;
             /** Weight Pct */
             weight_pct: number;
+        };
+        /** EtfPairAsset */
+        EtfPairAsset: {
+            /** Backtest Run Id */
+            backtest_run_id?: number | null;
+            /** Benchmark Id */
+            benchmark_id?: number | null;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Ticker */
+            ticker: string;
+        };
+        /**
+         * EtfPairCorrelationRequest
+         * @description A direct pair: two ETFs, or one saved strategy and one ETF.
+         */
+        EtfPairCorrelationRequest: {
+            /** Backtest Run Id */
+            backtest_run_id?: number | null;
+            /** Benchmark Ids */
+            benchmark_ids: number[];
+            /** Variant Key */
+            variant_key?: string | null;
+        };
+        /**
+         * EtfPairCorrelationResponse
+         * @description A pair's correlation and aligned return history.
+         */
+        EtfPairCorrelationResponse: {
+            /** Annual */
+            annual: components["schemas"]["EtfPairYear"][];
+            /** Correlation */
+            correlation?: number | null;
+            /** Daily */
+            daily: components["schemas"]["EtfPairDay"][];
+            first: components["schemas"]["EtfPairAsset"];
+            /** Monthly */
+            monthly: components["schemas"]["EtfPairMonth"][];
+            /** Overlap From */
+            overlap_from?: string | null;
+            /** Overlap Months */
+            overlap_months: number;
+            /** Overlap To */
+            overlap_to?: string | null;
+            second: components["schemas"]["EtfPairAsset"];
+        };
+        /** EtfPairDay */
+        EtfPairDay: {
+            /** Date */
+            date: string;
+            /** First Return */
+            first_return: number;
+            /** Second Return */
+            second_return: number;
+        };
+        /** EtfPairMonth */
+        EtfPairMonth: {
+            /** First Return */
+            first_return: number;
+            /** Month */
+            month: string;
+            /** Second Return */
+            second_return: number;
+        };
+        /** EtfPairYear */
+        EtfPairYear: {
+            /** First Return */
+            first_return: number;
+            /** Second Return */
+            second_return: number;
+            /** Year */
+            year: number;
         };
         /** EtfProviderSectorWeight */
         EtfProviderSectorWeight: {
@@ -16391,6 +16580,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LinkableContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_monthly_yahoo_performance_api_airs_model_portfolios__portfolio_id__monthly_yahoo_performance_get: {
+        parameters: {
+            query: {
+                month: string;
+                benchmark?: string;
+                benchmark_weights?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -22689,6 +22913,26 @@ export interface operations {
             };
         };
     };
+    frozen_yahoo_mappings_api_leonteq_frozen_yahoo_mappings_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     overview_api_leonteq_overview_get: {
         parameters: {
             query?: never;
@@ -23402,6 +23646,39 @@ export interface operations {
             };
         };
     };
+    pair_comparison_api_momentum_diversifier_comparison_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EtfPairCorrelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfPairCorrelationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     correlation_api_momentum_diversifier_correlation_post: {
         parameters: {
             query?: never;
@@ -23422,6 +23699,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CorrelationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    etf_correlation_api_momentum_diversifier_etf_correlation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EtfPairCorrelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfPairCorrelationResponse"];
                 };
             };
             /** @description Validation Error */

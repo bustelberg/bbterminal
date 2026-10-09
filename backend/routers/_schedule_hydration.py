@@ -818,13 +818,12 @@ def basket_price_staleness(
     if not comp and not etfs:
         return None
 
-    # Latest close date per company (metric_data) + per ETF benchmark.
+    # Latest Yahoo close date per company + per ETF benchmark.
     latest_by_cid: dict[int, str] = {}
     for r in fetch_in_chunks(
         list(comp.keys()),
-        lambda chunk: supabase.table("metric_data")
+        lambda chunk: supabase.table("company_yahoo_price")
         .select("company_id, target_date")
-        .eq("metric_code", "close_price")
         .in_("company_id", chunk)
         .order("target_date", desc=True)
         .execute(),

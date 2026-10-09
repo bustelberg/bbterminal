@@ -5,6 +5,12 @@
       "sector": "Financials",
       "name": "Groupe Bruxelles Lambert SA",
       "note": "GBL is an investment holding company classified in Financial Services/Financials. Its Yahoo-backed asset_grid row has no usable sector, which otherwise puts this ACWI constituent in Unclassified in composition and attribution."
+    },
+    {
+      "isin": "AEN000101016",
+      "sector": "Financials",
+      "name": "First Abu Dhabi Bank PJSC",
+      "note": "This ADX bank was incorrectly resolved to the unrelated US First Trust ETF with bare ticker FAB. First Abu Dhabi Bank is a direct Financials constituent; Yahoo has no ADX listing, so the reviewed classification remains available while its false price mapping is removed."
     }
   ]
 }

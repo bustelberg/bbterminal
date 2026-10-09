@@ -42,9 +42,7 @@ def self_heal_missing_data(
     """
     # Imported lazily to avoid making this module always pay the ingest
     # module's transitive imports (urllib, supabase storage helpers, etc.).
-    from ingest.prices import (  # noqa: PLC0415
-        ensure_prices_for_company, ensure_volume_for_company,
-    )
+    from asset_pipeline.store import extend_series, store_series  # noqa: PLC0415
 
     if not company_ids:
         return {
@@ -54,6 +52,55 @@ def self_heal_missing_data(
                 "forbidden_exchanges": [], "errors": 0,
             },
         }
+
+    # ``company_id`` is the momentum universe's key, whereas Yahoo's stored
+    # close/volume bars are keyed by ``analysis_id``. Resolve that bridge once
+    # before the workers start; a company with no reviewed Yahoo instrument is
+    # reported as such rather than being silently repaired from GuruFocus.
+    def _mapped() -> dict[int, tuple[int, str, str | None]]:
+        out: dict[int, tuple[int, str, str | None]] = {}
+        for start in range(0, len(company_ids), 200):
+            rows = (supabase.table("asset_grid")
+                    .select("company_id,analysis_id,yahoo_symbol,price_to,status")
+                    .in_("company_id", company_ids[start:start + 200])
+                    .eq("status", "ok").execute().data or [])
+            for row in rows:
+                cid, aid, symbol = row.get("company_id"), row.get("analysis_id"), row.get("yahoo_symbol")
+                if cid is not None and aid is not None and symbol:
+                    out.setdefault(int(cid), (int(aid), str(symbol), row.get("price_to")))
+        return out
+
+    mapped = _mapped()
+    missing_mapping = [cid for cid in company_ids if cid not in mapped]
+    if missing_mapping:
+        # A backtest requested these companies, so resolve its bounded repair
+        # slice now. Previously this only re-fetched legacy GuruFocus rows,
+        # leaving the new Yahoo loader with exactly the same empty panel.
+        from asset_pipeline import queue as asset_queue  # noqa: PLC0415
+
+        isin_rows = []
+        for start in range(0, len(missing_mapping), 200):
+            isin_rows += (supabase.table("company").select("company_id,isin")
+                          .in_("company_id", missing_mapping[start:start + 200])
+                          .not_.is_("isin", "null").execute().data or [])
+        isins = [str(row["isin"]).strip().upper() for row in isin_rows if row.get("isin")]
+        if isins:
+            asset_queue.enqueue(isins)
+            if asset_queue.is_worker_active():
+                if on_progress:
+                    on_progress(missing_mapping[0], "skipped", "Yahoo resolver is already working")
+            else:
+                if on_progress:
+                    on_progress(missing_mapping[0], "ok", f"resolving {len(isins)} Yahoo instrument(s)")
+                asset_queue.process_slice(
+                    limit=len(isins), priority_isins=isins,
+                    on_each=lambda isin, outcome: on_progress(
+                        next((int(row["company_id"]) for row in isin_rows
+                              if str(row.get("isin") or "").upper() == isin), missing_mapping[0]),
+                        "ok", f"Yahoo {isin}: {outcome}",
+                    ) if on_progress else None,
+                )
+                mapped = _mapped()
 
     forbidden_exchanges: set[str] = set()
     healed: list[int] = []
@@ -75,40 +122,29 @@ def self_heal_missing_data(
             if on_progress:
                 on_progress(cid, "skipped", "cancelled")
             return
-        ticker = ticker_lookup.get(cid)
-        exch = exchange_lookup.get(cid)
-        if not ticker or not exch:
+        asset = mapped.get(cid)
+        if asset is None:
             with lock:
                 stats["errors"] += 1
             if on_progress:
-                on_progress(cid, "skipped", "missing ticker/exchange")
+                on_progress(cid, "skipped", "no resolved Yahoo instrument")
             return
-        with lock:
-            if exch in forbidden_exchanges:
-                if on_progress:
-                    on_progress(cid, "skipped", f"exchange {exch} known forbidden")
-                return
         try:
-            r_p = ensure_prices_for_company(supabase, cid, ticker, exch)
-            if r_p.is_forbidden:
-                with lock:
-                    forbidden_exchanges.add(exch)
-                if on_progress:
-                    on_progress(cid, "forbidden", f"{exch}: unsubscribed")
-                return
-            r_v = ensure_volume_for_company(supabase, cid, ticker, exch)
+            analysis_id, symbol, last_close = asset
+            loaded = extend_series(analysis_id, symbol, str(last_close)) if last_close else None
+            if loaded is None:
+                loaded = store_series(analysis_id, symbol, None)
         except Exception as e:  # noqa: BLE001
             with lock:
                 stats["errors"] += 1
             if on_progress:
                 on_progress(cid, "error", str(e))
             return
-        any_loaded = r_p.rows_loaded > 0 or r_v.rows_loaded > 0
+        any_loaded = loaded > 0
         with lock:
             stats["processed"] += 1
-            if r_p.rows_loaded > 0:
+            if loaded > 0:
                 stats["prices_fetched"] += 1
-            if r_v.rows_loaded > 0:
                 stats["volumes_fetched"] += 1
             if any_loaded:
                 healed.append(cid)
@@ -116,9 +152,9 @@ def self_heal_missing_data(
             on_progress(
                 cid,
                 "ok" if any_loaded else "noop",
-                f"prices={r_p.source}({r_p.rows_loaded}) volumes={r_v.source}({r_v.rows_loaded})",
-                prices_loaded=r_p.rows_loaded,
-                volumes_loaded=r_v.rows_loaded,
+                f"Yahoo {symbol}: {loaded} close/volume bar(s)",
+                prices_loaded=loaded,
+                volumes_loaded=loaded,
             )
 
     # Use fewer workers than the bulk load: each call hits the GF API,

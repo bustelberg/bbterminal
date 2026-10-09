@@ -5920,6 +5920,82 @@
         "title": "CorrelationInstrument",
         "type": "object"
       },
+      "CorrelationMatrix": {
+        "description": "Pairwise monthly-return correlations and their own overlap counts.\n\nEach cell is calculated over the two series' shared months, rather than a\nfleet-wide intersection. A young ETF must not make every other comparison\nthrow away its older history.",
+        "properties": {
+          "labels": {
+            "items": {
+              "$ref": "#/components/schemas/CorrelationMatrixLabel"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "overlaps": {
+            "items": {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "title": "Overlaps",
+            "type": "array"
+          },
+          "values": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "labels",
+          "values",
+          "overlaps"
+        ],
+        "title": "CorrelationMatrix",
+        "type": "object"
+      },
+      "CorrelationMatrixLabel": {
+        "description": "One row/column in the selected-strategy-and-funds correlation matrix.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "CorrelationMatrixLabel",
+        "type": "object"
+      },
       "CorrelationPair": {
         "properties": {
           "a": {
@@ -5992,6 +6068,9 @@
       },
       "CorrelationResponse": {
         "properties": {
+          "matrix": {
+            "$ref": "#/components/schemas/CorrelationMatrix"
+          },
           "results": {
             "items": {
               "$ref": "#/components/schemas/DiversifierResult"
@@ -6005,7 +6084,8 @@
         },
         "required": [
           "strategy",
-          "results"
+          "results",
+          "matrix"
         ],
         "title": "CorrelationResponse",
         "type": "object"
@@ -6963,6 +7043,238 @@
           "weight_pct"
         ],
         "title": "EtfOverlayHolding",
+        "type": "object"
+      },
+      "EtfPairAsset": {
+        "properties": {
+          "backtest_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backtest Run Id"
+          },
+          "benchmark_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "ticker",
+          "name"
+        ],
+        "title": "EtfPairAsset",
+        "type": "object"
+      },
+      "EtfPairCorrelationRequest": {
+        "description": "A direct pair: two ETFs, or one saved strategy and one ETF.",
+        "properties": {
+          "backtest_run_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Backtest Run Id"
+          },
+          "benchmark_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Benchmark Ids",
+            "type": "array"
+          },
+          "variant_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant Key"
+          }
+        },
+        "required": [
+          "benchmark_ids"
+        ],
+        "title": "EtfPairCorrelationRequest",
+        "type": "object"
+      },
+      "EtfPairCorrelationResponse": {
+        "description": "A pair's correlation and aligned return history.",
+        "properties": {
+          "annual": {
+            "items": {
+              "$ref": "#/components/schemas/EtfPairYear"
+            },
+            "title": "Annual",
+            "type": "array"
+          },
+          "correlation": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correlation"
+          },
+          "daily": {
+            "items": {
+              "$ref": "#/components/schemas/EtfPairDay"
+            },
+            "title": "Daily",
+            "type": "array"
+          },
+          "first": {
+            "$ref": "#/components/schemas/EtfPairAsset"
+          },
+          "monthly": {
+            "items": {
+              "$ref": "#/components/schemas/EtfPairMonth"
+            },
+            "title": "Monthly",
+            "type": "array"
+          },
+          "overlap_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap From"
+          },
+          "overlap_months": {
+            "title": "Overlap Months",
+            "type": "integer"
+          },
+          "overlap_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap To"
+          },
+          "second": {
+            "$ref": "#/components/schemas/EtfPairAsset"
+          }
+        },
+        "required": [
+          "first",
+          "second",
+          "overlap_months",
+          "annual",
+          "monthly",
+          "daily"
+        ],
+        "title": "EtfPairCorrelationResponse",
+        "type": "object"
+      },
+      "EtfPairDay": {
+        "properties": {
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "first_return": {
+            "title": "First Return",
+            "type": "number"
+          },
+          "second_return": {
+            "title": "Second Return",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "first_return",
+          "second_return"
+        ],
+        "title": "EtfPairDay",
+        "type": "object"
+      },
+      "EtfPairMonth": {
+        "properties": {
+          "first_return": {
+            "title": "First Return",
+            "type": "number"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "second_return": {
+            "title": "Second Return",
+            "type": "number"
+          }
+        },
+        "required": [
+          "month",
+          "first_return",
+          "second_return"
+        ],
+        "title": "EtfPairMonth",
+        "type": "object"
+      },
+      "EtfPairYear": {
+        "properties": {
+          "first_return": {
+            "title": "First Return",
+            "type": "number"
+          },
+          "second_return": {
+            "title": "Second Return",
+            "type": "number"
+          },
+          "year": {
+            "title": "Year",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "year",
+          "first_return",
+          "second_return"
+        ],
+        "title": "EtfPairYear",
         "type": "object"
       },
       "EtfProviderSectorWeight": {
@@ -19440,6 +19752,82 @@
         ]
       }
     },
+    "/api/airs/model-portfolios/{portfolio_id}/monthly-yahoo-performance": {
+      "get": {
+        "description": "One chart interval, decomposed into each current holding's Yahoo close return.\n\nThe book curve remains AIRS's flow-aware account return.  This drill-down intentionally answers\nthe different question a click asks: how the model's named instruments moved between these two\ndisplayed marks, alongside that *same* interval's benchmark return.",
+        "operationId": "airs_model_portfolio_monthly_yahoo_performance_api_airs_model_portfolios__portfolio_id__monthly_yahoo_performance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "title": "Month",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark_weights",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark Weights"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Monthly Yahoo Performance",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream": {
       "get": {
         "description": "SSE: the whole portfolio's blended owner-earnings (Fundamental \u2192 Owner earnings), streaming\nper-holding progress then the result \u2014 its holdings run through the same basket blender.",
@@ -24009,7 +24397,7 @@
         ]
       },
       "post": {
-        "description": "Create a benchmark and fetch its prices from GuruFocus.",
+        "description": "Create a benchmark and fetch its price history from Yahoo Finance.",
         "operationId": "create_benchmark_api_benchmarks_post",
         "requestBody": {
           "content": {
@@ -25433,7 +25821,7 @@
     },
     "/api/data/price-coverage": {
       "get": {
-        "description": "Freshest + most-stale company by LATEST close-price date \u2014 so the\n/schedule month-end refresh can show prices actually moved.\n\nReads each company's latest close date from the\n`company_latest_close_price_dates` RPC (the same source the prices phase\nsorts on), then enriches the min/max companies with name / ticker /\nexchange. `newest` = the most recent price held anywhere (should be the last\ntrading day right after a refresh); `oldest` = the company whose latest\nprice is furthest behind. Both null when no company has prices. Cached (1\nmin) since the underlying aggregation isn't cheap.",
+        "description": "Freshest + most-stale company by LATEST close-price date \u2014 so the\n/schedule month-end refresh can show prices actually moved.\n\nReads each company's latest close date from the\n`company_yahoo_latest_close_dates` RPC (the same source the Yahoo refresh\nsorts on), then enriches the min/max companies with name / ticker /\nexchange. `newest` = the most recent price held anywhere (should be the last\ntrading day right after a refresh); `oldest` = the company whose latest\nprice is furthest behind. Both null when no company has prices. Cached (1\nmin) since the underlying aggregation isn't cheap.",
         "operationId": "price_coverage_api_data_price_coverage_get",
         "responses": {
           "200": {
@@ -28965,6 +29353,26 @@
         ]
       }
     },
+    "/api/leonteq/frozen-yahoo-mappings": {
+      "get": {
+        "description": "Yahoo tickers for the immutable Leonteq snapshot selected in backtests.\n\n``analysis_symbol`` is the yfinance instrument whose stored price series is\nused by the backtester.  Rows with a non-verified identity are deliberately\nreturned as ``review`` rather than silently treated as correct.",
+        "operationId": "frozen_yahoo_mappings_api_leonteq_frozen_yahoo_mappings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Frozen Yahoo Mappings",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
     "/api/leonteq/overview": {
       "get": {
         "description": "Sector \u2192 industries \u2192 companies tree, plus header counters.\n\nResponse shape:\n  {\n    \"total_equities\": int,\n    \"unique_sectors\": int,\n    \"unique_industries\": int,\n    \"scraped_at\": str | null,\n    \"sectors\": [\n      {\n        \"name\": str,\n        \"company_count\": int,\n        \"industries\": [\n          {\n            \"name\": str,\n            \"company_count\": int,\n            \"companies\": [\n              { \"name\", \"ticker\", \"isin\", \"gurufocus_url\", \"company_id\" }\n            ]\n          }\n        ]\n      }\n    ]\n  }\n\nIndustries are guaranteed to map to ONE sector each by construction\n(an industry that appears under multiple sectors in the scrape gets\nbucketed by majority-sector \u2014 this should never happen with a clean\nGICS-style source but we defend against it).",
@@ -29850,6 +30258,47 @@
         ]
       }
     },
+    "/api/momentum/diversifier/comparison": {
+      "post": {
+        "operationId": "pair_comparison_api_momentum_diversifier_comparison_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EtfPairCorrelationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtfPairCorrelationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pair Comparison",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
     "/api/momentum/diversifier/correlation": {
       "post": {
         "description": "Correlate a saved backtest's monthly returns against each selected\nETF and return the Sharpe-optimal blend per ETF, sorted by correlation\nascending (lowest = best diversifier first).",
@@ -29887,6 +30336,49 @@
           }
         },
         "summary": "Correlation",
+        "tags": [
+          "diversifier"
+        ]
+      }
+    },
+    "/api/momentum/diversifier/etf-correlation": {
+      "post": {
+        "deprecated": true,
+        "description": "Legacy ETF-pair path; use /comparison for new clients.",
+        "operationId": "etf_correlation_api_momentum_diversifier_etf_correlation_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EtfPairCorrelationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtfPairCorrelationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Etf Correlation",
         "tags": [
           "diversifier"
         ]

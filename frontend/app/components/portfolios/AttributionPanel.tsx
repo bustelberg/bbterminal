@@ -359,6 +359,12 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const [error, setError] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [monthOffset, setMonthOffset] = useState(0);
+  const attributionMonths = Array.from({ length: new Date().getUTCMonth() + 1 }, (_, index) => {
+    const d = new Date(Date.UTC(new Date().getUTCFullYear(), index, 1));
+    return { value: d.toISOString().slice(0, 10), label: d.toLocaleDateString(copy.lang === 'nl' ? 'nl-NL' : 'en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }) };
+  });
+  const selectedMonth = monthOffset ? attributionMonths[monthOffset - 1]?.value : undefined;
   /**
    * The bucket whose names are open, or null.
    *
@@ -376,7 +382,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
         const r = await apiFetch(
           `${API_URL}/api/airs/model-portfolios/${id}/attribution`
           + `?benchmark=${encodeURIComponent(benchmark)}&window=${window}&axis=${axis}`
-          + `&source=${source}&look_through=${lookThrough}`);
+          + `&source=${source}&look_through=${lookThrough}`
+          + (selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : ''), { noReadCache: true });
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
@@ -386,7 +393,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       }
     })();
     return () => { cancelled = true; };
-  }, [id, benchmark, window, axis, source, lookThrough, refreshVersion]);
+  }, [id, benchmark, window, axis, source, lookThrough, refreshVersion, selectedMonth]);
 
   const refreshBenchmarkPrices = async () => {
     setRefreshingPrices(true);
@@ -421,7 +428,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
    * "performance attribution" — `Since-inception performance attribution compared to SP500`. Left
    * as "Since inception" it reads as a sentence fragment where its twin reads as a title.
    */
-  const label = window === 'ytd' ? copy.chrome.ytd : copy.chrome.since;
+  const selectedPeriodLabel = selectedMonth ? attributionMonths[monthOffset - 1]?.label : null;
+  const label = selectedPeriodLabel ?? (window === 'ytd' ? copy.chrome.ytd : copy.chrome.since);
   /**
    * WHEN the drill-down's weights were measured — the header under "Weight" in each names table.
    *
@@ -430,7 +438,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
    * the 56 models is somewhere inside this year. "Start of year" on that second case would be a
    * confident wrong date on a column a reader uses to check the arithmetic.
    */
-  const startLabel = window === 'ytd' ? copy.chrome.startYear : copy.chrome.inception;
+  const startLabel = selectedPeriodLabel ?? (window === 'ytd' ? copy.chrome.startYear : copy.chrome.inception);
   // ONE source for the word: the axis the server actually computed, NOT the picker's state. If
   // the two disagree — a response still in flight, a server that normalises an unknown axis —
   // the labels must describe the numbers ON SCREEN, not the request that asked for them.
@@ -485,7 +493,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     returnBasis: 'The EUR close at the end of the window against the close at the start.',
   };
   const hasRows = (data?.rows?.length ?? 0) > 0;
-  const attributionYear = data?.start?.slice(0, 4) ?? new Date().getUTCFullYear().toString();
+  const attributionYear = selectedPeriodLabel ?? data?.start?.slice(0, 4) ?? new Date().getUTCFullYear().toString();
   const portfolioWeightTotal = (data?.rows ?? [])
     .reduce((sum, row) => sum + n(row.portfolio_weight_pct), 0);
   const benchmarkWeightTotal = (data?.rows ?? [])
@@ -497,13 +505,19 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {/*  `shrink-0`, AND IT CARRIES THE AXIS PICKER. Sized to its content, this dialog
           resized every time the axis changed — moving the select the reader had just used
           out from under the pointer. See `PanelDialog` for the fixed box. */}
-      <div className="shrink-0 flex items-start justify-between gap-3 mb-2">
-        <div>
+      <div className="relative shrink-0 mb-2">
+        <div className="w-full">
           <h4 className="text-sm font-semibold text-fg-strong">
             {copy.chrome.title(label, benchmark, portfolioName || data?.name || undefined)}
           </h4>
+          <div className="mt-4 flex justify-center py-2"><div className="flex max-w-full items-center gap-1 overflow-x-auto px-2 text-xs" aria-label="Attribution period">
+            {[{ label: 'YTD', value: 0 }, ...attributionMonths.map((month, index) => ({ label: month.label.split(' ')[0].slice(0, 3), value: index + 1 }))].map((period) => <button
+              key={period.value} type="button" onClick={() => { setData(null); setOpenBucket(null); setMonthOffset(period.value); }}
+              className={`shrink-0 rounded-md px-2 py-1 transition-colors ${monthOffset === period.value ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-white/10 hover:text-fg'}`}
+              aria-pressed={monthOffset === period.value}>{period.label}</button>)}
+          </div></div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="absolute right-0 top-0 flex items-center gap-2 shrink-0">
           <select value={axis}
             onChange={(e) => { setData(null); setOpenBucket(null); setAxis(e.target.value as Axis); }}
             className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg focus:border-accent-500">

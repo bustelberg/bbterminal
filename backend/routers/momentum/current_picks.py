@@ -20,7 +20,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -29,7 +28,6 @@ from pydantic import BaseModel
 from common.cron import verify_cron_secret
 from deps import supabase
 from routers._authz import is_admin_request
-from ingest.prices import ensure_prices_for_company
 from momentum.data import (
     convert_prices_to_eur,
     load_all_prices,
@@ -203,39 +201,6 @@ def _refresh_mtd_for_holdings(holdings: list[dict]) -> tuple[list[dict], str | N
     # DB-freshness fast path so it's a no-op for any company whose latest
     # close already covers today. Unblocks the "daily picks last day is 0%
     # because we never fetched the next-day close" case.
-    meta_resp = (
-        supabase.table("company")
-        .select("company_id,gurufocus_ticker,gurufocus_exchange:gurufocus_exchange(exchange_code)")
-        .in_("company_id", company_ids)
-        .execute()
-    )
-    company_meta: dict[int, tuple[str, str]] = {}
-    for r in (meta_resp.data or []):
-        cid = int(r["company_id"])
-        ticker = r.get("gurufocus_ticker") or ""
-        exch = (r.get("gurufocus_exchange") or {}).get("exchange_code") or ""
-        if ticker:
-            company_meta[cid] = (ticker, exch)
-
-    def _ensure(cid: int) -> None:
-        m = company_meta.get(cid)
-        if not m:
-            return
-        try:
-            ensure_prices_for_company(supabase, cid, m[0], m[1])
-        except Exception as e:
-            # Best-effort: downstream still uses whatever's in the DB. But
-            # silent failure here is exactly how the WAR:SPL "no MTD update"
-            # bug went unnoticed — log so the next regression is googleable.
-            logging.getLogger(__name__).warning(
-                "[refresh_mtd] ensure_prices_for_company failed for cid=%s ticker=%s exch=%s: %s: %s",
-                cid, m[0], m[1], type(e).__name__, e,
-            )
-
-    if company_meta:
-        with ThreadPoolExecutor(max_workers=min(8, len(company_meta))) as pool:
-            list(pool.map(_ensure, list(company_meta.keys())))
-
     # Look back ~14 days from today — the latest close should always land
     # inside that window even after long weekends / holidays.
     today = date.today()

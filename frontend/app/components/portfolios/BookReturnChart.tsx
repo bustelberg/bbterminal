@@ -104,6 +104,10 @@ const tick = (t: number) => new Date(t).toLocaleDateString('en-GB', {
 const pct = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 
+const price = (value: number | null) => value == null ? '—' : value.toLocaleString('en-GB', {
+  minimumFractionDigits: 2, maximumFractionDigits: 2,
+});
+
 function ReturnTooltip({ active, label, payload, benchmark }: {
   active?: boolean;
   label?: unknown;
@@ -142,6 +146,174 @@ function ReturnDot({ cx, cy, fill, payload }: {
   return <circle cx={cx} cy={cy} r={1.5} fill={fill} stroke={fill} />;
 }
 
+type MonthlyHolding = {
+  isin: string; name: string; ticker: string | null; weight_pct: number;
+  start_price: number | null; start_price_date: string | null;
+  end_price: number | null; end_price_date: string | null;
+  return_pct: number | null; vs_benchmark_pct: number | null;
+};
+type MonthlySortKey = 'portfolio' | 'name' | 'return_pct' | 'benchmark' | 'vs_benchmark_pct';
+type ComparisonPortfolio = { portfolio_id: number; name: string; holdings: MonthlyHolding[] };
+type ModelOption = { id: number; label: string };
+type OverviewPortfolio = { fixed_portfolio_id: number | null; name: string };
+type MonthlyDrilldown = {
+  from_date: string; to_date: string; positions_date?: string | null; benchmark: string;
+  benchmark_return_pct: number | null;
+  benchmark_detail?: {
+    ticker: string | null; start_price: number | null; start_price_date: string | null;
+    end_price: number | null; end_price_date: string | null;
+    components: { name: string; weight_pct: number; label: string | null; ticker: string | null;
+      start_price: number | null; start_date: string | null; end_price: number | null; end_date: string | null; return_pct: number | null }[];
+  };
+  holdings: MonthlyHolding[]; comparison?: ComparisonPortfolio | null;
+};
+
+function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuery, onSelect, onClose }: {
+  portfolioId: number; month: string | null; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
+  onSelect: (month: string) => void; onClose: () => void;
+}) {
+  const [data, setData] = useState<MonthlyDrilldown | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelOption[]>([]);
+  const [comparisonId, setComparisonId] = useState('');
+  const [sort, setSort] = useState<{ key: MonthlySortKey; descending: boolean }>({
+    key: 'vs_benchmark_pct', descending: true,
+  });
+  useEffect(() => {
+    if (!month) return;
+    let alive = true;
+    void apiFetch(`${API_URL}/api/airs/model-portfolios/${portfolioId}/monthly-yahoo-performance`
+      + `?month=${encodeURIComponent(month)}&benchmark=${encodeURIComponent(benchmark)}${weightsQuery}`
+      + (comparisonId ? `&compare_portfolio_id=${encodeURIComponent(comparisonId)}` : ''))
+      .then(async (r) => ({ r, body: await r.json().catch(() => null) }))
+      .then(({ r, body }) => {
+        if (!alive) return;
+        if (!r.ok) setError(body?.detail ?? `HTTP ${r.status}`);
+        else { setError(null); setData(body as MonthlyDrilldown); }
+      })
+      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
+    return () => { alive = false; };
+  }, [portfolioId, month, benchmark, weightsQuery, comparisonId]);
+  useEffect(() => {
+    let alive = true;
+    // Match the selector to the named strategies shown in the dashboard. The
+    // raw model table includes FX/Dynamic twins and internal AIRS variants
+    // which would produce duplicate choices here.
+    void apiFetch(`${API_URL}/api/airs/portfolios/overview`).then(async (response) => {
+      const body = await response.json().catch(() => []);
+      if (alive && response.ok && Array.isArray(body)) {
+        const options = new Map<number, ModelOption>();
+        for (const row of body as OverviewPortfolio[]) {
+          if (row.fixed_portfolio_id != null && row.name && !options.has(row.fixed_portfolio_id)) {
+            options.set(row.fixed_portfolio_id, { id: row.fixed_portfolio_id, label: row.name });
+          }
+        }
+        setModels([...options.values()].sort((a, b) => a.label.localeCompare(b.label)));
+      }
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
+  // A browser can receive the updated frontend before the backend process is
+  // restarted. Keep the drill-down usable for that older payload too.
+  const benchmarkDetail = data?.benchmark_detail ?? {
+    ticker: null, start_price: null, start_price_date: null,
+    end_price: null, end_price_date: null, components: [],
+  };
+  const toggleSort = (key: MonthlySortKey) => setSort((current) =>
+    current.key === key ? { key, descending: !current.descending } : { key, descending: key !== 'name' });
+  // Keep the table correct while a browser is still receiving a response from
+  // a backend that predates its ticker-level de-duplication.
+  const uniqueHoldings = data ? [...new Map(data.holdings.map((holding) => [holding.ticker || holding.isin, holding])).values()] : [];
+  const currentModel = models.find((model) => model.id === portfolioId);
+  const currentName = currentModel?.label || 'This portfolio';
+  const comparisonName = data?.comparison && (models.find((model) => model.id === data.comparison?.portfolio_id)?.label || data.comparison.name);
+  const compareHoldings = data?.comparison ? [...new Map(data.comparison.holdings.map((holding) => [holding.ticker || holding.isin, holding])).values()] : [];
+  const compareKeys = new Set(compareHoldings.map((holding) => holding.ticker || holding.isin));
+  const currentKeys = new Set(uniqueHoldings.map((holding) => holding.ticker || holding.isin));
+  const displayHoldings = data?.comparison ? [
+    ...uniqueHoldings.filter((holding) => !compareKeys.has(holding.ticker || holding.isin)).map((holding) => ({ ...holding, portfolio: currentName })),
+    ...compareHoldings.filter((holding) => !currentKeys.has(holding.ticker || holding.isin)).map((holding) => ({ ...holding, portfolio: comparisonName || 'Comparison portfolio' })),
+  ] : uniqueHoldings.map((holding) => ({ ...holding, portfolio: currentName }));
+  const sortedHoldings = data ? displayHoldings.sort((left, right) => {
+    const a = sort.key === 'benchmark' ? data.benchmark_return_pct : left[sort.key];
+    const b = sort.key === 'benchmark' ? data.benchmark_return_pct : right[sort.key];
+    if (a == null) return b == null ? 0 : 1;
+    if (b == null) return -1;
+    const compared = typeof a === 'string' && typeof b === 'string' ? a.localeCompare(b) : Number(a) - Number(b);
+    return sort.descending ? -compared : compared;
+  }) : [];
+  const SortHeader = ({ label, sortKey, align = 'right' }: { label: string; sortKey: MonthlySortKey; align?: 'left' | 'right' }) => <th className={align === 'left' ? 'px-3 py-2 text-left text-xs font-semibold' : 'px-2 py-2 text-right text-xs font-semibold'}>
+    <button type="button" onClick={() => toggleSort(sortKey)} className="inline-flex items-center gap-1 hover:text-fg">
+      {label}<span aria-hidden="true" className={sort.key === sortKey ? 'text-fg' : 'text-fg-faint'}>{sort.key === sortKey ? (sort.descending ? '↓' : '↑') : '↕'}</span>
+    </button>
+  </th>;
+  const content = error ? <p className="p-4 text-[12px] text-neg-300">{error}</p>
+    : !data ? <p className="p-4 text-[12px] text-fg-subtle">Loading Yahoo monthly performance…</p>
+    : <div className="overflow-x-auto">
+    {data.comparison && <p className="px-3 pt-3 text-xs text-fg-muted">Only holdings not shared by {currentName} and {comparisonName}.</p>}
+    <table className="w-full min-w-[600px] text-[11px]">
+      <thead className="text-fg-faint"><tr className="border-b border-neutral-800/50">
+        {data.comparison && <SortHeader label="Portfolio" sortKey="portfolio" align="left" />}
+        <SortHeader label="Holding" sortKey="name" align="left" />
+        <SortHeader label="Yahoo return" sortKey="return_pct" /><SortHeader label="Benchmark" sortKey="benchmark" />
+        <SortHeader label="vs benchmark" sortKey="vs_benchmark_pct" />
+      </tr></thead>
+      <tbody>{sortedHoldings.map((h) => <tr key={h.isin} className="border-b border-neutral-800/30 last:border-0">
+        {data.comparison && <td className="px-3 py-1.5 text-fg-muted">{h.portfolio}</td>}
+        <td className="px-3 py-1.5 text-fg"><span>{h.name}</span>{h.ticker && <span className="ml-1.5 font-mono text-fg-faint">{h.ticker}</span>}</td>
+        <td className={`px-2 py-1.5 text-right font-mono ${h.return_pct != null && h.return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
+          <span className="inline-flex items-center justify-end gap-1">{pct(h.return_pct)}
+            {h.ticker && h.start_price != null && h.end_price != null && <InfoTip wide content={<AspectCard
+              what={`Yahoo return: ${pct(h.return_pct)}`}
+              where={<a href={`https://finance.yahoo.com/quote/${encodeURIComponent(h.ticker)}/`} target="_blank" rel="noreferrer"
+                className="text-accent-300 underline underline-offset-2 hover:text-accent-200">Yahoo Finance · {h.ticker} ↗</a>}
+              when={<span>Start: {price(h.start_price)} on {h.start_price_date ?? '—'}<br />End: {price(h.end_price)} on {h.end_price_date ?? '—'}</span>}
+              how="(end close ÷ start close − 1) × 100. Yahoo daily closes in the listing’s local currency." />}/>
+            }
+          </span>
+        </td>
+        <td className="px-2 py-1.5 text-right font-mono" style={{ color: chartTheme.compare }}>
+          <span className="inline-flex items-center justify-end gap-1">{pct(data.benchmark_return_pct)}
+            <InfoTip wide content={<AspectCard
+              what={`Benchmark return: ${pct(data.benchmark_return_pct)}`}
+              where={benchmarkDetail.ticker ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(benchmarkDetail.ticker)}/`} target="_blank" rel="noreferrer"
+                className="text-accent-300 underline underline-offset-2 hover:text-accent-200">Yahoo Finance · {benchmarkDetail.ticker} ↗</a>
+                : <span>Weighted Yahoo ETF basket</span>}
+              when={benchmarkDetail.ticker ? <span>Start: {price(benchmarkDetail.start_price)} on {benchmarkDetail.start_price_date ?? '—'}<br />End: {price(benchmarkDetail.end_price)} on {benchmarkDetail.end_price_date ?? '—'}</span>
+                : benchmarkDetail.components.length ? <span>{benchmarkDetail.components.map((component) => <span key={component.name} className="block">{component.weight_pct.toFixed(0)}% · {component.ticker ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(component.ticker)}/`} target="_blank" rel="noreferrer" className="text-accent-300 underline underline-offset-2 hover:text-accent-200">{component.ticker} ↗</a> : component.label} · {price(component.start_price)} ({component.start_date ?? '—'}) → {price(component.end_price)} ({component.end_date ?? '—'})</span>)}</span>
+                  : <span>Benchmark price provenance is available after the backend refreshes.</span>}
+              how={benchmarkDetail.ticker
+                ? 'Benchmark proxy return based on its Yahoo daily closes; FX is converted to EUR when applicable.'
+                : 'Weighted sum of the Yahoo ETF proxy returns shown above; cash contributes 0%.'} />}/>
+          </span>
+        </td>
+        <td className={`px-3 py-1.5 text-right font-mono font-medium ${h.vs_benchmark_pct != null && h.vs_benchmark_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{pct(h.vs_benchmark_pct)}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>;
+  return <div role="dialog" aria-modal="true" aria-label="Monthly Yahoo performance"
+    className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4" onMouseDown={onClose}>
+    <div className="max-h-[85vh] w-full max-w-5xl overflow-auto rounded-xl border border-neutral-700 bg-card shadow-2xl"
+      onMouseDown={(event) => event.stopPropagation()}>
+      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+        {month ? <div className="flex items-center gap-4"><button type="button" onClick={() => onSelect('')}
+          className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg"><svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><path d="M11.5 4.5 6 10l5.5 5.5M6.5 10H16" strokeLinecap="round" strokeLinejoin="round" /></svg>Months</button><h2 className="text-lg font-semibold text-fg">{new Date(`${month}T00:00:00Z`).toLocaleDateString('en-GB', {
+            month: 'long', year: 'numeric', timeZone: 'UTC',
+          })}</h2></div> : <span />}
+        <button type="button" onClick={onClose}
+        className="rounded px-2 py-1 text-fg-muted hover:bg-white/10 hover:text-fg" aria-label="Close">×</button></div>
+      {!month ? <><div className="px-5 pt-2"><label className="block text-xs font-medium text-fg-muted" htmlFor="monthly-portfolio-compare">Compare with</label><select id="monthly-portfolio-compare" value={comparisonId} onChange={(event) => setComparisonId(event.target.value)}
+        className="mt-1 w-full rounded-lg border border-neutral-700 bg-black/20 px-3 py-2 text-sm text-fg"><option value="">No comparison</option>{models.filter((model) => model.id !== portfolioId).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></div><div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3">
+        {months.map(({ date }) => <button key={date} type="button" onClick={() => onSelect(date)}
+          className="rounded-xl border border-neutral-700 bg-black/10 px-4 py-6 text-center transition hover:border-accent-400 hover:bg-accent-500/10">
+          <span className="block text-sm font-medium text-fg">{new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' })}</span>
+          <span className="mt-1 block text-[11px] text-fg-faint">{new Date(`${date}T00:00:00Z`).getUTCFullYear()}</span>
+        </button>)}
+      </div></> : content}
+    </div>
+  </div>;
+}
+
 export default function BookReturnChart(
   {
     portfolioId,
@@ -161,6 +333,8 @@ export default function BookReturnChart(
 ) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [monthlyModalOpen, setMonthlyModalOpen] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const weights = weightedBenchmarkWeights(benchmarkBlocks, variant);
   const weightsQuery = weights ? `&benchmark_weights=${encodeURIComponent(JSON.stringify(weights))}` : '';
 
@@ -168,6 +342,7 @@ export default function BookReturnChart(
     let alive = true;
     void (async () => {
       setData(null); setErr(null);
+      setSelectedMonth(null);
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/model-portfolios/${portfolioId}/value-series`
@@ -270,8 +445,13 @@ export default function BookReturnChart(
             + `over ${v(all.length - 1)} published points.`}
           when={`${v(data.return_from ?? first.date)} to ${v(last.date)}.`} />} />
       </div>
+      <div className="mb-11">
       <ResponsiveContainer width="100%" height={104}>
-        <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+        <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+          onClick={(state: { activeLabel?: unknown }) => {
+            const point = colouredRows.find((row) => row.t === state.activeLabel && !row.interpolated);
+            if (point && point.date !== first.date) { setSelectedMonth(null); setMonthlyModalOpen(true); }
+          }} style={{ cursor: 'pointer' }}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           {/*  A TIME AXIS, NOT A CATEGORY ONE, AND THE DIFFERENCE IS THE WHOLE SHAPE OF THE
               LINE. The points are irregular — AIRS publishes a month-end for each closed month and
@@ -289,7 +469,9 @@ export default function BookReturnChart(
           <YAxis domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
             width={44} tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-          <Tooltip content={<ReturnTooltip benchmark={data.benchmark ?? benchmark} />} />
+          <Tooltip content={<ReturnTooltip benchmark={data.benchmark ?? benchmark} />}
+            position={{ x: 8, y: 108 }} allowEscapeViewBox={{ y: true }}
+            wrapperStyle={{ pointerEvents: 'none', zIndex: 10 }} />
           {/*  THE BASELINE IS DRAWN, not just included in the domain. "Start at 0%" is the whole
               claim of this chart, and a gridline the reader has to identify is not the same as a
               rule they can see the line cross. */}
@@ -304,6 +486,12 @@ export default function BookReturnChart(
             strokeDasharray="5 3" dot={false} connectNulls={false} />
         </AreaChart>
       </ResponsiveContainer>
+      </div>
+      <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to compare every holding&apos;s Yahoo return with the benchmark.</p>
+      {monthlyModalOpen && <MonthlyPerformance portfolioId={portfolioId} month={selectedMonth}
+        months={points.map((point, index) => ({ date: point.date, from: points[index - 1]?.date ?? '' })).slice(1).slice(-6)}
+        benchmark={benchmark} weightsQuery={weightsQuery} onSelect={setSelectedMonth}
+        onClose={() => { setMonthlyModalOpen(false); setSelectedMonth(null); }} />}
     </div>
   );
 }
