@@ -239,9 +239,8 @@ def compute_and_save_price_update(
         # Chunk to stay under the PostgREST URL-length window (see fetch_in_chunks).
         for r in fetch_in_chunks(
             cids,
-            lambda chunk: supabase.table("metric_data")
-            .select("company_id, target_date, numeric_value")
-            .eq("metric_code", "close_price")
+            lambda chunk: supabase.table("company_yahoo_price")
+            .select("company_id, target_date, numeric_value:close")
             .in_("company_id", chunk)
             .order("target_date", desc=True)
             .execute(),
@@ -291,9 +290,8 @@ def compute_and_save_price_update(
     if entry_anchor:
         for r in fetch_in_chunks(
             early_company_ids,
-            lambda chunk: supabase.table("metric_data")
-            .select("company_id, numeric_value")
-            .eq("metric_code", "close_price")
+            lambda chunk: supabase.table("company_yahoo_price")
+            .select("company_id, numeric_value:close")
             .eq("target_date", entry_anchor)
             .in_("company_id", chunk)
             .execute(),
@@ -327,9 +325,9 @@ def compute_and_save_price_update(
         ids = [cid for cid, d in missing_entry_pairs if d == entry_day]
         for r in fetch_in_chunks(
             ids,
-            lambda chunk, d=entry_day: supabase.table("metric_data")
-            .select("company_id, numeric_value")
-            .eq("metric_code", "close_price").eq("target_date", d)
+            lambda chunk, d=entry_day: supabase.table("company_yahoo_price")
+            .select("company_id, numeric_value:close")
+            .eq("target_date", d)
             .in_("company_id", chunk).execute(),
         ):
             if r.get("numeric_value") is not None:
@@ -602,9 +600,8 @@ def held_latest_close(holdings: list[dict] | None) -> str | None:
 
     for chunk in chunked(cids):
         rows = (
-            supabase.table("metric_data")
+            supabase.table("company_yahoo_price")
             .select("target_date")
-            .eq("metric_code", "close_price")
             .in_("company_id", chunk)
             .order("target_date", desc=True)
             .limit(1)

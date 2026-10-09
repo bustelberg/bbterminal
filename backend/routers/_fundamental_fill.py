@@ -324,8 +324,7 @@ def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
      IT NEVER RAISES. A price fetch failing must not lose the fundamentals that already landed —
     the feeds ran first and are already written.
     """
-    from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
-    from ingest.prices import ensure_prices_for_company  # noqa: PLC0415
+    from asset_pipeline.company_prices import refresh_company_prices  # noqa: PLC0415
 
     ok = failed = skipped = 0
     rows = 0
@@ -344,9 +343,7 @@ def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
         # reporting "prices 18/20" and looked hung at exactly the moment it was done.
         if c.get("gurufocus_ticker") and exch:
             try:
-                res = ensure_prices_for_company(
-                    supabase, c["company_id"], c["gurufocus_ticker"], exch,
-                    force_refresh=True, data_cutoff=DATA_CUTOFF)
+                res = refresh_company_prices(c["company_id"], force_refresh=True)
                 ok += 1
                 rows += getattr(res, "rows_loaded", 0) or 0
                 outcome = "price refreshed"

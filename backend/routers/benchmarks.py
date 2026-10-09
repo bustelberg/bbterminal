@@ -989,14 +989,10 @@ async def ingest_company_fundamentals_job(company_id: int, force: bool = False,
             # Financial statements carry at most a short historical annual price series for some
             # listings. The price endpoint has the actual daily history and is what creates the
             # missing FY2015/FY2016 annual observations in `load_prices_into_db`.
-            from ingest.prices import ensure_prices_for_company  # noqa: PLC0415
+            from asset_pipeline.company_prices import refresh_company_prices  # noqa: PLC0415
 
             ctx.progress(0, 4, "Fetching full share-price history (1 of 4)")
-            pr = ensure_prices_for_company(
-                supabase, cid, c["gurufocus_ticker"],
-                ((c.get("gurufocus_exchange") or {}).get("exchange_code") or ""),
-                force_refresh=force,
-            )
+            pr = refresh_company_prices(cid, force_refresh=force)
             price_rows = getattr(pr, "rows_loaded", 0) or 0
             price_calls = getattr(pr, "api_calls", 0) or 0
             ctx.spent(price_calls)

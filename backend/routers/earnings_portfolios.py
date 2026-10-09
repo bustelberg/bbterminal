@@ -425,12 +425,28 @@ def _load_members_eur_rows(
             .gte("target_date", date_floor).in_("metric_code", non_price_codes)
             .order("company_id").order("target_date").order("metric_code")
         ), chunk)
-        _collect(lambda ch: (
-            supabase.table("metric_data").select(sel)
-            .in_("company_id", ch).eq("source_code", "gurufocus")
-            .eq("metric_code", "close_price").gte("target_date", date_floor)
-            .order("company_id").order("target_date")
-        ), chunk)
+        # Yahoo market data is keyed by analysis asset; the database view
+        # returns it in the company domain used by this aggregation. Preserve
+        # the metrics payload shape so existing earnings charts consume the
+        # Yahoo close as their `close_price` line.
+        offset, page = 0, 1000
+        while True:
+            batch = (
+                supabase.table("company_yahoo_price")
+                .select("company_id,target_date,close")
+                .in_("company_id", chunk).gte("target_date", date_floor)
+                .order("company_id").order("target_date")
+                .range(offset, offset + page - 1).execute().data or []
+            )
+            for row in batch:
+                raw.setdefault(row["company_id"], []).append({
+                    "company_id": row["company_id"], "metric_code": "close_price",
+                    "target_date": row["target_date"], "numeric_value": row.get("close"),
+                    "is_prediction": False,
+                })
+            if len(batch) < page:
+                break
+            offset += page
         _collect(lambda ch: (
             supabase.table("metric_data").select(sel)
             .in_("company_id", ch).eq("source_code", "gurufocus")
@@ -758,9 +774,8 @@ def _load_eur_close_prices(cids: list[int], start_date: str, end_date: str) -> d
         offset, page = 0, 1000
         while True:
             resp = (
-                supabase.table("metric_data")
-                .select("company_id, target_date, numeric_value")
-                .eq("source_code", "gurufocus").eq("metric_code", "close_price")
+                supabase.table("company_yahoo_price")
+                .select("company_id, target_date, close")
                 .in_("company_id", chunk)
                 .gte("target_date", start_date).lte("target_date", end_date)
                 .order("target_date")
@@ -768,7 +783,7 @@ def _load_eur_close_prices(cids: list[int], start_date: str, end_date: str) -> d
             )
             batch = resp.data or []
             for r in batch:
-                v = r.get("numeric_value")
+                v = r.get("close")
                 if v is None:
                     continue
                 c = r["company_id"]
@@ -790,8 +805,7 @@ def _latest_close_year(cids: list[int]) -> int | None:
     """Calendar year of the most recent close price across `cids`."""
     for chunk in chunked(cids):
         resp = (
-            supabase.table("metric_data").select("target_date")
-            .eq("source_code", "gurufocus").eq("metric_code", "close_price")
+            supabase.table("company_yahoo_price").select("target_date")
             .in_("company_id", chunk).order("target_date", desc=True).limit(1).execute()
         )
         if resp.data:

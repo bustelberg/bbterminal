@@ -178,18 +178,9 @@ async def company_price_refresh(body: _PriceRefreshBody, authorization: str = He
     supplied, re-prices that strategy's held basket (a new price_update snapshot)
     so the card + heatmap update on the next reload. Admin only."""
     _require_admin(authorization)
-    import os  # noqa: PLC0415
-    from urllib.parse import quote  # noqa: PLC0415
-
-    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
-    from ingest.prices import (  # noqa: PLC0415
-        _build_symbol,
-        _fetch_price_from_api,
-        _mask_url,
-        _parse_price_series,
-        ensure_prices_for_company,
-    )
+    from asset_pipeline.company_prices import refresh_company_prices  # noqa: PLC0415
+    from asset_pipeline.yahoo import closed_daily_bars  # noqa: PLC0415
 
     def _q() -> dict:
         cid = body.company_id
@@ -226,41 +217,32 @@ async def company_price_refresh(body: _PriceRefreshBody, authorization: str = He
                 return [str(x["target_date"])[:10] for x in (r.data or [])]
 
             before = (_edge(True, 1) or [None])[0]
-            data, api_log, http_status = _fetch_price_from_api(ticker, exchange)
-            track_api_call(supabase, exchange, job="admin_benchmark_price",
-                           outcome=classify_outcome(
-                               http_status, has_data=data is not None))
-            parsed = _parse_price_series(data) if data is not None else []
+            parsed = closed_daily_bars(ticker)
             rows_loaded = 0
             if parsed:
                 rows = [
                     {"benchmark_id": bid, "target_date": d.isoformat(), "price": p}
-                    for d, p in parsed if d >= DATA_CUTOFF
+                    for d, p, _volume in parsed if d >= DATA_CUTOFF
                 ]
                 for i in range(0, len(rows), 500):
                     supabase.table("benchmark_price").upsert(
                         rows[i:i + 500], on_conflict="benchmark_id,target_date"
                     ).execute()
                 rows_loaded = len(rows)
-            symbol = _build_symbol(ticker, exchange)
-            base = os.environ.get("GURUFOCUS_BASE_URL", "").strip().rstrip("/")
-            if base.endswith("/data"):
-                base = base[: -len("/data")]
-            key = os.environ.get("GURUFOCUS_API_KEY", "")
             info = {
                 "company_name": brow.get("name"),
                 "ticker": ticker, "exchange": exchange, "resolved_exchange": None,
-                "request_url": _mask_url(f"{base}/public/user/{key}/stock/{quote(symbol, safe=':')}/price"),
-                "symbol": symbol,
-                "http_status": http_status,
-                "source": "api" if parsed else "none",
+                "request_url": f"https://finance.yahoo.com/quote/{ticker}",
+                "symbol": ticker,
+                "http_status": 200 if parsed else None,
+                "source": "yfinance" if parsed else "none",
                 "points": len(parsed),
                 "excerpt": None,
-                "error": None if parsed else (api_log or "no prices parsed"),
+                "error": None if parsed else "Yahoo returned no prices",
                 "is_delisted": False, "is_forbidden": False,
-                "rows_loaded": rows_loaded, "api_calls": 1,
+                "rows_loaded": rows_loaded, "api_calls": 0,
                 "before": before, "newest": _edge(True), "oldest": _edge(False),
-                "logs": [api_log] if api_log else [],
+                "logs": ["Yahoo Finance"],
             }
         # ── Real company: positive company_id (metric_data) ──
         else:
@@ -284,10 +266,9 @@ async def company_price_refresh(body: _PriceRefreshBody, authorization: str = He
 
             def _edge(desc: bool, n: int = 2) -> list[str]:
                 r = (
-                    supabase.table("metric_data")
+                    supabase.table("company_yahoo_price")
                     .select("target_date")
                     .eq("company_id", cid)
-                    .eq("metric_code", "close_price")
                     .order("target_date", desc=desc)
                     .limit(n)
                     .execute()
@@ -295,9 +276,7 @@ async def company_price_refresh(body: _PriceRefreshBody, authorization: str = He
                 return [str(x["target_date"])[:10] for x in (r.data or [])]
 
             before = (_edge(True, 1) or [None])[0]
-            result = ensure_prices_for_company(
-                supabase, cid, ticker, exchange, force_refresh=True,
-            )
+            result = refresh_company_prices(cid, force_refresh=True)
             info = {
                 "company_name": row.get("company_name"),
                 "ticker": ticker, "exchange": exchange,

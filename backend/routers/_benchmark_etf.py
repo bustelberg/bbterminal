@@ -190,9 +190,6 @@ def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
     are upserted deliberately, replacing legacy GuruFocus bars as well as adding the newest close.
     Adjusted close includes distributions, matching yfinance's standard total-return series.
     """
-    if ticker not in _YAHOO_TICKERS:
-        return _refresh_gurufocus(ticker, bid, have_max)
-
     from asset_pipeline import yahoo  # noqa: PLC0415
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
     from time import time  # noqa: PLC0415

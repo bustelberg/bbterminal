@@ -40,7 +40,7 @@ from ingest.earnings import (
     fetch_indicators,
     fetch_key_ratios,
 )
-from ingest.prices import ensure_prices_for_company
+from asset_pipeline.company_prices import refresh_company_prices
 
 router = APIRouter(tags=["earnings"])
 _log = logging.getLogger(__name__)
@@ -125,10 +125,8 @@ async def _earnings_refresh_stream(company_id: int, sources: list[str], force: b
                     ))
             elif source == "prices":
                 task = asyncio.get_event_loop().run_in_executor(
-                    None, lambda: ensure_prices_for_company(
-                        supabase, company_id, ticker, exchange,
-                        force_refresh=force, on_log=on_log,
-                    ))
+                    None, lambda: refresh_company_prices(
+                        company_id, force_refresh=force, on_log=on_log))
             else:
                 yield event("error", f"Unknown source: {source}")
                 continue
@@ -344,15 +342,14 @@ def load_company_metric_rows(company_id: int, metric_keys: list[str] | None = No
     ))
 
     if not requested or "price_ps" in requested:
-        rows.extend(_paginate(lambda: (
-            supabase.table("metric_data")
-            .select("metric_code,target_date,numeric_value,is_prediction")
+        yahoo_rows = _paginate(lambda: (
+            supabase.table("company_yahoo_price")
+            .select("target_date,numeric_value:close")
             .eq("company_id", company_id)
-            .eq("source_code", "gurufocus")
-            .eq("metric_code", "close_price")
             .gte("target_date", start_date)
             .order("target_date")
-        )))
+        ))
+        rows.extend({**row, "metric_code": "close_price", "is_prediction": False} for row in yahoo_rows)
 
     # GuruFocus's fiscal-statement blob can omit its separate "Month End Stock Price" line for
     # older years even though its daily `close_price` feed contains those exact historical closes.
@@ -971,12 +968,23 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
             if not body.earnings_only:
                 # A short close window is enough to identify the latest stored price while avoiding
                 # decades of daily bars for every company in the book.
-                collect(lambda chunk=chunk: supabase.table("metric_data")
-                        .select("company_id,metric_code,target_date,numeric_value,is_prediction,recorded_at")
-                        .in_("company_id", chunk).eq("source_code", "gurufocus")
-                        .eq("metric_code", "close_price")
-                        .gte("target_date", (_date.today() - timedelta(days=45)).isoformat())
-                        .order("company_id").order("target_date"))
+                offset = 0
+                while True:
+                    batch = (supabase.table("company_yahoo_price")
+                             .select("company_id,target_date,close")
+                             .in_("company_id", chunk)
+                             .gte("target_date", (_date.today() - timedelta(days=45)).isoformat())
+                             .order("company_id").order("target_date")
+                             .range(offset, offset + 999).execute().data or [])
+                    for row in batch:
+                        by_company.setdefault(int(row["company_id"]), []).append({
+                            "metric_code": "close_price", "target_date": row["target_date"],
+                            "numeric_value": row.get("close"), "is_prediction": False,
+                            "recorded_at": None,
+                        })
+                    if len(batch) < 1000:
+                        break
+                    offset += 1000
 
         meta: dict[int, dict] = {}
         for start in range(0, len(cids), 100):

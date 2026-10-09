@@ -444,9 +444,8 @@ async def list_held_companies(request: Request):
                 # one cheap indexed query each (held set is small).
                 for cid in company_cids:
                     r = (
-                        supabase.table("metric_data")
-                        .select("target_date, numeric_value")
-                        .eq("metric_code", "close_price")
+                        supabase.table("company_yahoo_price")
+                        .select("target_date, close")
                         .eq("company_id", cid)
                         .order("target_date", desc=True)
                         .limit(1)
@@ -454,7 +453,7 @@ async def list_held_companies(request: Request):
                     )
                     if r.data:
                         latest_close_by_cid[cid] = r.data[0]["target_date"]
-                        val = r.data[0].get("numeric_value")
+                        val = r.data[0].get("close")
                         latest_price_by_cid[cid] = float(val) if val is not None else None
         except Exception:
             # On any error the endpoint still returns the holdings — freshness

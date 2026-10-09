@@ -89,10 +89,8 @@ async def latest_price_date(response: Response):
     def _q() -> dict:
         try:
             resp = (
-                supabase.table("metric_data")
+                supabase.table("company_yahoo_price")
                 .select("target_date")
-                .eq("source_code", "gurufocus")
-                .eq("metric_code", "close_price")
                 .order("target_date", desc=True)
                 .limit(1)
                 .execute()
@@ -115,7 +113,7 @@ async def price_coverage(response: Response):
     /schedule month-end refresh can show prices actually moved.
 
     Reads each company's latest close date from the
-    `company_latest_close_price_dates` RPC (the same source the prices phase
+    `company_yahoo_latest_close_dates` RPC (the same source the Yahoo refresh
     sorts on), then enriches the min/max companies with name / ticker /
     exchange. `newest` = the most recent price held anywhere (should be the last
     trading day right after a refresh); `oldest` = the company whose latest
@@ -129,7 +127,7 @@ async def price_coverage(response: Response):
         for _ in range(20):
             try:
                 resp = (
-                    supabase.rpc("company_latest_close_price_dates", {})
+                    supabase.rpc("company_yahoo_latest_close_dates", {})
                     .range(offset, offset + page - 1)
                     .execute()
                 )
@@ -233,7 +231,7 @@ async def stale_prices(response: Response, limit: int = 50):
         for _ in range(30):
             try:
                 resp = (
-                    supabase.rpc("company_latest_close_price_dates", {})
+                    supabase.rpc("company_yahoo_latest_close_dates", {})
                     .range(offset, offset + page - 1).execute()
                 )
             except Exception as e:
@@ -316,12 +314,10 @@ def _latest_metric_dates_for(cids: set[int], metric_code: str) -> dict[int, str]
     cid_list = list(cids)
     for i in range(0, len(cid_list), 800):
         chunk = cid_list[i:i + 800]
-        resp = supabase.rpc(
-            "company_latest_metric_dates_for",
-            {"p_company_ids": chunk, "p_metric_code": metric_code},
-        ).execute()
+        resp = supabase.rpc("company_yahoo_latest_dates_for", {"p_company_ids": chunk}).execute()
         for row in resp.data or []:
-            cid, d = row.get("company_id"), row.get("latest_target_date")
+            cid = row.get("company_id")
+            d = row.get("latest_close_date" if metric_code == "close_price" else "latest_volume_date")
             if cid is not None and d:
                 out[int(cid)] = str(d)[:10]
     return out
@@ -653,12 +649,12 @@ async def universe_history(label: str, response: Response):
         cid_list = list(members)
         # Coverage per company for each metric (chunked to ride the index).
         cov_by_metric: dict[str, dict[int, dict]] = {}
-        for metric in ("close_price", "volume"):
+        for metric in ("close", "volume"):
             cov: dict[int, dict] = {}
             for i in range(0, len(cid_list), 400):
-                resp = supabase.rpc("company_metric_coverage_for", {
+                resp = supabase.rpc("company_yahoo_coverage_for", {
                     "p_company_ids": cid_list[i:i + 400],
-                    "p_metric_code": metric, "p_since": since,
+                    "p_series": metric, "p_since": since,
                 }).execute()
                 for r in resp.data or []:
                     cov[int(r["company_id"])] = r
@@ -667,7 +663,7 @@ async def universe_history(label: str, response: Response):
         # Enrich the worst offenders with ticker/exchange/name.
         worst_cids: set[int] = set()
         agg: dict[str, dict] = {}
-        for metric, key in (("close_price", "price"), ("volume", "volume")):
+        for metric, key in (("close", "price"), ("volume", "volume")):
             cov = cov_by_metric[metric]
             starts = [r["earliest_target_date"] for r in cov.values() if r.get("earliest_target_date")]
             short = [(c, r) for c, r in cov.items()
