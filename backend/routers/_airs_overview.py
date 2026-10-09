@@ -43,6 +43,7 @@ _MANAGEMENT_GROUPS = {
     "busbepoffensiefdyn": "bustelberg",
     "busoffensiefdyn": "bustelberg",
     "topsdefbehdyn": "toppenberg",
+    "topsneubehdyn": "toppenberg",
     "topsbeoffbehdyn": "toppenberg",
     "topsoffbehdyn": "toppenberg",
 }
