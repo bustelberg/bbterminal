@@ -25,6 +25,14 @@ from ._helpers import _FX_SYNC_PARALLELISM, _query_with_retry
 from ._pg import load_fx_rate_df_via_copy
 
 
+def _currency_parts(code: str | None) -> tuple[str, float]:
+    """Yahoo quote currency -> ECB currency plus its minor-unit divisor."""
+    from asset_pipeline.fx import SUBUNIT  # noqa: PLC0415
+
+    clean = (code or "").strip()
+    return SUBUNIT.get(clean, (clean, 1.0))
+
+
 def sync_fx_rates_to_db(
     supabase: Client,
     currency_codes: list[str],
@@ -178,6 +186,11 @@ def sync_fx_rates_to_db(
             out["note"] = note
         return code, out
 
+    # Yahoo reports London prices in GBp (pence), which is not an ECB
+    # currency. Fetch GBP once; conversion applies the 100x divisor below.
+    currency_codes = list(dict.fromkeys(
+        base for code in currency_codes if (base := _currency_parts(code)[0])
+    ))
     status: dict[str, dict] = {}
     if not currency_codes:
         return status
@@ -209,14 +222,15 @@ def load_fx_rates(
         return {}
 
     result: dict[str, pd.Series] = {}
-    needed = [c for c in currency_codes if c and c != "EUR"]
+    requested = [(code, *_currency_parts(code)) for code in currency_codes if code]
+    needed = list(dict.fromkeys(base for _code, base, _divisor in requested if base != "EUR"))
 
-    for code in currency_codes:
-        if code == "EUR":
+    for code, base, _divisor in requested:
+        if base == "EUR":
             # Constant 1.0 series — conversion is a no-op for EUR-denominated
             # prices. We still populate it so callers can look up uniformly.
             idx = pd.date_range(start=start_date, end=end_date, freq="D")
-            result["EUR"] = pd.Series(1.0, index=idx, dtype="float64")
+            result[code] = pd.Series(1.0, index=idx, dtype="float64")
 
     if not needed:
         return result
@@ -258,6 +272,7 @@ def load_fx_rates(
         # necessary for the PostgREST frame (string columns).
         df["rate_date"] = pd.to_datetime(df["rate_date"])
         df["rate"] = df["rate"].astype(float)
+        by_base: dict[str, pd.Series] = {}
         for code, grp in df.groupby("currency_code"):
             series = grp.set_index("rate_date")["rate"].sort_index()
             # Reindex onto a daily grid and forward-fill so weekends/holidays
@@ -265,7 +280,10 @@ def load_fx_rates(
             # Friday's close rate, which is how most back-office systems
             # report it anyway.
             idx = pd.date_range(start=start_date, end=end_date, freq="D")
-            result[code] = series.reindex(idx).ffill().bfill()
+            by_base[code] = series.reindex(idx).ffill().bfill()
+        for requested_code, base, _divisor in requested:
+            if base in by_base:
+                result[requested_code] = by_base[base]
     return result
 
 
@@ -313,7 +331,10 @@ def convert_prices_to_eur(
             kept_frames.append(group.drop(columns=["currency"]))
             continue
 
+        base, divisor = _currency_parts(code)
         series = fx_rates.get(code)
+        if series is None:
+            series = fx_rates.get(base)
         if series is None or series.empty:
             missing.add(code)
             dropped_no_fx += len(group)
@@ -328,7 +349,7 @@ def convert_prices_to_eur(
             continue
 
         converted_group = group.drop(columns=["currency"]).copy()
-        converted_group["price"] = group["price"].to_numpy() / rates_arr
+        converted_group["price"] = group["price"].to_numpy() / divisor / rates_arr
         # Drop rows where the rate was NaN after ffill/bfill (shouldn't happen
         # in practice but guards against partial FX history).
         valid = ~pd.isna(converted_group["price"])

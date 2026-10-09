@@ -2,7 +2,7 @@
 
 Endpoints:
     GET    /api/benchmarks                          list + price ranges + sector tag
-    POST   /api/benchmarks                          create (fetches prices from GuruFocus)
+    POST   /api/benchmarks                          create (fetches prices from Yahoo Finance)
     POST   /api/benchmarks/{id}/refresh             re-fetch prices for an existing row
     DELETE /api/benchmarks/{id}                     delete (cascades benchmark_price)
     PATCH  /api/benchmarks/{id}                     set / clear the GICS sector tag
@@ -27,9 +27,7 @@ from pydantic import BaseModel
 
 from deps import supabase
 from routers import _blend_cache
-from ingest.api_usage import track_api_call
 from ingest.constants import DATA_CUTOFF
-from ingest.prices import _fetch_price_from_api, _parse_price_series
 
 router = APIRouter(tags=["benchmarks"])
 
@@ -83,6 +81,13 @@ async def _bulk_upsert_prices(benchmark_id: int, parsed: list[tuple[date, float]
     return total_loaded
 
 
+def _yahoo_prices(ticker: str) -> list[tuple[date, float]]:
+    """Completed raw-close bars for Diversifier ETFs, from Yahoo Finance."""
+    from asset_pipeline.yahoo import closed_daily_bars  # noqa: PLC0415
+
+    return [(day, close) for day, close, _volume in closed_daily_bars(ticker)]
+
+
 @router.get("/api/benchmarks")
 async def list_benchmarks():
     """List all benchmarks with price date range and sector tag."""
@@ -118,7 +123,7 @@ async def list_benchmarks():
 
 @router.post("/api/benchmarks")
 async def create_benchmark(req: CreateBenchmarkRequest):
-    """Create a benchmark and fetch its prices from GuruFocus."""
+    """Create a benchmark and fetch its price history from Yahoo Finance."""
     ticker = req.ticker.strip().upper()
     name = req.name.strip()
     if not ticker or not name:
@@ -130,13 +135,7 @@ async def create_benchmark(req: CreateBenchmarkRequest):
     if existing.data:
         raise HTTPException(409, f"Benchmark {ticker} already exists")
 
-    # ETFs are US-listed, so no exchange prefix needed on the GF symbol.
-    data, log, _status = await asyncio.to_thread(_fetch_price_from_api, ticker, "NYSE")
-    await asyncio.to_thread(track_api_call, supabase, "NYSE")
-    if data is None:
-        raise HTTPException(502, f"Failed to fetch prices for {ticker}: {log}")
-
-    parsed = _parse_price_series(data)
+    parsed = await asyncio.to_thread(_yahoo_prices, ticker)
     if not parsed:
         raise HTTPException(502, f"No prices parsed for {ticker}")
 
@@ -217,12 +216,7 @@ async def refresh_benchmark(benchmark_id: int):
         raise HTTPException(404, "Benchmark not found")
     ticker = bm.data[0]["ticker"]
 
-    data, log, _status = await asyncio.to_thread(_fetch_price_from_api, ticker, "NYSE")
-    await asyncio.to_thread(track_api_call, supabase, "NYSE")
-    if data is None:
-        raise HTTPException(502, f"Failed to fetch prices: {log}")
-
-    parsed = _parse_price_series(data)
+    parsed = await asyncio.to_thread(_yahoo_prices, ticker)
     if not parsed:
         raise HTTPException(502, f"No prices parsed for {ticker}")
 

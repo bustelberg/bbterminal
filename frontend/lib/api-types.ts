@@ -3666,7 +3666,7 @@ export interface paths {
         put?: never;
         /**
          * Create Benchmark
-         * @description Create a benchmark and fetch its prices from GuruFocus.
+         * @description Create a benchmark and fetch its price history from Yahoo Finance.
          */
         post: operations["create_benchmark_api_benchmarks_post"];
         delete?: never;
@@ -7117,6 +7117,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/momentum/diversifier/comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pair Comparison */
+        post: operations["pair_comparison_api_momentum_diversifier_comparison_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/diversifier/correlation": {
         parameters: {
             query?: never;
@@ -7133,6 +7150,27 @@ export interface paths {
          *     ascending (lowest = best diversifier first).
          */
         post: operations["correlation_api_momentum_diversifier_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/momentum/diversifier/etf-correlation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Etf Correlation
+         * @deprecated
+         * @description Legacy ETF-pair path; use /comparison for new clients.
+         */
+        post: operations["etf_correlation_api_momentum_diversifier_etf_correlation_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10600,6 +10638,34 @@ export interface components {
              */
             weight_pct_sum?: number;
         };
+        /**
+         * CorrelationMatrix
+         * @description Pairwise monthly-return correlations and their own overlap counts.
+         *
+         *     Each cell is calculated over the two series' shared months, rather than a
+         *     fleet-wide intersection. A young ETF must not make every other comparison
+         *     throw away its older history.
+         */
+        CorrelationMatrix: {
+            /** Labels */
+            labels: components["schemas"]["CorrelationMatrixLabel"][];
+            /** Overlaps */
+            overlaps: number[][];
+            /** Values */
+            values: (number | null)[][];
+        };
+        /**
+         * CorrelationMatrixLabel
+         * @description One row/column in the selected-strategy-and-funds correlation matrix.
+         */
+        CorrelationMatrixLabel: {
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Name */
+            name?: string | null;
+        };
         /** CorrelationPair */
         CorrelationPair: {
             /** A */
@@ -10635,6 +10701,7 @@ export interface components {
         };
         /** CorrelationResponse */
         CorrelationResponse: {
+            matrix: components["schemas"]["CorrelationMatrix"];
             /** Results */
             results: components["schemas"]["DiversifierResult"][];
             strategy: components["schemas"]["StrategyStats"];
@@ -10995,6 +11062,80 @@ export interface components {
             benchmark_id: number;
             /** Weight Pct */
             weight_pct: number;
+        };
+        /** EtfPairAsset */
+        EtfPairAsset: {
+            /** Backtest Run Id */
+            backtest_run_id?: number | null;
+            /** Benchmark Id */
+            benchmark_id?: number | null;
+            /** Kind */
+            kind: string;
+            /** Name */
+            name: string;
+            /** Ticker */
+            ticker: string;
+        };
+        /**
+         * EtfPairCorrelationRequest
+         * @description A direct pair: two ETFs, or one saved strategy and one ETF.
+         */
+        EtfPairCorrelationRequest: {
+            /** Backtest Run Id */
+            backtest_run_id?: number | null;
+            /** Benchmark Ids */
+            benchmark_ids: number[];
+            /** Variant Key */
+            variant_key?: string | null;
+        };
+        /**
+         * EtfPairCorrelationResponse
+         * @description A pair's correlation and aligned return history.
+         */
+        EtfPairCorrelationResponse: {
+            /** Annual */
+            annual: components["schemas"]["EtfPairYear"][];
+            /** Correlation */
+            correlation?: number | null;
+            /** Daily */
+            daily: components["schemas"]["EtfPairDay"][];
+            first: components["schemas"]["EtfPairAsset"];
+            /** Monthly */
+            monthly: components["schemas"]["EtfPairMonth"][];
+            /** Overlap From */
+            overlap_from?: string | null;
+            /** Overlap Months */
+            overlap_months: number;
+            /** Overlap To */
+            overlap_to?: string | null;
+            second: components["schemas"]["EtfPairAsset"];
+        };
+        /** EtfPairDay */
+        EtfPairDay: {
+            /** Date */
+            date: string;
+            /** First Return */
+            first_return: number;
+            /** Second Return */
+            second_return: number;
+        };
+        /** EtfPairMonth */
+        EtfPairMonth: {
+            /** First Return */
+            first_return: number;
+            /** Month */
+            month: string;
+            /** Second Return */
+            second_return: number;
+        };
+        /** EtfPairYear */
+        EtfPairYear: {
+            /** First Return */
+            first_return: number;
+            /** Second Return */
+            second_return: number;
+            /** Year */
+            year: number;
         };
         /** EtfProviderSectorWeight */
         EtfProviderSectorWeight: {
@@ -23402,6 +23543,39 @@ export interface operations {
             };
         };
     };
+    pair_comparison_api_momentum_diversifier_comparison_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EtfPairCorrelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfPairCorrelationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     correlation_api_momentum_diversifier_correlation_post: {
         parameters: {
             query?: never;
@@ -23422,6 +23596,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CorrelationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    etf_correlation_api_momentum_diversifier_etf_correlation_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EtfPairCorrelationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfPairCorrelationResponse"];
                 };
             };
             /** @description Validation Error */

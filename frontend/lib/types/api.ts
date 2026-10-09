@@ -41,6 +41,7 @@ export type UpdateBenchmarkRequest = components['schemas']['UpdateBenchmarkReque
 // ── Diversifier (correlation + blend analysis) ───────────────────────
 export type CorrelationRequest = components['schemas']['CorrelationRequest'];
 export type CorrelationResponse = components['schemas']['CorrelationResponse'];
+export type EtfPairCorrelationResponse = components['schemas']['EtfPairCorrelationResponse'];
 export type DiversifierResult = components['schemas']['DiversifierResult'];
 export type DiversifierStrategyStats = components['schemas']['StrategyStats'];
 export type ResolveNameResponse = components['schemas']['ResolveNameResponse'];

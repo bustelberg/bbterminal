@@ -663,9 +663,8 @@ def refresh_held_benchmarks(run_id: int) -> int:
 
     Best-effort per benchmark (a fetch/upsert failure is logged + skipped).
     Returns the count refreshed."""
-    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
-    from ingest.prices import _fetch_price_from_api, _parse_price_series  # noqa: PLC0415
+    from asset_pipeline.yahoo import closed_daily_bars  # noqa: PLC0415
 
     bids = _collect_held_benchmark_ids()
     if not bids:
@@ -684,19 +683,13 @@ def refresh_held_benchmarks(run_id: int) -> int:
             if not bm.data:
                 continue
             ticker = bm.data[0]["ticker"]
-            # ETFs are US-listed — same fetch the /api/benchmarks refresh uses.
-            data, fetch_log, _status = _fetch_price_from_api(ticker, "NYSE")
-            track_api_call(supabase, "NYSE", job="held_benchmark_price",
-                           outcome=classify_outcome(_status, has_data=data is not None))
-            if not data:
-                log.warning("[price_update] benchmark %s (%s) fetch failed: %s", bid, ticker, fetch_log)
-                continue
-            parsed = _parse_price_series(data)
-            if not parsed:
+            bars = closed_daily_bars(ticker)
+            if not bars:
+                log.warning("[price_update] benchmark %s (%s) Yahoo returned no closed bars", bid, ticker)
                 continue
             rows = [
-                {"benchmark_id": bid, "target_date": d.isoformat(), "price": p}
-                for d, p in parsed if d >= DATA_CUTOFF
+                {"benchmark_id": bid, "target_date": day.isoformat(), "price": close}
+                for day, close, _volume in bars if day >= DATA_CUTOFF
             ]
             for i in range(0, len(rows), 500):
                 supabase.table("benchmark_price").upsert(

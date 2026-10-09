@@ -19,6 +19,11 @@ class _Executor:
         return future
 
 
+class _ShuttingDownExecutor:
+    def submit(self, _work):
+        raise RuntimeError("cannot schedule new futures after shutdown")
+
+
 def test_scheduled_work_deduplicates_a_live_job_and_releases_its_slot(monkeypatch):
     """A slow interval run costs one slot, never a new thread per subsequent tick."""
     executor = _Executor()
@@ -48,6 +53,18 @@ def test_queue_overrun_is_one_rate_limited_backpressure_summary(monkeypatch, cap
         S._on_job_max_instances(event)
         S._on_job_max_instances(event)
     assert caplog.text.count("asset ingest queue is still draining") == 1
+
+
+def test_shutdown_race_skips_work_without_a_traceback(monkeypatch, caplog):
+    monkeypatch.setattr(S, "_scheduled_executor", _ShuttingDownExecutor())
+    monkeypatch.setattr(S, "_scheduled_futures", {})
+    monkeypatch.setattr(S, "_scheduled_slots", threading.BoundedSemaphore(1))
+
+    with caplog.at_level(logging.INFO):
+        assert S._submit_scheduled_work("blend-prewarm", lambda: None) is False
+
+    assert "shutting down" in caplog.text
+    assert "Traceback" not in caplog.text
 
 
 def test_queue_overrun_filter_only_hides_the_expected_apscheduler_message():

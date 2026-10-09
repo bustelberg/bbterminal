@@ -210,6 +210,29 @@ _register_momentum_hooks(app)
 def _reset_stale_backfills() -> None:
     _scheduled_strategies_router.reset_stale_backfills()
 
+
+@app.on_event("startup")
+def _apply_reviewed_yahoo_symbol_overrides() -> None:
+    """Apply checked-in ISIN → Yahoo decisions after every deploy.
+
+    The mapping decisions live in ``asset_pipeline/symbol_overrides.json`` so
+    production receives the same reviewed listings as development.  The apply
+    step still probes stored Yahoo history and refuses an empty/delisted symbol;
+    startup must remain available even if that validation cannot run.
+    """
+    try:
+        from asset_pipeline.symbol_override import apply_symbol_overrides  # noqa: PLC0415
+        from routers.leonteq import enqueue_frozen_yahoo_mappings  # noqa: PLC0415
+        changed = apply_symbol_overrides()
+        queued = enqueue_frozen_yahoo_mappings()
+        logging.getLogger(__name__).info("[startup] applied %s reviewed Yahoo symbol override(s)", changed)
+        logging.getLogger(__name__).info(
+            "[startup] frozen Leonteq Yahoo resolver queue: %s queued, %s already mapped",
+            queued.get("queued", 0), queued.get("skipped_existing", 0),
+        )
+    except Exception as exc:  # noqa: BLE001 — a price-map repair cannot block serving
+        logging.getLogger(__name__).warning("[startup] Yahoo symbol overrides deferred: %s", exc)
+
 # Every blocking Supabase call runs via `asyncio.to_thread`, which uses the
 # default executor — only `min(32, cpu+4)` workers, as low as ~6 on a small
 # Railway container. When Supabase slows (ingest pipeline + many polling

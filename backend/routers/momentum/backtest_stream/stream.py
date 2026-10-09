@@ -550,9 +550,9 @@ async def _momentum_backtest_stream(req: BacktestRequest):
         else:
             yield _emit({"type": "progress", "pct": 67, "message": "Skipping volume load — no volume signal weighted (price-only strategy)."})
 
-        # Self-heal: refetch missing data for subscribed-exchange gaps.
+        # Self-heal: refetch missing Yahoo data gaps.
         # Runs even in db_only mode (backtest path) — these are TRUE gaps
-        # (zero rows) on subscribed exchanges, which means the pipeline
+        # (zero rows) in the Yahoo-backed registry, which means the pipeline
         # hasn't reached them yet. Healing them inline lets a backtest
         # produce correct results without the user having to babysit the
         # pipeline first. Cost is bounded: only fires for companies with
@@ -567,7 +567,7 @@ async def _momentum_backtest_stream(req: BacktestRequest):
             yield _emit({
                 "type": "info",
                 "scope": "self-heal",
-                "message": f"{len(gap_cids)} companies on subscribed exchanges have no data yet — fetching inline before the backtest: {sample}{more}",
+                "message": f"{len(gap_cids)} companies have no Yahoo data yet — fetching inline before the backtest: {sample}{more}",
             })
             async for evt in run_self_heal(
                 gap_cids, universe_df, audit,

@@ -35,6 +35,78 @@
       "symbol": "FER.MC",
       "name": "Ferrovial N.V.",
       "note": "The ACWI workbook holds Ferrovial under ticker FER on Bolsa de Madrid, which maps to Yahoo FER.MC. Automatic resolution selected the obscure 0P2N.IL line instead, so the workbook's exact ticker-and-venue membership could not resolve even though both the held security and the workbook row identify ISIN NL0015001FS8."
+    },
+    {
+      "isin": "CNE100000Q43",
+      "symbol": "1288.HK",
+      "name": "Agricultural Bank of China Ltd H",
+      "note": "OpenFIGI identifies this exact ISIN as the Hong Kong H share. Yahoo search did not return the listing from the ISIN/name query, but the Leonteq primary-listing code 1288 maps directly to Yahoo 1288.HK."
+    },
+    {
+      "isin": "US16115Q3083",
+      "symbol": "GTLS",
+      "name": "Chart Industries Inc",
+      "note": "This is the US ordinary share and its Leonteq, OpenFIGI and Yahoo-native symbol is GTLS. The batch name/ISIN search returned no candidate, so pin the exact primary listing rather than leaving a priceable US share absent."
+    },
+    {
+      "isin": "CNE1000002H1",
+      "symbol": "0939.HK",
+      "name": "China Construction Bank Corp H",
+      "note": "OpenFIGI identifies the Hong Kong H share for this ISIN. The Leonteq listing code 939 is zero-padded to Yahoo's canonical Hong Kong symbol 0939.HK; it is not the separately listed mainland A share."
+    },
+    {
+      "isin": "CNE100002359",
+      "symbol": "3908.HK",
+      "name": "China International Capital Corp Ltd H",
+      "note": "This ISIN is the Hong Kong H share. Yahoo's ISIN search missed it, while Leonteq supplies the primary Hong Kong code 3908, whose canonical Yahoo symbol is 3908.HK."
+    },
+    {
+      "isin": "CNE1000009Q7",
+      "symbol": "2601.HK",
+      "name": "China Pacific Insurance Group Co Ltd H",
+      "note": "OpenFIGI confirms the Hong Kong H share identity. Leonteq's matching Hong Kong code is 2601, and Yahoo's primary-market symbol is 2601.HK rather than an unrelated mainland share class."
+    },
+    {
+      "isin": "CNE100006WS8",
+      "symbol": "3750.HK",
+      "name": "Contemporary Amperex Technology Co Ltd H",
+      "note": "This ISIN is the recently listed Hong Kong H share, not CATL's Shenzhen A share. Leonteq identifies code 3750 and Yahoo's matching Hong Kong symbol is 3750.HK; the resolver's generic search missed the new listing."
+    },
+    {
+      "isin": "CNE100000338",
+      "symbol": "2333.HK",
+      "name": "Great Wall Motor Co Ltd H",
+      "note": "OpenFIGI identifies this as Great Wall Motor's Hong Kong H share. Leonteq's code 2333 maps directly to the Yahoo Hong Kong primary listing 2333.HK, preserving the exact share class."
+    },
+    {
+      "isin": "CNE100001922",
+      "symbol": "1336.HK",
+      "name": "New China Life Insurance Co Ltd H",
+      "note": "This exact ISIN is the Hong Kong H share. The Leonteq security code 1336 has the canonical Yahoo form 1336.HK, which is the correct primary listing for this instrument."
+    },
+    {
+      "isin": "KYG8020E1199",
+      "symbol": "0981.HK",
+      "name": "Semiconductor Manufacturing International Corp",
+      "note": "The Leonteq/ISIN instrument is SMIC's Hong Kong ordinary listing. Yahoo requires the zero-padded Hong Kong symbol 0981.HK; that preserves the listed security instead of substituting a US or mainland proxy."
+    },
+    {
+      "isin": "CNE100001T72",
+      "symbol": "6869.HK",
+      "name": "Yangtze Optical Fibre and Cable Joint Stock Ltd Co H",
+      "note": "OpenFIGI identifies this exact Hong Kong H share. Leonteq supplies code 6869 and Yahoo's corresponding Hong Kong primary-listing ticker is 6869.HK, which the generic resolver failed to discover."
+    },
+    {
+      "isin": "CNE1000003G1",
+      "symbol": "1398.HK",
+      "name": "Industrial And Commercial Bank Of China Ltd H",
+      "note": "The Leonteq constituent is ICBC's Hong Kong H share. The automatic resolver selected ICK.VI, a Vienna proxy; the verified primary Yahoo listing is 1398.HK, preserving the exact listed share class and its Hong Kong price history."
+    },
+    {
+      "isin": "US9297401088",
+      "symbol": "WAB",
+      "name": "Westinghouse Air Brake Technologies Corp",
+      "note": "The Leonteq constituent is the US ordinary share. The automatic resolver chose WAB.VI, a Vienna proxy; the verified Yahoo primary listing is WAB, which preserves the US security and its longer native price history."
     }
   ]
 }

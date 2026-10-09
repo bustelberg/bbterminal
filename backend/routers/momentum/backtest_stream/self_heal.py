@@ -1,4 +1,4 @@
-"""Self-heal block: for any subscribed-exchange company missing prices
+"""Self-heal block: for any company missing Yahoo prices
 or volumes, re-run the ingest pipeline (cache check → API fetch → DB
 load) and merge the recovered rows back into the in-memory frames.
 
@@ -111,7 +111,7 @@ async def run_self_heal(
     merging the recovered frames. Finally yields
     `("__result__", (prices_eur_df, prices_local_df, volumes_df))` so the
     orchestrator can swap in the merged frames."""
-    yield _emit({"type": "progress", "pct": 67, "message": f"Self-heal: refetching missing data for {len(gap_cids)} companies on subscribed exchanges..."})
+    yield _emit({"type": "progress", "pct": 67, "message": f"Self-heal: refetching Yahoo data for {len(gap_cids)} companies..."})
     yield _keepalive()
 
     ticker_lookup = {
