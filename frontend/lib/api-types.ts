@@ -4619,7 +4619,7 @@ export interface paths {
          *     /schedule month-end refresh can show prices actually moved.
          *
          *     Reads each company's latest close date from the
-         *     `company_latest_close_price_dates` RPC (the same source the prices phase
+         *     `company_yahoo_latest_close_dates` RPC (the same source the Yahoo refresh
          *     sorts on), then enriches the min/max companies with name / ticker /
          *     exchange. `newest` = the most recent price held anywhere (should be the last
          *     trading day right after a refresh); `oldest` = the company whose latest
@@ -6636,6 +6636,30 @@ export interface paths {
          *     the table is replace-all on every refresh.
          */
         get: operations["list_equities_api_leonteq_equities_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leonteq/frozen-yahoo-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Frozen Yahoo Mappings
+         * @description Yahoo tickers for the immutable Leonteq snapshot selected in backtests.
+         *
+         *     ``analysis_symbol`` is the yfinance instrument whose stored price series is
+         *     used by the backtester.  Rows with a non-verified identity are deliberately
+         *     returned as ``review`` rather than silently treated as correct.
+         */
+        get: operations["frozen_yahoo_mappings_api_leonteq_frozen_yahoo_mappings_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -22811,6 +22835,26 @@ export interface operations {
         };
     };
     list_equities_api_leonteq_equities_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    frozen_yahoo_mappings_api_leonteq_frozen_yahoo_mappings_get: {
         parameters: {
             query?: never;
             header?: never;
