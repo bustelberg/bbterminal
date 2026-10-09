@@ -22,7 +22,15 @@ from ._common import (
 )
 
 
-_DISPLAY_METRICS = frozenset({"revenue_estimate", "per_share_eps_estimate", "eps_nri_estimate"})
+_DISPLAY_METRICS = {
+    "quarterly": frozenset({"revenue_estimate", "per_share_eps_estimate", "eps_nri_estimate"}),
+    # `surprisemean` is the consensus available before the fiscal result.  These annual rows are
+    # the denominators for historical daily forward multiples: OCF for P/OCF and NRI-stripped EPS
+    # for P/E.  Keep the ordinary EPS series too as a vendor fallback where the NRI line is absent.
+    "annual": frozenset({
+        "operating_cash_flow_estimate", "eps_nri_estimate", "per_share_eps_estimate",
+    }),
+}
 _VALUES = {
     "actual": "actual",
     "surprisemean": "consensus",
@@ -32,34 +40,37 @@ _VALUES = {
 
 
 def _parse_estimate_history(data: dict, company_id: int) -> list[dict]:
-    """Store quarterly historical actuals and consensus without overwriting filings.
+    """Store historical consensus and surprises without overwriting filings.
 
     These codes are a point-in-time record supplied by ``estimate_history``;
     they are intentionally distinct from reported financial-statement metrics.
     """
     rows: list[dict] = []
-    quarterly = data.get("quarterly") if isinstance(data, dict) else None
-    if not isinstance(quarterly, dict):
+    if not isinstance(data, dict):
         return rows
-    for metric, periods in quarterly.items():
-        if metric not in _DISPLAY_METRICS or not isinstance(periods, dict):
+    for frequency, allowed_metrics in _DISPLAY_METRICS.items():
+        periods_by_metric = data.get(frequency)
+        if not isinstance(periods_by_metric, dict):
             continue
-        for raw_date, observation in periods.items():
-            target_date = _yyyy_mm_to_month_end(str(raw_date))
-            if target_date is None or not isinstance(observation, dict):
+        for metric, periods in periods_by_metric.items():
+            if metric not in allowed_metrics or not isinstance(periods, dict):
                 continue
-            for field, suffix in _VALUES.items():
-                value = _coerce_float(observation.get(field))
-                if value is None:
+            for raw_date, observation in periods.items():
+                target_date = _yyyy_mm_to_month_end(str(raw_date))
+                if target_date is None or not isinstance(observation, dict):
                     continue
-                rows.append({
-                    "company_id": company_id,
-                    "metric_code": f"quarterly_estimate_history__{metric}__{suffix}",
-                    "source_code": "gurufocus",
-                    "target_date": target_date.isoformat(),
-                    "numeric_value": value,
-                    "is_prediction": False,
-                })
+                for field, suffix in _VALUES.items():
+                    value = _coerce_float(observation.get(field))
+                    if value is None:
+                        continue
+                    rows.append({
+                        "company_id": company_id,
+                        "metric_code": f"{frequency}_estimate_history__{metric}__{suffix}",
+                        "source_code": "gurufocus",
+                        "target_date": target_date.isoformat(),
+                        "numeric_value": value,
+                        "is_prediction": False,
+                    })
     return rows
 
 

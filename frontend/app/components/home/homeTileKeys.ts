@@ -20,9 +20,12 @@
  */
 export type HomeTileKey =
   | '/management-dashboard'
+  | '/research-dashboard'
+  | '/log-dashboard'
   | '/earnings'
   | '/schedule'
   | '/backtest'
+  | '/momentum'
   | '/universe'
   | '/longequity-universe'
   | '/sp500'
@@ -30,6 +33,7 @@ export type HomeTileKey =
   | '/leonteq'
   | '/fx-rates'
   | '/airs-portfolio'
+  | '/debet-calculation'
   | '/request_gurufocus'
   | '/benchmarks';
 
@@ -42,9 +46,12 @@ export type HomeTileKey =
  */
 export const HOME_TILE_ORDER: readonly HomeTileKey[] = [
   '/management-dashboard',
+  '/research-dashboard',
+  '/log-dashboard',
   '/earnings',
   '/schedule',
   '/backtest',
+  '/momentum',
   '/universe',
   '/longequity-universe',
   '/sp500',
@@ -52,6 +59,7 @@ export const HOME_TILE_ORDER: readonly HomeTileKey[] = [
   '/leonteq',
   '/fx-rates',
   '/airs-portfolio',
+  '/debet-calculation',
   '/request_gurufocus',
   '/benchmarks',
 ];

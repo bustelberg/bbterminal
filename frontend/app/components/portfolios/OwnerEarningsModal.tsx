@@ -7,14 +7,36 @@ import LongEquityTab from './LongEquityTab';
 import TablesTab from './TablesTab';
 import QuickValuationTab from './QuickValuationTab';
 import DeepValuationTab from './DeepValuationTab';
-import PortfolioFundamentalsRefresh, { type RefreshScope } from './PortfolioFundamentalsRefresh';
+import PortfolioFundamentalsRefresh, {
+  type FundamentalRefreshFeeds, type RefreshScope,
+} from './PortfolioFundamentalsRefresh';
 import LangSwitch from '../LangSwitch';
 import { useLang } from '../../../lib/i18n';
 import { useFundamentalChromeCopy } from './fundamentalChromeCopy';
 import { valuationSubject } from './valuationSubject';
 import { isUniverseTarget, type BenchTarget } from './benchSeries';
 
-type Tab = 'longequity' | 'quickval' | 'deepval' | 'tables';
+export type Tab = 'longequity' | 'quickval' | 'deepval' | 'tables';
+
+export type TabRefreshPlan = {
+  feeds: FundamentalRefreshFeeds;
+  prices: boolean;
+  keyRatios: boolean;
+};
+
+/** The header refresh follows the active tab: ask GuruFocus only for the feeds it can change. */
+export function refreshPlanForTab(tab: Tab): TabRefreshPlan {
+  switch (tab) {
+    case 'longequity':
+      return { feeds: 'statements_estimates', prices: true, keyRatios: false };
+    case 'quickval':
+      return { feeds: 'all', prices: true, keyRatios: false };
+    case 'deepval':
+      return { feeds: 'all', prices: true, keyRatios: true };
+    case 'tables':
+      return { feeds: 'all', prices: true, keyRatios: false };
+  }
+}
 
 /**
  * The Fundamental modal: one company's fundamental chart suite.
@@ -150,6 +172,7 @@ export default function OwnerEarningsModal({
   // where the modal opens never depends on which it was opened for. (It became the landing tab when
   // `fundamentals` was demoted to "Old charts"; that tab is now gone entirely.)
   const [tab, setTab] = useState<Tab>('longequity');
+  const refreshPlan = refreshPlanForTab(tab);
   /** Which tabs have been opened at least once — the mount set. A tab enters it on first visit
    *  and never leaves, so its data survives every subsequent switch. Seeded with the landing tab
    *  so it mounts on open like it always did.
@@ -365,7 +388,7 @@ export default function OwnerEarningsModal({
               indicator and estimate feeds. None of the three is in the default fill. */}
           {scope && (
             <PortfolioFundamentalsRefresh scope={scope} additionalScope={activeBenchmarkScope}
-              everything />
+              {...refreshPlan} />
           )}
           {/*  ALWAYS ON, NOT ONLY ON THE TAB IT CURRENTLY TRANSLATES. It was tab-scoped first, on
               the same reasoning as the SBC checkbox below — a control that governs nothing on the

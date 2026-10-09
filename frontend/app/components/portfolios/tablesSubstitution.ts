@@ -102,19 +102,21 @@ export function meanSub(
   const got = windowMean(m, endX, years);
   if (got.mean == null) return '';
   const vals: number[] = [];
+  const periods: string[] = [];
   //  `fromX`/`toX` ARE THE FIRST AND LAST YEARS THAT HAVE A VALUE, not the window's edges — so
   // this walk collects exactly the `got.n` figures the mean was taken over, and a short window
   // lists what it actually had rather than padding it out.
   for (let x = got.fromX; x <= got.toX; x += 1) {
     const v = m.get(x);
-    if (v != null) vals.push(v);
+    if (v != null) {
+      vals.push(v);
+      periods.push(String(x));
+    }
   }
   if (!vals.length) return '';
-  const mean = workedMean(vals);
-  //  No caption and no span — see `rateSub`. This line sits INSIDE one display expression,
-  // between the symbolic formula and nothing else; a name and a year range there read as
-  // terms in the arithmetic. The window is already on the column header and in the cell's own
-  // hover (`meanTip`), which is where a reader asks what it was measured over.
+  // Each operand carries its own year. An average of five values is not auditable when the reader
+  // cannot see which fiscal observation each value came from, particularly in a short window.
+  const mean = workedMean(vals, '%', periods);
   if (!transform) return mean;
   const t = transform(got.mean);
   //  The inversion is its own line, because that is where its whole argument lives: the reader

@@ -4,7 +4,6 @@
   "topselecties": [
     { "dynamic_portefeuille": "AITopSelectie OFF DYN", "display_name": "AITopSelectie" },
     { "dynamic_portefeuille": "AzTopSelectie_DYN", "display_name": "AzieTopSelectie" },
-    { "dynamic_portefeuille": "DealmakersTopSel OFF DYN", "display_name": "DealmakersTopSelectie" },
     { "dynamic_portefeuille": "DiTopSelectie OFF DYN", "display_name": "DividendTopSelectie" },
     { "dynamic_portefeuille": "EuropaTopSelect OFF DYN", "display_name": "EuropaTopSelectie" },
     { "dynamic_portefeuille": "BUS_FTS_OFF_DYN", "display_name": "FamilieTopSelectie" },
@@ -12,7 +11,6 @@
     { "dynamic_portefeuille": "MoTopSelectie_DYN", "display_name": "MomentumTopSelectie" },
     { "dynamic_portefeuille": "OBTopSelectie_DYN", "display_name": "ObligatieTopSelectie" },
     { "dynamic_portefeuille": "StarTopSelectie OFF DYN", "display_name": "StarTopSelectie" },
-    { "dynamic_portefeuille": "TolpoortenSelect OFF DYN", "display_name": "TolpoortenTopSelectie" },
     { "dynamic_portefeuille": "VTopSelectie OFF DY", "display_name": "VastgoedTopSelectie" }
   ]
 }

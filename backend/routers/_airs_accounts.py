@@ -61,6 +61,7 @@ from datetime import date
 # two copies would drift the moment a fifth report is added, and the drift would show up as
 # accounts silently missing from the page.
 from airs_vermogen import REPORTS
+from airs_portfolio_exclusions import is_excluded_portfolio
 from common.pg import load_rows_via_copy
 from deps import supabase
 from routers._airs_ref import model_weights_for as ref_model_weights_for, mutaties_for as ref_mutaties_for
@@ -530,6 +531,8 @@ def list_accounts() -> list[dict]:
         # agrees. Hiding in the UI instead would leave the account in the API, in the
         # account-model link picker and in anything else that enumerates accounts.
         key = (name or "").strip().lower()
+        if is_excluded_portfolio(name):
+            continue
         if key in hidden:
             continue
         #  And the scrape decides what exists. `perf` comes from `airs_performance`, which is

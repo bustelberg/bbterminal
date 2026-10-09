@@ -42,6 +42,14 @@ const EN: HomeCopy = {
       label: 'Management Dashboard',
       description: 'Real-time insight from performance to risk into Bustelberg portfolios.',
     },
+    '/research-dashboard': {
+      label: 'Research Dashboard',
+      description: 'Compare companies and explore the fundamental research available in BBTerminal.',
+    },
+    '/log-dashboard': {
+      label: 'BC Logbook',
+      description: 'Review investment decisions recorded by the Beleggingscommissie (BC).',
+    },
     '/earnings': {
       label: 'Earnings Dashboard',
       description: 'Browse per-company earnings metrics pulled from GuruFocus, with quick refresh '
@@ -50,6 +58,10 @@ const EN: HomeCopy = {
     '/schedule': {
       label: 'Schedule',
       description: 'Scheduled strategies for the MomentumTopSelectie.',
+    },
+    '/momentum': {
+      label: 'Sector Momentum',
+      description: 'Follow sector momentum signals and their timeline.',
     },
     '/backtest': {
       label: 'Backtest',
@@ -92,6 +104,10 @@ const EN: HomeCopy = {
       description: 'Broker scanner and AIRS Excel upload — parses holdings and computes YTD '
         + 'returns in EUR and local currency.',
     },
+    '/debet-calculation': {
+      label: 'Debit calculations',
+      description: 'Check whether planned buys, sales, and cash leave a client with a debit balance.',
+    },
     '/request_gurufocus': {
       label: 'Request GuruFocus',
       description: 'Trigger GuruFocus indicator fetches for selected companies and exchanges.',
@@ -116,6 +132,14 @@ const NL: HomeCopy = {
       label: 'Managementdashboard',
       description: 'Realtime inzicht in Bustelberg-portefeuilles, van rendement tot risico.',
     },
+    '/research-dashboard': {
+      label: 'Researchdashboard',
+      description: 'Vergelijk bedrijven en verken het fundamentele onderzoek in BBTerminal.',
+    },
+    '/log-dashboard': {
+      label: 'BC-logboek',
+      description: 'Bekijk beleggingsbeslissingen die de Beleggingscommissie (BC) heeft vastgelegd.',
+    },
     '/earnings': {
       label: 'Winstdashboard',
       description: 'Blader door winstcijfers per bedrijf uit GuruFocus, met snelle verversing per '
@@ -124,6 +148,10 @@ const NL: HomeCopy = {
     '/schedule': {
       label: 'Planning',
       description: 'Ingeplande strategieën voor de MomentumTopSelectie.',
+    },
+    '/momentum': {
+      label: 'Sectormomentum',
+      description: 'Volg sector-momentumsignalen en hun tijdlijn.',
     },
     '/backtest': {
       label: 'Backtest',
@@ -165,6 +193,10 @@ const NL: HomeCopy = {
       label: 'AIRS-portefeuille',
       description: 'Brokerscanner en AIRS-Excelupload — leest posities in en berekent '
         + 'YTD-rendement in euro’s en lokale valuta.',
+    },
+    '/debet-calculation': {
+      label: 'Debetberekeningen',
+      description: 'Controleer of geplande aankopen, verkopen en kasgeld een cliënt debet zetten.',
     },
     '/request_gurufocus': {
       label: 'GuruFocus opvragen',

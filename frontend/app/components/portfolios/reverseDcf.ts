@@ -36,7 +36,7 @@ export type ReverseDcfAssumptions = {
  */
 export const PERPETUITY_GROWTH = 0.03;
 /** A convention too — long enough for growth to matter, short enough to be arguable. */
-export const FORECAST_YEARS = 5;
+export const FORECAST_YEARS = 10;
 /** Used when the company publishes no usable WACC — see `defaultDiscountRate`. */
 export const FALLBACK_DISCOUNT_RATE = 0.10;
 

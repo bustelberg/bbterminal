@@ -19,12 +19,10 @@ import PriceTargetCalculator from './PriceTargetCalculator';
 import { meanOf, paddedDomain, paddedLogDomain } from './marginData';
 import { logLinearFit, trendValueAt } from '../../../lib/trendFit';
 import MultipleHistoryChart from './MultipleHistoryChart';
+import { since } from './multiplesSeries';
 import {
-  forwardSeries, since,
-} from './multiplesSeries';
-import {
-  addYears, BASIS, cagrBetween, cagrOf, compoundFrom, dailyYieldHistory, latestDateOf, priceTarget, priceVsMetric,
-  PRICE_CODES, rebase, yearsBetween, yieldOf, type Basis, type MetricRow,
+  addYears, BASIS, cagrBetween, cagrOf, compoundFrom, dailyForwardMultiples, dailyYieldHistory, latestDateOf, priceTarget, priceVsMetric,
+  rebase, withDerivedHistoricalEpsConsensus, withDerivedOcfPerShare, yearsBetween, yieldOf, type Basis, type MetricRow,
 } from './quickValuation';
 import { runSSE } from '../../../lib/stream';
 import { invalidateReadCache } from '../../../lib/readCache';
@@ -95,6 +93,8 @@ import { onDate } from './asOfLine';
 const PROJECT_YEARS = 5;
 /** All three charts share it, so the grid cells match without any card padding out the gap. */
 const CHART_HEIGHT = 320;
+const OCF_CHART_COLOR = chartTheme.accent;
+const EPS_CHART_COLOR = chartTheme.warn;
 
 /** `GET /api/asset-pipeline/latest-close/isin/{isin}` — the fields this tab reads. */
 type LatestClose = {
@@ -103,13 +103,26 @@ type LatestClose = {
   close_in?: number | null; in_currency?: string | null;
 };
 
+/** Complete, daily `asset_price` history from yfinance, already converted per date. */
+type YahooPriceSeries = {
+  symbol?: string | null;
+  source: 'yfinance'; native_currency: string; currency: string;
+  points: { date: string; close: number }[];
+};
+
+type YahooPriceInfo = {
+  symbol?: string | null; nativeCurrency: string; currency: string;
+  from: string | null; through: string | null;
+};
+
 type SourceFetchedAt = { financials?: string | null; estimates?: string | null; indicators?: string | null };
 
 export default function QuickValuationTab({ isin, name }: { isin: string; name?: string | null }) {
   const [metrics, setMetrics] = useState<MetricRow[] | null>(null);
-  const [basis, setBasis] = useState<Basis>('fcf');
+  const [basis, setBasis] = useState<Basis>('ocf');
   const [currency, setCurrency] = useState<string | null>(null);
   const [sourceFetchedAt, setSourceFetchedAt] = useState<SourceFetchedAt>({});
+  const [yahooPrices, setYahooPrices] = useState<YahooPriceInfo | null>(null);
   /**  THE ANSWER CARRIES THE QUESTION IT ANSWERED. "Have we looked yet?" is derived from whether
    *  the stored result belongs to THIS (isin, currency) — a separate `pending` boolean has to be
    *  flipped in four places (mount, company change, success, failure) and the row makes a claim
@@ -174,7 +187,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     // truthfully reports "nothing newer" — a write against the wrong company that looks like a
     // vendor with no update. Latent until the ISIN could change inside one mount, which is what
     // the modal's A/B valuation switch now does.
-    if (blank) { setMetrics(null); setCurrency(null); setSourceFetchedAt({}); setLiveRes(null); setCompanyId(null); }
+    if (blank) { setMetrics(null); setCurrency(null); setSourceFetchedAt({}); setYahooPrices(null); setLiveRes(null); setCompanyId(null); }
     setErr(null);
     const r = await apiFetch(
       `${API_URL}/api/earnings/by-isin/${encodeURIComponent(isin)}/metrics?cadence=annual`,
@@ -185,15 +198,40 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     //  A cancelled run must not write. A cacheable read is SHARED, so aborting one caller does not
     // stop the request; without this the tab repaints from a refresh the reader already stopped.
     if (signal?.aborted) return;
-    const rows = (b?.metrics ?? []) as MetricRow[];
+    const reportingCurrency = b?.currency ?? null;
+    const financialRows = (b?.metrics ?? []) as MetricRow[];
+    // Quick Valuation has exactly one price universe: yfinance's stored daily
+    // close history.  Discard GuruFocus's `close_price` rather than letting an
+    // incomplete Yahoo series quietly become a mixed-vendor chart.
+    let rows = financialRows.filter((row) => row.metric_code !== 'close_price');
+    let priceInfo: YahooPriceInfo | null = null;
+    if (reportingCurrency) {
+      const prices = await apiFetch(
+        `${API_URL}/api/asset-pipeline/quick-valuation-prices/isin/${encodeURIComponent(isin)}`
+        + `?currency=${encodeURIComponent(reportingCurrency)}`,
+        { signal },
+      );
+      if (prices.ok) {
+        const series = await prices.json() as YahooPriceSeries;
+        rows = [...rows, ...series.points.map((point) => ({
+          metric_code: 'close_price', target_date: point.date, numeric_value: point.close,
+        }))];
+        priceInfo = {
+          symbol: series.symbol, nativeCurrency: series.native_currency, currency: series.currency,
+          from: series.points[0]?.date ?? null,
+          through: series.points.at(-1)?.date ?? null,
+        };
+      }
+    }
     setMetrics(rows);
-    setCurrency(b?.currency ?? null);
+    setCurrency(reportingCurrency);
     setSourceFetchedAt((b?.source_fetched_at ?? {}) as SourceFetchedAt);
+    setYahooPrices(priceInfo);
     setCompanyId(typeof b?.company_id === 'number' ? b.company_id : null);
     //  The same builder the chart uses, on the same rows, so the toast's date and the As-of tile
     // can never name different points. Read here rather than off `forwardHistory`, which is a memo
     // computed during the NEXT render and therefore still the old series at this line.
-    const fwd = forwardSeries(rows);
+    const fwd = dailyForwardMultiples(rows, BASIS.eps.estimateCodes ?? []);
     fwdDateRef.current = fwd.length
       ? new Date(fwd[fwd.length - 1].t).toISOString().slice(0, 10) : null;
   }, [isin]);
@@ -243,7 +281,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
     setRefreshJobId(startLocalJob(
       `${name ?? isin} — Quick Valuation`, 'quickval.all',
       async (signal, report) => {
-        const total = 5;
+        const total = currency ? 6 : 5;
         let done = 0;
         report({ done, total, message: 'starting refresh' });
         await runSSE(`${API_URL}/api/earnings/${companyId}/refresh-all?force=true`,
@@ -255,11 +293,24 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
             }
           }, signal);
         if (signal.aborted) return 'cancelled';
+        // Bring the daily yfinance numerator forward too.  The endpoint adds
+        // only the missing tail, while the subsequent load re-reads the whole
+        // stored history used by every Quick Valuation price calculation.
+        if (currency) {
+          const refreshedPrice = await apiFetch(`${API_URL}/api/asset-pipeline/latest-close/isin/${encodeURIComponent(isin)}`
+            + `/refresh?currency=${encodeURIComponent(currency)}`, { method: 'POST', signal });
+          if (!refreshedPrice.ok) {
+            const detail = await refreshedPrice.json().catch(() => null);
+            throw new Error(detail?.detail ?? `yfinance price refresh failed (HTTP ${refreshedPrice.status})`);
+          }
+          done += 1;
+          report({ done, total, message: `${done} of ${total} sources refreshed` });
+        }
         invalidateReadCache('refreshed all Quick Valuation inputs');
         await load(false, signal);
         return 'Quick Valuation data refreshed';
       }));
-  }, [companyId, name, isin, load]);
+  }, [companyId, name, isin, currency, load]);
 
   useEffect(() => {
     let alive = true;
@@ -301,6 +352,12 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   }, [isin, currency]);
 
   const b = BASIS[basis];
+  const yahooPriceWhere = yahooPrices
+    ? `yfinance asset_price daily closes${yahooPrices.symbol ? ` (${yahooPrices.symbol})` : ''}, ${yahooPrices.nativeCurrency} converted daily to ${yahooPrices.currency}.`
+    : 'No yfinance daily-close history is stored for this ISIN.';
+  const yahooPriceWhen = yahooPrices
+    ? `Yahoo close history spans ${yahooPrices.from ?? '—'} to ${yahooPrices.through ?? '—'}.`
+    : 'No yfinance daily-close history is available.';
   //  Two label sets, and mixing them inside one string is the bug to avoid. `t` / `bl` are the
   // TRANSLATED words for everything DRAWN on this tab; `b` keeps its ENGLISH ones and is used only
   // by the ⓘ cards, whose prose is not translated yet. An English sentence with a Dutch metric name
@@ -308,8 +365,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // as a rendering fault. See `quickValuationCopy`.
   const t = useQuickValuationCopy();
   const bl = t.basis[basis];
+  const valuationMetrics = useMemo(
+    () => withDerivedHistoricalEpsConsensus(withDerivedOcfPerShare(metrics ?? [])), [metrics]);
   const points = useMemo(
-    () => priceVsMetric(metrics ?? [], b.codes, PROJECT_YEARS), [metrics, b.codes]);
+    () => priceVsMetric(valuationMetrics, b.codes, PROJECT_YEARS), [valuationMetrics, b.codes]);
   const historyFromYear = points[0]?.year ?? new Date().getFullYear() - PROJECT_YEARS;
   const idx = useMemo(() => rebase(points), [points]);
 
@@ -573,18 +632,41 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   // arithmetic to satisfy an import list would be the wrong direction on a change described as
   // "for now". They are named here so the next reader knows the module is deliberately wider than
   // its callers rather than half-cleaned.
-  const forwardHistory = useMemo(
-    () => (basis === 'eps' ? since(forwardSeries(metrics ?? []), historyFromYear) : []),
-    [metrics, basis, historyFromYear]);
+  const ocfForwardHistory = useMemo(
+    () => since(dailyForwardMultiples(valuationMetrics, BASIS.ocf.estimateCodes ?? []), historyFromYear),
+    [valuationMetrics, historyFromYear]);
+  const epsForwardHistory = useMemo(
+    () => since(dailyForwardMultiples(valuationMetrics, BASIS.eps.estimateCodes ?? []), historyFromYear),
+    [valuationMetrics, historyFromYear]);
+  // This is a comparison chart, not a view of the selected valuation basis. Keep its OCF and
+  // EPS lines fixed while the switch changes the price/metric, yield, and calculator panels.
+  const multipleFromYear = ocfForwardHistory[0]
+    ? new Date(ocfForwardHistory[0].t).getUTCFullYear() : historyFromYear;
 
   //  Derived from the same two lines the chart above plots, not from GuruFocus's own
   // `Valuation Ratios__FCF Yield %` (or its P/E) — whose denominator convention (year-end price?
   // average market cap?) we do not control. One source, so the two charts cannot disagree.
-  const yields = useMemo(
-    () => dailyYieldHistory(metrics ?? [], b.codes)
-      .filter((point) => Number(point.date.slice(0, 4)) >= historyFromYear),
-    [metrics, b.codes, historyFromYear]);
+  const yieldHistories = useMemo(() => ({
+    ocf: dailyYieldHistory(valuationMetrics, BASIS.ocf.codes),
+    eps: dailyYieldHistory(valuationMetrics, BASIS.eps.codes),
+  }), [valuationMetrics]);
+  const yieldRows = useMemo(() => {
+    const byDate = new Map<string, { date: string; ocf: number | null; eps: number | null }>();
+    for (const key of ['ocf', 'eps'] as const) {
+      for (const point of yieldHistories[key]) {
+        if (Number(point.date.slice(0, 4)) < historyFromYear) continue;
+        const row = byDate.get(point.date) ?? { date: point.date, ocf: null, eps: null };
+        row[key] = point.yld;
+        byDate.set(point.date, row);
+      }
+    }
+    return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  }, [yieldHistories, historyFromYear]);
+  const yields = yieldHistories[basis]
+    .filter((point) => Number(point.date.slice(0, 4)) >= historyFromYear);
   const yieldValues = yields.map((y) => y.yld).filter((v): v is number => v != null);
+  const yieldScaleValues = yieldRows.flatMap((row) => [row.ocf, row.eps])
+    .filter((v): v is number => v != null);
   const avgYield = meanOf(yieldValues);
   /**
    *  The point the latest yield came from, not just the yield — because its ⓘ works the division
@@ -634,7 +716,7 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   const livePrice = live?.close_in != null && live.close_in > 0 ? live.close_in : null;
   const priceLive = livePrice != null;
   const lastFiscalPriceDate = useMemo(
-    () => latestDateOf(metrics ?? [], PRICE_CODES), [metrics]);
+    () => latestDateOf(metrics ?? [], b.codes), [metrics, b.codes]);
   const currentPrice = priceLive ? livePrice : latestPrice;
   const priceDate = priceLive ? live!.date : lastFiscalPriceDate;
 
@@ -782,10 +864,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
   if (!points.some((p) => p.price != null) || !points.some((p) => p.value != null)) {
     return (
       <div className="py-16 flex flex-col items-center gap-3">
-        <p className="text-xs text-fg-faint text-center">
-          {t.noHistory(bl.perShare, name ?? isin)}
-        </p>
-        {basisSwitch}
+         <p className="text-xs text-fg-faint text-center">
+           {t.noHistory(bl.perShare, name ?? isin)}
+         </p>
+         {basisSwitch}
       </div>
     );
   }
@@ -870,9 +952,9 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <Stat label={t.priceCagr} value={pct(priceCagr?.pct)} color={chartTheme.accentStrong}
           info={<InfoTip content={<AspectCard
             what="Compound annual growth of the fiscal year-end share price."
-            where="GuruFocus `Month End Stock Price`, the close at each fiscal year end."
-            when={priceCagr ? provenance(sourceFetchedAt.financials, null) : 'Not available.'}
-            how="First to last positive observation. The year-end price, not today's quote." />} />} />
+            where={yahooPriceWhere}
+            when={priceCagr ? yahooPriceWhen : 'Not available.'}
+            how="First to last positive yfinance close aligned on or before each fiscal year end; not today's quote." />} />} />
         <Stat label={t.perShareCagr(bl.perShare)} value={pct(valueCagr?.pct)} color={chartTheme.warn}
           info={<InfoTip content={<AspectCard
             what={`Compound annual growth of ${b.what}.`}
@@ -900,10 +982,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <Stat label={t.currentSharePrice} value={`${ccy}${fmtPrice(target.currentPrice)}`}
           info={<InfoTip content={<AspectCard
             what="Current share price."
-            where={priceLive
-              ? `yfinance asset_price${live?.symbol ? ` (${live.symbol})` : ''}.`
-              : 'GuruFocus Month End Stock Price.'}
-            when={provenance(priceLive ? priceDate : sourceFetchedAt.financials, priceDate)}
+            where={yahooPriceWhere}
+            when={priceDate ? `${yahooPriceWhen} This close applies on ${priceDate}.` : yahooPriceWhen}
             how="Used with the latest reported figure to calculate the current yield." />} />} />
         {/*  THE SAME COLOUR AS THE DOT IT DESCRIBES (`chartTheme.accentStrong`, the price line's,
             which is what the `ReferenceDot` below is stroked with) — the tile and the mark on the
@@ -1097,8 +1177,8 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
 
     <div className="rounded-xl border border-neutral-800/40 bg-card p-4 space-y-3 min-w-0">
       <div className="flex items-baseline gap-2 flex-wrap">
-        <h4 className="text-base font-semibold text-fg-strong">{bl.yieldTitle}</h4>
-        <span className="text-xs text-fg-faint">{t.yieldCaption(bl.perShare)}</span>
+        <h4 className="text-base font-semibold text-fg-strong">{t.yieldComparisonTitle}</h4>
+        <span className="text-xs text-fg-faint">{t.yieldComparisonCaption}</span>
         <button type="button"
           onClick={() => (refreshingQuickValuation
             ? (refreshJobId ? void cancelJob(refreshJobId) : undefined)
@@ -1120,13 +1200,11 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <Stat label={t.avg} value={yld(avgYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
             what={`Average ${b.yieldInline}.`}
-            where="Calculated from the charted daily closes."
+            where={`Calculated from yfinance daily closes. ${yahooPriceWhere}`}
             //  The span is named, not counted against a constant. This read "n of the last 10
             // fiscal years" off the history cap; with the cap gone there is no fixed denominator
             // to be `of`, and quoting one that no longer exists is worse than quoting none.
-            when={yields.length
-              ? provenance(sourceFetchedAt.financials, yields[yields.length - 1]?.date)
-              : 'No daily closes to average.'}
+            when={yields.length ? yahooPriceWhen : 'No daily yfinance closes to average.'}
             //  `yieldValues` IS WHAT THE MEAN WAS TAKEN OVER — the same array `avgYield` divides,
             // so the addends listed here provably sum to the figure on the tile. It is also the
             // dashed line on the chart below, which is the third place this one number appears.
@@ -1135,10 +1213,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <Stat label={t.latest} value={yld(latestYield)} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
             what={`Latest daily ${b.yieldInline}.`}
-            where={`${b.perShare} divided by that day's closing price.`}
+            where={`${b.perShare} divided by that day’s yfinance close. ${yahooPriceWhere}`}
             when={latestYieldPoint?.date
-              ? provenance(sourceFetchedAt.financials, latestYieldPoint.date)
-              : 'No daily close with a reported per-share figure.'}
+              ? `${yahooPriceWhen} This close applies on ${latestYieldPoint.date}.`
+              : 'No daily yfinance close with a reported per-share figure.'}
             //  Both operands off the same point — see `latestYieldPoint`. The FY label is in the
             // expression because that year is not necessarily the newest one on either line.
             worked={workedRatio(latestYieldPoint?.value, latestYieldPoint?.price,
@@ -1148,10 +1226,10 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
         <Stat label={t.asOf} value={latestYieldPoint?.date ?? '—'} color={chartTheme.accent}
           info={<InfoTip content={<AspectCard
             what={`As-of date for the latest daily ${b.yieldInline}.`}
-            where="The daily close series used as the yield denominator."
+            where={`The yfinance daily close series used as the yield denominator. ${yahooPriceWhere}`}
             when={latestYieldPoint?.date
-              ? provenance(sourceFetchedAt.financials, latestYieldPoint.date)
-              : 'No daily close with a reported per-share figure.'}
+              ? `${yahooPriceWhen} This close applies on ${latestYieldPoint.date}.`
+              : 'No daily yfinance close with a reported per-share figure.'}
             how="The Latest yield and this date always come from the same daily observation." />} />} />
       </div>
 
@@ -1160,32 +1238,38 @@ export default function QuickValuationTab({ isin, name }: { isin: string; name?:
           cheap year on the axis, as though it were the bargain of the decade. */}
       <div>
         <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-          <ComposedChart data={yields} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
+          <ComposedChart data={yieldRows} margin={{ top: 5, right: 12, bottom: 5, left: 4 }}
             style={{ cursor: 'pointer' }} onClick={() => setShowInputs(true)}>
             <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
             <XAxis dataKey="date" {...tiltedAxis()} tickFormatter={(date: string) => date.slice(0, 7)} />
-            <YAxis domain={paddedDomain(yieldValues)} tick={{ fontSize: 12, fill: chartTheme.axisTick }}
+            <YAxis domain={paddedDomain(yieldScaleValues)} tick={{ fontSize: 12, fill: chartTheme.axisTick }}
               width={52} tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
             <Tooltip contentStyle={chartTheme.tooltipCard.contentStyle} labelStyle={{ color: chartTheme.axisLabel }}
-              formatter={(v) => [typeof v === 'number' ? `${v.toFixed(2)}%` : '—', b.yieldTitle]} />
+              formatter={(v, label) => [typeof v === 'number' ? `${v.toFixed(2)}%` : '—', label]} />
             <ReferenceLine y={0} stroke={chartTheme.zeroLine} />
             {avgYield != null && (
-              <ReferenceLine y={avgYield} stroke={chartTheme.accent} strokeDasharray="5 3" strokeOpacity={0.6} />
+              <ReferenceLine y={avgYield} stroke={basis === 'ocf' ? OCF_CHART_COLOR : EPS_CHART_COLOR}
+                strokeDasharray="5 3" strokeOpacity={0.6} />
             )}
-            <Line dataKey="yld" name="yld" type="monotone" stroke={chartTheme.accent}
+            <Line dataKey="ocf" name={t.basis.ocf.yieldTitle} type="monotone" stroke={OCF_CHART_COLOR}
+              strokeWidth={2} dot={false} connectNulls />
+            <Line dataKey="eps" name={t.basis.eps.yieldTitle} type="monotone" stroke={EPS_CHART_COLOR}
               strokeWidth={2} dot={false} connectNulls />
           </ComposedChart>
         </ResponsiveContainer>
         <div className="flex justify-center flex-wrap gap-x-4 gap-y-1 text-xs mt-1">
-          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: chartTheme.accent }} />{t.yieldLegend(bl.yieldTitle)}</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: OCF_CHART_COLOR }} />{t.yieldLegend(t.basis.ocf.yieldTitle)}</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-0.5 inline-block rounded" style={{ background: EPS_CHART_COLOR }} />{t.yieldLegend(t.basis.eps.yieldTitle)}</span>
         </div>
       </div>
     </div>
 
     {/* Bottom-right, by auto-flow. Handed the computed series, never the ISIN — same rule as the
         drill-down modal, so it cannot disagree with the charts above about what the company earned. */}
-    <MultipleHistoryChart height={CHART_HEIGHT} basis={b} basisKey={basis} currency={currency}
-      forward={forwardHistory} fromYear={historyFromYear}
+    <MultipleHistoryChart height={CHART_HEIGHT} basis={BASIS.ocf} basisKey="ocf" currency={currency}
+      forward={ocfForwardHistory} comparisonForward={epsForwardHistory} fromYear={multipleFromYear}
+      estimateRetrievedAt={sourceFetchedAt.estimates}
+      priceSource={yahooPrices}
       name={name} isin={isin}
       onRefresh={refreshQuickValuation} canRefresh={companyId != null}
       refreshing={refreshingQuickValuation} cancelling={refreshingQuickValuation && !!refreshJob?.cancelRequested}

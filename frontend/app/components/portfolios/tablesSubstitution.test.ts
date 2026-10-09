@@ -24,14 +24,14 @@ import { subDigits, subNum } from './workedFormula';
  * that compiles, never matches, and reports as "not a mean line".
  */
 function parseMean(line: string) {
-  const m = /\\dfrac\{([^}]*)\}\{(\d+)\} = (-?[\d.]+)\\%/.exec(line);
+  const m = /\\dfrac\{([\s\S]*)\}\{(\d+)\} = (-?[\d.]+)\\%/.exec(line);
   if (!m) throw new Error(`not a mean line: ${line}`);
   return {
-    addends: m[1].split(' + ').map(Number),
+    addends: m[1].split(' + ').map((term) => Number(term.replace(/_\{[^}]*\}/, ''))),
     n: Number(m[2]),
     printed: Number(m[3]),
     /** The raw text of each addend — precision is part of what is under test. */
-    texts: m[1].split(' + '),
+    texts: m[1].split(' + ').map((term) => term.replace(/_\{[^}]*\}/, '')),
   };
 }
 
@@ -63,6 +63,13 @@ describe('meanSub', () => {
     const dp = (String(printed).split('.')[1] ?? '').length;
     const reader = addends.reduce((a, b) => a + b, 0) / n;
     expect(Number(reader.toFixed(dp))).toBe(printed);
+  });
+
+  it('labels every averaged operand with its fiscal year', () => {
+    const sub = meanSub(seriesOf(2021, [55.4, 54.1, 53.3]), 2023, 3);
+    expect(sub).toContain('55.40_{\\,2021}');
+    expect(sub).toContain('54.10_{\\,2022}');
+    expect(sub).toContain('53.30_{\\,2023}');
   });
 
   it('reconciles the coverage inversion at the printed precision', () => {

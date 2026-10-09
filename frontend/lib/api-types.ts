@@ -3129,6 +3129,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/asset-pipeline/quick-valuation-prices/isin/{isin}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Quick Valuation Prices By Isin
+         * @description All daily split-adjusted yfinance closes for Quick Valuation.
+         *
+         *     `currency` is the GuruFocus reporting currency of the per-share financial
+         *     series.  Each close is converted on its own date, so the response can be
+         *     used directly as the numerator of P/OCF, P/E, and yield calculations.
+         */
+        get: operations["quick_valuation_prices_by_isin_api_asset_pipeline_quick_valuation_prices_isin__isin__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/asset-pipeline/resolve": {
         parameters: {
             query?: never;
@@ -6694,7 +6718,11 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        put?: never;
+        /**
+         * Update Entry
+         * @description Update a recorded decision without changing its original meeting date.
+         */
+        put: operations["update_entry_api_log_dashboard_entries__entry_id__put"];
         post?: never;
         /** Delete Entry */
         delete: operations["delete_entry_api_log_dashboard_entries__entry_id__delete"];
@@ -13465,6 +13493,46 @@ export interface components {
             value?: number | null;
         };
         /**
+         * QuickValuationPricePoint
+         * @description One daily yfinance close expressed in the company's reporting currency.
+         */
+        QuickValuationPricePoint: {
+            /** Close */
+            close: number;
+            /** Date */
+            date: string;
+        };
+        /**
+         * QuickValuationPriceSeriesResponse
+         * @description The complete daily close history Quick Valuation is allowed to divide by.
+         *
+         *     The numerator of a valuation multiple must be in the same currency as the
+         *     per-share denominator.  `asset_price` is quoted in the Yahoo listing's
+         *     native currency, so this response performs that dated conversion before a
+         *     client can use the series.  Returning the native number and asking the UI
+         *     to relabel it would make a secondary listing look like a valuation change.
+         */
+        QuickValuationPriceSeriesResponse: {
+            /** Currency */
+            currency: string;
+            /** Isin */
+            isin: string;
+            /** Native Currency */
+            native_currency: string;
+            /**
+             * Points
+             * @default []
+             */
+            points?: components["schemas"]["QuickValuationPricePoint"][];
+            /**
+             * Source
+             * @default yfinance
+             */
+            source?: string;
+            /** Symbol */
+            symbol?: string | null;
+        };
+        /**
          * RealisedBlock
          * @description What the paired book realised on sales this year — the leg the holdings table cannot show.
          *
@@ -18301,6 +18369,39 @@ export interface operations {
             };
         };
     };
+    quick_valuation_prices_by_isin_api_asset_pipeline_quick_valuation_prices_isin__isin__get: {
+        parameters: {
+            query?: {
+                currency?: string | null;
+            };
+            header?: never;
+            path: {
+                isin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuickValuationPriceSeriesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     resolve_asset_api_asset_pipeline_resolve_get: {
         parameters: {
             query: {
@@ -22610,6 +22711,41 @@ export interface operations {
             query?: never;
             header?: never;
             path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogEntryIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_entry_api_log_dashboard_entries__entry_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
             cookie?: never;
         };
         requestBody: {

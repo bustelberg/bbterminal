@@ -39,11 +39,14 @@ ONE VOCABULARY, OR THE COMPARISON IS A LIE
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import time
 from collections import defaultdict
 from datetime import date
+from functools import lru_cache
+from pathlib import Path
 
 from asset_pipeline.geo import MSCI_REGION, msci_region_of
 from asset_pipeline.sector_override import load_file_sector_overrides
@@ -781,22 +784,45 @@ _SCORECARD_BLOCKS = (
     ("Cash", ("Cash",), None),
 )
 
+_WEIGHTED_BENCHMARK_PROFILES_PATH = (
+    Path(__file__).resolve().parents[1] / "config" / "weighted_benchmark_profiles.json"
+)
+
+
+@lru_cache(maxsize=1)
+def _weighted_benchmark_profiles() -> dict[str, dict[str, float]]:
+    """Versioned stock/bond benchmark mix per AIRS risk profile."""
+    raw = json.loads(_WEIGHTED_BENCHMARK_PROFILES_PATH.read_text(encoding="utf-8"))
+    profiles = {
+        str(name): {str(bucket): float(weight) for bucket, weight in weights.items()}
+        for name, weights in raw.items()
+    }
+    for name, weights in profiles.items():
+        if set(weights) != {"Stocks", "Bonds"} or abs(sum(weights.values()) - 100.0) > 0.001:
+            raise RuntimeError(f"invalid weighted benchmark profile {name!r}")
+    return profiles
+
 
 def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, float],
-                             anchor: str | None) -> dict:
+                             anchor: str | None, variant: str | None = None) -> dict:
     """The scorecard's allocation blocks and its weighted benchmark.
 
-    The portfolio's current allocation weights are deliberately used on BOTH sides. Comparing a
-    70/20/10 portfolio to a 100% ACWI benchmark confuses allocation with security selection.
+    Risk-profile portfolios use the versioned Stocks/Bonds policy mix.  Alternatives and cash are
+    deliberately absent from that benchmark; actual allocation remains visible elsewhere.
     """
     from routers._benchmark_etf import etf_returns  # noqa: PLC0415
 
-    proxy_labels = [proxy for _name, _buckets, proxy in _SCORECARD_BLOCKS if proxy]
+    policy = _weighted_benchmark_profiles().get(variant or "")
+    scorecard_blocks = (
+        tuple(block for block in _SCORECARD_BLOCKS if block[0] in policy)
+        if policy else _SCORECARD_BLOCKS
+    )
+    proxy_labels = [proxy for _name, _buckets, proxy in scorecard_blocks if proxy]
     proxy = {label: etf_returns(label, [anchor]).get(anchor) for label in proxy_labels} if anchor else {}
     blocks: list[dict] = []
-    for name, buckets, proxy_label in _SCORECARD_BLOCKS:
+    for name, buckets, proxy_label in scorecard_blocks:
         slices = [s for s in allocation if s.get("bucket") in buckets]
-        weight = sum(float(s.get("pct") or 0.0) for s in slices)
+        weight = policy[name] if policy else sum(float(s.get("pct") or 0.0) for s in slices)
         # A sleeve can consist of direct and ETF equities. Its return is weighted only over the
         # constituent slices that have a measured return; unknown is kept visible as null.
         measured = [(float(s.get("pct") or 0.0), bucket_returns.get(s.get("bucket"))) for s in slices]
@@ -2832,8 +2858,11 @@ def compute_portfolio_analysis(portfolio_id: int,
     allocation = _weigh_alloc(allocation_items)
     score_returns = _returns_timed(portfolio_id, p.get("positions_datum"), benchmark_label,
                                    source, _phase)
-    block_score = _scorecard_block_returns(allocation, bucket_returns,
-                                           score_returns.get("ytd_from"))
+    from ._airs_portfolio_variant import portfolio_variant  # noqa: PLC0415
+    block_score = _scorecard_block_returns(
+        allocation, bucket_returns, score_returns.get("ytd_from"),
+        portfolio_variant(p.get("name"), p.get("omschrijving")),
+    )
     # The book return is AIRS's own flow-aware `cumulatief_rendement`; it is the exact same
     # quantity drawn by the YTD chart. Never replace it with a weighted holding reconstruction:
     # purchases, sales and cash flows make that reconstruction a different answer. The benchmark,

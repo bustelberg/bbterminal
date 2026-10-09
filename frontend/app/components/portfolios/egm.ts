@@ -35,7 +35,7 @@ export type EgmInputs = {
  *
  *  The dividend yield lives here, not in `EgmInputs`. The measured yield is last period's
  * realised figure, and the model applies it as a CONSTANT for every one of the `years` — a claim
- * about the next decade, not an observation about the last one, and the same kind of claim as the
+ * about the model horizon, not an observation about the last one, and the same kind of claim as the
  * growth rate beside it. Keeping it on the measured side also meant a company GuruFocus has no
  * yield for silently became a non-payer, with no way to model an initiation or a cut. The panel
  * still seeds the field from the measured value, so the default answer is unchanged.

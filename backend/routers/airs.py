@@ -43,6 +43,7 @@ from airs_scanner import (
     fetch_portfolio_positions_sync,
     scan_portfolios_sync,
 )
+from airs_portfolio_exclusions import is_excluded_portfolio
 from deps import IN_CHUNK_SIZE, supabase
 from portfolio import parse_airs_excel
 
@@ -176,6 +177,8 @@ async def airs_portfolios_from_db():
         seen: dict[str, dict] = {}
         for r in (resp.data or []):
             name = r["portefeuille"]
+            if is_excluded_portfolio(name):
+                continue
             if name not in seen:
                 seen[name] = {
                     "portefeuille": name,

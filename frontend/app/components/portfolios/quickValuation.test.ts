@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
-  addYears, BASIS, cagrBetween, cagrOf, dailyYieldHistory, EPS_EST_CODES, EPS_PS_CODES, FCF_PS_CODES, forwardEstimates,
+  addYears, BASIS, cagrBetween, cagrOf, dailyForwardOcfMultiples, dailyYieldHistory, EPS_EST_CODES, EPS_ESTIMATE_HISTORY_CODES, EPS_PS_CODES, OCF_PS_CODE, OCF_PS_CODES, OCF_PS_ESTIMATE_CODE, forwardEstimates,
   compoundFrom, latestDateOf, medianOf, priceAtYield, priceTarget, priceVsMetric,
-  rebase, yearsBetween, yieldOf, type MetricRow,
+  rebase, withDerivedHistoricalEpsConsensus, withDerivedOcfPerShare, yearsBetween, yieldOf, type MetricRow,
 } from './quickValuation';
 
-const PRICE = 'annuals__Per Share Data__Month End Stock Price';
-const FCF = 'annuals__Per Share Data__Free Cash Flow per Share';
+// Quick Valuation receives every close under this code from yfinance's daily
+// asset_price series; fiscal fixtures use 31 December simply as a trading date.
+const PRICE = 'close_price';
+const FCF = OCF_PS_CODE;
 const EPS = 'annuals__Per Share Data__EPS without NRI';
 
 const m = (metric_code: string, year: number, numeric_value: number | null): MetricRow =>
@@ -21,12 +23,25 @@ describe('priceVsMetric', () => {
     ]);
   });
 
-  it('reads every section spelling — one cohort each', () => {
-    const out = priceVsMetric([
-      m('annuals__per_share_data__Month End Stock Price', 2024, 100),
-      m('annuals__per_share_data_array__Free Cash Flow per Share', 2024, 4),
-    ]);
+  it('derives OCF per share from the cash-flow statement and diluted shares', () => {
+    const out = priceVsMetric(withDerivedOcfPerShare([
+      m(PRICE, 2024, 100),
+      m('annuals__cashflow_statement__Cash Flow from Operations', 2024, 400),
+      m('annuals__income_statement__Shares Outstanding (Diluted Average)', 2024, 100),
+    ]));
     expect(out).toEqual([{ year: 2024, price: 100, value: 4 }]);
+  });
+
+  it('derives OCF/share consensus from total OCF estimates and matching diluted shares', () => {
+    const rows = withDerivedOcfPerShare([
+      m('annual_operating_cash_flow_estimate', 2026, 400),
+      m('annuals__Income Statement__Shares Outstanding (Diluted Average)', 2026, 100),
+    ]);
+    expect(rows).toContainEqual({
+      metric_code: OCF_PS_ESTIMATE_CODE,
+      target_date: '2026-12-31',
+      numeric_value: 4,
+    });
   });
 
   it('keeps a year only one series reports — the gap is information', () => {
@@ -35,9 +50,51 @@ describe('priceVsMetric', () => {
     expect(out[1]).toEqual({ year: 2024, price: 120, value: null });
   });
 
+  it('derives OCF/share from historical GuruFocus OCF consensus and matching diluted shares', () => {
+    const rows = withDerivedOcfPerShare([
+      m('annual_estimate_history__operating_cash_flow_estimate__consensus', 2023, 800),
+      m('annuals__Income Statement__Shares Outstanding (Diluted Average)', 2023, 100),
+    ]);
+    expect(rows).toContainEqual({
+      metric_code: OCF_PS_ESTIMATE_CODE,
+      target_date: '2023-12-31',
+      numeric_value: 8,
+    });
+  });
+
+  it('sums four historical quarterly EPS consensuses into a fiscal-year forward P/E denominator', () => {
+    const quarterly = 'quarterly_estimate_history__eps_nri_estimate__consensus';
+    const rows = withDerivedHistoricalEpsConsensus([
+      { metric_code: quarterly, target_date: '2022-04-30', numeric_value: 1 },
+      { metric_code: quarterly, target_date: '2022-07-31', numeric_value: 2 },
+      { metric_code: quarterly, target_date: '2022-10-31', numeric_value: 3 },
+      { metric_code: quarterly, target_date: '2023-01-31', numeric_value: 4 },
+    ]);
+    expect(rows).toContainEqual({
+      metric_code: 'derived__annual_eps_nri_estimate_history_consensus',
+      target_date: '2023-01-31',
+      numeric_value: 10,
+    });
+  });
+
+  it('uses that derived fiscal-year EPS for daily P/E before the live 2026 estimate horizon', () => {
+    const quarterly = 'quarterly_estimate_history__eps_nri_estimate__consensus';
+    const rows = withDerivedHistoricalEpsConsensus([
+      { metric_code: 'close_price', target_date: '2022-02-01', numeric_value: 100 },
+      { metric_code: quarterly, target_date: '2022-04-30', numeric_value: 1 },
+      { metric_code: quarterly, target_date: '2022-07-31', numeric_value: 2 },
+      { metric_code: quarterly, target_date: '2022-10-31', numeric_value: 3 },
+      { metric_code: quarterly, target_date: '2023-01-31', numeric_value: 4 },
+    ]);
+    expect(dailyForwardOcfMultiples(rows, BASIS.eps.estimateCodes ?? [])
+      .map(({ t, value }) => ({ t, value }))).toEqual([
+      { t: Date.parse('2022-02-01T00:00:00Z'), value: 10 },
+    ]);
+  });
+
   it('takes the LAST n fiscal years when a cap is asked for', () => {
     const rows = [2015, 2016, 2017, 2018].flatMap((y) => [m(PRICE, y, y), m(FCF, y, 1)]);
-    expect(priceVsMetric(rows, FCF_PS_CODES, 2).map((p) => p.year)).toEqual([2017, 2018]);
+    expect(priceVsMetric(rows, OCF_PS_CODES, 2).map((p) => p.year)).toEqual([2017, 2018]);
   });
 
   it('draws EVERY paired year from the floor when no cap is asked for', () => {
@@ -135,7 +192,7 @@ describe('BASIS — the two bases the tab switches between', () => {
   ];
 
   it('reads a DIFFERENT series per basis off the same payload', () => {
-    expect(priceVsMetric(rows, BASIS.fcf.codes)[0].value).toBe(5);
+    expect(priceVsMetric(rows, BASIS.ocf.codes)[0].value).toBe(5);
     expect(priceVsMetric(rows, BASIS.eps.codes)[0].value).toBe(8);
   });
 
@@ -146,19 +203,17 @@ describe('BASIS — the two bases the tab switches between', () => {
     expect(EPS_PS_CODES.some((c) => c.includes('Diluted'))).toBe(false);
   });
 
-  it('covers all three section spellings on both bases', () => {
-    // Match one spelling and a whole cohort of companies reads as having no data.
-    for (const codes of [FCF_PS_CODES, EPS_PS_CODES]) {
-      expect(codes).toHaveLength(3);
-      expect(new Set(codes.map((c) => c.split('__')[1]))).toEqual(
-        new Set(['Per Share Data', 'per_share_data', 'per_share_data_array']));
-    }
+  it('uses the derived OCF/share code and every EPS section spelling', () => {
+    expect(OCF_PS_CODES).toEqual([OCF_PS_CODE]);
+    expect(EPS_PS_CODES).toHaveLength(3);
+    expect(new Set(EPS_PS_CODES.map((c) => c.split('__')[1]))).toEqual(
+      new Set(['Per Share Data', 'per_share_data', 'per_share_data_array']));
   });
 
   it('never lets the two bases share a label', () => {
     // The failure mode is an earnings yield rendered under an FCF label: not a broken panel, a
     // plausible valuation of a company nobody analysed.
-    const f = BASIS.fcf; const e = BASIS.eps;
+    const f = BASIS.ocf; const e = BASIS.eps;
     for (const k of ['tab', 'perShare', 'yieldTitle', 'yieldInline', 'negativeYear'] as const) {
       expect(f[k]).not.toBe(e[k]);
     }
@@ -174,8 +229,10 @@ describe('BASIS — the two bases the tab switches between', () => {
   it(' has an analyst consensus for EPS and NONE for FCF', () => {
     // Not a gap in our ingest — nobody forecasts capex, so no free-cash-flow consensus exists to
     // fetch. `null` is what makes the forward half of the chart absent rather than modelled.
-    expect(BASIS.eps.estimateCodes).toEqual(EPS_EST_CODES);
-    expect(BASIS.fcf.estimateCodes).toBeNull();
+    expect(BASIS.eps.estimateCodes).toEqual([...EPS_ESTIMATE_HISTORY_CODES, ...EPS_EST_CODES]);
+    expect(BASIS.ocf.estimateCodes).toEqual([
+      'annual_operating_cash_flow_per_share_estimate', OCF_PS_ESTIMATE_CODE,
+    ]);
   });
 
   it(' prefers the NRI-stripped estimate, matching the NRI-stripped history', () => {
@@ -184,6 +241,15 @@ describe('BASIS — the two bases the tab switches between', () => {
     // that is pure bookkeeping.
     expect(EPS_EST_CODES[0]).toBe('annual_eps_nri_estimate');
     expect(BASIS.eps.codes[0]).toContain('EPS without NRI');
+  });
+
+  it('uses historical EPS consensus before the current estimate horizon', () => {
+    // The annual estimate-history feed is what lets daily P/E reach the same reported fiscal
+    // years as daily P/OCF, rather than beginning at the current FY2026 analyst series.
+    expect(EPS_ESTIMATE_HISTORY_CODES[0])
+      .toBe('annual_estimate_history__eps_nri_estimate__consensus');
+    expect(BASIS.eps.estimateCodes?.slice(0, EPS_ESTIMATE_HISTORY_CODES.length))
+      .toEqual(EPS_ESTIMATE_HISTORY_CODES);
   });
 });
 
@@ -197,7 +263,7 @@ describe('dailyYieldHistory', () => {
       { metric_code: FCF, target_date: '2026-01-03', numeric_value: 6 },
       { metric_code: 'close_price', target_date: '2026-01-04', numeric_value: 100 },
     ];
-    expect(dailyYieldHistory(rows, FCF_PS_CODES)).toEqual([
+    expect(dailyYieldHistory(rows, OCF_PS_CODES)).toEqual([
       { date: '2026-01-01', value: null, price: 100, yld: null },
       { date: '2026-01-02', value: 5, price: 125, yld: 4 },
       { date: '2026-01-03', value: 6, price: 100, yld: 6 },
@@ -211,7 +277,7 @@ describe('dailyYieldHistory', () => {
       { metric_code: 'close_price', target_date: '2016-12-30', numeric_value: 100 },
       { metric_code: 'close_price', target_date: '2017-01-03', numeric_value: 100 },
     ];
-    expect(dailyYieldHistory(rows, FCF_PS_CODES).map((p) => p.date)).toEqual(['2017-01-03']);
+    expect(dailyYieldHistory(rows, OCF_PS_CODES).map((p) => p.date)).toEqual(['2017-01-03']);
   });
 });
 
@@ -247,6 +313,64 @@ describe('forwardEstimates', () => {
 
   it('is empty when there are no estimates at all', () => {
     expect(forwardEstimates([], EPS_EST_CODES, 2025)).toEqual([]);
+  });
+});
+
+describe('dailyForwardOcfMultiples', () => {
+  it('divides each fiscal price by that year’s stored OCF/share consensus', () => {
+    const estimate = 'annual_operating_cash_flow_per_share_estimate';
+    const rows = [
+      m('close_price', 2022, 120), m(estimate, 2022, 6),
+      m('close_price', 2023, 150), m(estimate, 2023, 10),
+    ];
+    expect(dailyForwardOcfMultiples(rows, [estimate]).map(({ t, value }) => ({ t, value }))).toEqual([
+      { t: Date.parse('2022-12-31T00:00:00Z'), value: 12 },
+    ]);
+  });
+
+  it('drops a fiscal year with no positive price or consensus estimate', () => {
+    const estimate = 'annual_operating_cash_flow_per_share_estimate';
+    expect(dailyForwardOcfMultiples([
+      m('close_price', 2022, 100), m(estimate, 2022, -2),
+      m('close_price', 2023, 100), m(estimate, 2023, 5),
+    ], [estimate]).map(({ t, value }) => ({ t, value }))).toEqual([{ t: Date.parse('2022-12-31T00:00:00Z'), value: 20 }]);
+  });
+
+  it('fills gaps in a sparse native per-share series from the lower-priority derived series', () => {
+    const native = 'annual_operating_cash_flow_per_share_estimate';
+    const derived = OCF_PS_ESTIMATE_CODE;
+    expect(dailyForwardOcfMultiples([
+      m('close_price', 2022, 100), m(native, 2022, 5),
+      m('close_price', 2023, 120), m(derived, 2023, 6),
+    ], [native, derived]).map(({ t, value }) => ({ t, value }))).toEqual([
+      { t: Date.parse('2022-12-31T00:00:00Z'), value: 100 / 6 },
+    ]);
+  });
+});
+
+describe('daily OCF multiple timing', () => {
+  it('does not apply a future OCF estimate backwards to an earlier close', () => {
+    const estimate = 'annual_operating_cash_flow_per_share_estimate';
+    expect(dailyForwardOcfMultiples([
+      { metric_code: 'close_price', target_date: '2026-10-08', numeric_value: 200 },
+      m(estimate, 2027, 8), m(estimate, 2028, 10),
+    ], [estimate])).toEqual([]);
+  });
+});
+
+describe('one-year-ahead OCF consensus alignment', () => {
+  it('uses a FY2027 estimate for every daily close from FY2026 until FY2027', () => {
+    const estimate = 'annual_operating_cash_flow_per_share_estimate';
+    expect(dailyForwardOcfMultiples([
+      { metric_code: 'close_price', target_date: '2026-01-30', numeric_value: 100 },
+      { metric_code: estimate, target_date: '2027-01-31', numeric_value: 8 },
+      { metric_code: 'close_price', target_date: '2026-01-31', numeric_value: 120 },
+      { metric_code: 'close_price', target_date: '2026-10-08', numeric_value: 200 },
+      { metric_code: 'close_price', target_date: '2027-01-31', numeric_value: 240 },
+    ], [estimate]).map(({ t, value }) => ({ t, value }))).toEqual([
+      { t: Date.parse('2026-01-31T00:00:00Z'), value: 15 },
+      { t: Date.parse('2026-10-08T00:00:00Z'), value: 25 },
+    ]);
   });
 });
 

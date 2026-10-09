@@ -8,6 +8,8 @@ from urllib.parse import urlencode
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
+from airs_portfolio_exclusions import include_portfolios
+
 
 _log = logging.getLogger(__name__)
 
@@ -767,11 +769,20 @@ def scan_portfolios_sync(send_event):
             #  The comparison is the point. Equal means the three filters produced what we read;
             # different means one of them is not applying, or the pager is walking another
             # selection — and either way the roster is wrong in a way no row count reveals.
-            if declared is not None and declared != len(portfolios):
+            # Compare AIRS's declared population to what we actually scraped, before applying
+            # our local retirement list. Otherwise intentionally excluded portfolios would look
+            # like a broken AIRS filter/pager.
+            raw_count = len(portfolios)
+            if declared is not None and declared != raw_count:
                 send_event("progress", step="scrape", status="in_progress",
                            message=(f"   MISMATCH: AIRS says {declared} items in selectie, we read "
-                                    f"{len(portfolios)}. Check the Actieve/Interne/Zonder-consolidatie "
+                                    f"{raw_count}. Check the Actieve/Interne/Zonder-consolidatie "
                                     f"filters and the pager."))
+            portfolios = include_portfolios(portfolios, lambda row: row.get("portefeuille"))
+            excluded = raw_count - len(portfolios)
+            if excluded:
+                send_event("progress", step="scrape", status="in_progress",
+                           message=f"   {excluded} retired portfolio(s) excluded by local configuration")
             send_event("progress", step="scrape", status="done", message=f"Read {len(portfolios)} portfolios across {page_num} page(s)")
             send_event("portfolios", data=portfolios)
             send_event("done", message=f"Scan complete. Found {len(portfolios)} portfolios.")
@@ -1036,6 +1047,9 @@ def fetch_model_portfolios_sync(send_event=None) -> list[dict]:
         emit("progress", step="names", status="in_progress",
              message=f"edit-page fallback {i}/{len(leftover)}: {r['name']}")
 
+    # Do this after resolving AIRS's truncated list names. It means retired models never reach
+    # the saved grid or the expensive XLS-per-model holdings pass run by every caller.
+    rows = include_portfolios(rows, lambda row: row.get("name"))
     rows.sort(key=lambda r: r["name"].lower())
     # "portfolios", not "done": the caller may follow this with the (much slower) holdings
     # count and own the terminal event. The list is complete and renderable right here.

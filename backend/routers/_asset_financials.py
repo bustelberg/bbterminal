@@ -1125,6 +1125,29 @@ class PriceSeriesResponse(BaseModel):
     points: list[PricePoint] = []
 
 
+class QuickValuationPricePoint(BaseModel):
+    """One daily yfinance close expressed in the company's reporting currency."""
+    date: str
+    close: float
+
+
+class QuickValuationPriceSeriesResponse(BaseModel):
+    """The complete daily close history Quick Valuation is allowed to divide by.
+
+    The numerator of a valuation multiple must be in the same currency as the
+    per-share denominator.  `asset_price` is quoted in the Yahoo listing's
+    native currency, so this response performs that dated conversion before a
+    client can use the series.  Returning the native number and asking the UI
+    to relabel it would make a secondary listing look like a valuation change.
+    """
+    isin: str
+    symbol: str | None = None
+    source: str = "yfinance"
+    native_currency: str
+    currency: str
+    points: list[QuickValuationPricePoint] = []
+
+
 def _price_series_for_isin(isin: str, years: int = 15) -> PriceSeriesResponse:
     """Monthly split-adjusted close (native + EUR) for one ISIN, off `asset_price`."""
     from datetime import date, timedelta  # noqa: PLC0415
@@ -1167,6 +1190,59 @@ def _price_series_for_isin(isin: str, years: int = 15) -> PriceSeriesResponse:
         isin=isin, symbol=ex.get("yahoo_symbol"), currency=ccy or "EUR", points=points)
 
 
+def _quick_valuation_prices_for_isin(
+    isin: str, in_currency: str | None,
+) -> QuickValuationPriceSeriesResponse:
+    """All stored daily Yahoo closes for Quick Valuation, split-adjusted and FX-aligned.
+
+    This intentionally does not use GuruFocus's `close_price` feed as a
+    fallback.  A P/OCF history which silently switches vendor halfway through
+    is not one price series.  If Yahoo has no mapped listing, callers receive
+    a 404 and show that absence instead of a plausible mixed-vendor chart.
+    """
+    from datetime import date  # noqa: PLC0415
+
+    from routers._airs_portfolio_perf import _closes, _executions, _fx  # noqa: PLC0415
+    from routers._benchmark_index import _rate, _split_adjust  # noqa: PLC0415
+
+    ex = (_executions([isin]) or {}).get(isin)
+    if not ex or not ex.get("analysis_id"):
+        raise HTTPException(404, f"No priced Yahoo listing for {isin} — nothing to chart.")
+    native = _norm_ccy(ex.get("currency")) or "EUR"
+    target = _norm_ccy(in_currency)
+    if not target:
+        raise HTTPException(422, "Quick Valuation needs a reporting currency for Yahoo prices.")
+
+    raw = (_closes([ex["analysis_id"]], "1900-01-01", date.today().isoformat())
+           or {}).get(ex["analysis_id"]) or []
+    if not raw:
+        raise HTTPException(404, f"No stored Yahoo price bars for {isin} ({ex.get('yahoo_symbol')}).")
+    adjusted, _split_factor = _split_adjust(raw)
+    # `_rate` deals with weekends and GBp/other minor units.  Read every rate
+    # needed for this history once rather than converting an entire series in
+    # the client with today's FX rate.
+    fx = {} if native == target else _fx({native, target}, adjusted[0][0], adjusted[-1][0])
+    points: list[QuickValuationPricePoint] = []
+    for day, native_close in adjusted:
+        if not native_close or native_close <= 0:
+            continue
+        if native == target:
+            close = native_close
+        else:
+            native_rate = _rate(fx, native, day)
+            target_rate = _rate(fx, target, day)
+            if not native_rate or not target_rate:
+                continue
+            close = native_close / native_rate * target_rate
+        points.append(QuickValuationPricePoint(date=day, close=round(close, 6)))
+    if not points:
+        raise HTTPException(404, f"No Yahoo closes for {isin} can be converted to {target}.")
+    return QuickValuationPriceSeriesResponse(
+        isin=isin, symbol=ex.get("yahoo_symbol"), native_currency=native,
+        currency=target, points=points,
+    )
+
+
 @router.get("/api/asset-pipeline/price-series/isin/{isin}",
             response_model=PriceSeriesResponse)
 async def price_series_by_isin(isin: str, years: int = 15):
@@ -1175,6 +1251,18 @@ async def price_series_by_isin(isin: str, years: int = 15):
 
     404 when the ISIN has no priced Yahoo listing or no stored bars."""
     return await asyncio.to_thread(_price_series_for_isin, isin, years)
+
+
+@router.get("/api/asset-pipeline/quick-valuation-prices/isin/{isin}",
+            response_model=QuickValuationPriceSeriesResponse)
+async def quick_valuation_prices_by_isin(isin: str, currency: str | None = None):
+    """All daily split-adjusted yfinance closes for Quick Valuation.
+
+    `currency` is the GuruFocus reporting currency of the per-share financial
+    series.  Each close is converted on its own date, so the response can be
+    used directly as the numerator of P/OCF, P/E, and yield calculations.
+    """
+    return await asyncio.to_thread(_quick_valuation_prices_for_isin, isin, currency)
 
 
 # Latest close — the one live quote the fiscal-year world does not have. The Quick Valuation tab

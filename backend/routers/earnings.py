@@ -215,6 +215,10 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Ratios__Net Margin %",
     # Financials — Cashflow / Income
     "annuals__Cashflow Statement__Free Cash Flow",
+    # Quick Valuation derives OCF/share from these reported operands. The refresh already fetches
+    # the full financials blob; this allowlist must also return both inputs to the client.
+    "annuals__Cashflow Statement__Cash Flow from Operations",
+    "annuals__cashflow_statement__Cash Flow from Operations",
     #  The three lines the reverse DCF normalises FCF with — added 2026-08-18, and their absence
     # is worth recording because NOTHING SAID THEY WERE MISSING. The rows are in `metric_data` for
     # every company (ASML: SBC 202.3, capex -1631.2, D&A 1025.9); this list is an ALLOWLIST, so
@@ -235,6 +239,7 @@ _DASHBOARD_METRIC_CODES = [
     "annuals__Income Statement__Net Income",
     "annuals__Income Statement__EPS (Diluted)",
     "annuals__Income Statement__Shares Outstanding (Diluted Average)",
+    "annuals__income_statement__Shares Outstanding (Diluted Average)",
     # Financials — Valuation
     "annuals__Valuation Ratios__FCF Yield %",
     "annuals__Valuation Ratios__Dividend Yield %",
@@ -417,6 +422,25 @@ def load_company_metric_rows(company_id: int, metric_keys: list[str] | None = No
             .eq("is_prediction", True)
             .gte("target_date", "1998-01-01")
             .like("metric_code", "annual_%")
+            .order("target_date")
+        )))
+
+        # Point-in-time annual consensus from GuruFocus's estimate-history feed. These rows are
+        # marked as historical observations (not live predictions), so they are outside the
+        # annual_% prediction read above but required for daily historical forward P/OCF and P/E.
+        rows.extend(_paginate(lambda: (
+            supabase.table("metric_data")
+            .select("metric_code,target_date,numeric_value,is_prediction")
+            .eq("company_id", company_id)
+            .eq("source_code", "gurufocus")
+            .in_("metric_code", [
+                "annual_estimate_history__operating_cash_flow_estimate__consensus",
+                "annual_estimate_history__eps_nri_estimate__consensus",
+                "annual_estimate_history__per_share_eps_estimate__consensus",
+                "quarterly_estimate_history__eps_nri_estimate__consensus",
+                "quarterly_estimate_history__per_share_eps_estimate__consensus",
+            ])
+            .gte("target_date", "1998-01-01")
             .order("target_date")
         )))
 

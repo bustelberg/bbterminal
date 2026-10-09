@@ -1765,7 +1765,8 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
     prices, recompute — without touching the accounts.
 
      IT RUNS THE MODEL HALF AND ONLY THE MODEL HALF. It is invoked as the final phase of the
-    11:00 AIRS refresh, after the account scrape and model scan have released the AirSPMS session.
+    scheduled AIRS refresh, after the account scrape and model scan have released the AirSPMS
+    session.
 
      This closes the account refresh's final gap: account and model scans alone do not price the
     model holdings, so Analyse's YTD and valued-position figures would otherwise lag behind.
@@ -1946,7 +1947,7 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
                 "[scheduler] airs model-portfolio scan failed: %s: %s", type(e).__name__, e,
             )
         # The last AIRS phase deliberately starts only after the account and composition browser
-        # work is finished.  A separate 11:00 job would race the same AirSPMS session and either
+        # work is finished. A separate job would race the same AirSPMS session and either
         # job could leave a partial refresh behind.
         try:
             if stop is not None and stop():

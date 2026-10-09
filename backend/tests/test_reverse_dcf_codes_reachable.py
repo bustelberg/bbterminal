@@ -31,6 +31,7 @@ import pytest
 from routers.earnings import _DASHBOARD_METRIC_CODES
 
 _EGM_INPUTS = Path(__file__).resolve().parents[2] / "frontend/app/components/portfolios/egmInputs.ts"
+_QUICK_VALUATION = Path(__file__).resolve().parents[2] / "frontend/app/components/portfolios/quickValuation.ts"
 
 #: The code groups the Reverse DCF sources, by their `const` name in `egmInputs.ts`.
 #:  NAMED EXPLICITLY rather than "every array in the file" — a test that discovers its own subject
@@ -81,3 +82,17 @@ def test_the_depreciation_leg_is_the_cash_flow_one(src: str):
     for c in codes:
         assert "ashflow" in c or "ash_flow" in c or "ashflow_statement" in c.lower(), c
         assert "Income Statement" not in c and "income_statement" not in c, c
+
+
+def test_quick_valuation_ocf_per_share_operands_are_on_the_allowlist():
+    """Quick Valuation derives OCF/share client-side after re-reading this endpoint."""
+    src = _QUICK_VALUATION.read_text(encoding="utf-8")
+    operands: list[str] = []
+    for group in ("OCF_CODES", "DILUTED_SHARES_CODES"):
+        operands.extend(_codes(group, src))
+    assert operands, "Quick Valuation no longer declares its OCF/share operands"
+    missing = [code for code in operands if code not in _DASHBOARD_METRIC_CODES]
+    assert not missing, (
+        f"Quick Valuation refreshes financials but /by-isin metrics drops {missing}; "
+        "OCF/share cannot be derived after the refresh."
+    )

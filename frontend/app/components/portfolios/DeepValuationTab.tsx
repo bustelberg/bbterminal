@@ -793,7 +793,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
             nothing else on the panel says how long the figures run for, and an annualised return
             with no window is not a smaller claim than a wrong one — it is an unreadable one. It
             keeps the faint, smaller weight so the NAME is still what the eye lands on.
-             INTERPOLATED, NEVER TYPED. `assumptions.years` is fixed at 10 today (the EGM has no
+             INTERPOLATED, NEVER TYPED. `assumptions.years` is fixed at 5 today (the EGM has no
             horizon field, unlike the reverse DCF below), but a hardcoded "10" in a heading is a
             caption that silently stops being true the day one is added. */}
         <h4 className="text-base font-semibold text-fg-strong">
@@ -803,7 +803,7 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
           </span>
         </h4>
         {/*  NO SUBTITLE — REMOVED 2026-08-18, and the bridge below is why. It read
-            "earnings growth + dividend yield + change in the multiple, over 10 years", which was
+            "earnings growth + dividend yield + change in the multiple, over 5 years", which was
             the right three drivers, the wrong operator (they compound; the sum is +6.2% against an
             answer of +5.8%) and, once the bridge landed, a prose restatement of the three rows
             directly beneath it. A caption that names what the next element already shows is text
@@ -966,12 +966,6 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
                 </button>
               )} />
             <Field label={t.egm.forwardPE} value={fwdPeStr} onChange={setFwdPeStr}
-              badge={src.forwardPEDate == null ? null : (
-                <span className="shrink-0 rounded border border-neutral-700 bg-overlay/5 px-1 py-px font-mono text-[9px] text-fg-faint"
-                  title={`${t.common.guruFocus(vendorName(SOURCE_CODES.forwardPE))} — ${t.egm.forwardPEAsOf(onDate(src.forwardPEDate, lang))}`}>
-                  {t.egm.forwardPEAsOf(onDate(src.forwardPEDate, lang))}
-                </span>
-              )}
               placeholder={src.forwardPE == null ? '' : src.forwardPE.toFixed(1)}
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.forwardPE.what}
@@ -1075,15 +1069,9 @@ export default function DeepValuationTab({ isin, name }: { isin: string; name?: 
               )}
               />
             {/*  AN ASSUMPTION, NOT A READING. The model applies this yield in EVERY one of the
-                ten years, so it is a claim about the next decade; the measured figure is only its
+                five years, so it is a claim about the model horizon; the measured figure is only its
                 default. Blank = use what GuruFocus reports. */}
             <Field label={t.egm.dividendYield} value={divStr} onChange={setDivStr} suffix="%"
-              badge={divOverride != null || src.dividendYieldDate == null ? null : (
-                <span className="shrink-0 rounded border border-neutral-700 bg-overlay/5 px-1 py-px font-mono text-[9px] text-fg-faint"
-                  title={`${t.common.guruFocus(vendorName(SOURCE_CODES.dividendYield))} — ${t.egm.forwardPEAsOf(onDate(src.dividendYieldDate, lang))}`}>
-                  {t.egm.forwardPEAsOf(onDate(src.dividendYieldDate, lang))}
-                </span>
-              )}
               info={<InfoTip content={<AspectCard
                 what={t.egm.cards.dividend.what}
                 where={dividendUsesDefault ? dividendDefaultInfo.where : t.egm.yoursTypedHere}

@@ -1,0 +1,6 @@
+{
+  "Offensief": { "Stocks": 100, "Bonds": 0 },
+  "Beperkt Offensief": { "Stocks": 80, "Bonds": 20 },
+  "Neutraal": { "Stocks": 60, "Bonds": 40 },
+  "Defensief": { "Stocks": 40, "Bonds": 60 }
+}

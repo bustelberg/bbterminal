@@ -51,6 +51,7 @@ from common.fx_load import load_fx_to_eur
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 from momentum.diversification import annualized_stats
+from airs_portfolio_exclusions import is_excluded_portfolio
 from routers._airs_ref import models as ref_models
 from routers._airs_ref import positions as ref_positions
 from routers._benchmark_index import _at_or_before, _rate, _split_adjust
@@ -646,7 +647,8 @@ def compute_portfolio_performance(year: int | None = None, *,
     # columns with a `not.is.null` filter is a DIFFERENT request from the canonical one, so the
     # per-request memo cannot collapse it and the Analyse modal paid for a second read of a 102-row
     # table. The filter moves to Python, which is the rule that module states.
-    ports = [p for p in ref_models() if p.get("positions_datum")]
+    ports = [p for p in ref_models()
+             if p.get("positions_datum") and not is_excluded_portfolio(p.get("name"))]
     #  One portfolio's numbers should not cost fifty-six portfolios' prices. The Analyse modal
     # reads exactly one row out of this function's output, and paid for the whole fleet to get it
     # — every model's holdings resolved, priced and FX-converted, then 55/56 of that thrown away.

@@ -16,8 +16,8 @@ const A: ReverseDcfAssumptions = {
   discountRates: [FALLBACK_DISCOUNT_RATE],
 };   // A separate ten-year formula fixture: 3% terminal, discounted at 10%
 
-it('uses a five-year forecast horizon by default', () => {
-  expect(FORECAST_YEARS).toBe(5);
+it('uses a ten-year forecast horizon by default', () => {
+  expect(FORECAST_YEARS).toBe(10);
 });
 
 const INPUTS: ReverseDcfInputs = {

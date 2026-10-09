@@ -58,17 +58,22 @@ export type QuickValuationCopy = {
   legendTrend: (r2: string, years: string) => string;
   yieldCaption: (perShare: string) => string;
   yieldLegend: (yieldTitle: string) => string;
+  /** The yield chart always compares OCF with EPS, regardless of the selected calculator basis. */
+  yieldComparisonTitle: string;
+  yieldComparisonCaption: string;
   avg: string;
   latest: string;
   /** The forward-multiple card. */
   multipleForward: (multiple: string) => string;
+  /** The forward-multiple chart always compares P/OCF with P/E. */
+  forwardMultipleComparison: string;
   sinceMedian: (year: string) => string;
   vendorIndicator: string;
   median: string;
   forwardTile: (multiple: string) => string;
   asOf: string;
   loading: string;
-  noForwardFcf: string;
+  noForwardOcf: string;
   noForwardPublished: (multiple: string, year: string) => string;
   /**
    * The Price target card beside the chart.
@@ -100,12 +105,12 @@ export type QuickValuationCopy = {
 
 const EN: QuickValuationCopy = {
   basis: {
-    fcf: {
-      tab: 'FCF',
-      perShare: 'FCF per share',
-      yieldTitle: 'FCF yield',
-      yieldInline: 'FCF yield',
-      multiple: 'P/FCF',
+    ocf: {
+      tab: 'OCF',
+      perShare: 'Operating cash flow per share',
+      yieldTitle: 'OCF yield',
+      yieldInline: 'OCF yield',
+      multiple: 'P/OCF',
       negativeYear: 'cash-burn',
     },
     eps: {
@@ -134,16 +139,19 @@ const EN: QuickValuationCopy = {
   legendTrend: (r2, years) => `Trend (R² ${r2}), dotted = ${years}y projection`,
   yieldCaption: (perShare) => `${perShare} ÷ daily close · average dashed`,
   yieldLegend: (yieldTitle) => `${yieldTitle} (avg dashed)`,
+  yieldComparisonTitle: 'OCF- en EPS-yield',
+  yieldComparisonCaption: 'OCF/share and EPS ÷ daily close · selected average dashed',
   avg: 'Avg',
   latest: 'Latest',
   multipleForward: (multiple) => `${multiple} — forward`,
+  forwardMultipleComparison: 'Forward P/OCF en P/E',
   sinceMedian: (year) => `since ${year} · median dashed`,
   vendorIndicator: 'vendor indicator',
   median: 'Median',
   forwardTile: (multiple) => `Forward ${multiple}`,
   asOf: 'As of',
   loading: 'Loading…',
-  noForwardFcf: 'GuruFocus has no historical forward-FCF series.',
+  noForwardOcf: 'No positive annual OCF-per-share and daily share-price history are stored.',
   noForwardPublished: (multiple, year) =>
     `No forward ${multiple} published for this listing since ${year}.`,
   pt: {
@@ -177,14 +185,14 @@ const EN: QuickValuationCopy = {
  */
 const NL: QuickValuationCopy = {
   basis: {
-    fcf: {
-      tab: 'FCF',
-      perShare: 'FCF per aandeel',
+    ocf: {
+      tab: 'OCF',
+      perShare: 'Operationele kasstroom per aandeel',
       // "Yield" is the established term in Dutch portfolio reporting too.  Keeping it means
-      // the price-target rows read "Current FCF yield" / "Forecast FCF yield" in either language.
-      yieldTitle: 'FCF yield',
-      yieldInline: 'FCF yield',
-      multiple: 'P/FCF',
+      // the price-target rows read "Current OCF yield" / "Forecast OCF yield" in either language.
+      yieldTitle: 'OCF yield',
+      yieldInline: 'OCF yield',
+      multiple: 'P/OCF',
       negativeYear: 'cash-burn',
     },
     eps: {
@@ -217,16 +225,19 @@ const NL: QuickValuationCopy = {
   legendTrend: (r2, years) => `Trend (R² ${r2}), gestippeld = projectie van ${years} jaar`,
   yieldCaption: (perShare) => `${perShare} ÷ dagelijkse slotkoers · gemiddelde gestippeld`,
   yieldLegend: (yieldTitle) => `${yieldTitle} (gemiddelde gestippeld)`,
+  yieldComparisonTitle: 'OCF & EPS yield',
+  yieldComparisonCaption: 'OCF/aandeel en EPS ÷ dagelijkse slotkoers · gemiddelde van geselecteerde basis gestippeld',
   avg: 'Gem.',
   latest: 'Laatste',
   multipleForward: (multiple) => `${multiple} — forward`,
+  forwardMultipleComparison: 'Forward P/OCF & P/E',
   sinceMedian: (year) => `vanaf ${year} · mediaan gestippeld`,
   vendorIndicator: 'indicator van de leverancier',
   median: 'Mediaan',
   forwardTile: (multiple) => `Forward ${multiple}`,
   asOf: 'Per',
   loading: 'Laden…',
-  noForwardFcf: 'GuruFocus heeft geen historische forward-FCF-reeks.',
+  noForwardOcf: 'Er zijn geen positieve jaarlijkse OCF per aandeel en dagelijkse koershistorie opgeslagen.',
   noForwardPublished: (multiple, year) =>
     `Geen forward ${multiple} gepubliceerd voor deze notering sinds ${year}.`,
   pt: {
