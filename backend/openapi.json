@@ -25745,7 +25745,7 @@
     },
     "/api/data/price-coverage": {
       "get": {
-        "description": "Freshest + most-stale company by LATEST close-price date \u2014 so the\n/schedule month-end refresh can show prices actually moved.\n\nReads each company's latest close date from the\n`company_latest_close_price_dates` RPC (the same source the prices phase\nsorts on), then enriches the min/max companies with name / ticker /\nexchange. `newest` = the most recent price held anywhere (should be the last\ntrading day right after a refresh); `oldest` = the company whose latest\nprice is furthest behind. Both null when no company has prices. Cached (1\nmin) since the underlying aggregation isn't cheap.",
+        "description": "Freshest + most-stale company by LATEST close-price date \u2014 so the\n/schedule month-end refresh can show prices actually moved.\n\nReads each company's latest close date from the\n`company_yahoo_latest_close_dates` RPC (the same source the Yahoo refresh\nsorts on), then enriches the min/max companies with name / ticker /\nexchange. `newest` = the most recent price held anywhere (should be the last\ntrading day right after a refresh); `oldest` = the company whose latest\nprice is furthest behind. Both null when no company has prices. Cached (1\nmin) since the underlying aggregation isn't cheap.",
         "operationId": "price_coverage_api_data_price_coverage_get",
         "responses": {
           "200": {
@@ -29272,6 +29272,26 @@
           }
         },
         "summary": "List Equities",
+        "tags": [
+          "leonteq"
+        ]
+      }
+    },
+    "/api/leonteq/frozen-yahoo-mappings": {
+      "get": {
+        "description": "Yahoo tickers for the immutable Leonteq snapshot selected in backtests.\n\n``analysis_symbol`` is the yfinance instrument whose stored price series is\nused by the backtester.  Rows with a non-verified identity are deliberately\nreturned as ``review`` rather than silently treated as correct.",
+        "operationId": "frozen_yahoo_mappings_api_leonteq_frozen_yahoo_mappings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Frozen Yahoo Mappings",
         "tags": [
           "leonteq"
         ]
