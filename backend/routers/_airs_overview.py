@@ -160,6 +160,7 @@ def _list_overview_from_payload(payload: dict) -> list[dict]:
     """Apply reviewed Python-only pairing and naming rules to one database snapshot."""
     from ._airs_account_links import guess_model, mapped_model  # noqa: PLC0415
     from ._management_topselecties import topselectie_for_account  # noqa: PLC0415
+    from airs_portfolio_exclusions import topselectie_test_entry_for_account  # noqa: PLC0415
 
     accounts = payload["accounts"]
     model_rows = payload["models"]

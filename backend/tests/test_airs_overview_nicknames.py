@@ -125,6 +125,25 @@ class TestManagementGroups:
 
 
 class TestOverviewRpcAssembly:
+    def test_rpc_payload_includes_configured_test_topselecties(self, monkeypatch):
+        """The fast path needs the same test-collection lookup as the legacy path."""
+        payload = {
+            "accounts": [{
+                "portefeuille": "DealmakersTopSel OFF DYN",
+                "has_stored_link": False,
+                "isins": 0,
+            }],
+            "models": [],
+        }
+        monkeypatch.setattr(ov, "_overview_payload", lambda: payload)
+
+        rows = ov.list_overview()
+
+        assert [(r["dynamic_portefeuille"], r["management_group"], r["name"])
+                for r in rows] == [
+            ("DealmakersTopSel OFF DYN", "test_topselecties", "DealmakersTopSelectie"),
+        ]
+
     def test_rpc_payload_is_the_only_database_input_for_the_fast_path(self, monkeypatch):
         """The SQL RPC owns all relational reads; Python only applies reviewed naming rules."""
         payload = {

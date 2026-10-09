@@ -28,7 +28,6 @@ import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../
 import AttributionPanel from './AttributionPanel';
 import PanelDialog from './PanelDialog';
 import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
-import HoldingTimingModal from './HoldingTimingModal';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import EtfSectorAllocationModal from './EtfSectorAllocationModal';
@@ -1923,7 +1922,7 @@ export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean)
 }
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
-  lookThrough, onLookThroughChange, onTiming, onSectorOverride,
+  lookThrough, onLookThroughChange, onSectorOverride,
   onSectorAllocation, onSummary }: {
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
@@ -1955,10 +1954,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   /** WHY the table is empty, from the server (`book_note`) — three different faults used to
    *  render as one sentence, next to a portfolios list that visibly has rows. */
   note?: string | null;
-  /** Opens the per-holding timing popup. Null on an ad-hoc basket, which has no book to trade.
-   *   Only a HELD row can open it: 'what would doing nothing have made' needs a position that
-   *  still exists to hold. */
-  onTiming?: (name: string) => void;
   /** THIS book's own account name. A Return whose `own_return_book` differs came from the book
    *  behind a certificate, and this is the only thing that tells the two apart. */
   bookName?: string | null;
@@ -2575,15 +2570,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {sector.rows.map((h) => { const i = n++; const certificateAllocation = syntheticSectorAllocation(h); return (
                 <tr key={[h.isin ?? h.name ?? `${g.bucket}-${i}`,
                   (h.via_names ?? []).join(',')].join('|')}
-                  onClick={onTiming && h.name && !isSynthetic(h) ? () => onTiming(h.name!) : undefined}
-                  title={onTiming && h.name && !isSynthetic(h)
-                    ? copy.row.timingTitle(h.name)
-                    : isSynthetic(h)
+                  title={isSynthetic(h)
                       ? `${h.name} — the positions this book holds through that strategy, added up`
                       : undefined}
-                  className={`group border-b border-neutral-800/[0.15] last:border-0 transition-colors ${
-                    onTiming && h.name && !isSynthetic(h)
-                      ? 'cursor-pointer hover:bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.03]'}`}>
+                  className="group border-b border-neutral-800/[0.15] last:border-0 transition-colors hover:bg-overlay/[0.03]">
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[11px] text-fg-faint tabular-nums">{i + 1}</td>
                   <td className="py-1.5 pr-3 text-fg max-w-0"
                     title={syntheticAirsName(h) ? `AIRS: ${syntheticAirsName(h)}` : h.name ?? undefined}>
@@ -3545,7 +3535,6 @@ export default function PortfolioAnalysisModal({
   const [assetFilter, setAssetFilter] = useState<string | null>(null);
   //  The per-holding timing popup. Keyed by AIRS's own holding NAME, because that is what the
   // Transacties sheet joins on — it carries no ISIN.
-  const [timingFor, setTimingFor] = useState<string | null>(null);
   const [sectorFor, setSectorFor] = useState<BookHolding | null>(null);
   const [notesFor, setNotesFor] = useState<BookHolding | null>(null);
   const [sectorAllocationFor, setSectorAllocationFor] = useState<{
@@ -4175,9 +4164,6 @@ export default function PortfolioAnalysisModal({
                 onSectorOverride={setSectorFor}
                 note={data.book_note} bookName={data.book_portefeuille} realised={data.realised}
                 benchmark={data.benchmark ?? benchmark}
-                /*  Only when this modal is a real portfolio with a paired book. An ad-hoc
-                   basket has no account and therefore no trades to explain. */
-                onTiming={id && data.realised?.available ? setTimingFor : undefined}
                 /*  THE BOOK SNAPSHOT, NOT `data.as_of`. That field is the model COMPOSITION's
                    effective date (2025-12-30 for AITopSelectie) — a true fact about the weights
                    the model declares, and the wrong clock for figures the BOOK values, which are
@@ -4302,9 +4288,6 @@ export default function PortfolioAnalysisModal({
           portfolioWeightPct={sectorAllocationFor.portfolioWeightPct}
           initialData={sectorAllocationFor.allocation}
           onClose={() => setSectorAllocationFor(null)} />
-      )}
-      {timingFor && id && (
-        <HoldingTimingModal portfolioId={id} name={timingFor} onClose={() => setTimingFor(null)} />
       )}
       </ProvenanceFetchedAt>
       </div>

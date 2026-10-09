@@ -7,7 +7,7 @@ changes day-to-day), then for EVERY portfolio downloads + parses + stores both:
 Both are deduped, so re-running adds no duplicate rows. Another site can read
 these two tables straight from Supabase; this job keeps them fresh each day.
 
-Runs as an in-process scheduled job (working days 11:00 Amsterdam — see
+Runs as an in-process scheduled job (daily at 08:00, 09:00, 10:00, and 11:00 Amsterdam — see
 scheduler.py) and on-demand from the /airs-portfolio "Refresh now" button.
 Reuses the existing scraper + parsers (`scan_portfolios_sync`,
 `download_portfolio_sync`/`download_vermogensoverzicht_sync`, `parse_airs_excel`,

@@ -471,7 +471,6 @@ export function useMgmtCopy(): ManagementCopy {
  *   PortfoliosPanel            the /portfolios table this page embeds (~27 strings)
  *   AccountTotalReturn         the account reconciliation rows (~13)
  *   AccountTransactions        the transactions list
- *   HoldingTimingModal         the "why the trading mattered" popup (~12)
  *   AllocationBandsModal       the band editor
  *   the Fundamental modal      Long Equity + Tables (`longEquityCopy`, `tablesCopy`) and DEEP
  *                              VALUATION (2026-09-01, `deepValuationCopy` — the EGM panel, the
@@ -498,7 +497,7 @@ export const UNTRANSLATED_SURFACES = [
   //  BucketDetailPanel's rendered chrome is done (`bucketDetailCopy.ts`); what is left on it is
   // the two paragraph-length column hints (`WEIGHT_HINT` / `WEIGHT_NOW_HINT`).
   'BucketDetailPanel (partly — the labels and headers are done; the two column hints are not)',
-  'AccountTransactions', 'HoldingTimingModal', 'AllocationBandsModal',
+  'AccountTransactions', 'AllocationBandsModal',
   //  QuickValuationTab's RENDERED chrome is done (`quickValuationCopy.ts`); what is left on it
   // is the ⓘ prose behind each card, which is the larger, caveat-heavy half.
   'QuickValuationTab (partly — the headings, tiles and legends are done; the ⓘ cards are not)',

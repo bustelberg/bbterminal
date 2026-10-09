@@ -57,7 +57,8 @@ class TestTheDeclarationIsTheFixedPoint:
             if not s.trigger:
                 continue
             hour = s.trigger.get("hour")
-            assert hour is None or f"{hour:02d}:" in s.cadence, f"{s.id}: {s.cadence}"
+            hours = str(hour).split(",") if hour is not None else []
+            assert all(f"{int(h):02d}:" in s.cadence for h in hours), f"{s.id}: {s.cadence}"
             tz = str(s.trigger.get("timezone", ""))
             if tz == "UTC":
                 assert "UTC" in s.cadence, s.id
@@ -110,6 +111,14 @@ class TestOptInJobs:
         assert by_id["history_drift_check"].trigger == {
             "day_of_week": "mon", "hour": 7, "minute": 0, "timezone": "UTC",
         }
+
+    def test_airs_refresh_checks_for_new_daily_data_each_hour_from_eight_to_eleven(self):
+        spec = {s.id: s for s in SCHEDULED_JOBS}["airs_vermogen_refresh"]
+        assert spec.trigger == {
+            "day_of_week": "mon-sun", "hour": "8,9,10,11", "minute": 0,
+            "timezone": "Europe/Amsterdam",
+        }
+        assert spec.cadence == "Every day, 08:00, 09:00, 10:00, and 11:00 Amsterdam"
 
 
 
