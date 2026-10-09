@@ -384,11 +384,16 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
     file_overrides = load_file_sector_overrides()
     out: dict[str, dict] = {}
     for r in rows:
-        if r.get("status") == "ok":
+        file_override = file_overrides.get(str(r.get("isin") or "").strip().upper())
+        # A reviewed direct-equity sector fix is also an identity correction:
+        # retain it if the bad Yahoo mapping has been deliberately removed.  Otherwise an
+        # unpriceable but known ACWI company would disappear from the classifier and return as
+        # "Unclassified". The override file is restricted to GICS sectors, so this cannot turn
+        # an arbitrary ETF into a company.
+        if r.get("status") == "ok" or file_override:
             company_id = r.get("company_id")
             default_sector = r.get("sector")
             db_override = overrides.get(int(company_id)) if company_id is not None else None
-            file_override = file_overrides.get(str(r.get("isin") or "").strip().upper())
             if file_override and db_override and file_override != db_override:
                 _log.error("[analysis] %s sector is %s in sector_overrides.json and %s in "
                            "company_sector_override; using the checked-in production override",
@@ -398,6 +403,10 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
                 r["sector_default"] = default_sector
                 r["sector"] = override
                 r["sector_overridden"] = True
+                # File overrides are reviewed direct-company corrections. Their sector must not
+                # be trumped by a stale wrong-listing row that calls the company an ETF.
+                if file_override:
+                    r["asset_class"] = "equity"
             else:
                 r["sector_default"] = default_sector
                 r["sector_overridden"] = False

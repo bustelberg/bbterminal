@@ -418,6 +418,9 @@ class StoredModelPortfolio(BaseModel):
     # Never written by the scan — see the migration header; putting it in that payload wipes
     # every chosen name.
     display_name: str | None = None
+    # The reader-facing choice label: a chosen name, reviewed strategy nickname, or description,
+    # with AIRS's code retained only as the final fallback.
+    label: str | None = None
     # The risk profile this model is offered at — Offensief / Beperkt Offensief / Neutraal /
     # Defensief — DERIVED from AIRS's name, not stored (see `load_portfolios`). `null` means the
     # model is not offered at one: the themed TopSelectie and WTS funds, and
@@ -441,7 +444,16 @@ class StoredModelPortfolio(BaseModel):
 async def airs_model_portfolios_stored():
     """The stored portfolios — an instant DB read. The page opens on this; `/scan` is the
     explicit refresh, because re-scraping AirSPMS costs minutes."""
-    return await asyncio.to_thread(store.load_portfolios)
+    def load() -> list[dict]:
+        from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+
+        rows = store.load_portfolios()
+        for row in rows:
+            row["label"] = (row.get("display_name") or nickname_for(row.get("name"))
+                            or row.get("omschrijving") or row.get("name"))
+        return rows
+
+    return await asyncio.to_thread(load)
 
 
 class SetDisplayNameRequest(BaseModel):
@@ -1863,6 +1875,157 @@ async def airs_model_portfolio_value_series(portfolio_id: int, benchmark: str = 
         value_series, link["portefeuille"], benchmark, weights))
 
 
+@router.get("/api/airs/model-portfolios/{portfolio_id}/monthly-yahoo-performance")
+async def airs_model_portfolio_monthly_yahoo_performance(
+    portfolio_id: int, month: str, benchmark: str = "SP500", benchmark_weights: str | None = None,
+    compare_portfolio_id: int | None = None,
+):
+    """One chart interval, decomposed into each current holding's Yahoo close return.
+
+    The book curve remains AIRS's flow-aware account return.  This drill-down intentionally answers
+    the different question a click asks: how the model's named instruments moved between these two
+    displayed marks, alongside that *same* interval's benchmark return.
+    """
+    from datetime import date, timedelta  # noqa: PLC0415
+    from routers._airs_attribution_basis import portfolio_legs  # noqa: PLC0415
+    from routers._airs_ref import models as ref_models  # noqa: PLC0415
+    from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
+    from routers._airs_portfolio_perf import _closes, _executions  # noqa: PLC0415
+    from routers._airs_value_series import _weighted_benchmark_series  # noqa: PLC0415
+    from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
+
+    try:
+        end = date.fromisoformat(month[:10]).isoformat()
+    except ValueError as exc:
+        raise HTTPException(400, "month must be an ISO date") from exc
+    weights = None
+    if benchmark_weights:
+        try:
+            raw = json.loads(benchmark_weights)
+            if isinstance(raw, dict):
+                weights = {str(k): float(v) for k, v in raw.items()}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    end_day = date.fromisoformat(end)
+    start = date(end_day.year, end_day.month, 1).isoformat()
+    benchmark_series = await asyncio.to_thread(
+        _weighted_benchmark_series, weights, start, [end]) if weights else await asyncio.to_thread(
+            etf_return_series, benchmark, start, [end])
+    benchmark_return = benchmark_series.get("return_pct")
+    model = await asyncio.to_thread(lambda: next(
+        (p for p in ref_models() if int(p.get("id") or -1) == portfolio_id), None))
+    if not model:
+        raise HTTPException(404, "Model portfolio not found.")
+    # Expand every linked Leonteq certificate before pricing.  A certificate is
+    # a route into its underlying model, not a stock: preserving its wrapper
+    # would repeat EONR once per certificate and call that a holdings table.
+    legs = await asyncio.to_thread(
+        portfolio_legs, "model", portfolio_id, model.get("positions_datum"), start, True)
+    by_isin: dict[str, dict] = {}
+    for leg in legs or []:
+        isin = leg.get("isin")
+        if not isin:
+            continue
+        item = by_isin.setdefault(str(isin), {
+            "weight_pct": 0.0, "airs_name": leg.get("airs_name"), "via_names": set(),
+        })
+        item["weight_pct"] += float(leg.get("weight_pct") or 0)
+        item["via_names"].update(leg.get("via_names") or [])
+    isins = list(by_isin)
+    executions = await asyncio.to_thread(_executions, isins)
+    closes = await asyncio.to_thread(
+        _closes, [int(e["analysis_id"]) for e in executions.values()],
+        (date.fromisoformat(start) - timedelta(days=8)).isoformat(), end)
+    rows = []
+    for isin, holding in by_isin.items():
+        execution = executions.get(isin)
+        if not execution:
+            continue
+        prices = closes.get(int(execution["analysis_id"]), [])
+        opening = next((p for p in reversed(prices) if p[0] <= start), None)
+        closing = next((p for p in reversed(prices) if p[0] <= end), None)
+        ret = None if not opening or not closing or opening[1] <= 0 else (closing[1] / opening[1] - 1) * 100
+        rows.append({
+            "isin": isin, "name": execution.get("name") or holding.get("airs_name") or isin,
+            "ticker": execution.get("yahoo_symbol"), "weight_pct": round(float(holding["weight_pct"]), 3),
+            "start_price": opening[1] if opening else None, "start_price_date": opening[0] if opening else None,
+            "end_price": closing[1] if closing else None, "end_price_date": closing[0] if closing else None,
+            "return_pct": round(ret, 4) if ret is not None else None,
+            "vs_benchmark_pct": round(ret - benchmark_return, 4) if ret is not None and benchmark_return is not None else None,
+        })
+    # A model can reach the same listed stock through more than one AIRS ISIN
+    # (for example a direct leg and a certificate look-through leg). They have
+    # one Yahoo price series, so show it once rather than repeating the same
+    # monthly return. Retain the combined allocation for consumers that need it.
+    def deduplicate_rows(raw_rows: list[dict]) -> list[dict]:
+        unique_rows: dict[str, dict] = {}
+        for row in raw_rows:
+            key = row["ticker"] or row["isin"]
+            existing = unique_rows.get(key)
+            if existing is None:
+                unique_rows[key] = row
+            else:
+                existing["weight_pct"] = round(existing["weight_pct"] + row["weight_pct"], 3)
+        return list(unique_rows.values())
+
+    rows = deduplicate_rows(rows)
+    rows.sort(key=lambda r: (r["vs_benchmark_pct"] is None, -(r["vs_benchmark_pct"] or 0)))
+    comparison = None
+    if compare_portfolio_id and compare_portfolio_id != portfolio_id:
+        compare_model = await asyncio.to_thread(lambda: next(
+            (p for p in ref_models() if int(p.get("id") or -1) == compare_portfolio_id), None))
+        if not compare_model:
+            raise HTTPException(404, "Comparison model portfolio not found.")
+        compare_legs = await asyncio.to_thread(
+            portfolio_legs, "model", compare_portfolio_id, compare_model.get("positions_datum"), start, True)
+        compare_by_isin: dict[str, dict] = {}
+        for leg in compare_legs or []:
+            isin = leg.get("isin")
+            if not isin:
+                continue
+            item = compare_by_isin.setdefault(str(isin), {
+                "weight_pct": 0.0, "airs_name": leg.get("airs_name"),
+            })
+            item["weight_pct"] += float(leg.get("weight_pct") or 0)
+        compare_executions = await asyncio.to_thread(_executions, list(compare_by_isin))
+        compare_closes = await asyncio.to_thread(
+            _closes, [int(e["analysis_id"]) for e in compare_executions.values()],
+            (date.fromisoformat(start) - timedelta(days=8)).isoformat(), end)
+        compare_rows = []
+        for isin, holding in compare_by_isin.items():
+            execution = compare_executions.get(isin)
+            if not execution:
+                continue
+            prices = compare_closes.get(int(execution["analysis_id"]), [])
+            opening = next((p for p in reversed(prices) if p[0] <= start), None)
+            closing = next((p for p in reversed(prices) if p[0] <= end), None)
+            ret = None if not opening or not closing or opening[1] <= 0 else (closing[1] / opening[1] - 1) * 100
+            compare_rows.append({
+                "isin": isin, "name": execution.get("name") or holding.get("airs_name") or isin,
+                "ticker": execution.get("yahoo_symbol"), "weight_pct": round(float(holding["weight_pct"]), 3),
+                "start_price": opening[1] if opening else None, "start_price_date": opening[0] if opening else None,
+                "end_price": closing[1] if closing else None, "end_price_date": closing[0] if closing else None,
+                "return_pct": round(ret, 4) if ret is not None else None,
+                "vs_benchmark_pct": round(ret - benchmark_return, 4) if ret is not None and benchmark_return is not None else None,
+            })
+        compare_rows = deduplicate_rows(compare_rows)
+        comparison = {"portfolio_id": compare_portfolio_id,
+                      "name": (compare_model.get("display_name") or nickname_for(compare_model.get("name"))
+                               or compare_model.get("omschrijving") or compare_model.get("name")),
+                      "holdings": compare_rows}
+    benchmark_detail = {
+        "ticker": benchmark_series.get("ticker"),
+        "start_price": benchmark_series.get("start_price"),
+        "start_price_date": benchmark_series.get("start_date"),
+        "end_price": benchmark_series.get("end_price"),
+        "end_price_date": benchmark_series.get("as_of"),
+        "components": benchmark_series.get("components") or [],
+    }
+    return {"from_date": start, "to_date": end, "benchmark": benchmark_series.get("label") or benchmark,
+            "positions_date": model.get("positions_datum"), "benchmark_return_pct": benchmark_return,
+            "benchmark_detail": benchmark_detail, "holdings": rows, "comparison": comparison}
+
+
 @router.get("/api/airs/model-portfolios/{portfolio_id}/price-series",
             response_model=PriceSeriesResponse)
 async def airs_portfolio_price_series(portfolio_id: int):
@@ -2654,7 +2817,7 @@ class ModelPortfolioAttribution(BaseModel):
             response_model=ModelPortfolioAttribution)
 async def airs_model_portfolio_attribution(
     portfolio_id: int, benchmark: str = "SP500", window: str = "ytd", axis: str = "sector",
-    source: str = "book", look_through: bool = False,
+    source: str = "book", look_through: bool = False, month: str | None = None,
 ):
     """Brinson-Fachler attribution of one model against a benchmark, over one window.
 
@@ -2673,11 +2836,19 @@ async def airs_model_portfolio_attribution(
     """
     from routers._airs_portfolio_attribution import (  # noqa: PLC0415
         compute_attribution_async,
+        prewarm_attribution_months,
     )
 
     src = source if source in ("model", "book") else "model"
-    return await compute_attribution_async(
-        portfolio_id, benchmark, window, axis, src, look_through)
+    result = await compute_attribution_async(
+        portfolio_id, benchmark, window, axis, src, look_through, month)
+    # The response is deliberately returned first.  Once the panel is visible, a single
+    # background worker fills its remaining month buttons; repeat opens and clicks are cache hits.
+    asyncio.create_task(
+        prewarm_attribution_months(portfolio_id, benchmark, window, axis, src, look_through),
+        name=f"attribution-prewarm-{portfolio_id}-{axis}",
+    )
+    return result
 
 
 class ModelPortfolioPosition(BaseModel):

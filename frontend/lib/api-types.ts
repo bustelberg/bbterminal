@@ -1481,6 +1481,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/{portfolio_id}/monthly-yahoo-performance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Model Portfolio Monthly Yahoo Performance
+         * @description One chart interval, decomposed into each current holding's Yahoo close return.
+         *
+         *     The book curve remains AIRS's flow-aware account return.  This drill-down intentionally answers
+         *     the different question a click asks: how the model's named instruments moved between these two
+         *     displayed marks, alongside that *same* interval's benchmark return.
+         */
+        get: operations["airs_model_portfolio_monthly_yahoo_performance_api_airs_model_portfolios__portfolio_id__monthly_yahoo_performance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream": {
         parameters: {
             query?: never;
@@ -16556,6 +16580,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LinkableContext"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_model_portfolio_monthly_yahoo_performance_api_airs_model_portfolios__portfolio_id__monthly_yahoo_performance_get: {
+        parameters: {
+            query: {
+                month: string;
+                benchmark?: string;
+                benchmark_weights?: string | null;
+            };
+            header?: never;
+            path: {
+                portfolio_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

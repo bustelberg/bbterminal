@@ -19752,6 +19752,82 @@
         ]
       }
     },
+    "/api/airs/model-portfolios/{portfolio_id}/monthly-yahoo-performance": {
+      "get": {
+        "description": "One chart interval, decomposed into each current holding's Yahoo close return.\n\nThe book curve remains AIRS's flow-aware account return.  This drill-down intentionally answers\nthe different question a click asks: how the model's named instruments moved between these two\ndisplayed marks, alongside that *same* interval's benchmark return.",
+        "operationId": "airs_model_portfolio_monthly_yahoo_performance_api_airs_model_portfolios__portfolio_id__monthly_yahoo_performance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portfolio_id",
+            "required": true,
+            "schema": {
+              "title": "Portfolio Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "title": "Month",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "SP500",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark_weights",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark Weights"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Model Portfolio Monthly Yahoo Performance",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/model-portfolios/{portfolio_id}/owner-earnings-stream": {
       "get": {
         "description": "SSE: the whole portfolio's blended owner-earnings (Fundamental \u2192 Owner earnings), streaming\nper-holding progress then the result \u2014 its holdings run through the same basket blender.",

@@ -45,7 +45,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date
+import threading
+from concurrent.futures import Future
+from datetime import date, timedelta
 
 from routers._airs_ref import model as ref_model
 from routers._airs_portfolio_analysis import (
@@ -57,7 +59,7 @@ from routers._airs_portfolio_analysis import (
     _country_by_code,
     _grid,
 )
-from routers._airs_portfolio_perf import ytd_anchor_for
+from routers._airs_portfolio_perf import compute_holding_marks, ytd_anchor_for
 
 from routers._asset_benchmark import index_rows
 
@@ -72,6 +74,14 @@ _log = logging.getLogger(__name__)
 _NON_ATTRIBUTABLE = {FUND_BUCKET, CASH_BUCKET, UNKNOWN_BUCKET}
 
 _AXIS_IDX = {"sector": 0, "region": 1, "currency": 2}
+
+# A request and the prewarmer can reach the same month at the same time.  The data-versioned
+# cache makes the second *completed* request free; this registry also makes the concurrent one
+# join the first calculation instead of repeating its SQL and price reads.
+_inflight_lock = threading.Lock()
+_inflight: dict[tuple, Future[dict]] = {}
+_prewarm_lock = threading.Lock()
+_prewarming: set[tuple] = set()
 
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
@@ -135,7 +145,7 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
 
 def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                         window: str = "ytd", axis: str = "sector",
-                        source: str = "book", look_through: bool = False) -> dict:
+                        source: str = "book", look_through: bool = False, month: str | None = None) -> dict:
     """Brinson-Fachler over one window, plus the names that drove it.
 
     `source="book"` decomposes the paired AIRS BOOK's actual holdings + returns instead of the
@@ -159,7 +169,14 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     if not start:
         return {}
 
-    holdings = portfolio_legs(source, portfolio_id, eff, start, look_through=look_through)
+    base_start = start
+    month_end = None
+    if month:
+        chosen = date.fromisoformat(month[:10])
+        start = chosen.replace(day=1).isoformat()
+        next_month = (chosen.replace(day=28) + timedelta(days=4)).replace(day=1)
+        month_end = min(date.today(), next_month - timedelta(days=1)).isoformat()
+    holdings = portfolio_legs(source, portfolio_id, eff, base_start, look_through=look_through)
     if holdings is None:
         return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
                 "window": window, "axis": axis, "start": start, "source": source, "rows": [],
@@ -167,6 +184,18 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                 "note": "No paired AIRS book to attribute for this model."}
 
     held = sorted({h["isin"] for h in holdings if h.get("isin")})
+    if month:
+        drift = compute_holding_marks(held, base_start, end=start)
+        monthly = compute_holding_marks(held, start, end=month_end)
+        total_before = sum(float(h.get("weight_pct") or 0) for h in holdings)
+        wealth = sum(float(h.get("weight_pct") or 0) * (1 + float((drift.get(h.get("isin") or "") or {}).get("return_pct") or 0) / 100)
+                     for h in holdings)
+        for h in holdings:
+            mark = drift.get(h.get("isin") or "") or {}
+            period = monthly.get(h.get("isin") or "") or {}
+            factor = 1 + float(mark.get("return_pct") or 0) / 100
+            h["weight_pct"] = float(h.get("weight_pct") or 0) * factor / wealth * total_before if wealth else 0
+            h["return_pct"] = period.get("return_pct")
     grid = _grid(held)
     codes = _country_by_code()
 
@@ -184,7 +213,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
 
     # --- the benchmark ------------------------------------------------------------------
     bench, coverage = index_rows(
-        benchmark_label, start, include_membership_identity=True)
+        benchmark_label, start, include_membership_identity=True, end=month_end)
     # Internal matching keys, not coverage data for the client. They include real index members
     # that lack a cap or window return. Such a data gap may exclude a name from the attribution
     # maths, but must not relabel a held constituent as "outside ACWI".
@@ -361,7 +390,11 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "benchmark_holdings": b_hold,
             "benchmark_holdings_count": len(b_hold_all),
         })
-    rows_out.sort(key=lambda r: r["total_pct"])
+    # The reader's first question is where the portfolio is invested. Keep that
+    # ordering stable across YTD and static-weight monthly windows: biggest
+    # opening allocation first, not whichever attribution effect happened to be
+    # most negative in that particular period.
+    rows_out.sort(key=lambda r: (-r["portfolio_weight_pct"], r["bucket"]))
 
     attributed = sum(r["total_pct"] for r in rows_out)
     portfolio_share = p_w_total / 100.0
@@ -505,8 +538,83 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     }
 
 
+def _cache_key(portfolio_id: int, benchmark_label: str, window: str, axis: str,
+               source: str, look_through: bool, month: str | None) -> tuple:
+    """Every input that can change an attribution result belongs in the cache identity."""
+    return ("portfolio-attribution", portfolio_id, benchmark_label, window, axis, source,
+            look_through, month or "ytd")
+
+
+def _compute_attribution_cached(portfolio_id: int, benchmark_label: str, window: str, axis: str,
+                                source: str, look_through: bool, month: str | None) -> dict:
+    """Compute once per data fingerprint, also coalescing simultaneous identical requests."""
+    from routers import _analysis_cache as cache  # noqa: PLC0415
+
+    key = _cache_key(portfolio_id, benchmark_label, window, axis, source, look_through, month)
+    fingerprint = cache.fingerprint()
+    cached = cache.attribution_get(key, fingerprint)
+    if cached is not None:
+        return cached
+
+    # A fingerprint can be unavailable in a local/PostgREST-only environment.  We still join
+    # concurrent callers, but never retain the answer once that shared calculation ends.
+    flight_key = (fingerprint or "uncacheable", *key)
+    with _inflight_lock:
+        cached = cache.attribution_get(key, fingerprint)
+        if cached is not None:
+            return cached
+        future = _inflight.get(flight_key)
+        owner = future is None
+        if owner:
+            future = Future()
+            _inflight[flight_key] = future
+
+    if not owner:
+        return future.result()
+
+    try:
+        result = compute_attribution(
+            portfolio_id, benchmark_label, window, axis, source, look_through, month)
+        cache.attribution_put(key, fingerprint, result)
+        future.set_result(result)
+        return result
+    except BaseException as exc:
+        future.set_exception(exc)
+        raise
+    finally:
+        with _inflight_lock:
+            _inflight.pop(flight_key, None)
+
+
 async def compute_attribution_async(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                                     window: str = "ytd", axis: str = "sector",
-                                    source: str = "book", look_through: bool = False) -> dict:
+                                    source: str = "book", look_through: bool = False,
+                                    month: str | None = None) -> dict:
     return await asyncio.to_thread(
-        compute_attribution, portfolio_id, benchmark_label, window, axis, source, look_through)
+        _compute_attribution_cached, portfolio_id, benchmark_label, window, axis,
+        source, look_through, month)
+
+
+async def prewarm_attribution_months(portfolio_id: int, benchmark_label: str = SP500_LABEL,
+                                     window: str = "ytd", axis: str = "sector",
+                                     source: str = "book", look_through: bool = False) -> None:
+    """Fill this panel's month buttons sequentially without competing with its first render."""
+    scope = (portfolio_id, benchmark_label, window, axis, source, look_through)
+    with _prewarm_lock:
+        if scope in _prewarming:
+            return
+        _prewarming.add(scope)
+    try:
+        today = date.today()
+        # Users open the most recent tile first, so make it available before older history.
+        # Keep this sequential: it is genuinely background work, not a competing fan-out of
+        # expensive benchmark and price reads.
+        for number in range(today.month, 0, -1):
+            month = date(today.year, number, 1).isoformat()
+            await compute_attribution_async(
+                portfolio_id, benchmark_label, window, axis, source, look_through, month)
+    except Exception:  # noqa: BLE001 - warming must never affect the visible response
+        _log.exception("[attribution] monthly prewarm failed for portfolio %s", portfolio_id)
+    finally:
+        with _prewarm_lock:
+            _prewarming.discard(scope)

@@ -229,6 +229,20 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
         "points": points,
         "return_pct": points[-1]["cum_pct"],
         "as_of": points[-1]["price_date"],
+        # Keep the individual Yahoo proxy marks available to drill-downs.  A
+        # composite has no single quote or URL, so its provenance must name
+        # the ETFs that make up the weighted result.
+        "components": [{
+            "name": name,
+            "weight_pct": recognised[name],
+            "label": series.get("label"),
+            "ticker": series.get("ticker"),
+            "start_date": series.get("start_date"),
+            "start_price": series.get("start_price"),
+            "end_date": series.get("as_of"),
+            "end_price": series.get("end_price"),
+            "return_pct": series.get("return_pct"),
+        } for name, series in sleeves.items()],
     }
 
 
