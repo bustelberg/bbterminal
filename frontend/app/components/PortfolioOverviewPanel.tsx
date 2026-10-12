@@ -13,6 +13,7 @@ import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
 import { cancelJob, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
+import { PORTFOLIO_SECTORS } from './portfolios/etfSectorLookThrough';
 import { createLiveReload } from '../../lib/liveReload';
 import AllocationBandsModal from './portfolios/AllocationBandsModal';
 import AccountTransactions from './portfolios/AccountTransactions';
@@ -238,15 +239,6 @@ const collectionNameOrder: Record<PortfolioCollection, string[]> = {
   topselecties: [],
   test_topselecties: [],
 };
-
-// The management override deliberately uses the standard GICS taxonomy. The
-// source value may use Yahoo's vocabulary; selecting Automatic keeps that
-// source value instead of coercing it into one of these labels.
-const GICS_SECTORS = [
-  'Communication Services', 'Consumer Discretionary', 'Consumer Staples',
-  'Energy', 'Financials', 'Health Care', 'Industrials', 'Information Technology',
-  'Materials', 'Real Estate', 'Utilities',
-] as const;
 
 export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
   //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
@@ -1998,10 +1990,9 @@ function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Admin controls for the TWO identities an AIRS book needs: a reader-facing name and the Fixed
- * model portfolio whose composition it follows. The model selection is deliberately separate from
- * a certificate link: this pairs the whole Dynamic account to a strategy; certificate links live
- * inside the holdings table below. */
+/** Admin controls for the two identities an AIRS book needs: a reader-facing name and the Dynamic
+ * AIRS portfolio it is linked to. This is separate from certificate links inside the holdings
+ * table below. */
 function PortfolioIdentityEditor({ row, onSaved }: {
   row: AirsPortfolioOverview;
   onSaved: () => void | Promise<void>;
@@ -2019,7 +2010,16 @@ function PortfolioIdentityEditor({ row, onSaved }: {
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         return response.json() as Promise<AirsAccountModelLinks>;
       })
-      .then((data) => { if (live) setChoices(data); })
+      .then((data) => {
+        if (!live) return;
+        setChoices(data);
+        // Legacy links point at Fixed portfolio ids, which are deliberately absent from the new
+        // Dynamic-AIRS selector. Default those stale values to this book's own Dynamic portfolio;
+        // a previously saved Dynamic choice remains selected because its id is in the new list.
+        setModelId((current) => (data.models.some((model) => String(model.id) === current)
+          ? current
+          : String(data.models.find((model) => model.name === row.dynamic_portefeuille)?.id ?? '')));
+      })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
   }, []);
@@ -2075,18 +2075,18 @@ function PortfolioIdentityEditor({ row, onSaved }: {
       </div>
       <div className="flex flex-wrap items-end gap-2">
         <label className="grid gap-1 text-[11px] text-fg-faint">
-          Linked AIRS model portfolio
+          Linked AIRS Dynamic portfolio
           <select value={modelId} onChange={(e) => setModelId(e.target.value)} disabled={busy != null || !choices}
             className="w-80 rounded-md border border-neutral-800/60 bg-page px-2 py-1 text-[13px] text-fg focus:border-accent-500 disabled:opacity-50">
-            <option value="">No linked model</option>
+            <option value="">No linked Dynamic portfolio</option>
             {(choices?.models ?? []).map((model) => (
-              <option key={model.id} value={model.id}>{model.name} ({model.positions})</option>
+              <option key={model.id} value={model.id}>{model.name}</option>
             ))}
           </select>
         </label>
         <button type="button" onClick={() => void saveModel()} disabled={busy != null || !choices}
           className="rounded-md border border-accent-600/40 px-2.5 py-1 text-[13px] text-accent-300 hover:bg-accent-500/10 disabled:opacity-50">
-          {busy === 'model' ? 'Saving…' : 'Link model'}
+          {busy === 'model' ? 'Saving…' : 'Link Dynamic portfolio'}
         </button>
       </div>
       {error && <p className="text-[12px] text-neg-300">Could not save: {error}</p>}
@@ -2592,7 +2592,7 @@ function Holdings({ d, i, portefeuille, onOverride, canEdit }: {
                       )}
                       className="max-w-48 rounded-md border border-neutral-800/60 bg-page px-2 py-1 text-[12px] text-fg-subtle hover:border-accent-600/50 focus:border-accent-500">
                       <option value="">Automatic · {g.sector ?? '—'}</option>
-                      {GICS_SECTORS.map((sector) => <option key={sector} value={sector}>{sector}</option>)}
+                      {PORTFOLIO_SECTORS.map((sector) => <option key={sector} value={sector}>{sector}</option>)}
                     </select>
                   ) : (g?.sector || '—')}
                   {g?.sector && (

@@ -47,6 +47,11 @@ describe('Analyse primary-view copy', () => {
     }
   });
 
+  it('translates the weighted benchmark scorecard caption', () => {
+    expect(ANALYSE_COPY.en.score.weightedBenchmark).toBe('Weighted benchmark return (YTD) €');
+    expect(ANALYSE_COPY.nl.score.weightedBenchmark).toBe('Gewogen benchmarkrendement (YTD) €');
+  });
+
   it('keeps primary-view prose out of the component literals', () => {
     const source = readFileSync(join('app', 'components', 'portfolios', 'PortfolioAnalysisModal.tsx'), 'utf8');
     const forbidden = [

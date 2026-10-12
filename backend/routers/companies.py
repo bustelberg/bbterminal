@@ -105,10 +105,13 @@ def _investment_note_actor(request: Request) -> dict:
     return actor
 
 
-_GICS_SECTORS = frozenset({
-    "Communication Services", "Consumer Discretionary", "Consumer Staples",
-    "Energy", "Financials", "Health Care", "Industrials", "Information Technology",
-    "Materials", "Real Estate", "Utilities",
+# These are the labels the portfolio actually displays after normalising provider/GICS source
+# data. A management override is user-facing data, so it must use that same vocabulary rather
+# than storing a second set of names such as "Consumer Staples" for "Consumer Defensive".
+_PORTFOLIO_SECTORS = frozenset({
+    "Technology", "Communication Services", "Healthcare", "Financials",
+    "Consumer Cyclical", "Consumer Defensive", "Industrials", "Energy", "Utilities",
+    "Materials", "Real Estate",
 })
 
 
@@ -525,8 +528,8 @@ async def set_company_sector_override(company_id: int, req: SectorOverrideReques
     consumer to its source sector on the next read.
     """
     sector = req.sector.strip() if req.sector else None
-    if sector is not None and sector not in _GICS_SECTORS:
-        raise HTTPException(status_code=422, detail="Choose a valid GICS sector or Automatic.")
+    if sector is not None and sector not in _PORTFOLIO_SECTORS:
+        raise HTTPException(status_code=422, detail="Choose a valid portfolio sector or Automatic.")
 
     exists = (supabase.table("company").select("company_id")
               .eq("company_id", company_id).limit(1).execute().data or [])

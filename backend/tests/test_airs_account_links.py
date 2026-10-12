@@ -6,7 +6,7 @@ right, and the wrong risk profile holds nearly the same instruments.
 """
 from __future__ import annotations
 
-from routers._airs_account_links import _stem, guess_model, mapped_model
+from routers._airs_account_links import _dynamic_choices, _stem, guess_model, mapped_model
 
 
 def M(name, positions=20, id=None):
@@ -131,3 +131,19 @@ class TestTheTwoGatesThatMakeTheNameUsable:
         models = [M("Bar_FX", 24, id=1), M("Bar_AFS", 1, id=2)]
         m, _ = guess_model("Bar_DYN", models)
         assert m["name"] == "Bar_FX"
+
+
+def test_dynamic_picker_mirrors_the_live_airs_account_roster(monkeypatch):
+    """The identity editor must not offer the Fixed composition sibling as its AIRS target."""
+    import routers._airs_account_links as links
+
+    monkeypatch.setattr(links, "ref_models", lambda: [
+        M("BUS_Offensief_Dyn", id=10),
+        M("BUS_Offensief_FX", id=11),
+        M("A different Dynamic", id=12),
+    ])
+
+    choices = _dynamic_choices({"BUS_Offensief_Dyn", "A different Dynamic"})
+
+    assert [choice["name"] for choice in choices] == ["BUS_Offensief_Dyn", "A different Dynamic"]
+    assert all(choice["positions"] == 0 for choice in choices)

@@ -33,7 +33,7 @@ import AnalyseLoading from './AnalyseLoading';
 import EtfSectorAllocationModal from './EtfSectorAllocationModal';
 import {
   addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
-  portfolioSectorBucket,
+  portfolioSectorBucket, PORTFOLIO_SECTORS,
 } from './etfSectorLookThrough';
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
@@ -43,12 +43,6 @@ import {
 } from './MoneyWeightedCalculation';
 
 const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
-
-const GICS_SECTORS = [
-  'Communication Services', 'Consumer Discretionary', 'Consumer Staples',
-  'Energy', 'Financials', 'Health Care', 'Industrials', 'Information Technology',
-  'Materials', 'Real Estate', 'Utilities',
-] as const;
 
 /** The first fund added to the look-through registry. Availability itself comes from the backend's
  * exact external-fund ISIN registry; names and exchange tickers vary and are never identity. */
@@ -954,7 +948,7 @@ function SectorOverrideDialog({ holding, onClose, onSave }: {
           <select value={sector} onChange={(event) => setSector(event.target.value)}
             className="mt-1 w-full rounded-lg border border-neutral-800 bg-page px-3 py-2 text-sm text-fg focus:border-accent-500">
             <option value="">Automatic · {automatic}</option>
-            {GICS_SECTORS.map((option) => <option key={option} value={option}>{option}</option>)}
+            {PORTFOLIO_SECTORS.map((option) => <option key={option} value={option}>{option}</option>)}
           </select>
         </label>
         <div className="mt-5 flex justify-end gap-2">

@@ -157,6 +157,18 @@ def _models(include_empty: bool = False) -> list[dict]:
     return with_counts if include_empty else [m for m in with_counts if m["positions"]]
 
 
+def _dynamic_choices(account_names: set[str]) -> list[dict]:
+    """The Dynamic AIRS portfolios an operator may explicitly link.
+
+    This is deliberately the live-account roster (`airs_performance`), not the Fixed portfolios
+    with stored compositions. A Fixed portfolio is an implementation detail used by the legacy
+    analysis path; it is not the AIRS Dynamic portfolio an operator sees and selects in AIRS.
+    """
+    wanted = {_norm(name) for name in account_names}
+    return [{**model, "positions": 0} for model in ref_models()
+            if _norm(model.get("name") or "") in wanted]
+
+
 def mapped_model(account: str, models: list[dict]) -> dict | None:
     """The reviewed strategy-map counterpart of an account, including an empty fixed model.
 
@@ -230,10 +242,13 @@ def _list_account_links_uncached() -> dict:
     from routers._airs_accounts import _year_perf  # noqa: PLC0415  (circular at module level)
 
     perf = _year_perf()
+    # Fixed rows remain available only to resolve existing legacy links and their analysis data.
+    # The editor's choices below are the Dynamic AIRS portfolios the user actually sees in AIRS.
     models = _models()
+    dynamic_choices = _dynamic_choices(set(perf))
     all_models = _models(include_empty=True)
     stored = _stored()
-    by_id = {m["id"]: m for m in models}
+    by_id = {m["id"]: m for m in [*all_models, *dynamic_choices]}
 
     out = []
     for name, p in sorted(perf.items(), key=lambda kv: kv[0].lower()):
@@ -262,9 +277,11 @@ def _list_account_links_uncached() -> dict:
         })
     return {
         "accounts": out,
-        # The pick-list for the dropdown. Sent once, not per row.
+        # The pick-list for the dropdown. Sent once, not per row, and intentionally mirrors the
+        # Dynamic portfolio names retrieved from AIRS rather than the old Fixed composition rows.
         "models": sorted(
-            [{"id": m["id"], "name": m["name"], "positions": m["positions"]} for m in models],
+            [{"id": m["id"], "name": m["name"], "positions": m["positions"]}
+             for m in dynamic_choices],
             key=lambda m: m["name"].lower()),
     }
 
