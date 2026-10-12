@@ -3783,6 +3783,28 @@
             ],
             "title": "Name"
           },
+          "return_end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return End Date"
+          },
+          "return_end_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return End Price Eur"
+          },
           "return_pct": {
             "anyOf": [
               {
@@ -3793,6 +3815,28 @@
               }
             ],
             "title": "Return Pct"
+          },
+          "return_start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Start Date"
+          },
+          "return_start_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Start Price Eur"
           },
           "ticker": {
             "anyOf": [
@@ -3884,11 +3928,77 @@
         "type": "object"
       },
       "AttributionWeightComponent": {
-        "description": "One raw AIRS VOLK Beginwaarde included in an opening-weight denominator.",
+        "description": "One AIRS VOLK value included in an attribution opening-weight denominator.",
         "properties": {
+          "base_value_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Value Eur"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "price_end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price End Date"
+          },
+          "price_end_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price End Eur"
+          },
+          "price_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Return Pct"
+          },
+          "price_start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Start Date"
+          },
+          "price_start_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Start Eur"
           },
           "value_eur": {
             "title": "Value Eur",

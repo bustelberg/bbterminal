@@ -84,6 +84,10 @@ def model_legs(portfolio_id: int, eff: str | None, start: str,
         "isin": r.get("isin"),
         "weight_pct": float(r.get("percentage") or 0),
         "return_pct": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("return_pct"),
+        "return_start_date": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("start_date"),
+        "return_start_price_eur": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("start_price_eur"),
+        "return_end_date": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("end_date"),
+        "return_end_price_eur": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("end_price_eur"),
         "airs_name": r.get("fonds"),
         "is_cash": not r.get("isin"),
         "via_names": r.get("via_names") or [],
@@ -167,8 +171,13 @@ def book_legs(portfolio_id: int, start: str, look_through: bool = False) -> list
     denominator_components = [{
         "name": r.get("holding_name") or r.get("isin") or "Unnamed AIRS position",
         "value_eur": float(r.get("start_value_eur") or 0),
+        # Internal identity for a selected month's yfinance roll-forward. It is deliberately
+        # removed from the public component list: AIRS's named values are the audit surface.
+        "isin": r.get("isin"),
     } for r in rows]
     total = sum(c["value_eur"] for c in denominator_components) or 1.0
+    public_denominator_components = [
+        {"name": c["name"], "value_eur": c["value_eur"]} for c in denominator_components]
     if look_through:
         rows = _expand_book_rows(rows)
     # The row's own income loader, keyed on `holding_name` exactly as `account_holdings` keys it.
@@ -193,6 +202,7 @@ def book_legs(portfolio_id: int, start: str, look_through: bool = False) -> list
         d = income.get(r.get("holding_name"))
         net_income = ((d.gross_eur or 0.0) + (d.tax_eur or 0.0)) if d else 0.0
         isin = r.get("isin")
+        mark = (marks.get(isin) or {}) if isin else {}
         out.append({
             "isin": isin,
             "weight_pct": start_val / total * 100.0,
@@ -200,7 +210,8 @@ def book_legs(portfolio_id: int, start: str, look_through: bool = False) -> list
             # calculation rather than restating only the rounded result.
             "weight_value_eur": start_val,
             "weight_total_eur": total,
-            "weight_denominator_components": denominator_components,
+            "weight_denominator_components": public_denominator_components,
+            "_weight_denominator_components": denominator_components,
             #  The current value, carried but never weighed here. `weight_pct` above is and stays
             # Beginwaarde — a Brinson decomposition is only valid on the weights that earned the
             # return. This rides along so the drill-down can print TODAY's weight in a column of
@@ -210,7 +221,11 @@ def book_legs(portfolio_id: int, start: str, look_through: bool = False) -> list
             #  The instrument's own EUR price return, from the SAME series the benchmark is built
             # from. None where we cannot price it — which `split_legs` then reports as `unpriced`,
             # the one exclusion that is a genuine gap rather than an answer.
-            "return_pct": None if not isin else (marks.get(isin) or {}).get("return_pct"),
+            "return_pct": mark.get("return_pct"),
+            "return_start_date": mark.get("start_date"),
+            "return_start_price_eur": mark.get("start_price_eur"),
+            "return_end_date": mark.get("end_date"),
+            "return_end_price_eur": mark.get("end_price_eur"),
             #  AIRS'S own figure, carried but not used. It is what the book says this position
             # made, and it is how the difference between this panel and the book's own return can
             # be shown rather than discovered.  For a leg inside a certificate it is the WRAPPER's

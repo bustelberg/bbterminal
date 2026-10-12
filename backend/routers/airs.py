@@ -2667,10 +2667,18 @@ async def airs_portfolio_exposure(req: ActiveShareRequest, benchmark: str = "ACW
 
 
 class AttributionWeightComponent(BaseModel):
-    """One raw AIRS VOLK Beginwaarde included in an opening-weight denominator."""
+    """One AIRS VOLK value included in an attribution opening-weight denominator."""
 
     name: str
     value_eur: float
+    # Present for a historical monthly opening: the original AIRS value and the yfinance EUR
+    # price return used to roll it forward to that month's first day.
+    base_value_eur: float | None = None
+    price_return_pct: float | None = None
+    price_start_date: str | None = None
+    price_start_eur: float | None = None
+    price_end_date: str | None = None
+    price_end_eur: float | None = None
 
 
 class AttributionName(BaseModel):
@@ -2700,6 +2708,11 @@ class AttributionName(BaseModel):
     weight_now_value_eur: float | None = None
     weight_now_total_eur: float | None = None
     return_pct: float | None = None
+    # The two EUR marks behind `return_pct`, so the client can show the actual closes and dates.
+    return_start_date: str | None = None
+    return_start_price_eur: float | None = None
+    return_end_date: str | None = None
+    return_end_price_eur: float | None = None
     contribution_pct: float = 0.0
     # True when this company is held on BOTH sides — in the model AND the benchmark bucket.
     # Matched by ISIN first, then by company, so BOTH "AMD" == "Advanced Micro Devices Inc" (one

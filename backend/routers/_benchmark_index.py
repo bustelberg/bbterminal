@@ -417,6 +417,9 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
             "currency": ccy,
             "start_date": first_d, "start_price": first_p,
             "end_date": last_d, "end_price": last_p,
+            # Exact EUR operands of `return_eur_pct`, for checkable return provenance.
+            "start_price_eur": first_p / r0,
+            "end_price_eur": last_p / r1,
             "return_local_pct": (last_p / first_p - 1.0) * 100.0,
             "return_eur_pct": ((last_p / r1) / (first_p / r0) - 1.0) * 100.0,
             "market_cap_eur": cap_now_eur,

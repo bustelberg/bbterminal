@@ -5,6 +5,12 @@ import { useLang } from '../../../lib/i18n';
 export type AirsWeightComponent = {
   name: string;
   value_eur: number;
+  base_value_eur?: number | null;
+  price_return_pct?: number | null;
+  price_start_date?: string | null;
+  price_start_eur?: number | null;
+  price_end_date?: string | null;
+  price_end_eur?: number | null;
 };
 
 const money = (value: number, locale: string) => new Intl.NumberFormat(locale, {
@@ -13,23 +19,27 @@ const money = (value: number, locale: string) => new Intl.NumberFormat(locale, {
 
 /** The literal AIRS rows behind one opening weight—no symbolic algebra or hidden subtotal. */
 export default function AirsWeightCalculation({ components, numerator, denominator, result,
-  holdingName, valueLabel = 'Beginwaarde' }: {
+  holdingName, valueLabel = 'Beginwaarde', rolledTo }: {
   components: AirsWeightComponent[];
   numerator: number;
   denominator: number;
   result: string;
   holdingName: string;
   valueLabel?: string;
+  /** A historical month: AIRS Beginwaarde was rolled forward with yfinance EUR price returns. */
+  rolledTo?: string | null;
 }) {
   const [lang] = useLang();
   const locale = lang === 'nl' ? 'nl-NL' : 'en-GB';
   const copy = lang === 'nl' ? {
-    heading: 'Werkelijke AIRS-waarden (VOLK)',
-    sum: `Som van ${components.length} ${valueLabel}-regels`,
+    heading: rolledTo ? 'AIRS Beginwaarde, doorgerekend met yfinance EUR-rendement' : 'Werkelijke AIRS-waarden (VOLK)',
+    sum: rolledTo ? `Som van ${components.length} doorgerekende waarden op ${rolledTo}`
+      : `Som van ${components.length} ${valueLabel}-regels`,
     result: 'Uiteindelijke weging',
   } : {
-    heading: 'Actual AIRS values (VOLK)',
-    sum: `Sum of ${components.length} ${valueLabel} rows`,
+    heading: rolledTo ? 'AIRS opening values, rolled forward with yfinance EUR returns' : 'Actual AIRS values (VOLK)',
+    sum: rolledTo ? `Sum of ${components.length} rolled-forward values at ${rolledTo}`
+      : `Sum of ${components.length} ${valueLabel} rows`,
     result: 'Resulting weight',
   };
 
@@ -45,7 +55,18 @@ export default function AirsWeightCalculation({ components, numerator, denominat
             <span className="min-w-0 flex-1 truncate text-fg-muted" title={component.name}>
               {component.name}
             </span>
-            <span className="shrink-0 text-fg">{money(component.value_eur, locale)}</span>
+            {component.base_value_eur != null ? (
+              <span className="min-w-0 flex-1 text-right">
+                <span className="block shrink-0 text-fg whitespace-nowrap">
+                  {money(component.base_value_eur, locale)} × (1 + {(component.price_return_pct ?? 0).toFixed(2)}%) = {money(component.value_eur, locale)}
+                </span>
+                {component.price_start_eur != null && component.price_end_eur != null && (
+                  <span className="block text-[10px] text-fg-faint whitespace-nowrap">
+                    {money(component.price_start_eur, locale)} ({component.price_start_date}) → {money(component.price_end_eur, locale)} ({component.price_end_date}) = {(component.price_return_pct ?? 0).toFixed(2)}%
+                  </span>
+                )}
+              </span>
+            ) : <span className="shrink-0 text-fg">{money(component.value_eur, locale)}</span>}
           </span>
         ))}
       </span>

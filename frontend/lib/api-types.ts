@@ -9853,8 +9853,16 @@ export interface components {
             isin?: string | null;
             /** Name */
             name?: string | null;
+            /** Return End Date */
+            return_end_date?: string | null;
+            /** Return End Price Eur */
+            return_end_price_eur?: number | null;
             /** Return Pct */
             return_pct?: number | null;
+            /** Return Start Date */
+            return_start_date?: string | null;
+            /** Return Start Price Eur */
+            return_start_price_eur?: number | null;
             /** Ticker */
             ticker?: string | null;
             /** Weight Denominator Components */
@@ -9877,11 +9885,23 @@ export interface components {
         };
         /**
          * AttributionWeightComponent
-         * @description One raw AIRS VOLK Beginwaarde included in an opening-weight denominator.
+         * @description One AIRS VOLK value included in an attribution opening-weight denominator.
          */
         AttributionWeightComponent: {
+            /** Base Value Eur */
+            base_value_eur?: number | null;
             /** Name */
             name: string;
+            /** Price End Date */
+            price_end_date?: string | null;
+            /** Price End Eur */
+            price_end_eur?: number | null;
+            /** Price Return Pct */
+            price_return_pct?: number | null;
+            /** Price Start Date */
+            price_start_date?: string | null;
+            /** Price Start Eur */
+            price_start_eur?: number | null;
             /** Value Eur */
             value_eur: number;
         };

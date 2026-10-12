@@ -83,6 +83,10 @@ _inflight: dict[tuple, Future[dict]] = {}
 _prewarm_lock = threading.Lock()
 _prewarming: set[tuple] = set()
 
+# Bump when the response's calculation semantics change. A data fingerprint invalidates changed
+# source data; it cannot invalidate a correct-data response shaped by an older implementation.
+_ATTRIBUTION_CACHE_VERSION = "rolled-opening-weights-with-prices-v3"
+
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
     """Weighted return of (weight, return_pct) pairs, renormalised over the weights given."""
@@ -195,7 +199,39 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             period = monthly.get(h.get("isin") or "") or {}
             factor = 1 + float(mark.get("return_pct") or 0) / 100
             h["weight_pct"] = float(h.get("weight_pct") or 0) * factor / wealth * total_before if wealth else 0
+            # The monthly opening weight is a January AIRS value rolled forward by yfinance EUR
+            # price moves. Carry EVERY operand, not just the resulting percentage, so the hover
+            # can show `Beginwaarde × (1 + price return)` for the numerator and denominator.
+            raw_components = h.get("_weight_denominator_components")
+            if raw_components:
+                rolled = []
+                for component in raw_components:
+                    component_mark = drift.get(component.get("isin") or "") or {}
+                    component_return = component_mark.get("return_pct")
+                    component_factor = 1 + float(component_return or 0) / 100
+                    base_value = float(component.get("value_eur") or 0)
+                    rolled.append({
+                        "name": component["name"],
+                        "base_value_eur": base_value,
+                        "price_return_pct": component_return,
+                        "price_start_date": component_mark.get("start_date"),
+                        "price_start_eur": component_mark.get("start_price_eur"),
+                        "price_end_date": component_mark.get("end_date"),
+                        "price_end_eur": component_mark.get("end_price_eur"),
+                        "value_eur": base_value * component_factor,
+                    })
+                h["weight_denominator_components"] = rolled
+                h["weight_total_eur"] = sum(component["value_eur"] for component in rolled)
+                if h.get("weight_value_eur") is not None:
+                    h["weight_value_eur"] = float(h["weight_value_eur"]) * factor
+            # The return below is for THIS selected month, so its audit marks must be the same
+            # monthly pair. Leaving the base-window marks here made an October return display
+            # December-to-October prices beside it — a checkable-looking but false explanation.
             h["return_pct"] = period.get("return_pct")
+            h["return_start_date"] = period.get("start_date")
+            h["return_start_price_eur"] = period.get("start_price_eur")
+            h["return_end_date"] = period.get("end_date")
+            h["return_end_price_eur"] = period.get("end_price_eur")
     grid = _grid(held)
     codes = _country_by_code()
 
@@ -236,6 +272,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "isin": b.get("isin"), "name": _display_name(row, b.get("company_name")),
             "ticker": b.get("ticker"),
             "weight_pct": b["weight_pct"], "return_pct": b["return_eur_pct"],
+            "return_start_date": b.get("start_date"),
+            "return_start_price_eur": b.get("start_price_eur"),
+            "return_end_date": b.get("end_date"),
+            "return_end_price_eur": b.get("end_price_eur"),
             "contribution_pct": b["weight_pct"] / 100.0 * b["return_eur_pct"],
             #  Today's cap, for the second weight column only — `market_cap_eur` is the current
             # figure `start_cap_eur` was rolled BACK from, so the two columns are the same cap at
@@ -251,6 +291,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         port_holdings_by_bucket.setdefault(i["bucket"], []).append({
             "isin": i["isin"], "name": i["name"], "ticker": None,
             "weight_pct": i["weight_pct"], "return_pct": i["return_pct"],
+            "return_start_date": i.get("return_start_date"),
+            "return_start_price_eur": i.get("return_start_price_eur"),
+            "return_end_date": i.get("return_end_date"),
+            "return_end_price_eur": i.get("return_end_price_eur"),
             "weight_value_eur": i.get("weight_value_eur"),
             "weight_total_eur": i.get("weight_total_eur"),
             "weight_denominator_components": i.get("weight_denominator_components"),
@@ -541,7 +585,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
 def _cache_key(portfolio_id: int, benchmark_label: str, window: str, axis: str,
                source: str, look_through: bool, month: str | None) -> tuple:
     """Every input that can change an attribution result belongs in the cache identity."""
-    return ("portfolio-attribution", portfolio_id, benchmark_label, window, axis, source,
+    return ("portfolio-attribution", _ATTRIBUTION_CACHE_VERSION, portfolio_id, benchmark_label, window, axis, source,
             look_through, month or "ytd")
 
 
