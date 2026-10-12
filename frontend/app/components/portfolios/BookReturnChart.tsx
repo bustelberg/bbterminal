@@ -150,9 +150,9 @@ type MonthlyHolding = {
   isin: string; name: string; ticker: string | null; weight_pct: number;
   start_price: number | null; start_price_date: string | null;
   end_price: number | null; end_price_date: string | null;
-  return_pct: number | null; vs_benchmark_pct: number | null;
+  return_pct: number | null; contribution_pct: number | null; vs_benchmark_pct: number | null;
 };
-type MonthlySortKey = 'name' | 'return_pct' | 'benchmark' | 'vs_benchmark_pct';
+type MonthlySortKey = 'name' | 'weight_pct' | 'return_pct' | 'contribution_pct';
 type MonthlyDrilldown = {
   from_date: string; to_date: string; positions_date?: string | null; benchmark: string;
   benchmark_return_pct: number | null;
@@ -186,13 +186,15 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
 }) {
   const [data, setData] = useState<MonthlyDrilldown | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lookThrough, setLookThrough] = useState(true);
   const [sort, setSort] = useState<{ key: MonthlySortKey; descending: boolean }>({
-    key: 'vs_benchmark_pct', descending: true,
+    key: 'return_pct', descending: true,
   });
   useEffect(() => {
     let alive = true;
     const url = `${API_URL}/api/airs/model-portfolios/${portfolioId}/monthly-yahoo-performance`
-      + `?month=${encodeURIComponent(month)}&benchmark=${encodeURIComponent(benchmark)}${weightsQuery}`;
+      + `?month=${encodeURIComponent(month)}&benchmark=${encodeURIComponent(benchmark)}${weightsQuery}`
+      + `&look_through=${lookThrough}`;
     const cached = monthlyPerformanceCache.get(url);
     if (cached) {
       setError(null);
@@ -213,21 +215,15 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
       })
       .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
     return () => { alive = false; };
-  }, [portfolioId, month, benchmark, weightsQuery]);
-  // A browser can receive the updated frontend before the backend process is
-  // restarted. Keep the drill-down usable for that older payload too.
-  const benchmarkDetail = data?.benchmark_detail ?? {
-    ticker: null, start_price: null, start_price_date: null,
-    end_price: null, end_price_date: null, components: [],
-  };
+  }, [portfolioId, month, benchmark, weightsQuery, lookThrough]);
   const toggleSort = (key: MonthlySortKey) => setSort((current) =>
     current.key === key ? { key, descending: !current.descending } : { key, descending: key !== 'name' });
   // Keep the table correct while a browser is still receiving a response from
   // a backend that predates its ticker-level de-duplication.
   const uniqueHoldings = data ? [...new Map(data.holdings.map((holding) => [holding.ticker || holding.isin, holding])).values()] : [];
   const sortedHoldings = data ? uniqueHoldings.sort((left, right) => {
-    const a = sort.key === 'benchmark' ? data.benchmark_return_pct : left[sort.key];
-    const b = sort.key === 'benchmark' ? data.benchmark_return_pct : right[sort.key];
+    const a = left[sort.key];
+    const b = right[sort.key];
     if (a == null) return b == null ? 0 : 1;
     if (b == null) return -1;
     const compared = typeof a === 'string' && typeof b === 'string' ? a.localeCompare(b) : Number(a) - Number(b);
@@ -236,14 +232,16 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
   const content = error ? <p className="p-4 text-[12px] text-neg-300">{error}</p>
     : !data ? <p className="p-4 text-[12px] text-fg-subtle">Loading Yahoo monthly performance…</p>
     : <div className="overflow-x-auto">
-    <table className="w-full min-w-[600px] text-[11px]">
+    <table className="w-full min-w-[600px] text-xs">
       <thead className="text-fg-faint"><tr className="border-b border-neutral-800/50">
         <MonthlySortHeader label="Holding" sortKey="name" align="left" sort={sort} onToggle={toggleSort} />
-        <MonthlySortHeader label="Yahoo return" sortKey="return_pct" sort={sort} onToggle={toggleSort} /><MonthlySortHeader label="Benchmark" sortKey="benchmark" sort={sort} onToggle={toggleSort} />
-        <MonthlySortHeader label="vs benchmark" sortKey="vs_benchmark_pct" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="Weight %" sortKey="weight_pct" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="Return %" sortKey="return_pct" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="Contribution" sortKey="contribution_pct" sort={sort} onToggle={toggleSort} />
       </tr></thead>
       <tbody>{sortedHoldings.map((h) => <tr key={h.isin} className="border-b border-neutral-800/30 last:border-0">
         <td className="px-3 py-1.5 text-fg"><span>{h.name}</span>{h.ticker && <span className="ml-1.5 font-mono text-fg-faint">{h.ticker}</span>}</td>
+        <td className="px-2 py-1.5 text-right font-mono text-fg-muted">{pct(h.weight_pct)}</td>
         <td className={`px-2 py-1.5 text-right font-mono ${h.return_pct != null && h.return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
           <span className="inline-flex items-center justify-end gap-1">{pct(h.return_pct)}
             {h.ticker && h.start_price != null && h.end_price != null && <InfoTip wide content={<AspectCard
@@ -251,10 +249,12 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
               where={<a href={`https://finance.yahoo.com/quote/${encodeURIComponent(h.ticker)}/`} target="_blank" rel="noreferrer"
                 className="text-accent-300 underline underline-offset-2 hover:text-accent-200">Yahoo Finance · {h.ticker} ↗</a>}
               when={<span>Start: {price(h.start_price)} on {h.start_price_date ?? '—'}<br />End: {price(h.end_price)} on {h.end_price_date ?? '—'}</span>}
-              how="Based on Yahoo daily closing prices in the listing’s local currency." />}/>
+              how="Based on Yahoo daily closing prices, converted to EUR on each price date." />}/>
             }
           </span>
         </td>
+        <td className={`px-3 py-1.5 text-right font-mono font-medium ${h.contribution_pct != null && h.contribution_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{pct(h.contribution_pct)}</td>
+        {/* Benchmark columns deliberately omitted from this direct Yahoo-return view.
         <td className="px-2 py-1.5 text-right font-mono" style={{ color: chartTheme.compare }}>
           <span className="inline-flex items-center justify-end gap-1">{pct(data.benchmark_return_pct)}
             <InfoTip wide content={<AspectCard
@@ -270,28 +270,34 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
                 : 'Weighted sum of the Yahoo ETF proxy returns shown above; cash contributes 0%.'} />}/>
           </span>
         </td>
-        <td className={`px-3 py-1.5 text-right font-mono font-medium ${h.vs_benchmark_pct != null && h.vs_benchmark_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{pct(h.vs_benchmark_pct)}</td>
+        <td className={`px-3 py-1.5 text-right font-mono font-medium ${h.vs_benchmark_pct != null && h.vs_benchmark_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{pct(h.vs_benchmark_pct)}</td> */}
       </tr>)}</tbody>
     </table>
   </div>;
   return <div role="dialog" aria-modal="true" aria-label="Monthly Yahoo performance"
     className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4" onMouseDown={onClose}>
-    <div className="max-h-[85vh] w-full max-w-5xl overflow-auto rounded-xl border border-neutral-700 bg-card shadow-2xl"
+    <div className="flex h-[75vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-card text-sm shadow-2xl"
       onMouseDown={(event) => event.stopPropagation()}>
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-        <h2 className="text-lg font-semibold text-fg">Yahoo holding returns</h2>
+        <h2 className="text-xl font-semibold text-fg">Yahoo holding returns</h2>
+        <label title="Replace linked certificates with the companies held by their underlying strategies."
+          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-semibold transition ${lookThrough ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
+          <input type="checkbox" checked={lookThrough} onChange={(event) => setLookThrough(event.target.checked)}
+            className="h-3.5 w-3.5 accent-[var(--color-accent-500)]" />
+          Look through certificates
+        </label>
         <button type="button" onClick={onClose}
         className="rounded px-2 py-1 text-fg-muted hover:bg-white/10 hover:text-fg" aria-label="Close">×</button></div>
       <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 px-4 py-2" role="tablist" aria-label="Month">
         {months.map(({ date }) => {
           const active = date === month;
           return <button key={date} type="button" role="tab" aria-selected={active} onClick={() => onSelect(date)}
-            className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition ${active ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
+            className={`shrink-0 rounded-md border px-3 py-1.5 text-sm font-semibold transition ${active ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
             {new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })}
           </button>;
         })}
       </div>
-      {content}
+      <div className="min-h-0 flex-1 overflow-auto">{content}</div>
     </div>
   </div>;
 }

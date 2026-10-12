@@ -16623,6 +16623,7 @@ export interface operations {
                 benchmark?: string;
                 benchmark_weights?: string | null;
                 compare_portfolio_id?: number | null;
+                look_through?: boolean;
             };
             header?: never;
             path: {

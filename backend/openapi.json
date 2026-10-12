@@ -19953,6 +19953,16 @@
               ],
               "title": "Compare Portfolio Id"
             }
+          },
+          {
+            "in": "query",
+            "name": "look_through",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Look Through",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

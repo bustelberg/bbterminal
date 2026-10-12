@@ -1878,7 +1878,7 @@ async def airs_model_portfolio_value_series(portfolio_id: int, benchmark: str = 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/monthly-yahoo-performance")
 async def airs_model_portfolio_monthly_yahoo_performance(
     portfolio_id: int, month: str, benchmark: str = "SP500", benchmark_weights: str | None = None,
-    compare_portfolio_id: int | None = None,
+    compare_portfolio_id: int | None = None, look_through: bool = True,
 ):
     """One chart interval, decomposed into each current holding's Yahoo close return.
 
@@ -1887,7 +1887,7 @@ async def airs_model_portfolio_monthly_yahoo_performance(
     displayed marks, alongside that *same* interval's benchmark return.
     """
     from datetime import date, timedelta  # noqa: PLC0415
-    from routers._airs_attribution_basis import portfolio_legs  # noqa: PLC0415
+    from routers._airs_attribution_basis import compute_holding_marks, portfolio_legs  # noqa: PLC0415
     from routers._airs_ref import models as ref_models  # noqa: PLC0415
     from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
     from routers._airs_portfolio_perf import _closes, _executions  # noqa: PLC0415
@@ -1916,11 +1916,24 @@ async def airs_model_portfolio_monthly_yahoo_performance(
         (p for p in ref_models() if int(p.get("id") or -1) == portfolio_id), None))
     if not model:
         raise HTTPException(404, "Model portfolio not found.")
-    # Expand every linked Leonteq certificate before pricing.  A certificate is
-    # a route into its underlying model, not a stock: preserving its wrapper
-    # would repeat EONR once per certificate and call that a holdings table.
+    # Start from the same AIRS opening-book weights as monthly Attribution.
+    # A selected month's opening value is that 1 January AIRS value rolled
+    # forward with the holding's yfinance EUR return, then normalised over the
+    # complete book.  It is deliberately not today's model target allocation.
+    base_start = f"{end_day.year}-01-01"
     legs = await asyncio.to_thread(
-        portfolio_legs, "model", portfolio_id, model.get("positions_datum"), start, True)
+        portfolio_legs, "book", portfolio_id, model.get("positions_datum"), base_start, look_through)
+    held = sorted({str(leg["isin"]) for leg in legs or [] if leg.get("isin")})
+    drift = await asyncio.to_thread(compute_holding_marks, held, base_start, end=start)
+    total_before = sum(float(leg.get("weight_pct") or 0) for leg in legs or [])
+    wealth = sum(
+        float(leg.get("weight_pct") or 0)
+        * (1 + float((drift.get(str(leg.get("isin") or "")) or {}).get("return_pct") or 0) / 100)
+        for leg in legs or [])
+    for leg in legs or []:
+        factor = 1 + float((drift.get(str(leg.get("isin") or "")) or {}).get("return_pct") or 0) / 100
+        leg["weight_pct"] = (float(leg.get("weight_pct") or 0) * factor / wealth * total_before
+                             if wealth else 0.0)
     by_isin: dict[str, dict] = {}
     for leg in legs or []:
         isin = leg.get("isin")
@@ -1933,25 +1946,20 @@ async def airs_model_portfolio_monthly_yahoo_performance(
         item["via_names"].update(leg.get("via_names") or [])
     isins = list(by_isin)
     executions = await asyncio.to_thread(_executions, isins)
-    closes = await asyncio.to_thread(
-        _closes, [int(e["analysis_id"]) for e in executions.values()],
-        (date.fromisoformat(start) - timedelta(days=8)).isoformat(), end)
+    monthly_marks = await asyncio.to_thread(compute_holding_marks, isins, start, end=end)
     rows = []
     for isin, holding in by_isin.items():
         execution = executions.get(isin)
-        if not execution:
-            continue
-        prices = closes.get(int(execution["analysis_id"]), [])
-        opening = next((p for p in reversed(prices) if p[0] <= start), None)
-        closing = next((p for p in reversed(prices) if p[0] <= end), None)
-        ret = None if not opening or not closing or opening[1] <= 0 else (closing[1] / opening[1] - 1) * 100
+        mark = monthly_marks.get(isin) or {}
+        ret = mark.get("return_pct")
         rows.append({
-            "isin": isin, "name": execution.get("name") or holding.get("airs_name") or isin,
-            "ticker": execution.get("yahoo_symbol"), "weight_pct": round(float(holding["weight_pct"]), 3),
-            "start_price": opening[1] if opening else None, "start_price_date": opening[0] if opening else None,
-            "end_price": closing[1] if closing else None, "end_price_date": closing[0] if closing else None,
+            "isin": isin, "name": (execution or {}).get("name") or holding.get("airs_name") or isin,
+            "ticker": (execution or {}).get("yahoo_symbol"), "weight_pct": round(float(holding["weight_pct"]), 3),
+            "start_price": mark.get("start_price_eur"), "start_price_date": mark.get("start_date"),
+            "end_price": mark.get("end_price_eur"), "end_price_date": mark.get("end_date"),
             "return_pct": round(ret, 4) if ret is not None else None,
             "vs_benchmark_pct": round(ret - benchmark_return, 4) if ret is not None and benchmark_return is not None else None,
+            "contribution_pct": round(float(holding["weight_pct"]) / 100 * ret, 4) if ret is not None else None,
         })
     # A model can reach the same listed stock through more than one AIRS ISIN
     # (for example a direct leg and a certificate look-through leg). They have
@@ -1966,6 +1974,8 @@ async def airs_model_portfolio_monthly_yahoo_performance(
                 unique_rows[key] = row
             else:
                 existing["weight_pct"] = round(existing["weight_pct"] + row["weight_pct"], 3)
+                if existing["return_pct"] is not None:
+                    existing["contribution_pct"] = round(existing["weight_pct"] / 100 * existing["return_pct"], 4)
         return list(unique_rows.values())
 
     rows = deduplicate_rows(rows)
@@ -1977,7 +1987,7 @@ async def airs_model_portfolio_monthly_yahoo_performance(
         if not compare_model:
             raise HTTPException(404, "Comparison model portfolio not found.")
         compare_legs = await asyncio.to_thread(
-            portfolio_legs, "model", compare_portfolio_id, compare_model.get("positions_datum"), start, True)
+            portfolio_legs, "model", compare_portfolio_id, compare_model.get("positions_datum"), start, look_through)
         compare_by_isin: dict[str, dict] = {}
         for leg in compare_legs or []:
             isin = leg.get("isin")
