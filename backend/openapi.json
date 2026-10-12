@@ -15761,6 +15761,17 @@
             "title": "Id",
             "type": "integer"
           },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -19357,6 +19368,22 @@
               "title": "Look Through",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Month"
+            }
           }
         ],
         "responses": {
@@ -19799,6 +19826,22 @@
                 }
               ],
               "title": "Benchmark Weights"
+            }
+          },
+          {
+            "in": "query",
+            "name": "compare_portfolio_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Compare Portfolio Id"
             }
           }
         ],

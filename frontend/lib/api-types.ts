@@ -14405,6 +14405,8 @@ export interface components {
             holdings?: number | null;
             /** Id */
             id: number;
+            /** Label */
+            label?: string | null;
             /** Name */
             name: string;
             /**
@@ -16358,6 +16360,7 @@ export interface operations {
                 axis?: string;
                 source?: string;
                 look_through?: boolean;
+                month?: string | null;
             };
             header?: never;
             path: {
@@ -16599,6 +16602,7 @@ export interface operations {
                 month: string;
                 benchmark?: string;
                 benchmark_weights?: string | null;
+                compare_portfolio_id?: number | null;
             };
             header?: never;
             path: {

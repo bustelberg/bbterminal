@@ -277,7 +277,7 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
               where={<a href={`https://finance.yahoo.com/quote/${encodeURIComponent(h.ticker)}/`} target="_blank" rel="noreferrer"
                 className="text-accent-300 underline underline-offset-2 hover:text-accent-200">Yahoo Finance · {h.ticker} ↗</a>}
               when={<span>Start: {price(h.start_price)} on {h.start_price_date ?? '—'}<br />End: {price(h.end_price)} on {h.end_price_date ?? '—'}</span>}
-              how="(end close ÷ start close − 1) × 100. Yahoo daily closes in the listing’s local currency." />}/>
+              how="Based on Yahoo daily closing prices in the listing’s local currency." />}/>
             }
           </span>
         </td>
