@@ -145,16 +145,21 @@ class TestTheOneDefinition:
         # 500 remaining shares out of 1,000 held on the payment date.
         assert aligned["Example"] == pytest.approx(50.0)
 
-    def test_the_kla_deposit_is_proven_as_a_split(self):
+    def test_the_kla_deposit_is_proven_as_a_split_after_a_later_sale(self):
         from types import SimpleNamespace
 
-        holdings = [{"holding_name": "KLA Corp.", "quantity": 310,
-                     "start_value_eur": 34_146.96}]
+        # The six-share September sale happens after the June split. The holding snapshot therefore
+        # has 304 shares, but the split must be tested against the 310 shares that existed on the
+        # split date. Otherwise `304 / (304 - 279)` is 12.16 and the known 10:1 split is refused.
+        holdings = [{"holding_name": "KLA Corp.", "quantity": 304,
+                     "start_value_eur": 33_486.05}]
         sheet = SimpleNamespace(rows=[
             {"Tt": "A", "Datum": "2026-02-03", "Fonds": "KLA Corp.",
              "Aantal": 14.0, "Waarde  EUR": 16_567.077772728},
             {"Tt": "D", "Datum": "2026-06-12", "Fonds": "KLA Corp.",
              "Aantal": 279.0, "Waarde  EUR": 0.0},
+            {"Tt": "V", "Datum": "2026-09-28", "Fonds": "KLA Corp.",
+             "Aantal": 6.0, "Waarde  EUR": 0.0},
         ])
         unknown, splits = pa._detected_book_splits(holdings, sheet)
         assert unknown == {"KLA Corp."}

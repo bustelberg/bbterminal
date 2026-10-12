@@ -445,7 +445,10 @@ export default function BookReturnChart(
             + `over ${v(all.length - 1)} published points.`}
           when={`${v(data.return_from ?? first.date)} to ${v(last.date)}.`} />} />
       </div>
-      <div className="mb-11">
+      {/* The return hover is deliberately docked below the plot.  Keep a slot for its tallest
+          form (date, portfolio and benchmark) so it neither obscures the line being inspected
+          nor collides with the drill-down hint below. */}
+      <div className="mb-[72px]">
       <ResponsiveContainer width="100%" height={104}>
         <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
           onClick={(state: { activeLabel?: unknown }) => {
@@ -470,7 +473,7 @@ export default function BookReturnChart(
             width={44} tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
           <Tooltip content={<ReturnTooltip benchmark={data.benchmark ?? benchmark} />}
-            position={{ x: 8, y: 108 }} allowEscapeViewBox={{ y: true }}
+            position={{ x: 8, y: 112 }} allowEscapeViewBox={{ y: true }}
             wrapperStyle={{ pointerEvents: 'none', zIndex: 10 }} />
           {/*  THE BASELINE IS DRAWN, not just included in the domain. "Start at 0%" is the whole
               claim of this chart, and a gridline the reader has to identify is not the same as a
