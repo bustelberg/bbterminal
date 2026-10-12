@@ -152,10 +152,7 @@ type MonthlyHolding = {
   end_price: number | null; end_price_date: string | null;
   return_pct: number | null; vs_benchmark_pct: number | null;
 };
-type MonthlySortKey = 'portfolio' | 'name' | 'return_pct' | 'benchmark' | 'vs_benchmark_pct';
-type ComparisonPortfolio = { portfolio_id: number; name: string; holdings: MonthlyHolding[] };
-type ModelOption = { id: number; label: string };
-type OverviewPortfolio = { fixed_portfolio_id: number | null; name: string };
+type MonthlySortKey = 'name' | 'return_pct' | 'benchmark' | 'vs_benchmark_pct';
 type MonthlyDrilldown = {
   from_date: string; to_date: string; positions_date?: string | null; benchmark: string;
   benchmark_return_pct: number | null;
@@ -165,8 +162,9 @@ type MonthlyDrilldown = {
     components: { name: string; weight_pct: number; label: string | null; ticker: string | null;
       start_price: number | null; start_date: string | null; end_price: number | null; end_date: string | null; return_pct: number | null }[];
   };
-  holdings: MonthlyHolding[]; comparison?: ComparisonPortfolio | null;
+  holdings: MonthlyHolding[];
 };
+const monthlyPerformanceCache = new Map<string, MonthlyDrilldown>();
 
 function MonthlySortHeader({ label, sortKey, align = 'right', sort, onToggle }: {
   label: string;
@@ -183,50 +181,39 @@ function MonthlySortHeader({ label, sortKey, align = 'right', sort, onToggle }: 
 }
 
 function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuery, onSelect, onClose }: {
-  portfolioId: number; month: string | null; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
+  portfolioId: number; month: string; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
   onSelect: (month: string) => void; onClose: () => void;
 }) {
   const [data, setData] = useState<MonthlyDrilldown | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const [comparisonId, setComparisonId] = useState('');
   const [sort, setSort] = useState<{ key: MonthlySortKey; descending: boolean }>({
     key: 'vs_benchmark_pct', descending: true,
   });
   useEffect(() => {
-    if (!month) return;
     let alive = true;
-    void apiFetch(`${API_URL}/api/airs/model-portfolios/${portfolioId}/monthly-yahoo-performance`
-      + `?month=${encodeURIComponent(month)}&benchmark=${encodeURIComponent(benchmark)}${weightsQuery}`
-      + (comparisonId ? `&compare_portfolio_id=${encodeURIComponent(comparisonId)}` : ''))
+    const url = `${API_URL}/api/airs/model-portfolios/${portfolioId}/monthly-yahoo-performance`
+      + `?month=${encodeURIComponent(month)}&benchmark=${encodeURIComponent(benchmark)}${weightsQuery}`;
+    const cached = monthlyPerformanceCache.get(url);
+    if (cached) {
+      setError(null);
+      setData(cached);
+      return () => { alive = false; };
+    }
+    setError(null);
+    void apiFetch(url)
       .then(async (r) => ({ r, body: await r.json().catch(() => null) }))
       .then(({ r, body }) => {
         if (!alive) return;
         if (!r.ok) setError(body?.detail ?? `HTTP ${r.status}`);
-        else { setError(null); setData(body as MonthlyDrilldown); }
+        else {
+          const drilldown = body as MonthlyDrilldown;
+          monthlyPerformanceCache.set(url, drilldown);
+          setError(null); setData(drilldown);
+        }
       })
       .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
     return () => { alive = false; };
-  }, [portfolioId, month, benchmark, weightsQuery, comparisonId]);
-  useEffect(() => {
-    let alive = true;
-    // Match the selector to the named strategies shown in the dashboard. The
-    // raw model table includes FX/Dynamic twins and internal AIRS variants
-    // which would produce duplicate choices here.
-    void apiFetch(`${API_URL}/api/airs/portfolios/overview`).then(async (response) => {
-      const body = await response.json().catch(() => []);
-      if (alive && response.ok && Array.isArray(body)) {
-        const options = new Map<number, ModelOption>();
-        for (const row of body as OverviewPortfolio[]) {
-          if (row.fixed_portfolio_id != null && row.name && !options.has(row.fixed_portfolio_id)) {
-            options.set(row.fixed_portfolio_id, { id: row.fixed_portfolio_id, label: row.name });
-          }
-        }
-        setModels([...options.values()].sort((a, b) => a.label.localeCompare(b.label)));
-      }
-    }).catch(() => undefined);
-    return () => { alive = false; };
-  }, []);
+  }, [portfolioId, month, benchmark, weightsQuery]);
   // A browser can receive the updated frontend before the backend process is
   // restarted. Keep the drill-down usable for that older payload too.
   const benchmarkDetail = data?.benchmark_detail ?? {
@@ -238,17 +225,7 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
   // Keep the table correct while a browser is still receiving a response from
   // a backend that predates its ticker-level de-duplication.
   const uniqueHoldings = data ? [...new Map(data.holdings.map((holding) => [holding.ticker || holding.isin, holding])).values()] : [];
-  const currentModel = models.find((model) => model.id === portfolioId);
-  const currentName = currentModel?.label || 'This portfolio';
-  const comparisonName = data?.comparison && (models.find((model) => model.id === data.comparison?.portfolio_id)?.label || data.comparison.name);
-  const compareHoldings = data?.comparison ? [...new Map(data.comparison.holdings.map((holding) => [holding.ticker || holding.isin, holding])).values()] : [];
-  const compareKeys = new Set(compareHoldings.map((holding) => holding.ticker || holding.isin));
-  const currentKeys = new Set(uniqueHoldings.map((holding) => holding.ticker || holding.isin));
-  const displayHoldings = data?.comparison ? [
-    ...uniqueHoldings.filter((holding) => !compareKeys.has(holding.ticker || holding.isin)).map((holding) => ({ ...holding, portfolio: currentName })),
-    ...compareHoldings.filter((holding) => !currentKeys.has(holding.ticker || holding.isin)).map((holding) => ({ ...holding, portfolio: comparisonName || 'Comparison portfolio' })),
-  ] : uniqueHoldings.map((holding) => ({ ...holding, portfolio: currentName }));
-  const sortedHoldings = data ? displayHoldings.sort((left, right) => {
+  const sortedHoldings = data ? uniqueHoldings.sort((left, right) => {
     const a = sort.key === 'benchmark' ? data.benchmark_return_pct : left[sort.key];
     const b = sort.key === 'benchmark' ? data.benchmark_return_pct : right[sort.key];
     if (a == null) return b == null ? 0 : 1;
@@ -259,16 +236,13 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
   const content = error ? <p className="p-4 text-[12px] text-neg-300">{error}</p>
     : !data ? <p className="p-4 text-[12px] text-fg-subtle">Loading Yahoo monthly performance…</p>
     : <div className="overflow-x-auto">
-    {data.comparison && <p className="px-3 pt-3 text-xs text-fg-muted">Only holdings not shared by {currentName} and {comparisonName}.</p>}
     <table className="w-full min-w-[600px] text-[11px]">
       <thead className="text-fg-faint"><tr className="border-b border-neutral-800/50">
-        {data.comparison && <MonthlySortHeader label="Portfolio" sortKey="portfolio" align="left" sort={sort} onToggle={toggleSort} />}
         <MonthlySortHeader label="Holding" sortKey="name" align="left" sort={sort} onToggle={toggleSort} />
         <MonthlySortHeader label="Yahoo return" sortKey="return_pct" sort={sort} onToggle={toggleSort} /><MonthlySortHeader label="Benchmark" sortKey="benchmark" sort={sort} onToggle={toggleSort} />
         <MonthlySortHeader label="vs benchmark" sortKey="vs_benchmark_pct" sort={sort} onToggle={toggleSort} />
       </tr></thead>
       <tbody>{sortedHoldings.map((h) => <tr key={h.isin} className="border-b border-neutral-800/30 last:border-0">
-        {data.comparison && <td className="px-3 py-1.5 text-fg-muted">{h.portfolio}</td>}
         <td className="px-3 py-1.5 text-fg"><span>{h.name}</span>{h.ticker && <span className="ml-1.5 font-mono text-fg-faint">{h.ticker}</span>}</td>
         <td className={`px-2 py-1.5 text-right font-mono ${h.return_pct != null && h.return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
           <span className="inline-flex items-center justify-end gap-1">{pct(h.return_pct)}
@@ -305,20 +279,19 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
     <div className="max-h-[85vh] w-full max-w-5xl overflow-auto rounded-xl border border-neutral-700 bg-card shadow-2xl"
       onMouseDown={(event) => event.stopPropagation()}>
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-        {month ? <div className="flex items-center gap-4"><button type="button" onClick={() => onSelect('')}
-          className="inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg"><svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-4 w-4"><path d="M11.5 4.5 6 10l5.5 5.5M6.5 10H16" strokeLinecap="round" strokeLinejoin="round" /></svg>Months</button><h2 className="text-lg font-semibold text-fg">{new Date(`${month}T00:00:00Z`).toLocaleDateString('en-GB', {
-            month: 'long', year: 'numeric', timeZone: 'UTC',
-          })}</h2></div> : <span />}
+        <h2 className="text-lg font-semibold text-fg">Yahoo holding returns</h2>
         <button type="button" onClick={onClose}
         className="rounded px-2 py-1 text-fg-muted hover:bg-white/10 hover:text-fg" aria-label="Close">×</button></div>
-      {!month ? <><div className="px-5 pt-2"><label className="block text-xs font-medium text-fg-muted" htmlFor="monthly-portfolio-compare">Compare with</label><select id="monthly-portfolio-compare" value={comparisonId} onChange={(event) => setComparisonId(event.target.value)}
-        className="mt-1 w-full rounded-lg border border-neutral-700 bg-black/20 px-3 py-2 text-sm text-fg"><option value="">No comparison</option>{models.filter((model) => model.id !== portfolioId).map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></div><div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3">
-        {months.map(({ date }) => <button key={date} type="button" onClick={() => onSelect(date)}
-          className="rounded-xl border border-neutral-700 bg-black/10 px-4 py-6 text-center transition hover:border-accent-400 hover:bg-accent-500/10">
-          <span className="block text-sm font-medium text-fg">{new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', timeZone: 'UTC' })}</span>
-          <span className="mt-1 block text-[11px] text-fg-faint">{new Date(`${date}T00:00:00Z`).getUTCFullYear()}</span>
-        </button>)}
-      </div></> : content}
+      <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 px-4 py-2" role="tablist" aria-label="Month">
+        {months.map(({ date }) => {
+          const active = date === month;
+          return <button key={date} type="button" role="tab" aria-selected={active} onClick={() => onSelect(date)}
+            className={`shrink-0 rounded-md border px-3 py-1.5 text-xs font-semibold transition ${active ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
+            {new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })}
+          </button>;
+        })}
+      </div>
+      {content}
     </div>
   </div>;
 }
@@ -462,7 +435,7 @@ export default function BookReturnChart(
         <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
           onClick={(state: { activeLabel?: unknown }) => {
             const point = colouredRows.find((row) => row.t === state.activeLabel && !row.interpolated);
-            if (point && point.date !== first.date) { setSelectedMonth(null); setMonthlyModalOpen(true); }
+            if (point && point.date !== first.date) { setSelectedMonth(point.date); setMonthlyModalOpen(true); }
           }} style={{ cursor: 'pointer' }}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           {/*  A TIME AXIS, NOT A CATEGORY ONE, AND THE DIFFERENCE IS THE WHOLE SHAPE OF THE
@@ -499,8 +472,8 @@ export default function BookReturnChart(
         </AreaChart>
       </ResponsiveContainer>
       </div>
-      <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to compare every holding&apos;s Yahoo return with the benchmark.</p>
-      {monthlyModalOpen && <MonthlyPerformance portfolioId={portfolioId} month={selectedMonth}
+      <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to view each holding&apos;s Yahoo return against the benchmark.</p>
+      {monthlyModalOpen && selectedMonth && <MonthlyPerformance portfolioId={portfolioId} month={selectedMonth}
         months={points.map((point, index) => ({ date: point.date, from: points[index - 1]?.date ?? '' })).slice(1).slice(-6)}
         benchmark={benchmark} weightsQuery={weightsQuery} onSelect={setSelectedMonth}
         onClose={() => { setMonthlyModalOpen(false); setSelectedMonth(null); }} />}

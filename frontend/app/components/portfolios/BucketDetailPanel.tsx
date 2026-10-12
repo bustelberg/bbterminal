@@ -5,6 +5,7 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
+import { useLang } from '../../../lib/i18n';
 import { useBucketDetailCopy } from './bucketDetailCopy';
 import { workedContribution, workedPriceReturn, workedReturn, workedWeight } from './attributionFormulas';
 import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
@@ -172,6 +173,7 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
   startLabel?: string;
 }) {
   const t = useBucketDetailCopy();
+  const [lang] = useLang();
   // Sortable — click a header to toggle direction. Default: weight, largest first. Each table sorts
   // on its OWN state (your names and the index's are independent lists).
   //  The column, its hint and the default sort all come from one flag. Three places deciding
@@ -266,12 +268,15 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
     const money = (value: number) => new Intl.NumberFormat('en-IE', {
       style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2,
     }).format(value);
+    const longDate = (value: string) => new Intl.DateTimeFormat(lang === 'nl' ? 'nl-NL' : 'en-GB', {
+      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+    }).format(new Date(`${value.slice(0, 10)}T00:00:00Z`));
     const result = v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
     return <Provenance source={provenance.returnSource} asOf={provenance.returnAsOf} kind="formula"
       what={what} note="EUR return over the window" how={provenance.returnBasis}
       when={hasMarks ? <span className="text-fg-soft leading-relaxed">
-        Start: {money(mark.return_start_price_eur!)} on {mark.return_start_date}<br />
-        End: {money(mark.return_end_price_eur!)} on {mark.return_end_date}
+        Start: {money(mark.return_start_price_eur!)} on {longDate(mark.return_start_date!)}<br />
+        End: {money(mark.return_end_price_eur!)} on {longDate(mark.return_end_date!)}
       </span> : undefined}
       worked={hasMarks
         ? workedPriceReturn(mark.return_start_price_eur, mark.return_end_price_eur, result)
