@@ -49,13 +49,8 @@ _log = logging.getLogger(__name__)
 # The `universe.label` of the reconstructed membership (Wikipedia + OpenFIGI, the /sp500 page).
 SP500_LABEL = "SP500"
 
-# GuruFocus daily close, in the LISTING's currency. (`metric_data` is EAV — the value lives
-# in `numeric_value`, and the same table holds `market_cap_bn`, `score`, … so the
-# source_code filter is not optional.)
-_CLOSE_METRIC = "close_price"
-_CLOSE_SOURCE = "gurufocus"
-
-
+# Membership still uses the company domain, while prices resolve through the ISIN-to-asset bridge
+# below and are read from the Yahoo-backed `asset_price` series.
 def _members(label: str, *, require_market_cap: bool = True) -> list[dict]:
     """The index's companies, deduped to ONE ROW PER COMPANY (see the module header).
 
@@ -157,32 +152,32 @@ def weight_basis(label: str) -> dict:
 
 
 def _closes(company_ids: list[int], start: str, end: str) -> dict[int, list[tuple[str, float]]]:
-    """Each company's closes in [start, end], ascending. Local currency."""
-    out: dict[int, list[tuple[str, float]]] = {}
+    """Each company's Yahoo closes in [start, end], ascending and in local currency."""
+    from ._airs_portfolio_perf import _closes as asset_closes  # noqa: PLC0415
+
+    company_to_isin: dict[int, str] = {}
     for i in range(0, len(company_ids), IN_CHUNK_SIZE):
-        chunk = company_ids[i:i + IN_CHUNK_SIZE]
-        off = 0
-        while True:
-            # PostgREST caps a response at 1,000 rows and TRUNCATES SILENTLY — 500 names ×
-            # ~130 trading days is far past that, so this must page or the index is computed
-            # off whatever fraction happened to fit.
-            batch = (supabase.table("metric_data")
-                     .select("company_id,target_date,numeric_value")
-                     .in_("company_id", chunk)
-                     .eq("metric_code", _CLOSE_METRIC).eq("source_code", _CLOSE_SOURCE)
-                     .gte("target_date", start).lte("target_date", end)
-                     .order("target_date").range(off, off + 999).execute().data or [])
-            for r in batch:
-                if r["numeric_value"] is None:
-                    continue
-                out.setdefault(r["company_id"], []).append(
-                    (r["target_date"], float(r["numeric_value"])))
-            if len(batch) < 1000:
-                break
-            off += 1000
-    for s in out.values():
-        s.sort()
-    return out
+        rows = (supabase.table("company").select("company_id,isin")
+                .in_("company_id", company_ids[i:i + IN_CHUNK_SIZE]).execute().data or [])
+        company_to_isin.update({int(r["company_id"]): str(r["isin"]).upper()
+                                for r in rows if r.get("isin")})
+    if not company_to_isin:
+        return {}
+
+    isin_to_analysis: dict[str, int] = {}
+    isins = sorted(set(company_to_isin.values()))
+    for i in range(0, len(isins), IN_CHUNK_SIZE):
+        rows = (supabase.table("asset_execution").select("analysis_id,isin")
+                .in_("isin", isins[i:i + IN_CHUNK_SIZE]).eq("status", "ok")
+                .execute().data or [])
+        for row in rows:
+            if row.get("isin") and row.get("analysis_id") is not None:
+                isin_to_analysis.setdefault(str(row["isin"]).upper(), int(row["analysis_id"]))
+    analysis_to_company = {aid: cid for cid, isin in company_to_isin.items()
+                           if (aid := isin_to_analysis.get(isin)) is not None}
+    yahoo = asset_closes(sorted(analysis_to_company), start, end)
+    return {analysis_to_company[aid]: bars for aid, bars in yahoo.items()
+            if aid in analysis_to_company}
 
 
 def _fx_to_eur(currencies: set[str], start: str, end: str) -> dict[str, dict[str, float]]:

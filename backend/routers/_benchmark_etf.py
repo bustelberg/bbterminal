@@ -220,39 +220,6 @@ def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
     return len(rows)
 
 
-def _refresh_gurufocus(ticker: str, bid: int, have_max: str | None) -> int:
-    """Fetch the ETF from GuruFocus and store the bars we do not have. Returns rows written.
-
-     THE FULL HISTORY COMES BACK IN ONE CALL and we upsert only what is NEWER than `have_max`.
-    The unfiltered endpoint is the one that stops at the last settled close — a WINDOWED fetch
-    invents a bar dated today carrying yesterday's price whenever today has not settled (measured
-    on AAPL, 2026-08-02). So: ask for everything, write the tail.
-    """
-    from ingest.api_usage import classify_outcome, track_api_call  # noqa: PLC0415
-    from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
-    from ingest.prices import _fetch_price_from_api, _parse_price_series  # noqa: PLC0415
-
-    data, fetch_log, _status = _fetch_price_from_api(ticker, "NYSE")
-    track_api_call(supabase, "NYSE", job="benchmark_etf_price",
-                   outcome=classify_outcome(_status, has_data=data is not None))
-    if not data:
-        _log.warning("[bench-etf] %s: fetch returned nothing — %s", ticker, fetch_log)
-        return 0
-    #  The shared parser, which already drops future-dated ticks. GuruFocus occasionally emits a
-    # stray bar dated ahead of today; storing one is the SPMO +277% incident.
-    parsed = _parse_price_series(data)
-    rows = [{"benchmark_id": bid, "target_date": d.isoformat(), "price": p}
-            for d, p in parsed
-            if d >= DATA_CUTOFF and (have_max is None or d.isoformat() > have_max)]
-    for i in range(0, len(rows), 500):
-        supabase.table("benchmark_price").upsert(
-            rows[i:i + 500], on_conflict="benchmark_id,target_date").execute()
-    if rows:
-        _log.warning("[bench-etf] %s: stored %d new bar(s), newest %s",
-                     ticker, len(rows), rows[-1]["target_date"])
-    return len(rows)
-
-
 def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, float]] | None:
     """`(benchmark_id, newest bar)` for this label's proxy ETF, refreshed if it has gone stale.
 
