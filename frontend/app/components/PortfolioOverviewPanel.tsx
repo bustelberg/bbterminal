@@ -2022,7 +2022,7 @@ function PortfolioIdentityEditor({ row, onSaved }: {
       })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
-  }, []);
+  }, [row.dynamic_portefeuille]);
 
   const saveName = async () => {
     setBusy('name'); setError(null);

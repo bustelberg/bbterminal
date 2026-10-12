@@ -168,6 +168,20 @@ type MonthlyDrilldown = {
   holdings: MonthlyHolding[]; comparison?: ComparisonPortfolio | null;
 };
 
+function MonthlySortHeader({ label, sortKey, align = 'right', sort, onToggle }: {
+  label: string;
+  sortKey: MonthlySortKey;
+  align?: 'left' | 'right';
+  sort: { key: MonthlySortKey; descending: boolean };
+  onToggle: (key: MonthlySortKey) => void;
+}) {
+  return <th className={align === 'left' ? 'px-3 py-2 text-left text-xs font-semibold' : 'px-2 py-2 text-right text-xs font-semibold'}>
+    <button type="button" onClick={() => onToggle(sortKey)} className="inline-flex items-center gap-1 hover:text-fg">
+      {label}<span aria-hidden="true" className={sort.key === sortKey ? 'text-fg' : 'text-fg-faint'}>{sort.key === sortKey ? (sort.descending ? '↓' : '↑') : '↕'}</span>
+    </button>
+  </th>;
+}
+
 function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuery, onSelect, onClose }: {
   portfolioId: number; month: string | null; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
   onSelect: (month: string) => void; onClose: () => void;
@@ -242,21 +256,16 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
     const compared = typeof a === 'string' && typeof b === 'string' ? a.localeCompare(b) : Number(a) - Number(b);
     return sort.descending ? -compared : compared;
   }) : [];
-  const SortHeader = ({ label, sortKey, align = 'right' }: { label: string; sortKey: MonthlySortKey; align?: 'left' | 'right' }) => <th className={align === 'left' ? 'px-3 py-2 text-left text-xs font-semibold' : 'px-2 py-2 text-right text-xs font-semibold'}>
-    <button type="button" onClick={() => toggleSort(sortKey)} className="inline-flex items-center gap-1 hover:text-fg">
-      {label}<span aria-hidden="true" className={sort.key === sortKey ? 'text-fg' : 'text-fg-faint'}>{sort.key === sortKey ? (sort.descending ? '↓' : '↑') : '↕'}</span>
-    </button>
-  </th>;
   const content = error ? <p className="p-4 text-[12px] text-neg-300">{error}</p>
     : !data ? <p className="p-4 text-[12px] text-fg-subtle">Loading Yahoo monthly performance…</p>
     : <div className="overflow-x-auto">
     {data.comparison && <p className="px-3 pt-3 text-xs text-fg-muted">Only holdings not shared by {currentName} and {comparisonName}.</p>}
     <table className="w-full min-w-[600px] text-[11px]">
       <thead className="text-fg-faint"><tr className="border-b border-neutral-800/50">
-        {data.comparison && <SortHeader label="Portfolio" sortKey="portfolio" align="left" />}
-        <SortHeader label="Holding" sortKey="name" align="left" />
-        <SortHeader label="Yahoo return" sortKey="return_pct" /><SortHeader label="Benchmark" sortKey="benchmark" />
-        <SortHeader label="vs benchmark" sortKey="vs_benchmark_pct" />
+        {data.comparison && <MonthlySortHeader label="Portfolio" sortKey="portfolio" align="left" sort={sort} onToggle={toggleSort} />}
+        <MonthlySortHeader label="Holding" sortKey="name" align="left" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="Yahoo return" sortKey="return_pct" sort={sort} onToggle={toggleSort} /><MonthlySortHeader label="Benchmark" sortKey="benchmark" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="vs benchmark" sortKey="vs_benchmark_pct" sort={sort} onToggle={toggleSort} />
       </tr></thead>
       <tbody>{sortedHoldings.map((h) => <tr key={h.isin} className="border-b border-neutral-800/30 last:border-0">
         {data.comparison && <td className="px-3 py-1.5 text-fg-muted">{h.portfolio}</td>}
