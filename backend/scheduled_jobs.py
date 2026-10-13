@@ -244,8 +244,9 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
                  "timezone": "Europe/Amsterdam"},
         options={"coalesce": True, "misfire_grace_time": 3600},
         max_age_hours=80,
-        note="Refreshes every account (force=True), model composition, and paired-model prices in "
-             "four Amsterdam-local runs from 08:00 through 11:00; APScheduler handles DST.",
+        note="Full AIRS re-scan at every run: every account, all model compositions, and "
+             "paired-model prices at 08:00, 09:00, 10:00 and 11:00 Amsterdam; APScheduler "
+             "handles DST.",
     ),
     JobSpec(
         id="table_size_sample",
