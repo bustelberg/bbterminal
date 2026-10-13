@@ -3,10 +3,26 @@
 import { useEffect, useState } from 'react';
 
 import { useIsAdmin } from '../../../lib/hooks/useEffectiveRole';
+import { useLang, type Lang } from '../../../lib/i18n';
 import {
   attachRunningJobs, cancelJob, dismissJob, jobsStore, LINGER_SECONDS, type JobToast,
 } from '../../../lib/stores/jobs';
 import { fundamentalJobMessage } from './fundamentalJobMessage';
+
+const JOB_COPY: Record<Lang, { cancel: string; cancelling: string; cancelTitle: string }> = {
+  en: {
+    cancel: 'Cancel',
+    cancelling: 'cancelling…',
+    cancelTitle: 'Stop this job at its next safe point. Whatever has already been written stays '
+      + 'written — it is not rolled back — and re-running picks up where it left off.',
+  },
+  nl: {
+    cancel: 'Annuleren',
+    cancelling: 'annuleren…',
+    cancelTitle: 'Stop deze taak op het eerstvolgende veilige punt. Alles wat al is opgeslagen '
+      + 'blijft behouden — er wordt niets teruggedraaid — en een nieuwe start gaat verder waar deze stopte.',
+  },
+};
 
 /**
  * The bottom-right progress stack.
@@ -22,6 +38,7 @@ import { fundamentalJobMessage } from './fundamentalJobMessage';
 export default function JobToaster() {
   const jobs = jobsStore.use((s) => s.jobs);
   const isAdmin = useIsAdmin();
+  const [lang] = useLang();
 
   //  Admin only, because `/api/jobs` IS. Every job that exists spends GuruFocus quota, so the
   // gate holds the whole namespace to admins — asking as a user would 403 on every page load.
@@ -37,7 +54,7 @@ export default function JobToaster() {
       {/*  KEYED ON `id:status`, SO GOING STALE REMOUNTS THE CARD. That is what lets the countdown
           be a `useState` initialiser instead of an effect — the card that appears when a job
           finishes is a new card, already armed with the right number of seconds. */}
-      {jobs.map((j) => <JobCard key={`${j.id}:${j.status}`} job={j} />)}
+      {jobs.map((j) => <JobCard key={`${j.id}:${j.status}`} job={j} lang={lang} />)}
     </div>
   );
 }
@@ -80,7 +97,8 @@ export function unavailableNotice(summary: string | null): UnavailableNotice | n
   return { company, reason };
 }
 
-function JobCard({ job }: { job: JobToast }) {
+function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
+  const copy = JOB_COPY[lang];
   const unavailable = unavailableNotice(job.summary);
   const fundamentals = job.kind.startsWith('fundamentals.');
   const displayMessage = fundamentals
@@ -182,7 +200,7 @@ function JobCard({ job }: { job: JobToast }) {
           )}
           {/* The press is acknowledged the moment it happens, even though the worker stops at its
               next safe point a few seconds later. */}
-          {job.cancelRequested && running ? 'cancelling…'
+          {job.cancelRequested && running ? copy.cancelling
             : running ? (pct === null ? 'working' : `${Math.round(pct)}%`)
               //  The countdown is shown, not just run. A card that disappears on an invisible
               // timer reads as a bug the first time you watch it happen; a number ticking down
@@ -243,12 +261,11 @@ function JobCard({ job }: { job: JobToast }) {
       <div className="flex justify-end gap-2">
         {running && job.cancellable !== false && !job.cancelRequested && (
           <button type="button" onClick={() => void cancelJob(job.id)}
-            title="Stop this job at its next safe point. Whatever has already been written stays
-written — it is not rolled back — and re-running picks up where it left off."
+            title={copy.cancelTitle}
             className="cursor-pointer text-[11px] px-2 py-0.5 rounded border border-neutral-700
                        text-fg-subtle hover:text-warn-300 hover:border-warn-500/50
                        transition-colors">
-            Cancel
+            {copy.cancel}
           </button>
         )}
         {!running && (

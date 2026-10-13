@@ -320,6 +320,8 @@ def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
      `force_refresh=True`, DELIBERATELY, AND IT IS THE SAME ARGUMENT `ingest_company` MAKES ABOUT
     ITS OWN CACHE: pressing Refresh is a request to LOOK. The staleness window that is right for a
     nightly pass is wrong for a human who has just pressed a button and is watching the number.
+    For a mapped series that means a fresh overlapping *tail* request, not a full-history reload:
+    a current close must not make the progress toast look stuck on a decades-old company.
 
      IT NEVER RAISES. A price fetch failing must not lose the fundamentals that already landed —
     the feeds ran first and are already written.
@@ -344,9 +346,15 @@ def _refresh_prices(ctx, label: str, comps: list[dict]) -> str:
         if c.get("gurufocus_ticker") and exch:
             try:
                 res = refresh_company_prices(c["company_id"], force_refresh=True)
-                ok += 1
-                rows += getattr(res, "rows_loaded", 0) or 0
-                outcome = "price refreshed"
+                if res.error:
+                    failed += 1
+                    outcome = f"price failed ({res.error})"
+                    _log.warning("[fill] price refresh failed for %s: %s",
+                                 c.get("gurufocus_ticker"), res.error)
+                else:
+                    ok += 1
+                    rows += getattr(res, "rows_loaded", 0) or 0
+                    outcome = "price refreshed"
             except Exception as e:  # noqa: BLE001 — one price must not lose the run
                 failed += 1
                 outcome = f"price failed ({type(e).__name__})"

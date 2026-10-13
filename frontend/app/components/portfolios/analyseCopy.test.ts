@@ -64,6 +64,22 @@ describe('Analyse primary-view copy', () => {
     expect(forbidden.filter((phrase) => source.includes(phrase))).toEqual([]);
   });
 
+  it('localises the monthly-return dialog controls too', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    expect(source).toContain('useAnalyseCopy');
+    expect(source).toContain('copy.actions.lookThrough');
+    expect(source).toContain('copy.actions.close');
+    expect(source).not.toContain('>Look through certificates<');
+    expect(source).not.toContain('aria-label="Close"');
+  });
+
+  it('replaces the previous month with a loading state immediately', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    expect(source).toContain('<MonthlyPerformance key={selectedMonth}');
+    expect(source).toContain('role="status" aria-live="polite"');
+    expect(source).toContain('animate-spin');
+  });
+
   it('localises benchmark provenance too', () => {
     const card = benchmarkProvenance({ source: 'etf', label: 'ACWI', ticker: 'ACWI' }, 'nl');
     expect(card.what).toContain('eigen EUR-rendement');

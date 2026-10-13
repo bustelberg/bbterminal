@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { unavailableNotice } from './JobToaster';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('unavailableNotice', () => {
   it('turns the old TSX receipt into a complete user-facing explanation', () => {
@@ -21,5 +23,14 @@ describe('unavailableNotice', () => {
 
   it('does not reinterpret ordinary job summaries', () => {
     expect(unavailableNotice('3 companies refetched')).toBeNull();
+  });
+});
+
+describe('the job cancel control', () => {
+  it('uses the reader language instead of a hard-coded English label', () => {
+    const source = readFileSync(join('app', 'components', 'jobs', 'JobToaster.tsx'), 'utf8');
+    expect(source).toContain("cancel: 'Annuleren'");
+    expect(source).toContain('{copy.cancel}');
+    expect(source).toContain('{job.cancelRequested && running ? copy.cancelling');
   });
 });

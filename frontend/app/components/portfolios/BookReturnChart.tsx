@@ -63,6 +63,7 @@ import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
 import type { BookValueSeries } from '../../../lib/types/api';
 import allocationProfiles from '../../config/weightedBenchmarkAllocations.json';
+import { useAnalyseCopy } from './analyseCopy';
 
 type WeightedBenchmarkBlock = { bucket: string; weight_pct: number };
 
@@ -184,6 +185,10 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
   portfolioId: number; month: string; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
   onSelect: (month: string) => void; onClose: () => void;
 }) {
+  // This dialog belongs to Analyse, so it must follow the same reader-level language setting as
+  // the modal behind it.  These controls used to be literals, leaving English beside the Dutch
+  // "Annuleren" action whenever the interface was set to Dutch.
+  const copy = useAnalyseCopy();
   const [data, setData] = useState<MonthlyDrilldown | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lookThrough, setLookThrough] = useState(true);
@@ -230,7 +235,14 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
     return sort.descending ? -compared : compared;
   }) : [];
   const content = error ? <p className="p-4 text-[12px] text-neg-300">{error}</p>
-    : !data ? <p className="p-4 text-[12px] text-fg-subtle">Loading Yahoo monthly performance…</p>
+    : !data ? <div className="flex min-h-48 items-center justify-center gap-2 text-[12px] text-fg-subtle"
+      role="status" aria-live="polite">
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          className="h-4 w-4 shrink-0 animate-spin fill-none stroke-current stroke-2">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+        </svg>
+        <span>Loading Yahoo monthly performance…</span>
+      </div>
     : <div className="overflow-x-auto">
     <table className="w-full min-w-[600px] text-xs">
       <thead className="text-fg-faint"><tr className="border-b border-neutral-800/50">
@@ -280,14 +292,14 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
       onMouseDown={(event) => event.stopPropagation()}>
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
         <h2 className="text-xl font-semibold text-fg">Yahoo holding returns</h2>
-        <label title="Replace linked certificates with the companies held by their underlying strategies."
+        <label title={copy.actions.lookThroughTitle}
           className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-semibold transition ${lookThrough ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
           <input type="checkbox" checked={lookThrough} onChange={(event) => setLookThrough(event.target.checked)}
             className="h-3.5 w-3.5 accent-[var(--color-accent-500)]" />
-          Look through certificates
+          {copy.actions.lookThrough}
         </label>
         <button type="button" onClick={onClose}
-        className="rounded px-2 py-1 text-fg-muted hover:bg-white/10 hover:text-fg" aria-label="Close">×</button></div>
+        className="rounded px-2 py-1 text-fg-muted hover:bg-white/10 hover:text-fg" aria-label={copy.actions.close}>×</button></div>
       <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 px-4 py-2" role="tablist" aria-label="Month">
         {months.map(({ date }) => {
           const active = date === month;
@@ -479,7 +491,7 @@ export default function BookReturnChart(
       </ResponsiveContainer>
       </div>
       <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to view each holding&apos;s Yahoo return against the benchmark.</p>
-      {monthlyModalOpen && selectedMonth && <MonthlyPerformance portfolioId={portfolioId} month={selectedMonth}
+      {monthlyModalOpen && selectedMonth && <MonthlyPerformance key={selectedMonth} portfolioId={portfolioId} month={selectedMonth}
         months={points.map((point, index) => ({ date: point.date, from: points[index - 1]?.date ?? '' })).slice(1).slice(-6)}
         benchmark={benchmark} weightsQuery={weightsQuery} onSelect={setSelectedMonth}
         onClose={() => { setMonthlyModalOpen(false); setSelectedMonth(null); }} />}

@@ -52,9 +52,19 @@ def refresh_company_prices(company_id: int, *, force_refresh: bool = False,
         else:
             aid, symbol = int(ex[0]["analysis_id"]), str(ex[0]["yahoo_symbol"])
             latest = price_refresh.latest_close_by_analysis([aid]).get(aid)
-            if force_refresh or not latest:
+            if not latest:
+                # There is no known tail to extend yet.  A first price load is the one case
+                # that genuinely needs the whole history.
                 rows = int(store.store_series(aid, symbol, None) or 0)
             else:
+                # ``force_refresh`` means "ask Yahoo again now", not "re-download every daily
+                # bar Yahoo has ever published".  In particular, the Fundamentals modal passes
+                # it for an explicit share-price refresh.  Sending a decades-old L'Oreal or
+                # Hermes series through ``store_series`` then did thousands of redundant upserts
+                # and held the progress card on one company for minutes.  ``extend_series``
+                # always calls Yahoo for the overlapping current window; its ``None`` result is
+                # the only safe reason to fall back to a complete reload (it could not recompute
+                # the whole-series coverage statistics exactly).
                 extended = store.extend_series(aid, symbol, latest)
                 rows = int(extended or 0)
                 if extended is None:
