@@ -131,6 +131,21 @@ class TestTheSchedulerJob:
         assert "price_refresh.refresh_stale(" in inspect.getsource(
             scheduler._run_asset_price_refresh)
 
+    def test_it_refreshes_analyse_yahoo_benchmarks_even_when_holdings_are_current(self):
+        """An Analyse request must not be the normal path that updates its benchmark ETF.
+
+        The smart daily pipeline is optional because it follows enabled strategies; AIRS Analyse
+        is not. Put its Yahoo proxy series in the unconditional price refresh and do so before the
+        no-stale early return.
+        """
+        import scheduler
+
+        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        proxies_at = src.index("refresh_index_proxies()")
+        current_at = src.index("if not stale:")
+        assert "from routers._benchmark_etf import refresh_index_proxies" in src
+        assert proxies_at < current_at
+
 
 class TestTheStartupCatchUp:
     """A daily tick keeps prices current going FORWARD. It cannot repair the PAST.

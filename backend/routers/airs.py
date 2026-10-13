@@ -16,6 +16,7 @@ import asyncio
 import gzip
 import io
 import json
+import logging
 import re
 from io import StringIO
 from routers import _airs_portfolio_store as store
@@ -48,6 +49,7 @@ from deps import IN_CHUNK_SIZE, supabase
 from portfolio import parse_airs_excel
 
 router = APIRouter(tags=["airs"])
+_log = logging.getLogger(__name__)
 
 _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
@@ -608,7 +610,7 @@ async def _portfolio_refresh_stream(portfolio_id: int):
             try:
                 from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
                 emit("progress",
-                     message=f"  {refresh_index_proxies()} index proxy series brought current")
+                     message=f"  {refresh_index_proxies(bypass_daily_guard=True)} index proxy series brought current")
             except Exception as e:  # noqa: BLE001
                 emit("progress",
                      message=f"  index proxies not refreshed: {type(e).__name__}: {e}")
@@ -3737,12 +3739,13 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
         #   whole of a Cancel that appears to do nothing. `refresh_portfolio_fully` sees the same
         #   flag at its own first boundary and returns cancelled, which `job_verdict` reports.
         if not ctx.cancelled:
-            ctx.progress(0, 0, "bringing the benchmark index prices current…")
+            ctx.progress(0, 0, "Preparing refresh…")
             try:
                 from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
-                refresh_index_proxies()
+                refresh_index_proxies(bypass_daily_guard=True)
             except Exception as e:  # noqa: BLE001 — never fail a book refresh over the benchmark
-                ctx.progress(0, 0, f"index proxies not refreshed: {type(e).__name__}: {e}")
+                _log.warning("[airs refresh] benchmark prices not refreshed: %s: %s",
+                             type(e).__name__, e)
         full = refresh_portfolio_fully(
             portefeuille=portefeuille, cascade=cascade,
             on_step=lambda done, total, msg: ctx.progress(done, total, msg),

@@ -11,6 +11,19 @@ function source(): string {
     .replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
+function attributionSource(): string {
+  return readFileSync(ATTRIBUTION_FILE, 'utf8');
+}
+
+describe('attribution table layout', () => {
+  it('uses one fixed column grid for every period and axis', () => {
+    const s = attributionSource();
+    expect(s).toContain('min-w-[1600px] table-fixed');
+    expect(s).toContain('<col className="w-[12%]" />');
+    expect(s).toContain('<col span={8} className="w-[11%]" />');
+  });
+});
+
 describe('the per-company holdings table explains every displayed cell', () => {
   it('puts a What/Where/When/How provenance icon in every descriptive column header', () => {
     const s = source();

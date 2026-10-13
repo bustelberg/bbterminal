@@ -9,20 +9,40 @@ import {
 } from '../../../lib/stores/jobs';
 import { fundamentalJobMessage } from './fundamentalJobMessage';
 
-const JOB_COPY: Record<Lang, { cancel: string; cancelling: string; cancelTitle: string }> = {
+const JOB_COPY: Record<Lang, {
+  cancel: string; cancelling: string; cancelTitle: string; working: string; dismiss: string;
+  status: Record<'done' | 'failed' | 'cancelled', string>;
+}> = {
   en: {
     cancel: 'Cancel',
-    cancelling: 'cancelling…',
-    cancelTitle: 'Stop this job at its next safe point. Whatever has already been written stays '
-      + 'written — it is not rolled back — and re-running picks up where it left off.',
+    cancelling: 'Cancelling…',
+    cancelTitle: 'Stop at the next safe point. Saved changes will be kept.',
+    working: 'Working',
+    dismiss: 'Dismiss',
+    status: { done: 'Complete', failed: 'Failed', cancelled: 'Cancelled' },
   },
   nl: {
     cancel: 'Annuleren',
-    cancelling: 'annuleren…',
-    cancelTitle: 'Stop deze taak op het eerstvolgende veilige punt. Alles wat al is opgeslagen '
-      + 'blijft behouden — er wordt niets teruggedraaid — en een nieuwe start gaat verder waar deze stopte.',
+    cancelling: 'Annuleren…',
+    cancelTitle: 'Stoppen bij het eerstvolgende veilige punt. Opgeslagen wijzigingen blijven behouden.',
+    working: 'Bezig',
+    dismiss: 'Sluiten',
+    status: { done: 'Voltooid', failed: 'Mislukt', cancelled: 'Geannuleerd' },
   },
 };
+
+/** Keep server diagnostics readable in a one-line reader-facing toast. */
+export function friendlyJobMessage(summary: string | null, lang: Lang): string | null {
+  if (!summary) return summary;
+  const plain = summary.replace(/\s(?:\u2014|\u2013)\s/g, '. ');
+  const cancelled = plain.match(/^cancelled before (.+?)\.\s*nothing was read\.?$/i);
+  if (cancelled) {
+    return lang === 'nl'
+      ? `Geannuleerd vóór ${cancelled[1]}. Er zijn geen wijzigingen gemaakt.`
+      : `Cancelled before ${cancelled[1]}. No changes were made.`;
+  }
+  return plain;
+}
 
 /**
  * The bottom-right progress stack.
@@ -101,9 +121,11 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
   const copy = JOB_COPY[lang];
   const unavailable = unavailableNotice(job.summary);
   const fundamentals = job.kind.startsWith('fundamentals.');
+  const humanSummary = friendlyJobMessage(job.summary, lang);
+  const humanMessage = friendlyJobMessage(job.message, lang);
   const displayMessage = fundamentals
-    ? fundamentalJobMessage(job.summary || job.message)
-    : (job.summary || job.message);
+    ? fundamentalJobMessage(humanSummary || humanMessage)
+    : (humanSummary || humanMessage);
   const tone = unavailable ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
   const running = job.status === 'running';
   //  Indeterminate until a total arrives. `done/0` is NaN, and a bar that reads 100% before the
@@ -201,11 +223,11 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
           {/* The press is acknowledged the moment it happens, even though the worker stops at its
               next safe point a few seconds later. */}
           {job.cancelRequested && running ? copy.cancelling
-            : running ? (pct === null ? 'working' : `${Math.round(pct)}%`)
+              : running ? (pct === null ? copy.working : `${Math.round(pct)}%`)
               //  The countdown is shown, not just run. A card that disappears on an invisible
               // timer reads as a bug the first time you watch it happen; a number ticking down
               // says it was always going to. `paused` on hover explains why it stopped.
-              : `${unavailable ? 'unavailable' : job.status}${secondsLeft === null ? ''
+              : `${unavailable ? 'Unavailable' : copy.status[job.status as 'done' | 'failed' | 'cancelled']}${secondsLeft === null ? ''
                 : hover ? ' · paused' : ` · ${secondsLeft}s`}`}
         </span>
       </div>
@@ -253,7 +275,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
         </div>
       ) : (
         <p className={`whitespace-normal break-words text-[12px] ${tone.text}`}
-          title={[job.summary, job.message].filter(Boolean).join('\n') || undefined}>
+          title={[humanSummary, humanMessage].filter(Boolean).join('\n') || undefined}>
           {displayMessage}
         </p>
       )}
@@ -272,7 +294,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
           <button type="button" onClick={() => dismissJob(job.id)}
             className="cursor-pointer text-[11px] px-2 py-0.5 rounded border border-neutral-700
                        text-fg-subtle hover:bg-overlay/5 transition-colors">
-            Dismiss
+            {copy.dismiss}
           </button>
         )}
       </div>

@@ -70,11 +70,9 @@ export type ActiveShareHolding = {
   currency?: string | null;
 };
 
-export type RiskWeightBasis = 'now' | 'start';
-
 /** Apply one AIRS weight snapshot without changing membership or any other holding fact. */
 export function holdingsOnRiskBasis(
-  holdings: ActiveShareHolding[], basis: RiskWeightBasis,
+  holdings: ActiveShareHolding[], basis: 'now' | 'start',
 ): ActiveShareHolding[] {
   return holdings.map((holding) => ({
     ...holding,
@@ -126,8 +124,8 @@ function Tile({ label, value, tone, info }: {
 }
 
 export default function ActiveSharePanel({
-  holdings, benchmark, portfolioName, portfolioAsOf, portfolioStartAsOf, portfolioFetchedAt,
-  portfolioSource, weightComponentsNow, weightComponentsStart, weightTotalNow, weightTotalStart,
+  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
+  portfolioSource, weightComponentsNow, weightTotalNow,
   onClose,
 }: {
   holdings: ActiveShareHolding[];
@@ -168,7 +166,6 @@ export default function ActiveSharePanel({
   /**  ALL ROWS, OR ONLY WHAT WE HOLD. The underweights are the other half of the measure — a book
    *  can be 70% active almost entirely by NOT owning things — but there are ~1,700 of them on ACWI,
    *  so the default is the book and the index's biggest gaps are one click away. */
-  const [showAll, setShowAll] = useState(false);
   /**
    * Which of the two risk views is on screen.
    *
@@ -185,16 +182,13 @@ export default function ActiveSharePanel({
    */
   const [view, setView] =
     useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active');
-  const [weightBasis, setWeightBasis] = useState<RiskWeightBasis>('now');
-  const hasStartWeights = holdings.some((holding) => holding.weight_start_pct != null);
   const weightedHoldings = useMemo(
-    () => holdingsOnRiskBasis(holdings, weightBasis), [holdings, weightBasis],
+    () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
   );
-  const selectedPortfolioAsOf = weightBasis === 'start' ? portfolioStartAsOf : portfolioAsOf;
-  const benchmarkStart = weightBasis === 'start' ? portfolioStartAsOf : null;
-  const selectedWeightComponents = weightBasis === 'start'
-    ? weightComponentsStart : weightComponentsNow;
-  const selectedWeightTotal = weightBasis === 'start' ? weightTotalStart : weightTotalNow;
+  const selectedPortfolioAsOf = portfolioAsOf;
+  const benchmarkStart = null;
+  const selectedWeightComponents = weightComponentsNow;
+  const selectedWeightTotal = weightTotalNow;
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
@@ -214,7 +208,7 @@ export default function ActiveSharePanel({
   //  `?? []` ON BOTH — every list on this payload is optional in the generated types (the
   // Pydantic default makes it so), and `.filter` on undefined is a blank panel with no error.
   const all: ActiveShareRow[] = data?.rows ?? [];
-  const rows = all.filter((r) => (showAll ? true : r.held && !r.residual));
+  const rows = all.filter((r) => r.held && !r.residual);
   const maxBet = Math.max(0, ...all.map((r) => Math.abs(r.active_pct ?? 0)));
   /**
    * The footer row's sums — over the ROWS ON SCREEN, not over `all`.
@@ -296,25 +290,6 @@ export default function ActiveSharePanel({
               </button>
             ))}
           </div>
-          {hasStartWeights && (
-            <div className="flex items-center gap-2 mt-2">
-              <span className="text-[10px] uppercase tracking-wider text-fg-faint">
-                {t.basis.label}
-              </span>
-              <span className="inline-flex rounded-md border border-neutral-800/40 overflow-hidden">
-                {(['now', 'start'] as const).map((basis) => (
-                  <button key={basis} type="button"
-                    onClick={() => setWeightBasis(basis)}
-                    aria-pressed={weightBasis === basis}
-                    className={`cursor-pointer px-2.5 py-0.5 text-[11px] transition-colors ${
-                      weightBasis === basis ? 'bg-accent-600 text-white'
-                        : 'bg-elevated text-fg-muted hover:text-accent-300'}`}>
-                    {basis === 'now' ? t.basis.now : t.basis.start}
-                  </button>
-                ))}
-              </span>
-            </div>
-          )}
         </div>
         <button type="button" onClick={onClose}
           className="cursor-pointer text-fg-faint hover:text-fg text-sm leading-none px-1"
@@ -331,7 +306,7 @@ export default function ActiveSharePanel({
           lazy load real rather than merely hidden. It takes the SAME holdings, so both views
           describe one portfolio; see `compute_tracking_error`. */}
       {view === 'te' && (
-        <TrackingErrorView key={weightBasis} holdings={weightedHoldings}
+        <TrackingErrorView holdings={weightedHoldings}
           benchmark={data?.benchmark ?? benchmark}
           //  The same book identity the active-share cards carry. This view measures the same
           // sleeve, so its cards owe the reader the same answer to "whose weights, read when, from
@@ -340,25 +315,25 @@ export default function ActiveSharePanel({
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'corr' && (
-        <CorrelationView key={weightBasis} holdings={weightedHoldings}
+        <CorrelationView holdings={weightedHoldings}
           benchmark={data?.benchmark ?? benchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'vol' && (
-        <VolatilityView key={weightBasis} holdings={weightedHoldings}
+        <VolatilityView holdings={weightedHoldings}
           benchmark={data?.benchmark ?? benchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'dd' && (
-        <DrawdownView key={weightBasis} holdings={weightedHoldings}
+        <DrawdownView holdings={weightedHoldings}
           benchmark={data?.benchmark ?? benchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'conc' && (
-        <ConcentrationView key={weightBasis} holdings={weightedHoldings}
+        <ConcentrationView holdings={weightedHoldings}
           benchmark={data?.benchmark ?? benchmark}
           benchmarkStart={benchmarkStart}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
@@ -472,22 +447,6 @@ export default function ActiveSharePanel({
             </p>
           )}
 
-          <div className="shrink-0 flex items-center gap-2 pt-1">
-            <button type="button" onClick={() => setShowAll(false)}
-              className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-                !showAll ? 'bg-accent-600 text-white border-transparent'
-                  : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300'}`}>
-              {t.active.heldOnly(data.n_holdings ?? 0)}
-            </button>
-            <button type="button" onClick={() => setShowAll(true)}
-              title="Include the index names the book does not hold — the underweights are the other half of the measure."
-              className={`cursor-pointer rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
-                showAll ? 'bg-accent-600 text-white border-transparent'
-                  : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300'}`}>
-              {t.active.everyName(all.length)}
-            </button>
-          </div>
-
           {/*  THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED
               TO SIT HERE. That note said a cap would "nest one scrollbar inside another — and the
               outer one would have nothing to scroll". The first half is true and the second is
@@ -563,8 +522,7 @@ export default function ActiveSharePanel({
                             && selectedWeightTotal > 0 && selectedWeightComponents?.length ? (
                             <Provenance source={portfolioSource} asOf={selectedPortfolioAsOf}
                               what={t.active.weightWhat(r.name, portfolioName)}
-                              note={weightBasis === 'start'
-                                ? t.active.startWeight : t.active.currentWeight}
+                              note={t.active.currentWeight}
                               how={t.active.weightHow}
                               calculation={<AirsWeightCalculation
                                 components={selectedWeightComponents}
@@ -572,8 +530,7 @@ export default function ActiveSharePanel({
                                 denominator={selectedWeightTotal}
                                 result={`${(r.portfolio_pct ?? 0).toFixed(2)}%`}
                                 holdingName={r.name}
-                                valueLabel={weightBasis === 'start'
-                                  ? 'Beginwaarde' : 'Huidige waarde'} />} />
+                                valueLabel="Huidige waarde" />} />
                             ) : null}
                         </span>
                       </span>
@@ -611,9 +568,9 @@ export default function ActiveSharePanel({
                 <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
                   [&>td]:border-neutral-700/60 [&>td]:bg-inset font-medium">
                   <td className="text-fg-soft">
-                    {showAll ? t.active.totalAll(rows.length) : t.active.totalHeld(rows.length)}
+                    {t.active.totalHeld(rows.length)}
                     <InfoTip className="ml-1" content={<AspectCard
-                      {...(showAll ? t.active.totalCard : t.active.totalCardHeld)}
+                      {...t.active.totalCardHeld}
                       when={whenBoth}
                       // This is a totals-row formula, not a second derivation of active share.
                       // It mirrors the three numeric cells immediately to its right.
@@ -631,8 +588,7 @@ export default function ActiveSharePanel({
                         + String.raw`\end{aligned}`}
                       legend={[
                         { sym: 'i', is: t.active.legend.issuer },
-                        { sym: 'S', is: showAll
-                          ? t.active.legend.allSet : t.active.legend.heldSet },
+                        { sym: 'S', is: t.active.legend.heldSet },
                         { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
                         { sym: String.raw`w_i^{\,b}`,
                           is: t.active.legend.wb(data.benchmark ?? benchmark) },

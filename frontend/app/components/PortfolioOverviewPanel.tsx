@@ -695,7 +695,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    * job is two places to keep in step, and the toast already carries the outcome, the failure and
    * the countdown. `refreshMsg` stays for everything else on this panel that is NOT a job.
    */
-  const refreshOne = async (portefeuille: string) => {
+  const refreshOne = async (portefeuille: string, displayName = portefeuille) => {
     //  One job per row, enforced here and not by the button's `disabled`. A second job on the same
     // account cannot do any work — the backend `_LOCK` answers "busy" — but it DOES get a job id
     // and therefore a second toast, which is the duplicate card this guard exists to prevent. The
@@ -708,7 +708,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     try {
       const { id, done } = await startJob(
         `${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}/refresh/job`,
-        portefeuille);
+        t.common.refreshingFromAirs(displayName), undefined, undefined, { label: displayName });
       setRowJobs((m) => ({ ...m, [portefeuille]: id }));
       //  The cancel that arrived before the id. The button flips on the press, so Cancel is
       // pressable during the round-trip above — and a press that reached a control offering it must
@@ -1261,7 +1261,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                                   e.stopPropagation();
                                   if (stopping) return;                 // already asked
                                   if (busy) void cancelRefreshRow(pf);
-                                  else void refreshOne(pf);
+                                  else void refreshOne(pf, r.name ?? pf);
                                 }}
                                 //  Inert only once the cancel is in. A disabled spinner is the
                                 // state this panel kept being reported as "stuck": nothing to
@@ -1457,7 +1457,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         // when it finishes so the modal re-reads what the scan rebuilt.
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
           name={analyse.name}
-          onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!) : undefined}
+          onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!, analyse.name) : undefined}
           refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
           refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."
           //  The row's own cancel, not a second one — and passed unconditionally while the modal

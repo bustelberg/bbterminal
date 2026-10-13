@@ -46,6 +46,7 @@ export type ManagementCopy = {
     /** The AIRS walk: its verb while running, and the button once there are rows. */
     scanning: string;
     refreshFromAirs: string;
+    refreshingFromAirs: (name: string) => string;
     asOf: string;
   };
   benchmarks: {
@@ -178,6 +179,7 @@ const en: ManagementCopy = {
     refreshAll: 'Refresh all',
     scanning: 'Scanning…',
     refreshFromAirs: 'Refresh from AIRS',
+    refreshingFromAirs: (name) => `Refreshing ${name} from AIRS`,
     asOf: 'As of',
   },
   benchmarks: {
@@ -315,6 +317,7 @@ const nl: ManagementCopy = {
     refreshAll: 'Alles vernieuwen',
     scanning: 'Scannen…',
     refreshFromAirs: 'Vernieuwen vanuit AIRS',
+    refreshingFromAirs: (name) => `${name} vernieuwen vanuit AIRS`,
     asOf: 'Per',
   },
   benchmarks: {

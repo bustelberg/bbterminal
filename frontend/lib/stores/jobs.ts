@@ -212,7 +212,17 @@ export function startLocalJob(
 export function watchJob(id: string, title: string, after = 0,
                          seed?: { kind?: string; label?: string },
                          onProgress?: (e: { done?: number; total?: number; message?: string })
-                           => void): Promise<JobToast> {
+                           => void,
+                         presentation?: { label?: string }): Promise<JobToast> {
+  // A server job must retain its machine-readable label for deduplication and
+  // re-attachment. Its toast can still use the reader-facing portfolio name.
+  // Keep that substitution at the presentation boundary so progress payloads
+  // and job identity remain exact on the wire.
+  let backendLabel = seed?.label ?? '';
+  const present = (text: string | null | undefined) => {
+    if (!text || !backendLabel || !presentation?.label) return text ?? null;
+    return text.split(backendLabel).join(presentation.label);
+  };
   jobsStore.set((s) => (s.jobs.some((j) => j.id === id) ? {} : {
     jobs: [...s.jobs, {
       id, title, kind: seed?.kind ?? '', label: seed?.label ?? '',
@@ -244,11 +254,12 @@ export function watchJob(id: string, title: string, after = 0,
           api_calls?: number;
         };
         if (e.type === 'job') {
+          backendLabel = e.label ?? backendLabel;
           upsert(id, {
             status: e.status ?? 'running',
             done: e.done ?? 0,
             total: e.total ?? 0,
-            summary: e.summary ?? null,
+            summary: present(e.summary),
             apiCalls: e.api_calls ?? 0,
             cancelRequested: !!e.cancel_requested,
             //  Only from the `job` FRAME. A progress EVENT also carries a `kind` and it means
@@ -262,7 +273,7 @@ export function watchJob(id: string, title: string, after = 0,
         // A progress line. `done`/`total` ride along on the ones that have them; the others are
         // pure narration and must not reset the bar to zero.
         upsert(id, {
-          message: e.message ?? '',
+          message: present(e.message) ?? '',
           ...(typeof e.done === 'number' ? { done: e.done } : {}),
           ...(typeof e.total === 'number' ? { total: e.total } : {}),
         });
@@ -297,6 +308,7 @@ export async function startJob(
   startUrl: string, title: string, init?: RequestInit,
   /** Per-progress-line callback — see `watchJob`. For callers whose screen the job rewrites. */
   onProgress?: (e: { done?: number; total?: number; message?: string }) => void,
+  presentation?: { label?: string },
 ): Promise<{ id: string; done: Promise<JobToast>; body: Record<string, unknown> }> {
   //  `init` IS OPTIONAL AND MERGED AFTER `method`, so a caller can add a JSON body (the basket
   // fill posts its holdings) without being able to turn this into a GET by accident.
@@ -308,7 +320,7 @@ export async function startJob(
   // it could reach and why the rest it could not, which the caller has to render BEFORE the first
   // progress line arrives. Discarding it forced a second request for data we already had.
   // Additive: every existing caller destructures `{ id, done }` and is untouched.
-  return { id: b.job_id, done: watchJob(b.job_id, title, 0, undefined, onProgress),
+  return { id: b.job_id, done: watchJob(b.job_id, title, 0, undefined, onProgress, presentation),
     body: b as Record<string, unknown> };
 }
 
