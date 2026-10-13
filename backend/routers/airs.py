@@ -608,7 +608,7 @@ async def _portfolio_refresh_stream(portfolio_id: int):
             try:
                 from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
                 emit("progress",
-                     message=f"  {refresh_index_proxies()} index proxy series brought current")
+                     message=f"  {refresh_index_proxies(bypass_daily_guard=True)} index proxy series brought current")
             except Exception as e:  # noqa: BLE001
                 emit("progress",
                      message=f"  index proxies not refreshed: {type(e).__name__}: {e}")
@@ -3740,7 +3740,7 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
             ctx.progress(0, 0, "Preparing refresh…")
             try:
                 from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
-                refresh_index_proxies()
+                refresh_index_proxies(bypass_daily_guard=True)
             except Exception as e:  # noqa: BLE001 — never fail a book refresh over the benchmark
                 _log.warning("[airs refresh] benchmark prices not refreshed: %s: %s",
                              type(e).__name__, e)

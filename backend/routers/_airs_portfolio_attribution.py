@@ -642,23 +642,55 @@ async def compute_attribution_async(portfolio_id: int, benchmark_label: str = SP
 async def prewarm_attribution_months(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                                      window: str = "ytd", axis: str = "sector",
                                      source: str = "book", look_through: bool = False) -> None:
-    """Fill this panel's month buttons sequentially without competing with its first render."""
+    """Fill YTD and this panel's month buttons sequentially without competing with its first render."""
+    await asyncio.to_thread(
+        prewarm_attribution_periods, portfolio_id, benchmark_label, window, axis, source,
+        look_through,
+    )
+
+
+def prewarm_attribution_periods(portfolio_id: int, benchmark_label: str = SP500_LABEL,
+                                window: str = "ytd", axis: str = "sector",
+                                source: str = "book", look_through: bool = False) -> int:
+    """Synchronously cache YTD and every current-year month for one attribution panel.
+
+    This is also called from the scheduler after AIRS/model prices land.  Keeping the cache fill
+    here means server-side and client-triggered warming have the exact same period set.
+    """
     scope = (portfolio_id, benchmark_label, window, axis, source, look_through)
     with _prewarm_lock:
         if scope in _prewarming:
-            return
+            return 0
         _prewarming.add(scope)
     try:
         today = date.today()
-        # Users open the most recent tile first, so make it available before older history.
-        # Keep this sequential: it is genuinely background work, not a competing fan-out of
-        # expensive benchmark and price reads.
+        # YTD appears first in the picker. The client may open a month first, so it too belongs in
+        # the background set instead of relying on that first visible request to calculate it.
+        _compute_attribution_cached(
+            portfolio_id, benchmark_label, window, axis, source, look_through, None)
+        # Most recent first after YTD. Keep this sequential: it is genuinely background work, not
+        # a competing fan-out of expensive benchmark and price reads.
         for number in range(today.month, 0, -1):
             month = date(today.year, number, 1).isoformat()
-            await compute_attribution_async(
+            _compute_attribution_cached(
                 portfolio_id, benchmark_label, window, axis, source, look_through, month)
+        return today.month + 1
     except Exception:  # noqa: BLE001 - warming must never affect the visible response
         _log.exception("[attribution] monthly prewarm failed for portfolio %s", portfolio_id)
+        return 0
     finally:
         with _prewarm_lock:
             _prewarming.discard(scope)
+
+
+def prewarm_paired_attributions(benchmark_label: str = "ACWI") -> dict:
+    """Precompute the default Analyse attribution periods without any browser request."""
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+
+    ids = sorted({int(account["model_portfolio_id"])
+                  for account in list_account_links().get("accounts", [])
+                  if account.get("model_portfolio_id") is not None})
+    periods = 0
+    for portfolio_id in ids:
+        periods += prewarm_attribution_periods(portfolio_id, benchmark_label)
+    return {"portfolios": len(ids), "periods": periods, "benchmark": benchmark_label}

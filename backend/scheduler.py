@@ -2017,6 +2017,16 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             pricing_message, pricing = _body_airs_model_prices(ctx)
             summary["pricing"] = pricing
             _log.info("[scheduler] AIRS paired-model pricing: %s", pricing_message)
+            # Do not wait for someone to open Analyse before beginning its YTD/monthly
+            # attribution work. This uses the bounded scheduler pool and is coalesced by name,
+            # so the four morning AIRS ticks cannot create a fan-out of duplicate warmers.
+            def _warm_attribution() -> None:
+                from routers._airs_portfolio_attribution import prewarm_paired_attributions  # noqa: PLC0415
+                warmed = prewarm_paired_attributions("ACWI")
+                _log.info("[scheduler] AIRS attribution prewarm: %s", warmed)
+
+            summary["attribution_prewarm_started"] = _submit_scheduled_work(
+                "airs_attribution_prewarm", _warm_attribution)
         except _Cancelled:
             raise
         except Exception as e:

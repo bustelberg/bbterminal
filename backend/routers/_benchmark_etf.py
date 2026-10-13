@@ -53,7 +53,7 @@ WHAT THIS REPLACES, AND WHY
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from deps import supabase
 
@@ -75,7 +75,6 @@ _NAMES = {"ACWI": "iShares MSCI ACWI ETF", "SPY": "SPDR S&P 500 ETF Trust",
           "AGGH.AS": "iShares Core Global Aggregate Bond UCITS ETF",
           "HYEA.L": "iShares EUR High Yield Corporate Bond UCITS ETF"}
 _CURRENCY = {"ACWI": "USD", "SPY": "USD", "AGGH.AS": "EUR", "HYEA.L": "EUR"}
-_YAHOO_TICKERS = frozenset(PROXY.values())
 
 #  The fallback rule only. How far behind TODAY the newest stored bar may be before we go back to
 # the vendor, used when the market anchor below cannot be had. Three days clears a normal weekend;
@@ -86,9 +85,10 @@ _STALE_DAYS = 3
 # re-fetched by every Analyse-modal open that missed the leg cache — and the modal is ONE request
 # with no partial paint, so a vendor round trip lands directly in the wait the reader sees.
 _fetched_today: dict[tuple[str, str], bool] = {}
-# The stored proxy table predates adjusted closes. A current last date does not prove that the old
-# rows use the new convention, so each Yahoo proxy must be rewritten once per running process.
-_adjusted_history_loaded: set[str] = set()
+
+# Re-fetch a few existing closes as well as the gap. Yahoo's range boundaries are inclusive-ish;
+# idempotently upserting this overlap is cheap insurance against an omitted final session.
+_GAP_OVERLAP_DAYS = 5
 
 
 def _behind_the_market(last: tuple[str, float] | None) -> bool:
@@ -183,11 +183,13 @@ def _at_or_before(bid: int, anchor: str) -> tuple[str, float] | None:
     return (str(rows[0]["target_date"])[:10], float(rows[0]["price"])) if rows else None
 
 
-def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
-    """Fetch adjusted daily ETF closes from Yahoo Finance and replace the stored series.
+def _refresh(ticker: str, bid: int, have_max: str | None, *, full_history: bool = False) -> int:
+    """Fetch adjusted daily ETF closes from Yahoo Finance.
 
-    The scorecard benchmark now uses the same Yahoo Finance source as portfolio returns. All bars
-    are upserted deliberately, replacing legacy GuruFocus bars as well as adding the newest close.
+    Normal maintenance fetches only the gap plus a five-day overlap. A historical rewrite is an
+    explicit repair/migration operation: downloading and upserting thousands of unchanged bars
+    on every daily tick (or process restart) is needless load on both Yahoo and Postgres.
+
     Adjusted close includes distributions, matching yfinance's standard total-return series.
     """
     from asset_pipeline import yahoo  # noqa: PLC0415
@@ -195,7 +197,18 @@ def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
     from time import time  # noqa: PLC0415
 
     # Yahoo coarsens range=max. An explicit range gives daily bars, as in the asset pipeline.
-    chart = yahoo.chart_window(ticker, 0, int(time()), "1d")
+    # A missing series needs its history; an established one only needs the recent overlap.
+    start_ts = 0
+    if have_max and not full_history:
+        try:
+            start_ts = int(datetime.combine(
+                date.fromisoformat(have_max) - timedelta(days=_GAP_OVERLAP_DAYS),
+                datetime.min.time(), tzinfo=timezone.utc,
+            ).timestamp())
+        except ValueError:
+            _log.warning("[bench-etf] %s: invalid stored latest date %r; rebuilding history",
+                         ticker, have_max)
+    chart = yahoo.chart_window(ticker, start_ts, int(time()), "1d")
     if not chart:
         _log.warning("[bench-etf] %s: Yahoo Finance returned no price history", ticker)
         return 0
@@ -220,7 +233,8 @@ def _refresh(ticker: str, bid: int, have_max: str | None) -> int:
     return len(rows)
 
 
-def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, float]] | None:
+def ensure_fresh(label: str, *, force: bool = False, bypass_daily_guard: bool = False,
+                 full_history: bool = False) -> tuple[int, tuple[str, float]] | None:
     """`(benchmark_id, newest bar)` for this label's proxy ETF, refreshed if it has gone stale.
 
     None when there is no proxy, or when nothing can be had at all. Self-healing: the scheduled
@@ -255,7 +269,8 @@ def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, fl
     #   anchor is the freshest close we hold. `force` sidesteps the question entirely for the
     #   scheduled caller, which simply asks the vendor what it has.
     stale = _behind_the_market(last)
-    guard = (ticker, date.today().isoformat())
+    utc_today = datetime.now(timezone.utc).date().isoformat()
+    guard = (ticker, utc_today)
     #  `force` BYPASSES THE DAY GUARD TOO, AND IT DID NOT — which made "Refresh" unable to move
     #   this tile for the rest of any day the lazy path had already spent its one call. Measured
     #   2026-09-03: the modal's first open asked the vendor, GuruFocus had not yet published ACWI's
@@ -264,13 +279,21 @@ def ensure_fresh(label: str, *, force: bool = False) -> tuple[int, tuple[str, fl
     #   callers are the scheduled pass and a button somebody pressed, both of which run where
     #   nobody is waiting on the round trip. The guard is still SET, so a later lazy read in the
     #   same process cannot spend a second call.
-    needs_adjusted_history = ticker in _YAHOO_TICKERS and ticker not in _adjusted_history_loaded
-    if (force or stale or needs_adjusted_history) and (force or needs_adjusted_history or not _fetched_today.get(guard)):
+    # `force` asks Yahoo even when this series is not stale. It does NOT bypass the once-daily
+    # guard: a restart after the scheduled run must not repeat the request. A human's explicit
+    # Refresh may opt into that separately; a history rewrite is reserved for data repair.
+    needs_refresh = force or stale or full_history
+    # `_fetched_today` bounds calls in this process. `proxy_fetched_at` survives a deploy, so it
+    # also bounds the startup catch-up in a newly started process later on the same UTC day.
+    persisted = _proxy_fetched_at(bid) if needs_refresh and not bypass_daily_guard else None
+    fetched_today = bool(persisted and str(persisted)[:10] == utc_today)
+    if needs_refresh and (bypass_daily_guard or (
+            not _fetched_today.get(guard) and not fetched_today)):
         _fetched_today[guard] = True
         try:
-            written = _refresh(ticker, bid, last[0] if last else None)
+            written = _refresh(ticker, bid, last[0] if last else None,
+                               full_history=full_history)
             if written:
-                _adjusted_history_loaded.add(ticker)
                 last = _latest(bid)
             #  Stamped whether or not a new bar arrived, and that is the point. The question this
             # answers is "is our copy current", and asking a vendor that has published nothing since
@@ -317,7 +340,8 @@ def _stamp_fetched(benchmark_id: int) -> None:
         _log.warning("[bench-etf] could not stamp proxy_fetched_at for %s: %s", benchmark_id, exc)
 
 
-def refresh_index_proxies() -> int:
+def refresh_index_proxies(*, force: bool = True, bypass_daily_guard: bool = False,
+                          full_history: bool = False) -> int:
     """Bring every proxy ETF up to date. For the scheduled price phase. Returns tickers refreshed.
 
      SO THE 1.35s VENDOR CALL DOES NOT LAND ON A READER. `ensure_fresh` will do it lazily, but
@@ -333,17 +357,24 @@ def refresh_index_proxies() -> int:
     reader, not here.
 
      The per-process, per-day guard inside `ensure_fresh` still applies, so a restart-looping box
-    does not turn this into a fetch per boot.
+    does not turn this into a fetch per boot. `full_history` is for an explicit data repair or
+    migration only; ordinary daily calls fetch just the recent gap and overlap.
     """
     n = 0
     for label in PROXY:
         try:
-            if ensure_fresh(label, force=True):
+            if ensure_fresh(label, force=force, bypass_daily_guard=bypass_daily_guard,
+                            full_history=full_history):
                 n += 1
         except Exception as exc:                                # noqa: BLE001
             _log.warning("[bench-etf] %s: proxy refresh failed: %s: %s",
                          label, type(exc).__name__, exc)
     return n
+
+
+def repair_index_proxy_history() -> int:
+    """Explicitly rebuild all proxy ETF histories after a data repair or source migration."""
+    return refresh_index_proxies(force=True, bypass_daily_guard=True, full_history=True)
 
 
 def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:

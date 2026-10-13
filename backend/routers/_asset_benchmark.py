@@ -727,13 +727,29 @@ def index_rows(label: str, start: str, *,
     if not mem:
         return [], coverage
     lookback = (date.fromisoformat(start) - timedelta(days=45)).isoformat()
-    today = end or date.today().isoformat()
+    # `market_cap_eur` is today's cap.  A window may end in a prior month, but its opening
+    # weight must not change merely because we ask for January's return rather than YTD: both
+    # windows opened on 1 January and therefore require the exact same rolled-back opening cap.
+    # Keep the return's end separate from the cap reference date for that reason.
+    cap_reference_end = date.today().isoformat()
+    return_end = end or cap_reference_end
     ids = [m["company_id"] for m in mem]
-    fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
-    marks = window_marks(ids, lookback, start, today)
-    closes = {} if marks else _asset_closes(ids, lookback, today)
+    fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, cap_reference_end)
+    marks = window_marks(ids, lookback, start, return_end)
+    closes = {} if marks else _asset_closes(ids, lookback, return_end)
 
     rows, _ = _window_rows(mem, closes, fx, start, marks=marks or None)
+    if return_end != cap_reference_end:
+        # `_window_rows` normally rolls today's cap back from its own closing mark.  For a closed
+        # monthly return that mark is month-end, so it would omit every subsequent price move and
+        # manufacture a different 1-January weight.  Get only the cap basis over the same opening
+        # date through today, then retain the monthly returns already in `rows`.
+        cap_marks = window_marks(ids, lookback, start, cap_reference_end)
+        cap_rows, _ = _window_rows(mem, {}, fx, start, marks=cap_marks or None)
+        cap_by_id = {r["company_id"]: r["start_cap_eur"] for r in cap_rows}
+        rows = [r for r in rows if r["company_id"] in cap_by_id]
+        for r in rows:
+            r["start_cap_eur"] = cap_by_id[r["company_id"]]
     total = sum(r["start_cap_eur"] for r in rows)
     if total <= 0:
         return [], coverage

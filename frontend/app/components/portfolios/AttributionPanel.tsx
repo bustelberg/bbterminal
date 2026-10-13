@@ -626,7 +626,14 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               so the panel carried every formula twice. */}
           {hasRows && <>
           <div className="overflow-x-auto rounded-lg border border-neutral-800/40 mb-3">
-            <table className="w-full text-[12px]">
+            {/* Fixed columns keep the table still while YTD/month/axis requests replace their
+                values. Without an explicit layout the browser sized each response from its
+                labels and numbers, so clicking Jan visibly shifted every column. */}
+            <table className="w-full min-w-[1600px] table-fixed text-[12px]">
+              <colgroup>
+                <col className="w-[12%]" />
+                <col span={8} className="w-[11%]" />
+              </colgroup>
               <thead className="sticky top-0 z-[1] bg-card">
                 <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <Th align="left" label={w}
@@ -712,7 +719,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       title={open ? copy.row.hide(r.bucket) : copy.row.show(r.bucket, benchmark)}
                       className={`cursor-pointer transition-colors ${
                         open ? 'bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.02]'}`}>
-                      <td className="px-2 py-1.5 text-fg whitespace-nowrap">
+                      <td className="px-2 py-1.5 text-fg whitespace-nowrap overflow-hidden text-ellipsis">
                         <span className={`inline-block w-3 text-[10px] ${open ? 'text-accent-400' : 'text-fg-faint'}`}>
                           {open ? '▾' : '▸'}
                         </span>

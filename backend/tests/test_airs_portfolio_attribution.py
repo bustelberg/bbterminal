@@ -251,3 +251,44 @@ class TestTheBenchmarkWeightsAreTheSAMEONES:
         attribution_src = inspect.getsource(at.compute_attribution)
         assert "index_rows(" in attribution_src
         assert "benchmark_label, start" in attribution_src
+
+    def test_a_closed_month_keeps_the_same_opening_weight_as_ytd(self):
+        """January and YTD share a 1 January opening date.
+
+        A monthly return ends at month-end, but that cannot turn the index's opening cap into a
+        month-end-relative calculation: `market_cap_eur` is current and has to be rolled back from
+        the same current reference point for both requests.
+        """
+        from routers import _asset_benchmark as benchmark
+
+        src = inspect.getsource(benchmark.index_rows)
+        assert "cap_reference_end = date.today().isoformat()" in src
+        assert "return_end = end or cap_reference_end" in src
+        assert "if return_end != cap_reference_end:" in src
+        assert "r[\"start_cap_eur\"] = cap_by_id[r[\"company_id\"]]" in src
+
+
+class TestBackgroundPeriodPrewarm:
+    def test_it_caches_ytd_and_every_month_without_a_client_request(self, monkeypatch):
+        from datetime import date as real_date
+        from routers import _airs_portfolio_attribution as at
+
+        seen: list[str | None] = []
+        class D(real_date):
+            @classmethod
+            def today(cls):
+                return cls(2026, 3, 15)
+
+        monkeypatch.setattr(at, "date", D)
+        monkeypatch.setattr(at, "_compute_attribution_cached",
+                            lambda *_args: seen.append(_args[-1]) or {})
+
+        assert at.prewarm_attribution_periods(12, "ACWI") == 4
+        assert seen == [None, "2026-03-01", "2026-02-01", "2026-01-01"]
+
+    def test_scheduler_starts_the_server_side_warmer_after_model_prices(self):
+        import scheduler
+
+        src = inspect.getsource(scheduler._body_airs_vermogen)
+        assert "prewarm_paired_attributions(\"ACWI\")" in src
+        assert '"airs_attribution_prewarm"' in src
