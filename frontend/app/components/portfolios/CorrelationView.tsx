@@ -79,7 +79,7 @@ function Tile({ label, value, tone, info }: {
 }) {
   return (
     <div className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 min-w-[8rem]">
-      <div className="text-[9px] uppercase tracking-wider text-fg-faint flex items-center gap-1">
+      <div className="text-[11px] uppercase tracking-wide text-fg-faint flex items-center gap-1">
         {label}{info}
       </div>
       <div className={`font-mono text-xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>

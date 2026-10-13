@@ -784,7 +784,7 @@ const nl: RiskCopy = {
   },
 
   corr: {
-    rhoVs: (b) => `ρ t.o.v. ${b}`, rSquared: 'R²', meanPair: 'Gemiddelde ρ tussen posities',
+    rhoVs: (b) => `Correlatie t.o.v. ${b}`, rSquared: 'R²', meanPair: 'Gemiddelde correlatie tussen eigen posities',
     activeVol: 'Actieve volatiliteit (= TE)',
     betweenPositions: 'Tussen de posities',
     legend: 'Blauw = tegengesteld, amber = beweegt mee. Gesorteerd op gewicht.',
