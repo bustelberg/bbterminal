@@ -16,6 +16,7 @@ import asyncio
 import gzip
 import io
 import json
+import logging
 import re
 from io import StringIO
 from routers import _airs_portfolio_store as store
@@ -48,6 +49,7 @@ from deps import IN_CHUNK_SIZE, supabase
 from portfolio import parse_airs_excel
 
 router = APIRouter(tags=["airs"])
+_log = logging.getLogger(__name__)
 
 _OLE2_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 
