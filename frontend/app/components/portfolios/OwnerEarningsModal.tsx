@@ -388,7 +388,8 @@ export default function OwnerEarningsModal({
               indicator and estimate feeds. None of the three is in the default fill. */}
           {scope && (
             <PortfolioFundamentalsRefresh scope={scope} additionalScope={activeBenchmarkScope}
-              {...refreshPlan} />
+              {...refreshPlan}
+              jobTitle={chrome.refreshingTab(chrome.tabs[tab])} />
           )}
           {/*  ALWAYS ON, NOT ONLY ON THE TAB IT CURRENTLY TRANSLATES. It was tab-scoped first, on
               the same reasoning as the SBC checkbox below — a control that governs nothing on the

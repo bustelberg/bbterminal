@@ -13,7 +13,6 @@ type Entry = {
   notes: string; conviction: number; portfolio_weight: number | null;
   review_on: string | null;
 };
-type Article = { id?: number; subject?: string; subtitle?: string; publish_time?: string; link?: string };
 type YahooReturn = { available: boolean; return_pct?: number; start_date?: string; as_of?: string; retrieved_at?: string; message?: string };
 
 const card = 'rounded-xl border border-neutral-800/60 bg-card p-5';
@@ -46,8 +45,6 @@ export default function LogDashboard() {
   };
   const [entries, setEntries] = useState<Entry[]>([]);
   const [company, setCompany] = useState<AssetPick | null>(null);
-  const [articles, setArticles] = useState<Article[]>([]);
-  const [newsMessage, setNewsMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [openTarget, setOpenTarget] = useState<Entry | null>(null);
   const [editTarget, setEditTarget] = useState<Entry | null>(null);
@@ -79,22 +76,6 @@ export default function LogDashboard() {
     })().catch(() => { if (!ctrl.signal.aborted) setYahooReturns({}); });
     return () => ctrl.abort();
   }, [entries]);
-
-  useEffect(() => {
-    const ticker = company?.yahoo_symbol?.replace(/\..*$/, '');
-    if (!ticker) { setArticles([]); setNewsMessage(nl ? 'Kies een bedrijf om het nieuws te zien.' : 'Choose a company to see its news.'); return; }
-    const ctrl = new AbortController();
-    setNewsMessage(nl ? 'Nieuws laden…' : 'Loading news…');
-    void (async () => {
-      const r = await apiFetch(`${API_URL}/api/log-dashboard/news/${encodeURIComponent(ticker)}`, { signal: ctrl.signal });
-      if (ctrl.signal.aborted) return;
-      const body = await r.json().catch(() => ({}));
-      if (!r.ok) { setArticles([]); setNewsMessage((body.detail as string) || (nl ? 'Geen nieuws beschikbaar voor dit bedrijf.' : 'No news is available for this company.')); return; }
-      setArticles(body.articles || []);
-      setNewsMessage(body.message || (body.articles?.length ? '' : (nl ? 'Geen recente artikelen voor dit aandeel.' : 'No recent articles for this company.')));
-    })();
-    return () => ctrl.abort();
-  }, [company, nl]);
 
   const openYahooReturn = openTarget ? yahooReturns[openTarget.id] : null;
   async function refreshYahooReturns() {
@@ -155,8 +136,7 @@ export default function LogDashboard() {
   return <main className="min-h-screen bg-page px-5 py-8 text-fg sm:px-8 lg:px-10">
     <div className="mx-auto max-w-7xl space-y-6">
       <header><h1 className="text-2xl font-semibold text-fg-strong">{nl ? 'BC-logboek' : 'BC logbook'}</h1><p className="mt-1 text-sm text-fg-muted">{nl ? 'Leg besluiten vast, volg actiepunten op en evalueer de beleggingscase door de tijd.' : 'Record decisions, follow up on actions and review the investment case over time.'}</p></header>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <section className={`${card} xl:h-[clamp(420px,calc(100vh-14rem),560px)] xl:overflow-y-auto`}>
+      <section className={card}>
           <h2 className="text-base font-semibold text-fg-strong">{nl ? 'Nieuw besluit' : 'New decision'}</h2>
           <div className="mt-4"><CompanyPicker label={nl ? 'Bedrijf' : 'Company'} value={company} onPick={setCompany} /></div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -167,9 +147,7 @@ export default function LogDashboard() {
           </div>
           <label className="mt-3 block text-sm text-fg-soft">{nl ? 'Besluit en notulen' : 'Decision and minutes'}<textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={4} className="mt-1 w-full rounded-lg border border-neutral-700 bg-page px-3 py-2 text-fg" /></label>
           <button type="button" disabled={!company || saving} onClick={() => void save()} className="mt-4 rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">{saving ? (nl ? 'Opslaan…' : 'Saving…') : (nl ? 'Besluit opslaan' : 'Save decision')}</button>
-        </section>
-        <section className={`${card} flex h-full min-h-0 flex-col overflow-hidden xl:h-[clamp(420px,calc(100vh-14rem),560px)]`}><div className="flex items-baseline justify-between gap-3"><h2 className="text-base font-semibold text-fg-strong">{nl ? 'Nieuws' : 'News'}</h2></div><div className="mt-4 min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">{articles.map((a, i) => <a key={a.id || i} href={a.link} target="_blank" rel="noreferrer" className="block rounded-lg border border-neutral-800/60 p-3 hover:bg-overlay/[0.04]"><p className="text-sm font-medium text-fg-strong">{a.subject}</p>{a.subtitle && <p className="mt-1 text-xs text-fg-muted">{a.subtitle}</p>}<p className="mt-2 text-xs text-fg-faint">{formatDate(a.publish_time)}</p></a>)}{newsMessage && <p className="py-8 text-center text-sm text-fg-muted">{newsMessage}</p>}</div></section>
-      </div>
+      </section>
       <section className={card}>
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <h2 className="text-base font-semibold text-fg-strong">{nl ? 'Besluitlog' : 'Decision log'}</h2>

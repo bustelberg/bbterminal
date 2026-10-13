@@ -26,6 +26,8 @@ export type FundamentalChromeCopy = {
   refresh: string;
   refreshUniverse: string;
   refreshing: string;
+  /** Progress-card title: unlike the resting control, it names the tab being refreshed. */
+  refreshingTab: (tab: string) => string;
   cancel: string;
   cancelling: string;
   sbc: string;
@@ -49,6 +51,7 @@ const EN: FundamentalChromeCopy = {
   refresh: 'Refresh fundamentals',
   refreshUniverse: 'Fetch missing fundamentals',
   refreshing: 'Refreshing…',
+  refreshingTab: (tab) => `Refreshing ${tab} tab…`,
   cancel: 'Cancel',
   cancelling: 'Cancelling…',
   sbc: 'SBC correction',
@@ -84,6 +87,7 @@ const NL: FundamentalChromeCopy = {
   refresh: 'Fundamentals verversen',
   refreshUniverse: 'Ontbrekende fundamentals ophalen',
   refreshing: 'Verversen…',
+  refreshingTab: (tab) => `Tab ${tab} verversen…`,
   cancel: 'Annuleren',
   cancelling: 'Annuleren…',
   sbc: 'SBC-correctie',

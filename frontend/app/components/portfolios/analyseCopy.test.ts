@@ -80,6 +80,19 @@ describe('Analyse primary-view copy', () => {
     expect(source).toContain('animate-spin');
   });
 
+  it('also clears the old rows when certificate look-through changes', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    const toggle = source.slice(source.indexOf('checked={lookThrough}'), source.indexOf('className="h-3.5'));
+    expect(toggle).toContain('setData(null)');
+    expect(toggle).toContain('setLookThrough(event.target.checked)');
+  });
+
+  it('uses the shared Toppenberg-only certificate default in the monthly-return dialog', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    expect(source).toContain("import { defaultLookThroughCertificates } from './portfolioDefaults'");
+    expect(source).toContain('() => defaultLookThroughCertificates(portfolioName)');
+  });
+
   it('localises benchmark provenance too', () => {
     const card = benchmarkProvenance({ source: 'etf', label: 'ACWI', ticker: 'ACWI' }, 'nl');
     expect(card.what).toContain('eigen EUR-rendement');

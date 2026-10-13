@@ -4098,6 +4098,7 @@ export default function PortfolioAnalysisModal({
                     {!isBasket && id != null && (
                       <div className="w-0 min-w-full">
                         <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
+                          portfolioName={name}
                           benchmark={benchmark}
                           variant={data.variant}
                           benchmarkBlocks={(data.returns?.block_returns ?? []).filter(isScorecardBlock)} />

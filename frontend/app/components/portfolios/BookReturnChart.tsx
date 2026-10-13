@@ -64,6 +64,7 @@ import { traceError } from '../../../lib/debugTrace';
 import type { BookValueSeries } from '../../../lib/types/api';
 import allocationProfiles from '../../config/weightedBenchmarkAllocations.json';
 import { useAnalyseCopy } from './analyseCopy';
+import { defaultLookThroughCertificates } from './portfolioDefaults';
 
 type WeightedBenchmarkBlock = { bucket: string; weight_pct: number };
 
@@ -181,8 +182,8 @@ function MonthlySortHeader({ label, sortKey, align = 'right', sort, onToggle }: 
   </th>;
 }
 
-function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuery, onSelect, onClose }: {
-  portfolioId: number; month: string; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
+function MonthlyPerformance({ portfolioId, portfolioName, month, months, benchmark, weightsQuery, onSelect, onClose }: {
+  portfolioId: number; portfolioName?: string | null; month: string; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
   onSelect: (month: string) => void; onClose: () => void;
 }) {
   // This dialog belongs to Analyse, so it must follow the same reader-level language setting as
@@ -191,7 +192,13 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
   const copy = useAnalyseCopy();
   const [data, setData] = useState<MonthlyDrilldown | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [lookThrough, setLookThrough] = useState(true);
+  // Certificates are normally shown as the instruments the account actually holds. Toppenberg is
+  // the exception: its portfolios are deliberately certificate wrappers, so their useful default
+  // is the underlying strategies. This shared family rule also drives the Analyse and Fundamental
+  // views; keeping it here avoids one portfolio opening with three conflicting defaults.
+  const [lookThrough, setLookThrough] = useState(
+    () => defaultLookThroughCertificates(portfolioName),
+  );
   const [sort, setSort] = useState<{ key: MonthlySortKey; descending: boolean }>({
     key: 'return_pct', descending: true,
   });
@@ -294,7 +301,14 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
         <h2 className="text-xl font-semibold text-fg">Yahoo holding returns</h2>
         <label title={copy.actions.lookThroughTitle}
           className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-semibold transition ${lookThrough ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
-          <input type="checkbox" checked={lookThrough} onChange={(event) => setLookThrough(event.target.checked)}
+          <input type="checkbox" checked={lookThrough} onChange={(event) => {
+            // The rows belong to the OLD look-through mode.  Clear them in the click handler,
+            // before the request effect runs, so toggling cannot briefly present an opaque
+            // certificate table as the transparent one (or vice versa).
+            setData(null);
+            setError(null);
+            setLookThrough(event.target.checked);
+          }}
             className="h-3.5 w-3.5 accent-[var(--color-accent-500)]" />
           {copy.actions.lookThrough}
         </label>
@@ -317,6 +331,7 @@ function MonthlyPerformance({ portfolioId, month, months, benchmark, weightsQuer
 export default function BookReturnChart(
   {
     portfolioId,
+    portfolioName,
     /**
      * Bumped by the modal's caller when a refresh finishes — the SAME counter the modal's own
      * payload effect takes.
@@ -329,7 +344,7 @@ export default function BookReturnChart(
     benchmark,
     benchmarkBlocks = [],
     variant,
-  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; variant?: string | null },
+  }: { portfolioId: number; portfolioName?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; variant?: string | null },
 ) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -491,7 +506,7 @@ export default function BookReturnChart(
       </ResponsiveContainer>
       </div>
       <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to view each holding&apos;s Yahoo return against the benchmark.</p>
-      {monthlyModalOpen && selectedMonth && <MonthlyPerformance key={selectedMonth} portfolioId={portfolioId} month={selectedMonth}
+      {monthlyModalOpen && selectedMonth && <MonthlyPerformance key={selectedMonth} portfolioId={portfolioId} portfolioName={portfolioName} month={selectedMonth}
         months={points.map((point, index) => ({ date: point.date, from: points[index - 1]?.date ?? '' })).slice(1).slice(-6)}
         benchmark={benchmark} weightsQuery={weightsQuery} onSelect={setSelectedMonth}
         onClose={() => { setMonthlyModalOpen(false); setSelectedMonth(null); }} />}
