@@ -500,12 +500,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     // Analyse fell back to an empty basket. An unpaired account with real holdings is therefore
     // a missing-model signal, not a reason to call the whole fleet "already scanned".
     //
-    // The scan is still the slow half (list + one XLS per model), and a shift-click remains the
-    // explicit way to re-read fully populated models even when no account needs one.
+    // A full AIRS refresh re-reads populated models too, so their composition and the account
+    // reports always describe the same run.
     const needsModel = (rows ?? []).some((r) =>
       r.fixed_portfolio_id == null && (r.holdings ?? 0) >= MIN_REAL_HOLDINGS);
     if (!needsModel && !force) {
-      console.warn('[AIRS models] skipped — every substantial account is paired (shift-click Refresh all to re-scan)');
+      console.warn('[AIRS models] skipped — every substantial account is paired');
       return;
     }
     setScanningModels(true);
@@ -513,7 +513,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     try {
       const { id, done } = await startJob(
         `${API_URL}/api/airs/model-portfolios/scan/job?force=${force ? 'true' : 'false'}`,
-        'Scan model portfolios');
+        t.overview.scanningModels);
       setModelsJob(id);
       const job = await done;
       //  `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
@@ -808,7 +808,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    */
   const live = useRef<ReturnType<typeof createLiveReload> | null>(null);
 
-  const refreshAll = async (force = false) => {
+  const refreshAll = async (force = true) => {
     if (refreshingAll) return;
     // See refreshOne: this run changes the source of every overview row.
     invalidateOverviewCache();
@@ -819,7 +819,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       live.current = createLiveReload(() => loadOverview(), 4000);
       const { id, done } = await startJob(
         `${API_URL}/api/airs/vermogen/refresh/job${force ? '?force=true' : ''}`,
-        force ? 'Refresh all (full re-scan)' : 'Refresh all portfolios',
+        t.overview.refreshAll,
         undefined,
         (e) => live.current?.onProgress(e.done));
       setFleetJob(id);
@@ -1045,18 +1045,17 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               Links
             </button>
           )}
-          {/* Scan every portfolio that NEEDS it — the backend skips an account whose last pass got
-              all four reports within the last few hours, so a press after a full run is seconds
-              rather than minutes. Shift-click forces a full re-scan. */}
+          {/* A manual refresh is a complete AIRS read, so a successful run makes every visible
+              account current rather than retaining a report from an earlier run. */}
           <button type="button"
-            onClick={(e) => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(e.shiftKey); } }}
+            onClick={() => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(); } }}
             // Inert only in the gap between the press and the job id arriving — see the row button.
             disabled={refreshingAll && !allJob}
             title={allJob
               ? (modelsJob
                 ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
                 : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
-              : 'Everything AIRS has: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book — plus the model portfolios if they have never been scanned. An account fully scanned in the last few hours is skipped. Shift-click forces a full re-scan of everything (minutes).'}
+              : 'Reads every current AIRS account: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book, followed by every model portfolio. This can take several minutes.'}
             className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
               allJob
                 ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'

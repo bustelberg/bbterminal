@@ -1,8 +1,7 @@
 """The morning AIRS checks must be cheap without missing a new valuation."""
 from __future__ import annotations
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
+import inspect
 
 import airs_vermogen as V
 import scheduler
@@ -80,25 +79,12 @@ def test_gate_runs_when_airs_has_a_new_portfolio_even_without_a_new_valuation(mo
     assert gate["new_portfolios"] == ["TOPS_NEU_BEH_DYN"]
 
 
-def test_models_are_deferred_before_eleven(monkeypatch):
-    monkeypatch.setattr(
-        scheduler, "_amsterdam_now",
-        lambda: datetime(2026, 10, 9, 10, 0, tzinfo=ZoneInfo("Europe/Amsterdam")),
-    )
-    monkeypatch.setattr(V, "scheduled_account_refresh_decision", lambda: {
-        "run": False, "reason": "AIRS valuation is already stored",
-    })
+def test_every_morning_slot_runs_the_full_accounts_models_and_pricing_refresh():
+    src = inspect.getsource(scheduler._body_airs_vermogen)
 
-    message, summary = scheduler._body_airs_vermogen()
-
-    assert summary["accounts_skipped"] is True
-    assert summary["models_deferred"] is True
-    assert summary["pricing_deferred"] is True
-    assert "deferred to 11:00" in message
-
-
-def test_models_are_due_at_eleven_amsterdam():
-    assert scheduler._airs_models_due(datetime(2026, 10, 9, 10, 59,
-                                               tzinfo=ZoneInfo("Europe/Amsterdam"))) is False
-    assert scheduler._airs_models_due(datetime(2026, 10, 9, 11, 0,
-                                               tzinfo=ZoneInfo("Europe/Amsterdam"))) is True
+    assert 'triggered_by="auto", force=True' in src
+    assert "scheduled_account_refresh_decision" not in src
+    assert "models_deferred" not in src
+    assert "pricing_deferred" not in src
+    assert "count_model_portfolio_holdings_sync(" in src
+    assert "_body_airs_model_prices(ctx)" in src

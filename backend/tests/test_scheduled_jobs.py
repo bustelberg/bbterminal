@@ -119,6 +119,7 @@ class TestOptInJobs:
             "timezone": "Europe/Amsterdam",
         }
         assert spec.cadence == "Every day, 08:00, 09:00, 10:00, and 11:00 Amsterdam"
+        assert "Full AIRS re-scan at every run" in spec.note
 
 
 
