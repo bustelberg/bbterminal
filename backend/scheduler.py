@@ -1147,7 +1147,8 @@ def _fire_asset_price_refresh() -> None:
     "working" about a queue nobody is draining). `is_worker_active()` reads the real heartbeat:
     when a row was last MOVED out of pending.
 
-    Scope is HELD-only (~220 instruments, not the 16k grid). Bounded scheduler worker; never raises.
+    Scope is held instruments (~220, not the 16k grid) plus the small set of Yahoo benchmark
+    proxies used by AIRS Analyse. Bounded scheduler worker; never raises.
 
     Also fired ON STARTUP by `_maybe_kickstart_asset_prices` — see there for why a daily tick
     alone is not enough.
@@ -1200,6 +1201,25 @@ def _run_asset_price_refresh(trigger: str) -> None:
         # last date to compare), so repair that distinct case after the cheap
         # detection pass. This uses its existing symbol and cannot remap it.
         backfill = price_refresh.backfill_missing(watched)
+
+        # Analyse also shows benchmark returns derived from a small set of Yahoo ETF proxies.
+        # These used to be refreshed only from the smart daily pipeline, which is conditional on
+        # enabled strategies. That left a quiet deployment with current holdings but an ageing
+        # benchmark until somebody opened Analyse and its lazy repair ran. Keep all Yahoo-backed
+        # Analyse inputs on this unconditional daily path instead. The helper protects against a
+        # duplicate same-day request when the smart pipeline did run.
+        try:
+            from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
+            proxies_refreshed = refresh_index_proxies()
+        except Exception as proxy_error:  # noqa: BLE001
+            # A proxy failure should not discard a successful holdings refresh. Individual proxy
+            # failures are also logged in refresh_index_proxies, so preserve the main job's result.
+            proxies_refreshed = None
+            _log.warning(
+                "[scheduler] asset price refresh (%s): Analyse benchmark proxy refresh failed: "
+                "%s: %s", trigger, type(proxy_error).__name__, proxy_error,
+            )
+
         if not stale:
             _log.info(
                 "[scheduler] asset price refresh (%s): all %s watched instrument(s) current as of "
@@ -1208,10 +1228,13 @@ def _run_asset_price_refresh(trigger: str) -> None:
             detail = f"all {considered} watched instrument(s) current as of {latest}"
             if backfill["backfilled"]:
                 detail += f"; {backfill['backfilled']} absent series backfilled"
+            if proxies_refreshed is not None:
+                detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
             else:
                 rec.skip(detail)
             rec.done(detail, considered=considered, latest=str(latest), stale=0,
-                     price_backfilled=backfill["backfilled"])
+                     price_backfilled=backfill["backfilled"],
+                     analyse_benchmark_proxies_refreshed=proxies_refreshed)
             return
 
         # WARNING, not info: uvicorn leaves the ROOT logger at WARNING, so an `info` here is
@@ -1229,10 +1252,14 @@ def _run_asset_price_refresh(trigger: str) -> None:
             "[scheduler] asset price refresh (%s) done — %s moved, %s unchanged, %s failed",
             trigger, r["moved"], r["unchanged"], r["failed"],
         )
-        rec.done(f"{r['moved']} moved, {r['unchanged']} unchanged, {r['failed']} failed",
+        detail = f"{r['moved']} moved, {r['unchanged']} unchanged, {r['failed']} failed"
+        if proxies_refreshed is not None:
+            detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
+        rec.done(detail,
                  considered=considered, stale=len(stale), moved=r["moved"],
                  unchanged=r["unchanged"], failed=r["failed"],
-                 price_backfilled=backfill["backfilled"])
+                 price_backfilled=backfill["backfilled"],
+                 analyse_benchmark_proxies_refreshed=proxies_refreshed)
       except Exception as e:  # noqa: BLE001
         #  Caught here, so the record must be set by hand. `record_run` marks a run failed off the
         # exception PROPAGATING; swallowing it (which this must, to keep the scheduler thread
