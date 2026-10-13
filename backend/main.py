@@ -275,12 +275,16 @@ def _arm_sector_timeline_prewarm() -> None:
 async def _size_io_thread_pool() -> None:
     import asyncio  # noqa: PLC0415
     import concurrent.futures  # noqa: PLC0415
-    raw_workers = os.environ.get("IO_THREAD_WORKERS", "24")
+    # This pool is shared by every ``asyncio.to_thread`` route.  It must leave
+    # headroom for the bounded scheduler, browser/session workers and the
+    # small per-job pools; otherwise a burst of refresh work can consume the
+    # process thread allowance and even a cheap page read cannot start.
+    raw_workers = os.environ.get("IO_THREAD_WORKERS", "12")
     try:
         workers = int(raw_workers)
     except ValueError:
-        workers = 24
-    workers = max(4, min(48, workers))
+        workers = 12
+    workers = max(4, min(16, workers))
     asyncio.get_running_loop().set_default_executor(
         concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="bb-io")
     )
