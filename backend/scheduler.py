@@ -564,9 +564,16 @@ def _submit_scheduled_work(name: str, work) -> bool:
             future = _scheduled_executor.submit(work)
         except RuntimeError as e:
             _scheduled_slots.release()
-            # This is the exact failure that used to escape from Thread.start
-            # under a container thread limit.  A cron callback must survive it.
-            _log.exception("[scheduler] %s not started: worker pool unavailable: %s", name, e)
+            # Uvicorn reload/interpreter shutdown can race an APScheduler
+            # callback. It is an expected no-op: no work must start while the
+            # process is leaving, and a traceback makes that normal lifecycle
+            # event look like a failed scheduled job.
+            if "after shutdown" in str(e).lower():
+                _log.info("[scheduler] %s skipped: worker pool is shutting down", name)
+            else:
+                # A cron callback must survive a genuine worker-pool failure,
+                # but retain the exception context for diagnostics.
+                _log.exception("[scheduler] %s not started: worker pool unavailable: %s", name, e)
             return False
         _scheduled_futures[name] = future
 

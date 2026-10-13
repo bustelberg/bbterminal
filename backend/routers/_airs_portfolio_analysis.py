@@ -87,8 +87,12 @@ _MSCI_REGIONS = frozenset(MSCI_REGION.values())
 # index are in the same sector and the only question is which names they picked. Canonicalised
 # here, at the single point where a sector becomes a bucket.
 _SECTOR_ALIASES = {
+    "Information Technology": "Technology",
+    "Health Care": "Healthcare",
     "Basic Materials": "Materials",
     "Financial Services": "Financials",
+    "Consumer Discretionary": "Consumer Cyclical",
+    "Consumer Staples": "Consumer Defensive",
 }
 
 # Values that appear in the `sector` column of an EQUITY row but are not sectors — leftovers from
@@ -384,11 +388,16 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
     file_overrides = load_file_sector_overrides()
     out: dict[str, dict] = {}
     for r in rows:
-        if r.get("status") == "ok":
+        file_override = file_overrides.get(str(r.get("isin") or "").strip().upper())
+        # A reviewed direct-equity sector fix is also an identity correction:
+        # retain it if the bad Yahoo mapping has been deliberately removed.  Otherwise an
+        # unpriceable but known ACWI company would disappear from the classifier and return as
+        # "Unclassified". The override file is restricted to GICS sectors, so this cannot turn
+        # an arbitrary ETF into a company.
+        if r.get("status") == "ok" or file_override:
             company_id = r.get("company_id")
             default_sector = r.get("sector")
             db_override = overrides.get(int(company_id)) if company_id is not None else None
-            file_override = file_overrides.get(str(r.get("isin") or "").strip().upper())
             if file_override and db_override and file_override != db_override:
                 _log.error("[analysis] %s sector is %s in sector_overrides.json and %s in "
                            "company_sector_override; using the checked-in production override",
@@ -398,6 +407,10 @@ def _grid_uncached(isins: list[str]) -> dict[str, dict]:
                 r["sector_default"] = default_sector
                 r["sector"] = override
                 r["sector_overridden"] = True
+                # File overrides are reviewed direct-company corrections. Their sector must not
+                # be trumped by a stale wrong-listing row that calls the company an ETF.
+                if file_override:
+                    r["asset_class"] = "equity"
             else:
                 r["sector_default"] = default_sector
                 r["sector_overridden"] = False
@@ -1408,13 +1421,27 @@ def _detected_book_splits(holdings: list[dict], sheet) -> tuple[
                   if r.get("Fonds") == name and r.get("Tt") not in ("A", "V")]
         deposited = sum(float(r.get("Aantal") or 0) for r in events)
         first = min((str(r.get("Datum")) for r in events if r.get("Datum")), default=None)
+        # `qty` is today's quantity, while a split is identifiable only at the moment it
+        # happened. A later sale otherwise shrinks the numerator but not the deposited quantity:
+        # KLA was 310 immediately after its 10:1 split, then six shares were sold, so checking
+        # today's 304 yields the nonsensical ratio 304 / (304 - 279) = 12.16. Reverse ordinary
+        # trades after the corporate action to restore the post-event quantity. Their quantities
+        # are already in the post-split basis, so no further rescaling belongs here.
+        qty_at_event = qty
+        if first:
+            for trade in sheet.rows:
+                if (trade.get("Fonds") != name or trade.get("Tt") not in ("A", "V")
+                        or str(trade.get("Datum") or "") <= first):
+                    continue
+                amount = float(trade.get("Aantal") or 0)
+                qty_at_event += amount if trade.get("Tt") == "V" else -amount
         prices = [abs(float(r.get("Waarde  EUR") or r.get("Waarde  EUR.1") or 0))
                   / float(r["Aantal"])
                   for r in sheet.rows
                   if r.get("Fonds") == name and r.get("Tt") in ("A", "V")
                   and float(r.get("Aantal") or 0) > 0
                   and (not first or str(r.get("Datum") or "") < first)]
-        ratio = detect_split(qty, deposited, start_val / qty, prices)
+        ratio = detect_split(qty_at_event, deposited, start_val / qty, prices)
         if ratio and first:
             splits[name] = (ratio, first)
     return unknown, splits

@@ -12,7 +12,6 @@ const en = {
     loading: 'Computing attribution', error: 'Attribution could not be computed.',
     residual: (value: string) => `The attribution does not reconcile. Difference: ${value}.`,
     drivers: 'Holdings behind the result',
-    driversHint: 'Biggest contributors, detractors and benchmark winners you did not own',
   },
   headers: {
     name: 'Name', weight: 'Weight', ret: 'Ret.', contribution: 'Contr.',
@@ -28,9 +27,8 @@ const en = {
     noneMine: (bucket: string) => `You hold nothing in ${bucket} — the whole effect is the decision not to own it, so Selection and Interaction are zero.`,
     noneIndex: (benchmark: string, bucket: string) => `${benchmark} holds nothing in ${bucket}, so there is no index return to judge your picks against; the whole effect is allocation.`,
     shared: (benchmark: string) => `Blue circles indicate overlap between the portfolio and ${benchmark}.`,
-    contributors: 'Biggest contributors', detractors: 'Biggest detractors', detractorsHint: 'what cost you the most',
+    contributors: 'Biggest contributors', detractors: 'Biggest detractors',
     winners: (benchmark: string) => `${benchmark} winners you didn’t own`,
-    winnersHint: 'matched by COMPANY, not ISIN — a share class is not a different business', weightReturnHint: 'weight × return, in EUR',
   },
   row: {
     show: (bucket: string, benchmark: string) => `Show the names behind ${bucket} — what you hold and what ${benchmark} holds`,
@@ -114,7 +112,6 @@ const nl: AttributionCopy = {
     loading: 'Attributie berekenen', error: 'De attributie kon niet worden berekend.',
     residual: (value) => `De attributie sluit niet aan. Verschil: ${value}.`,
     drivers: 'Posities achter het resultaat',
-    driversHint: 'Grootste bijdragen, tegenvallers en gemiste indexwinnaars',
   },
   headers: {
     name: 'Naam', weight: 'Gewicht', ret: 'Rend.', contribution: 'Bijdr.',
@@ -130,9 +127,8 @@ const nl: AttributionCopy = {
     noneMine: (bucket) => `U houdt niets aan in ${bucket} — het hele effect is de keuze om deze niet te bezitten; Selectie en Interactie zijn daarom nul.`,
     noneIndex: (benchmark, bucket) => `${benchmark} houdt niets aan in ${bucket}. Er is dus geen indexrendement om uw selectie tegen af te zetten; het hele effect is allocatie.`,
     shared: (benchmark) => `Blauwe cirkels tonen overlap tussen de portefeuille en ${benchmark}.`,
-    contributors: 'Grootste positieve bijdragen', detractors: 'Grootste negatieve bijdragen', detractorsHint: 'wat het meeste kostte',
+    contributors: 'Grootste positieve bijdragen', detractors: 'Grootste negatieve bijdragen',
     winners: (benchmark) => `Winnaars in ${benchmark} die u niet bezat`,
-    winnersHint: 'gekoppeld op ONDERNEMING, niet op ISIN — een aandelenklasse is geen ander bedrijf', weightReturnHint: 'gewicht × rendement, in EUR',
   },
   row: {
     show: (bucket, benchmark) => `Toon de namen achter ${bucket} — wat u en ${benchmark} aanhouden`,

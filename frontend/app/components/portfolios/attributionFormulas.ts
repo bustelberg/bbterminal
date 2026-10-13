@@ -59,6 +59,14 @@ export function workedReturn(result: string | null | undefined): string {
   return withWorked(RETURN_TEX, has(result) ? String.raw`= ${pctTex(result)}` : '');
 }
 
+/** The two EUR prices behind one holding's return, with the displayed result. */
+export function workedPriceReturn(startEur: number | null | undefined,
+  endEur: number | null | undefined, result: string | null | undefined): string {
+  if (startEur == null || endEur == null || startEur <= 0 || !has(result)) return workedReturn(result);
+  return withWorked(String.raw`r = \left(\dfrac{P_{\text{end}}}{P_{\text{start}}} - 1\right) \times 100`,
+    String.raw`\left(\dfrac{${eurTex(endEur)}}{${eurTex(startEur)}} - 1\right) \times 100 = ${pctTex(result)}`);
+}
+
 /** `contribution = w · r` — one holding's share of the book times what it returned. */
 export const CONTRIBUTION_TEX = String.raw`c_i = w_i \times r_i`;
 

@@ -56,6 +56,11 @@ async def indicators_fetch(req: IndicatorRequest):
     exchange = req.exchange.upper()
     ticker = req.ticker.upper()
     indicator = req.indicator.lower()
+    if indicator in {"price", "volume", "close_price"}:
+        raise HTTPException(
+            400,
+            "Price and volume are sourced exclusively from Yahoo. Refresh the company's Yahoo mapping instead.",
+        )
 
     def work():
         symbol = _build_symbol(ticker, exchange)

@@ -11,7 +11,7 @@ import ManualPortfolioSection from './diversifier/ManualPortfolioSection';
 import SavedPortfoliosSection from './diversifier/SavedPortfoliosSection';
 import { useDiversifier } from './diversifier/useDiversifier';
 import { useFxCurrencies } from '../../lib/hooks/apiData';
-import type { AssetWeight, CorrelationResponse, DiversifierResult, DrawdownInfo, OptimizeResponse } from '../../lib/types/api';
+import type { AssetWeight, CorrelationResponse, DiversifierResult, DrawdownInfo, EtfPairCorrelationResponse, OptimizeResponse } from '../../lib/types/api';
 
 const fmtPct = (v: number | null | undefined, dp = 1) =>
   v == null ? '—' : `${(v * 100).toFixed(dp)}%`;
@@ -31,6 +31,13 @@ function corrClass(c: number | null): string {
   if (c <= 0.3) return 'text-pos-400';
   if (c <= 0.7) return 'text-warn-400';
   return 'text-neg-400';
+}
+
+function corrCellClass(c: number | null): string {
+  if (c == null) return 'bg-inset/40 text-fg-subtle';
+  if (c <= 0.3) return 'bg-pos-500/10 text-pos-400';
+  if (c <= 0.7) return 'bg-warn-500/10 text-warn-400';
+  return 'bg-neg-500/10 text-neg-400';
 }
 
 export default function DiversifierAnalysis() {
@@ -242,7 +249,7 @@ export default function DiversifierAnalysis() {
         {/* ── Funds (ETFs & bonds, treated the same) ────────────────── */}
         <BenchmarkSection
           title="Funds (ETFs & bonds)"
-          hint="Add any GuruFocus-priced fund by ticker; all selected funds are optimized into the diversifier share."
+          hint="Add any Yahoo Finance-priced fund by ticker; all selected funds are optimized into the diversifier share."
           rows={d.visibleEtfs}
           selectedIds={d.selectedEtfIds}
           onToggle={d.toggleEtf}
@@ -260,6 +267,12 @@ export default function DiversifierAnalysis() {
           emptyText={d.cutoffYear ? `No funds with history before ${d.cutoffYear}.` : 'No funds yet — add one above.'}
           loading={d.loadingLists}
         />
+        <div className="flex items-center gap-3">
+          <button onClick={d.runEtfPairCorrelation} disabled={!((d.selectedEtfIds.size === 2) || (d.selectedRunId != null && d.selectedEtfIds.size === 1)) || d.etfPairRunning} className="rounded-lg border border-accent-500 px-4 py-2 text-sm font-medium text-accent-400 transition-colors hover:bg-accent-600/10 disabled:cursor-not-allowed disabled:opacity-40">
+            {d.etfPairRunning ? <LoadingDots /> : 'Compare selected pair'}
+          </button>
+          <span className="text-xs text-fg-subtle">Select two funds, or select a strategy and one fund. Expand a year, then a month, to inspect their shared daily returns.</span>
+        </div>
 
         {/* ── Portfolio optimization ────────────────────────────────── */}
         {d.optimizeResult && d.compareBenchmarkId != null && d.optimizeResult.benchmark?.benchmark_id !== d.compareBenchmarkId && (
@@ -301,11 +314,37 @@ export default function DiversifierAnalysis() {
           onDelete={d.deletePortfolio}
         />
 
-        {/* ── Per-ETF correlation results ───────────────────────────── */}
+        {/* Correlation results */}
         {d.result && <ResultsCard result={d.result} />}
+        {d.etfPairResult && <EtfPairCorrelationCard result={d.etfPairResult} />}
       </div>
     </div>
   );
+}
+
+function EtfPairCorrelationCard({ result }: { result: EtfPairCorrelationResponse }) {
+  const first = result.first;
+  const second = result.second;
+  return <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
+    <div className="flex flex-wrap items-baseline justify-between gap-3">
+      <div><h3 className="text-xs font-medium uppercase tracking-wider text-fg-muted">Pair comparison</h3><p className="mt-1 text-sm text-fg-strong"><span className="font-mono">{first.ticker}</span> <span className="text-fg-subtle">×</span> <span className="font-mono">{second.ticker}</span></p></div>
+      <div className={`font-mono text-lg font-medium ${corrClass(result.correlation ?? null)}`}>{result.correlation == null ? 'Correlation —' : `Correlation ${result.correlation.toFixed(2)}`}</div>
+    </div>
+    <p className="mt-2 text-xs text-fg-subtle">{result.overlap_months} shared months · {result.overlap_from ?? '—'} to {result.overlap_to ?? '—'} · returns are aligned to dates both instruments have.</p>
+    <DrilldownReturnTable result={result} />
+  </div>;
+}
+
+function DrilldownReturnTable({ result }: { result: EtfPairCorrelationResponse }) {
+  const [openYear, setOpenYear] = useState<number | null>(null);
+  const [openMonth, setOpenMonth] = useState<string | null>(null);
+  const monthsForYear = (year: number) => result.monthly.filter((row) => row.month.startsWith(`${year}-`));
+  const daysForMonth = (month: string) => result.daily.filter((row) => row.date.startsWith(`${month}-`));
+  const toggleYear = (year: number) => {
+    setOpenYear((current) => current === year ? null : year);
+    setOpenMonth(null);
+  };
+  return <div className="mt-5"><h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-fg-subtle">Returns by period</h4><div className="max-h-[34rem] overflow-auto rounded-lg border border-neutral-800/50"><table className="w-full text-sm"><thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-neutral-800/60 text-xs text-fg-subtle"><th className="px-3 py-2 text-left font-medium">Period</th><th className="px-3 py-2 text-right font-medium font-mono">{result.first.ticker}</th><th className="px-3 py-2 text-right font-medium font-mono">{result.second.ticker}</th></tr></thead><tbody>{result.annual.map((year) => <Fragment key={year.year}><tr onClick={() => toggleYear(year.year)} className="cursor-pointer border-b border-neutral-800/40 hover:bg-inset/30"><td className="px-3 py-1.5 font-mono text-xs text-fg-strong">{openYear === year.year ? '▾' : '▸'} {year.year}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(year.first_return)}`}>{fmtSignedPct(year.first_return)}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(year.second_return)}`}>{fmtSignedPct(year.second_return)}</td></tr>{openYear === year.year && monthsForYear(year.year).map((month) => <Fragment key={month.month}><tr onClick={() => setOpenMonth((current) => current === month.month ? null : month.month)} className="cursor-pointer border-b border-neutral-800/30 bg-page/30 hover:bg-inset/30"><td className="px-3 py-1.5 pl-8 font-mono text-xs text-fg-muted">{openMonth === month.month ? '▾' : '▸'} {month.month}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(month.first_return)}`}>{fmtSignedPct(month.first_return)}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(month.second_return)}`}>{fmtSignedPct(month.second_return)}</td></tr>{openMonth === month.month && <>{daysForMonth(month.month).map((day) => <tr key={day.date} className="border-b border-neutral-800/20 bg-page/50"><td className="px-3 py-1 pl-14 font-mono text-xs text-fg-subtle">{day.date}</td><td className={`px-3 py-1 text-right font-mono text-xs ${pnlClass(day.first_return)}`}>{fmtSignedPct(day.first_return)}</td><td className={`px-3 py-1 text-right font-mono text-xs ${pnlClass(day.second_return)}`}>{fmtSignedPct(day.second_return)}</td></tr>)}{daysForMonth(month.month).length === 0 && <tr className="border-b border-neutral-800/20 bg-page/50"><td colSpan={3} className="px-3 py-2 pl-14 text-xs text-fg-subtle">No shared daily history is stored for this month.</td></tr>}</>}</Fragment>)}</Fragment>)}</tbody></table></div></div>;
 }
 
 function StatPair({ label, before, after, bench, benchLabel, dp = 2 }: { label: string; before: number | null | undefined; after: number | null | undefined; bench?: number | null; benchLabel?: string; dp?: number }) {
@@ -655,11 +694,28 @@ function OptimizeCard({ result: r, title, onSetIsin }: {
 
 function ResultsCard({ result }: { result: CorrelationResponse }) {
   const s = result.strategy;
+  const matrix = result.matrix;
   return (
     <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
       <div className="flex items-baseline justify-between mb-1">
         <h3 className="text-fg-muted text-xs font-medium uppercase tracking-wider">Results</h3>
         <span className="text-fg-strong text-sm font-medium">{s.name}</span>
+      </div>
+
+      <div className="mt-4 overflow-auto">
+        <div className="mb-2 text-xs font-medium uppercase tracking-wider text-fg-subtle">Correlation matrix</div>
+        <table className="border-separate border-spacing-1 text-sm">
+          <thead><tr><th className="px-2 py-1 text-left text-xs font-medium text-fg-subtle">vs</th>{matrix.labels.map((label) => (
+            <th key={label.key} title={label.name ?? label.label} className="px-2 py-1 text-right font-mono text-xs font-medium text-fg-subtle">{label.label}</th>
+          ))}</tr></thead>
+          <tbody>{matrix.labels.map((row, i) => <tr key={row.key}>
+            <th title={row.name ?? row.label} className="px-2 py-1 text-left font-mono text-xs font-medium text-fg-muted">{row.label}</th>
+            {(matrix.values[i] ?? []).map((value, j) => <td key={matrix.labels[j]?.key ?? j} title={`${row.name ?? row.label} × ${matrix.labels[j]?.name ?? matrix.labels[j]?.label ?? 'ETF'} · ${matrix.overlaps[i]?.[j] ?? 0} shared month(s)`} className={`min-w-14 rounded px-2 py-1 text-right font-mono text-xs font-medium ${corrCellClass(value)}`}>
+              {value == null ? '—' : value.toFixed(2)}
+            </td>)}
+          </tr>)}</tbody>
+        </table>
+        <p className="mt-2 text-xs text-fg-subtle">Strategy and every selected ETF are compared pairwise using monthly returns. Hover a cell to see that pair’s shared-month count.</p>
       </div>
 
       <div className="overflow-auto">

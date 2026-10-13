@@ -152,6 +152,10 @@ _LEG_MAX_ENTRIES = 4096
 
 _cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
 _leg_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=_LEG_MAX_ENTRIES, ttl_seconds=_TTL_SECONDS)
+# Attribution has one compact payload per month.  It must not live in `_cache`: prewarming the
+# ten month buttons for several portfolios would evict the much more expensive Analyse payloads.
+# It also is not a leg: a Brinson result is a complete screen response, not a reusable sub-read.
+_attribution_cache: _LruTtlCache[Any] = _LruTtlCache(max_size=512, ttl_seconds=_TTL_SECONDS)
 _stamp_lock = threading.Lock()
 _stamp: tuple[float, str] | None = None   # (expires_monotonic, fingerprint)
 
@@ -234,6 +238,22 @@ def put(key: tuple, fp: str | None, value: Any) -> None:
     _cache.put((fp, *key), value)
 
 
+def attribution_get(key: tuple, fp: str | None) -> Any | None:
+    """Return one monthly-attribution payload for this exact data version."""
+    if fp is None:
+        return None
+    hit = _attribution_cache.get((fp, *key))
+    if hit is not None:
+        _log.info("[analysis-cache] attribution HIT %s", key)
+    return hit
+
+
+def attribution_put(key: tuple, fp: str | None, value: Any) -> None:
+    """Store one monthly-attribution payload for this exact data version."""
+    if fp is not None:
+        _attribution_cache.put((fp, *key), value)
+
+
 def cached(key: tuple, compute: Callable[[], Any]) -> Any:
     """`compute()`, memoized against the current data fingerprint.
 
@@ -313,9 +333,10 @@ def leg_put_many(values: dict[tuple, Any]) -> None:
 def invalidate() -> int:
     """Drop everything, both stores. Not needed for correctness (the fingerprint handles it) —
     here for an operator who wants a cold read, and for tests."""
-    n = _cache.size() + _leg_cache.size()
+    n = _cache.size() + _leg_cache.size() + _attribution_cache.size()
     _cache.clear()
     _leg_cache.clear()
+    _attribution_cache.clear()
     with _stamp_lock:
         globals()["_stamp"] = None
     return n
@@ -324,4 +345,5 @@ def invalidate() -> int:
 def stats() -> dict:
     return {"entries": _cache.size(), "max_entries": _MAX_ENTRIES,
             "leg_entries": _leg_cache.size(), "leg_max_entries": _LEG_MAX_ENTRIES,
+            "attribution_entries": _attribution_cache.size(), "attribution_max_entries": 512,
             "watched_tables": len(_WATCHED)}

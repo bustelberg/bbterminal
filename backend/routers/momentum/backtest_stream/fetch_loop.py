@@ -9,7 +9,6 @@ and the int counters in `counters` in place."""
 from __future__ import annotations
 
 import asyncio
-import functools
 from routers._sse import sse_event as _emit, sse_keepalive as _keepalive
 import os
 import time
@@ -19,12 +18,7 @@ from datetime import date
 import pandas as pd
 
 from deps import supabase
-from ingest.prices import (
-    PriceResult,
-    _ensure_bucket,
-    ensure_prices_for_company,
-    ensure_volume_for_company,
-)
+from asset_pipeline.company_prices import YahooPriceResult, refresh_company_prices
 
 
 async def run_fetch_loop(
@@ -45,12 +39,11 @@ async def run_fetch_loop(
 
     # Warm the storage bucket once before launching tasks — otherwise the
     # first N workers would race and each fire a bucket-create HTTP call.
-    await asyncio.to_thread(_ensure_bucket, supabase)
 
     # Each company task submits 2 blocking HTTP calls in parallel (price +
     # volume), so the executor needs 2 slots per concurrent task or the
     # second call queues behind the first and inflates wall-clock timings.
-    pool_size = concurrency * 2 + 4
+    pool_size = concurrency + 2
     executor = ThreadPoolExecutor(max_workers=pool_size, thread_name_prefix="fetch")
     loop = asyncio.get_event_loop()
 
@@ -76,28 +69,14 @@ async def run_fetch_loop(
             task_start = time.monotonic()
             try:
                 # Run price + volume concurrently inside one company task
-                pr_fut = loop.run_in_executor(
-                    executor,
-                    functools.partial(
-                        ensure_prices_for_company,
-                        supabase, row_cid, row_ticker, row_exchange,
-                        data_cutoff=data_cutoff,
-                    ),
-                )
-                vr_fut = loop.run_in_executor(
-                    executor,
-                    functools.partial(
-                        ensure_volume_for_company,
-                        supabase, row_cid, row_ticker, row_exchange,
-                        data_cutoff=data_cutoff,
-                    ),
-                )
+                pr_fut = loop.run_in_executor(executor, lambda: refresh_company_prices(row_cid))
+                vr_fut = loop.run_in_executor(executor, YahooPriceResult)
                 pr_res, vr_res = await asyncio.gather(pr_fut, vr_fut, return_exceptions=True)
                 if isinstance(pr_res, BaseException):
                     raise pr_res
                 pr = pr_res
                 if isinstance(vr_res, BaseException):
-                    vr = PriceResult()
+                    vr = YahooPriceResult()
                     vr.source = "error"
                     vr.error = str(vr_res)
                 else:

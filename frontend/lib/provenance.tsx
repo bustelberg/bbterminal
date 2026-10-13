@@ -272,11 +272,13 @@ function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
 
 
 function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh,
-  worked, legend, calculation, onRefresh }: {
+  worked, legend, calculation, when, onRefresh }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
   note?: string; how?: string; kind?: ProvKind;
   worked?: string; legend?: readonly FormulaSymbol[];
   calculation?: React.ReactNode;
+  /** Dated operands, for calculations with more than one relevant observation. */
+  when?: React.ReactNode;
   column?: boolean; what?: string;
   /** See `Provenance`. */
   onRefresh?: () => Promise<string | null>;
@@ -332,7 +334,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
               row, and the one the reader can act on was the one not shown. `asOf` remains the
               answer only where no fetch time exists (yfinance closes, FX rates, computed values),
               which is most call sites and is unchanged. */}
-          {column
+          {when ?? (column
             ? <span className="text-fg-muted">per value — each cell carries its own date</span>
             : fetchedAt
               ? (
@@ -348,7 +350,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
                     <FreshnessPill stale={f.stale} label={f.label} />
                   </span>
                 )
-                : <span className="text-fg-muted">no dated source (a structural / computed value)</span>}
+                : <span className="text-fg-muted">no dated source (a structural / computed value)</span>)}
         </Field>
         {/*  THE ACTION THE AMBER BADGE ALREADY PROMISED. The icon's own aria-label has read
             "not current; refresh to update" since it was written, and until now there was nowhere
@@ -489,7 +491,7 @@ export function ProvenanceFetchedAt({ at, scope = 'all', children }: {
 }
 
 export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what,
-  worked, legend, calculation, onRefresh, staleReason }: {
+  worked, legend, calculation, when, onRefresh, staleReason }: {
   source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
@@ -497,6 +499,8 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   legend?: readonly FormulaSymbol[];
   /** A literal, caller-designed audit trail when a list of source rows is clearer than algebra. */
   calculation?: React.ReactNode;
+  /** Dated operands, displayed instead of a single as-of date. */
+  when?: React.ReactNode;
   /** When WE last read the source, if the caller knows it. Turns an amber badge from a dead end
    *  into an answer — see `whoseLag` in the card. Optional everywhere. */
   fetchedAt?: string | null;
@@ -554,7 +558,7 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
     : provenanceFreshness(asOf, fetched, column, source);
   return (
     <InfoTip wide={calculation != null} content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
-      worked={worked} legend={legend} calculation={calculation}
+      worked={worked} legend={legend} calculation={calculation} when={when}
       how={how} kind={kind} column={column} what={what} fresh={fresh}
       onRefresh={onRefresh} />}>
       <span

@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { refreshPlanForTab } from './OwnerEarningsModal';
 
 describe('refreshPlanForTab', () => {
@@ -18,5 +20,11 @@ describe('refreshPlanForTab', () => {
     expect(refreshPlanForTab('longequity')).toEqual({
       feeds: 'statements_estimates', prices: true, keyRatios: false,
     });
+  });
+
+  it('names the active tab in the persistent refresh card', () => {
+    const source = readFileSync(join(__dirname, 'OwnerEarningsModal.tsx'), 'utf8');
+    expect(source).toContain('jobTitle={chrome.refreshingTab(chrome.tabs[tab])}');
+    expect(source).toContain('{...refreshPlan}');
   });
 });

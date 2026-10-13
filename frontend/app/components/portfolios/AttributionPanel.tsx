@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
@@ -147,7 +147,7 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
   owner = 'the model', held = true }: {
   title: string;
   rows: NonNullable<ModelPortfolioAttribution['top_contributors']>;
-  hint: string;
+  hint?: string;
   weightSrc: SourceKey;
   returnSrc: SourceKey;
   weightAsOf?: string | null;
@@ -168,7 +168,7 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
   return (
     <div>
       <h5 className="text-[12px] font-semibold text-fg-strong">{title}</h5>
-      <p className="text-[11px] text-fg-faint mb-1">{hint}</p>
+      {hint && <p className="text-[11px] text-fg-faint mb-1">{hint}</p>}
       {/* `table-fixed` + this colgroup pin the numeric columns to a fixed width and let the Name
           column take the rest and TRUNCATE — without it the table sizes to its content and, in the
           narrower dock, spills past its grid cell and overlaps the neighbouring list. */}
@@ -234,7 +234,9 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
                     ? <AirsWeightCalculation components={r.weight_denominator_components}
                       numerator={r.weight_value_eur} denominator={r.weight_total_eur}
                       result={`${wt(r.weight_pct)}%`}
-                      holdingName={r.airs_name ?? r.name ?? r.ticker ?? r.isin ?? 'Holding'} />
+                      holdingName={r.airs_name ?? r.name ?? r.ticker ?? r.isin ?? 'Holding'}
+                      rolledTo={r.weight_denominator_components.some(
+                        (component) => component.base_value_eur != null) ? weightAsOf : undefined} />
                     : undefined} />}>
                   {wt(r.weight_pct)}%
                 </Num>
@@ -355,10 +357,26 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
 }) {
   const copy = useAttributionCopy();
   const [axis, setAxis] = useState<Axis>('sector');
-  const [data, setData] = useState<ModelPortfolioAttribution | null>(null);
+  // Keep the fully-shaped response for every period while this panel is open. The backend also
+  // prewarms and fingerprints these exact requests, but retaining the responses here means a
+  // Jan → Feb → Jan click is synchronous: no spinner, no HTTP trip, no chance to recompute.
+  const periodCache = useRef(new Map<string, ModelPortfolioAttribution>());
+  const [loaded, setLoaded] = useState<{ key: string; value: ModelPortfolioAttribution } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [refreshingPrices, setRefreshingPrices] = useState(false);
+  const [monthOffset, setMonthOffset] = useState(0);
+  const attributionMonths = Array.from({ length: new Date().getUTCMonth() + 1 }, (_, index) => {
+    const d = new Date(Date.UTC(new Date().getUTCFullYear(), index, 1));
+    return { value: d.toISOString().slice(0, 10), label: d.toLocaleDateString(copy.lang === 'nl' ? 'nl-NL' : 'en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }) };
+  });
+  const selectedMonth = monthOffset ? attributionMonths[monthOffset - 1]?.value : undefined;
+  // Keep browser responses compatible with the payload version. The server uses the matching
+  // cache version so a deployed calculation upgrade cannot leave a live modal showing old maths.
+  const requestKey = JSON.stringify({ attributionPayload: 'rolled-opening-weights-with-prices-v3', id, benchmark, window, axis, source, lookThrough,
+    month: selectedMonth ?? 'ytd', refreshVersion });
+  const data = periodCache.current.get(requestKey)
+    ?? (loaded?.key === requestKey ? loaded.value : null);
   /**
    * The bucket whose names are open, or null.
    *
@@ -371,22 +389,32 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
 
   useEffect(() => {
     let cancelled = false;
+    const cached = periodCache.current.get(requestKey);
+    if (cached) {
+      setError(null);
+      setLoaded({ key: requestKey, value: cached });
+      return () => { cancelled = true; };
+    }
     void (async () => {
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/model-portfolios/${id}/attribution`
           + `?benchmark=${encodeURIComponent(benchmark)}&window=${window}&axis=${axis}`
-          + `&source=${source}&look_through=${lookThrough}`);
+          + `&source=${source}&look_through=${lookThrough}`
+          + (selectedMonth ? `&month=${encodeURIComponent(selectedMonth)}` : ''), { noReadCache: true });
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        setData(b as ModelPortfolioAttribution);
+        const value = b as ModelPortfolioAttribution;
+        periodCache.current.set(requestKey, value);
+        setError(null);
+        setLoaded({ key: requestKey, value });
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
     })();
     return () => { cancelled = true; };
-  }, [id, benchmark, window, axis, source, lookThrough, refreshVersion]);
+  }, [id, benchmark, window, axis, source, lookThrough, refreshVersion, selectedMonth, requestKey]);
 
   const refreshBenchmarkPrices = async () => {
     setRefreshingPrices(true);
@@ -398,7 +426,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       const job = await done;
       if (job.status === 'done') {
         setError(null);
-        setData(null);
+        // Price/cap data changed. Do not let a response calculated before the refresh survive in
+        // the panel-local cache; the backend's data fingerprint will likewise reject its copy.
+        periodCache.current.clear();
+        setLoaded(null);
         setRefreshVersion((version) => version + 1);
       }
     } catch (e) {
@@ -421,7 +452,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
    * "performance attribution" — `Since-inception performance attribution compared to SP500`. Left
    * as "Since inception" it reads as a sentence fragment where its twin reads as a title.
    */
-  const label = window === 'ytd' ? copy.chrome.ytd : copy.chrome.since;
+  const selectedPeriodLabel = selectedMonth ? attributionMonths[monthOffset - 1]?.label : null;
+  const label = selectedPeriodLabel ?? (window === 'ytd' ? copy.chrome.ytd : copy.chrome.since);
   /**
    * WHEN the drill-down's weights were measured — the header under "Weight" in each names table.
    *
@@ -430,7 +462,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
    * the 56 models is somewhere inside this year. "Start of year" on that second case would be a
    * confident wrong date on a column a reader uses to check the arithmetic.
    */
-  const startLabel = window === 'ytd' ? copy.chrome.startYear : copy.chrome.inception;
+  // The weight is measured at the WINDOW'S OPEN, not sometime during the named month. Showing
+  // “October 2026” made the header look like an imprecise monthly average although the payload's
+  // opening weights are specifically from 2026-10-01.
+  const startDate = data?.start ?? selectedMonth;
+  const startLabel = startDate
+    ? new Intl.DateTimeFormat(copy.lang === 'nl' ? 'nl-NL' : 'en-GB', {
+      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+    }).format(new Date(`${startDate.slice(0, 10)}T00:00:00Z`))
+    : (window === 'ytd' ? copy.chrome.startYear : copy.chrome.inception);
   // ONE source for the word: the axis the server actually computed, NOT the picker's state. If
   // the two disagree — a response still in flight, a server that normalises an unknown axis —
   // the labels must describe the numbers ON SCREEN, not the request that asked for them.
@@ -485,7 +525,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     returnBasis: 'The EUR close at the end of the window against the close at the start.',
   };
   const hasRows = (data?.rows?.length ?? 0) > 0;
-  const attributionYear = data?.start?.slice(0, 4) ?? new Date().getUTCFullYear().toString();
+  const attributionYear = selectedPeriodLabel ?? data?.start?.slice(0, 4) ?? new Date().getUTCFullYear().toString();
   const portfolioWeightTotal = (data?.rows ?? [])
     .reduce((sum, row) => sum + n(row.portfolio_weight_pct), 0);
   const benchmarkWeightTotal = (data?.rows ?? [])
@@ -497,15 +537,21 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {/*  `shrink-0`, AND IT CARRIES THE AXIS PICKER. Sized to its content, this dialog
           resized every time the axis changed — moving the select the reader had just used
           out from under the pointer. See `PanelDialog` for the fixed box. */}
-      <div className="shrink-0 flex items-start justify-between gap-3 mb-2">
-        <div>
+      <div className="relative shrink-0 mb-2">
+        <div className="w-full">
           <h4 className="text-sm font-semibold text-fg-strong">
             {copy.chrome.title(label, benchmark, portfolioName || data?.name || undefined)}
           </h4>
+          <div className="mt-4 flex justify-center py-2"><div className="flex max-w-full items-center gap-1 overflow-x-auto px-2 text-xs" aria-label="Attribution period">
+            {[{ label: 'YTD', value: 0 }, ...attributionMonths.map((month, index) => ({ label: month.label.split(' ')[0].slice(0, 3), value: index + 1 }))].map((period) => <button
+              key={period.value} type="button" onClick={() => { setError(null); setOpenBucket(null); setMonthOffset(period.value); }}
+              className={`shrink-0 rounded-md px-2 py-1 transition-colors ${monthOffset === period.value ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-white/10 hover:text-fg'}`}
+              aria-pressed={monthOffset === period.value}>{period.label}</button>)}
+          </div></div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="absolute right-0 top-0 flex items-center gap-2 shrink-0">
           <select value={axis}
-            onChange={(e) => { setData(null); setOpenBucket(null); setAxis(e.target.value as Axis); }}
+            onChange={(e) => { setError(null); setOpenBucket(null); setAxis(e.target.value as Axis); }}
             className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg focus:border-accent-500">
             <option value="sector">{copy.axis.bySector}</option>
             <option value="region">{copy.axis.byRegion}</option>
@@ -809,7 +855,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </table>
           </div>
 
-          <details className="group rounded-lg border border-neutral-800/35 bg-card">
+          <details open className="group rounded-lg border border-neutral-800/35 bg-card">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5
                                 text-[12px] text-fg-muted hover:bg-overlay/[0.02]">
               <svg viewBox="0 0 16 16" aria-hidden="true"
@@ -818,17 +864,14 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                 <path d="m6 3 5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <span className="font-semibold text-fg-strong">{copy.chrome.drivers}</span>
-              <span className="hidden text-fg-faint sm:inline">
-                &middot; {copy.chrome.driversHint}
-              </span>
             </summary>
             <div className="grid gap-5 border-t border-neutral-800/25 px-3 py-3 md:grid-cols-3">
             <Names title={copy.names.contributors} rows={data.top_contributors ?? []}
-              hint={copy.names.weightReturnHint} weightSrc={pWeightSource} returnSrc={pSrc}
+              weightSrc={pWeightSource} returnSrc={pSrc}
               weightAsOf={data.start} returnAsOf={benchmarkAsOf}
               weightHow={pWeightSrc} returnHow={pReturnHow} />
             <Names title={copy.names.detractors} rows={data.top_detractors ?? []}
-              hint={copy.names.detractorsHint} weightSrc={pWeightSource} returnSrc={pSrc}
+              weightSrc={pWeightSource} returnSrc={pSrc}
               weightAsOf={data.start} returnAsOf={benchmarkAsOf}
               weightHow={pWeightSrc} returnHow={pReturnHow} />
             {/* The other half of "why" — and the half a holdings-only view can never show.
@@ -837,7 +880,6 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                 different subject — the per-cell text has to say so or a benchmark's gain reads as
                 something that happened in your book. */}
             <Names title={copy.names.winners(benchmark)} rows={data.missed_winners ?? []}
-              hint={copy.names.winnersHint}
               weightSrc="benchmark_caps" returnSrc="benchmark"
               weightAsOf={data.start} returnAsOf={benchmarkAsOf}
               owner={benchmark} held={false}

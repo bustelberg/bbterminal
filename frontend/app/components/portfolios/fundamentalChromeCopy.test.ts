@@ -89,4 +89,10 @@ describe('Fundamental modal chrome copy', () => {
       expect(C.nl[k], k).not.toBe(C.en[k]);
     }
   });
+
+  it('names the active tab in the progress card in the reader language', () => {
+    expect(C.en.refreshingTab(C.en.tabs.quickval)).toBe('Refreshing Quick Valuation tab…');
+    expect(C.en.refreshingTab(C.en.tabs.deepval)).toBe('Refreshing Deep Valuation tab…');
+    expect(C.nl.refreshingTab(C.nl.tabs.quickval)).toBe('Tab Quick Valuation verversen…');
+  });
 });

@@ -712,7 +712,7 @@ def index_returns(label: str, starts: list[str]) -> dict[str, dict]:
 
 
 def index_rows(label: str, start: str, *,
-               include_membership_identity: bool = False) -> tuple[list[dict], dict]:
+               include_membership_identity: bool = False, end: str | None = None) -> tuple[list[dict], dict]:
     """The index's CONSTITUENTS over one window — each with its start-of-window weight and its
     EUR return. Returns (rows, coverage).
 
@@ -727,7 +727,7 @@ def index_rows(label: str, start: str, *,
     if not mem:
         return [], coverage
     lookback = (date.fromisoformat(start) - timedelta(days=45)).isoformat()
-    today = date.today().isoformat()
+    today = end or date.today().isoformat()
     ids = [m["company_id"] for m in mem]
     fx = _fx_to_eur({(m.get("currency") or "USD") for m in mem}, lookback, today)
     marks = window_marks(ids, lookback, start, today)

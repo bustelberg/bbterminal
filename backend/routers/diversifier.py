@@ -13,7 +13,8 @@ Endpoints:
     POST /api/momentum/diversifier/correlation    the analysis
 
 Storage note: ETFs reuse the `benchmark` / `benchmark_price` tables (an
-ETF here is just a benchmark with no sector tag). The math lives in the
+ETF here is just a benchmark with no sector tag). Its price history is sourced
+from Yahoo Finance. The math lives in the
 pure, unit-tested `momentum.diversification` module; this router only does
 the DB loads and the variant/shape plumbing.
 """
@@ -88,9 +89,75 @@ class DiversifierResult(BaseModel):
     sortino_lift: float | None = None
 
 
+class CorrelationMatrixLabel(BaseModel):
+    """One row/column in the selected-strategy-and-funds correlation matrix."""
+    key: str
+    label: str
+    name: str | None = None
+
+
+class CorrelationMatrix(BaseModel):
+    """Pairwise monthly-return correlations and their own overlap counts.
+
+    Each cell is calculated over the two series' shared months, rather than a
+    fleet-wide intersection. A young ETF must not make every other comparison
+    throw away its older history.
+    """
+    labels: list[CorrelationMatrixLabel]
+    values: list[list[float | None]]
+    overlaps: list[list[int]]
+
+
 class CorrelationResponse(BaseModel):
     strategy: StrategyStats
     results: list[DiversifierResult]
+    matrix: CorrelationMatrix
+
+
+class EtfPairCorrelationRequest(BaseModel):
+    """A direct pair: two ETFs, or one saved strategy and one ETF."""
+    benchmark_ids: list[int]
+    backtest_run_id: int | None = None
+    variant_key: str | None = None
+
+
+class EtfPairAsset(BaseModel):
+    kind: str
+    benchmark_id: int | None = None
+    backtest_run_id: int | None = None
+    ticker: str
+    name: str
+
+
+class EtfPairMonth(BaseModel):
+    month: str
+    first_return: float
+    second_return: float
+
+
+class EtfPairYear(BaseModel):
+    year: int
+    first_return: float
+    second_return: float
+
+
+class EtfPairDay(BaseModel):
+    date: str
+    first_return: float
+    second_return: float
+
+
+class EtfPairCorrelationResponse(BaseModel):
+    """A pair's correlation and aligned return history."""
+    first: EtfPairAsset
+    second: EtfPairAsset
+    correlation: float | None = None
+    overlap_months: int
+    overlap_from: str | None = None
+    overlap_to: str | None = None
+    annual: list[EtfPairYear]
+    monthly: list[EtfPairMonth]
+    daily: list[EtfPairDay]
 
 
 class ResolveNameResponse(BaseModel):
@@ -270,6 +337,65 @@ def _select_scope(
     return result.get("summary") or {}, result.get("monthly_records") or [], None
 
 
+def _daily_records_for_scope(result: dict, variant_key: str | None) -> list[dict]:
+    """Return the daily equity curve for the selected strategy scope.
+
+    Variant bundles persist their curve inside the selected variant; old saved
+    runs without a daily curve simply produce no daily drill-down rows.
+    """
+    variants = result.get("variants")
+    if isinstance(variants, list) and variants:
+        chosen = None
+        if variant_key is not None:
+            chosen = next(
+                (v for v in variants if isinstance(v, dict) and str(v.get("key")) == variant_key),
+                None,
+            )
+        elif len(variants) == 1:
+            chosen = variants[0]
+        return (chosen or {}).get("daily_records") or []
+    return result.get("daily_records") or []
+
+
+def _daily_returns_from_prices(prices: list[tuple[str, float]]) -> dict[str, float]:
+    """Convert ordered close prices to one-day returns, keyed by ISO date."""
+    out: dict[str, float] = {}
+    previous: float | None = None
+    for raw_day, raw_price in sorted(prices):
+        try:
+            price = float(raw_price)
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        day = str(raw_day)[:10]
+        if previous is not None:
+            out[day] = price / previous - 1.0
+        previous = price
+    return out
+
+
+def _daily_returns_from_curve(records: list[dict]) -> dict[str, float]:
+    """Turn a strategy's cumulative daily curve into one-day returns."""
+    points: list[tuple[str, float]] = []
+    for row in records:
+        if not isinstance(row, dict) or row.get("date") is None:
+            continue
+        try:
+            points.append((str(row["date"])[:10], 1.0 + float(row["cumulative_return_pct"]) / 100.0))
+        except (KeyError, TypeError, ValueError):
+            continue
+    out: dict[str, float] = {}
+    previous: float | None = None
+    for day, value in sorted(points):
+        if value <= 0:
+            continue
+        if previous is not None:
+            out[day] = value / previous - 1.0
+        previous = value
+    return out
+
+
 async def _run_name(run_id: int) -> str:
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
@@ -385,12 +511,20 @@ async def correlation(req: CorrelationRequest):
     meta = {m["benchmark_id"]: m for m in (meta_resp.data or [])}
 
     results: list[DiversifierResult] = []
+    # Keep the actual return maps as well as the one-to-strategy result. The
+    # latter cannot be used to derive ETF-to-ETF correlation: every pair has
+    # its own overlap window.
+    matrix_series: list[tuple[CorrelationMatrixLabel, dict[str, float]]] = [
+        (CorrelationMatrixLabel(key="strategy", label="Strategy", name=run_name), strategy_returns),
+    ]
     for bid in req.benchmark_ids:
         m = meta.get(bid)
         if not m:
             continue
         prices = await _load_benchmark_prices(bid)
         etf_returns = div.prices_to_monthly_returns(prices)
+        matrix_series.append((CorrelationMatrixLabel(
+            key=f"benchmark:{bid}", label=m["ticker"], name=m.get("name")), etf_returns))
         a = div.analyze_pair(strategy_returns, etf_returns, rf, w_max=w_max, objective=req.objective)
         results.append(
             DiversifierResult(
@@ -403,7 +537,116 @@ async def correlation(req: CorrelationRequest):
 
     # Lowest correlation first (best diversifier); undefined correlations last.
     results.sort(key=lambda r: (r.correlation is None, r.correlation if r.correlation is not None else 0.0))
-    return CorrelationResponse(strategy=strategy_stats, results=results)
+    matrix_values: list[list[float | None]] = []
+    matrix_overlaps: list[list[int]] = []
+    for _left_label, left in matrix_series:
+        value_row: list[float | None] = []
+        overlap_row: list[int] = []
+        for _right_label, right in matrix_series:
+            left_values, right_values, months = div.align(left, right)
+            value_row.append(div.pearson(left_values, right_values))
+            overlap_row.append(len(months))
+        matrix_values.append(value_row)
+        matrix_overlaps.append(overlap_row)
+    return CorrelationResponse(
+        strategy=strategy_stats, results=results,
+        matrix=CorrelationMatrix(
+            labels=[label for label, _series in matrix_series],
+            values=matrix_values, overlaps=matrix_overlaps,
+        ),
+    )
+
+
+def _etf_pair_response(first_meta: dict, first_returns: dict[str, float],
+                       second_meta: dict, second_returns: dict[str, float],
+                       first_daily: dict[str, float] | None = None,
+                       second_daily: dict[str, float] | None = None) -> EtfPairCorrelationResponse:
+    """Build a direct comparison on each pair's shared monthly/daily windows."""
+    first_values, second_values, months = div.align(first_returns, second_returns)
+    annual: list[EtfPairYear] = []
+    for year in sorted({int(month[:4]) for month in months}):
+        indices = [i for i, month in enumerate(months) if int(month[:4]) == year]
+        first_year = 1.0
+        second_year = 1.0
+        for i in indices:
+            first_year *= 1.0 + first_values[i]
+            second_year *= 1.0 + second_values[i]
+        annual.append(EtfPairYear(year=year, first_return=first_year - 1.0,
+                                  second_return=second_year - 1.0))
+    return EtfPairCorrelationResponse(
+        first=EtfPairAsset(**({"kind": "etf"} | first_meta)),
+        second=EtfPairAsset(**({"kind": "etf"} | second_meta)),
+        correlation=div.pearson(first_values, second_values), overlap_months=len(months),
+        overlap_from=months[0] if months else None, overlap_to=months[-1] if months else None,
+        annual=annual,
+        monthly=[EtfPairMonth(month=month, first_return=first_values[i], second_return=second_values[i])
+                 for i, month in enumerate(months)],
+        daily=[EtfPairDay(date=day, first_return=first_daily[day], second_return=second_daily[day])
+               for day in sorted(set(first_daily or {}) & set(second_daily or {}))],
+    )
+
+
+async def _pair_comparison(req: EtfPairCorrelationRequest) -> EtfPairCorrelationResponse:
+    """Compare two ETFs, or the chosen strategy against one ETF."""
+    ids = list(dict.fromkeys(req.benchmark_ids))
+    strategy_pair = req.backtest_run_id is not None
+    if (strategy_pair and len(ids) != 1) or (not strategy_pair and len(ids) != 2):
+        raise HTTPException(422, "Select two ETFs, or select one ETF with a saved strategy.")
+    rows = await asyncio.to_thread(
+        lambda: supabase.table("benchmark").select("benchmark_id,ticker,name")
+        .in_("benchmark_id", ids).execute().data or [])
+    meta = {row["benchmark_id"]: row for row in rows}
+    if len(meta) != len(ids):
+        raise HTTPException(404, "One or more selected ETFs no longer exist.")
+
+    if strategy_pair:
+        result = await asyncio.to_thread(load_backtest_result_sync, req.backtest_run_id)
+        if not result:
+            raise HTTPException(404, "Backtest result not available.")
+        _summary, monthly, ambiguous = _select_scope(result, req.variant_key)
+        if ambiguous is not None:
+            raise HTTPException(400, detail={
+                "error": "This backtest has multiple variants; choose one.",
+                "available_variant_keys": ambiguous,
+            })
+        strategy_returns = div.monthly_records_to_returns(monthly)
+        strategy_daily = _daily_returns_from_curve(_daily_records_for_scope(result, req.variant_key))
+        if len(strategy_returns) < 2:
+            raise HTTPException(422, "The selected strategy has fewer than two completed months.")
+        benchmark = meta[ids[0]]
+        prices = await _load_benchmark_prices(ids[0])
+        first = {
+            "kind": "strategy", "backtest_run_id": req.backtest_run_id,
+            "ticker": "Strategy", "name": await _run_name(req.backtest_run_id),
+        }
+        second = {"kind": "etf", **benchmark}
+        response = _etf_pair_response(
+            first, strategy_returns, second, div.prices_to_monthly_returns(prices),
+            strategy_daily, _daily_returns_from_prices(prices))
+    else:
+        first_row, second_row = (meta[bid] for bid in ids)
+        first_prices, second_prices = await asyncio.gather(
+            _load_benchmark_prices(ids[0]), _load_benchmark_prices(ids[1]))
+        first = {"kind": "etf", **first_row}
+        second = {"kind": "etf", **second_row}
+        response = _etf_pair_response(
+            first, div.prices_to_monthly_returns(first_prices),
+            second, div.prices_to_monthly_returns(second_prices),
+            _daily_returns_from_prices(first_prices), _daily_returns_from_prices(second_prices))
+    if response.overlap_months < 2:
+        raise HTTPException(422, "The selected pair has fewer than two shared monthly returns.")
+    return response
+
+
+@router.post("/api/momentum/diversifier/comparison", response_model=EtfPairCorrelationResponse)
+async def pair_comparison(req: EtfPairCorrelationRequest):
+    return await _pair_comparison(req)
+
+
+@router.post("/api/momentum/diversifier/etf-correlation", response_model=EtfPairCorrelationResponse, deprecated=True)
+async def etf_correlation(req: EtfPairCorrelationRequest):
+    """Legacy ETF-pair path; use /comparison for new clients."""
+    return await _pair_comparison(req)
 
 
 def _meta_of_from(ticker_to_meta: dict):

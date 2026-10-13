@@ -63,6 +63,8 @@ import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
 import type { BookValueSeries } from '../../../lib/types/api';
 import allocationProfiles from '../../config/weightedBenchmarkAllocations.json';
+import { useAnalyseCopy } from './analyseCopy';
+import { defaultLookThroughCertificates } from './portfolioDefaults';
 
 type WeightedBenchmarkBlock = { bucket: string; weight_pct: number };
 
@@ -104,6 +106,10 @@ const tick = (t: number) => new Date(t).toLocaleDateString('en-GB', {
 const pct = (v: number | null | undefined) =>
   (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
 
+const price = (value: number | null) => value == null ? '—' : value.toLocaleString('en-GB', {
+  minimumFractionDigits: 2, maximumFractionDigits: 2,
+});
+
 function ReturnTooltip({ active, label, payload, benchmark }: {
   active?: boolean;
   label?: unknown;
@@ -142,9 +148,190 @@ function ReturnDot({ cx, cy, fill, payload }: {
   return <circle cx={cx} cy={cy} r={1.5} fill={fill} stroke={fill} />;
 }
 
+type MonthlyHolding = {
+  isin: string; name: string; ticker: string | null; weight_pct: number;
+  start_price: number | null; start_price_date: string | null;
+  end_price: number | null; end_price_date: string | null;
+  return_pct: number | null; contribution_pct: number | null; vs_benchmark_pct: number | null;
+};
+type MonthlySortKey = 'name' | 'weight_pct' | 'return_pct' | 'contribution_pct';
+type MonthlyDrilldown = {
+  from_date: string; to_date: string; positions_date?: string | null; benchmark: string;
+  benchmark_return_pct: number | null;
+  benchmark_detail?: {
+    ticker: string | null; start_price: number | null; start_price_date: string | null;
+    end_price: number | null; end_price_date: string | null;
+    components: { name: string; weight_pct: number; label: string | null; ticker: string | null;
+      start_price: number | null; start_date: string | null; end_price: number | null; end_date: string | null; return_pct: number | null }[];
+  };
+  holdings: MonthlyHolding[];
+};
+const monthlyPerformanceCache = new Map<string, MonthlyDrilldown>();
+
+function MonthlySortHeader({ label, sortKey, align = 'right', sort, onToggle }: {
+  label: string;
+  sortKey: MonthlySortKey;
+  align?: 'left' | 'right';
+  sort: { key: MonthlySortKey; descending: boolean };
+  onToggle: (key: MonthlySortKey) => void;
+}) {
+  return <th className={align === 'left' ? 'px-3 py-2 text-left text-xs font-semibold' : 'px-2 py-2 text-right text-xs font-semibold'}>
+    <button type="button" onClick={() => onToggle(sortKey)} className="inline-flex items-center gap-1 hover:text-fg">
+      {label}<span aria-hidden="true" className={sort.key === sortKey ? 'text-fg' : 'text-fg-faint'}>{sort.key === sortKey ? (sort.descending ? '↓' : '↑') : '↕'}</span>
+    </button>
+  </th>;
+}
+
+function MonthlyPerformance({ portfolioId, portfolioName, month, months, benchmark, weightsQuery, onSelect, onClose }: {
+  portfolioId: number; portfolioName?: string | null; month: string; months: { date: string; from: string }[]; benchmark: string; weightsQuery: string;
+  onSelect: (month: string) => void; onClose: () => void;
+}) {
+  // This dialog belongs to Analyse, so it must follow the same reader-level language setting as
+  // the modal behind it.  These controls used to be literals, leaving English beside the Dutch
+  // "Annuleren" action whenever the interface was set to Dutch.
+  const copy = useAnalyseCopy();
+  const [data, setData] = useState<MonthlyDrilldown | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // Certificates are normally shown as the instruments the account actually holds. Toppenberg is
+  // the exception: its portfolios are deliberately certificate wrappers, so their useful default
+  // is the underlying strategies. This shared family rule also drives the Analyse and Fundamental
+  // views; keeping it here avoids one portfolio opening with three conflicting defaults.
+  const [lookThrough, setLookThrough] = useState(
+    () => defaultLookThroughCertificates(portfolioName),
+  );
+  const [sort, setSort] = useState<{ key: MonthlySortKey; descending: boolean }>({
+    key: 'return_pct', descending: true,
+  });
+  useEffect(() => {
+    let alive = true;
+    const url = `${API_URL}/api/airs/model-portfolios/${portfolioId}/monthly-yahoo-performance`
+      + `?month=${encodeURIComponent(month)}&benchmark=${encodeURIComponent(benchmark)}${weightsQuery}`
+      + `&look_through=${lookThrough}`;
+    const cached = monthlyPerformanceCache.get(url);
+    if (cached) {
+      setError(null);
+      setData(cached);
+      return () => { alive = false; };
+    }
+    setError(null);
+    void apiFetch(url)
+      .then(async (r) => ({ r, body: await r.json().catch(() => null) }))
+      .then(({ r, body }) => {
+        if (!alive) return;
+        if (!r.ok) setError(body?.detail ?? `HTTP ${r.status}`);
+        else {
+          const drilldown = body as MonthlyDrilldown;
+          monthlyPerformanceCache.set(url, drilldown);
+          setError(null); setData(drilldown);
+        }
+      })
+      .catch((e) => alive && setError(e instanceof Error ? e.message : String(e)));
+    return () => { alive = false; };
+  }, [portfolioId, month, benchmark, weightsQuery, lookThrough]);
+  const toggleSort = (key: MonthlySortKey) => setSort((current) =>
+    current.key === key ? { key, descending: !current.descending } : { key, descending: key !== 'name' });
+  // Keep the table correct while a browser is still receiving a response from
+  // a backend that predates its ticker-level de-duplication.
+  const uniqueHoldings = data ? [...new Map(data.holdings.map((holding) => [holding.ticker || holding.isin, holding])).values()] : [];
+  const sortedHoldings = data ? uniqueHoldings.sort((left, right) => {
+    const a = left[sort.key];
+    const b = right[sort.key];
+    if (a == null) return b == null ? 0 : 1;
+    if (b == null) return -1;
+    const compared = typeof a === 'string' && typeof b === 'string' ? a.localeCompare(b) : Number(a) - Number(b);
+    return sort.descending ? -compared : compared;
+  }) : [];
+  const content = error ? <p className="p-4 text-[12px] text-neg-300">{error}</p>
+    : !data ? <div className="flex min-h-48 items-center justify-center gap-2 text-[12px] text-fg-subtle"
+      role="status" aria-live="polite">
+        <svg viewBox="0 0 24 24" aria-hidden="true"
+          className="h-4 w-4 shrink-0 animate-spin fill-none stroke-current stroke-2">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+        </svg>
+        <span>Loading Yahoo monthly performance…</span>
+      </div>
+    : <div className="overflow-x-auto">
+    <table className="w-full min-w-[600px] text-xs">
+      <thead className="text-fg-faint"><tr className="border-b border-neutral-800/50">
+        <MonthlySortHeader label="Holding" sortKey="name" align="left" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="Weight %" sortKey="weight_pct" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="Return %" sortKey="return_pct" sort={sort} onToggle={toggleSort} />
+        <MonthlySortHeader label="Contribution" sortKey="contribution_pct" sort={sort} onToggle={toggleSort} />
+      </tr></thead>
+      <tbody>{sortedHoldings.map((h) => <tr key={h.isin} className="border-b border-neutral-800/30 last:border-0">
+        <td className="px-3 py-1.5 text-fg"><span>{h.name}</span>{h.ticker && <span className="ml-1.5 font-mono text-fg-faint">{h.ticker}</span>}</td>
+        <td className="px-2 py-1.5 text-right font-mono text-fg-muted">{pct(h.weight_pct)}</td>
+        <td className={`px-2 py-1.5 text-right font-mono ${h.return_pct != null && h.return_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
+          <span className="inline-flex items-center justify-end gap-1">{pct(h.return_pct)}
+            {h.ticker && h.start_price != null && h.end_price != null && <InfoTip wide content={<AspectCard
+              what={`Yahoo return: ${pct(h.return_pct)}`}
+              where={<a href={`https://finance.yahoo.com/quote/${encodeURIComponent(h.ticker)}/`} target="_blank" rel="noreferrer"
+                className="text-accent-300 underline underline-offset-2 hover:text-accent-200">Yahoo Finance · {h.ticker} ↗</a>}
+              when={<span>Start: {price(h.start_price)} on {h.start_price_date ?? '—'}<br />End: {price(h.end_price)} on {h.end_price_date ?? '—'}</span>}
+              how="Based on Yahoo daily closing prices, converted to EUR on each price date." />}/>
+            }
+          </span>
+        </td>
+        <td className={`px-3 py-1.5 text-right font-mono font-medium ${h.contribution_pct != null && h.contribution_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{pct(h.contribution_pct)}</td>
+        {/* Benchmark columns deliberately omitted from this direct Yahoo-return view.
+        <td className="px-2 py-1.5 text-right font-mono" style={{ color: chartTheme.compare }}>
+          <span className="inline-flex items-center justify-end gap-1">{pct(data.benchmark_return_pct)}
+            <InfoTip wide content={<AspectCard
+              what={`Benchmark return: ${pct(data.benchmark_return_pct)}`}
+              where={benchmarkDetail.ticker ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(benchmarkDetail.ticker)}/`} target="_blank" rel="noreferrer"
+                className="text-accent-300 underline underline-offset-2 hover:text-accent-200">Yahoo Finance · {benchmarkDetail.ticker} ↗</a>
+                : <span>Weighted Yahoo ETF basket</span>}
+              when={benchmarkDetail.ticker ? <span>Start: {price(benchmarkDetail.start_price)} on {benchmarkDetail.start_price_date ?? '—'}<br />End: {price(benchmarkDetail.end_price)} on {benchmarkDetail.end_price_date ?? '—'}</span>
+                : benchmarkDetail.components.length ? <span>{benchmarkDetail.components.map((component) => <span key={component.name} className="block">{component.weight_pct.toFixed(0)}% · {component.ticker ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(component.ticker)}/`} target="_blank" rel="noreferrer" className="text-accent-300 underline underline-offset-2 hover:text-accent-200">{component.ticker} ↗</a> : component.label} · {price(component.start_price)} ({component.start_date ?? '—'}) → {price(component.end_price)} ({component.end_date ?? '—'})</span>)}</span>
+                  : <span>Benchmark price provenance is available after the backend refreshes.</span>}
+              how={benchmarkDetail.ticker
+                ? 'Benchmark proxy return based on its Yahoo daily closes; FX is converted to EUR when applicable.'
+                : 'Weighted sum of the Yahoo ETF proxy returns shown above; cash contributes 0%.'} />}/>
+          </span>
+        </td>
+        <td className={`px-3 py-1.5 text-right font-mono font-medium ${h.vs_benchmark_pct != null && h.vs_benchmark_pct >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>{pct(h.vs_benchmark_pct)}</td> */}
+      </tr>)}</tbody>
+    </table>
+  </div>;
+  return <div role="dialog" aria-modal="true" aria-label="Monthly Yahoo performance"
+    className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4" onMouseDown={onClose}>
+    <div className="flex h-[75vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-card text-sm shadow-2xl"
+      onMouseDown={(event) => event.stopPropagation()}>
+      <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
+        <h2 className="text-xl font-semibold text-fg">Yahoo holding returns</h2>
+        <label title={copy.actions.lookThroughTitle}
+          className={`inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-sm font-semibold transition ${lookThrough ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
+          <input type="checkbox" checked={lookThrough} onChange={(event) => {
+            // The rows belong to the OLD look-through mode.  Clear them in the click handler,
+            // before the request effect runs, so toggling cannot briefly present an opaque
+            // certificate table as the transparent one (or vice versa).
+            setData(null);
+            setError(null);
+            setLookThrough(event.target.checked);
+          }}
+            className="h-3.5 w-3.5 accent-[var(--color-accent-500)]" />
+          {copy.actions.lookThrough}
+        </label>
+        <button type="button" onClick={onClose}
+        className="rounded px-2 py-1 text-fg-muted hover:bg-white/10 hover:text-fg" aria-label={copy.actions.close}>×</button></div>
+      <div className="flex gap-1 overflow-x-auto border-b border-neutral-800 px-4 py-2" role="tablist" aria-label="Month">
+        {months.map(({ date }) => {
+          const active = date === month;
+          return <button key={date} type="button" role="tab" aria-selected={active} onClick={() => onSelect(date)}
+            className={`shrink-0 rounded-md border px-3 py-1.5 text-sm font-semibold transition ${active ? 'border-accent-400 bg-accent-600 text-white shadow-sm' : 'border-transparent bg-page text-fg hover:border-neutral-600 hover:bg-white/10'}`}>
+            {new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })}
+          </button>;
+        })}
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">{content}</div>
+    </div>
+  </div>;
+}
+
 export default function BookReturnChart(
   {
     portfolioId,
+    portfolioName,
     /**
      * Bumped by the modal's caller when a refresh finishes — the SAME counter the modal's own
      * payload effect takes.
@@ -157,10 +344,12 @@ export default function BookReturnChart(
     benchmark,
     benchmarkBlocks = [],
     variant,
-  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; variant?: string | null },
+  }: { portfolioId: number; portfolioName?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; variant?: string | null },
 ) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [monthlyModalOpen, setMonthlyModalOpen] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
   const weights = weightedBenchmarkWeights(benchmarkBlocks, variant);
   const weightsQuery = weights ? `&benchmark_weights=${encodeURIComponent(JSON.stringify(weights))}` : '';
 
@@ -168,6 +357,7 @@ export default function BookReturnChart(
     let alive = true;
     void (async () => {
       setData(null); setErr(null);
+      setSelectedMonth(null);
       try {
         const r = await apiFetch(
           `${API_URL}/api/airs/model-portfolios/${portfolioId}/value-series`
@@ -270,8 +460,16 @@ export default function BookReturnChart(
             + `over ${v(all.length - 1)} published points.`}
           when={`${v(data.return_from ?? first.date)} to ${v(last.date)}.`} />} />
       </div>
+      {/* The return hover is deliberately docked below the plot.  Keep a slot for its tallest
+          form (date, portfolio and benchmark) so it neither obscures the line being inspected
+          nor collides with the drill-down hint below. */}
+      <div className="mb-[72px]">
       <ResponsiveContainer width="100%" height={104}>
-        <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+        <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
+          onClick={(state: { activeLabel?: unknown }) => {
+            const point = colouredRows.find((row) => row.t === state.activeLabel && !row.interpolated);
+            if (point && point.date !== first.date) { setSelectedMonth(point.date); setMonthlyModalOpen(true); }
+          }} style={{ cursor: 'pointer' }}>
           <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.gridEarnings} />
           {/*  A TIME AXIS, NOT A CATEGORY ONE, AND THE DIFFERENCE IS THE WHOLE SHAPE OF THE
               LINE. The points are irregular — AIRS publishes a month-end for each closed month and
@@ -289,7 +487,9 @@ export default function BookReturnChart(
           <YAxis domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
             width={44} tick={{ fontSize: 11, fill: chartTheme.axisTick }}
             tickFormatter={(v: number) => `${v.toFixed(0)}%`} />
-          <Tooltip content={<ReturnTooltip benchmark={data.benchmark ?? benchmark} />} />
+          <Tooltip content={<ReturnTooltip benchmark={data.benchmark ?? benchmark} />}
+            position={{ x: 8, y: 112 }} allowEscapeViewBox={{ y: true }}
+            wrapperStyle={{ pointerEvents: 'none', zIndex: 10 }} />
           {/*  THE BASELINE IS DRAWN, not just included in the domain. "Start at 0%" is the whole
               claim of this chart, and a gridline the reader has to identify is not the same as a
               rule they can see the line cross. */}
@@ -304,6 +504,12 @@ export default function BookReturnChart(
             strokeDasharray="5 3" dot={false} connectNulls={false} />
         </AreaChart>
       </ResponsiveContainer>
+      </div>
+      <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to view each holding&apos;s Yahoo return against the benchmark.</p>
+      {monthlyModalOpen && selectedMonth && <MonthlyPerformance key={selectedMonth} portfolioId={portfolioId} portfolioName={portfolioName} month={selectedMonth}
+        months={points.map((point, index) => ({ date: point.date, from: points[index - 1]?.date ?? '' })).slice(1).slice(-6)}
+        benchmark={benchmark} weightsQuery={weightsQuery} onSelect={setSelectedMonth}
+        onClose={() => { setMonthlyModalOpen(false); setSelectedMonth(null); }} />}
     </div>
   );
 }

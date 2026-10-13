@@ -5,7 +5,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { apiFetch } from '../../../lib/apiFetch';
 import { dialog } from '../../../lib/dialog';
 import { trackedFetch } from '../../../lib/loading';
-import type { BacktestStats, CorrelationResponse, OptimizeResponse, PortfolioStateResponse, SavedPortfolio } from '../../../lib/types/api';
+import type { BacktestStats, CorrelationResponse, EtfPairCorrelationResponse, OptimizeResponse, PortfolioStateResponse, SavedPortfolio } from '../../../lib/types/api';
 
 /** Pipeline rebalance cadences a scheduled strategy can take (backend FREQUENCIES). */
 export const SCHEDULE_FREQUENCIES = ['daily', 'weekly', 'monthly', 'bimonthly', 'quarterly'] as const;
@@ -76,6 +76,8 @@ export function useDiversifier() {
   const [busyEtfId, setBusyEtfId] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<CorrelationResponse | null>(null);
+  const [etfPairResult, setEtfPairResult] = useState<EtfPairCorrelationResponse | null>(null);
+  const [etfPairRunning, setEtfPairRunning] = useState(false);
   const [optimizeResult, setOptimizeResult] = useState<OptimizeResponse | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   // Manual-portfolio backtest (the section below the optimizer): per-holding
@@ -174,6 +176,7 @@ export function useDiversifier() {
   );
 
   const toggleEtf = useCallback((id: number) => {
+    setEtfPairResult(null);
     setSelectedEtfIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -184,6 +187,7 @@ export function useDiversifier() {
 
   /** Select every visible fund, or clear if they're all already selected. */
   const toggleSelectAll = useCallback(() => {
+    setEtfPairResult(null);
     setSelectedEtfIds((prev) => {
       const allSelected = visibleEtfs.length > 0 && visibleEtfs.every((e) => prev.has(e.benchmark_id));
       return allSelected ? new Set() : new Set(visibleEtfs.map((e) => e.benchmark_id));
@@ -363,6 +367,31 @@ export function useDiversifier() {
     }
     setRunning(false);
   }, [selectedRunId, selectedEtfIds, variantKey, riskFreePct, coreMinPct, objective]);
+
+  /** Compare two ETFs, or the selected strategy against one ETF. */
+  const runEtfPairCorrelation = useCallback(async () => {
+    const useStrategy = selectedRunId != null && selectedEtfIds.size === 1;
+    if (selectedEtfIds.size !== 2 && !useStrategy) return;
+    setEtfPairRunning(true);
+    setError(null);
+    try {
+      const res = await trackedFetch('Computing pair comparison', `${API_URL}/api/momentum/diversifier/comparison`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          benchmark_ids: [...selectedEtfIds],
+          ...(useStrategy ? { backtest_run_id: selectedRunId, variant_key: variantKey } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(typeof data.detail === 'string' ? data.detail : `HTTP ${res.status}`);
+      }
+      setEtfPairResult(await res.json());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setEtfPairRunning(false);
+  }, [selectedRunId, selectedEtfIds, variantKey]);
 
   /** Optimize the strategy + diversifier sleeve, maximizing the objective with
    * a drift-rebalance band. */
@@ -631,6 +660,7 @@ export function useDiversifier() {
     setVariantKey(null);
     setVariantOptions(null);
     setResult(null);
+    setEtfPairResult(null);
     setOptimizeResult(null);
     setManualResult(null);
     setBacktestStats(null);
@@ -641,6 +671,7 @@ export function useDiversifier() {
   const selectVariant = useCallback((vKey: string | null) => {
     setVariantKey(vKey);
     setResult(null);
+    setEtfPairResult(null);
     setOptimizeResult(null);
     setManualResult(null);
     if (selectedRunId != null && vKey) loadStrategyStats(selectedRunId, vKey);
@@ -655,6 +686,7 @@ export function useDiversifier() {
     setCutoffYear,
     loadingLists,
     result,
+    etfPairResult,
     optimizeResult,
     error,
     // selection
@@ -692,6 +724,8 @@ export function useDiversifier() {
     busyEtfId,
     runCorrelation,
     running,
+    runEtfPairCorrelation,
+    etfPairRunning,
     runOptimize,
     optimizing,
     // manual portfolio backtest

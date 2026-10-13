@@ -29,7 +29,7 @@ from fastapi.responses import StreamingResponse
 
 from deps import supabase, chunked
 from ingest.earnings import fetch_analyst_estimates, fetch_financials, fetch_indicators
-from ingest.prices import ensure_prices_for_company
+from asset_pipeline.company_prices import refresh_company_prices
 from routers.index_universe._helpers import drain_thread_queue
 
 router = APIRouter(tags=["universe"])
@@ -129,7 +129,7 @@ async def universe_fetch_data(universe_id: int, force: bool = False):
                         elif source == "indicators":
                             r = fetch_indicators(supabase, cid, ticker, exchange, force_refresh=force)
                         else:
-                            r = ensure_prices_for_company(supabase, cid, ticker, exchange, force_refresh=force)
+                            r = refresh_company_prices(cid, force_refresh=force)
                         c_rows += getattr(r, "rows_loaded", 0) or 0
                         c_calls += getattr(r, "api_calls", 0) or 0
                         if getattr(r, "error", None):

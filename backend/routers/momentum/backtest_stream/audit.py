@@ -155,7 +155,10 @@ def audit_price_coverage(
         exch for exch, no_price in _exchange_no_price.items()
         if no_price > 0 and exch in _KNOWN_UNSUBSCRIBED_EXCHANGES
     }
-    res.unsubscribed_exchanges = sorted(_heuristic | _known_with_misses)
+    # Price/volume data now comes from Yahoo, which has no GuruFocus-style
+    # subscription regions. Do not suppress an all-zero exchange: it is a
+    # Yahoo coverage gap and should be eligible for self-heal.
+    res.unsubscribed_exchanges = []
     if res.unsubscribed_exchanges:
         parts = [f"{exch}({_exchange_no_price[exch]})" for exch in res.unsubscribed_exchanges]
         total_unsub = sum(_exchange_no_price[e] for e in res.unsubscribed_exchanges)
@@ -185,7 +188,7 @@ def audit_price_coverage(
     if res.no_price_gap_cids:
         sample = ", ".join(_label(int(c)) for c in res.no_price_gap_cids[:10])
         more = f" (+{len(res.no_price_gap_cids) - 10} more)" if len(res.no_price_gap_cids) > 10 else ""
-        res.events.append(_emit({"type": "warning", "id": "prices-gap", "scope": "prices", "message": f"{len(res.no_price_gap_cids)} companies on subscribed exchanges have NO price data: {sample}{more}"}))
+        res.events.append(_emit({"type": "warning", "id": "prices-gap", "scope": "prices", "message": f"{len(res.no_price_gap_cids)} companies have NO Yahoo price data: {sample}{more}"}))
     if _sparse_price:
         sample = ", ".join(
             f"{_label(int(c))}[{price_counts.get(int(c), 0)} rows]" for c in _sparse_price[:10]
@@ -229,7 +232,7 @@ def audit_volume_coverage(
     if audit.no_vol_gap_cids:
         sample = ", ".join(audit.label_for_cid.get(int(c), str(c)) for c in audit.no_vol_gap_cids[:10])
         more = f" (+{len(audit.no_vol_gap_cids) - 10} more)" if len(audit.no_vol_gap_cids) > 10 else ""
-        audit.events.append(_emit({"type": "warning", "id": "volumes-gap", "scope": "volumes", "message": f"{len(audit.no_vol_gap_cids)} companies on subscribed exchanges have NO volume data — volume signals will be skipped for them: {sample}{more}"}))
+        audit.events.append(_emit({"type": "warning", "id": "volumes-gap", "scope": "volumes", "message": f"{len(audit.no_vol_gap_cids)} companies have NO Yahoo volume data; volume signals will be skipped for them: {sample}{more}"}))
     if _sparse_vol:
         sample = ", ".join(
             f"{audit.label_for_cid.get(int(c), str(c))}[{vol_counts.get(int(c), 0)} rows]" for c in _sparse_vol[:10]

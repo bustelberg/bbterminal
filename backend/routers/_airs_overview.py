@@ -336,4 +336,14 @@ def _list_overview_legacy() -> list[dict]:
 
 
 async def list_overview_async() -> list[dict]:
-    return await asyncio.to_thread(list_overview)
+    try:
+        return await asyncio.to_thread(list_overview)
+    except RuntimeError as exc:
+        # A refresh burst can temporarily exhaust the platform's process-wide
+        # thread allowance.  The overview is a short, read-only DB composition;
+        # serving it synchronously is preferable to making the portfolios page
+        # a 500 while those workers drain.  Do not mask unrelated RuntimeErrors.
+        if "can't start new thread" not in str(exc).lower():
+            raise
+        _log.warning("[airs overview] I/O thread budget exhausted; serving overview inline")
+        return list_overview()

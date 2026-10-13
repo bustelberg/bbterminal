@@ -5,6 +5,14 @@ export type SectorChartRow = Axis['rows'][number];
 type BookHolding = NonNullable<ModelPortfolioAnalysis['book_holdings']>[number];
 type EtfSector = EtfSectorAllocationResponse['sectors'][number];
 
+/** The one sector vocabulary displayed throughout portfolio composition. Management overrides
+ * store these names too, so a chosen sector is never silently renamed in the chart. */
+export const PORTFOLIO_SECTORS = [
+  'Technology', 'Communication Services', 'Healthcare', 'Financials',
+  'Consumer Cyclical', 'Consumer Defensive', 'Industrials', 'Energy',
+  'Utilities', 'Materials', 'Real Estate',
+] as const;
+
 // The existing portfolio/benchmark chart uses Yahoo's sector vocabulary. ETF providers commonly
 // publish GICS display names instead. Resolve both onto the buckets already established in that
 // chart before doing any arithmetic, or "Healthcare" and "Health Care" become two investments.

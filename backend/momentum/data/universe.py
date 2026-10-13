@@ -14,6 +14,37 @@ from deps import IN_CHUNK_SIZE, chunked
 from ._helpers import _query_with_retry
 
 
+def load_company_asset_map(
+    supabase: Client,
+    company_ids: list[int],
+) -> dict[int, tuple[int, str | None]]:
+    """Map a GuruFocus company id to its Yahoo analysis id and quote currency.
+
+    The momentum universe is still defined by ``company``/``universe_membership``;
+    Yahoo bars live in the separate asset domain. ``asset_grid`` is the reviewed
+    ISIN bridge between them. Rows without a resolved Yahoo instrument are left
+    out rather than silently falling back to GuruFocus prices.
+    """
+    out: dict[int, tuple[int, str | None]] = {}
+    for chunk in chunked(sorted(set(company_ids)), IN_CHUNK_SIZE):
+        rows = (
+            supabase.table("asset_grid")
+            .select("company_id,analysis_id,currency,status")
+            .in_("company_id", chunk)
+            .eq("status", "ok")
+            .execute()
+            .data or []
+        )
+        for row in rows:
+            cid, aid = row.get("company_id"), row.get("analysis_id")
+            if cid is None or aid is None:
+                continue
+            # More than one execution can temporarily point at one company;
+            # keep the first stable mapping rather than duplicating its series.
+            out.setdefault(int(cid), (int(aid), row.get("currency")))
+    return out
+
+
 def load_universe(
     supabase: Client,
     *,
@@ -139,19 +170,5 @@ def load_company_currency(
     if not company_ids:
         return {}
 
-    result: dict[int, str | None] = {}
-    chunk_size = IN_CHUNK_SIZE
-    for ci, chunk in enumerate(chunked(company_ids, chunk_size)):
-        resp = _query_with_retry(
-            lambda c=chunk: (
-                supabase.table("company")
-                .select("company_id, gurufocus_exchange:gurufocus_exchange(currency_code)")
-                .in_("company_id", c)
-                .execute()
-            ),
-            description=f"load_company_currency chunk {ci + 1}",
-        )
-        for row in (resp.data or []):
-            exch = row.get("gurufocus_exchange") or {}
-            result[int(row["company_id"])] = exch.get("currency_code")
-    return result
+    return {company_id: currency for company_id, (_aid, currency) in
+            load_company_asset_map(supabase, company_ids).items()}

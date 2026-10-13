@@ -5,8 +5,9 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
 import type { ModelPortfolioAttribution } from '../../../lib/types/api';
+import { useLang } from '../../../lib/i18n';
 import { useBucketDetailCopy } from './bucketDetailCopy';
-import { workedContribution, workedReturn, workedWeight } from './attributionFormulas';
+import { workedContribution, workedPriceReturn, workedReturn, workedWeight } from './attributionFormulas';
 import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
 import LoadingDots from './LoadingDots';
 
@@ -172,6 +173,7 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
   startLabel?: string;
 }) {
   const t = useBucketDetailCopy();
+  const [lang] = useLang();
   // Sortable — click a header to toggle direction. Default: weight, largest first. Each table sorts
   // on its OWN state (your names and the index's are independent lists).
   //  The column, its hint and the default sort all come from one flag. Three places deciding
@@ -254,14 +256,32 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
       how={now ? provenance.currentBasis : provenance.startBasis}
       worked={raw ? undefined : workedWeight(weightText(v), valueEur, totalEur)}
       calculation={raw ? <AirsWeightCalculation components={components} numerator={valueEur}
-        denominator={totalEur} result={weightText(v)} holdingName={holdingName ?? 'Holding'} />
+        denominator={totalEur} result={weightText(v)} holdingName={holdingName ?? 'Holding'}
+        rolledTo={components?.some((component) => component.base_value_eur != null)
+          ? provenance.startWeightAsOf : undefined} />
         : undefined} />;
   };
-  const returnProv = (v: number | null | undefined, what: string) => (
-    <Provenance source={provenance.returnSource} asOf={provenance.returnAsOf} kind="formula"
+  const returnProv = (v: number | null | undefined, what: string, mark?: Pick<Name,
+    'return_start_date' | 'return_start_price_eur' | 'return_end_date' | 'return_end_price_eur'>) => {
+    const hasMarks = mark?.return_start_date != null && mark.return_start_price_eur != null
+      && mark.return_end_date != null && mark.return_end_price_eur != null;
+    const money = (value: number) => new Intl.NumberFormat('en-IE', {
+      style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2,
+    }).format(value);
+    const longDate = (value: string) => new Intl.DateTimeFormat(lang === 'nl' ? 'nl-NL' : 'en-GB', {
+      day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+    }).format(new Date(`${value.slice(0, 10)}T00:00:00Z`));
+    const result = v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
+    return <Provenance source={provenance.returnSource} asOf={provenance.returnAsOf} kind="formula"
       what={what} note="EUR return over the window" how={provenance.returnBasis}
-      worked={workedReturn(v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`)} />
-  );
+      when={hasMarks ? <span className="text-fg-soft leading-relaxed">
+        Start: {money(mark.return_start_price_eur!)} on {longDate(mark.return_start_date!)}<br />
+        End: {money(mark.return_end_price_eur!)} on {longDate(mark.return_end_date!)}
+      </span> : undefined}
+      worked={hasMarks
+        ? workedPriceReturn(mark.return_start_price_eur, mark.return_end_price_eur, result)
+        : workedReturn(result)} />;
+  };
   const contributionProv = (w: number | null | undefined, r: number | null | undefined,
     v: number | null | undefined, what: string) => (
     <Provenance source="derived" asOf={provenance.returnAsOf ?? provenance.startWeightAsOf} kind="formula"
@@ -439,7 +459,7 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
               </ValueWithInfo>
             </td>
             <td className="py-1 px-1 text-right font-mono"><Num v={h.return_pct}
-              prov={returnProv(h.return_pct, `What ${h.name ?? 'this holding'} returned, in EUR.`)} /></td>
+              prov={returnProv(h.return_pct, `What ${h.name ?? 'this holding'} returned, in EUR.`, h)} /></td>
             {/* Contribution = weight × return — percentage POINTS of the basket's return, not %. */}
             <td className="py-1 pl-1 text-right font-mono"><Num v={h.contribution_pct} pp
               prov={contributionProv(h.weight_pct, h.return_pct, h.contribution_pct,

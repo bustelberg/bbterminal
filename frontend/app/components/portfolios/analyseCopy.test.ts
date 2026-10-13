@@ -47,6 +47,11 @@ describe('Analyse primary-view copy', () => {
     }
   });
 
+  it('translates the weighted benchmark scorecard caption', () => {
+    expect(ANALYSE_COPY.en.score.weightedBenchmark).toBe('Weighted benchmark return (YTD) €');
+    expect(ANALYSE_COPY.nl.score.weightedBenchmark).toBe('Gewogen benchmarkrendement (YTD) €');
+  });
+
   it('keeps primary-view prose out of the component literals', () => {
     const source = readFileSync(join('app', 'components', 'portfolios', 'PortfolioAnalysisModal.tsx'), 'utf8');
     const forbidden = [
@@ -57,6 +62,35 @@ describe('Analyse primary-view copy', () => {
       'This index is rebuilt from', 'Why the trading mattered for',
     ];
     expect(forbidden.filter((phrase) => source.includes(phrase))).toEqual([]);
+  });
+
+  it('localises the monthly-return dialog controls too', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    expect(source).toContain('useAnalyseCopy');
+    expect(source).toContain('copy.actions.lookThrough');
+    expect(source).toContain('copy.actions.close');
+    expect(source).not.toContain('>Look through certificates<');
+    expect(source).not.toContain('aria-label="Close"');
+  });
+
+  it('replaces the previous month with a loading state immediately', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    expect(source).toContain('<MonthlyPerformance key={selectedMonth}');
+    expect(source).toContain('role="status" aria-live="polite"');
+    expect(source).toContain('animate-spin');
+  });
+
+  it('also clears the old rows when certificate look-through changes', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    const toggle = source.slice(source.indexOf('checked={lookThrough}'), source.indexOf('className="h-3.5'));
+    expect(toggle).toContain('setData(null)');
+    expect(toggle).toContain('setLookThrough(event.target.checked)');
+  });
+
+  it('uses the shared Toppenberg-only certificate default in the monthly-return dialog', () => {
+    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
+    expect(source).toContain("import { defaultLookThroughCertificates } from './portfolioDefaults'");
+    expect(source).toContain('() => defaultLookThroughCertificates(portfolioName)');
   });
 
   it('localises benchmark provenance too', () => {

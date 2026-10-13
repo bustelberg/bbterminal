@@ -245,9 +245,9 @@ def load_latest_close_prices_via_copy(
         return None
     sql = (
         "COPY (SELECT cid AS company_id, l.d::text, l.v FROM unnest(%s::int[]) AS cid "
-        "CROSS JOIN LATERAL (SELECT md.target_date AS d, md.numeric_value AS v "
-        "FROM metric_data md WHERE md.company_id = cid AND md.metric_code = 'close_price' "
-        "AND md.source_code = 'gurufocus' ORDER BY md.target_date DESC LIMIT 1) l) "
+        "CROSS JOIN LATERAL (SELECT yp.target_date AS d, yp.close AS v "
+        "FROM company_yahoo_price yp WHERE yp.company_id = cid "
+        "ORDER BY yp.target_date DESC LIMIT 1) l) "
         "TO STDOUT WITH (FORMAT csv)"
     )
     buf = _run_copy(sql, (list(company_ids),))

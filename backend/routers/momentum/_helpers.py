@@ -83,10 +83,9 @@ def latest_db_price_date() -> date | None:
     partial index makes this a one-tuple index-only scan (0.07 ms). See
     `supabase/migrations/20260902000000_metric_data_source_date_split.sql`."""
     resp = (
-        supabase.table("metric_data")
+        supabase.table("asset_price")
         .select("target_date")
-        .eq("source_code", "gurufocus")
-        .eq("metric_code", "close_price")
+        .not_.is_("close", "null")
         .order("target_date", desc=True)
         .limit(1)
         .execute()
