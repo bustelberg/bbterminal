@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { unavailableNotice } from './JobToaster';
+import { friendlyJobMessage, unavailableNotice } from './JobToaster';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -32,5 +32,17 @@ describe('the job cancel control', () => {
     expect(source).toContain("cancel: 'Annuleren'");
     expect(source).toContain('{copy.cancel}');
     expect(source).toContain('{job.cancelRequested && running ? copy.cancelling');
+  });
+});
+
+describe('friendlyJobMessage', () => {
+  it('makes a cancelled portfolio refresh concise and reader-facing', () => {
+    expect(friendlyJobMessage('cancelled before Bustelberg Offensief \u2014 nothing was read', 'en'))
+      .toBe('Cancelled before Bustelberg Offensief. No changes were made.');
+  });
+
+  it('uses Dutch cancellation copy when Dutch is selected', () => {
+    expect(friendlyJobMessage('cancelled before Bustelberg Offensief \u2014 nothing was read', 'nl'))
+      .toBe('Geannuleerd vóór Bustelberg Offensief. Er zijn geen wijzigingen gemaakt.');
   });
 });

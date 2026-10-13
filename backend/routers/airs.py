@@ -3737,12 +3737,13 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
         #   whole of a Cancel that appears to do nothing. `refresh_portfolio_fully` sees the same
         #   flag at its own first boundary and returns cancelled, which `job_verdict` reports.
         if not ctx.cancelled:
-            ctx.progress(0, 0, "bringing the benchmark index prices current…")
+            ctx.progress(0, 0, "Preparing refresh…")
             try:
                 from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
                 refresh_index_proxies()
             except Exception as e:  # noqa: BLE001 — never fail a book refresh over the benchmark
-                ctx.progress(0, 0, f"index proxies not refreshed: {type(e).__name__}: {e}")
+                _log.warning("[airs refresh] benchmark prices not refreshed: %s: %s",
+                             type(e).__name__, e)
         full = refresh_portfolio_fully(
             portefeuille=portefeuille, cascade=cascade,
             on_step=lambda done, total, msg: ctx.progress(done, total, msg),
