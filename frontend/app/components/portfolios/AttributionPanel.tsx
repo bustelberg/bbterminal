@@ -688,8 +688,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       worked={workedSelection(null, null, null, null)}
                       legend={copy.prov.effectLegend(benchmark)} />} />
                   <Th label={copy.headers.interaction}
-                    prov={<Provenance source="derived" column kind="formula" note="interaction (the cross term)"
-                      what="What the tilt and the picks were worth together."
+                    prov={<Provenance source="derived" column note="interaction (the cross term)"
+                      what={copy.prov.interactionWhat}
+                      where={copy.prov.interactionWhere}
+                      when={copy.prov.interactionWhen}
                       how={copy.prov.interactionHow}
                       worked={workedInteraction(null, null, null, null, null)}
                       legend={copy.prov.effectLegend(benchmark)} />} />
@@ -784,8 +786,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono">
                         <Eff v={n(r.interaction_pct)}
-                          prov={<Provenance source="derived" kind="formula" note={`interaction — ${r.bucket}`}
-                            what={`What the ${r.bucket} tilt and picks were worth together.`}
+                          prov={<Provenance source="derived" note={`interaction — ${r.bucket}`}
+                            what={copy.prov.interactionWhatFor(r.bucket)}
+                            where={copy.prov.interactionWhere}
+                            when={copy.prov.interactionWhen}
                             how={copy.prov.interactionHow}
                             worked={workedInteraction(`${wt(wP)}%`, `${wt(wB)}%`, rP, rB,
                               pp(r.interaction_pct))}

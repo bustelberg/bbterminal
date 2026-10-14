@@ -271,10 +271,10 @@ function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
 }
 
 
-function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh,
+function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, column, what, fresh,
   worked, legend, calculation, when, onRefresh }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
-  note?: string; how?: string; kind?: ProvKind;
+  note?: string; where?: React.ReactNode; how?: string; kind?: ProvKind;
   worked?: string; legend?: readonly FormulaSymbol[];
   calculation?: React.ReactNode;
   /** Dated operands, for calculations with more than one relevant observation. */
@@ -323,8 +323,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
         {what && (
           <Field label="Where">
             <span className="text-fg-soft">
-              {s.label}
-              {note && <span className="text-fg-muted"> — {note}</span>}
+              {where ?? <>{s.label}{note && <span className="text-fg-muted"> — {note}</span>}</>}
             </span>
           </Field>
         )}
@@ -490,9 +489,9 @@ export function ProvenanceFetchedAt({ at, scope = 'all', children }: {
   return <FetchedAtContext.Provider value={{ at, scope }}>{children}</FetchedAtContext.Provider>;
 }
 
-export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what,
+export function Provenance({ source, asOf, fetchedAt, note, where, how, kind, column = false, what,
   worked, legend, calculation, when, onRefresh, staleReason }: {
-  source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+  source: SourceKey; asOf?: string | null; note?: string; where?: React.ReactNode; how?: string; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
   /** What each symbol in `worked` stands for. */
@@ -557,7 +556,7 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
     ? { stale: true, label: staleReason }
     : provenanceFreshness(asOf, fetched, column, source);
   return (
-    <InfoTip wide={calculation != null} content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
+    <InfoTip wide={calculation != null} content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note} where={where}
       worked={worked} legend={legend} calculation={calculation} when={when}
       how={how} kind={kind} column={column} what={what} fresh={fresh}
       onRefresh={onRefresh} />}>
