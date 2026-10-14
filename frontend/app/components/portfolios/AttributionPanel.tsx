@@ -35,6 +35,12 @@ import ReturnCalculation from './ReturnCalculation';
  * other, and the banner says so instead of letting them be read as a decomposition.
  */
 type Axis = 'sector' | 'region' | 'currency';
+type AttributionWithExclusions = Omit<ModelPortfolioAttribution, 'excluded'> & {
+  excluded?: Array<{ name?: string | null; asset_class?: string | null; weight_pct?: number; return_pct?: number | null; reason?: string | null }>;
+  sleeves?: Array<{ bucket: string; portfolio_weight_pct: number; policy_weight_pct: number | null;
+    portfolio_return_pct: number | null; comparator: string | null; comparator_return_pct: number | null; impact_pct: number | null;
+    holdings?: Array<{ isin?: string | null; name?: string | null; airs_name?: string | null; weight_pct: number; return_pct: number | null; contribution_pct: number }> }>;
+};
 
 /**
  * Decimals on every figure in this panel — one constant, because "all of it" is the requirement.
@@ -360,8 +366,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   // Keep the fully-shaped response for every period while this panel is open. The backend also
   // prewarms and fingerprints these exact requests, but retaining the responses here means a
   // Jan → Feb → Jan click is synchronous: no spinner, no HTTP trip, no chance to recompute.
-  const periodCache = useRef(new Map<string, ModelPortfolioAttribution>());
-  const [loaded, setLoaded] = useState<{ key: string; value: ModelPortfolioAttribution } | null>(null);
+  const periodCache = useRef(new Map<string, AttributionWithExclusions>());
+  const [loaded, setLoaded] = useState<{ key: string; value: AttributionWithExclusions } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [refreshingPrices, setRefreshingPrices] = useState(false);
@@ -386,6 +392,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
    * belong to.
    */
   const [openBucket, setOpenBucket] = useState<string | null>(null);
+  const [openSleeve, setOpenSleeve] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -405,7 +412,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
         const b = await r.json().catch(() => null);
         if (cancelled) return;
         if (!r.ok) { setError(b?.detail ?? `HTTP ${r.status}`); return; }
-        const value = b as ModelPortfolioAttribution;
+        const value = b as AttributionWithExclusions;
         periodCache.current.set(requestKey, value);
         setError(null);
         setLoaded({ key: requestKey, value });
@@ -530,6 +537,30 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     .reduce((sum, row) => sum + n(row.portfolio_weight_pct), 0);
   const benchmarkWeightTotal = (data?.rows ?? [])
     .reduce((sum, row) => sum + n(row.benchmark_weight_pct), 0);
+  const unpricedAlternatives = (data?.excluded ?? []).filter((item) =>
+    item.asset_class === 'Alternatives' && item.return_pct == null);
+  const unpricedAlternativeWeight = unpricedAlternatives.reduce((sum, item) => sum + n(item.weight_pct), 0);
+  // One table, on one whole-portfolio basis. Index-only sectors stay in it because choosing not
+  // to own one is a real allocation decision; non-sector sleeves complete the portfolio to 100%.
+  const rankedRows = [...(data?.rows ?? [])]
+    .sort((a, b) => Math.abs(n(b.total_pct)) - Math.abs(n(a.total_pct)));
+  const excludedGroups = (data?.excluded ?? []).reduce<Record<string, {
+    weight: number; returnContribution: number; hasMissingReturn: boolean;
+  }>>((groups, item) => {
+    const label = item.reason === 'cash' ? 'Cash'
+      : item.asset_class === 'Bonds' ? 'Bonds'
+        : item.asset_class === 'Alternatives' ? 'Alternatives'
+          : item.reason === 'fund' ? 'Stock ETFs' : 'Other holdings';
+    const group = groups[label] ?? { weight: 0, returnContribution: 0, hasMissingReturn: false };
+    group.weight += n(item.weight_pct);
+    if (item.return_pct == null) group.hasMissingReturn = true;
+    else group.returnContribution += n(item.weight_pct) * item.return_pct;
+    groups[label] = group;
+    return groups;
+  }, {});
+  const excludedWeightTotal = Object.values(excludedGroups).reduce((sum, group) => sum + group.weight, 0);
+  const excludedReturn = (group: { weight: number; returnContribution: number; hasMissingReturn: boolean }) =>
+    group.hasMissingReturn || group.weight === 0 ? null : group.returnContribution / group.weight;
 
   return (
     <section className="h-full min-h-0 flex flex-col bg-card border border-accent-500/30
@@ -593,6 +624,54 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               )}
             </div>
           )}
+          {unpricedAlternativeWeight > 0 && (
+            <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-[12px]">
+              <span className="font-semibold text-fg-strong">Alternatives not attributed: </span>
+              <span className="text-fg-soft">{wt(unpricedAlternativeWeight)}% of the opening portfolio has no comparable price series. It remains in the 100% portfolio weight, but is not redistributed across stocks or bonds and has no Brinson effect.</span>
+            </div>
+          )}
+          {(data.sleeves?.length ?? 0) > 0 && (
+            <div className="mb-4 overflow-x-auto rounded-xl border border-neutral-800/50 bg-card shadow-sm">
+              <div className="min-w-[700px]">
+                <div className="grid grid-cols-[minmax(150px,1fr)_84px_84px_88px_110px_98px_88px] gap-2 border-b border-accent-500/20 bg-accent-500/[0.06] px-4 py-3 text-[10px] font-medium uppercase tracking-wide text-fg-faint">
+                  <span>Sleeve</span><span className="text-right">You</span><span className="text-right">Policy</span><span className="text-right">Return</span><span>Compared with</span><span className="text-right">Benchmark</span><span className="text-right">Impact</span>
+                </div>
+                <div className="divide-y divide-neutral-800/25">
+                  {(data.sleeves ?? []).map((sleeve) => {
+                    const sleeveHoldings = sleeve.holdings ?? [];
+                    const expandable = sleeveHoldings.length > 0;
+                    const open = openSleeve === sleeve.bucket;
+                    return <Fragment key={sleeve.bucket}>
+                      <button type="button" disabled={!expandable}
+                        onClick={() => expandable && setOpenSleeve(open ? null : sleeve.bucket)}
+                        className={`grid w-full grid-cols-[minmax(150px,1fr)_84px_84px_88px_110px_98px_88px] items-center gap-2 px-4 py-3 text-left transition-colors ${expandable ? 'cursor-pointer hover:bg-accent-500/[0.05]' : 'cursor-default'}`}>
+                        <span className="flex items-center gap-2 text-[13px] font-medium text-fg">{expandable && <span className="grid h-5 w-5 place-items-center rounded-full bg-inset text-[10px] text-fg-faint">{open ? '▾' : '▸'}</span>}{sleeve.bucket}</span>
+                        <span className="text-right font-mono text-[12px] text-fg">{wt(sleeve.portfolio_weight_pct)}%</span>
+                        <span className="text-right font-mono text-[12px] text-fg-soft">{sleeve.policy_weight_pct == null ? '—' : `${wt(sleeve.policy_weight_pct)}%`}</span>
+                        <span className="text-right font-mono text-[12px] text-fg">{pct(sleeve.portfolio_return_pct)}</span>
+                        <span>{sleeve.comparator ? <span className="inline-flex rounded-full border border-accent-500/25 bg-accent-500/[0.08] px-2 py-0.5 text-[11px] font-medium text-accent-200">{sleeve.comparator}</span> : <span className="text-[11px] text-fg-faint">Not benchmarked</span>}</span>
+                        <span className="text-right font-mono text-[12px] text-fg-soft">{pct(sleeve.comparator_return_pct)}</span>
+                        <span className={`text-right font-mono text-[12px] font-semibold ${sleeve.impact_pct == null ? 'text-fg-faint' : sleeve.impact_pct >= 0 ? 'text-pos-300' : 'text-neg-300'}`}>{sleeve.impact_pct == null ? '—' : pp(sleeve.impact_pct)}</span>
+                      </button>
+                      {open && <div className="border-t border-neutral-800/25 bg-inset/40 px-4 py-4">
+                        <div className="mb-3 flex items-center justify-between"><p className="text-[12px] font-medium text-fg">Holdings in {sleeve.bucket}</p><span className="rounded-full bg-card px-2 py-0.5 text-[11px] text-fg-faint">{sleeveHoldings.length} instruments</span></div>
+                        <div className="divide-y divide-neutral-800/25 overflow-hidden rounded-lg border border-neutral-800/35 bg-card">
+                          <div className="grid grid-cols-[minmax(0,1fr)_80px_84px_84px] gap-2 bg-overlay/[0.02] px-3 py-2 text-[10px] uppercase tracking-wide text-fg-faint">
+                            <span>Instrument</span><span className="text-right">Weight</span><span className="text-right">Return</span><span className="text-right">Contribution</span>
+                          </div>
+                          {sleeveHoldings.map((holding) => <div key={holding.isin ?? holding.name}
+                            className="grid grid-cols-[minmax(0,1fr)_80px_84px_84px] gap-2 px-3 py-2 text-[12px]">
+                            <span className="truncate text-fg">{holding.name ?? holding.airs_name ?? 'Unknown holding'}</span><span className="text-right font-mono text-fg-soft">{wt(holding.weight_pct)}%</span>
+                            <span className="text-right font-mono text-fg-soft">{pct(holding.return_pct)}</span><span className={`text-right font-mono ${holding.return_pct == null ? 'text-fg-faint' : holding.contribution_pct >= 0 ? 'text-pos-300' : 'text-neg-300'}`}>{holding.return_pct == null ? '—' : pp(holding.contribution_pct)}</span>
+                          </div>)}
+                        </div>
+                      </div>}
+                    </Fragment>;
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
           {/*  The identity IS the decomposition. If it fails, these are just three columns. */}
           {hasRows && !data.reconciles && (
             <p className="text-[12px] text-neg-300 mb-2">
@@ -624,15 +703,72 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
-          {hasRows && <>
+          {hasRows && !(data.sleeves?.length) && <>
+          <div className="mb-3 overflow-x-auto rounded-lg border border-neutral-800/40 bg-inset/30">
+            <div className="min-w-[660px]">
+            <div className="grid grid-cols-[minmax(150px,1fr)_72px_72px_88px_88px_88px] gap-2 border-b border-neutral-800/40 px-3 py-2 text-[10px] uppercase tracking-wide text-fg-faint">
+              <span>{w}</span><span className="text-right">Your weight</span><span className="text-right">{benchmark} weight</span><span className="text-right">Your return</span><span className="text-right">{benchmark} return</span><span className="text-right">Impact</span>
+            </div>
+            <div className="divide-y divide-neutral-800/25">
+              {rankedRows.map((row) => {
+                const open = openBucket === row.bucket;
+                const impact = n(row.total_pct);
+                return <Fragment key={`summary-${row.bucket}`}>
+                  <button type="button" onClick={() => setOpenBucket(open ? null : row.bucket)}
+                    className="grid w-full grid-cols-[minmax(150px,1fr)_72px_72px_88px_88px_88px] items-center gap-2 px-3 py-2 text-left hover:bg-overlay/[0.03]">
+                    <span className="truncate text-[12px] text-fg">{row.bucket}</span>
+                    <span className="text-right font-mono text-[12px] text-fg-soft">{wt(row.portfolio_weight_pct)}%</span>
+                    <span className="text-right font-mono text-[12px] text-fg-soft">{wt(row.benchmark_weight_pct)}%</span>
+                    <span className="text-right font-mono text-[12px] text-fg-soft">{pct(row.portfolio_return_pct)}</span>
+                    <span className="text-right font-mono text-[12px] text-fg-soft">{pct(row.benchmark_return_pct)}</span>
+                    <span className={`text-right font-mono text-[12px] font-semibold ${impact >= 0 ? 'text-pos-300' : 'text-neg-300'}`}>{pp(impact)}</span>
+                  </button>
+                  {open && <div className="border-t border-neutral-800/25 bg-card px-3 py-3">
+                    <BucketNames row={row} bucket={row.bucket} benchmark={benchmark}
+                      startLabel={startLabel} portfolioProvenance={portfolioHoldingProvenance}
+                      benchmarkProvenance={benchmarkHoldingProvenance} />
+                  </div>}
+                </Fragment>;
+              })}
+              {Object.entries(excludedGroups).sort(([a], [b]) => a.localeCompare(b)).map(([label, group]) => (
+                <div key={label} className="grid grid-cols-[minmax(150px,1fr)_72px_72px_88px_88px_88px] items-center gap-2 px-3 py-2 text-[12px]">
+                  <span className="truncate text-fg-soft">{label}</span>
+                  <span className="text-right font-mono text-fg-soft">{wt(group.weight)}%</span>
+                  <span className="text-right font-mono text-fg-faint">0.00%</span>
+                  <span className="text-right font-mono text-fg-soft">{pct(excludedReturn(group))}</span>
+                  <span className="text-right font-mono text-fg-faint">{label === 'Stock ETFs' ? pct(data.benchmark_return_pct) : label === 'Cash' ? pct(0) : '—'}</span>
+                  <span className="text-right text-fg-faint">—</span>
+                </div>
+              ))}
+              <div className="grid grid-cols-[minmax(150px,1fr)_72px_72px_88px_88px_88px] items-center gap-2 border-t border-neutral-800/40 px-3 py-2 text-[12px] font-semibold">
+                <span className="text-fg">Total</span>
+                <span className="text-right font-mono text-fg">{wt(portfolioWeightTotal + excludedWeightTotal)}%</span>
+                <span className="text-right font-mono text-fg">{wt(benchmarkWeightTotal)}%</span>
+                <span />
+                <span />
+                <span className="text-right font-mono text-fg">{pp(data.attributed_pct)}</span>
+              </div>
+            </div>
+            </div>
+          </div>
+          {data && <details className="hidden">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12px] text-fg-muted hover:bg-overlay/[0.02]">
+              <svg viewBox="0 0 16 16" aria-hidden="true"
+                className="h-3 w-3 shrink-0 text-fg-faint transition-transform group-open:rotate-90"
+                fill="none" stroke="currentColor" strokeWidth="1.6">
+                <path d="m6 3 5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              <span>Show the full calculation</span>
+            </summary>
           <div className="overflow-x-auto rounded-lg border border-neutral-800/40 mb-3">
             {/* Fixed columns keep the table still while YTD/month/axis requests replace their
                 values. Without an explicit layout the browser sized each response from its
                 labels and numbers, so clicking Jan visibly shifted every column. */}
-            <table className="w-full min-w-[1600px] table-fixed text-[12px]">
+            <table className="w-full min-w-[1900px] table-fixed text-[12px]">
               <colgroup>
-                <col className="w-[12%]" />
-                <col span={8} className="w-[11%]" />
+                <col className="w-[220px]" />
+                <col span={4} className="w-[230px]" />
+                <col span={4} className="w-[140px]" />
               </colgroup>
               <thead className="sticky top-0 z-[1] bg-card">
                 <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
@@ -865,6 +1001,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               </tfoot>
             </table>
           </div>
+          </details>}
 
           <details open className="group rounded-lg border border-neutral-800/35 bg-card">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5
@@ -874,7 +1011,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                 fill="none" stroke="currentColor" strokeWidth="1.6">
                 <path d="m6 3 5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              <span className="font-semibold text-fg-strong">{copy.chrome.drivers}</span>
+              <span className="font-semibold text-fg-strong">Holdings behind the result</span>
             </summary>
             <div className="grid gap-5 border-t border-neutral-800/25 px-3 py-3 md:grid-cols-3">
             <Names title={copy.names.contributors} rows={data.top_contributors ?? []}

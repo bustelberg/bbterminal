@@ -447,6 +447,50 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # a decomposition of it.
     residual = excess - attributed
 
+    # --- client-facing profile sleeves ---------------------------------------------------
+    # The sector rows below explain the stock sleeve.  The first view needs a whole-portfolio
+    # comparison, however: ACWI is the Stocks comparator, while Bonds have their own aggregate
+    # proxy.  Keep alternatives visible but do not invent a comparator where none exists.
+    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles  # noqa: PLC0415
+    from routers._airs_portfolio_variant import portfolio_variant  # noqa: PLC0415
+    from routers._benchmark_etf import etf_returns  # noqa: PLC0415
+
+    variant = portfolio_variant(p.get("name"), p.get("omschrijving"))
+    policy = _weighted_benchmark_profiles().get(variant or "")
+    bond_mark = etf_returns("BONDS", [start]).get(start) or {}
+    sleeve_specs = (
+        ("Stocks", {"Equity", "ETF Equity"}, benchmark_label, r_b_total),
+        ("Bonds", {"Bonds"}, str(bond_mark.get("ticker") or "AGGH.AS"), bond_mark.get("eur_pct")),
+        ("Alternatives", {"Alternatives"}, None, None),
+        ("Cash", {"Cash"}, "Cash", 0.0),
+    )
+    sleeves: list[dict] = []
+    for name, classes, comparator, comparator_return in sleeve_specs:
+        legs = [h for h in holdings if ("Cash" in classes and h.get("is_cash"))
+                or h.get("asset_class") in classes]
+        weight = sum(float(h.get("weight_pct") or 0.0) for h in legs)
+        known = [(float(h.get("weight_pct") or 0.0),
+                  0.0 if name == "Cash" else float(h["return_pct"]))
+                 for h in legs if name == "Cash" or h.get("return_pct") is not None]
+        priced_weight = sum(w for w, _ret in known)
+        portfolio_return = (_weighted(known) if known and priced_weight >= weight - 1e-6 else None)
+        policy_weight = policy.get(name, 0.0) if policy else None
+        impact = (weight / 100.0 * portfolio_return - policy_weight / 100.0 * float(comparator_return)
+                  if portfolio_return is not None and comparator_return is not None
+                  and policy_weight is not None else None)
+        if weight > 0 or (policy_weight or 0) > 0:
+            sleeve_holdings = sorted(({
+                "isin": h.get("isin"), "name": h.get("name"), "airs_name": h.get("airs_name"),
+                "weight_pct": float(h.get("weight_pct") or 0.0), "return_pct": h.get("return_pct"),
+                "contribution_pct": float(h.get("weight_pct") or 0.0) / 100.0
+                                    * float(h.get("return_pct") or 0.0),
+            } for h in legs), key=lambda h: -h["weight_pct"])
+            sleeves.append({"bucket": name, "portfolio_weight_pct": weight,
+                            "policy_weight_pct": policy_weight,
+                            "portfolio_return_pct": portfolio_return, "comparator": comparator,
+                            "comparator_return_pct": comparator_return, "impact_pct": impact,
+                            "holdings": sleeve_holdings})
+
     # --- contributors: the names, not the buckets ---------------------------------------
     contrib = [{**i, "contribution_pct": i["weight_pct"] / 100.0 * (i["return_pct"] or 0.0)}
                for i in attributable + [e for e in excluded if e["return_pct"] is not None]]
@@ -572,9 +616,11 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                          if coverage_total_w > 0 else 0.0),
         "unpriced_buckets": sorted({e["bucket"] for e in unpriced}),
         "excluded": [{"bucket": e["bucket"], "name": e["name"], "isin": e["isin"],
+                      "asset_class": e.get("asset_class"),
                       "weight_pct": e["weight_pct"], "return_pct": e["return_pct"],
                       "reason": e["reason"]}
                      for e in sorted(excluded, key=lambda e: -e["weight_pct"])],
+        "sleeves": sleeves,
         "rows": rows_out,
         "top_contributors": contrib[:5],
         "top_detractors": [c for c in reversed(contrib[-5:]) if c["contribution_pct"] < 0],

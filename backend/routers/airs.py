@@ -2761,6 +2761,19 @@ class AttributionExcluded(BaseModel):
     weight_pct: float = 0.0
     return_pct: float | None = None
     reason: str | None = None       # fund | cash | unpriced | unclassified
+    asset_class: str | None = None
+
+
+class AttributionSleeve(BaseModel):
+    """One client-facing sleeve in the profile benchmark comparison."""
+    bucket: str
+    portfolio_weight_pct: float = 0.0
+    policy_weight_pct: float | None = None
+    portfolio_return_pct: float | None = None
+    comparator: str | None = None
+    comparator_return_pct: float | None = None
+    impact_pct: float | None = None
+    holdings: list[AttributionName] = []
 
 
 class ModelPortfolioAttribution(BaseModel):
@@ -2832,6 +2845,7 @@ class ModelPortfolioAttribution(BaseModel):
     unpriced_pct: float = 0.0
     unpriced_buckets: list[str] = []
     excluded: list[AttributionExcluded] = []
+    sleeves: list[AttributionSleeve] = []
     rows: list[AttributionBucket] = []
     top_contributors: list[AttributionName] = []
     top_detractors: list[AttributionName] = []
