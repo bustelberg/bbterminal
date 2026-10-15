@@ -43,6 +43,7 @@ import threading
 import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -1886,6 +1887,42 @@ def _fire_airs_vermogen() -> None:
     _spawn_body("airs_vermogen_refresh")
 
 
+def _maybe_kickstart_airs_vermogen() -> None:
+    """Recover an AIRS morning refresh interrupted by a Railway redeploy.
+
+    The four scheduled attempts are deliberately redundant: AIRS can publish its valuation at an
+    uncertain point in the morning.  What matters is one completed attempt, not which of 08:00,
+    09:00, 10:00 or 11:00 produced it.  APScheduler's clock is in-process, so a redeploy can miss
+    all remaining fires; consult the durable run log on boot and submit one catch-up only when no
+    attempt has completed successfully since Amsterdam midnight.
+
+    A healthy redeploy is a no-op.  A deployment that interrupted an in-flight scan retries from
+    the same body as the normal tick, which keeps account/model sequencing and run logging intact.
+    """
+    now = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    if now.hour < 8:
+        return
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    try:
+        from deps import supabase  # noqa: PLC0415
+
+        rows = (supabase.table("scheduled_job_run")
+                .select("id")
+                .eq("job_id", "airs_vermogen_refresh")
+                .eq("status", "ok")
+                .gte("started_at", day_start.isoformat())
+                .limit(1).execute().data or [])
+    except Exception as e:  # noqa: BLE001 — a database that cannot be read cannot safely dedupe
+        _log.warning("[scheduler] AIRS boot catch-up could not read today's run history: %s: %s",
+                     type(e).__name__, e)
+        return
+    if rows:
+        return
+    _log.warning("[scheduler] no successful AIRS refresh recorded since %s; starting catch-up",
+                 now.date().isoformat())
+    _spawn_body("airs_vermogen_refresh")
+
+
 def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
       """ CANCEL LANDS BETWEEN ACCOUNTS, NEVER INSIDE ONE — `run_airs_vermogen_refresh_sync`
       already takes the `should_stop` hook and checks it at exactly that boundary, because an
@@ -2491,6 +2528,15 @@ def register_scheduler(app) -> None:
         except Exception as e:
             _log.warning(
                 "[scheduler] airs-models kickstart wrapper failed: %s: %s",
+                type(e).__name__, e,
+            )
+        # The AIRS refresh has four morning attempts. A Railway restart can land between them;
+        # consult the durable run log and recover immediately only when none succeeded today.
+        try:
+            _maybe_kickstart_airs_vermogen()
+        except Exception as e:
+            _log.warning(
+                "[scheduler] AIRS refresh kickstart wrapper failed: %s: %s",
                 type(e).__name__, e,
             )
         next_runs = {j.id: str(j.next_run_time) for j in sched.get_jobs()}

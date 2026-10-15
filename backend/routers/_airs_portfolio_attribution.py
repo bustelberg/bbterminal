@@ -86,7 +86,7 @@ _prewarming: set[tuple] = set()
 
 # Bump when the response's calculation semantics change. A data fingerprint invalidates changed
 # source data; it cannot invalidate a correct-data response shaped by an older implementation.
-_ATTRIBUTION_CACHE_VERSION = "attribution-native-price-audit-v14"
+_ATTRIBUTION_CACHE_VERSION = "attribution-native-price-audit-v15"
 
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
@@ -647,6 +647,16 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # --- contributors: the names, not the buckets ---------------------------------------
     contrib = [{**i, "contribution_pct": i["weight_pct"] / 100.0 * (i["return_pct"] or 0.0)}
                for i in attributable + [e for e in excluded if e["return_pct"] is not None]]
+    # The headline contributor lists use these copied holding records rather than the bucket
+    # drill-down records above. Preserve the same ACWI-membership marker here too, otherwise a
+    # holding such as Hermes is correctly marked inside Consumer Discretionary but silently loses
+    # that context in the prominent detractors list.
+    for holding in contrib:
+        holding["in_both"] = _overlaps(
+            holding,
+            benchmark_member_isins,
+            benchmark_member_names,
+        )
     contrib.sort(key=lambda c: -c["contribution_pct"])
     held_isins = {i["isin"] for i in attributable if i.get("isin")}
 

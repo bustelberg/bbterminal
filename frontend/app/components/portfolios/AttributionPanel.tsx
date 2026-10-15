@@ -8,6 +8,7 @@ import type { ModelPortfolioAttribution } from '../../../lib/types/api';
 import { Provenance, type SourceKey } from '../../../lib/provenance';
 import { Holdings, type HoldingsProvenance } from './BucketDetailPanel';
 import LoadingDots from './LoadingDots';
+import InfoTip from '../InfoTip';
 import { useAttributionCopy } from './attributionCopy';
 import {
   workedAllocation, workedContribution, workedInteraction, workedReturn,
@@ -137,17 +138,19 @@ function Eff({ v, prov }: { v?: number | null; prov?: React.ReactNode }) {
  * The ⓘ is now the single place, and anything the label's card said that its card did not must
  * be folded INTO it — deleting the second tooltip is only safe if nothing was left behind in it.
  */
-function Th({ label, prov, align = 'right' }: {
+function Th({ label, prov, align = 'right', simpleInfo }: {
   label: React.ReactNode;
   /** The column's ⓘ — What / Source / When / How. One per column; every cell repeats it with its
    *  own row's figures. */
   prov?: React.ReactNode;
   align?: 'left' | 'right';
+  /** A header needs a definition, not the full per-value provenance card. */
+  simpleInfo?: string;
 }) {
   return (
     <th className={`px-2 py-1.5 align-top font-medium whitespace-normal break-words leading-tight ${align === 'left' ? 'text-left' : 'text-right'}`}>
       {label}
-      {prov}
+      {simpleInfo ? <InfoTip text={simpleInfo} /> : prov}
     </th>
   );
 }
@@ -229,7 +232,9 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
           {rows.map((r) => (
             <tr key={`${r.isin ?? r.ticker ?? r.name}`} className="border-t border-neutral-800/20">
               <td className="py-1 pr-2 text-fg truncate" title={r.name ?? r.ticker ?? r.isin ?? ''}>
-                {r.name ?? r.ticker ?? r.isin}
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate">{r.name ?? r.ticker ?? r.isin}</span>
+                </span>
               </td>
               <td className="py-1 px-1 text-right font-mono text-fg-subtle">
                 <Num prov={<Provenance source={weightSrc} asOf={weightAsOf}
@@ -329,7 +334,8 @@ function BucketNames({ row, bucket, benchmark, startLabel, portfolioProvenance,
             )}
           </p>
           {mine.length
-            ? <Holdings rows={mine} startLabel={startLabel} provenance={portfolioProvenance} />
+            ? <Holdings rows={mine} startLabel={startLabel} provenance={portfolioProvenance}
+                />
             : (
               <p className="text-[12px] text-fg-subtle py-1">
                 {copy.names.noneMine(bucket)}
@@ -344,7 +350,8 @@ function BucketNames({ row, bucket, benchmark, startLabel, portfolioProvenance,
             )}
           </p>
           {theirs.length
-            ? <Holdings rows={theirs} startLabel={startLabel} provenance={benchmarkProvenance} />
+            ? <Holdings rows={theirs} startLabel={startLabel} provenance={benchmarkProvenance}
+                />
             : (
               <p className="text-[12px] text-fg-subtle py-1">
                 {copy.names.noneIndex(benchmark, bucket)}
@@ -781,6 +788,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               <thead className="sticky top-0 z-[1] bg-card">
                 <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                   <Th align="left" label={w}
+                    simpleInfo={`The ${w}s used to group your holdings and ${benchmark}'s constituents.`}
                     prov={<Provenance source="derived" column kind="formula" note={`the ${w}s`}
                       what={`The ${w}s the excess is split across — including the ones ${benchmark} holds and you do NOT, because choosing not to own something is a decision the numbers can price.`}
                       how={copy.prov.bucketsHow(w)} />} />
@@ -792,18 +800,16 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       that will be guessed at instead. The tooltip formulas use the same words, so
                       the two cannot drift apart the way symbols and a missing key did. */}
                   <Th label={copy.headers.yourWeight(attributionYear)}
-                    prov={<Provenance source={pWeightSource} column kind="formula"
-                      what={`Your real AIRS opening weight in each ${w}, as a share of the complete book or model. Removed funds, cash and opaque certificates remain outside the rows without inflating the stocks to 100%.`}
-                      note={`your weight in this ${w}`}
-                      how={copy.prov.yourWeightHow(pWeightSrc)}
-                      worked={workedWeight(null)} />} />
+                    prov={<InfoTip text="Your opening weight in each sector, measured at the start of the selected period." />} />
                   <Th label={`Benchmark weight at start of ${attributionYear}`}
+                    simpleInfo={`${benchmark}'s opening weight in each ${w}.`}
                     prov={<Provenance source="derived" column kind="formula"
                       what={`${benchmark}'s share in each ${w}, at the START of the window — weighting by today’s cap would be look-ahead.`}
                       note={`policy benchmark weight in this ${w}`}
                       how={`${benchmark}'s sector weight, scaled to the policy Stocks allocation.`}
                       worked={workedWeight(null)} />} />
                   <Th label={copy.headers.yourReturn(attributionYear)}
+                    simpleInfo={`The EUR return of your holdings in each ${w} since the start of the selected period.`}
                     prov={<Provenance source={pSrc} column kind="formula"
                       what={`What your directly held stocks in each ${w} returned, in EUR. ETF sector weights are included in allocation, but an ETF has no observable sector return.`}
                       note={`your direct-stock return in this ${w}`}
@@ -813,6 +819,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       be on the screen — an over/underweight is judged by whether its sector beat
                       or lagged the index as a whole, not by whether it went up. */}
                   <Th label={copy.headers.indexReturn(attributionYear)}
+                    simpleInfo={`The EUR return of ${benchmark}'s holdings in each ${w} since the start of the selected period.`}
                     prov={<Provenance source="benchmark" column kind="formula"
                       what={`What ${benchmark}'s holdings in each ${w} returned, in EUR.`}
                       note={`${benchmark} return in this ${w}`}
@@ -910,7 +917,6 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
                         <Num prov={<Provenance source={pWeightSource} asOf={data.start} kind="formula"
                           what={`Your real AIRS opening-book share held in ${r.bucket}.`}
-                          note={`your weight in ${r.bucket}`}
                           how={weightHow}
                           worked={workedWeight(`${wt(wP)}%`)} />}>
                           {wt(wP)}%
@@ -1013,7 +1019,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       Bonds
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono text-fg-subtle"><Num prov={<Provenance source={pWeightSource} asOf={data.start} kind="formula"
-                      what="Your opening-book share held in Bonds." note="your weight in Bonds"
+                      what="Your opening-book share held in Bonds."
                       how={`The real opening-book weight, from ${pWeightSrc}.`}
                       worked={workedWeight(`${wt(bondsSleeve.portfolio_weight_pct)}%`)} />}>
                       {wt(bondsSleeve.portfolio_weight_pct)}%</Num></td>

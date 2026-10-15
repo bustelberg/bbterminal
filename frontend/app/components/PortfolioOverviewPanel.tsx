@@ -1383,7 +1383,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             name has no valuation date of its own, so `fetchedAt` alone is right:
                             the card badges it and prices its own freshness from it. */}
                         <Provenance source={r.fixed_name ? 'airs_model' : 'airs_volk'} kind="copied"
-                          fetchedAt={r.fixed_name ? r.model_fetched_at : r.fetched_at}
+                          /* The paired model supplies a structural display name, but its catalogue
+                             scan is not a prerequisite for a current account. Tie freshness to the
+                             book scan that Refresh all actually performs; otherwise a stale fixed-
+                             model catalogue leaves a freshly refreshed account orange. */
+                          fetchedAt={r.fetched_at}
                           what={r.fixed_name
                             ? 'The name of this account, read from the model portfolio it is paired with.'
                             : 'The name of this account, as AIRS itself calls it.'}

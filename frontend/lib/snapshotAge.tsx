@@ -3,7 +3,7 @@
  *
  * There are two clocks here. `snapshotFreshness` measures a source's dated observation for feeds
  * with no acquisition receipt. `airsScheduleFreshness` measures our daily AIRS read against its
- * declared 11:00 Amsterdam schedule. Provenance uses the latter whenever an AIRS `fetched_at`
+ * declared 08:00 Amsterdam schedule. Provenance uses the latter whenever an AIRS `fetched_at`
  * exists, so yesterday remains current until today's scheduled run has had time to complete.
  *
  *  This exists because a cached AIRS value shown as if it were current is exactly how a stale
@@ -84,7 +84,7 @@ export function snapshotFreshness(asOf: string | null | undefined):
  *
  *  Calendar days, not trading days, and that is the literal rule rather than a softened one. It
  * means a Saturday can light up something read on Friday. AIRS no longer uses this rule; its
- * schedule-aware branch below decides against the 11:00 Europe/Amsterdam slot instead.
+ * schedule-aware branch below decides against the first 08:00 Europe/Amsterdam slot instead.
  *
  *  Compared in local time, on the date portion only. `fetched_at` is an ISO timestamp in UTC;
  * slicing to `YYYY-MM-DD` and comparing to the browser's own local date is what makes "today" mean
@@ -100,9 +100,12 @@ export function fetchedToday(fetchedAt: string | null | undefined): boolean {
 }
 
 const AIRS_TIME_ZONE = 'Europe/Amsterdam';
-const AIRS_RUN_MINUTE = 11 * 60;
+// The scheduler probes at 08:00, 09:00, 10:00 and 11:00 Amsterdam. Its incremental gate retains
+// a successful first scan for 20 hours, so an 08:00 acquisition is the day's authoritative run;
+// demanding a second write at 11:00 incorrectly marks every healthy production book as stale.
+const AIRS_RUN_MINUTE = 8 * 60;
 // The fleet is sequential: accounts, model compositions, then paired-model pricing. Do not call a
-// still-running 11:00 pass stale merely because the clock has just struck eleven.
+// still-running first pass stale merely because the clock has just struck eight.
 const AIRS_COMPLETION_GRACE_MINUTES = 60;
 
 type ZonedMinute = { date: string; minute: number; stamp: string };
@@ -132,11 +135,11 @@ function previousDate(date: string): string {
   return value.toISOString().slice(0, 10);
 }
 
-/** Freshness of the daily AIRS acquisition, aligned to its 11:00 Amsterdam schedule.
+/** Freshness of the daily AIRS acquisition, aligned to its first 08:00 Amsterdam schedule.
  *
- * Before 12:00 (the scheduled time plus one hour for the sequential fleet run), yesterday's
- * successful 11:00 pass is still the latest one we can reasonably require. From 12:00 onward,
- * this requires a read at or after today's 11:00 slot. This is deliberately schedule-based rather
+ * Before 09:00 (the scheduled time plus one hour for the sequential fleet run), yesterday's
+ * successful pass is still the latest one we can reasonably require. From 09:00 onward,
+ * this requires a read at or after today's 08:00 slot. This is deliberately schedule-based rather
  * than `age < 24h`: a manual read late yesterday must not conceal a missed scheduled run today.
  */
 export function airsScheduleFreshness(
@@ -149,13 +152,16 @@ export function airsScheduleFreshness(
 
   const afterDeadline = current.minute >= AIRS_RUN_MINUTE + AIRS_COMPLETION_GRACE_MINUTES;
   const expectedDate = afterDeadline ? current.date : previousDate(current.date);
-  const expectedStamp = `${expectedDate}T11:00`;
+  const expectedStamp = `${expectedDate}T08:00`;
   if (fetched.stamp >= expectedStamp) {
     const awaitingToday = !afterDeadline && fetched.date < current.date;
     return { stale: false,
-      label: awaitingToday ? "current; today's 11:00 AIRS run is pending" : 'current AIRS run' };
+      // A successful scheduled read is the normal state, not a second badge competing with the
+      // source date in every provenance card. Keep the useful pre-noon caveat, but otherwise the
+      // neutral info icon is sufficient; only missing runs need a visible freshness signal.
+      label: awaitingToday ? "current; today's 08:00 AIRS run is pending" : '' };
   }
-  return { stale: true, label: `missing AIRS run since ${expectedDate} 11:00 Amsterdam` };
+  return { stale: true, label: `missing AIRS run since ${expectedDate} 08:00 Amsterdam` };
 }
 
 export type LagOwner = { side: 'source' | 'ours'; days: number; text: string };
