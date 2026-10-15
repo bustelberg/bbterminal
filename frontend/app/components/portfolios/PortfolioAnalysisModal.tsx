@@ -6,7 +6,6 @@ import { API_URL } from '../../../lib/apiUrl';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
 import { chartTheme } from '../../../lib/chartTheme';
 import { ValueBadge } from '../../../lib/dynamicValue';
-import { track } from '../../../lib/loading';
 import { startJob } from '../../../lib/stores/jobs';
 import { startSectorOverride } from '../../../lib/sectorOverride';
 import { Field, TipCard } from '../../../lib/tipCard';
@@ -3722,10 +3721,11 @@ export default function PortfolioAnalysisModal({
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
           return body as ModelPortfolioAnalysis;
         });
-        // Once a payload is already on screen, selection and refresh loads belong in the shared
-        // root-level request popup. Keeping this around the existing promise reports the same
-        // request without launching a second one; the cold-open loader remains inside the modal.
-        const b = await (data == null ? analysis : track('Updating charts', analysis));
+        // Keep the existing chart payload visible while this reload settles, but do not surface
+        // routine selection/refresh work in the global request popup. The request is background
+        // maintenance from the reader's perspective; a popup per superseded selection made normal
+        // chart updates look like unrelated work and could stack during quick changes.
+        const b = await analysis;
         if (cancelled) return;
         //  Where the wait went. `apiFetch` already logs the round-trip total, but this endpoint
         // is one request covering eight different loads — so a 5-second "Loading overview…"

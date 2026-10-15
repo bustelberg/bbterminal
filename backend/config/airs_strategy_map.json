@@ -147,10 +147,11 @@
       "look_through_target": null
     },
     {
-      "nickname": "FamilieTopSelectie Offensief",
+      "nickname": "FamilieTopSelectie",
       "airs_names": [
         "BUS_FTS_OFF_DYN",
-        "BUS_FTS_OFF_AFS"
+        "BUS_FTS_OFF_AFS",
+        "FamilieTopSelectie Offensief"
       ],
       "holding_aliases": [],
       "look_through_target": null
