@@ -31,7 +31,7 @@ trough, recovery and both durations are returned for every drawdown reported.
 """
 from __future__ import annotations
 
-from routers._tracking_error import PERIODS, SeriesError, build_paired_series
+from routers._tracking_error import PERIODS, SeriesError, build_paired_series, is_direct_equity_stock
 
 #: How many of the deepest drawdowns to describe, not just the worst.
 #:
@@ -140,14 +140,6 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
     # doing it here and handing it over means the cadence comparison costs no extra round trips.
     bench_isin = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
     preloaded = None
-    if bench_isin:
-        isins = sorted({(h.get("isin") or "").strip().upper() for h in holdings
-                        if not h.get("is_fund") and (h.get("isin") or "").strip()})
-        if isins:
-            try:
-                preloaded = _daily_eur([*isins, bench_isin], years)
-            except Exception:  # noqa: BLE001 — fall through; the builder reports the real reason
-                preloaded = None
 
     try:
         built = build_paired_series(holdings, benchmark, freq, years, preloaded=preloaded)

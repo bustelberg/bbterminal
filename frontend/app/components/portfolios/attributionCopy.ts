@@ -81,12 +81,12 @@ const en = {
       { sym: 'w_i', is: `each holding’s weight in ${owner}` },
       { sym: 'r_i', is: 'what it returned over the window, in EUR' },
     ],
-    effectLegend: (benchmark: string) => [
-      { sym: 'w_p', is: 'your weight in the bucket' },
-      { sym: 'w_b', is: `${benchmark}’s weight in it` },
-      { sym: 'r_p', is: 'what your holdings there returned' },
-      { sym: 'r_b', is: `what ${benchmark}’s did` },
-      { sym: 'r_B', is: `${benchmark}’s return as a whole` },
+    effectLegend: (benchmark: string, bucket: string) => [
+      { sym: 'w_p', is: `your opening weight in this ${bucket}` },
+      { sym: 'w_b', is: `${benchmark}'s opening weight in this ${bucket}` },
+      { sym: 'r_p', is: `what your holdings in this ${bucket} returned` },
+      { sym: 'r_b', is: `what ${benchmark}'s holdings in this ${bucket} returned` },
+      { sym: 'r_B', is: `${benchmark}'s overall return` },
     ],
   },
 } as const;
@@ -173,12 +173,12 @@ const nl: AttributionCopy = {
       { sym: 'w_i', is: `het gewicht van elke positie in ${owner}` },
       { sym: 'r_i', is: 'wat die positie over de periode rendeerde, in EUR' },
     ],
-    effectLegend: (benchmark) => [
-      { sym: 'w_p', is: 'uw gewicht in de groep' },
-      { sym: 'w_b', is: `het gewicht van ${benchmark} daarin` },
-      { sym: 'r_p', is: 'wat uw posities daar rendeerden' },
-      { sym: 'r_b', is: `wat die van ${benchmark} deden` },
-      { sym: 'r_B', is: `het rendement van ${benchmark} als geheel` },
+    effectLegend: (benchmark, bucket) => [
+      { sym: 'w_p', is: `uw startweging in deze ${bucket}` },
+      { sym: 'w_b', is: `de startweging van ${benchmark} in deze ${bucket}` },
+      { sym: 'r_p', is: `wat uw posities in deze ${bucket} rendeerden` },
+      { sym: 'r_b', is: `wat de posities van ${benchmark} in deze ${bucket} rendeerden` },
+      { sym: 'r_B', is: `het totale rendement van ${benchmark}` },
     ],
   },
 };

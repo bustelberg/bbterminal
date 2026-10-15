@@ -8781,6 +8781,10 @@ export interface components {
              * @default false
              */
             residual?: boolean;
+            workbook_weight_pct?: number | null;
+            weight_calculation?: { as_of: string; initial_weight_pct: number; return_eur_pct: number; normalisation_total: number; result_pct: number; prices: { ticker?: string; start_date?: string; end_date?: string; start_price_eur?: number; end_price_eur?: number }[] } | null;
+            yfinance_return_pct?: number | null;
+            normalisation_total?: number | null;
         };
         /**
          * ActiveShareUnmatched
@@ -13669,6 +13673,7 @@ export interface components {
          *     is the other caveat: the weights are TODAY'S, carried backwards.
          */
         PortfolioVolatility: {
+            rolling_volatility?: { date: string; portfolio_pct: number; benchmark_pct: number }[];
             /**
              * Available
              * @default true
@@ -14591,6 +14596,8 @@ export interface components {
          *     disagree — so every label says "realised" rather than leaving the reader to assume.
          */
         TrackingError: {
+            portfolio_return_ann_pct?: number | null;
+            benchmark_return_ann_pct?: number | null;
             /** Active Return Ann Pct */
             active_return_ann_pct?: number | null;
             /**

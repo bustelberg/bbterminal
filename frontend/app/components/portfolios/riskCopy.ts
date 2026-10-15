@@ -439,7 +439,7 @@ const en: RiskCopy = {
   },
 
   corr: {
-    rhoVs: (b) => `ρ vs ${b}`, rSquared: 'R²', meanPair: 'Mean ρ between positions',
+    rhoVs: (b) => `Correlation vs. ${b} Index`, rSquared: 'R²', meanPair: 'Mean correlation between own positions',
     activeVol: 'Active vol (= TE)',
     betweenPositions: 'Between the positions',
     legend: 'Blue = diverging, amber = moving together. Ordered by weight.',

@@ -60,6 +60,18 @@ def book(monkeypatch):
 
 
 class TestTheFormula:
+    def test_rolling_chart_uses_twelve_aligned_monthly_returns(self, book):
+        from routers._tracking_error import build_paired_series
+        built = build_paired_series(book, "ACWI", "monthly", 5)
+        got = V.compute_volatility(book, "ACWI", frequency="monthly")
+        rolling = got["rolling_volatility"]
+        assert len(rolling) == len(built["portfolio"]) - 11
+        for i, row in enumerate(rolling, 11):
+            assert row["date"] == built["obs_dates"][i]
+            for key, series in (("portfolio_pct", "portfolio"), ("benchmark_pct", "benchmark")):
+                expected = np.std(built[series][i-11:i+1], ddof=1) * np.sqrt(12) * 100
+                assert row[key] == pytest.approx(expected)
+
     def test_it_is_the_bessel_corrected_annualised_sd(self, book):
         from routers._tracking_error import build_paired_series
 

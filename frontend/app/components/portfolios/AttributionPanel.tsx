@@ -618,10 +618,6 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             <option value="region">{copy.axis.byRegion}</option>
             <option value="currency">{copy.axis.byCurrency}</option>
           </select>
-          <button type="button" onClick={onClose}
-            className="cursor-pointer text-[12px] px-2 py-1 rounded-lg border border-neutral-700 text-fg-muted hover:text-accent-300 transition-colors">
-            {copy.chrome.hide}
-          </button>
         </div>
       </div>
 
@@ -831,13 +827,13 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       how={copy.prov.allocationHow}
                       worked={workedAllocation(null, null, null,
                         pct(data.benchmark_return_pct), null)}
-                      legend={copy.prov.effectLegend(benchmark)} />} />
+                      legend={copy.prov.effectLegend(benchmark, w)} />} />
                   <Th label={copy.headers.selection}
                     prov={<Provenance source="derived" column kind="formula" note="Brinson selection"
                       what="What choosing which companies to hold was worth, scored at the index’s weight so sizing is held constant."
                       how={copy.prov.selectionHow}
                       worked={workedSelection(null, null, null, null)}
-                      legend={copy.prov.effectLegend(benchmark)} />} />
+                      legend={copy.prov.effectLegend(benchmark, w)} />} />
                   <Th label={copy.headers.interaction}
                     prov={<Provenance source="derived" column note="interaction (the cross term)"
                       what={copy.prov.interactionWhat}
@@ -845,7 +841,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       when={copy.prov.interactionWhen}
                       how={copy.prov.interactionHow}
                       worked={workedInteraction(null, null, null, null, null)}
-                      legend={copy.prov.effectLegend(benchmark)} />} />
+                      legend={copy.prov.effectLegend(benchmark, w)} />} />
                   <Th label={copy.headers.total}
                     prov={<Provenance source="derived" column kind="formula" note={`this ${w}'s share of the excess`}
                       what={`Each ${w}'s whole share of the excess. The column sums to the excess, and that identity is checked, not assumed.`}
@@ -960,7 +956,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                             how={copy.prov.allocationHow}
                             worked={workedAllocation(`${wt(wP)}%`, `${wt(wB)}%`, rB, rBt,
                               pp(r.allocation_pct))}
-                            legend={copy.prov.effectLegend(benchmark)} />} />
+                            legend={copy.prov.effectLegend(benchmark, w)} />} />
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono">
                         <Eff v={n(r.selection_pct)}
@@ -968,7 +964,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                             what={`What your ${r.bucket} company picks were worth, scored at the index’s weight.`}
                             how={copy.prov.selectionHow}
                             worked={workedSelection(`${wt(wB)}%`, rP, rB, pp(r.selection_pct))}
-                            legend={copy.prov.effectLegend(benchmark)} />} />
+                            legend={copy.prov.effectLegend(benchmark, w)} />} />
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono">
                         <Eff v={n(r.interaction_pct)}
@@ -979,7 +975,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                             how={copy.prov.interactionHow}
                             worked={workedInteraction(`${wt(wP)}%`, `${wt(wB)}%`, rP, rB,
                               pp(r.interaction_pct))}
-                            legend={copy.prov.effectLegend(benchmark)} />} />
+                            legend={copy.prov.effectLegend(benchmark, w)} />} />
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono font-semibold">
                         <Eff v={n(r.total_pct)}

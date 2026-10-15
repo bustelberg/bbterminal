@@ -125,6 +125,6 @@ def compute_concentration(holdings: list[dict], benchmark: str,
         # three weeks ago is a three-week-old weight, and N_eff computed off it is that old too.
         "benchmark_caps_from": built["coverage"].get("caps_from"),
         "benchmark_caps_to": built["coverage"].get("caps_to"),
-        "benchmark_caps_unstamped": built["coverage"].get("caps_unstamped"),
+        "benchmark_caps_unstamped": int(built["coverage"].get("caps_unstamped") or 0),
         "unresolved": len(built["unresolved"]),
     }

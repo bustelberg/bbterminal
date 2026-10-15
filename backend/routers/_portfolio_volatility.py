@@ -53,6 +53,13 @@ def compute_volatility(holdings: list[dict], benchmark: str,
 
     sp = annualized_stats(p.tolist(), periods_per_year=ppy)
     sb = annualized_stats(b.tolist(), periods_per_year=ppy)
+    window = max(2, round(ppy))
+    rolling = [
+        {"date": built["obs_dates"][i],
+         "portfolio_pct": float(np.std(p[i-window+1:i+1], ddof=1) * np.sqrt(ppy) * 100),
+         "benchmark_pct": float(np.std(b[i-window+1:i+1], ddof=1) * np.sqrt(ppy) * 100)}
+        for i in range(window - 1, len(p))
+    ]
 
     #  The worst and best single period, because "18% annualised volatility" is not a thing anybody
     # has felt. A client experiences the worst week, not the second moment of the distribution —
@@ -70,6 +77,7 @@ def compute_volatility(holdings: list[dict], benchmark: str,
 
     return {
         "available": True,
+        "rolling_volatility": rolling,
         "benchmark": benchmark,
         "frequency": freq,
         "periods_per_year": ppy,

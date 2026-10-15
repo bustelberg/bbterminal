@@ -78,11 +78,11 @@ function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 min-w-[8rem]">
-      <div className="text-[11px] uppercase tracking-wide text-fg-faint flex items-center gap-1">
+    <div className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
+      <div className="text-sm text-fg-faint flex items-center gap-1">
         {label}{info}
       </div>
-      <div className={`font-mono text-xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
+      <div className={`font-mono text-2xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
     </div>
   );
 }
@@ -100,7 +100,7 @@ export default function CorrelationView({
 }) {
   const t = useRiskCopy();
   const requestUrl = `${API_URL}/api/airs/portfolio/risk-correlation`
-    + `?benchmark=${encodeURIComponent(benchmark)}`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=monthly&years=5&data_window=shared-v1`;
   const requestBody = JSON.stringify({ holdings });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<RiskCorrelation>(key, async () => {
@@ -142,19 +142,20 @@ export default function CorrelationView({
     : '';
 
   return (
-    <div className="space-y-3">
-      <p className="text-[11px] text-fg-faint">
-        Measured from monthly EUR returns.
-      </p>
+    <div className="mx-auto w-full max-w-6xl space-y-4">
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>}
+      {!data && !error && (
+        <div className="absolute inset-0 grid place-items-center text-center px-6" role="status">
+          <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
+        </div>
+      )}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Tile label={`ρ vs ${data.benchmark}`} value={rho2(data.benchmark_corr)}
+          <div className="flex flex-wrap justify-center gap-3">
+            <Tile label={`${portfolioName} — ${t.corr.rhoVs(data.benchmark)}`} value={rho2(data.benchmark_corr)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.corr.cards.rho.what}
                 where={where}
@@ -174,20 +175,6 @@ export default function CorrelationView({
                    Active-vol tile two along now sets properly in its own `worked`, from the same
                    numbers. One formula, typeset once, on the card whose figure it produces. */
                 />} />} />
-            <Tile label="R²" value={data.r_squared == null ? '—' : data.r_squared.toFixed(2)}
-              tone="text-fg-muted"
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.corr.cards.rSquared.what}
-                where={where}
-                when={when}
-                worked={data.r_squared == null || data.benchmark_corr == null ? '' : withWorked(
-                  String.raw`R^2 = \rho^2`,
-                  String.raw`${data.benchmark_corr.toFixed(4)}^2 = ${data.r_squared.toFixed(4)}`)}
-                legend={[
-                  { sym: String.raw`\rho`, is: LEGEND.rho(data.benchmark) },
-                  { sym: String.raw`R^2`, is: LEGEND.r2(portfolioName) },
-                ]}
-                how={t.corr.cards.rSquared.how} />} />} />
             <Tile label={t.corr.meanPair}
               value={rho2(data.mean_pair_corr)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
@@ -231,18 +218,14 @@ export default function CorrelationView({
 
           {labels.length > 1 && (
             <>
-              <div className="flex items-baseline gap-3 flex-wrap pt-1">
-                <h5 className="text-xs font-medium text-fg-strong">{t.corr.betweenPositions}</h5>
-                <span className="text-[11px] text-fg-faint">
-                  Blue = diverging, amber = moving together. Ordered by weight.
-                </span>
-              </div>
               {/*  ITS OWN horizontal scroll — a 49-name matrix must never widen the dialog.
                    THE RIGHT PADDING IS THE TILT'S OVERHANG, not spacing. A 45° label anchored to
                   the LAST column extends up and to the RIGHT of the table box; without room for it
                   the scroll container clips the final holding's name, which is the one a reader is
                   most likely to be hunting for. 7.5rem of text at 45° projects ~5.3rem across. */}
-              <div className="overflow-auto pr-[5.5rem]">
+              <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)]">
+              <div className="min-w-0">
+              <div className="mx-auto w-fit max-w-full overflow-auto pr-[5.5rem]">
                 <table className="border-separate" style={{ borderSpacing: 0 }}>
                   {/*  THE COLUMN NAMES, ROTATED — added on request 2026-08-31. A cell is 16px
                       wide, so horizontal labels were never an option and the matrix shipped with
@@ -280,10 +263,10 @@ export default function CorrelationView({
                       <th className="sticky left-0 z-20 bg-card" />
                       {labels.map((name) => (
                         <th key={name} scope="col" title={name}
-                          className="relative p-0 align-bottom h-[5.5rem] w-4 min-w-4">
+                          className="relative p-0 align-bottom h-[7rem] w-5 min-w-5">
                           <span className="absolute bottom-1 left-1/2 block origin-bottom-left
-                                           -rotate-45 max-w-[7.5rem] truncate text-left
-                                           text-[10px] font-normal text-fg-muted">
+                                           -rotate-45 max-w-[9rem] truncate text-left
+                                           text-xs font-normal text-fg-muted">
                             {name}
                           </span>
                         </th>
@@ -294,55 +277,64 @@ export default function CorrelationView({
                     {matrix.map((row, i) => (
                       <tr key={labels[i]}>
                         <th scope="row"
-                          className="sticky left-0 z-10 bg-card pr-2 text-right text-[10px]
+                          className="sticky left-0 z-10 bg-card pr-2 text-right text-xs
                             font-normal text-fg-muted whitespace-nowrap max-w-[12rem] truncate">
                           {labels[i]}
                         </th>
                         {row.map((v, j) => (
                           <td key={labels[j]} style={cellStyle(v, i === j)}
                             title={`${labels[i]} × ${labels[j]}: ${v == null ? 'too few overlapping returns' : rho2(v)}`}
-                            className="w-4 h-4 min-w-4" />
+                            className="w-5 h-5 min-w-5 text-center text-sm leading-none text-black">
+                            {v == null && i !== j ? '×' : null}
+                          </td>
                         ))}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-fg-muted" aria-label="Correlation matrix legend">
+                {([-1, 0, 1] as const).map((value) => (
+                  <span key={value} className="inline-flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm" style={cellStyle(value, false)} aria-hidden />
+                    {value === -1 ? '−1 Opposite movement' : value === 0 ? '0 No correlation' : '+1 Moving together'}
+                  </span>
+                ))}
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-flex h-3 w-3 items-center justify-center text-sm leading-none text-black" aria-hidden>×</span>
+                  Insufficient data
+                </span>
+              </div>
+              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <div className="grid w-full min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-4 pt-1 [&>div]:min-w-0 [&>div]:rounded-lg [&>div]:border [&>div]:border-neutral-800/40 [&>div]:bg-elevated [&>div]:p-4">
                 <div>
-                  <h6 className="text-[11px] font-medium text-fg-muted mb-1">
+                  <h6 className="text-center text-base font-medium text-fg-muted mb-3">
                     Least correlated — what actually diversifies
                   </h6>
                   {(data.least_correlated ?? []).map((p) => (
-                    <div key={`${p.a}|${p.b}`} className="flex justify-between gap-2 text-[11px] py-0.5">
+                    <div key={`${p.a}|${p.b}`} className="flex justify-between gap-3 text-sm py-1">
                       <span className="text-fg-soft truncate">{p.a} × {p.b}</span>
                       <span className="font-mono tabular-nums text-fg-muted shrink-0">{rho2(p.rho)}</span>
                     </div>
                   ))}
                 </div>
                 <div>
-                  <h6 className="text-[11px] font-medium text-fg-muted mb-1">
+                  <h6 className="text-center text-base font-medium text-fg-muted mb-3">
                     Most correlated — one bet held twice
                   </h6>
                   {(data.most_correlated ?? []).map((p) => (
-                    <div key={`${p.a}|${p.b}`} className="flex justify-between gap-2 text-[11px] py-0.5">
+                    <div key={`${p.a}|${p.b}`} className="flex justify-between gap-3 text-sm py-1">
                       <span className="text-fg-soft truncate">{p.a} × {p.b}</span>
                       <span className="font-mono tabular-nums text-fg-muted shrink-0">{rho2(p.rho)}</span>
                     </div>
                   ))}
                 </div>
               </div>
+              </div>
             </>
           )}
 
-          <p className="text-[11px] text-fg-faint leading-relaxed">
-            {`The selected stock sleeve at the selected AIRS weights over ${data.years} years `}
-            {`(${data.priced_holdings} of ${data.total_holdings} priced). `}
-            A pair with fewer than {data.min_pair_observations} overlapping returns is left blank
-            rather than tinted — over ten weeks a correlation is noise with a sign, and a coloured
-            cell looks exactly as authoritative as one measured over five years.
-          </p>
         </>
       )}
     </div>

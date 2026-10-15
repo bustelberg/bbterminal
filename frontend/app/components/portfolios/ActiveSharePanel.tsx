@@ -64,6 +64,7 @@ export type ActiveShareHolding = {
   weight_now_pct?: number | null;
   weight_start_pct?: number | null;
   is_fund?: boolean;
+  bucket?: string | null;
   /** AIRS's own `current_value_eur`.  Absent on an ad-hoc basket — weights without euros. */
   value_eur?: number | null;
   /**  The LISTING's currency — the FX exposure actually borne, not the company's reporting one. */
@@ -80,6 +81,13 @@ export function holdingsOnRiskBasis(
       ? (holding.weight_start_pct ?? 0)
       : (holding.weight_now_pct ?? holding.weight_pct),
   }));
+}
+
+/** Keep fixed-income certificates out of every equity-risk request, even when AIRS labels one Equity. */
+function isDirectEquityStock(holding: ActiveShareHolding): boolean {
+  return !holding.is_fund
+    && (holding.bucket == null || holding.bucket === '' || holding.bucket === 'Equity')
+    && !/\b(perp|bond|obligat|coupon|treasur|gilt|bund|govie|sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b|\d[.,]?\d*\s*%/i.test(holding.name ?? '');
 }
 
 /**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SIX VIEWS. One decimal read as false
@@ -110,16 +118,22 @@ function Bar({ v, max }: { v: number; max: number }) {
   );
 }
 
-function Tile({ label, value, tone, info }: {
+function Tile({ label, value, tone, info, simpleInfo, suffix }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
+  simpleInfo?: string;
+  /** Equation operator/result immediately following this tile. */
+  suffix?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 min-w-[7.5rem]">
-      <div className="text-[9px] uppercase tracking-wider text-fg-faint flex items-center gap-1">
-        {label}{info}
+    <>
+      <div className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
+        <div className="text-sm text-fg-faint flex items-center gap-1">
+          {label}{simpleInfo ? <InfoTip className="ml-0.5" text={simpleInfo} /> : info}
+        </div>
+        <div className={`font-mono text-2xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
       </div>
-      <div className={`font-mono text-xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
-    </div>
+      {suffix}
+    </>
   );
 }
 
@@ -183,7 +197,7 @@ export default function ActiveSharePanel({
   const [view, setView] =
     useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active');
   const weightedHoldings = useMemo(
-    () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
+    () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
   const selectedPortfolioAsOf = portfolioAsOf;
   const benchmarkStart = null;
@@ -192,7 +206,7 @@ export default function ActiveSharePanel({
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}`
+  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}&weight_method=workbook-rollforward-v4-airs-weights`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
   const activeBody = JSON.stringify({ holdings: weightedHoldings });
   const key = riskRequestKey(activeUrl, activeBody);
@@ -245,17 +259,17 @@ export default function ActiveSharePanel({
   }), { book: 0, bench: 0, active: 0 });
 
   return (
-    <div className="h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
+    <div className="relative h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
       bg-card p-4">
       {/*  THE HEADER IS `shrink-0` AND OUTSIDE THE VIEW BRANCH — which is the whole point
           of the switch living here. It used to sit above content whose height changed with
           the selected view, so choosing "Tracking error" moved the very control that had
           just been clicked. A toggle that jumps out from under the pointer reads as a
           misclick even when it worked. */}
-      <div className="shrink-0 flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
+      <div className="relative shrink-0 text-center">
+        <div className="min-w-0">
           <h4 className="text-sm font-semibold text-fg-strong">
-            {t.titles[view]} vs {data?.benchmark ?? benchmark}
+            {t.titles[view]} vs {data?.benchmark ?? benchmark}{view === 'dd' ? ' over the past 5 years' : ''}
           </h4>
           <p className="text-xs text-fg-faint mt-0.5">
             {t.subtitle(portfolioName, selectedPortfolioAsOf)}
@@ -267,8 +281,8 @@ export default function ActiveSharePanel({
           {/*  `flex-wrap`, NOT `inline-flex` — at six positions the row was wider than a
               narrow dialog, and an overflowing segmented control silently hides its last option.
               Wrapping keeps every view reachable; the joined look survives via the shared border. */}
-          <div className="flex w-fit flex-wrap mt-2 rounded-lg border border-neutral-800/40
-            overflow-hidden max-w-full">
+          <div className="flex w-fit flex-wrap mx-auto mt-2 rounded-lg border border-neutral-800/40
+            overflow-hidden max-w-full text-xs">
             {/*  FIVE RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SIXTH. Every one
                 of these describes the SHAPE of the book — how far it sits from the index, how far
                 that gap has moved, how much of the movement is shared, how much it varies, how
@@ -282,24 +296,21 @@ export default function ActiveSharePanel({
             {(['active', 'te', 'corr', 'vol', 'dd', 'conc'] as const).map((k) => (
               <button key={k} type="button" onClick={() => setView(k)}
                 aria-pressed={view === k}
-                className={`cursor-pointer px-3 py-1 text-[11px] whitespace-nowrap
+                className={`cursor-pointer px-3 py-1.5 font-medium whitespace-nowrap
                   transition-colors ${
                   view === k ? 'bg-accent-600 text-white'
-                    : 'bg-elevated text-fg-muted hover:text-accent-300'}`}>
+                    : 'text-fg-subtle hover:bg-overlay/5'}`}>
                 {t.views[k]}
               </button>
             ))}
           </div>
         </div>
-        <button type="button" onClick={onClose}
-          className="cursor-pointer text-fg-faint hover:text-fg text-sm leading-none px-1"
-          aria-label={t.close}>×</button>
       </div>
 
       {/*  EVERYTHING BELOW THE HEADER SCROLLS AS ONE. `min-h-0` is what lets it: without it the
           flex child refuses to shrink under its content and the dialog's fixed height gives way
           — see `PanelDialog`. */}
-      <div className={`flex-1 min-h-0 pt-3 ${view === 'active'
+      <div className={`relative flex-1 min-h-0 pt-3 ${view === 'active'
         ? 'overflow-hidden' : 'overflow-auto space-y-3'}`}>
 
       {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
@@ -345,19 +356,21 @@ export default function ActiveSharePanel({
       {view === 'active' && (error || !data || !data.available) && (
         <div className="h-full grid place-items-center text-center px-6">
           {error ? <p className="text-xs text-neg-300">{error}</p>
-            : !data ? <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>
+            : !data ? <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
               : <p className="text-xs text-fg-muted max-w-md">{data.reason}</p>}
         </div>
       )}
 
       {view === 'active' && data?.available && (
         <div className="h-full min-h-0 flex flex-col gap-3">
-          <div className="shrink-0 flex flex-wrap gap-2">
+          <div className="shrink-0 flex flex-wrap justify-center gap-2">
             {/*  `where` STAYS AT THE CALL SITE where it interpolates live counts — the copy
                 table carries the sentences, not the arithmetic. A `where` with two numbers in it
                 would need a formatter per language for no gain; these are counts and a benchmark
                 name, which read the same in both. */}
             <Tile label={t.active.activeShare} value={pct2(data.active_share_pct)}
+              suffix={<span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>+</span>}
+              simpleInfo={`The percentage of ${portfolioName} invested differently from ${data.benchmark ?? benchmark}. 0% means the same holdings and weights; 100% means no overlap.`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.activeShare.what}
                 where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
@@ -375,6 +388,7 @@ export default function ActiveSharePanel({
                 ]}
                 />} />} />
             <Tile label={t.active.overlap} value={pct2(data.overlap_pct)}
+              suffix={<><span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>=</span><Tile label="Total" value="100.00%" /></>}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.overlap.what}
                 where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
@@ -392,50 +406,7 @@ export default function ActiveSharePanel({
                   { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
                 ]}
                 how={t.active.cards.overlap.how} />} />} />
-            <Tile label={t.active.offBenchmark} value={pct2(data.off_benchmark_pct)}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.active.cards.offBenchmark.what}
-                where={t.active.offBenchWhere(
-                  (data.n_holdings ?? 0) - (data.n_in_benchmark ?? 0), data.n_holdings ?? 0)}
-                when={whenBoth}
-                worked={data.off_benchmark_pct == null ? '' : withWorked(
-                  String.raw`\sum_{i \,:\; w_i^{\,b} = 0} w_i^{\,p}`,
-                  String.raw`${subNum(data.off_benchmark_pct, 2)}\%`)}
-                legend={[
-                  { sym: String.raw`w_i^{\,b} = 0`,
-                    is: t.active.legend.notInBench(data.benchmark ?? benchmark) },
-                  { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
-                ]}
-                how={t.active.cards.offBenchmark.how} />} />} />
-            <Tile label={t.active.stocks} value={pct2(data.stocks_pct)}
-              tone="text-fg-muted"
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.active.cards.stocks.what}
-                where={t.active.cards.stocks.where}
-                //  The book's date alone. No index appears in this figure, so dating the caps
-                // beside it would date a side the number does not contain.
-                when={t.active.whenBook(
-                  portfolioName, dayOf(portfolioAsOf), dayOf(portfolioFetchedAt))}
-                worked={withWorked(
-                  String.raw`\dfrac{W_{\text{stocks}}}{W_{\text{book}}}`,
-                  workedRatio(data.stocks_weight, data.total_weight,
-                    pct2(data.stocks_pct), '%', '%'))}
-                legend={[
-                  { sym: String.raw`W_{\text{stocks}}`, is: t.active.legend.stocksNum },
-                  { sym: String.raw`W_{\text{book}}`, is: t.active.legend.stocksDen },
-                ]}
-                how={t.active.cards.stocks.how} />} />} />
           </div>
-
-          {/*  THE INDEX'S OWN COVERAGE, STATED WHENEVER ITS WEIGHTS ARE ON SCREEN — the same rule
-              the composition charts follow. A constituent we cannot price does not lose its weight,
-              it redistributes it across the rest, which makes active share read slightly LOW. */}
-          {data.benchmark_covered_pct != null && data.benchmark_covered_pct < 99.5 && (
-            <p className="shrink-0 text-[11px] text-fg-faint">
-              {t.active.coverage(`${data.benchmark_covered_pct.toFixed(2)}%`,
-                data.benchmark ?? benchmark)}
-            </p>
-          )}
 
           {(data.unresolved ?? []).length > 0 && (
             <p className="shrink-0 text-[11px] text-warn-300">
@@ -536,7 +507,22 @@ export default function ActiveSharePanel({
                       </span>
                     </td>
                     <td className="text-right font-mono tabular-nums text-fg-muted">
+                      <span className="inline-flex flex-row-reverse items-center gap-1 whitespace-nowrap">
+                      {!r.residual && <span className="font-sans">
+                        <InfoTip content={r.weight_calculation ? <div className="space-y-2 text-xs">
+                          <p>{r.name}: iShares ACWI workbook weight on {r.weight_calculation.as_of}: {r.weight_calculation.initial_weight_pct.toFixed(4)}%.</p>
+                          {r.weight_calculation.prices.map((price, index) => <p key={index}>
+                            {price.ticker}: €{price.start_price_eur?.toFixed(4)} ({price.start_date}) → €{price.end_price_eur?.toFixed(4)} ({price.end_date}).
+                          </p>)}
+                          <p>Yfinance EUR return: {r.weight_calculation.return_eur_pct.toFixed(4)}%.</p>
+                          <p className="font-mono">{r.weight_calculation.initial_weight_pct.toFixed(4)} × (1 + {r.weight_calculation.return_eur_pct.toFixed(4)} / 100) ÷ {r.weight_calculation.normalisation_total.toFixed(4)} × 100 = {r.weight_calculation.result_pct.toFixed(4)}%</p>
+                          <p>The denominator sums the workbook weights grown by each constituent’s EUR return.</p>
+                        </div> : undefined} text={r.workbook_weight_pct != null && r.yfinance_return_pct != null && r.normalisation_total != null
+                          ? `${data.benchmark ?? benchmark}: ${r.workbook_weight_pct.toFixed(4)}% workbook weight × (1 + ${r.yfinance_return_pct.toFixed(2)}% yfinance EUR return) ÷ ${r.normalisation_total.toFixed(4)} × 100 = ${(r.benchmark_pct ?? 0).toFixed(2)}%.`
+                          : `${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
+                      </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%` : '—'}
+                      </span>
                     </td>
                     {/*  NO TONE ON THE NUMBER ITSELF beyond direction. An overweight is not a
                         good thing and an underweight is not a bad one; the colour says which way

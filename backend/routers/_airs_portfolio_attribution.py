@@ -86,7 +86,7 @@ _prewarming: set[tuple] = set()
 
 # Bump when the response's calculation semantics change. A data fingerprint invalidates changed
 # source data; it cannot invalidate a correct-data response shaped by an older implementation.
-_ATTRIBUTION_CACHE_VERSION = "attribution-native-price-audit-v15"
+_ATTRIBUTION_CACHE_VERSION = "attribution-native-price-audit-v16"
 
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
@@ -788,9 +788,9 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                      for e in sorted(excluded, key=lambda e: -e["weight_pct"])],
         "sleeves": sleeves,
         "rows": rows_out,
-        "top_contributors": contrib[:5],
-        "top_detractors": [c for c in reversed(contrib[-5:]) if c["contribution_pct"] < 0],
-        "missed_winners": missed[:5],
+        "top_contributors": contrib[:10],
+        "top_detractors": [c for c in reversed(contrib[-10:]) if c["contribution_pct"] < 0],
+        "missed_winners": missed[:10],
     }
 
 

@@ -39,6 +39,16 @@ import re
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
 
+
+def is_direct_equity_stock(holding: dict) -> bool:
+    """Whether a risk input is a direct operating-company equity position."""
+    if holding.get("is_fund") or holding.get("bucket") not in (None, "", "Equity"):
+        return False
+    # AIRS can classify perpetual coupon certificates as Equity. Reuse the classifier's
+    # fixed-income name guard so they never become an ACWI stock merely because they have an ISIN.
+    from routers._airs_holding_isin import _looks_like_bond  # noqa: PLC0415
+    return not _looks_like_bond(holding.get("name"))
+
 # What a portfolio line must have before it can be compared with an index at all.
 #  `currency` IS THE LISTING'S, and the exposure view needs it — see `_portfolio_exposure`.
 _GRID_COLS = "isin,gf_company_name,name,currency,status,analysis_id"
@@ -158,7 +168,7 @@ def build_issuer_weights(holdings: list[dict], benchmark: str,
     # ── the book: individual stocks only, renormalised to 1 ────────────────────────────────────
     total_all = sum(float(h.get("weight_pct") or 0) for h in holdings)
     stocks = [h for h in holdings
-              if not h.get("is_fund")
+              if is_direct_equity_stock(h)
               and (h.get("isin") or "").strip()
               and float(h.get("weight_pct") or 0) > 0]
     stocks_w = sum(float(h["weight_pct"]) for h in stocks)
@@ -204,6 +214,80 @@ def build_issuer_weights(holdings: list[dict], benchmark: str,
                     "caps_from": min(dates) if dates else benchmark_start,
                     "caps_to": max(dates) if dates else benchmark_start,
                     "caps_unstamped": len(positive) - len(dates)}
+    elif benchmark.upper() == "ACWI":
+        # The iShares workbook supplies the actual dated ACWI weights. Roll each forward by its
+        # yfinance EUR return, then normalise: this is today's composition implied by that file,
+        # not a substitute full-market-cap index.
+        from index_universe.acwi.asset_membership import resolve  # noqa: PLC0415
+        file_rows, file_stats = resolve()
+        file_weights = {int(r["analysis_id"]): float(r.get("weight_pct") or 0) for r in file_rows}
+        from datetime import date, timedelta
+        from index_universe.acwi.reconstruction import _parse_xls_as_of
+        from routers._asset_benchmark import window_marks, _asset_closes
+        from routers._benchmark_index import _window_rows, _fx_to_eur
+        parsed = _parse_xls_as_of(str(file_stats.get("as_of") or ""))
+        if parsed is None:
+            raise IssuerError("The ACWI workbook has no valid weight snapshot date.")
+        start = parsed.isoformat()
+        end = date.today().isoformat()
+        ids = list(file_weights)
+        grid = {}
+        for offset in range(0, len(ids), IN_CHUNK_SIZE):
+            for row in (supabase.table("asset_grid").select("analysis_id,isin,currency,name,gf_company_name")
+                        .in_("analysis_id", ids[offset:offset + IN_CHUNK_SIZE]).execute().data or []):
+                grid[int(row["analysis_id"])] = row
+        price_members = []
+        for row in file_rows:
+            aid = int(row["analysis_id"])
+            g = grid.get(aid, {})
+            price_members.append({"company_id": aid, "company_name": g.get("gf_company_name") or g.get("name") or row.get("name"),
+                                  "isin": g.get("isin"), "currency": g.get("currency") or row.get("currency"),
+                                  "gurufocus_ticker": row.get("yahoo_symbol"), "market_cap_eur": 1.0})
+        lookback = (parsed - timedelta(days=45)).isoformat()
+        marks = window_marks(ids, lookback, start, end)
+        fx = _fx_to_eur({m.get("currency") or "USD" for m in price_members}, lookback, end)
+        priced, _ = _window_rows(price_members, {} if marks else _asset_closes(ids, lookback, end),
+                                 fx, start, marks=marks or None)
+        coverage = {"workbook_as_of": start}
+        grown = [(r, file_weights.get(int(r["company_id"]), 0.0) * (1 + float(r.get("return_eur_pct") or 0) / 100))
+                 for r in priced if file_weights.get(int(r["company_id"]), 0) > 0 and r.get("return_eur_pct") is not None]
+        total = sum(weight for _r, weight in grown)
+        if total <= 0:
+            raise IssuerError("ACWI workbook weights could not be rolled forward to today.")
+        bench = _fold([
+            (_issuer_key(r.get("company_name")) or f"isin:{(r.get('isin') or '').upper()}",
+             r.get("company_name") or "", weight / total * 100.0)
+            for r, weight in grown
+        ])
+        for r, grown_weight in grown:
+            key = _issuer_key(r.get("company_name")) or f"isin:{(r.get('isin') or '').upper()}"
+            slot = bench[key]
+            slot["workbook_weight_pct"] = slot.get("workbook_weight_pct", 0.0) + file_weights[int(r["company_id"])]
+            slot["grown_weight"] = slot.get("grown_weight", 0.0) + grown_weight
+        for slot in bench.values():
+            slot["yfinance_return_pct"] = (slot["grown_weight"] / slot["workbook_weight_pct"] - 1) * 100
+            slot["normalisation_total"] = total
+            slot["weight_calculation"] = {
+                "as_of": start, "initial_weight_pct": slot["workbook_weight_pct"],
+                "return_eur_pct": slot["yfinance_return_pct"],
+                "normalisation_total": total, "result_pct": slot["weight_pct"],
+                "prices": [{k: r.get(k) for k in ("ticker", "start_date", "end_date", "start_price_eur", "end_price_eur")}
+                           for r, _w in grown if (_issuer_key(r.get("company_name")) or f"isin:{(r.get('isin') or '').upper()}") == slot["key"]],
+            }
+        # A workbook constituent with a temporarily missing price is still an ACWI constituent.
+        # Keep its issuer identity in the comparison (at zero rolled-forward weight) so a held
+        # name is never labelled outside the index merely because its price row was unavailable.
+        for file_row in file_rows:
+            aid = int(file_row["analysis_id"])
+            if aid in {int(r["company_id"]) for r, _weight in grown}:
+                continue
+            name = str(file_row.get("name") or file_row.get("ticker") or "")
+            if not name:
+                continue
+            key = _issuer_key(name)
+            if key:
+                bench.setdefault(key, {"key": key, "name": name, "weight_pct": 0.0})
+        coverage = {**coverage, "workbook_as_of": start}
     else:
         mem, coverage = members(benchmark)
         cap_total = sum(float(m.get("market_cap_eur") or 0) for m in mem)
@@ -238,23 +322,10 @@ def compute_active_share(holdings: list[dict], benchmark: str,
     stocks_w, total_all = built["stocks_w"], built["total_all"]
     unresolved, coverage = built["unresolved"], built["coverage"]
 
-    # Show actual AIRS whole-book weights. The shared builder also serves Concentration's sleeve
-    # profile, so scale that vector back here and explicitly retain the rest of the book.
-    sleeve_share = stocks_w / total_all if total_all > 0 else 0.0
-    port = {
-        key: {**row, "weight_pct": float(row["weight_pct"]) * sleeve_share}
-        for key, row in sleeve_port.items()
-    }
-    residual_key = "__other_portfolio_positions__"
-    residual_pct = max(0.0, 100.0 - sum(r["weight_pct"] for r in port.values()))
-    if residual_pct > 1e-12:
-        port[residual_key] = {
-            "key": residual_key,
-            "name": "Other portfolio positions",
-            "weight_pct": residual_pct,
-        }
-    unresolved = [{**row, "weight_pct": float(row["weight_pct"]) * sleeve_share}
-                  for row in unresolved]
+    # Active share is an equity-sleeve measure. The builder has already normalised its direct
+    # stock vector to 100%; funds, cash, bonds and fixed-income certificates do not reappear as a
+    # synthetic residual bet against ACWI.
+    port = sleeve_port
 
     # ── ½ Σ |wᵖ − wᵇ| over the UNION ───────────────────────────────────────────────────────────
     rows: list[dict] = []
@@ -267,10 +338,21 @@ def compute_active_share(holdings: list[dict], benchmark: str,
             "benchmark_pct": b,
             "active_pct": p - b,
             "held": key in port,
-            "residual": key == residual_key,
+            "residual": False,
+            "workbook_weight_pct": (bench.get(key) or {}).get("workbook_weight_pct"),
+            "yfinance_return_pct": (bench.get(key) or {}).get("yfinance_return_pct"),
+            "normalisation_total": (bench.get(key) or {}).get("normalisation_total"),
+            "weight_calculation": (bench.get(key) or {}).get("weight_calculation"),
         })
     active_share = sum(abs(r["active_pct"]) for r in rows) / 2.0
     overlap = sum(min(r["portfolio_pct"], r["benchmark_pct"]) for r in rows)
+
+    # Keep the stock-sleeve Active share identity above, but display the literal AIRS share of
+    # the complete book. The input weights retain that denominator even after non-stocks filter out.
+    for row in rows:
+        row["portfolio_pct"] *= stocks_w / 100.0
+        row["active_pct"] = row["portfolio_pct"] - row["benchmark_pct"]
+    rows.sort(key=lambda row: -abs(row["active_pct"]))
 
     held = [r for r in rows if r["held"] and not r["residual"]]
     in_bench = [r for r in held if r["benchmark_pct"] > 0]
@@ -303,7 +385,7 @@ def compute_active_share(holdings: list[dict], benchmark: str,
         # close enough to compare, which is a judgement only they can make.
         "benchmark_caps_from": coverage.get("caps_from"),
         "benchmark_caps_to": coverage.get("caps_to"),
-        "benchmark_caps_unstamped": coverage.get("caps_unstamped"),
+        "benchmark_caps_unstamped": int(coverage.get("caps_unstamped") or 0),
         "unresolved": sorted(unresolved, key=lambda r: -r["weight_pct"]),
         # Everything the book holds, plus the index names it is most under-weight in. Sorted by the
         # size of the bet either way, which is the order a risk report is read in.
