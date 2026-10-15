@@ -94,6 +94,12 @@ cd backend && uv run pytest tests/
 # Build frontend for production (local check)
 cd frontend && npm run build
 
+# Refresh the FastAPI contract and generated frontend types after an API change
+npm run api:sync
+
+# Verify both generated contract artifacts are committed
+npm run api:check
+
 # Stop local Supabase
 supabase stop
 

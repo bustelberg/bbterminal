@@ -8,7 +8,10 @@
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test:fast": "npm --prefix frontend run test:fast && cd backend && uv run pytest -m fast"
+    "test:fast": "npm --prefix frontend run test:fast && cd backend && uv run pytest -m fast",
+    "api:sync": "cd backend && uv run python scripts/dump_openapi.py && cd .. && npm --prefix frontend run gen:types",
+    "api:check": "npm run api:sync && git diff --exit-code -- backend/openapi.json frontend/lib/api-types.ts",
+    "build": "npm run api:sync && npm --prefix frontend run build"
   },
   "repository": {
     "type": "git",

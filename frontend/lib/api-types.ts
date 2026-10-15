@@ -9780,8 +9780,18 @@ export interface components {
              * @default 0
              */
             benchmark_holdings_count?: number;
+            /**
+             * Benchmark Index Weight Pct
+             * @default 0
+             */
+            benchmark_index_weight_pct?: number;
             /** Benchmark Return Pct */
             benchmark_return_pct?: number | null;
+            /**
+             * Benchmark Stock Weight Pct
+             * @default 100
+             */
+            benchmark_stock_weight_pct?: number;
             /**
              * Benchmark Weight Pct
              * @default 0
@@ -9794,6 +9804,16 @@ export interface components {
              * @default 0
              */
             interaction_pct?: number;
+            /**
+             * Lookthrough Funds
+             * @default []
+             */
+            lookthrough_funds?: components["schemas"]["AttributionLookthroughFund"][];
+            /**
+             * Lookthrough Weight Pct
+             * @default 0
+             */
+            lookthrough_weight_pct?: number;
             /**
              * Portfolio Holdings
              * @default []
@@ -9819,6 +9839,8 @@ export interface components {
         };
         /** AttributionExcluded */
         AttributionExcluded: {
+            /** Asset Class */
+            asset_class?: string | null;
             /** Bucket */
             bucket: string;
             /** Isin */
@@ -9834,6 +9856,28 @@ export interface components {
              * @default 0
              */
             weight_pct?: number;
+        };
+        /** AttributionLookthroughFund */
+        AttributionLookthroughFund: {
+            /**
+             * Fund Weight Pct
+             * @default 0
+             */
+            fund_weight_pct?: number;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Sector Pct
+             * @default 0
+             */
+            sector_pct?: number;
+            /**
+             * Sector Weight Pct
+             * @default 0
+             */
+            sector_weight_pct?: number;
         };
         /** AttributionName */
         AttributionName: {
@@ -9853,16 +9897,22 @@ export interface components {
             isin?: string | null;
             /** Name */
             name?: string | null;
+            /** Return Currency */
+            return_currency?: string | null;
             /** Return End Date */
             return_end_date?: string | null;
             /** Return End Price Eur */
             return_end_price_eur?: number | null;
+            /** Return End Price Local */
+            return_end_price_local?: number | null;
             /** Return Pct */
             return_pct?: number | null;
             /** Return Start Date */
             return_start_date?: string | null;
             /** Return Start Price Eur */
             return_start_price_eur?: number | null;
+            /** Return Start Price Local */
+            return_start_price_local?: number | null;
             /** Ticker */
             ticker?: string | null;
             /** Weight Denominator Components */
@@ -9882,6 +9932,45 @@ export interface components {
             weight_total_eur?: number | null;
             /** Weight Value Eur */
             weight_value_eur?: number | null;
+        };
+        /**
+         * AttributionSleeve
+         * @description One client-facing sleeve in the profile benchmark comparison.
+         */
+        AttributionSleeve: {
+            /** Allocation Pct */
+            allocation_pct?: number | null;
+            /** Bucket */
+            bucket: string;
+            /** Comparator */
+            comparator?: string | null;
+            /** Comparator Return Pct */
+            comparator_return_pct?: number | null;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["AttributionName"][];
+            /** Impact Pct */
+            impact_pct?: number | null;
+            /** Interaction Pct */
+            interaction_pct?: number | null;
+            /** Policy Weight Pct */
+            policy_weight_pct?: number | null;
+            /** Portfolio Return Pct */
+            portfolio_return_pct?: number | null;
+            /**
+             * Portfolio Weight Pct
+             * @default 0
+             */
+            portfolio_weight_pct?: number;
+            /**
+             * Priced Weight Pct
+             * @default 0
+             */
+            priced_weight_pct?: number;
+            /** Selection Pct */
+            selection_pct?: number | null;
         };
         /**
          * AttributionWeightComponent
@@ -12465,6 +12554,13 @@ export interface components {
             excluded_pct?: number;
             /** Excluded Return Pct */
             excluded_return_pct?: number | null;
+            /** Fund Implementation Residual Pct */
+            fund_implementation_residual_pct?: number | null;
+            /**
+             * Fund Lookthrough Pct
+             * @default 0
+             */
+            fund_lookthrough_pct?: number;
             /**
              * Missed Winners
              * @default []
@@ -12501,6 +12597,11 @@ export interface components {
              * @default []
              */
             rows?: components["schemas"]["AttributionBucket"][];
+            /**
+             * Sleeves
+             * @default []
+             */
+            sleeves?: components["schemas"]["AttributionSleeve"][];
             /**
              * Source
              * @default model

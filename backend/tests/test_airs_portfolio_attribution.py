@@ -13,6 +13,59 @@ import pytest
 from routers import _airs_portfolio_attribution as at
 
 
+class TestMonthlyReturnMarks:
+    def test_native_prices_travel_with_the_monthly_eur_marks(self):
+        """The calculation drawer must not show an empty local-price pair for a priced leg."""
+        holding = {
+            "return_pct": 99.0,
+            "return_start_price_eur": 1.0,
+            "return_end_price_eur": 2.0,
+            "return_start_price_local": 3.0,
+            "return_end_price_local": 4.0,
+            "return_currency": "EUR",
+        }
+        monthly = {
+            "return_pct": 24.54,
+            "start_date": "2025-12-31",
+            "start_price_eur": 158.72,
+            "start_price_local": 186.50,
+            "end_date": "2026-10-14",
+            "end_price_eur": 197.68,
+            "end_price_local": 221.30,
+            "currency": "USD",
+        }
+
+        at._replace_return_marks(holding, monthly)
+
+        assert holding == {
+            "return_pct": 24.54,
+            "return_start_date": "2025-12-31",
+            "return_start_price_eur": 158.72,
+            "return_start_price_local": 186.50,
+            "return_end_date": "2026-10-14",
+            "return_end_price_eur": 197.68,
+            "return_end_price_local": 221.30,
+            "return_currency": "USD",
+        }
+
+    def test_benchmark_native_prices_are_exposed_to_the_same_drawer(self):
+        row = {
+            "start_date": "2025-12-31", "start_price": 186.50,
+            "start_price_eur": 158.72, "end_date": "2026-10-14",
+            "end_price": 221.30, "end_price_eur": 197.68, "currency": "USD",
+        }
+
+        assert at._benchmark_return_marks(row) == {
+            "return_start_date": "2025-12-31",
+            "return_start_price_eur": 158.72,
+            "return_start_price_local": 186.50,
+            "return_end_date": "2026-10-14",
+            "return_end_price_eur": 197.68,
+            "return_end_price_local": 221.30,
+            "return_currency": "USD",
+        }
+
+
 class TestTheIdentityIsTheWholePoint:
     """ allocation + selection + interaction == excess.
 

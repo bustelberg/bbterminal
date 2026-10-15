@@ -17,7 +17,7 @@ import pytest
 
 from routers import _airs_portfolio_analysis as pa
 from routers._airs_lookthrough import merge_by_isin
-from routers._airs_strategy_map import is_strategy_holding, nickname_for_holding
+from routers._airs_strategy_map import is_strategy_holding, nickname_for, nickname_for_holding
 
 
 class TestWeighSources:
@@ -29,6 +29,10 @@ class TestWeighSources:
 
     def test_familie_defensief_uses_its_reviewed_nickname(self):
         assert nickname_for_holding("BUS_FTS_DEF_DYN") == "FamilieTopSelectie"
+
+    def test_familie_offensief_always_uses_the_short_display_name(self):
+        assert nickname_for("BUS_FTS_OFF_DYN") == "FamilieTopSelectie"
+        assert nickname_for("FamilieTopSelectie Offensief") == "FamilieTopSelectie"
 
     def test_the_routes_sum_to_the_holdings_weight(self):
         # 50,489 direct + 1,991 via, over a 1,245,014 book -> 4.0553% + 0.1599% = 4.2152%.

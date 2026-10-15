@@ -3610,6 +3610,11 @@
             "title": "Benchmark Holdings Count",
             "type": "integer"
           },
+          "benchmark_index_weight_pct": {
+            "default": 0.0,
+            "title": "Benchmark Index Weight Pct",
+            "type": "number"
+          },
           "benchmark_return_pct": {
             "anyOf": [
               {
@@ -3620,6 +3625,11 @@
               }
             ],
             "title": "Benchmark Return Pct"
+          },
+          "benchmark_stock_weight_pct": {
+            "default": 100.0,
+            "title": "Benchmark Stock Weight Pct",
+            "type": "number"
           },
           "benchmark_weight_pct": {
             "default": 0.0,
@@ -3633,6 +3643,19 @@
           "interaction_pct": {
             "default": 0.0,
             "title": "Interaction Pct",
+            "type": "number"
+          },
+          "lookthrough_funds": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionLookthroughFund"
+            },
+            "title": "Lookthrough Funds",
+            "type": "array"
+          },
+          "lookthrough_weight_pct": {
+            "default": 0.0,
+            "title": "Lookthrough Weight Pct",
             "type": "number"
           },
           "portfolio_holdings": {
@@ -3678,6 +3701,17 @@
       },
       "AttributionExcluded": {
         "properties": {
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
           "bucket": {
             "title": "Bucket",
             "type": "string"
@@ -3738,6 +3772,49 @@
         "title": "AttributionExcluded",
         "type": "object"
       },
+      "AttributionLookthroughFund": {
+        "properties": {
+          "fund_weight_pct": {
+            "default": 0.0,
+            "title": "Fund Weight Pct",
+            "type": "number"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sector_pct": {
+            "default": 0.0,
+            "title": "Sector Pct",
+            "type": "number"
+          },
+          "sector_weight_pct": {
+            "default": 0.0,
+            "title": "Sector Weight Pct",
+            "type": "number"
+          }
+        },
+        "title": "AttributionLookthroughFund",
+        "type": "object"
+      },
       "AttributionName": {
         "properties": {
           "airs_name": {
@@ -3783,6 +3860,17 @@
             ],
             "title": "Name"
           },
+          "return_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Currency"
+          },
           "return_end_date": {
             "anyOf": [
               {
@@ -3804,6 +3892,17 @@
               }
             ],
             "title": "Return End Price Eur"
+          },
+          "return_end_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return End Price Local"
           },
           "return_pct": {
             "anyOf": [
@@ -3837,6 +3936,17 @@
               }
             ],
             "title": "Return Start Price Eur"
+          },
+          "return_start_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Start Price Local"
           },
           "ticker": {
             "anyOf": [
@@ -3925,6 +4035,126 @@
           }
         },
         "title": "AttributionName",
+        "type": "object"
+      },
+      "AttributionSleeve": {
+        "description": "One client-facing sleeve in the profile benchmark comparison.",
+        "properties": {
+          "allocation_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Pct"
+          },
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "comparator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparator"
+          },
+          "comparator_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparator Return Pct"
+          },
+          "holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionName"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "impact_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Pct"
+          },
+          "interaction_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interaction Pct"
+          },
+          "policy_weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Weight Pct"
+          },
+          "portfolio_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Return Pct"
+          },
+          "portfolio_weight_pct": {
+            "default": 0.0,
+            "title": "Portfolio Weight Pct",
+            "type": "number"
+          },
+          "priced_weight_pct": {
+            "default": 0.0,
+            "title": "Priced Weight Pct",
+            "type": "number"
+          },
+          "selection_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Pct"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "title": "AttributionSleeve",
         "type": "object"
       },
       "AttributionWeightComponent": {
@@ -10556,6 +10786,22 @@
             ],
             "title": "Excluded Return Pct"
           },
+          "fund_implementation_residual_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Implementation Residual Pct"
+          },
+          "fund_lookthrough_pct": {
+            "default": 0.0,
+            "title": "Fund Lookthrough Pct",
+            "type": "number"
+          },
           "missed_winners": {
             "default": [],
             "items": {
@@ -10616,6 +10862,14 @@
               "$ref": "#/components/schemas/AttributionBucket"
             },
             "title": "Rows",
+            "type": "array"
+          },
+          "sleeves": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionSleeve"
+            },
+            "title": "Sleeves",
             "type": "array"
           },
           "source": {

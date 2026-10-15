@@ -6,7 +6,6 @@ import { API_URL } from '../../../lib/apiUrl';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
 import { chartTheme } from '../../../lib/chartTheme';
 import { ValueBadge } from '../../../lib/dynamicValue';
-import { track } from '../../../lib/loading';
 import { startJob } from '../../../lib/stores/jobs';
 import { startSectorOverride } from '../../../lib/sectorOverride';
 import { Field, TipCard } from '../../../lib/tipCard';
@@ -691,6 +690,7 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   };
 }) {
   const copy = useAnalyseCopy();
+  const [selectedSector, setSelectedSector] = useState<Row | null>(null);
   const axisLabel = axis === 'sector' ? copy.axes.sector : axis === 'region' ? copy.axes.region : copy.axes.currency;
   const axisNote = axis === 'sector' ? copy.axes.sectorNote : axis === 'region' ? copy.axes.regionNote : copy.axes.currencyNote;
   const benchmarkDate = benchmarkCapsTo ?? benchmarkCapsFrom;
@@ -742,10 +742,10 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
   const slack = Math.max(0.01, sorted.length * 0.005);
 
   return (
+    <>
     <section className="bg-card border border-neutral-800/40 rounded-xl p-4">
-      {/* These are deliberately READ-ONLY exposure charts. Attribution is the one drill-down
-          surface: keeping a second holding table here made two controls answer the same question
-          with different grouping and state. */}
+      {/* Sector rows open a current-holdings drill-down. The other axes stay read-only: Attribution
+          remains the return drill-down, so the two surfaces do not answer the same question. */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
         <div className="flex items-baseline gap-2">
           <h4 className="text-sm font-semibold text-fg-strong">{axisLabel}</h4>
@@ -853,9 +853,11 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
           const b = Math.max(0, r.benchmark_pct ?? 0);
           const tilt = r.diff_pct ?? (p - b);
           return (
-            <div key={r.bucket}
+            <button key={r.bucket} type="button"
+              onClick={() => axis === 'sector' && setSelectedSector(r)}
+              aria-label={axis === 'sector' ? `Show holdings in ${r.bucket}` : undefined}
               title={copy.allocation.chartRowTitle(r.bucket, p.toFixed(2), benchmark, b.toFixed(2), `${tilt >= 0 ? '+' : ''}${tilt.toFixed(2)}`)}
-              className="flex items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left">
+              className={`flex w-full items-center gap-2.5 rounded-md -mx-1.5 px-1.5 py-1 text-left ${axis === 'sector' ? 'cursor-pointer hover:bg-overlay/5 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent-500' : 'cursor-default'}`}>
               <span className="w-[6.5rem] shrink-0 truncate text-[12px] text-fg-muted">{r.bucket}</span>
               {/* Fixed 0–100% scale — a bar's length IS its share of the sleeve, not its rank
                   against the biggest bucket. */}
@@ -885,12 +887,71 @@ function Chart({ axis, rows, unpricedPct, excluded, benchmark,
                   the value ties to its bar without reading the legend. */}
               <span className="w-[3.5rem] shrink-0 text-right font-mono text-[12px]" style={{ color: SERIES.portfolio }}>{pct(p)}</span>
               <span className="w-[3.5rem] shrink-0 text-right font-mono text-[11px]" style={{ color: SERIES.benchmark }}>{pct(b)}</span>
-            </div>
+            </button>
           );
         })}
       </div>
       </>)}
     </section>
+    {selectedSector && (
+      <SectorHoldingsDialog row={selectedSector} onClose={() => setSelectedSector(null)} />
+    )}
+    </>
+  );
+}
+
+/** The sector bar is current portfolio exposure.  Its direct names live on the composition row;
+ * fund look-through can add exposure without inventing individual constituents in that payload. */
+function SectorHoldingsDialog({ row, onClose }: { row: Row; onClose: () => void }) {
+  const holdings = [...(row.holdings ?? [])].sort((a, b) => (b.weight_pct ?? 0) - (a.weight_pct ?? 0));
+  const directWeight = holdings.reduce((sum, holding) => sum + (holding.weight_pct ?? 0), 0);
+  const totalWeight = row.portfolio_pct ?? 0;
+  const lookedThroughWeight = Math.max(0, totalWeight - directWeight);
+
+  return (
+    <PanelDialog onClose={onClose} labelledBy="sector-holdings-title">
+      <div className="m-auto flex h-full w-full max-w-2xl min-h-0 flex-col overflow-hidden rounded-xl border border-neutral-800 bg-card shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-800 px-5 py-4">
+          <div>
+            <h2 id="sector-holdings-title" className="text-base font-semibold text-fg">
+              {row.bucket}
+            </h2>
+            <p className="mt-0.5 text-sm text-fg-muted">
+              {pct(totalWeight)} of the current portfolio
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-sm text-fg-muted hover:bg-overlay/5 hover:text-fg">
+            Close
+          </button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto p-5">
+          {holdings.length === 0 ? (
+            <p className="text-sm text-fg-muted">No directly classified portfolio holdings are in this sector.</p>
+          ) : (
+            <div className="divide-y divide-neutral-800/70">
+              {holdings.map((holding) => (
+                <div key={`${holding.isin ?? holding.name}-${holding.classified_as ?? ''}`} className="flex items-start justify-between gap-4 py-3 first:pt-0">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-medium text-fg" title={holding.name ?? holding.isin ?? undefined}>
+                      {holding.name ?? holding.isin ?? 'Unnamed holding'}
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] text-fg-faint">
+                      {[holding.isin, holding.asset_class, ...(holding.via_names ?? [])].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  <span className="shrink-0 font-mono text-sm tabular-nums text-fg">{pct(holding.weight_pct ?? 0)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {lookedThroughWeight > 0.005 && (
+            <p className="mt-5 rounded-lg bg-inset px-3 py-2 text-[12px] text-fg-muted">
+              {pct(lookedThroughWeight)} is fund or certificate look-through exposure. It is included in the sector bar, but its underlying names are not returned as individual portfolio holdings.
+            </p>
+          )}
+        </div>
+      </div>
+    </PanelDialog>
   );
 }
 
@@ -3660,10 +3721,11 @@ export default function PortfolioAnalysisModal({
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
           return body as ModelPortfolioAnalysis;
         });
-        // Once a payload is already on screen, selection and refresh loads belong in the shared
-        // root-level request popup. Keeping this around the existing promise reports the same
-        // request without launching a second one; the cold-open loader remains inside the modal.
-        const b = await (data == null ? analysis : track('Updating charts', analysis));
+        // Keep the existing chart payload visible while this reload settles, but do not surface
+        // routine selection/refresh work in the global request popup. The request is background
+        // maintenance from the reader's perspective; a popup per superseded selection made normal
+        // chart updates look like unrelated work and could stack during quick changes.
+        const b = await analysis;
         if (cancelled) return;
         //  Where the wait went. `apiFetch` already logs the round-trip total, but this endpoint
         // is one request covering eight different loads — so a 5-second "Loading overview…"
@@ -3927,7 +3989,7 @@ export default function PortfolioAnalysisModal({
                 left-alignment bought stillness by giving up the centring; the width reservation
                 below buys both, so the padding that used to hold the block off the left edge is
                 gone with it (it would now just push this right of true centre). */}
-            <div className="flex items-center justify-center gap-8 flex-wrap mb-4">
+            <div className="flex items-start justify-center gap-8 flex-wrap mb-4">
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
@@ -4096,7 +4158,10 @@ export default function PortfolioAnalysisModal({
                         column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
                         child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
-                      <div className="w-0 min-w-full">
+                      <div className="w-0 min-w-full min-h-[15.5rem]">
+                        {/* `BookReturnChart` fetches independently and initially renders one line.
+                            Reserve the final chart card's plot/tooltip footprint here, before that
+                            request completes, so its arrival cannot move the scorecard above it. */}
                         <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
                           portfolioName={name}
                           benchmark={benchmark}

@@ -34,6 +34,28 @@ _CHUNK = 500
 SLICE = 40
 
 
+def _resolver_workers() -> int:
+    """Keep the queue inside the process thread budget.
+
+    Railway's small production containers can have every thread slot occupied by the
+    asyncio I/O pool and the bounded scheduler when this tick starts.  A four-wide
+    resolver wave then fails before it can process even its first ISIN.  One paced
+    Yahoo resolver still drains the durable queue, merely more slowly; correctness
+    and eventual progress are the important properties for background ingest.
+
+    `YAHOO_CONCURRENCY` remains useful locally and outside Railway, where the four
+    concurrent network requests overlap Yahoo latency as intended.
+    """
+    default = "1" if os.environ.get("RAILWAY_PUBLIC_DOMAIN") else "4"
+    try:
+        requested = int(os.environ.get("YAHOO_CONCURRENCY", default))
+    except ValueError:
+        requested = int(default)
+    # An explicit production setting must not accidentally reintroduce the failure
+    # this guard exists for.  The queue is already paced globally, so one is enough.
+    return 1 if os.environ.get("RAILWAY_PUBLIC_DOMAIN") else max(1, requested)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -213,7 +235,7 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
     # `banned` short-circuits the rest of the slice once Yahoo hard-bans us (the
     # throttle raised YahooThrottled after its cooldowns); those stay pending and
     # retry next tick. `plock` keeps verbose lines from interleaving.
-    workers = max(1, int(os.environ.get("YAHOO_CONCURRENCY", "4")))
+    workers = _resolver_workers()
     banned = threading.Event()
     plock = threading.Lock()
 
@@ -282,8 +304,32 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
             _report(isin, "failed", f"{type(e).__name__}: {e}"[:60])
             return "failed"
 
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        results = list(ex.map(_one, ids))
+    # A thread-start failure is recoverable here: this is a durable, idempotent
+    # queue and resolving serially makes real progress without needing another
+    # process thread.  Keep completed outcomes so a partial executor start never
+    # causes one ISIN to be resolved twice during the fallback.
+    outcomes: dict[str, str] = {}
+    outcomes_lock = threading.Lock()
+
+    def _tracked_one(isin: str) -> str:
+        outcome = _one(isin)
+        with outcomes_lock:
+            outcomes[isin] = outcome
+        return outcome
+
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            results = list(ex.map(_tracked_one, ids))
+    except RuntimeError as exc:
+        if "can't start new thread" not in str(exc).lower():
+            raise
+        # `ThreadPoolExecutor.__exit__` has waited for any successfully started
+        # worker above.  Only process IDs it did not finish before the rejection.
+        log.warning("[queue] resolver threads unavailable; draining this slice serially")
+        results = list(outcomes.values())
+        for isin in ids:
+            if isin not in outcomes:
+                results.append(_tracked_one(isin))
     ok = results.count("ok")
     failed = results.count("failed")
     #  `unmapped` IS AN OUTCOME, NOT A GAP IN THE TALLY. OpenFIGI identified the security and

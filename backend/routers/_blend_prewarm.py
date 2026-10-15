@@ -129,7 +129,14 @@ def arm() -> None:
             return
         _armed = True
         _boot_fast_path = True
-        threading.Thread(target=_run, name="bb-blend-prewarm", daemon=True).start()
+        try:
+            threading.Thread(target=_run, name="bb-blend-prewarm", daemon=True).start()
+        except RuntimeError as exc:
+            # This is cache warming only.  The normal request path remains fully
+            # correct without it, whereas propagating a thread-cap error aborts
+            # application startup.
+            _log.warning("[blend-prewarm] skipped: cannot start worker: %s", exc)
+            return
     _log.info("[blend-prewarm] armed for %s; warming shared chart prerequisites now",
               ", ".join(f"{a}/{b}" for a, b in targets))
     #  THROUGH `notify()`, NOT BY SETTING THE EVENT HERE. It is the one place that bumps the

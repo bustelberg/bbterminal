@@ -55,6 +55,7 @@ from routers._airs_portfolio_analysis import (
     FUND_BUCKET,
     SP500_LABEL,
     UNKNOWN_BUCKET,
+    _SECTOR_ALIASES,
     _buckets,
     _country_by_code,
     _grid,
@@ -85,13 +86,85 @@ _prewarming: set[tuple] = set()
 
 # Bump when the response's calculation semantics change. A data fingerprint invalidates changed
 # source data; it cannot invalidate a correct-data response shaped by an older implementation.
-_ATTRIBUTION_CACHE_VERSION = "rolled-opening-weights-with-prices-v3"
+_ATTRIBUTION_CACHE_VERSION = "attribution-native-price-audit-v14"
 
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
     """Weighted return of (weight, return_pct) pairs, renormalised over the weights given."""
     w = sum(x[0] for x in rows)
     return sum(x[0] * x[1] for x in rows) / w if w > 0 else 0.0
+
+
+def _replace_return_marks(holding: dict, marks: dict) -> None:
+    """Replace every displayed price operand when attribution switches to a monthly return."""
+    holding.update({
+        "return_pct": marks.get("return_pct"),
+        "return_start_date": marks.get("start_date"),
+        "return_start_price_eur": marks.get("start_price_eur"),
+        "return_start_price_local": marks.get("start_price_local"),
+        "return_end_date": marks.get("end_date"),
+        "return_end_price_eur": marks.get("end_price_eur"),
+        "return_end_price_local": marks.get("end_price_local"),
+        "return_currency": marks.get("currency"),
+    })
+
+
+def _benchmark_return_marks(row: dict) -> dict:
+    """Return the public price operands for one `_window_rows` benchmark constituent."""
+    return {
+        "return_start_date": row.get("start_date"),
+        "return_start_price_eur": row.get("start_price_eur"),
+        "return_start_price_local": row.get("start_price"),
+        "return_end_date": row.get("end_date"),
+        "return_end_price_eur": row.get("end_price_eur"),
+        "return_end_price_local": row.get("end_price"),
+        "return_currency": row.get("currency"),
+    }
+
+
+def _fund_sector_exposures(excluded: list[dict], *, axis: str) -> list[dict]:
+    """Expand verified fund weights into sectors, never their total return.
+
+    A fund's published sector split tells us *where* its capital was invested, so it is valid
+    input to allocation. Its quoted return belongs to the entire fund, however; assigning that
+    same return to each sector would fabricate selection and interaction.  The caller therefore
+    receives sector weights plus the wrapper return separately and leaves the latter residual.
+    """
+    if axis != "sector":
+        return []
+    from routers._etf_sector_allocation import fetch_sector_allocation, supported  # noqa: PLC0415
+
+    exposures: list[dict] = []
+    for fund_index, fund in enumerate(excluded):
+        isin = str(fund.get("isin") or "").upper()
+        if fund.get("reason") != "fund" or fund.get("return_pct") is None or not supported(isin):
+            continue
+        try:
+            allocation = fetch_sector_allocation(isin)
+        except Exception as exc:  # A stale issuer page must not break attribution.
+            _log.warning("[attribution] ETF sector look-through unavailable for %s: %s", isin, exc)
+            continue
+        fund_weight = float(fund["weight_pct"])
+        for sector in allocation.sectors:
+            # The ETF API retains formal GICS names for its own disclosure dialog; attribution
+            # buckets use the friendlier analysis vocabulary. Without this bridge, one economic
+            # sector becomes two rows (Technology / Information Technology).
+            bucket = _SECTOR_ALIASES.get(sector.sector, sector.sector)
+            # Provider cash/derivatives and unknown residuals are not equity-sector bets.
+            # They remain part of the ETF implementation residual, never a fake sector row.
+            if bucket in {CASH_BUCKET, UNKNOWN_BUCKET}:
+                continue
+            exposures.append({
+                "bucket": bucket,
+                "weight_pct": fund_weight * float(sector.weight_pct) / 100.0,
+                "fund_weight_pct": fund_weight,
+                "sector_pct": float(sector.weight_pct),
+                "return_pct": float(fund["return_pct"]),
+                "isin": isin,
+                "fund_key": f"{fund_index}:{isin}",
+                "name": fund.get("name"),
+            })
+    return exposures
 
 
 def _display_name(row: dict | None, source_name: str | None) -> str | None:
@@ -173,6 +246,14 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     if not start:
         return {}
 
+    # The sector benchmark is ACWI inside the policy's stock sleeve, not a hypothetical 100%
+    # equity account. A 26.56% ACWI Technology weight is therefore 15.94% of a 60/40 benchmark.
+    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles  # noqa: PLC0415
+    from routers._airs_portfolio_variant import portfolio_variant  # noqa: PLC0415
+    variant = portfolio_variant(p.get("name"), p.get("omschrijving"))
+    policy = _weighted_benchmark_profiles().get(variant or "")
+    benchmark_stock_weight = float(policy.get("Stocks", 100.0) if policy else 100.0) / 100.0
+
     base_start = start
     month_end = None
     if month:
@@ -227,11 +308,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             # The return below is for THIS selected month, so its audit marks must be the same
             # monthly pair. Leaving the base-window marks here made an October return display
             # December-to-October prices beside it — a checkable-looking but false explanation.
-            h["return_pct"] = period.get("return_pct")
-            h["return_start_date"] = period.get("start_date")
-            h["return_start_price_eur"] = period.get("start_price_eur")
-            h["return_end_date"] = period.get("end_date")
-            h["return_end_price_eur"] = period.get("end_price_eur")
+            _replace_return_marks(h, period)
     grid = _grid(held)
     codes = _country_by_code()
 
@@ -272,10 +349,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "isin": b.get("isin"), "name": _display_name(row, b.get("company_name")),
             "ticker": b.get("ticker"),
             "weight_pct": b["weight_pct"], "return_pct": b["return_eur_pct"],
-            "return_start_date": b.get("start_date"),
-            "return_start_price_eur": b.get("start_price_eur"),
-            "return_end_date": b.get("end_date"),
-            "return_end_price_eur": b.get("end_price_eur"),
+            **_benchmark_return_marks(b),
             "contribution_pct": b["weight_pct"] / 100.0 * b["return_eur_pct"],
             #  Today's cap, for the second weight column only — `market_cap_eur` is the current
             # figure `start_cap_eur` was rolled BACK from, so the two columns are the same cap at
@@ -293,8 +367,11 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "weight_pct": i["weight_pct"], "return_pct": i["return_pct"],
             "return_start_date": i.get("return_start_date"),
             "return_start_price_eur": i.get("return_start_price_eur"),
+            "return_start_price_local": i.get("return_start_price_local"),
             "return_end_date": i.get("return_end_date"),
             "return_end_price_eur": i.get("return_end_price_eur"),
+            "return_end_price_local": i.get("return_end_price_local"),
+            "return_currency": i.get("return_currency"),
             "weight_value_eur": i.get("weight_value_eur"),
             "weight_total_eur": i.get("weight_total_eur"),
             "weight_denominator_components": i.get("weight_denominator_components"),
@@ -302,12 +379,32 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
             "_value_now": float(i.get("current_value_eur") or 0.0),
         })
 
-    # Renormalise BOTH sides over what each can attribute. The identity below needs weights that
-    # sum to 1 on each side; anything else and the residual is just the missing weight.
+    # Direct holdings have observable sector returns. Verified ETFs add sector *weights* below,
+    # but never a synthetic sector return.
     p_w_total = sum(i["weight_pct"] for i in attributable)
+    p_by_bucket: dict[str, list[tuple[float, float]]] = {}
+    for i in attributable:
+        p_by_bucket.setdefault(i["bucket"], []).append((i["weight_pct"], i["return_pct"]))
+    fund_exposures = _fund_sector_exposures(excluded, axis=axis)
+    fund_weight_by_bucket: dict[str, float] = {}
+    fund_exposures_by_bucket: dict[str, list[dict]] = {}
+    fund_weights: dict[str, float] = {}
+    fund_return_contribution = 0.0
+    for exposure in fund_exposures:
+        fund_weight_by_bucket[exposure["bucket"]] = (
+            fund_weight_by_bucket.get(exposure["bucket"], 0.0) + exposure["weight_pct"])
+        fund_exposures_by_bucket.setdefault(exposure["bucket"], []).append(exposure)
+        # One wrapper may yield many sector exposure rows; count its total return only once.
+        if exposure["fund_key"] not in fund_weights:
+            fund_weights[exposure["fund_key"]] = exposure["fund_weight_pct"]
+            fund_return_contribution += exposure["fund_weight_pct"] / 100.0 * exposure["return_pct"]
+    fund_w_total = sum(fund_weights.values())
+
+    # Renormalise the index to the coverage it actually has. The portfolio remains on its real
+    # whole-book basis: direct sector weights plus verified ETF look-through weights.
     b_w_total = sum(w for rows in b_by_bucket.values() for w, _ in rows)
-    if p_w_total <= 0 or b_w_total <= 0:
-        if p_w_total <= 0:
+    if p_w_total + fund_w_total <= 0 or b_w_total <= 0:
+        if p_w_total + fund_w_total <= 0:
             note = (
                 "No portfolio holdings have a price return for this period."
                 if source == "model" else
@@ -318,14 +415,15 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
                 "window": window, "axis": axis, "start": start, "source": source, "rows": [],
                 "attributable_pct": 0.0, "note": note,
-                "needs_benchmark_price_refresh": p_w_total > 0 and b_w_total <= 0}
-
-    p_by_bucket: dict[str, list[tuple[float, float]]] = {}
-    for i in attributable:
-        p_by_bucket.setdefault(i["bucket"], []).append(
-            (i["weight_pct"], i["return_pct"]))
-    b_norm: dict[str, list[tuple[float, float]]] = {
+                "needs_benchmark_price_refresh": p_w_total + fund_w_total > 0 and b_w_total <= 0}
+    b_index_norm: dict[str, list[tuple[float, float]]] = {
         k: [(w / b_w_total * 100.0, r) for w, r in rows] for k, rows in b_by_bucket.items()
+    }
+    # Scale the ACWI sleeve into the policy benchmark. These are the comparable weights for a
+    # whole-portfolio Brinson calculation, while `b_index_norm` remains the pure index split.
+    b_norm: dict[str, list[tuple[float, float]]] = {
+        k: [(w * benchmark_stock_weight, r) for w, r in rows]
+        for k, rows in b_index_norm.items()
     }
 
     #  THE PORTFOLIO WEIGHTS STAY ON AIRS'S WHOLE-BOOK BASIS. Do not renormalise the individual
@@ -374,15 +472,23 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # Return of the individual-stock sleeve itself. Its EXCESS below is scaled by the sleeve's
     # real share of the whole AIRS book, turning it into a contribution rather than pretending the
     # sleeve was the whole portfolio.
-    r_p_total = _weighted([(w, ret) for rows in p_by_bucket.values() for w, ret in rows])
-    r_b_total = sum(w / 100.0 * ret for rows in b_norm.values() for w, ret in rows)
+    direct_return_contribution = sum(w / 100.0 * ret
+                                     for rows in p_by_bucket.values() for w, ret in rows)
+    hybrid_w_total = p_w_total + fund_w_total
+    r_p_total = ((direct_return_contribution + fund_return_contribution) / hybrid_w_total * 100.0
+                 if hybrid_w_total > 0 else 0.0)
+    r_b_total = sum(w / 100.0 * ret for rows in b_index_norm.values() for w, ret in rows)
 
     rows_out: list[dict] = []
-    for bucket in sorted(set(p_by_bucket) | set(b_norm)):
+    for bucket in sorted(set(p_by_bucket) | set(fund_weight_by_bucket) | set(b_norm)):
         pr = p_by_bucket.get(bucket, [])
         br = b_norm.get(bucket, [])
-        w_p = sum(w for w, _ in pr) / 100.0
+        index_br = b_index_norm.get(bucket, [])
+        direct_w_p = sum(w for w, _ in pr) / 100.0
+        fund_w_p = fund_weight_by_bucket.get(bucket, 0.0) / 100.0
+        w_p = direct_w_p + fund_w_p
         w_b = sum(w for w, _ in br) / 100.0
+        index_w_b = sum(w for w, _ in index_br) / 100.0
         R_p = _weighted(pr)
         R_b = _weighted(br)
 
@@ -393,7 +499,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         # effect lands in allocation — correct here, because these ARE real sector bets (an
         # unheld sector), unlike a fund, which is why funds are excluded above.
         selection = w_b * (R_p - R_b) if br and pr else 0.0
-        interaction = (w_p - w_b) * (R_p - R_b) if br and pr else 0.0
+        # Only direct positions have a sector return. ETFs influence allocation through their
+        # disclosed sector weight; their unobservable sector performance becomes the explicit
+        # fund implementation residual below instead of fake interaction.
+        interaction = (direct_w_p - w_b) * (R_p - R_b) if br and pr else 0.0
         # A bucket the PORTFOLIO does not hold: selection/interaction are undefined (there are no
         # picks to judge), and the entire effect is the decision not to own it — allocation.
         p_hold = sorted(port_holdings_by_bucket.get(bucket, []),
@@ -423,7 +532,16 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         rows_out.append({
             "bucket": bucket,
             "portfolio_weight_pct": w_p * 100.0,
+            "lookthrough_weight_pct": fund_w_p * 100.0,
+            "lookthrough_funds": [{
+                "isin": exposure["isin"], "name": exposure.get("name"),
+                "fund_weight_pct": exposure["fund_weight_pct"],
+                "sector_pct": exposure["sector_pct"],
+                "sector_weight_pct": exposure["weight_pct"],
+            } for exposure in fund_exposures_by_bucket.get(bucket, [])],
             "benchmark_weight_pct": w_b * 100.0,
+            "benchmark_index_weight_pct": index_w_b * 100.0,
+            "benchmark_stock_weight_pct": benchmark_stock_weight * 100.0,
             "portfolio_return_pct": R_p if pr else None,
             "benchmark_return_pct": R_b if br else None,
             "allocation_pct": allocation,
@@ -441,11 +559,90 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     rows_out.sort(key=lambda r: (-r["portfolio_weight_pct"], r["bucket"]))
 
     attributed = sum(r["total_pct"] for r in rows_out)
-    portfolio_share = p_w_total / 100.0
-    excess = portfolio_share * (r_p_total - r_b_total)
-    # The identity. Returned, never assumed: three columns that do not sum to the excess are not
-    # a decomposition of it.
-    residual = excess - attributed
+    portfolio_share = hybrid_w_total / 100.0
+    excess = direct_return_contribution + fund_return_contribution - portfolio_share * r_b_total
+    # The unobservable ETF-sector return is not assigned to selection/interaction. It is the
+    # amount required for the hybrid decomposition to reconcile exactly to the ETF's real return.
+    fund_implementation_residual = excess - attributed if fund_w_total > 0 else 0.0
+    residual = excess - attributed - fund_implementation_residual
+
+    # --- client-facing profile sleeves ---------------------------------------------------
+    # The sector rows below explain the stock sleeve.  The first view needs a whole-portfolio
+    # comparison, however: ACWI is the Stocks comparator, while Bonds have their own aggregate
+    # proxy.  Keep alternatives visible but do not invent a comparator where none exists.
+    from routers._benchmark_etf import etf_returns  # noqa: PLC0415
+
+    bond_mark = etf_returns("BONDS", [start]).get(start) or {}
+    sleeve_specs = (
+        ("Stocks", {"Equity", "ETF Equity"}, benchmark_label, r_b_total),
+        ("Bonds", {"Bonds"}, str(bond_mark.get("ticker") or "AGGH.AS"), bond_mark.get("eur_pct")),
+        ("Alternatives", {"Alternatives"}, None, None),
+        ("Cash", {"Cash"}, "Cash", 0.0),
+    )
+    sleeves: list[dict] = []
+    for name, classes, comparator, comparator_return in sleeve_specs:
+        legs = [h for h in holdings if ("Cash" in classes and h.get("is_cash"))
+                or h.get("asset_class") in classes]
+        weight = sum(float(h.get("weight_pct") or 0.0) for h in legs)
+        known = [(float(h.get("weight_pct") or 0.0),
+                  0.0 if name == "Cash" else float(h["return_pct"]))
+                 for h in legs if name == "Cash" or h.get("return_pct") is not None]
+        priced_weight = sum(w for w, _ret in known)
+        # Show the return the priced bond legs actually earned — the expandable holdings table
+        # uses this same opening-weighted basis. When marks are incomplete, evaluate the effects
+        # over that SAME covered weight and a proportionate policy slice. Treating the unknown
+        # positions as zero-return, or applying the priced return to all bond weight, would each
+        # fabricate a different result.
+        portfolio_return = _weighted(known) if known else None
+        policy_weight = policy.get(name, 0.0) if policy else None
+        if (portfolio_return is not None and comparator_return is not None
+                and policy_weight is not None and weight > 0):
+            priced_coverage = priced_weight / weight
+            w_p, w_b = priced_weight / 100.0, policy_weight / 100.0 * priced_coverage
+            r_p, r_b = portfolio_return, float(comparator_return)
+            # A dedicated bond comparator is not part of the equity index total, so its
+            # allocation term is measured against the comparator's zero baseline. The three
+            # terms are still the exact identity `w_p R_p - w_b R_b` shown in Total.
+            sleeve_allocation = (w_p - w_b) * r_b
+            sleeve_selection = w_b * (r_p - r_b)
+            sleeve_interaction = (w_p - w_b) * (r_p - r_b)
+            impact = sleeve_allocation + sleeve_selection + sleeve_interaction
+        else:
+            sleeve_allocation = sleeve_selection = sleeve_interaction = impact = None
+        if weight > 0 or (policy_weight or 0) > 0:
+            sleeve_holdings = sorted(({
+                # `holdings` is the raw source list, whereas `attributable` below is a copied
+                # enrichment. Resolve the display label here too: otherwise Bonds' expandable
+                # sleeve sees neither copy's canonical name and renders seven anonymous rows.
+                "isin": h.get("isin"),
+                "name": _display_name(grid.get(h.get("isin")), h.get("airs_name") or h.get("holding_name")),
+                "airs_name": h.get("airs_name"),
+                "weight_pct": float(h.get("weight_pct") or 0.0), "return_pct": h.get("return_pct"),
+                # Sleeves are built from the raw legs, not the sector holding rows above. Carry
+                # the SAME AIRS current-value basis so Bonds' Weight (now) is not needlessly
+                # blank while every directly held stock reports it.
+                "weight_now_value_eur": float(h.get("current_value_eur") or 0.0),
+                "weight_now_total_eur": p_now_total,
+                "weight_now_pct": (float(h.get("current_value_eur") or 0.0) / p_now_total * 100.0
+                                   if p_now_total > 0 else None),
+                "return_start_date": h.get("return_start_date"),
+                "return_start_price_eur": h.get("return_start_price_eur"),
+                "return_start_price_local": h.get("return_start_price_local"),
+                "return_end_date": h.get("return_end_date"),
+                "return_end_price_eur": h.get("return_end_price_eur"),
+                "return_end_price_local": h.get("return_end_price_local"),
+                "return_currency": h.get("return_currency"),
+                "contribution_pct": float(h.get("weight_pct") or 0.0) / 100.0
+                                    * float(h.get("return_pct") or 0.0),
+            } for h in legs), key=lambda h: -h["weight_pct"])
+            sleeves.append({"bucket": name, "portfolio_weight_pct": weight,
+                            "priced_weight_pct": priced_weight,
+                            "policy_weight_pct": policy_weight,
+                            "portfolio_return_pct": portfolio_return, "comparator": comparator,
+                            "comparator_return_pct": comparator_return,
+                            "allocation_pct": sleeve_allocation, "selection_pct": sleeve_selection,
+                            "interaction_pct": sleeve_interaction, "impact_pct": impact,
+                            "holdings": sleeve_holdings})
 
     # --- contributors: the names, not the buckets ---------------------------------------
     contrib = [{**i, "contribution_pct": i["weight_pct"] / 100.0 * (i["return_pct"] or 0.0)}
@@ -549,6 +746,9 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "attributed_pct": attributed,
         "residual_pct": residual,
         "reconciles": abs(residual) < 1e-6,
+        "fund_implementation_residual_pct": (fund_implementation_residual
+                                               if fund_w_total > 0 else None),
+        "fund_lookthrough_pct": fund_w_total,
         # The ACCOUNT's own return and excess — what the Analyse tile shows — beside this panel's,
         # and the gap between them. `unattributed_excess_pct` is cash, plus income on positions
         # closed during the year, plus the account's flows: real return with no sector to put it
@@ -558,7 +758,7 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "unattributed_excess_pct": unattributed,
         #  How much of the model the table above explains. The rest is funds and cash, which are
         # not a sector bet and are NOT decomposed.
-        "attributable_pct": (p_w_total / coverage_total_w * 100.0
+        "attributable_pct": (hybrid_w_total / coverage_total_w * 100.0
                              if coverage_total_w > 0 else 0.0),
         "excluded_pct": (excl_w / coverage_total_w * 100.0
                          if coverage_total_w > 0 else 0.0),
@@ -572,9 +772,11 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                          if coverage_total_w > 0 else 0.0),
         "unpriced_buckets": sorted({e["bucket"] for e in unpriced}),
         "excluded": [{"bucket": e["bucket"], "name": e["name"], "isin": e["isin"],
+                      "asset_class": e.get("asset_class"),
                       "weight_pct": e["weight_pct"], "return_pct": e["return_pct"],
                       "reason": e["reason"]}
                      for e in sorted(excluded, key=lambda e: -e["weight_pct"])],
+        "sleeves": sleeves,
         "rows": rows_out,
         "top_contributors": contrib[:5],
         "top_detractors": [c for c in reversed(contrib[-5:]) if c["contribution_pct"] < 0],

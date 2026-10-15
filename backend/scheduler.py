@@ -70,7 +70,25 @@ _scheduler: BackgroundScheduler | None = None
 # a run that is already working (or waiting for a worker).  Skipping is safer
 # than replaying stale market-data work hours later, and the durable job-health
 # view will report the missed run.
-_SCHEDULED_WORKERS = max(1, min(8, int(os.environ.get("SCHEDULED_JOB_WORKERS", "3"))))
+def _scheduled_worker_count() -> int:
+    """Bound scheduled work more tightly on the small production container.
+
+    Each scheduled body can own its own short-lived I/O pool.  On Railway, admitting
+    three such bodies alongside the web I/O executor made the total process thread
+    count exceed the runtime allowance.  Two jobs still permit a slow ingest and a
+    cheap housekeeping task to overlap; additional ticks are safely recorded as
+    skipped by the admission gate below.
+    """
+    production = bool(os.environ.get("RAILWAY_PUBLIC_DOMAIN"))
+    default = "2" if production else "3"
+    try:
+        requested = int(os.environ.get("SCHEDULED_JOB_WORKERS", default))
+    except ValueError:
+        requested = int(default)
+    return max(1, min(2 if production else 8, requested))
+
+
+_SCHEDULED_WORKERS = _scheduled_worker_count()
 _scheduled_executor = ThreadPoolExecutor(
     max_workers=_SCHEDULED_WORKERS, thread_name_prefix="scheduled-job",
 )

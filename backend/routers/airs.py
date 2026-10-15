@@ -2723,8 +2723,11 @@ class AttributionName(BaseModel):
     # The two EUR marks behind `return_pct`, so the client can show the actual closes and dates.
     return_start_date: str | None = None
     return_start_price_eur: float | None = None
+    return_start_price_local: float | None = None
     return_end_date: str | None = None
     return_end_price_eur: float | None = None
+    return_end_price_local: float | None = None
+    return_currency: str | None = None
     contribution_pct: float = 0.0
     # True when this company is held on BOTH sides — in the model AND the benchmark bucket.
     # Matched by ISIN first, then by company, so BOTH "AMD" == "Advanced Micro Devices Inc" (one
@@ -2735,10 +2738,28 @@ class AttributionName(BaseModel):
     in_both: bool = False
 
 
+class AttributionLookthroughFund(BaseModel):
+    isin: str | None = None
+    name: str | None = None
+    fund_weight_pct: float = 0.0
+    sector_pct: float = 0.0
+    sector_weight_pct: float = 0.0
+
+
 class AttributionBucket(BaseModel):
     bucket: str
     portfolio_weight_pct: float = 0.0
+    # Weight sourced from verified ETF/mutual-fund sector disclosures. It is included in the
+    # portfolio weight and allocation effect, but has no corresponding sector return.
+    lookthrough_weight_pct: float = 0.0
+    # Every verified fund contributing to `lookthrough_weight_pct`, retained so the client can
+    # show the auditable calculation: fund weight × its disclosed sector split.
+    lookthrough_funds: list[AttributionLookthroughFund] = []
     benchmark_weight_pct: float = 0.0
+    # `benchmark_weight_pct` is the whole-policy weight. Retain its operands so the client can
+    # audit, e.g., 26.56% ACWI Technology × 60% Stocks policy = 15.94% benchmark Technology.
+    benchmark_index_weight_pct: float = 0.0
+    benchmark_stock_weight_pct: float = 100.0
     portfolio_return_pct: float | None = None
     benchmark_return_pct: float | None = None
     allocation_pct: float = 0.0
@@ -2761,6 +2782,28 @@ class AttributionExcluded(BaseModel):
     weight_pct: float = 0.0
     return_pct: float | None = None
     reason: str | None = None       # fund | cash | unpriced | unclassified
+    asset_class: str | None = None
+
+
+class AttributionSleeve(BaseModel):
+    """One client-facing sleeve in the profile benchmark comparison."""
+    bucket: str
+    portfolio_weight_pct: float = 0.0
+    # The opening weight with a usable return. Sleeve effects are calculated only over this
+    # comparable portion when one or more holdings have no mark for the selected window.
+    priced_weight_pct: float = 0.0
+    policy_weight_pct: float | None = None
+    portfolio_return_pct: float | None = None
+    comparator: str | None = None
+    comparator_return_pct: float | None = None
+    # A sleeve's own Brinson split against its dedicated comparator. Unlike equity-sector
+    # attribution, Allocation here is measured from the comparator's zero baseline because a
+    # bond comparator is not a constituent of the equity index total.
+    allocation_pct: float | None = None
+    selection_pct: float | None = None
+    interaction_pct: float | None = None
+    impact_pct: float | None = None
+    holdings: list[AttributionName] = []
 
 
 class ModelPortfolioAttribution(BaseModel):
@@ -2812,6 +2855,11 @@ class ModelPortfolioAttribution(BaseModel):
     attributed_pct: float = 0.0
     residual_pct: float = 0.0
     reconciles: bool = False
+    # The part of a verified fund's actual return that cannot honestly be split by sector. Fund
+    # sector weights inform allocation; assigning its total return to every sector would invent
+    # selection and interaction, so this is shown separately.
+    fund_implementation_residual_pct: float | None = None
+    fund_lookthrough_pct: float = 0.0
     #  Two different "EXCESS" FIGURES LIVE ON THIS SCREEN AND BOTH ARE RIGHT — the payload
     # carries both so the panel can reconcile them instead of contradicting the tile.
     #   `excess_pct`         the attributable individual-stock sleeve's contribution versus the
@@ -2832,6 +2880,7 @@ class ModelPortfolioAttribution(BaseModel):
     unpriced_pct: float = 0.0
     unpriced_buckets: list[str] = []
     excluded: list[AttributionExcluded] = []
+    sleeves: list[AttributionSleeve] = []
     rows: list[AttributionBucket] = []
     top_contributors: list[AttributionName] = []
     top_detractors: list[AttributionName] = []

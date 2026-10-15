@@ -271,10 +271,10 @@ function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
 }
 
 
-function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what, fresh,
+function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, column, what, fresh,
   worked, legend, calculation, when, onRefresh }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
-  note?: string; how?: string; kind?: ProvKind;
+  note?: string; where?: React.ReactNode; how?: React.ReactNode; kind?: ProvKind;
   worked?: string; legend?: readonly FormulaSymbol[];
   calculation?: React.ReactNode;
   /** Dated operands, for calculations with more than one relevant observation. */
@@ -323,8 +323,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
         {what && (
           <Field label="Where">
             <span className="text-fg-soft">
-              {s.label}
-              {note && <span className="text-fg-muted"> — {note}</span>}
+              {where ?? <>{s.label}{note && <span className="text-fg-muted"> — {note}</span>}</>}
             </span>
           </Field>
         )}
@@ -381,7 +380,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
         {(kind || how || worked || legend?.length) && (
           <span className="block space-y-1.5">
           <Field label="How">
-            <span className="text-fg-soft leading-relaxed">
+            <div className="text-fg-soft leading-relaxed">
               {kind === 'copied'
                 /*  IT MAY CARRY A CAVEAT, AND IT COULD NOT BEFORE. This branch ignored `how`
                    entirely, on the reasoning that a copied figure has no arithmetic to explain —
@@ -393,7 +392,9 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
                    read straight off the source. The tag now tells the truth and the caveat still
                    fits. */
                 ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not
-                  computed here{how ? <>. <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span></> : null}.</>
+                   computed here{how ? <>. {typeof how === 'string'
+                     ? <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span>
+                     : how}</> : null}.</>
                 : kind === 'formula'
                   /*  `whitespace-pre-wrap` SO A FORMULA CAN BREATHE. The best formula cards state
                      the rule and then the same rule with this row's own numbers under it — and a
@@ -401,9 +402,11 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, how, kind, column, what
                      rather than as one long sentence. In a plain span every run of whitespace
                      collapses to one character, so the separation has to be permitted here; it
                      changes nothing for the single-line cards, which contain no runs to preserve. */
-                  ? <>A formula on the data{how ? <>: <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span></> : <> we compute here</>}.</>
+                   ? <>A formula on the data{how ? <>: {typeof how === 'string'
+                     ? <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span>
+                     : how}</> : <> we compute here</>}.</>
                   : how}
-            </span>
+            </div>
           </Field>
           {worked ? <Worked text={worked} /> : null}
           {legend?.length ? <Legend items={legend} /> : null}
@@ -490,9 +493,9 @@ export function ProvenanceFetchedAt({ at, scope = 'all', children }: {
   return <FetchedAtContext.Provider value={{ at, scope }}>{children}</FetchedAtContext.Provider>;
 }
 
-export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = false, what,
-  worked, legend, calculation, when, onRefresh, staleReason }: {
-  source: SourceKey; asOf?: string | null; note?: string; how?: string; kind?: ProvKind;
+export function Provenance({ source, asOf, fetchedAt, note, where, how, kind, column = false, what,
+  worked, legend, calculation, when, onRefresh, staleReason, historical = false }: {
+  source: SourceKey; asOf?: string | null; note?: string; where?: React.ReactNode; how?: React.ReactNode; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
   /** What each symbol in `worked` stands for. */
@@ -525,6 +528,8 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   onRefresh?: () => Promise<string | null>;
   /** A known failed/partial acquisition. This outranks clock-based freshness for this value. */
   staleReason?: string;
+  /** A deliberately frozen past observation, such as start-of-window benchmark weights. */
+  historical?: boolean;
 }) {
   //  `!column &&` FIRST. A column header must never reach the stale branch, whatever it was
   // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
@@ -553,11 +558,13 @@ export function Provenance({ source, asOf, fetchedAt, note, how, kind, column = 
   //  Computed once and handed to both — the icon below and the card's When pill. Two
   // computations of "is this current" in one component is what produced a blue ⓘ over an amber
   // "3 trading days old".
-  const fresh = staleReason && !column
+  const fresh = historical
+    ? { stale: false, label: '' }
+    : staleReason && !column
     ? { stale: true, label: staleReason }
     : provenanceFreshness(asOf, fetched, column, source);
   return (
-    <InfoTip wide={calculation != null} content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note}
+    <InfoTip wide={calculation != null} content={<ProvenanceCard source={source} asOf={asOf} fetchedAt={fetched} note={note} where={where}
       worked={worked} legend={legend} calculation={calculation} when={when}
       how={how} kind={kind} column={column} what={what} fresh={fresh}
       onRefresh={onRefresh} />}>

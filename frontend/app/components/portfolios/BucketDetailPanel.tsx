@@ -251,6 +251,7 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
     const raw = !now && valueEur != null && totalEur != null && components?.length;
     return <Provenance source={now ? provenance.currentWeightSource : provenance.startWeightSource}
       asOf={now ? provenance.currentWeightAsOf : provenance.startWeightAsOf}
+      historical={!now && provenance.startWeightSource === 'benchmark_caps'}
       kind={raw ? undefined : 'formula'}
       what={what} note={now ? 'current weight' : 'opening weight'}
       how={now ? provenance.currentBasis : provenance.startBasis}
@@ -438,7 +439,8 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
                     title={t.inBothTitle} />
                 )}
                 <span className={`truncate ${h.in_both ? 'text-fg-strong font-medium' : 'text-fg-soft'}`}>{h.name ?? '—'}</span>
-                <Provenance source={provenance.nameSource} asOf={provenance.startWeightAsOf} kind="copied"
+                <Provenance source={provenance.nameSource} asOf={provenance.startWeightAsOf}
+                  historical={provenance.nameSource === 'benchmark_caps'} kind="copied"
                   what={`The company represented by this holding${h.isin ? ` (${h.isin})` : ''}.`}
                   note="holding name" />
               </span>

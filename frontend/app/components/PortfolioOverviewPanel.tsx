@@ -240,6 +240,16 @@ const collectionNameOrder: Record<PortfolioCollection, string[]> = {
   test_topselecties: [],
 };
 
+type TableSort = { collection: PortfolioCollection; key: SortKey; dir: 'asc' | 'desc' };
+
+function defaultTableSort(collection: PortfolioCollection): TableSort {
+  return {
+    collection,
+    key: 'name',
+    dir: collection === 'bustelberg' || collection === 'toppenberg' ? 'desc' : 'asc',
+  };
+}
+
 export default function PortfolioOverviewPanel({ collection }: { collection: PortfolioCollection }) {
   //  Its own call, not a prop threaded down. `useMgmtCopy` reads an external store, so every
   // component in one render gets the same value — passing copy down would add a prop to each
@@ -256,14 +266,20 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
   // Bustelberg and Toppenberg open from Offensief down to Defensief; TopSelecties open A–Z.
   // The name comparator still uses the explicit profile order.
-  const [sortKey, setSortKey] = useState<SortKey>('name');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
-    () => collection === 'bustelberg' || collection === 'toppenberg' ? 'desc' : 'asc');
+  const [storedSort, setStoredSort] = useState<TableSort>(() => defaultTableSort(collection));
+  // The table remains mounted while the selected collection changes. Use that collection's
+  // default until the reader actively chooses a sort within it.
+  const activeSort = storedSort.collection === collection ? storedSort : defaultTableSort(collection);
+  const { key: sortKey, dir: sortDir } = activeSort;
   const toggleSort = (k: SortKey) => {
     // Same column -> flip. New column -> its own natural first direction: A-Z for a name, but
     // biggest-first for a number, because nobody opens a returns column to see the worst.
-    if (k === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    else { setSortKey(k); setSortDir(k === 'name' ? 'asc' : 'desc'); }
+    setStoredSort((previous) => {
+      const current = previous.collection === collection ? previous : defaultTableSort(collection);
+      return k === current.key
+        ? { ...current, dir: current.dir === 'asc' ? 'desc' : 'asc' }
+        : { ...current, key: k, dir: k === 'name' ? 'asc' : 'desc' };
+    });
   };
   const [err, setErr] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
