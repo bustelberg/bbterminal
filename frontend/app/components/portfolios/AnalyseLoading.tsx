@@ -46,7 +46,10 @@ export default function AnalyseLoading({ label }: {
     return () => clearInterval(t);
   }, []);
 
-  const elapsed = (ticks * TICK_MS / 1000).toFixed(1);
+  // The animation needs a sub-second cadence, but elapsed time does not. Whole
+  // seconds are easier to scan and avoid a stopwatch that appears to make false
+  // precision claims while the request itself reports no live progress.
+  const elapsed = Math.floor(ticks * TICK_MS / 1000);
   const stage = STAGES[Math.min(STAGES.length - 1, Math.floor(ticks / 5))];
 
   return (
