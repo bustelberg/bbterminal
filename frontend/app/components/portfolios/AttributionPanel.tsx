@@ -801,7 +801,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     prov={<Provenance source="derived" column kind="formula"
                       what={`${benchmark}'s share in each ${w}, at the START of the window — weighting by today’s cap would be look-ahead.`}
                       note={`policy benchmark weight in this ${w}`}
-                      how={`${benchmark}'s sector weight × the policy Stocks allocation.`}
+                      how={`${benchmark}'s sector weight, scaled to the policy Stocks allocation.`}
                       worked={workedWeight(null)} />} />
                   <Th label={copy.headers.yourReturn(attributionYear)}
                     prov={<Provenance source={pSrc} column kind="formula"
@@ -1036,17 +1036,17 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.allocation_pct} prov={<Provenance source="derived" kind="formula"
                       what="Bond allocation effect." note="bond sleeve allocation"
-                      how={`${bondCoverageNote} Your bond-policy weight difference × the dedicated bond comparator return.`} />} /></td>
+                      how={`${bondCoverageNote} It compares your bond allocation with the policy allocation against the dedicated comparator.`} />} /></td>
                     <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.selection_pct} prov={<Provenance source="derived" kind="formula"
                       what="Bond selection effect." note="bond sleeve selection"
-                      how={`${bondCoverageNote} The policy bond weight × the difference between your bond return and its dedicated comparator.`} />} /></td>
+                      how={`${bondCoverageNote} It compares your bond return with the dedicated comparator at the policy allocation.`} />} /></td>
                     <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.interaction_pct} prov={<Provenance source="derived" kind="formula"
                       what="Bond interaction effect." note="bond sleeve interaction"
-                      how={`${bondCoverageNote} The bond weight difference × the difference between your bond return and its dedicated comparator.`} />} /></td>
+                      how={`${bondCoverageNote} It captures the combined allocation and return difference.`} />} /></td>
                     <td className="px-2 py-1.5 text-right font-mono font-semibold">
                       <Eff v={bondsSleeve.impact_pct} prov={<Provenance source="derived" kind="formula"
                         what="Bonds' whole contribution to the portfolio-versus-policy gap."
-                        note="bond sleeve impact" how={`${bondCoverageNote} Your bond weight × your bond return, minus the same-coverage policy bond weight × its comparator return.`} />} />
+                        note="bond sleeve impact" how={`${bondCoverageNote} It compares your bond return contribution with the same-coverage policy comparator contribution.`} />} />
                     </td>
                   </tr>
                   {open && <tr className="bg-inset/60">
