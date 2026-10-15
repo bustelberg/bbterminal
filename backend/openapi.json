@@ -3635,6 +3635,19 @@
             "title": "Interaction Pct",
             "type": "number"
           },
+          "lookthrough_funds": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionLookthroughFund"
+            },
+            "title": "Lookthrough Funds",
+            "type": "array"
+          },
+          "lookthrough_weight_pct": {
+            "default": 0.0,
+            "title": "Lookthrough Weight Pct",
+            "type": "number"
+          },
           "portfolio_holdings": {
             "default": [],
             "items": {
@@ -3747,6 +3760,49 @@
           "bucket"
         ],
         "title": "AttributionExcluded",
+        "type": "object"
+      },
+      "AttributionLookthroughFund": {
+        "properties": {
+          "fund_weight_pct": {
+            "default": 0.0,
+            "title": "Fund Weight Pct",
+            "type": "number"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sector_pct": {
+            "default": 0.0,
+            "title": "Sector Pct",
+            "type": "number"
+          },
+          "sector_weight_pct": {
+            "default": 0.0,
+            "title": "Sector Weight Pct",
+            "type": "number"
+          }
+        },
+        "title": "AttributionLookthroughFund",
         "type": "object"
       },
       "AttributionName": {
@@ -10648,6 +10704,22 @@
               }
             ],
             "title": "Excluded Return Pct"
+          },
+          "fund_implementation_residual_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fund Implementation Residual Pct"
+          },
+          "fund_lookthrough_pct": {
+            "default": 0.0,
+            "title": "Fund Lookthrough Pct",
+            "type": "number"
           },
           "missed_winners": {
             "default": [],

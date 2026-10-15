@@ -144,7 +144,7 @@ function Th({ label, prov, align = 'right' }: {
   align?: 'left' | 'right';
 }) {
   return (
-    <th className={`px-2 py-1.5 font-medium whitespace-nowrap ${align === 'left' ? 'text-left' : 'text-right'}`}>
+    <th className={`px-2 py-1.5 align-top font-medium whitespace-normal break-words leading-tight ${align === 'left' ? 'text-left' : 'text-right'}`}>
       {label}
       {prov}
     </th>
@@ -535,14 +535,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
     returnBasis: 'The EUR close at the end of the window against the close at the start.',
   };
   const hasRows = (data?.rows?.length ?? 0) > 0;
+  // Bonds are priced against their dedicated comparator (normally AGGH.AS), rather than
+  // ACWI. They therefore belong in this view as one sleeve-level row, not as a made-up
+  // stock-sector Brinson decomposition.
+  const bondsSleeve = (data?.sleeves ?? []).find((sleeve) => sleeve.bucket === 'Bonds');
   const attributionYear = selectedPeriodLabel ?? data?.start?.slice(0, 4) ?? new Date().getUTCFullYear().toString();
   const portfolioWeightTotal = (data?.rows ?? [])
     .reduce((sum, row) => sum + n(row.portfolio_weight_pct), 0);
   const benchmarkWeightTotal = (data?.rows ?? [])
     .reduce((sum, row) => sum + n(row.benchmark_weight_pct), 0);
-  const unpricedAlternatives = (data?.excluded ?? []).filter((item) =>
-    item.asset_class === 'Alternatives' && item.return_pct == null);
-  const unpricedAlternativeWeight = unpricedAlternatives.reduce((sum, item) => sum + n(item.weight_pct), 0);
   // One table, on one whole-portfolio basis. Index-only sectors stay in it because choosing not
   // to own one is a real allocation decision; non-sector sleeves complete the portfolio to 100%.
   const rankedRows = [...(data?.rows ?? [])]
@@ -627,20 +628,14 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               )}
             </div>
           )}
-          {unpricedAlternativeWeight > 0 && (
-            <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-3 py-2 text-[12px]">
-              <span className="font-semibold text-fg-strong">Alternatives not attributed: </span>
-              <span className="text-fg-soft">{wt(unpricedAlternativeWeight)}% of the opening portfolio has no comparable price series. It remains in the 100% portfolio weight, but is not redistributed across stocks or bonds and has no Brinson effect.</span>
-            </div>
-          )}
-          {(data.sleeves?.length ?? 0) > 0 && (
+          {data && (data.sleeves?.length ?? 0) > 0 && false && (
             <div className="mb-4 overflow-x-auto rounded-xl border border-neutral-800/50 bg-card shadow-sm">
               <div className="min-w-[700px]">
                 <div className="grid grid-cols-[minmax(150px,1fr)_84px_84px_88px_110px_98px_88px] gap-2 border-b border-accent-500/20 bg-accent-500/[0.06] px-4 py-3 text-[10px] font-medium uppercase tracking-wide text-fg-faint">
                   <span>Sleeve</span><span className="text-right">You</span><span className="text-right">Policy</span><span className="text-right">Return</span><span>Compared with</span><span className="text-right">Benchmark</span><span className="text-right">Impact</span>
                 </div>
                 <div className="divide-y divide-neutral-800/25">
-                  {(data.sleeves ?? []).map((sleeve) => {
+                  {(data?.sleeves ?? []).map((sleeve) => {
                     const sleeveHoldings = sleeve.holdings ?? [];
                     const expandable = sleeveHoldings.length > 0;
                     const open = openSleeve === sleeve.bucket;
@@ -706,8 +701,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               info icon (`Th prov` → `Provenance how`), stated in the SAME WORDS the headers use
               so the two cannot drift — a strip above the table restated all three permanently,
               so the panel carried every formula twice. */}
-          {hasRows && !(data.sleeves?.length) && <>
-          <div className="mb-3 overflow-x-auto rounded-lg border border-neutral-800/40 bg-inset/30">
+          {hasRows && <>
+          <div className="hidden mb-3 overflow-x-auto rounded-lg border border-neutral-800/40 bg-inset/30">
             <div className="min-w-[660px]">
             <div className="grid grid-cols-[minmax(150px,1fr)_72px_72px_88px_88px_88px] gap-2 border-b border-neutral-800/40 px-3 py-2 text-[10px] uppercase tracking-wide text-fg-faint">
               <span>{w}</span><span className="text-right">Your weight</span><span className="text-right">{benchmark} weight</span><span className="text-right">Your return</span><span className="text-right">{benchmark} return</span><span className="text-right">Impact</span>
@@ -754,24 +749,15 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </div>
             </div>
           </div>
-          {data && <details className="hidden">
-            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12px] text-fg-muted hover:bg-overlay/[0.02]">
-              <svg viewBox="0 0 16 16" aria-hidden="true"
-                className="h-3 w-3 shrink-0 text-fg-faint transition-transform group-open:rotate-90"
-                fill="none" stroke="currentColor" strokeWidth="1.6">
-                <path d="m6 3 5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-              <span>Show the full calculation</span>
-            </summary>
+          {data && <>
           <div className="overflow-x-auto rounded-lg border border-neutral-800/40 mb-3">
             {/* Fixed columns keep the table still while YTD/month/axis requests replace their
                 values. Without an explicit layout the browser sized each response from its
                 labels and numbers, so clicking Jan visibly shifted every column. */}
-            <table className="w-full min-w-[1900px] table-fixed text-[12px]">
+            <table className="w-full min-w-[1600px] table-fixed text-[12px]">
               <colgroup>
-                <col className="w-[220px]" />
-                <col span={4} className="w-[230px]" />
-                <col span={4} className="w-[140px]" />
+                <col className="w-[12%]" />
+                <col span={8} className="w-[11%]" />
               </colgroup>
               <thead className="sticky top-0 z-[1] bg-card">
                 <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
@@ -798,10 +784,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       note={`${benchmark} weight in this ${w}`}
                       how={copy.prov.indexWeightHow(benchmark)}
                       worked={workedWeight(null)} />} />
-                  <Th label={copy.headers.yourReturn(attributionYear)}
+                  <Th label={`${copy.headers.yourReturn(attributionYear)} (direct)`}
                     prov={<Provenance source={pSrc} column kind="formula"
-                      what={`What your holdings in each ${w} returned, in EUR. A dash means you hold nothing there.`}
-                      note={`your return in this ${w}`}
+                      what={`What your directly held stocks in each ${w} returned, in EUR. ETF sector weights are included in allocation, but an ETF has no observable sector return.`}
+                      note={`your direct-stock return in this ${w}`}
                       how={copy.prov.yourReturnHow(pReturnHow)}
                       worked={workedReturn(null)} legend={copy.prov.returnLegend(copy.prov.yours)} />} />
                   {/* The reference point. Allocation is scored against THIS number, so it has to
@@ -847,6 +833,27 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   // reader can check the arithmetic against the digits in the row.
                   const wP = n(r.portfolio_weight_pct);
                   const wB = n(r.benchmark_weight_pct);
+                  const etfWeight = n(r.lookthrough_weight_pct);
+                  const directWeight = Math.max(0, wP - etfWeight);
+                  const weightHow = <>
+                    <p>{copy.prov.yourWeightHow(pWeightSrc)}</p>
+                    <p className="mt-1">Direct stocks: {wt(directWeight)}%; verified ETF look-through: {wt(etfWeight)}%; together: {wt(wP)}%.</p>
+                    {etfWeight > 0 && <div className="mt-2 overflow-x-auto rounded border border-neutral-700/50">
+                      <table className="w-full min-w-[420px] text-[11px]">
+                        <thead className="bg-inset/50 text-fg-faint">
+                          <tr><th className="px-2 py-1 text-left font-medium">ETF</th><th className="px-2 py-1 text-right font-medium">ETF weight</th><th className="px-2 py-1 text-right font-medium">{r.bucket} split</th><th className="px-2 py-1 text-right font-medium">In sector</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-neutral-800/40">
+                          {(r.lookthrough_funds ?? []).map((fund, index) => <tr key={`${fund.isin ?? fund.name}-${index}`}>
+                            <td className="px-2 py-1 text-fg-soft">{fund.name ?? fund.isin ?? 'ETF'}</td>
+                            <td className="px-2 py-1 text-right font-mono">{wt(fund.fund_weight_pct)}%</td>
+                            <td className="px-2 py-1 text-right font-mono">{wt(fund.sector_pct)}%</td>
+                            <td className="px-2 py-1 text-right font-mono text-fg">{wt(fund.sector_weight_pct)}%</td>
+                          </tr>)}
+                        </tbody>
+                      </table>
+                    </div>}
+                  </>;
                   const rP = pct(r.portfolio_return_pct);
                   const rB = pct(r.benchmark_return_pct);
                   const rBt = pct(data.benchmark_return_pct);
@@ -870,7 +877,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                         <Num prov={<Provenance source={pWeightSource} asOf={data.start} kind="formula"
                           what={`Your real AIRS opening-book share held in ${r.bucket}.`}
                           note={`your weight in ${r.bucket}`}
-                          how={copy.prov.yourWeightHow(pWeightSrc)}
+                          how={weightHow}
                           worked={workedWeight(`${wt(wP)}%`)} />}>
                           {wt(wP)}%
                         </Num>
@@ -893,6 +900,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                           calculation={<ReturnCalculation rows={r.portfolio_holdings ?? []}
                             result={rP} bucket={r.bucket} owner={copy.prov.yours} />} />}>
                           {rP}
+                          {n(r.lookthrough_weight_pct) > 0 && <span className="ml-1 text-[10px] text-fg-faint" title={`${wt(r.lookthrough_weight_pct)}% ETF look-through weight; its sector return is unavailable`}>ETF</span>}
                         </Num>
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
@@ -953,8 +961,37 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     </Fragment>
                   );
                 })}
+                {bondsSleeve && (
+                  <tr className="border-t border-neutral-800/40 bg-inset/20">
+                    <td className="px-2 py-1.5 text-fg whitespace-nowrap">Bonds</td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{wt(bondsSleeve.portfolio_weight_pct)}%</td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{bondsSleeve.policy_weight_pct == null ? '—' : `${wt(bondsSleeve.policy_weight_pct)}%`}</td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{pct(bondsSleeve.portfolio_return_pct)}</td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                      {pct(bondsSleeve.comparator_return_pct)}
+                      {bondsSleeve.comparator && <span className="ml-1 text-[10px] text-fg-faint">{bondsSleeve.comparator}</span>}
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-faint">—</td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-faint">—</td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-faint">—</td>
+                    <td className="px-2 py-1.5 text-right font-mono font-semibold">
+                      <Eff v={bondsSleeve.impact_pct} />
+                    </td>
+                  </tr>
+                )}
               </tbody>
               <tfoot>
+                {data.fund_implementation_residual_pct != null && (
+                  <tr className="border-t border-neutral-800/25 text-fg-soft">
+                    <td colSpan={8} className="px-2 py-1.5">
+                      ETF implementation residual
+                      <span className="ml-2 text-[10px] text-fg-faint">ETF sector weights are included in allocation; their total returns cannot be split into sector selection.</span>
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono font-semibold">
+                      <Eff v={data.fund_implementation_residual_pct} />
+                    </td>
+                  </tr>
+                )}
                 <tr className="border-t border-neutral-800/40 font-semibold">
                   <td className="px-2 py-1.5 text-fg">{copy.headers.totalExcess}</td>
                   <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
@@ -995,16 +1032,16 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                         how={`Every ${w}'s interaction effect, summed.`} />} />
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={data.attributed_pct}
+                    <Eff v={data.excess_pct}
                       prov={<Provenance source="derived" kind="formula" note="the attributed excess"
-                        what="The excess this table explains."
-                        how={`Allocation + selection + interaction across every ${w}, scaled by the stocks' real share of the opening book.`} />} />
+                        what="The hybrid excess this table explains, including the explicit ETF implementation residual."
+                        how={`Allocation + direct-stock selection + interaction + the ETF implementation residual across every ${w}.`} />} />
                   </td>
                 </tr>
               </tfoot>
             </table>
           </div>
-          </details>}
+          </>}
 
           <details open className="group rounded-lg border border-neutral-800/35 bg-card">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5

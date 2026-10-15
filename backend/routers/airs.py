@@ -2735,9 +2735,23 @@ class AttributionName(BaseModel):
     in_both: bool = False
 
 
+class AttributionLookthroughFund(BaseModel):
+    isin: str | None = None
+    name: str | None = None
+    fund_weight_pct: float = 0.0
+    sector_pct: float = 0.0
+    sector_weight_pct: float = 0.0
+
+
 class AttributionBucket(BaseModel):
     bucket: str
     portfolio_weight_pct: float = 0.0
+    # Weight sourced from verified ETF/mutual-fund sector disclosures. It is included in the
+    # portfolio weight and allocation effect, but has no corresponding sector return.
+    lookthrough_weight_pct: float = 0.0
+    # Every verified fund contributing to `lookthrough_weight_pct`, retained so the client can
+    # show the auditable calculation: fund weight × its disclosed sector split.
+    lookthrough_funds: list[AttributionLookthroughFund] = []
     benchmark_weight_pct: float = 0.0
     portfolio_return_pct: float | None = None
     benchmark_return_pct: float | None = None
@@ -2825,6 +2839,11 @@ class ModelPortfolioAttribution(BaseModel):
     attributed_pct: float = 0.0
     residual_pct: float = 0.0
     reconciles: bool = False
+    # The part of a verified fund's actual return that cannot honestly be split by sector. Fund
+    # sector weights inform allocation; assigning its total return to every sector would invent
+    # selection and interaction, so this is shown separately.
+    fund_implementation_residual_pct: float | None = None
+    fund_lookthrough_pct: float = 0.0
     #  Two different "EXCESS" FIGURES LIVE ON THIS SCREEN AND BOTH ARE RIGHT — the payload
     # carries both so the panel can reconcile them instead of contradicting the tile.
     #   `excess_pct`         the attributable individual-stock sleeve's contribution versus the

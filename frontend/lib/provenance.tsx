@@ -274,7 +274,7 @@ function RefreshField({ action }: { action: ProvenanceRefreshAction }) {
 function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, column, what, fresh,
   worked, legend, calculation, when, onRefresh }: {
   source: SourceKey; asOf?: string | null; fetchedAt?: string | null;
-  note?: string; where?: React.ReactNode; how?: string; kind?: ProvKind;
+  note?: string; where?: React.ReactNode; how?: React.ReactNode; kind?: ProvKind;
   worked?: string; legend?: readonly FormulaSymbol[];
   calculation?: React.ReactNode;
   /** Dated operands, for calculations with more than one relevant observation. */
@@ -380,7 +380,7 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
         {(kind || how || worked || legend?.length) && (
           <span className="block space-y-1.5">
           <Field label="How">
-            <span className="text-fg-soft leading-relaxed">
+            <div className="text-fg-soft leading-relaxed">
               {kind === 'copied'
                 /*  IT MAY CARRY A CAVEAT, AND IT COULD NOT BEFORE. This branch ignored `how`
                    entirely, on the reasoning that a copied figure has no arithmetic to explain —
@@ -392,7 +392,9 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
                    read straight off the source. The tag now tells the truth and the caveat still
                    fits. */
                 ? <>Copied straight from {s.label}{asOf ? ` (${asOf})` : ''}, as reported — not
-                  computed here{how ? <>. <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span></> : null}.</>
+                   computed here{how ? <>. {typeof how === 'string'
+                     ? <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span>
+                     : how}</> : null}.</>
                 : kind === 'formula'
                   /*  `whitespace-pre-wrap` SO A FORMULA CAN BREATHE. The best formula cards state
                      the rule and then the same rule with this row's own numbers under it — and a
@@ -400,9 +402,11 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
                      rather than as one long sentence. In a plain span every run of whitespace
                      collapses to one character, so the separation has to be permitted here; it
                      changes nothing for the single-line cards, which contain no runs to preserve. */
-                  ? <>A formula on the data{how ? <>: <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span></> : <> we compute here</>}.</>
+                   ? <>A formula on the data{how ? <>: {typeof how === 'string'
+                     ? <span className="text-fg whitespace-pre-wrap">{trimStop(how)}</span>
+                     : how}</> : <> we compute here</>}.</>
                   : how}
-            </span>
+            </div>
           </Field>
           {worked ? <Worked text={worked} /> : null}
           {legend?.length ? <Legend items={legend} /> : null}
@@ -491,7 +495,7 @@ export function ProvenanceFetchedAt({ at, scope = 'all', children }: {
 
 export function Provenance({ source, asOf, fetchedAt, note, where, how, kind, column = false, what,
   worked, legend, calculation, when, onRefresh, staleReason }: {
-  source: SourceKey; asOf?: string | null; note?: string; where?: React.ReactNode; how?: string; kind?: ProvKind;
+  source: SourceKey; asOf?: string | null; note?: string; where?: React.ReactNode; how?: React.ReactNode; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
   /** What each symbol in `worked` stands for. */

@@ -9795,6 +9795,16 @@ export interface components {
              */
             interaction_pct?: number;
             /**
+             * Lookthrough Funds
+             * @default []
+             */
+            lookthrough_funds?: components["schemas"]["AttributionLookthroughFund"][];
+            /**
+             * Lookthrough Weight Pct
+             * @default 0
+             */
+            lookthrough_weight_pct?: number;
+            /**
              * Portfolio Holdings
              * @default []
              */
@@ -9836,6 +9846,28 @@ export interface components {
              * @default 0
              */
             weight_pct?: number;
+        };
+        /** AttributionLookthroughFund */
+        AttributionLookthroughFund: {
+            /**
+             * Fund Weight Pct
+             * @default 0
+             */
+            fund_weight_pct?: number;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Sector Pct
+             * @default 0
+             */
+            sector_pct?: number;
+            /**
+             * Sector Weight Pct
+             * @default 0
+             */
+            sector_weight_pct?: number;
         };
         /** AttributionName */
         AttributionName: {
@@ -12495,6 +12527,13 @@ export interface components {
             excluded_pct?: number;
             /** Excluded Return Pct */
             excluded_return_pct?: number | null;
+            /** Fund Implementation Residual Pct */
+            fund_implementation_residual_pct?: number | null;
+            /**
+             * Fund Lookthrough Pct
+             * @default 0
+             */
+            fund_lookthrough_pct?: number;
             /**
              * Missed Winners
              * @default []
