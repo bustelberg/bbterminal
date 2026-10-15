@@ -43,12 +43,6 @@
       "note": "OpenFIGI identifies this exact ISIN as the Hong Kong H share. Yahoo search did not return the listing from the ISIN/name query, but the Leonteq primary-listing code 1288 maps directly to Yahoo 1288.HK."
     },
     {
-      "isin": "US16115Q3083",
-      "symbol": "GTLS",
-      "name": "Chart Industries Inc",
-      "note": "This is the US ordinary share and its Leonteq, OpenFIGI and Yahoo-native symbol is GTLS. The batch name/ISIN search returned no candidate, so pin the exact primary listing rather than leaving a priceable US share absent."
-    },
-    {
       "isin": "CNE1000002H1",
       "symbol": "0939.HK",
       "name": "China Construction Bank Corp H",

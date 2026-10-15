@@ -67,6 +67,13 @@ def test_shutdown_race_skips_work_without_a_traceback(monkeypatch, caplog):
     assert "Traceback" not in caplog.text
 
 
+def test_production_scheduler_cap_keeps_room_for_request_workers(monkeypatch):
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "api.example.test")
+    monkeypatch.setenv("SCHEDULED_JOB_WORKERS", "8")
+
+    assert S._scheduled_worker_count() == 2
+
+
 def test_queue_overrun_filter_only_hides_the_expected_apscheduler_message():
     filt = S._ExpectedQueueOverrunFilter()
     expected = logging.LogRecord("apscheduler.executors.default", logging.WARNING, "", 0,

@@ -269,7 +269,12 @@ def _arm_sector_timeline_prewarm() -> None:
         except Exception as exc:  # noqa: BLE001 — a warm cache must never block serving
             logging.getLogger(__name__).warning("[momentum] sector timeline prewarm failed: %s", exc)
 
-    threading.Thread(target=_warm, name="sector-timeline-prewarm", daemon=True).start()
+    try:
+        threading.Thread(target=_warm, name="sector-timeline-prewarm", daemon=True).start()
+    except RuntimeError as exc:
+        # A prewarm is optional.  Under a tight container thread limit, serving
+        # requests cold is correct; failing application startup is not.
+        logging.getLogger(__name__).warning("[momentum] sector timeline prewarm skipped: %s", exc)
 
 @app.on_event("startup")
 async def _size_io_thread_pool() -> None:
@@ -279,12 +284,15 @@ async def _size_io_thread_pool() -> None:
     # headroom for the bounded scheduler, browser/session workers and the
     # small per-job pools; otherwise a burst of refresh work can consume the
     # process thread allowance and even a cheap page read cannot start.
-    raw_workers = os.environ.get("IO_THREAD_WORKERS", "12")
+    production = bool(os.environ.get("RAILWAY_PUBLIC_DOMAIN"))
+    raw_workers = os.environ.get("IO_THREAD_WORKERS", "6" if production else "12")
     try:
         workers = int(raw_workers)
     except ValueError:
-        workers = 12
-    workers = max(4, min(16, workers))
+        workers = 6 if production else 12
+    # Scheduled jobs and their small internal pools need headroom too.  A larger
+    # value is fine on local/larger hosts, but not on Railway's constrained one.
+    workers = max(4, min(8 if production else 16, workers))
     asyncio.get_running_loop().set_default_executor(
         concurrent.futures.ThreadPoolExecutor(max_workers=workers, thread_name_prefix="bb-io")
     )
