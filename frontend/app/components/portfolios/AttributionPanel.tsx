@@ -35,7 +35,10 @@ import ReturnCalculation from './ReturnCalculation';
  * other, and the banner says so instead of letting them be read as a decomposition.
  */
 type Axis = 'sector' | 'region' | 'currency';
-type AttributionWithExclusions = Omit<ModelPortfolioAttribution, 'excluded'> & {
+// The endpoint's top-level model has optional defaults in generated OpenAPI types. This panel
+// consumes the normalized sleeves emitted by the attribution builder, so replace both extended
+// payload fields rather than intersecting their older and newer generated shapes.
+type AttributionWithExclusions = Omit<ModelPortfolioAttribution, 'excluded' | 'sleeves'> & {
   excluded?: Array<{ name?: string | null; asset_class?: string | null; weight_pct?: number; return_pct?: number | null; reason?: string | null }>;
   sleeves?: Array<{ bucket: string; portfolio_weight_pct: number; policy_weight_pct: number | null;
     portfolio_return_pct: number | null; comparator: string | null; comparator_return_pct: number | null; impact_pct: number | null;

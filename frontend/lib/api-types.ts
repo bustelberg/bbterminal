@@ -9819,6 +9819,8 @@ export interface components {
         };
         /** AttributionExcluded */
         AttributionExcluded: {
+            /** Asset Class */
+            asset_class?: string | null;
             /** Bucket */
             bucket: string;
             /** Isin */
@@ -9882,6 +9884,34 @@ export interface components {
             weight_total_eur?: number | null;
             /** Weight Value Eur */
             weight_value_eur?: number | null;
+        };
+        /**
+         * AttributionSleeve
+         * @description One client-facing sleeve in the profile benchmark comparison.
+         */
+        AttributionSleeve: {
+            /** Bucket */
+            bucket: string;
+            /** Comparator */
+            comparator?: string | null;
+            /** Comparator Return Pct */
+            comparator_return_pct?: number | null;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings?: components["schemas"]["AttributionName"][];
+            /** Impact Pct */
+            impact_pct?: number | null;
+            /** Policy Weight Pct */
+            policy_weight_pct?: number | null;
+            /** Portfolio Return Pct */
+            portfolio_return_pct?: number | null;
+            /**
+             * Portfolio Weight Pct
+             * @default 0
+             */
+            portfolio_weight_pct?: number;
         };
         /**
          * AttributionWeightComponent
@@ -12501,6 +12531,11 @@ export interface components {
              * @default []
              */
             rows?: components["schemas"]["AttributionBucket"][];
+            /**
+             * Sleeves
+             * @default []
+             */
+            sleeves?: components["schemas"]["AttributionSleeve"][];
             /**
              * Source
              * @default model

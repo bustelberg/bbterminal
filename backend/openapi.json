@@ -3678,6 +3678,17 @@
       },
       "AttributionExcluded": {
         "properties": {
+          "asset_class": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asset Class"
+          },
           "bucket": {
             "title": "Bucket",
             "type": "string"
@@ -3925,6 +3936,88 @@
           }
         },
         "title": "AttributionName",
+        "type": "object"
+      },
+      "AttributionSleeve": {
+        "description": "One client-facing sleeve in the profile benchmark comparison.",
+        "properties": {
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "comparator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparator"
+          },
+          "comparator_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comparator Return Pct"
+          },
+          "holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionName"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "impact_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Impact Pct"
+          },
+          "policy_weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Policy Weight Pct"
+          },
+          "portfolio_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Return Pct"
+          },
+          "portfolio_weight_pct": {
+            "default": 0.0,
+            "title": "Portfolio Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "bucket"
+        ],
+        "title": "AttributionSleeve",
         "type": "object"
       },
       "AttributionWeightComponent": {
@@ -10616,6 +10709,14 @@
               "$ref": "#/components/schemas/AttributionBucket"
             },
             "title": "Rows",
+            "type": "array"
+          },
+          "sleeves": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AttributionSleeve"
+            },
+            "title": "Sleeves",
             "type": "array"
           },
           "source": {

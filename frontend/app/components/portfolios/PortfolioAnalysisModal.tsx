@@ -3989,7 +3989,7 @@ export default function PortfolioAnalysisModal({
                 left-alignment bought stillness by giving up the centring; the width reservation
                 below buys both, so the padding that used to hold the block off the left edge is
                 gone with it (it would now just push this right of true centre). */}
-            <div className="flex items-center justify-center gap-8 flex-wrap mb-4">
+            <div className="flex items-start justify-center gap-8 flex-wrap mb-4">
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
@@ -4158,7 +4158,10 @@ export default function PortfolioAnalysisModal({
                         column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
                         child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
-                      <div className="w-0 min-w-full">
+                      <div className="w-0 min-w-full min-h-[15.5rem]">
+                        {/* `BookReturnChart` fetches independently and initially renders one line.
+                            Reserve the final chart card's plot/tooltip footprint here, before that
+                            request completes, so its arrival cannot move the scorecard above it. */}
                         <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
                           portfolioName={name}
                           benchmark={benchmark}
