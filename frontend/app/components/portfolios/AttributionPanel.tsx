@@ -40,8 +40,9 @@ type Axis = 'sector' | 'region' | 'currency';
 // payload fields rather than intersecting their older and newer generated shapes.
 type AttributionWithExclusions = Omit<ModelPortfolioAttribution, 'excluded' | 'sleeves'> & {
   excluded?: Array<{ name?: string | null; asset_class?: string | null; weight_pct?: number; return_pct?: number | null; reason?: string | null }>;
-  sleeves?: Array<{ bucket: string; portfolio_weight_pct: number; policy_weight_pct: number | null;
-    portfolio_return_pct: number | null; comparator: string | null; comparator_return_pct: number | null; impact_pct: number | null;
+  sleeves?: Array<{ bucket: string; portfolio_weight_pct: number; priced_weight_pct?: number; policy_weight_pct: number | null;
+    portfolio_return_pct: number | null; comparator: string | null; comparator_return_pct: number | null;
+    allocation_pct?: number | null; selection_pct?: number | null; interaction_pct?: number | null; impact_pct: number | null;
     holdings?: Array<{ isin?: string | null; name?: string | null; airs_name?: string | null; weight_pct: number; return_pct: number | null; contribution_pct: number }> }>;
 };
 
@@ -232,6 +233,7 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
               </td>
               <td className="py-1 px-1 text-right font-mono text-fg-subtle">
                 <Num prov={<Provenance source={weightSrc} asOf={weightAsOf}
+                  historical={weightSrc === 'benchmark_caps'}
                   what={copy.prov.share(r.name ?? r.ticker ?? r.isin ?? '', owner)}
                   note={copy.prov.weightIn(owner)}
                   how={copy.prov.weightHow(weightHow, owner)}
@@ -294,7 +296,8 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
  */
 function BucketNames({ row, bucket, benchmark, startLabel, portfolioProvenance,
   benchmarkProvenance }: {
-  row: NonNullable<ModelPortfolioAttribution['rows']>[number];
+  row: Pick<NonNullable<ModelPortfolioAttribution['rows']>[number],
+    'portfolio_holdings' | 'benchmark_holdings'>;
   bucket: string;
   benchmark: string;
   portfolioProvenance: HoldingsProvenance;
@@ -540,10 +543,26 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   // stock-sector Brinson decomposition.
   const bondsSleeve = (data?.sleeves ?? []).find((sleeve) => sleeve.bucket === 'Bonds');
   const attributionYear = selectedPeriodLabel ?? data?.start?.slice(0, 4) ?? new Date().getUTCFullYear().toString();
+  // The footer is the sum of the rows the table actually renders. Bonds is a separate sleeve
+  // because its comparator is not ACWI, but it is still a displayed row and cannot disappear
+  // from a column total just because its calculation is specialised.
   const portfolioWeightTotal = (data?.rows ?? [])
-    .reduce((sum, row) => sum + n(row.portfolio_weight_pct), 0);
+    .reduce((sum, row) => sum + n(row.portfolio_weight_pct), 0)
+    + n(bondsSleeve?.portfolio_weight_pct);
   const benchmarkWeightTotal = (data?.rows ?? [])
-    .reduce((sum, row) => sum + n(row.benchmark_weight_pct), 0);
+    .reduce((sum, row) => sum + n(row.benchmark_weight_pct), 0)
+    + n(bondsSleeve?.policy_weight_pct);
+  const allocationColumnTotal = (data?.rows ?? [])
+    .reduce((sum, row) => sum + n(row.allocation_pct), 0)
+    + n(bondsSleeve?.allocation_pct);
+  const selectionColumnTotal = (data?.rows ?? [])
+    .reduce((sum, row) => sum + n(row.selection_pct), 0)
+    + n(bondsSleeve?.selection_pct);
+  const interactionColumnTotal = (data?.rows ?? [])
+    .reduce((sum, row) => sum + n(row.interaction_pct), 0)
+    + n(bondsSleeve?.interaction_pct);
+  const totalColumnTotal = allocationColumnTotal + selectionColumnTotal + interactionColumnTotal
+    + n(data?.fund_implementation_residual_pct);
   // One table, on one whole-portfolio basis. Index-only sectors stay in it because choosing not
   // to own one is a real allocation decision; non-sector sleeves complete the portfolio to 100%.
   const rankedRows = [...(data?.rows ?? [])]
@@ -577,10 +596,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           <h4 className="text-sm font-semibold text-fg-strong">
             {copy.chrome.title(label, benchmark, portfolioName || data?.name || undefined)}
           </h4>
-          <div className="mt-4 flex justify-center py-2"><div className="flex max-w-full items-center gap-1 overflow-x-auto px-2 text-xs" aria-label="Attribution period">
+          <div className="mt-4 flex justify-center py-2"><div className="inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800/40 text-xs" aria-label="Attribution period">
             {[{ label: 'YTD', value: 0 }, ...attributionMonths.map((month, index) => ({ label: month.label.split(' ')[0].slice(0, 3), value: index + 1 }))].map((period) => <button
               key={period.value} type="button" onClick={() => { setError(null); setOpenBucket(null); setMonthOffset(period.value); }}
-              className={`shrink-0 rounded-md px-2 py-1 transition-colors ${monthOffset === period.value ? 'bg-accent-600 text-white' : 'text-fg-muted hover:bg-white/10 hover:text-fg'}`}
+              className={`shrink-0 px-3 py-1.5 font-medium transition-colors ${monthOffset === period.value ? 'bg-accent-600 text-white' : 'text-fg-subtle hover:bg-overlay/5'}`}
               aria-pressed={monthOffset === period.value}>{period.label}</button>)}
           </div></div>
         </div>
@@ -602,7 +621,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
       {/*  `min-h-0` OR THE FIXED HEIGHT GIVES WAY. A flex item defaults to `min-height:auto`,
           which refuses to shrink below its content, so `overflow-auto` here would be ignored and
           the section would grow instead — silently, and only for the longest tables. */}
-      <div className="flex-1 min-h-0 overflow-auto">
+      <div className="flex-1 min-h-0 overflow-x-auto overflow-y-scroll [scrollbar-gutter:stable]">
       {error && (
         <div className="bg-neg-500/10 border border-neg-500/20 rounded-lg px-3 py-2 text-xs text-neg-300">
           {copy.lang === 'nl' ? copy.chrome.error : error}
@@ -778,13 +797,13 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       note={`your weight in this ${w}`}
                       how={copy.prov.yourWeightHow(pWeightSrc)}
                       worked={workedWeight(null)} />} />
-                  <Th label={copy.headers.indexWeight(attributionYear)}
-                    prov={<Provenance source="benchmark_caps" column kind="formula"
+                  <Th label={`Benchmark weight at start of ${attributionYear}`}
+                    prov={<Provenance source="derived" column kind="formula"
                       what={`${benchmark}'s share in each ${w}, at the START of the window — weighting by today’s cap would be look-ahead.`}
-                      note={`${benchmark} weight in this ${w}`}
-                      how={copy.prov.indexWeightHow(benchmark)}
+                      note={`policy benchmark weight in this ${w}`}
+                      how={`${benchmark}'s sector weight × the policy Stocks allocation.`}
                       worked={workedWeight(null)} />} />
-                  <Th label={`${copy.headers.yourReturn(attributionYear)} (direct)`}
+                  <Th label={copy.headers.yourReturn(attributionYear)}
                     prov={<Provenance source={pSrc} column kind="formula"
                       what={`What your directly held stocks in each ${w} returned, in EUR. ETF sector weights are included in allocation, but an ETF has no observable sector return.`}
                       note={`your direct-stock return in this ${w}`}
@@ -833,6 +852,8 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   // reader can check the arithmetic against the digits in the row.
                   const wP = n(r.portfolio_weight_pct);
                   const wB = n(r.benchmark_weight_pct);
+                  const acwiSectorWeight = n(r.benchmark_index_weight_pct);
+                  const benchmarkStocksWeight = n(r.benchmark_stock_weight_pct);
                   const etfWeight = n(r.lookthrough_weight_pct);
                   const directWeight = Math.max(0, wP - etfWeight);
                   const weightHow = <>
@@ -853,6 +874,19 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                         </tbody>
                       </table>
                     </div>}
+                  </>;
+                  const benchmarkWeightHow = <>
+                    <p>{copy.prov.indexWeightHow(benchmark)}</p>
+                    <div className="mt-2 overflow-x-auto rounded border border-neutral-700/50">
+                      <table className="w-full min-w-[360px] text-[11px]">
+                        <tbody className="divide-y divide-neutral-800/40">
+                          <tr><th className="bg-inset/50 px-2 py-1 text-left font-medium text-fg-faint">ACWI sector weight</th><td className="px-2 py-1 text-right font-mono">{wt(acwiSectorWeight)}%</td></tr>
+                          <tr><th className="bg-inset/50 px-2 py-1 text-left font-medium text-fg-faint">Benchmark allocation to stocks</th><td className="px-2 py-1 text-right font-mono">{wt(benchmarkStocksWeight)}%</td></tr>
+                          <tr><th className="bg-inset/50 px-2 py-1 text-left font-medium text-fg-faint">Benchmark sector weight</th><td className="px-2 py-1 text-right font-mono text-fg">{wt(wB)}%</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="mt-1">{wt(acwiSectorWeight)}% × {wt(benchmarkStocksWeight)}% = {wt(wB)}%.</p>
                   </>;
                   const rP = pct(r.portfolio_return_pct);
                   const rB = pct(r.benchmark_return_pct);
@@ -883,10 +917,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                         </Num>
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
-                        <Num prov={<Provenance source="benchmark_caps" asOf={data.start} kind="formula"
-                          what={`${benchmark}'s share held in ${r.bucket}.`}
-                          note={`${benchmark} weight in ${r.bucket}`}
-                          how={copy.prov.indexWeightHow(benchmark)}
+                        <Num prov={<Provenance source="benchmark_caps" asOf={data.start} historical kind="formula"
+                          what={`The policy benchmark's share held in ${r.bucket}.`}
+                          note={`${benchmark} sector weight, scaled by the Stocks policy allocation`}
+                          how={benchmarkWeightHow}
                           worked={workedWeight(`${wt(wB)}%`)} />}>
                           {wt(wB)}%
                         </Num>
@@ -900,7 +934,6 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                           calculation={<ReturnCalculation rows={r.portfolio_holdings ?? []}
                             result={rP} bucket={r.bucket} owner={copy.prov.yours} />} />}>
                           {rP}
-                          {n(r.lookthrough_weight_pct) > 0 && <span className="ml-1 text-[10px] text-fg-faint" title={`${wt(r.lookthrough_weight_pct)}% ETF look-through weight; its sector return is unavailable`}>ETF</span>}
                         </Num>
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
@@ -961,24 +994,71 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     </Fragment>
                   );
                 })}
-                {bondsSleeve && (
-                  <tr className="border-t border-neutral-800/40 bg-inset/20">
-                    <td className="px-2 py-1.5 text-fg whitespace-nowrap">Bonds</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{wt(bondsSleeve.portfolio_weight_pct)}%</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{bondsSleeve.policy_weight_pct == null ? '—' : `${wt(bondsSleeve.policy_weight_pct)}%`}</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">{pct(bondsSleeve.portfolio_return_pct)}</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
-                      {pct(bondsSleeve.comparator_return_pct)}
-                      {bondsSleeve.comparator && <span className="ml-1 text-[10px] text-fg-faint">{bondsSleeve.comparator}</span>}
+                {bondsSleeve && (() => {
+                  const bondKey = '__sleeve:Bonds';
+                  const open = openBucket === bondKey;
+                  const bondPricedWeight = bondsSleeve.priced_weight_pct ?? bondsSleeve.portfolio_weight_pct;
+                  const bondCoverageNote = bondPricedWeight < bondsSleeve.portfolio_weight_pct - 1e-6
+                    ? `Calculated over the priced ${wt(bondPricedWeight)}% of your ${wt(bondsSleeve.portfolio_weight_pct)}% bond sleeve; the policy weight is scaled to that same coverage.`
+                    : 'Calculated over the complete bond sleeve.';
+                  return <Fragment key={bondKey}>
+                  <tr onClick={() => setOpenBucket(open ? null : bondKey)}
+                    title={open ? copy.row.hide('Bonds') : copy.row.show('Bonds', bondsSleeve.comparator ?? 'its comparator')}
+                    className={`border-t border-neutral-800/40 bg-inset/20 cursor-pointer transition-colors ${
+                      open ? 'bg-accent-500/[0.07]' : 'hover:bg-overlay/[0.02]'}`}>
+                    <td className="px-2 py-1.5 text-fg whitespace-nowrap">
+                      <span className={`inline-block w-3 text-[10px] ${open ? 'text-accent-400' : 'text-fg-faint'}`}>
+                        {open ? '▾' : '▸'}
+                      </span>
+                      Bonds
                     </td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-faint">—</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-faint">—</td>
-                    <td className="px-2 py-1.5 text-right font-mono text-fg-faint">—</td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle"><Num prov={<Provenance source={pWeightSource} asOf={data.start} kind="formula"
+                      what="Your opening-book share held in Bonds." note="your weight in Bonds"
+                      how={`The real opening-book weight, from ${pWeightSrc}.`}
+                      worked={workedWeight(`${wt(bondsSleeve.portfolio_weight_pct)}%`)} />}>
+                      {wt(bondsSleeve.portfolio_weight_pct)}%</Num></td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle"><Num prov={<Provenance source="derived" kind="formula"
+                      what="The policy benchmark allocation to Bonds." note="policy weight in Bonds"
+                      how="The policy's stated bond allocation." worked={workedWeight(bondsSleeve.policy_weight_pct == null ? null : `${wt(bondsSleeve.policy_weight_pct)}%`)} />}>
+                      {bondsSleeve.policy_weight_pct == null ? '—' : `${wt(bondsSleeve.policy_weight_pct)}%`}</Num></td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle"><Num prov={<Provenance source={pSrc} asOf={benchmarkAsOf} kind="formula"
+                      what="What your bond holdings returned in EUR." note="your bond return"
+                      how={pReturnHow} worked={workedReturn(pct(bondsSleeve.portfolio_return_pct))}
+                      calculation={<ReturnCalculation rows={bondsSleeve.holdings ?? []}
+                        result={pct(bondsSleeve.portfolio_return_pct)} bucket="Bonds" owner={copy.prov.yours} />} />}>
+                      {pct(bondsSleeve.portfolio_return_pct)}</Num></td>
+                    <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
+                      <Num prov={<Provenance source="benchmark" asOf={benchmarkAsOf} kind="formula"
+                        what={`What the ${bondsSleeve.comparator ?? 'bond'} comparator returned in EUR.`}
+                        note="bond comparator return" how="The EUR close at the end of the window against the close at the start."
+                        worked={workedReturn(pct(bondsSleeve.comparator_return_pct))} />}>
+                        {pct(bondsSleeve.comparator_return_pct)}</Num>
+                    </td>
+                    <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.allocation_pct} prov={<Provenance source="derived" kind="formula"
+                      what="Bond allocation effect." note="bond sleeve allocation"
+                      how={`${bondCoverageNote} Your bond-policy weight difference × the dedicated bond comparator return.`} />} /></td>
+                    <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.selection_pct} prov={<Provenance source="derived" kind="formula"
+                      what="Bond selection effect." note="bond sleeve selection"
+                      how={`${bondCoverageNote} The policy bond weight × the difference between your bond return and its dedicated comparator.`} />} /></td>
+                    <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.interaction_pct} prov={<Provenance source="derived" kind="formula"
+                      what="Bond interaction effect." note="bond sleeve interaction"
+                      how={`${bondCoverageNote} The bond weight difference × the difference between your bond return and its dedicated comparator.`} />} /></td>
                     <td className="px-2 py-1.5 text-right font-mono font-semibold">
-                      <Eff v={bondsSleeve.impact_pct} />
+                      <Eff v={bondsSleeve.impact_pct} prov={<Provenance source="derived" kind="formula"
+                        what="Bonds' whole contribution to the portfolio-versus-policy gap."
+                        note="bond sleeve impact" how={`${bondCoverageNote} Your bond weight × your bond return, minus the same-coverage policy bond weight × its comparator return.`} />} />
                     </td>
                   </tr>
-                )}
+                  {open && <tr className="bg-inset/60">
+                    <td colSpan={9} className="px-3 py-3">
+                      <BucketNames row={{ portfolio_holdings: bondsSleeve.holdings ?? [], benchmark_holdings: [] }}
+                        bucket="Bonds" benchmark={bondsSleeve.comparator ?? 'bond comparator'}
+                        startLabel={startLabel} portfolioProvenance={portfolioHoldingProvenance}
+                        benchmarkProvenance={benchmarkHoldingProvenance} />
+                    </td>
+                  </tr>}
+                  </Fragment>;
+                })()}
               </tbody>
               <tfoot>
                 {data.fund_implementation_residual_pct != null && (
@@ -996,17 +1076,17 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                   <td className="px-2 py-1.5 text-fg">{copy.headers.totalExcess}</td>
                   <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
                     <Num prov={<Provenance source={pWeightSource} asOf={data.start} kind="formula"
-                      what={`Your combined opening weight across every displayed ${w}.`}
-                      note={`total displayed portfolio weight by ${w}`}
-                      how={`Every displayed ${w}'s real opening-book weight, summed. Positions outside this attribution remain outside this total.`} />}>
+                      what="Sum of the Your weight column."
+                      note="column total"
+                      how="Adds the values above in this column." />}>
                       {wt(portfolioWeightTotal)}%
                     </Num>
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono text-fg-subtle">
-                    <Num prov={<Provenance source="benchmark_caps" asOf={data.start} kind="formula"
-                      what={`${benchmark}'s combined opening weight across every displayed ${w}.`}
-                      note={`total displayed ${benchmark} weight by ${w}`}
-                      how={`Every displayed ${w}'s opening index weight, summed.`} />}>
+                    <Num prov={<Provenance source="benchmark_caps" asOf={data.start} historical kind="formula"
+                      what="Sum of the Benchmark weight column."
+                      note="column total"
+                      how="Adds the values above in this column." />}>
                       {wt(benchmarkWeightTotal)}%
                     </Num>
                   </td>
@@ -1014,28 +1094,28 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       empty rather than putting a mathematically meaningless sum underneath. */}
                   <td colSpan={2} />
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.allocation_pct), 0)}
-                      prov={<Provenance source="derived" kind="formula" note="total allocation"
-                        what={`What choosing where to put the money was worth, across every ${w}.`}
-                        how={`Every ${w}'s allocation effect, summed.`} />} />
+                    <Eff v={allocationColumnTotal}
+                      prov={<Provenance source="derived" kind="formula" note="column total"
+                        what="Sum of the Allocation column."
+                        how="Adds the values above in this column." />} />
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.selection_pct), 0)}
-                      prov={<Provenance source="derived" kind="formula" note="total selection"
-                        what={`What choosing which companies to hold was worth, across every ${w}.`}
-                        how={`Every ${w}'s selection effect, summed.`} />} />
+                    <Eff v={selectionColumnTotal}
+                      prov={<Provenance source="derived" kind="formula" note="column total"
+                        what="Sum of the Selection column."
+                        how="Adds the values above in this column." />} />
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={(data.rows ?? []).reduce((s, r) => s + n(r.interaction_pct), 0)}
-                      prov={<Provenance source="derived" kind="formula" note="total interaction"
-                        what={`The cross terms, across every ${w}.`}
-                        how={`Every ${w}'s interaction effect, summed.`} />} />
+                    <Eff v={interactionColumnTotal}
+                      prov={<Provenance source="derived" kind="formula" note="column total"
+                        what="Sum of the Interaction column."
+                        how="Adds the values above in this column." />} />
                   </td>
                   <td className="px-2 py-1.5 text-right font-mono">
-                    <Eff v={data.excess_pct}
-                      prov={<Provenance source="derived" kind="formula" note="the attributed excess"
-                        what="The hybrid excess this table explains, including the explicit ETF implementation residual."
-                        how={`Allocation + direct-stock selection + interaction + the ETF implementation residual across every ${w}.`} />} />
+                    <Eff v={totalColumnTotal}
+                      prov={<Provenance source="derived" kind="formula" note="column total"
+                        what="Sum of the Total column."
+                        how="Adds the values above in this column." />} />
                   </td>
                 </tr>
               </tfoot>

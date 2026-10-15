@@ -494,7 +494,7 @@ export function ProvenanceFetchedAt({ at, scope = 'all', children }: {
 }
 
 export function Provenance({ source, asOf, fetchedAt, note, where, how, kind, column = false, what,
-  worked, legend, calculation, when, onRefresh, staleReason }: {
+  worked, legend, calculation, when, onRefresh, staleReason, historical = false }: {
   source: SourceKey; asOf?: string | null; note?: string; where?: React.ReactNode; how?: React.ReactNode; kind?: ProvKind;
   /** The formula, then the same formula with this row's numbers in it. See `Worked`. */
   worked?: string;
@@ -528,6 +528,8 @@ export function Provenance({ source, asOf, fetchedAt, note, where, how, kind, co
   onRefresh?: () => Promise<string | null>;
   /** A known failed/partial acquisition. This outranks clock-based freshness for this value. */
   staleReason?: string;
+  /** A deliberately frozen past observation, such as start-of-window benchmark weights. */
+  historical?: boolean;
 }) {
   //  `!column &&` FIRST. A column header must never reach the stale branch, whatever it was
   // handed — the guard belongs here, not at ~90 call sites that each have to remember it.
@@ -556,7 +558,9 @@ export function Provenance({ source, asOf, fetchedAt, note, where, how, kind, co
   //  Computed once and handed to both — the icon below and the card's When pill. Two
   // computations of "is this current" in one component is what produced a blue ⓘ over an amber
   // "3 trading days old".
-  const fresh = staleReason && !column
+  const fresh = historical
+    ? { stale: false, label: '' }
+    : staleReason && !column
     ? { stale: true, label: staleReason }
     : provenanceFreshness(asOf, fetched, column, source);
   return (

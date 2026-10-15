@@ -86,8 +86,11 @@ def model_legs(portfolio_id: int, eff: str | None, start: str,
         "return_pct": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("return_pct"),
         "return_start_date": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("start_date"),
         "return_start_price_eur": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("start_price_eur"),
+        "return_start_price_local": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("start_price_local"),
         "return_end_date": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("end_date"),
         "return_end_price_eur": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("end_price_eur"),
+        "return_end_price_local": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("end_price_local"),
+        "return_currency": None if not r.get("isin") else (marks.get(r["isin"]) or {}).get("currency"),
         "airs_name": r.get("fonds"),
         "is_cash": not r.get("isin"),
         "via_names": r.get("via_names") or [],
@@ -224,8 +227,11 @@ def book_legs(portfolio_id: int, start: str, look_through: bool = False) -> list
             "return_pct": mark.get("return_pct"),
             "return_start_date": mark.get("start_date"),
             "return_start_price_eur": mark.get("start_price_eur"),
+            "return_start_price_local": mark.get("start_price_local"),
             "return_end_date": mark.get("end_date"),
             "return_end_price_eur": mark.get("end_price_eur"),
+            "return_end_price_local": mark.get("end_price_local"),
+            "return_currency": mark.get("currency"),
             #  AIRS'S own figure, carried but not used. It is what the book says this position
             # made, and it is how the difference between this panel and the book's own return can
             # be shown rather than discovered.  For a leg inside a certificate it is the WRAPPER's

@@ -3610,6 +3610,11 @@
             "title": "Benchmark Holdings Count",
             "type": "integer"
           },
+          "benchmark_index_weight_pct": {
+            "default": 0.0,
+            "title": "Benchmark Index Weight Pct",
+            "type": "number"
+          },
           "benchmark_return_pct": {
             "anyOf": [
               {
@@ -3620,6 +3625,11 @@
               }
             ],
             "title": "Benchmark Return Pct"
+          },
+          "benchmark_stock_weight_pct": {
+            "default": 100.0,
+            "title": "Benchmark Stock Weight Pct",
+            "type": "number"
           },
           "benchmark_weight_pct": {
             "default": 0.0,
@@ -3850,6 +3860,17 @@
             ],
             "title": "Name"
           },
+          "return_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Currency"
+          },
           "return_end_date": {
             "anyOf": [
               {
@@ -3871,6 +3892,17 @@
               }
             ],
             "title": "Return End Price Eur"
+          },
+          "return_end_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return End Price Local"
           },
           "return_pct": {
             "anyOf": [
@@ -3904,6 +3936,17 @@
               }
             ],
             "title": "Return Start Price Eur"
+          },
+          "return_start_price_local": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Start Price Local"
           },
           "ticker": {
             "anyOf": [
@@ -3997,6 +4040,17 @@
       "AttributionSleeve": {
         "description": "One client-facing sleeve in the profile benchmark comparison.",
         "properties": {
+          "allocation_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allocation Pct"
+          },
           "bucket": {
             "title": "Bucket",
             "type": "string"
@@ -4042,6 +4096,17 @@
             ],
             "title": "Impact Pct"
           },
+          "interaction_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interaction Pct"
+          },
           "policy_weight_pct": {
             "anyOf": [
               {
@@ -4068,6 +4133,22 @@
             "default": 0.0,
             "title": "Portfolio Weight Pct",
             "type": "number"
+          },
+          "priced_weight_pct": {
+            "default": 0.0,
+            "title": "Priced Weight Pct",
+            "type": "number"
+          },
+          "selection_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Selection Pct"
           }
         },
         "required": [

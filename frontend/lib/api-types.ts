@@ -9780,8 +9780,18 @@ export interface components {
              * @default 0
              */
             benchmark_holdings_count?: number;
+            /**
+             * Benchmark Index Weight Pct
+             * @default 0
+             */
+            benchmark_index_weight_pct?: number;
             /** Benchmark Return Pct */
             benchmark_return_pct?: number | null;
+            /**
+             * Benchmark Stock Weight Pct
+             * @default 100
+             */
+            benchmark_stock_weight_pct?: number;
             /**
              * Benchmark Weight Pct
              * @default 0
@@ -9887,16 +9897,22 @@ export interface components {
             isin?: string | null;
             /** Name */
             name?: string | null;
+            /** Return Currency */
+            return_currency?: string | null;
             /** Return End Date */
             return_end_date?: string | null;
             /** Return End Price Eur */
             return_end_price_eur?: number | null;
+            /** Return End Price Local */
+            return_end_price_local?: number | null;
             /** Return Pct */
             return_pct?: number | null;
             /** Return Start Date */
             return_start_date?: string | null;
             /** Return Start Price Eur */
             return_start_price_eur?: number | null;
+            /** Return Start Price Local */
+            return_start_price_local?: number | null;
             /** Ticker */
             ticker?: string | null;
             /** Weight Denominator Components */
@@ -9922,6 +9938,8 @@ export interface components {
          * @description One client-facing sleeve in the profile benchmark comparison.
          */
         AttributionSleeve: {
+            /** Allocation Pct */
+            allocation_pct?: number | null;
             /** Bucket */
             bucket: string;
             /** Comparator */
@@ -9935,6 +9953,8 @@ export interface components {
             holdings?: components["schemas"]["AttributionName"][];
             /** Impact Pct */
             impact_pct?: number | null;
+            /** Interaction Pct */
+            interaction_pct?: number | null;
             /** Policy Weight Pct */
             policy_weight_pct?: number | null;
             /** Portfolio Return Pct */
@@ -9944,6 +9964,13 @@ export interface components {
              * @default 0
              */
             portfolio_weight_pct?: number;
+            /**
+             * Priced Weight Pct
+             * @default 0
+             */
+            priced_weight_pct?: number;
+            /** Selection Pct */
+            selection_pct?: number | null;
         };
         /**
          * AttributionWeightComponent

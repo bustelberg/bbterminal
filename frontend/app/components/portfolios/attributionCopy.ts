@@ -7,8 +7,8 @@ const en = {
   axis: { sector: 'sector', region: 'region', currency: 'currency', group: 'group', bySector: 'by Sector', byRegion: 'by Region', byCurrency: 'by Currency' },
   chrome: {
     ytd: 'Year-to-date', since: 'Since-inception', startYear: 'Start of year', inception: 'At inception', hide: 'Hide',
-    title: (window: string, benchmark: string, portfolio?: string) =>
-      `${portfolio ? `${portfolio} \u2014 ` : ''}${window} performance attribution compared to ${benchmark}`,
+    title: (window: string, _benchmark: string, portfolio?: string) =>
+      `${portfolio ? `${portfolio} \u2014 ` : ''}${window} performance attribution`,
     loading: 'Computing attribution', error: 'Attribution could not be computed.',
     residual: (value: string) => `The attribution does not reconcile. Difference: ${value}.`,
     drivers: 'Holdings behind the result',
@@ -111,8 +111,8 @@ const nl: AttributionCopy = {
   axis: { sector: 'sector', region: 'regio', currency: 'valuta', group: 'groep', bySector: 'per sector', byRegion: 'per regio', byCurrency: 'per valuta' },
   chrome: {
     ytd: 'Sinds jaarbegin', since: 'Sinds ingangsdatum', startYear: 'Begin van het jaar', inception: 'Bij ingangsdatum', hide: 'Verbergen',
-    title: (window, benchmark, portfolio) =>
-      `${portfolio ? `${portfolio} \u2014 ` : ''}${window}: rendementsattributie ten opzichte van ${benchmark}`,
+    title: (window, _benchmark, portfolio) =>
+      `${portfolio ? `${portfolio} \u2014 ` : ''}${window}: rendementsattributie`,
     loading: 'Attributie berekenen', error: 'De attributie kon niet worden berekend.',
     residual: (value) => `De attributie sluit niet aan. Verschil: ${value}.`,
     drivers: 'Posities achter het resultaat',

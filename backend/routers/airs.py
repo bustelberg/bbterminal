@@ -2723,8 +2723,11 @@ class AttributionName(BaseModel):
     # The two EUR marks behind `return_pct`, so the client can show the actual closes and dates.
     return_start_date: str | None = None
     return_start_price_eur: float | None = None
+    return_start_price_local: float | None = None
     return_end_date: str | None = None
     return_end_price_eur: float | None = None
+    return_end_price_local: float | None = None
+    return_currency: str | None = None
     contribution_pct: float = 0.0
     # True when this company is held on BOTH sides — in the model AND the benchmark bucket.
     # Matched by ISIN first, then by company, so BOTH "AMD" == "Advanced Micro Devices Inc" (one
@@ -2753,6 +2756,10 @@ class AttributionBucket(BaseModel):
     # show the auditable calculation: fund weight × its disclosed sector split.
     lookthrough_funds: list[AttributionLookthroughFund] = []
     benchmark_weight_pct: float = 0.0
+    # `benchmark_weight_pct` is the whole-policy weight. Retain its operands so the client can
+    # audit, e.g., 26.56% ACWI Technology × 60% Stocks policy = 15.94% benchmark Technology.
+    benchmark_index_weight_pct: float = 0.0
+    benchmark_stock_weight_pct: float = 100.0
     portfolio_return_pct: float | None = None
     benchmark_return_pct: float | None = None
     allocation_pct: float = 0.0
@@ -2782,10 +2789,19 @@ class AttributionSleeve(BaseModel):
     """One client-facing sleeve in the profile benchmark comparison."""
     bucket: str
     portfolio_weight_pct: float = 0.0
+    # The opening weight with a usable return. Sleeve effects are calculated only over this
+    # comparable portion when one or more holdings have no mark for the selected window.
+    priced_weight_pct: float = 0.0
     policy_weight_pct: float | None = None
     portfolio_return_pct: float | None = None
     comparator: str | None = None
     comparator_return_pct: float | None = None
+    # A sleeve's own Brinson split against its dedicated comparator. Unlike equity-sector
+    # attribution, Allocation here is measured from the comparator's zero baseline because a
+    # bond comparator is not a constituent of the equity index total.
+    allocation_pct: float | None = None
+    selection_pct: float | None = None
+    interaction_pct: float | None = None
     impact_pct: float | None = None
     holdings: list[AttributionName] = []
 
