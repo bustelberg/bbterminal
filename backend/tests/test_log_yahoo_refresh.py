@@ -90,3 +90,65 @@ def test_logbook_rows_include_the_yahoo_symbol_for_links(monkeypatch):
     rows = {row["id"]: row for row in log._entries()}
     assert rows[1]["yahoo_symbol"] == "AAPL"
     assert rows[2]["yahoo_symbol"] is None
+
+
+def test_immediate_price_fetch_preserves_mapping_and_targets_one_isin(monkeypatch):
+    db = _fake_db()
+    db.tables["asset_execution"][0]["yahoo_symbol"] = "TEST"
+    db.tables["bc_log_entry"] = [{"id": 1, "isin": "US0000000001"}]
+    monkeypatch.setattr(log, "supabase", db)
+    seen = []
+    monkeypatch.setattr(price_refresh, "backfill_missing", lambda isins: seen.append(isins) or {"failed": 0})
+    monkeypatch.setattr(price_refresh, "refresh_stale", lambda **kw: seen.append(kw) or {"failed": 0})
+    result = asyncio.run(log.refresh_entry_price(1))
+    assert result["available"] is True
+    assert seen == [{"US0000000001"}, {"held_only": False, "stale_days": 0, "isins": {"US0000000001"}}]
+
+
+def test_immediate_price_fetch_without_isin_never_calls_yahoo(monkeypatch):
+    monkeypatch.setattr(log, "supabase", FakeSupabase({"bc_log_entry": [{"id": 1, "isin": ""}]}))
+    result = asyncio.run(log.refresh_entry_price(1))
+    assert result["available"] is False
+    assert "No ISIN" in result["message"]
+
+
+def test_immediate_price_fetch_reports_failure_without_removing_decision(monkeypatch):
+    import pytest
+    from fastapi import HTTPException
+    db = _fake_db()
+    db.tables["asset_execution"][0]["yahoo_symbol"] = "TEST"
+    db.tables["bc_log_entry"] = [{"id": 1, "isin": "US0000000001"}]
+    monkeypatch.setattr(log, "supabase", db)
+    monkeypatch.setattr(price_refresh, "backfill_missing", lambda isins: {"failed": 0})
+    monkeypatch.setattr(price_refresh, "refresh_stale", lambda **kw: {"failed": 1})
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(log.refresh_entry_price(1))
+    assert error.value.status_code == 502
+    assert db.tables["bc_log_entry"][0]["id"] == 1
+
+
+def test_refresh_job_reports_real_outcomes_for_every_row(monkeypatch):
+    from jobs import Job, JobCtx
+    db = _fake_db()
+    db.tables["asset_execution"][0]["yahoo_symbol"] = "TEST"
+    monkeypatch.setattr(log, "supabase", db)
+    monkeypatch.setattr(log, "_entries", lambda: [
+        {"id": 1, "company_name": "Mapped", "isin": "US0000000001", "review_on": "2026-01-01"},
+        {"id": 2, "company_name": "Manual", "isin": "", "review_on": "2026-01-01"},
+        {"id": 3, "company_name": "Unmapped", "isin": "UNKNOWN", "review_on": "2026-01-01"},
+        {"id": 4, "company_name": "Undated", "isin": "US0000000001", "review_on": None},
+    ])
+    seen = []
+    monkeypatch.setattr(price_refresh, "backfill_missing", lambda isins: {"failed": 0})
+    monkeypatch.setattr(price_refresh, "refresh_stale", lambda **kw: seen.append(kw["isins"]) or {"failed": 0})
+    job = Job(id="test", kind="log-yahoo-returns", label="test")
+    summary = log._refresh_logbook_job(JobCtx(job))
+    assert summary == "1 returns available; 3 unavailable/skipped; 0 failed. 4 decisions checked."
+    assert seen == [{"US0000000001"}]
+    messages = [event["message"] for event in job.events]
+    assert any("Mapped" in m and "+25%" in m for m in messages)
+    assert any("Manual" in m and "no ISIN" in m for m in messages)
+    assert any("Unmapped" in m and "no Yahoo mapping" in m for m in messages)
+    assert any("Undated" in m and "no review date" in m for m in messages)
+    assert job.done == job.total == 4
+    assert [event["done"] for event in job.events] == sorted(event["done"] for event in job.events)

@@ -6779,6 +6779,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/log-dashboard/entries/{entry_id}/refresh-price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Entry Price
+         * @description Fetch prices for one saved decision, preserving an existing Yahoo mapping.
+         */
+        post: operations["refresh_entry_price_api_log_dashboard_entries__entry_id__refresh_price_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/log-dashboard/news/{ticker}": {
         parameters: {
             query?: never;
@@ -6840,6 +6860,23 @@ export interface paths {
          *     stored closes; a page view must never cause a burst of vendor requests.
          */
         post: operations["refresh_yahoo_returns_api_log_dashboard_yahoo_returns_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/log-dashboard/yahoo-returns/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Yahoo Returns Job */
+        post: operations["refresh_yahoo_returns_job_api_log_dashboard_yahoo_returns_refresh_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -23252,6 +23289,37 @@ export interface operations {
             };
         };
     };
+    refresh_entry_price_api_log_dashboard_entries__entry_id__refresh_price_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stock_news_api_log_dashboard_news__ticker__get: {
         parameters: {
             query?: never;
@@ -23317,6 +23385,26 @@ export interface operations {
         };
     };
     refresh_yahoo_returns_api_log_dashboard_yahoo_returns_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    refresh_yahoo_returns_job_api_log_dashboard_yahoo_returns_refresh_job_post: {
         parameters: {
             query?: never;
             header?: never;

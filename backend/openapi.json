@@ -30141,6 +30141,47 @@
         ]
       }
     },
+    "/api/log-dashboard/entries/{entry_id}/refresh-price": {
+      "post": {
+        "description": "Fetch prices for one saved decision, preserving an existing Yahoo mapping.",
+        "operationId": "refresh_entry_price_api_log_dashboard_entries__entry_id__refresh_price_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "entry_id",
+            "required": true,
+            "schema": {
+              "title": "Entry Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Entry Price",
+        "tags": [
+          "log dashboard"
+        ]
+      }
+    },
     "/api/log-dashboard/news/{ticker}": {
       "get": {
         "description": "Latest headlines from the legacy GuruFocus API used by this app.",
@@ -30247,6 +30288,25 @@
           }
         },
         "summary": "Refresh Yahoo Returns",
+        "tags": [
+          "log dashboard"
+        ]
+      }
+    },
+    "/api/log-dashboard/yahoo-returns/refresh/job": {
+      "post": {
+        "operationId": "refresh_yahoo_returns_job_api_log_dashboard_yahoo_returns_refresh_job_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Refresh Yahoo Returns Job",
         "tags": [
           "log dashboard"
         ]

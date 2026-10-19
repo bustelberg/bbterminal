@@ -165,6 +165,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
    */
   const [ms, setMs] = useState<number | null>(linger ? linger * 1000 : null);
   const [hover, setHover] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   // Derived, not stored: "at zero" and "fading" are the same fact, and holding it twice is how the
   // two come to disagree.
   const leaving = ms !== null && ms <= 0;
@@ -240,11 +241,11 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
           empty because it is empty, not because an animation was given long enough to get there.
           The transition is one TICK, so it smooths the 100ms steps without ever lagging behind. */}
       <div className="h-1 rounded bg-overlay/10 overflow-hidden">
-        <div className={`h-full ${tone.bar} ${hover ? '' : 'transition-[width] ease-linear'}`}
+        <div className={`h-full ${tone.bar} ${running && pct === null ? 'animate-pulse opacity-40' : ''} ${hover ? '' : 'transition-[width] ease-linear'}`}
           style={{
             transitionDuration: `${TICK_MS}ms`,
             width: running
-              ? (pct === null ? '35%' : `${pct}%`)
+              ? (pct === null ? '100%' : `${pct}%`)
               : `${linger && ms !== null ? (ms / (linger * 1000)) * 100 : 100}%`,
           }} />
       </div>
@@ -281,6 +282,22 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
           {displayMessage}
         </p>
       )}
+
+      {job.details?.length ? (
+        <div>
+          <button type="button" onClick={() => setShowDetails((visible) => !visible)}
+            className="text-[11px] text-accent-400 hover:text-accent-300">
+            {showDetails ? (lang === 'nl' ? 'Details verbergen' : 'Hide details')
+              : (lang === 'nl' ? 'Details bekijken' : 'View details')}
+          </button>
+          {showDetails && (
+            <ol role="log" aria-live="polite"
+              className="mt-1.5 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-neutral-800/60 bg-page/50 p-2 text-[11px] text-fg-muted">
+              {job.details.map((line, index) => <li key={`${index}:${line}`}>{line}</li>)}
+            </ol>
+          )}
+        </div>
+      ) : null}
 
       <div className="flex justify-end gap-2">
         {running && job.cancellable !== false && !job.cancelRequested && (

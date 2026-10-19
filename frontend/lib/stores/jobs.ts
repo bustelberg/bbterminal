@@ -59,6 +59,8 @@ export type JobToast = {
   cancelRequested: boolean;
   /** Local quick actions may report progress without a truthful cancel boundary. */
   cancellable?: boolean;
+  /** Recent progress lines, retained for the generic popup's on-demand run receipt. */
+  details?: string[];
   dismissed: boolean;
 };
 
@@ -279,8 +281,16 @@ export function watchJob(id: string, title: string, after = 0,
         }
         // A progress line. `done`/`total` ride along on the ones that have them; the others are
         // pure narration and must not reset the bar to zero.
+        const message = present(e.message) ?? '';
+        const current = jobsStore.get().jobs.find((job) => job.id === id);
+        // A job can emit thousands of lines. Preserve enough context for a useful receipt without
+        // turning a long-running job into an unbounded client-side log.
+        const details = message
+          ? [...(current?.details ?? []), message].slice(-100)
+          : current?.details;
         upsert(id, {
-          message: present(e.message) ?? '',
+          message,
+          ...(details ? { details } : {}),
           ...(typeof e.done === 'number' ? { done: e.done } : {}),
           ...(typeof e.total === 'number' ? { total: e.total } : {}),
         });

@@ -6,7 +6,8 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { useLang } from '../../../lib/i18n';
 import CompanyPicker, { type AssetPick } from '../research/CompanyPicker';
 import { Provenance } from '../../../lib/provenance';
-import { startLocalJob } from '../../../lib/stores/jobs';
+import { ValueBadge } from '../../../lib/dynamicValue';
+import { startJob, startLocalJob } from '../../../lib/stores/jobs';
 
 type Entry = {
   yahoo_symbol?: string | null;
@@ -14,7 +15,7 @@ type Entry = {
   notes: string; conviction: number; portfolio_weight: number | null;
   review_on: string | null;
 };
-type YahooReturn = { available: boolean; return_pct?: number; start_date?: string; as_of?: string; retrieved_at?: string; message?: string };
+type YahooReturn = { available: boolean; return_pct?: number; start_date?: string; start_close?: number; as_of?: string; end_close?: number; retrieved_at?: string; message?: string };
 
 function yahooUrl(entry: Entry): string {
   return entry.yahoo_symbol
@@ -50,6 +51,11 @@ export default function LogDashboard() {
       : ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     return `${day} ${months[month - 1]} ${year}`;
   };
+  const formatPrice = (value: number | undefined) => value == null ? '—'
+    : new Intl.NumberFormat(nl ? 'nl-NL' : 'en-US', {
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    }).format(value);
+  const formulaPrice = (value: number | undefined) => (value ?? 0).toFixed(2);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [company, setCompany] = useState<AssetPick | null>(null);
   const [saving, setSaving] = useState(false);
@@ -88,34 +94,44 @@ export default function LogDashboard() {
   async function refreshYahooReturns() {
     if (refreshingYahoo) return;
     setRefreshingYahoo(true);
-    startLocalJob(nl ? 'Yahoo-rendementen verversen' : 'Refresh Yahoo returns', 'log-yahoo-returns', async (signal) => {
-      try {
-        const r = await apiFetch(`${API_URL}/api/log-dashboard/yahoo-returns/refresh`, { method: 'POST', signal });
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error((body.detail as string) || 'Could not refresh Yahoo returns.');
-        setYahooReturns((body.returns || {}) as Record<number, YahooReturn>);
-        const moved = Number(body.prices?.moved || 0);
-        return nl
-          ? `${body.entries || 0} rendementen bijgewerkt${moved ? `; ${moved} koersreeksen verlengd` : ''}.`
-          : `${body.entries || 0} returns updated${moved ? `; ${moved} price series extended` : ''}.`;
-      } finally { setRefreshingYahoo(false); }
-    }, { cancellable: false });
-  }
-  async function save() {
-    if (!company) return;
-    setSaving(true);
     try {
-      const r = await apiFetch(`${API_URL}/api/log-dashboard/entries`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        company_name: company.name || company.isin,
-        isin: company.isin,
-        decision: form.decision, notes: form.notes,
-        conviction: Number(form.conviction), portfolio_weight: form.portfolio_weight ? Number(form.portfolio_weight) : null,
-        review_on: form.review_on || null,
-      }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'Could not save the decision.');
-      setForm({ decision: 'Hold', notes: '', conviction: '3', portfolio_weight: '', review_on: today });
+      const { done } = await startJob(
+        `${API_URL}/api/log-dashboard/yahoo-returns/refresh/job`,
+        nl ? 'Yahoo-rendementen verversen' : 'Refresh Yahoo returns',
+      );
+      await done;
       await loadEntries();
-    } finally { setSaving(false); }
+    } catch (error) {
+      startLocalJob(nl ? 'Yahoo-rendementen verversen' : 'Refresh Yahoo returns', 'log-yahoo-start-error', async () => { throw error; }, { cancellable: false });
+    } finally { setRefreshingYahoo(false); }
+  }
+  function save() {
+    if (!company || saving) return;
+    const selected = company;
+    const decision = { ...form };
+    setSaving(true);
+    startLocalJob(nl ? `Besluit opslaan: ${selected.name || selected.isin}` : `Save decision: ${selected.name || selected.isin}`, 'log-save', async (signal, report) => {
+      try {
+        report({ done: 0, total: 2, message: nl ? 'Besluit opslaan...' : 'Saving decision...' });
+        const r = await apiFetch(`${API_URL}/api/log-dashboard/entries`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+          company_name: selected.name || selected.isin, isin: selected.isin,
+          decision: decision.decision, notes: decision.notes, conviction: Number(decision.conviction),
+          portfolio_weight: decision.portfolio_weight === '' ? null : Number(decision.portfolio_weight),
+          review_on: decision.review_on || null,
+        }) });
+        const saved = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(saved.detail || 'Could not save the decision.');
+        setForm({ decision: 'Hold', notes: '', conviction: '3', portfolio_weight: '', review_on: today });
+        await loadEntries();
+        report({ done: 1, total: 2, message: nl ? 'Opgeslagen. Yahoo-koersen ophalen...' : 'Saved. Fetching Yahoo prices...' });
+        const prices = await apiFetch(`${API_URL}/api/log-dashboard/entries/${saved.id}/refresh-price`, { method: 'POST', signal });
+        const result = await prices.json().catch(() => ({}));
+        if (!prices.ok) throw new Error(result.detail || (nl ? 'Besluit opgeslagen, maar Yahoo-koersen ophalen is mislukt.' : 'Decision saved, but fetching Yahoo prices failed.'));
+        await loadEntries();
+        report({ done: 2, total: 2 });
+        return result.message;
+      } finally { setSaving(false); }
+    }, { cancellable: false });
   }
   async function deleteEntry() {
     if (!deleteTarget) return;
@@ -165,7 +181,7 @@ export default function LogDashboard() {
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[900px] text-left text-sm [&_th]:px-3 [&_td]:px-3 [&_th:first-child]:pl-0 [&_td:first-child]:pl-0 [&_th:last-child]:pr-0 [&_td:last-child]:pr-0 [&_tbody_button]:rounded-lg [&_tbody_button]:border [&_tbody_button]:border-neutral-700 [&_tbody_button]:bg-card [&_tbody_button]:px-2.5 [&_tbody_button]:py-1.5 [&_tbody_button]:font-medium [&_tbody_button]:transition-colors [&_tbody_button:hover]:border-neutral-500 [&_tbody_button:hover]:bg-overlay/[0.05]">
             <thead className="border-b border-neutral-800 text-fg-faint"><tr><th className="pb-2 font-medium">{nl ? 'Bedrijf' : 'Company'}</th><th className="pb-2 font-medium">{nl ? 'Besluit' : 'Decision'}</th><th className="pb-2 font-medium">{nl ? 'Convictie' : 'Conviction'}</th><th className="pb-2 font-medium">{nl ? 'Weging' : 'Weight'}</th><th className="pb-2 font-medium">{nl ? 'Evaluatie' : 'Review'}</th><th className="pb-2 font-medium">{nl ? 'Yahoo-rendement' : 'Yahoo return'}</th><th className="pb-2 font-medium">{nl ? 'Notities' : 'Notes'}</th><th className="pb-2 font-medium"><span className="sr-only">{nl ? 'Acties' : 'Actions'}</span></th></tr></thead>
-            <tbody>{entries.map(e => { const result = yahooReturns[e.id]; return <tr key={e.id} className="border-b border-neutral-800/50 align-top"><td className="py-3"><a href={yahooUrl(e)} target="_blank" rel="noopener noreferrer" title="Yahoo Finance" className="font-medium text-fg-strong hover:underline">{e.company_name}</a><div className="font-mono text-xs text-fg-faint">{e.isin}</div></td><td className="py-3">{decisionLabel(e.decision)}</td><td className="py-3">{e.conviction}/5</td><td className="py-3">{e.portfolio_weight == null ? '—' : `${e.portfolio_weight}%`}</td><td className="py-3">{formatDate(e.review_on)}</td><td className={`py-3 font-medium ${result?.available && (result.return_pct ?? 0) >= 0 ? 'text-pos-400' : result?.available ? 'text-neg-400' : 'text-fg-muted'}`}>{!e.review_on || !e.isin ? '—' : !result ? '…' : result.available ? <span>{(result.return_pct ?? 0) >= 0 ? '+' : ''}{result.return_pct}%<Provenance source="yfinance" asOf={result.as_of} fetchedAt={result.retrieved_at} kind="formula" what={nl ? 'Het koersrendement sinds de evaluatiedatum, exclusief dividenden.' : 'The price return since the review date, excluding dividends.'} how={nl ? 'Eerste beschikbare Yahoo-slotkoers op of na de evaluatiedatum, vergeleken met de nieuwste opgeslagen Yahoo-slotkoers.' : 'The first available Yahoo close on or after the review date, compared with the newest stored Yahoo close.'} /></span> : '—'}</td><td className="max-w-sm py-3 text-fg-muted"><p className="line-clamp-2 whitespace-pre-wrap">{e.notes || '—'}</p></td><td className="py-3 text-right"><div className="flex justify-end gap-3"><button type="button" onClick={() => setOpenTarget(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Openen' : 'Open'}</button><button type="button" onClick={() => beginEdit(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Bewerken' : 'Edit'}</button><button type="button" onClick={() => setDeleteTarget(e)} className="text-xs text-fg-subtle hover:text-neg-400">{nl ? 'Verwijderen' : 'Delete'}</button></div></td></tr>})}{!entries.length && <tr><td colSpan={8} className="py-8 text-center text-fg-muted">{nl ? 'Nog geen besluiten vastgelegd.' : 'No decisions recorded yet.'}</td></tr>}</tbody>
+            <tbody>{entries.map(e => { const result = yahooReturns[e.id]; return <tr key={e.id} className="border-b border-neutral-800/50 align-top"><td className="py-3"><a href={yahooUrl(e)} target="_blank" rel="noopener noreferrer" title="Yahoo Finance" className="font-medium text-fg-strong hover:underline">{e.company_name}</a><div className="font-mono text-xs text-fg-faint">{e.isin}</div></td><td className="py-3">{decisionLabel(e.decision)}</td><td className="py-3">{e.conviction}/5</td><td className="py-3">{e.portfolio_weight == null ? '—' : `${e.portfolio_weight}%`}</td><td className="py-3">{formatDate(e.review_on)}</td><td className={`py-3 font-medium ${result?.available && (result.return_pct ?? 0) >= 0 ? 'text-pos-400' : result?.available ? 'text-neg-400' : 'text-fg-muted'}`}>{!e.review_on || !e.isin ? '—' : !result ? '…' : result.available ? <span>{(result.return_pct ?? 0) >= 0 ? '+' : ''}{result.return_pct}%<Provenance source="yfinance" asOf={result.as_of} fetchedAt={result.retrieved_at} kind="formula" what={nl ? 'Het koersrendement sinds de evaluatiedatum, exclusief dividenden.' : 'The price return since the review date, excluding dividends.'} when={<span className="flex flex-wrap items-center gap-1.5"><span>{nl ? 'Start' : 'Start'}</span><ValueBadge>{formatDate(result.start_date)} · {formatPrice(result.start_close)}</ValueBadge><span>{nl ? 'Einde' : 'End'}</span><ValueBadge>{formatDate(result.as_of)} · {formatPrice(result.end_close)}</ValueBadge><span>{nl ? 'Opgehaald' : 'Retrieved'}</span><ValueBadge>{formatDate(result.retrieved_at)}</ValueBadge></span>} how={nl ? '(Eindkoers ÷ startkoers − 1) × 100.' : '(End close ÷ start close − 1) × 100.'} worked={String.raw`\left(\frac{${formulaPrice(result.end_close)}}{${formulaPrice(result.start_close)}} - 1\right) \times 100 = ${result.return_pct}\%`} /></span> : '—'}</td><td className="max-w-sm py-3 text-fg-muted"><p className="line-clamp-2 whitespace-pre-wrap">{e.notes || '—'}</p></td><td className="py-3 text-right"><div className="flex justify-end gap-3"><button type="button" onClick={() => setOpenTarget(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Openen' : 'Open'}</button><button type="button" onClick={() => beginEdit(e)} className="text-xs text-fg-subtle hover:text-fg">{nl ? 'Bewerken' : 'Edit'}</button><button type="button" onClick={() => setDeleteTarget(e)} className="text-xs text-fg-subtle hover:text-neg-400">{nl ? 'Verwijderen' : 'Delete'}</button></div></td></tr>})}{!entries.length && <tr><td colSpan={8} className="py-8 text-center text-fg-muted">{nl ? 'Nog geen besluiten vastgelegd.' : 'No decisions recorded yet.'}</td></tr>}</tbody>
           </table>
         </div>
       </section>
@@ -179,9 +195,9 @@ export default function LogDashboard() {
             <div><dt className="text-xs text-fg-faint">{nl ? 'Portefeuilleweging' : 'Portfolio weight'}</dt><dd className="mt-1 text-fg-soft">{openTarget.portfolio_weight == null ? '—' : `${openTarget.portfolio_weight}%`}</dd></div>
             <div><dt className="text-xs text-fg-faint">{nl ? 'Vastgelegd op' : 'Recorded on'}</dt><dd className="mt-1 text-fg-soft">{formatDate(openTarget.meeting_date)}</dd></div>
             <div><dt className="text-xs text-fg-faint">{nl ? 'Evalueren op' : 'Review on'}</dt><dd className="mt-1 text-fg-soft">{formatDate(openTarget.review_on)}</dd></div>
-            <div><dt className="text-xs text-fg-faint">{nl ? 'Yahoo-rendement' : 'Yahoo return'}</dt><dd className={`mt-1 font-medium ${openYahooReturn?.available && (openYahooReturn.return_pct ?? 0) >= 0 ? 'text-pos-400' : openYahooReturn?.available ? 'text-neg-400' : 'text-fg-soft'}`}>{!openTarget.review_on || !openTarget.isin ? '—' : !openYahooReturn ? (nl ? 'Laden…' : 'Loading…') : openYahooReturn.available ? `${(openYahooReturn.return_pct ?? 0) >= 0 ? '+' : ''}${openYahooReturn.return_pct}%` : '—'}{openYahooReturn?.available && <span className="mt-0.5 block text-[11px] font-normal text-fg-faint">{formatDate(openYahooReturn.start_date)} – {formatDate(openYahooReturn.as_of)}</span>}</dd></div>
+            <div><dt className="text-xs text-fg-faint">{nl ? 'Yahoo-rendement' : 'Yahoo return'}</dt><dd className={`mt-1 font-medium ${openYahooReturn?.available && (openYahooReturn.return_pct ?? 0) >= 0 ? 'text-pos-400' : openYahooReturn?.available ? 'text-neg-400' : 'text-fg-soft'}`}>{!openTarget.review_on || !openTarget.isin ? '—' : !openYahooReturn ? (nl ? 'Laden…' : 'Loading…') : openYahooReturn.available ? `${(openYahooReturn.return_pct ?? 0) >= 0 ? '+' : ''}${openYahooReturn.return_pct}%` : '—'}{openYahooReturn?.available && <span className="mt-0.5 block text-[11px] font-normal text-fg-faint">{openYahooReturn.start_close} ({formatDate(openYahooReturn.start_date)}); {openYahooReturn.end_close} ({formatDate(openYahooReturn.as_of)})</span>}</dd></div>
           </dl>
-          <p className="mt-2 text-xs text-fg-faint">{nl ? 'Gebaseerd op Yahoo-slotkoersen; exclusief dividenden.' : 'Based on Yahoo closing prices; excluding dividends.'}</p>
+          <p className="mt-2 text-xs text-fg-faint">{nl ? 'Gebaseerd op de Yahoo-slotkoers op of na de evaluatiedatum en de nieuwste opgeslagen slotkoers; exclusief dividenden.' : 'Based on the Yahoo close on or after the review date and the latest stored close; excluding dividends.'}</p>
           <div className="mt-5"><h3 className="text-sm font-medium text-fg-soft">{nl ? 'Notities' : 'Notes'}</h3><p className="mt-2 max-h-[45vh] overflow-y-auto whitespace-pre-wrap rounded-lg border border-neutral-800/60 bg-card p-4 text-sm leading-6 text-fg-soft">{openTarget.notes || '—'}</p></div>
           <div className="mt-5 flex justify-end"><button type="button" onClick={() => setOpenTarget(null)} className="rounded-lg bg-accent-600 px-3 py-2 text-sm font-medium text-white">{nl ? 'Sluiten' : 'Close'}</button></div>
         </div>
