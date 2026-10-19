@@ -158,7 +158,11 @@ export type RiskCopy = {
   };
 
   te: {
-    trackingError: string; activeReturn: string; infoRatio: string; observations: string;
+    trackingError: string; activeReturn: string;
+    benchmarkReturn: (benchmark: string) => string; portfolioReturn: (portfolio: string) => string;
+    activeReturnQuestion: (portfolio: string, benchmark: string) => string;
+    trackingErrorQuestion: (average: string) => string;
+    infoRatio: string; observations: string;
     /**
      * The ā ± TE interval, prepended to the TE card's `how` — see `activeBand`.
      *
@@ -220,6 +224,7 @@ export type RiskCopy = {
      *  head off. */
     shownAnnualised: string;
     volatility: string; downside: string; benchVol: (bench: string) => string;
+    question: (portfolio: string, benchmark: string) => string;
     worst: (period: string) => string;
     ret: string; sharpe: string; sortino: string;
     periodDay: string; periodWeek: string; periodMonth: string;
@@ -251,6 +256,7 @@ export type RiskCopy = {
 
   conc: {
     effective: string; ofIssuers: (n: number) => string;
+    question: (portfolio: string, benchmark: string) => string;
     top10: string; ofBook: (pct: string) => string;
     largest: string; benchEffective: (bench: string) => string;
     benchSub: (n: number, top10: string) => string;
@@ -283,8 +289,8 @@ const en: RiskCopy = {
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlation',
     vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration' },
   basis: { label: 'AIRS weights', now: 'Current', start: 'Start of year' },
-  subtitle: (portfolio, asOf) => `Shows how the individual stock weights in ${portfolio} differ from the benchmark, using AIRS weights`
-    + `${riskLongDate(asOf) ? ` as of ${riskLongDate(asOf)}` : ''}.`,
+  subtitle: (portfolio, asOf) => `Current AIRS stock weights in ${portfolio}`
+    + `${riskLongDate(asOf) ? ` as of ${riskLongDate(asOf)}` : ''}, compared with the benchmark history — not realised account performance.`,
   close: 'close',
 
   common: {
@@ -386,6 +392,10 @@ const en: RiskCopy = {
 
   te: {
     trackingError: 'Tracking error (realised)', activeReturn: 'Active return (ann.)',
+    benchmarkReturn: (benchmark) => `${benchmark} return (ann.)`,
+    portfolioReturn: (portfolio) => `${portfolio} return (ann.)`,
+    activeReturnQuestion: (portfolio, benchmark) => `How would ${portfolio} have performed versus ${benchmark} over the past five years if it had held this exact portfolio throughout?`,
+    trackingErrorQuestion: (average) => `How much would the active return have varied around its average of ${average} a year?`,
     infoRatio: 'Information ratio', observations: 'Observations',
     bandReading: (lo, hi, centre, bench) =>
       `A typical year is roughly between ${v(lo)} and ${v(hi)} versus ${v(bench)}. The range is `
@@ -482,6 +492,7 @@ const en: RiskCopy = {
     shownAnnualised: '· shown annualised',
     volatility: 'Volatility (ann.)', downside: 'Downside deviation',
     benchVol: (b) => `${b} volatility`, worst: (p) => `Worst ${p}`,
+    question: (portfolio, benchmark) => `How much would ${portfolio}'s returns have varied compared with ${benchmark}?`,
     ret: 'Return (ann.)', sharpe: 'Sharpe', sortino: 'Sortino',
     periodDay: 'day', periodWeek: 'week', periodMonth: 'month',
     cards: {
@@ -569,6 +580,7 @@ const en: RiskCopy = {
 
   conc: {
     effective: 'Effective positions', ofIssuers: (n) => `of ${n} companies held`,
+    question: (portfolio, benchmark) => `How concentrated are ${portfolio} and ${benchmark}?`,
     top10: 'Top 10', ofBook: (p) => `${p} of the whole book`,
     largest: 'Largest position', benchEffective: (b) => `${b} effective`,
     benchSub: (n, t) => `of ${n} · top 10 ${t}`,
@@ -616,8 +628,8 @@ const nl: RiskCopy = {
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
     vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
   basis: { label: 'AIRS-wegingen', now: 'Actueel', start: 'Begin van het jaar' },
-  subtitle: (portfolio, asOf) => `Toont hoe de wegingen van individuele aandelen in ${portfolio} afwijken van de benchmark, met AIRS-wegingen`
-    + `${riskLongDate(asOf) ? ` per ${riskLongDate(asOf)}` : ''}.`,
+  subtitle: (portfolio, asOf) => `Huidige AIRS-wegingen van aandelen in ${portfolio}`
+    + `${riskLongDate(asOf) ? ` per ${riskLongDate(asOf)}` : ''}, vergeleken met de historische benchmark — geen gerealiseerd rendement van de rekening.`,
   close: 'sluiten',
 
   common: {
@@ -721,6 +733,10 @@ const nl: RiskCopy = {
 
   te: {
     trackingError: 'Tracking error (gerealiseerd)', activeReturn: 'Actief rendement (geann.)',
+    benchmarkReturn: (benchmark) => `${benchmark}-rendement (geann.)`,
+    portfolioReturn: (portfolio) => `${portfolio}-rendement (geann.)`,
+    activeReturnQuestion: (portfolio, benchmark) => `Hoe zou ${portfolio} het de afgelopen vijf jaar hebben gedaan ten opzichte van ${benchmark} als het deze exacte portefeuille de hele periode had aangehouden?`,
+    trackingErrorQuestion: (average) => `Hoe sterk zou het actieve rendement rond het gemiddelde van ${average} per jaar hebben geschommeld?`,
     infoRatio: 'Information ratio', observations: 'Waarnemingen',
     bandReading: (lo, hi, centre, bench) =>
       `Een doorsnee jaar landt op ā ± TE — tussen ${v(lo)} en ${v(hi)} ten opzichte van ${v(bench)}, met `
@@ -829,6 +845,7 @@ const nl: RiskCopy = {
     shownAnnualised: '· geannualiseerd weergegeven',
     volatility: 'Volatiliteit (geann.)', downside: 'Neerwaartse deviatie',
     benchVol: (b) => `Volatiliteit ${b}`, worst: (p) => `Slechtste ${p}`,
+    question: (portfolio, benchmark) => `Hoe sterk zouden de rendementen van ${portfolio} hebben geschommeld vergeleken met ${benchmark}?`,
     ret: 'Rendement (geann.)', sharpe: 'Sharpe', sortino: 'Sortino',
     periodDay: 'dag', periodWeek: 'week', periodMonth: 'maand',
     cards: {
@@ -918,6 +935,7 @@ const nl: RiskCopy = {
 
   conc: {
     effective: 'Effectieve posities', ofIssuers: (n) => `van ${n} gehouden ondernemingen`,
+    question: (portfolio, benchmark) => `Hoe geconcentreerd zijn ${portfolio} en ${benchmark}?`,
     top10: 'Top 10', ofBook: (p) => `${p} van het hele boek`,
     largest: 'Grootste positie', benchEffective: (b) => `Effectief ${b}`,
     benchSub: (n, t) => `van ${n} · top 10 ${t}`,

@@ -1806,6 +1806,21 @@ class BenchmarkReturnPoint(BaseModel):
     price_date: str
 
 
+class WeightedBenchmarkComponent(BaseModel):
+    """One priced sleeve within the stock-and-bond policy benchmark."""
+
+    name: str
+    weight_pct: float
+    label: str | None = None
+    ticker: str | None = None
+    start_date: str | None = None
+    start_price: float | None = None
+    end_date: str | None = None
+    end_price: float | None = None
+    currency: str | None = None
+    return_pct: float | None = None
+
+
 class BookValueSeries(BaseModel):
     """The book's value through time, and the return that value earned.
 
@@ -1834,7 +1849,7 @@ class BookValueSeries(BaseModel):
     benchmark_return_pct: float | None = None
     benchmark_as_of: str | None = None
     #: The Stocks/Bonds proxy marks behind a weighted benchmark, for the chart's provenance table.
-    benchmark_components: list[dict] = []
+    benchmark_components: list[WeightedBenchmarkComponent] = []
     first_date: str | None = None
     last_date: str | None = None
     #: The first date we hold a snapshot for — where the series stops being AIRS's and becomes ours.
@@ -2613,6 +2628,9 @@ class PortfolioConcentration(BaseModel):
     benchmark_effective_positions: float | None = None
 
     top: list[ConcentrationRow] = []
+    #: Largest benchmark constituents, independently ranked so the reader can compare the two
+    #: actual top fives rather than only the benchmark weights of names we happen to hold.
+    benchmark_top: list[ConcentrationRow] = []
     benchmark_covered_pct: float | None = None
     #: When the index caps behind those weights were read — the same range the active-share
     #: response carries, because both weight the benchmark from one `members()` call.

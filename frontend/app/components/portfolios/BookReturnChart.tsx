@@ -408,7 +408,7 @@ export default function BookReturnChart(
   const benchmarkComponents = (data as BookValueSeries & {
     benchmark_components?: WeightedBenchmarkComponent[];
   }).benchmark_components ?? [];
-  const dateLabel = (value: string | null) => value
+  const dateLabel = (value: string | null | undefined) => value
     ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
       .format(new Date(`${value}T00:00:00Z`))
     : 'n/a';

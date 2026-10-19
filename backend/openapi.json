@@ -5764,6 +5764,14 @@
             ],
             "title": "Benchmark As Of"
           },
+          "benchmark_components": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/WeightedBenchmarkComponent"
+            },
+            "title": "Benchmark Components",
+            "type": "array"
+          },
           "benchmark_return_pct": {
             "anyOf": [
               {
@@ -12830,6 +12838,14 @@
             "title": "Benchmark Issuers",
             "type": "integer"
           },
+          "benchmark_top": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ConcentrationRow"
+            },
+            "title": "Benchmark Top",
+            "type": "array"
+          },
           "benchmark_top10_pct": {
             "anyOf": [
               {
@@ -17184,6 +17200,113 @@
           "strategy_type"
         ],
         "title": "VariantSpec",
+        "type": "object"
+      },
+      "WeightedBenchmarkComponent": {
+        "description": "One priced sleeve within the stock-and-bond policy benchmark.",
+        "properties": {
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "end_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Price"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Pct"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "start_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Price"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "weight_pct"
+        ],
+        "title": "WeightedBenchmarkComponent",
         "type": "object"
       },
       "YearStat": {
@@ -30225,7 +30348,7 @@
     },
     "/api/log-dashboard/yahoo-return/{isin}": {
       "get": {
-        "description": "Stored Yahoo close-price return from the first close on/after ``since``.\n\nUses the asset pipeline's persisted Yahoo series, so opening a log entry\nnever silently makes a fresh vendor request. This is price return only;\ndividends are intentionally not implied to be included.",
+        "description": "Stored Yahoo price return from the review-date close through the latest close.\n\nUses the asset pipeline's persisted Yahoo series, so opening a log entry\nnever silently makes a fresh vendor request.",
         "operationId": "yahoo_return_since_api_log_dashboard_yahoo_return__isin__get",
         "parameters": [
           {

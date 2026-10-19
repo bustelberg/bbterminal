@@ -282,14 +282,17 @@ export default function VolatilityView({
             the project rule for a dense table: it scrolls in its own box rather than squashing its
             columns or pushing the dialog sideways.
           */}
-          <div className="flex flex-wrap justify-center gap-2">
-            {MEASURES.filter((m) => m.key === 'vol' || m.key === 'dd').map((m) => (
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-sm font-medium text-fg-subtle text-center">{t.vol.question(portfolioName, data.benchmark)}</p>
+            <div className="flex flex-wrap justify-center gap-2">
+              {MEASURES.filter((m) => m.key === 'vol' || m.key === 'dd').map((m) => (
               <div key={m.key} className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
                 <div className="text-sm text-fg-faint flex items-center gap-1">{m.label}{m.info}</div>
                 <div className={`font-mono text-2xl tabular-nums ${m.ownTone ?? 'text-fg-strong'}`}>{m.own}</div>
                 <div className="mt-1 text-xs text-fg-muted">{data.benchmark}: <span className="font-mono tabular-nums">{m.bench}</span></div>
               </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           {data.cadence_note && <p className="text-[11px] text-fg-faint">{data.cadence_note}</p>}

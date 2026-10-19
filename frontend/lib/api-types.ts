@@ -6828,11 +6828,10 @@ export interface paths {
         };
         /**
          * Yahoo Return Since
-         * @description Stored Yahoo close-price return from the first close on/after ``since``.
+         * @description Stored Yahoo price return from the review-date close through the latest close.
          *
          *     Uses the asset pipeline's persisted Yahoo series, so opening a log entry
-         *     never silently makes a fresh vendor request. This is price return only;
-         *     dividends are intentionally not implied to be included.
+         *     never silently makes a fresh vendor request.
          */
         get: operations["yahoo_return_since_api_log_dashboard_yahoo_return__isin__get"];
         put?: never;
@@ -10604,6 +10603,11 @@ export interface components {
             benchmark?: string | null;
             /** Benchmark As Of */
             benchmark_as_of?: string | null;
+            /**
+             * Benchmark Components
+             * @default []
+             */
+            benchmark_components?: components["schemas"]["WeightedBenchmarkComponent"][];
             /** Benchmark Return Pct */
             benchmark_return_pct?: number | null;
             /**
@@ -13332,6 +13336,11 @@ export interface components {
              * @default 0
              */
             benchmark_issuers?: number;
+            /**
+             * Benchmark Top
+             * @default []
+             */
+            benchmark_top?: components["schemas"]["ConcentrationRow"][];
             /** Benchmark Top10 Pct */
             benchmark_top10_pct?: number | null;
             /** Effective Positions */
@@ -14857,6 +14866,32 @@ export interface components {
             universe_label?: string | null;
             /** Vol Target */
             vol_target?: number | null;
+        };
+        /**
+         * WeightedBenchmarkComponent
+         * @description One priced sleeve within the stock-and-bond policy benchmark.
+         */
+        WeightedBenchmarkComponent: {
+            /** Currency */
+            currency?: string | null;
+            /** End Date */
+            end_date?: string | null;
+            /** End Price */
+            end_price?: number | null;
+            /** Label */
+            label?: string | null;
+            /** Name */
+            name: string;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Start Date */
+            start_date?: string | null;
+            /** Start Price */
+            start_price?: number | null;
+            /** Ticker */
+            ticker?: string | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** YearStat */
         YearStat: {

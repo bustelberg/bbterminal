@@ -30,7 +30,6 @@ import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf, dayRange } from './asOfLine';
 import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { withWorked, subNum } from './workedFormula';
 import type { PortfolioConcentration } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
@@ -40,29 +39,6 @@ import { riskRequestKey, useRiskResult } from './useRiskResult';
  *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
  *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
-
-/**
- * Every symbol this view uses, defined once — same rule as the other risk views.
- *
- *  `wᵢ` CARRIES THREE OF THE FOUR CARDS (HHI squares it, C₁₀ sorts it, the largest position IS
- * it), so one definition is the only way they describe the same quantity.
- */
-const LEGEND = {
-  w: (bookName: string) => `one company's weight in ${v(bookName)}'s stock sleeve, as a fraction of 1`,
-  wSorted: 'the same weights sorted largest first — the bracket is what makes (i) a RANK rather '
-    + 'than a name',
-  //  One sentence, and it says what the number is rather than why the formula works. The reading
-  // is exact rather than an analogy: `Σwᵢ²` IS the probability of drawing the same company twice.
-  //  The scale caveat that used to follow it (ours is 0…1; antitrust quotes the same measure
-  // ×10,000) is real but belongs to somebody comparing against an outside threshold, which is not
-  // what this legend is for.
-  hhi: 'the chance that two euros drawn at random from the sleeve land in the SAME company — that '
-    + 'is exactly what summing the squared weights computes',
-  nEff: 'the answer: how many EQUALLY-sized positions would concentrate the book this much. An '
-    + 'equal-weight book of N names returns exactly N',
-  c10: 'the answer: how much of the sleeve sits in its ten largest companies',
-  c1: 'the answer: the single largest position, as a share of the sleeve',
-};
 
 function Tile({ label, value, sub, tone, info }: {
   label: string; value: string; sub?: string; tone?: string; info?: React.ReactNode;
@@ -92,7 +68,7 @@ export default function ConcentrationView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
-  const requestUrl = `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}`
+  const requestUrl = `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}&view=top-five-v3`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
   const requestBody = JSON.stringify({ holdings });
   const key = riskRequestKey(requestUrl, requestBody);
@@ -106,6 +82,7 @@ export default function ConcentrationView({
   }, 'concentration', 'the concentration could not be computed');
 
   const rows = data?.top ?? [];
+  const benchmarkRows = data?.benchmark_top ?? [];
 
   /**
    * What these cards are measured from — built once.
@@ -149,66 +126,20 @@ export default function ConcentrationView({
 
       {data?.available && (
         <>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-sm font-medium text-fg-subtle text-center">{t.conc.question(portfolioName, data.benchmark)}</p>
+            <div className="flex flex-wrap justify-center gap-2">
             <Tile label={t.conc.effective}
               value={data.effective_positions == null ? '—' : data.effective_positions.toFixed(2)}
               sub={`of ${data.issuers} companies held`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.conc.cards.effective.what}
+                what="How many equally sized companies would have the same concentration as this portfolio."
                 where={where}
                 when={whenBook}
-                worked={data.hhi == null || data.effective_positions == null ? '' : withWorked(
-                  String.raw`HHI = \sum_i w_i^2\qquad N_{\text{eff}} = \dfrac{1}{HHI}`,
-                  String.raw`\dfrac{1}{${subNum(data.hhi, 4)}} = ${data.effective_positions.toFixed(2)}`)}
-                legend={[
-                  { sym: 'w_i', is: LEGEND.w(portfolioName) },
-                  { sym: String.raw`HHI`, is: LEGEND.hhi },
-                  { sym: String.raw`N_{\text{eff}}`, is: LEGEND.nEff },
-                ]}
-                /*  NO `how`. It argued why this measure leads over C₁₀ — an editorial comparison
-                   between two tiles, not a fact about this one. The `N_eff` legend row already
-                   says what the number IS, and the file header keeps the reasoning for whoever
-                   changes the ordering. */
+                how={data.effective_positions == null
+                  ? 'It uses every current company weight in the stock sleeve.'
+                  : `It uses every current company weight in the stock sleeve. ${data.effective_positions.toFixed(2)} means the portfolio is as concentrated as ${data.effective_positions.toFixed(2)} equally sized companies.`}
                 />} />} />
-            <Tile label="Top 10" value={pct2(data.top10_pct)}
-              sub={`${pct2(data.stocks_pct)} of the complete book is in comparable stocks`}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.conc.cards.top10.what}
-                where={where}
-                when={whenBook}
-                worked={data.top10_pct == null ? '' : withWorked(
-                  String.raw`C_{10} = \sum_{i=1}^{10} w_{(i)}`,
-                  String.raw`C_1 = ${subNum(data.top1_pct ?? 0, 2)}\%`
-                  + String.raw`\quad C_3 = ${subNum(data.top3_pct ?? 0, 2)}\%`
-                  + String.raw`\quad C_5 = ${subNum(data.top5_pct ?? 0, 2)}\%`
-                  + String.raw`\quad C_{10} = ${subNum(data.top10_pct, 2)}\%`
-                  + String.raw`\quad C_{20} = ${subNum(data.top20_pct ?? 0, 2)}\%`)}
-                legend={[
-                  { sym: String.raw`w_{(i)}`, is: LEGEND.wSorted },
-                  { sym: String.raw`C_{10}`, is: LEGEND.c10 },
-                ]}
-                how={'Company weights use the complete AIRS book denominator, exactly as in '
-                  + 'Attribution. Funds, cash and other excluded positions are not redistributed '
-                  + 'over the visible companies.'} />} />} />
-            <Tile label={t.conc.largest} value={pct2(data.top1_pct)} tone="text-fg-strong"
-              sub={rows[0]?.name}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.conc.cards.largest.what}
-                where={rows[0]
-                  ? `${v(rows[0].name)} — ${v(data.benchmark)} holds ${v(pct2(rows[0].benchmark_pct))} of the same company. Weights from ${v(sourceLabel(portfolioSource))}.`
-                  : where}
-                when={whenBoth}
-                worked={data.top1_pct == null ? '' : withWorked(
-                  String.raw`C_1 = \max_i \; w_i`,
-                  String.raw`${subNum(data.top1_pct, 2)}\%`
-                  + String.raw` \text{ against } ${subNum(rows[0]?.benchmark_pct ?? 0, 2)}\%`)}
-                legend={[
-                  { sym: 'w_i', is: LEGEND.w(portfolioName) },
-                  { sym: String.raw`C_1`, is: LEGEND.c1 },
-                ]}
-                how={' A BIG POSITION IS NOT AUTOMATICALLY A BIG BET. Apple at 6% against an index '
-                  + 'holding 5% is a 1pp bet; the same 6% in a name the index does not hold is a '
-                  + '6pp one. The table below carries both.'} />} />} />
             <Tile label={`${data.benchmark} effective`}
               value={data.benchmark_effective_positions == null ? '—'
                 : data.benchmark_effective_positions.toFixed(2)}
@@ -222,6 +153,27 @@ export default function ConcentrationView({
                 how={'For scale.  A cap-weighted index is far more concentrated than its member '
                   + 'count suggests, so this is usually a small fraction of it — which is the '
                   + 'honest comparison, not the raw count.'} />} />} />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Top 5 {portfolioName} positions</div>
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium"><th className="text-left">Company</th><th className="text-right">Weight</th></tr></thead>
+                <tbody>{rows.slice(0, 5).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
+                  <td className="text-fg-soft">{row.name || `Position ${row.rank}`}</td><td className="text-right font-mono tabular-nums">{pct2(row.weight_pct)}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
+            <div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Top 5 {data.benchmark} positions</div>
+              <table className="w-full text-[11px]">
+                <thead><tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium"><th className="text-left">Company</th><th className="text-right">Weight</th></tr></thead>
+                <tbody>{benchmarkRows.slice(0, 5).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
+                  <td className="text-fg-soft">{row.name || `${data.benchmark} constituent ${row.rank}`}</td><td className="text-right font-mono tabular-nums">{pct2(row.weight_pct)}</td>
+                </tr>)}</tbody>
+              </table>
+            </div>
           </div>
         </>
       )}

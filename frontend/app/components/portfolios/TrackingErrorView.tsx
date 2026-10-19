@@ -108,6 +108,8 @@ export default function TrackingErrorView({
    */
   const band = oneSigmaBand(
     data?.mean_active_per_period_pct, data?.periods_per_year, data?.tracking_error_pct);
+  const activeReturnAverage = data?.active_return_ann_pct == null ? 'n/a'
+    : `${data.active_return_ann_pct >= 0 ? '+' : ''}${data.active_return_ann_pct.toFixed(2)}pp`;
 
   /**
    * What every card in this view is measured from, built once.
@@ -151,7 +153,12 @@ export default function TrackingErrorView({
 
       {data?.available && (
         <>
-          <div className="flex flex-wrap justify-center gap-3">
+          <div className="flex flex-col items-center gap-3">
+            <div className="flex flex-col items-center gap-1">
+              <p className="text-sm font-medium text-fg-subtle">{t.te.activeReturnQuestion(portfolioName, data.benchmark)}</p>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+              <Tile label={t.te.benchmarkReturn(data.benchmark)} value={pct2(data.benchmark_return_ann_pct)} />
+              <span aria-hidden="true" className="text-xl text-fg-faint">+</span>
             <Tile label={t.te.activeReturn}
               value={pct2(data.active_return_ann_pct).replace('%', 'pp')}
               tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
@@ -163,7 +170,14 @@ export default function TrackingErrorView({
                   String.raw`\text{Active return} = \text{Portfolio annualized return} - \text{Benchmark annualized return}`,
                   String.raw`${subNum(data.portfolio_return_ann_pct ?? 0, 4)}\% - (${subNum(data.benchmark_return_ann_pct ?? 0, 4)}\%) \approx ${subNum(data.active_return_ann_pct, 2)}\text{pp}`)}
                 how="Each series is compounded and annualized separately, then the benchmark return is subtracted. This uses today's AIRS holdings and weights over the historical period; it is not your account's realized performance." />} />} />
-            <Tile label={t.te.trackingError} value={pct2(data.tracking_error_pct).replace('%', 'pp')}
+              <span aria-hidden="true" className="text-xl text-fg-faint">=</span>
+              <Tile label={t.te.portfolioReturn(portfolioName)} value={pct2(data.portfolio_return_ann_pct)}
+                tone={(data.portfolio_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'} />
+              </div>
+            </div>
+            <div className="flex flex-col items-center">
+              <p className="mb-1 text-sm font-medium text-fg-subtle">{t.te.trackingErrorQuestion(activeReturnAverage)}</p>
+              <Tile label={t.te.trackingError} value={pct2(data.tracking_error_pct).replace('%', 'pp')}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.te.cards.te.what}
                 where={where}
@@ -189,6 +203,7 @@ export default function TrackingErrorView({
                   ? `${t.te.bandReading(subPct2(band.lo), subPct2(band.hi),
                     subPct2(band.centre), data.benchmark)} `
                   : '') + t.te.cards.te.how} />} />} />
+            </div>
           </div>
 
           {data.cadence_note && (

@@ -5,8 +5,8 @@ import { RISK_COPY, riskLongDate } from './riskCopy';
 describe('Risk subtitle', () => {
   it('names the AIRS portfolio and its valuation date', () => {
     expect(RISK_COPY.en.subtitle('Bustelberg Offensief', '2026-09-25')).toBe(
-      'Shows how the individual stock weights in Bustelberg Offensief differ from the benchmark, using AIRS weights as of '
-      + '25 september 2026.',
+      'Current AIRS stock weights in Bustelberg Offensief as of 25 september 2026, compared with the benchmark history '
+      + '\u2014 not realised account performance.',
     );
   });
 

@@ -89,10 +89,10 @@ export default function DrawdownView({
     return b as PortfolioDrawdown;
   }, 'drawdown', 'the drawdown could not be computed');
 
-  const unit = 'trading days';
   const worst = data?.worst;
-  const otherEpisodes = (data?.episodes ?? []).filter((episode) =>
-    episode.peak_date !== worst?.peak_date || episode.trough_date !== worst?.trough_date);
+  const topEpisodes = [...(data?.episodes ?? [])]
+    .sort((a, b) => a.depth_pct - b.depth_pct)
+    .slice(0, 10);
 
   /**
    * What every card here is measured from, and over what window — built once.
@@ -126,7 +126,10 @@ export default function DrawdownView({
 
       {data?.available && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-sm font-medium text-fg-subtle text-center">
+              What would have been the worst drawdown of {portfolioName} over the past five years?
+            </p>
             <Tile label={t.dd.maxDrawdown(data.frequency)} value={pct2(data.max_drawdown_pct)}
               tone="text-neg-300"
               info={<InfoTip className="ml-0.5" content={<AspectCard
@@ -134,9 +137,6 @@ export default function DrawdownView({
                 where={where}
                 when={when}
                 worked={data.max_drawdown_pct == null ? '' : withWorked(
-                  //  One statement per line, broken here rather than by the box. The formula
-                  // block honours `\n`; left as one line it wraps at whatever operator lands on
-                  // the 22rem edge, which is harder to read than no formula at all.
                   String.raw`W_t = \prod_s (1 + R_s)\qquad M_t = \max_{s \le t} W_s\qquad MDD = \min_t \left( \dfrac{W_t}{M_t} - 1 \right)`,
                   String.raw`\text{${day(worst?.peak_date)}} \;\rightarrow\; \text{${day(worst?.trough_date)}}`
                   + String.raw` \;=\; ${subNum(data.max_drawdown_pct, 2)}\%`)}
@@ -147,69 +147,13 @@ export default function DrawdownView({
                   { sym: String.raw`MDD`, is: LEGEND.MDD },
                 ]}
                 how={t.dd.cards.maxDrawdown.how}
-                /* Daily is the only available basis, so the card needs no alternate-cadence
-                   comparison to explain a number the reader cannot select. */
                 />} />} />
-            <Tile label={t.dd.benchMax(data.benchmark)}
-              value={pct2(data.benchmark_max_drawdown_pct)} tone="text-fg-muted"
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.dd.cards.benchMax.what}
-                where={where}
-                when={when}
-                how={t.dd.cards.benchMax.how} />} />} />
-            {/*  THE VALUE IS THE FILTERED COUNT, and it did not used to be. The label has
-                always promised "over 5%" while the tile showed `episodes_total`, which counts
-                every peak-to-recovery cycle including a bad afternoon that came back the next
-                session — 68 of them here against 6 real falls. A heading that names a
-                threshold the number does not apply is worse than no threshold. */}
-            <Tile label={t.dd.episodes(Math.abs(data.episode_threshold_pct ?? 5).toFixed(0))}
-              value={`${data.episodes_over_threshold ?? 0}`} tone="text-fg-muted"
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.dd.cards.episodes.what}
-                where={where}
-                when={when}
-                how={t.dd.cards.episodes.how} />} />} />
           </div>
 
-          <p className="text-[11px] text-fg-muted leading-relaxed">
-            {t.dd.provenance}
-          </p>
-
-          {worst && (
-            <div className="rounded-lg border border-neutral-800/40 px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-                {t.dd.worstInFull}
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 text-[11px]">
-                <div><span className="text-fg-faint">{t.dd.peak}</span>{' '}
-                  <span className="text-fg-soft">{day(worst.peak_date)}</span></div>
-                <div><span className="text-fg-faint">{t.dd.trough}</span>{' '}
-                  <span className="text-fg-soft">{day(worst.trough_date)}</span>
-                  <span className="text-fg-faint"> ({worst.decline_periods} {unit})</span></div>
-                <div><span className="text-fg-faint">{t.dd.recovered}</span>{' '}
-                  {worst.recovered
-                    ? (
-                      <>
-                        <span className="text-fg-soft">{day(worst.recovery_date)}</span>
-                        <span className="text-fg-faint"> ({worst.recovery_periods} {unit})</span>
-                      </>
-                    )
-                    /*  NOT A DASH. "Still underwater" is a fact about the book; a dash reads as
-                       a missing figure. */
-                    : <span className="text-warn-300">{t.dd.stillUnderwater}</span>}
-                </div>
-                <div><span className="text-fg-faint">{t.dd.peakToPeak}</span>{' '}
-                  <span className="text-fg-soft">
-                    {worst.total_periods == null ? '—' : `${worst.total_periods} ${unit}`}
-                  </span></div>
-              </div>
-            </div>
-          )}
-
-          {otherEpisodes.length > 0 && (
+          {topEpisodes.length > 0 && (
             <div>
               <div className="text-[10px] uppercase tracking-wider text-fg-faint mb-1">
-                {t.dd.deepest}
+                10 worst drawdowns
               </div>
               <table className="w-full text-[11px]">
                 <thead>
@@ -217,12 +161,12 @@ export default function DrawdownView({
                     <th className="text-left">{t.dd.peak}</th>
                     <th className="text-left">{t.dd.trough}</th>
                     <th className="text-right">{t.dd.colDepth}</th>
-                    <th className="text-right">{t.dd.colDecline}</th>
-                    <th className="text-right">{t.dd.colRecovery}</th>
+                    <th className="text-right">Fall (months)</th>
+                    <th className="text-right">Recovery (months)</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {otherEpisodes.map((e) => (
+                  {topEpisodes.map((e) => (
                     <tr key={`${e.peak_date}|${e.trough_date}`}
                       className="[&>td]:py-1 [&>td]:border-t [&>td]:border-neutral-800/20">
                       <td className="text-fg-soft">{day(e.peak_date)}</td>
@@ -245,9 +189,8 @@ export default function DrawdownView({
           )}
 
           <p className="text-[11px] text-fg-faint leading-relaxed">
-            {`Data window: ${data.window_from ?? 'unknown'} to ${data.window_to ?? 'unknown'} · `}
-            {`${data.priced_holdings} of ${data.total_holdings} holdings priced. `}
-            {t.dd.note(unit)}
+            {`Data window: ${data.window_from ?? 'unknown'} to ${data.window_to ?? 'unknown'}; `}
+            {`${data.priced_holdings} of ${data.total_holdings} holdings priced.`}
           </p>
         </>
       )}
