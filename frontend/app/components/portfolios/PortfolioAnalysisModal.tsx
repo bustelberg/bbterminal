@@ -2081,6 +2081,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
         bucket,
         slice: (slices ?? []).find((s) => s.bucket === bucket),
         rows,
+        // The heading describes the rows immediately below it.  The allocation slice always
+        // uses the looked-through book, while a folded certificate can hide a small cash leg
+        // inside its wrapper; using that slice here made one visible 0.85% cash row read 1.00%.
+        weightNowPct: rows.reduce((total, h) => total + (h.weight_now_pct ?? 0), 0),
         // The class's own return: the Return column below, weighted by what each position was
         // worth when the window OPENED. Never by the Weight (now) column — see `classReturn.ts`.
         //  Cash has no `Beginwaarde` to divide by, and its return is nonetheless known exactly:
@@ -2157,10 +2161,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
         + (sum(sold.map((p) => p.result_eur)) ?? 0)) / (heldCap + (soldCap ?? 0)) * 100
       : null,
   };
-  // Within a cent of a point. The measured case lands at exactly 0.0000pp; the tolerance is for
-  // float noise across ~60 additions, not for a missing leg.
-  const reconciled = grand.contribution != null && realised?.book_ytd_pct != null
-    && Math.abs(grand.contribution - realised.book_ytd_pct) < 0.01;
+  // The backend owns the reconciliation verdict because it knows whether the holdings snapshot
+  // and AIRS's return report cover the same date. A local numerical comparison here used to turn
+  // that explicitly unknown state into a warning about an unexplained position.
+  const reconciliationKnown = realised?.reconciles === true || realised?.reconciles === false;
+  const reconciled = realised?.reconciles === true;
 
   const cmp = (a: BookHolding, b: BookHolding) => {
     // The two text columns sort as text.  An unclassified row sorts LAST either way, like an
@@ -2484,11 +2489,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 <td />
                 <td />
                 <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
-                  {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
+                  {num2(g.weightNowPct)}%
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.classRow.weightWhat(copy.bucket(bucketLabel(g.bucket)))}
-                    note={g.slice ? copy.classRow.chartWeightNote : copy.classRow.rowsWeightNote}
-                    how={copy.classRow.weightHow(`${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%`)} />
+                    note={copy.classRow.rowsWeightNote}
+                    how={copy.classRow.weightHow(`${num2(g.weightNowPct)}%`)} />
                 </td>
                 {/* The class's own four euro columns, summed — so a reader can see which CLASS
                     made the money, not only which position. */}
@@ -3213,7 +3218,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.info.bookReturnWhat}
                     note={copy.info.bookReturnNote}
-                    how={copy.reconciliation.compareHow(ppt(grand.contribution), fmtRet(realised?.book_ytd_pct), reconciled)} />
+                    how={reconciliationKnown
+                      ? copy.reconciliation.compareHow(ppt(grand.contribution), fmtRet(realised?.book_ytd_pct), reconciled)
+                      : copy.reconciliation.compareUnavailable(
+                        ppt(grand.contribution), fmtRet(realised?.book_ytd_pct),
+                        realised?.holdings_as_of ?? 'an unknown date',
+                        realised?.book_as_of ?? 'an unknown date')} />
                 </td>
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>
                   {ppt(grand.contribution)}
@@ -3229,7 +3239,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
       </div>
       {/* Silence is success; only show this line when the position contributions genuinely fail
           to reconcile to AIRS. Both figures must exist before we can claim a mismatch. */}
-      {grand.contribution != null && realised?.book_ytd_pct != null && !reconciled && (
+      {grand.contribution != null && realised?.book_ytd_pct != null && realised?.reconciles === false && (
         <div className="px-4 py-2 border-t border-neutral-800/40 text-[11px]">
           <span className="text-warn-500">
             {copy.reconciliation.mismatch(ppt(grand.contribution), fmtRet(realised.book_ytd_pct),

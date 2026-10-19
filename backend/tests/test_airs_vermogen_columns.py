@@ -198,3 +198,27 @@ class TestTheIsinColumn:
         the Vermogensoverzicht says `ISIN-code`."""
         row = {k: v for k, v in _ROW.items() if k != "ISIN-code"} | {"ISINCode": "US0320951017"}
         assert parse_airs_excel(_xls([row]))[0].isin == "US0320951017"
+
+    def test_each_airs_position_survives_even_when_two_rows_share_an_isin(self):
+        """AIRS can report a security position and its accrued-interest position separately.
+
+        They may share an ISIN (as Bustelberg 2.0 Offensief's Rabobank certificate does),
+        and are separate rows in the Vermogensoverzicht.  Parsing by ISIN would silently lose
+        one, so a refresh must retain the sheet's rows verbatim for storage.
+        """
+        principal = dict(_ROW, **{
+            "Fondsomschrijving": "6,5% Rabobank Certificaten 14-perp.",
+            "ISIN-code": "XS1002121454",
+            "Huidige waarde  EUR": 19928.70,
+        })
+        accrued_interest = dict(_ROW, **{
+            # The section label is outside the row in AIRS's sheet, so the name repeats too.
+            "Fondsomschrijving": "6,5% Rabobank Certificaten 14-perp.",
+            "ISIN-code": "XS1002121454",
+            "Huidige waarde  EUR": 56.00,
+        })
+        rows = parse_airs_excel(_xls([principal, accrued_interest]))
+        assert [(row.holding_name, row.isin, row.current_value_eur) for row in rows] == [
+            ("6,5% Rabobank Certificaten 14-perp.", "XS1002121454", 19928.70),
+            ("6,5% Rabobank Certificaten 14-perp.", "XS1002121454", 56.00),
+        ]

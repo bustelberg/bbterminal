@@ -9,6 +9,9 @@ const en = {
     ytd: 'Year-to-date', since: 'Since-inception', startYear: 'Start of year', inception: 'At inception', hide: 'Hide',
     title: (window: string, _benchmark: string, portfolio?: string) =>
       `${portfolio ? `${portfolio} \u2014 ` : ''}${window} performance attribution`,
+    subtitle: (window: string) => window === 'Year-to-date'
+      ? 'Shows how today\u2019s portfolio would have performed from 1 January, compared with the benchmark over the same period.'
+      : 'Shows how today\u2019s portfolio would have performed from the start date, compared with the benchmark over the same period.',
     loading: 'Computing attribution', error: 'Attribution could not be computed.',
     residual: (value: string) => `The attribution does not reconcile. Difference: ${value}.`,
     drivers: 'Holdings behind the result',
@@ -113,6 +116,9 @@ const nl: AttributionCopy = {
     ytd: 'Sinds jaarbegin', since: 'Sinds ingangsdatum', startYear: 'Begin van het jaar', inception: 'Bij ingangsdatum', hide: 'Verbergen',
     title: (window, _benchmark, portfolio) =>
       `${portfolio ? `${portfolio} \u2014 ` : ''}${window}: rendementsattributie`,
+    subtitle: (window) => window === 'Sinds jaarbegin'
+      ? 'Toont hoe de portefeuille van vandaag vanaf 1 januari zou hebben gepresteerd, vergeleken met de benchmark over dezelfde periode.'
+      : 'Toont hoe de portefeuille van vandaag vanaf de startdatum zou hebben gepresteerd, vergeleken met de benchmark over dezelfde periode.',
     loading: 'Attributie berekenen', error: 'De attributie kon niet worden berekend.',
     residual: (value) => `De attributie sluit niet aan. Verschil: ${value}.`,
     drivers: 'Posities achter het resultaat',

@@ -603,6 +603,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           <h4 className="text-sm font-semibold text-fg-strong">
             {copy.chrome.title(label, benchmark, portfolioName || data?.name || undefined)}
           </h4>
+          <p className="mt-1 text-xs text-fg-subtle">{copy.chrome.subtitle(label)}</p>
           <div className="mt-4 flex justify-center py-2"><div className="inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800/40 text-xs" aria-label="Attribution period">
             {[{ label: 'YTD', value: 0 }, ...attributionMonths.map((month, index) => ({ label: month.label.split(' ')[0].slice(0, 3), value: index + 1 }))].map((period) => <button
               key={period.value} type="button" onClick={() => { setError(null); setOpenBucket(null); setMonthOffset(period.value); }}

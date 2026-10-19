@@ -824,7 +824,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    */
   const live = useRef<ReturnType<typeof createLiveReload> | null>(null);
 
-  const refreshAll = async (force = true) => {
+  // A normal press refreshes what is missing or stale. Forcing every report and every fixed model
+  // on each press turns a quick check into 48 account downloads plus ~61 model XLS downloads.
+  const refreshAll = async (force = false) => {
     if (refreshingAll) return;
     // See refreshOne: this run changes the source of every overview row.
     invalidateOverviewCache();
@@ -1054,15 +1056,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           </h3>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {isAdmin && (
-            <button type="button" onClick={() => setShowLinks(true)}
-              title="Configure which AIRS holding names are certificates for which AIRS model portfolios."
-              className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
-              Links
-            </button>
-          )}
-          {/* A manual refresh is a complete AIRS read, so a successful run makes every visible
-              account current rather than retaining a report from an earlier run. */}
+          {/* A normal press checks every visible account and re-reads only data that is missing or
+              stale. That keeps Refresh all quick while the daily scan maintains full coverage. */}
           <button type="button"
             onClick={() => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(); } }}
             // Inert only in the gap between the press and the job id arriving — see the row button.
@@ -1317,7 +1312,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           beside its own small badge is the hierarchy; scaling the badge with it
                           would be the same flat row one step louder. */}
                       <td className="px-3 py-1.5 text-[15px] text-fg whitespace-nowrap">
-                        <span className="text-fg-faint mr-1.5">{isOpen ? '▾' : '▸'}</span>
+                        <span className="text-fg-faint mr-1.5">{isOpen ? '\u25BE' : '\u25B8'}</span>
                         {/*  AIRS NAMES ONE PORTFOLIO THREE WAYS — our readable name, the Fixed
                             code and the Dynamic code — and printing all three ran them together
                             ("ToppenbergBeheer DefensiefTOPS_DEF_BEH_DYN · TOPS_DEF_BEH"), so the
@@ -1425,7 +1420,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           className={`${deletingRows.has(r.dynamic_portefeuille)
                             ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
                             } text-fg-faint hover:text-neg-400 px-1`}>
-                          {deletingRows.has(r.dynamic_portefeuille) ? '…' : '🗑'}
+                          {deletingRows.has(r.dynamic_portefeuille) ? '\u2026' : '\u{1F5D1}'}
                         </button>
                         )}
                       </td>
@@ -1540,7 +1535,7 @@ function SortTh({ label, k, sortKey, sortDir, onSort, align = 'left', title }: {
           + (active ? 'text-fg-soft' : '')}>
         {label}
         <span className={'text-[10px] ' + (active ? 'text-accent-400' : 'text-fg-faint/40')}>
-          {active ? (sortDir === 'asc' ? '▲' : '▼') : '▾'}
+          {active ? (sortDir === 'asc' ? '\u25B2' : '\u25BC') : '\u25BE'}
         </span>
       </button>
     </th>
@@ -1875,7 +1870,6 @@ function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
       .then((overview) => {
         if (!live) return;
         setData(overview);
-        setSelectedId(overview.models[0]?.id ?? null);
       })
       .catch((e) => { if (live) setError(e instanceof Error ? e.message : String(e)); });
     return () => { live = false; };
@@ -1894,12 +1888,12 @@ function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
 
   const visibleModels = (data?.models ?? []).filter((model) => {
     const needle = filter.trim().toLocaleLowerCase();
-    return !needle || `${model.airs_name} ${model.display_name ?? ''}`.toLocaleLowerCase().includes(needle);
-  });
+    return needle.length >= 2 && `${model.airs_name} ${model.display_name ?? ''}`.toLocaleLowerCase().includes(needle);
+  }).slice(0, 20);
   const aliases = (data?.holdings ?? []).filter((holding) => {
     const needle = aliasFilter.trim().toLocaleLowerCase();
-    return !needle || `${holding.fonds} ${holding.isin ?? ''}`.toLocaleLowerCase().includes(needle);
-  }).slice(0, 100);
+    return needle.length >= 2 && `${holding.fonds} ${holding.isin ?? ''}`.toLocaleLowerCase().includes(needle);
+  }).slice(0, 20);
   const chosenAlias = aliasKey ? (data?.holdings ?? []).find((holding) =>
     JSON.stringify([holding.isin ?? '', holding.fonds]) === aliasKey) : undefined;
 
@@ -1943,11 +1937,11 @@ function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Portfolio links">
-      <div className="flex max-h-[85vh] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-card shadow-2xl">
+      <div className="flex max-h-[85vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-neutral-700 bg-card shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-neutral-800/70 px-5 py-4">
           <div>
-            <h2 className="text-[16px] font-semibold text-fg-strong">Links</h2>
-            <p className="mt-0.5 text-[12px] text-fg-faint">Connect the certificate name used as a holding to the AIRS strategy it represents.</p>
+            <h2 className="text-[16px] font-semibold text-fg-strong">Link a certificate</h2>
+            <p className="mt-0.5 text-[12px] text-fg-faint">Choose the AIRS strategy, then the certificate name used for it in another portfolio.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md px-2 py-1 text-[13px] text-fg-subtle hover:bg-overlay/10 hover:text-fg">Close</button>
         </div>
@@ -1955,9 +1949,10 @@ function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
         {!data ? <p className="p-5 text-[13px] text-fg-subtle">Loading AIRS portfolio names…</p> : (
           <div className="grid min-h-0 flex-1 grid-cols-[minmax(17rem,0.9fr)_minmax(0,1.4fr)]">
             <div className="min-h-0 border-r border-neutral-800/70 p-3">
-              <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Find AIRS name or nickname"
+              <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search a strategy"
                 className="mb-2 w-full rounded-md border border-neutral-800/70 bg-page px-2 py-1.5 text-[13px] text-fg focus:border-accent-500" />
               <div className="max-h-[57vh] space-y-1 overflow-y-auto pr-1">
+                {filter.trim().length < 2 && <p className="px-2 py-3 text-[12px] text-fg-faint">Type at least two letters to find a strategy.</p>}
                 {visibleModels.map((model) => {
                   const linked = data.holdings.find((holding) => holding.linked_portfolio_id === model.id);
                   return <button key={model.id} type="button" onClick={() => setSelectedId(model.id)}
@@ -1968,7 +1963,7 @@ function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
                 })}
               </div>
             </div>
-            {selected && <div className="min-h-0 overflow-y-auto p-5 space-y-5">
+            {!selected ? <div className="flex items-center p-5 text-[13px] text-fg-subtle">Search for and select a strategy to create or change its certificate link.</div> : <div className="min-h-0 overflow-y-auto p-5 space-y-5">
               <div>
                 <div className="text-[11px] uppercase tracking-wide text-fg-faint">AIRS portfolio name</div>
                 <div className="mt-1 text-[15px] font-semibold text-fg-strong">{selected.airs_name}</div>
@@ -1983,22 +1978,21 @@ function PortfolioLinksModal({ onClose }: { onClose: () => void }) {
                   className="rounded-md border border-neutral-700 px-2.5 py-1.5 text-[13px] text-fg-subtle hover:text-accent-300 disabled:opacity-50">{busy === 'name' ? 'Saving…' : 'Save nickname'}</button>
               </div>
               <div className="border-t border-neutral-800/70 pt-4">
-                <label className="grid gap-1 text-[12px] text-fg-subtle">Holding name used in other AIRS portfolios
+                <label className="grid gap-1 text-[12px] text-fg-subtle">Certificate name in AIRS
                   <input value={aliasFilter} onChange={(e) => { setAliasFilter(e.target.value); setAliasKey(''); }} placeholder="Search e.g. Star Selection Index"
                     className="rounded-md border border-neutral-800/70 bg-page px-2 py-1.5 text-[13px] text-fg focus:border-accent-500" />
                 </label>
-                <select value={aliasKey} onChange={(e) => setAliasKey(e.target.value)} size={Math.min(Math.max(aliases.length, 3), 8)}
+                {aliasFilter.trim().length < 2 ? <p className="mt-2 text-[12px] text-fg-faint">Type at least two letters to see matching holdings.</p> : <select value={aliasKey} onChange={(e) => setAliasKey(e.target.value)} size={Math.min(Math.max(aliases.length, 3), 8)}
                   className="mt-2 w-full rounded-md border border-neutral-800/70 bg-page px-2 py-1.5 text-[13px] text-fg focus:border-accent-500">
                   {!aliases.length && <option value="">No AIRS holding matches this search</option>}
                   {aliases.map((holding) => <option key={JSON.stringify([holding.isin ?? '', holding.fonds])} value={JSON.stringify([holding.isin ?? '', holding.fonds])}>
                     {holding.fonds}{holding.isin ? ` · ${holding.isin}` : ''}{holding.linked_portfolio_id != null && holding.linked_portfolio_id !== selected.id ? ' · linked elsewhere' : ''}
                   </option>)}
-                </select>
+                </select>}
                 <button type="button" onClick={() => void saveLink()} disabled={busy != null || !chosenAlias}
                   className="mt-3 rounded-md border border-accent-600/40 bg-accent-500/10 px-3 py-1.5 text-[13px] text-accent-300 hover:bg-accent-500/20 disabled:opacity-50">
                   {busy === 'link' ? 'Saving…' : 'Save link'}
                 </button>
-                <p className="mt-2 text-[11px] text-fg-faint">Example: select “Star Selection Index” for AIRS model “StarTopSelectie OFF DYN”.</p>
               </div>
               {notice && <p className="rounded-md border border-pos-500/25 bg-pos-500/10 px-3 py-2 text-[12px] text-pos-300">{notice}</p>}
             </div>}

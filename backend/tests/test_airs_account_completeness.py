@@ -22,6 +22,8 @@ healthiest books).
 """
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
 from airs_vermogen import REPORTS
@@ -217,6 +219,21 @@ class TestRetrievedIsNotTheSameAsNonEmpty:
         assert res["errors"][0]["report"] == "Vermogensoverzicht"
         assert res["errors"][0]["account"] == "BUS_X"
         assert "no valued" in res["errors"][0]["message"]
+
+
+class TestCompletedRendementDate:
+    def test_monday_refresh_uses_the_preceding_friday(self):
+        """AIRS recalculates an unvalued Monday's time-weighted return instead of returning
+        Friday's completed result. Bustelberg 2.0 Offensief was -1.84% from that request versus
+        -2.76% in AIRS's actual 16 October report."""
+        import airs_vermogen as V
+
+        assert V.latest_completed_market_date(date(2026, 10, 19)) == "2026-10-16"
+
+    def test_weekday_refresh_uses_the_previous_business_day(self):
+        import airs_vermogen as V
+
+        assert V.latest_completed_market_date(date(2026, 10, 21)) == "2026-10-20"
 
 
 class TestOneImplementation:

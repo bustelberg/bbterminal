@@ -77,10 +77,17 @@ async def etf_sector_allocation(isin: str) -> EtfSectorAllocationResponse:
         ) from exc
 
 
-def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
+def _save_performance_to_db(portfolio_name: str, rows: list[dict], *,
+                            prune_after: str | None = None):
     """Upsert performance rows into the airs_performance table."""
     if not rows:
         return
+    # A prior request through an unvalued future date can leave a later, synthetic AIRS row in
+    # this month's cache. Remove it when a completed report replaces the live tail; otherwise
+    # `_year_perf` would correctly select the latest stored row and still show that bad value.
+    if prune_after:
+        (supabase.table("airs_performance").delete()
+         .eq("portefeuille", portfolio_name).gt("periode", prune_after).execute())
     for r in rows:
         supabase.table("airs_performance").upsert({
             "portefeuille": portfolio_name,
@@ -3497,10 +3504,16 @@ async def airs_portfolio_download(
 ):
     """Return performance data. Serves from DB cache unless refresh=true or no cache."""
     today = dt_date.today()
+    live_end_requested = datum_tot is None
     if not datum_van:
         datum_van = f"{today.year}-01-01"
     if not datum_tot:
         datum_tot = today.isoformat()
+
+    # AIRS will generate a misleading time-weighted Rendement row when asked through an unvalued
+    # future date. The scheduled importer uses the same completed-market-day cap.
+    from airs_vermogen import latest_completed_market_date  # noqa: PLC0415
+    datum_tot = min(datum_tot, latest_completed_market_date())
 
     # Check what we already have in DB.
     db_rows: list[dict] = []
@@ -3537,7 +3550,8 @@ async def airs_portfolio_download(
             raise HTTPException(status_code=500, detail=f"Download failed: {e}")
 
         try:
-            await asyncio.to_thread(_save_performance_to_db, portfolio_name, fresh_rows)
+            await asyncio.to_thread(_save_performance_to_db, portfolio_name, fresh_rows,
+                                    prune_after=datum_tot if live_end_requested else None)
         except Exception:
             pass
 

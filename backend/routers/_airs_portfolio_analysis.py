@@ -1628,10 +1628,11 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
-    # Some AIRS accounts have no asset_grid rows at all.  AITopSelectie OFF DYN is one: its
-    # twenty equity ISINs are valid and present in the paired model, but the grid lookup returns
-    # nothing, so the account resolver quite reasonably labels them Unclassified.  The paired
-    # model's category is the authoritative fallback for the book view in that case.
+    # The paired model supplies AIRS's intended asset class for its own positions.  The grid is
+    # still authoritative for sector, region and currency, but it can carry a broad wrapper
+    # class (Mint Tower is an ``equity`` fund there while AIRS explicitly marks it ``ALTBEL``).
+    # Use the model class wherever it is known so the book allocation says what AIRS says it
+    # holds; fall back to the resolver/grid only for instruments outside that model.
     model_categories = {
         p.get("isin"): _class_from_categorie(p.get("categorie"))
         for p in ref_positions_for(link["model_portfolio_id"])
@@ -1714,9 +1715,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         # `resolve_account_isins` normally supplies this, but older/cached rows and test/import
         # callers may only carry the raw instrument fields. Never let a missing persisted bucket
         # turn a plainly identifiable stock into Unclassified in the allocation bar.
-        bucket = r.get("bucket")
-        if bucket == UNKNOWN_BUCKET:
-            bucket = model_categories.get(isin) or bucket
+        bucket = model_categories.get(isin) or r.get("bucket")
         if not bucket:
             bucket = classify_bucket(None, _is_fund(grow, r.get("holding_name") or ""),
                                     isin, r.get("holding_name") or "", grow)

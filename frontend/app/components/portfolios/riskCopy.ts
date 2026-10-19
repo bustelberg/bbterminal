@@ -283,7 +283,7 @@ const en: RiskCopy = {
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlation',
     vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration' },
   basis: { label: 'AIRS weights', now: 'Current', start: 'Start of year' },
-  subtitle: (portfolio, asOf) => `Individual stocks at their actual weight in AIRS for ${portfolio}`
+  subtitle: (portfolio, asOf) => `Shows how the individual stock weights in ${portfolio} differ from the benchmark, using AIRS weights`
     + `${riskLongDate(asOf) ? ` as of ${riskLongDate(asOf)}` : ''}.`,
   close: 'close',
 
@@ -616,8 +616,8 @@ const nl: RiskCopy = {
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
     vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
   basis: { label: 'AIRS-wegingen', now: 'Actueel', start: 'Begin van het jaar' },
-  subtitle: (portfolio, asOf) => `Individuele aandelen tegen hun werkelijke gewicht in AIRS voor `
-    + `${portfolio}${riskLongDate(asOf) ? ` per ${riskLongDate(asOf)}` : ''}.`,
+  subtitle: (portfolio, asOf) => `Toont hoe de wegingen van individuele aandelen in ${portfolio} afwijken van de benchmark, met AIRS-wegingen`
+    + `${riskLongDate(asOf) ? ` per ${riskLongDate(asOf)}` : ''}.`,
   close: 'sluiten',
 
   common: {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { friendlyJobMessage, unavailableNotice } from './JobToaster';
+import { bundlePortfolioRefreshJobs, friendlyJobMessage, unavailableNotice } from './JobToaster';
 import { isAirsBusy } from '../../../lib/stores/jobs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -58,5 +58,29 @@ describe('friendlyJobMessage', () => {
   it('uses Dutch cancellation copy when Dutch is selected', () => {
     expect(friendlyJobMessage('cancelled before Bustelberg Offensief \u2014 nothing was read', 'nl'))
       .toBe('Geannuleerd vóór Bustelberg Offensief. Er zijn geen wijzigingen gemaakt.');
+  });
+});
+
+describe('friendly AIRS progress', () => {
+  it('turns a technical report receipt into a plain progress update', () => {
+    expect(friendlyJobMessage('Rendement: ok. stored (0.3s)', 'en'))
+      .toBe('The returns have been updated.');
+    expect(friendlyJobMessage('Vermogensoverzicht: ok. 31 holdings as of 2026-10-16 (1.2s)', 'nl'))
+      .toBe('De portefeuilleposities zijn bijgewerkt.');
+  });
+});
+
+describe('portfolio refresh toast bundle', () => {
+  it('keeps the model stage as the single continuation card', () => {
+    const jobs = [
+      { id: 'accounts', kind: 'airs.vermogen.refresh' },
+      { id: 'models', kind: 'airs.models.scan' },
+    ] as never[];
+    expect(bundlePortfolioRefreshJobs(jobs).map((job) => job.id)).toEqual(['models']);
+  });
+
+  it('keeps an account-only refresh visible', () => {
+    const jobs = [{ id: 'accounts', kind: 'airs.vermogen.refresh' }] as never[];
+    expect(bundlePortfolioRefreshJobs(jobs).map((job) => job.id)).toEqual(['accounts']);
   });
 });

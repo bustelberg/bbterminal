@@ -28,6 +28,21 @@ _log = logging.getLogger(__name__)
 _LOCK = threading.Lock()
 
 
+def latest_completed_market_date(today: date | None = None) -> str:
+    """The latest weekday whose AIRS end-of-day return can be requested safely.
+
+    AIRS accepts a future/unvalued date for the Rendement report, but then recalculates a
+    time-weighted return over that request window. For Bustelberg 2.0 Offensief, asking on
+    Monday 19 October produced -1.84%, while AIRS's completed Friday 16 October report was
+    -2.76%. The daily scan runs before the valuation batch, so it must ask for the last completed
+    market day rather than calendar ``today``.
+    """
+    day = (today or date.today()) - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
 def _progress_name(airs_name: str) -> str:
     """Friendly strategy name plus the exact AIRS code for progress messages."""
     from routers._airs_strategy_map import nickname_for  # noqa: PLC0415
@@ -865,6 +880,9 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
     errors: list[dict] = []
     holdings = mutaties = transacties = model_weights = 0
     as_of = tot
+    # Never let an on-demand historical range move forward, but cap a live refresh at the last
+    # completed market day. AIRS otherwise answers an unvalued date with a different return.
+    att_tot = min(tot, latest_completed_market_date())
 
     from airs_scanner import AirsNoData  # noqa: PLC0415
 
@@ -919,7 +937,9 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
             _log.warning("[airs_vermogen] %s %s failed: %s: %s", name, label, type(e).__name__, e)
 
     def _att() -> None:
-        _save_performance_to_db(name, _parse_att_excel(download_portfolio_sync(name, van, tot)))
+        _save_performance_to_db(
+            name, _parse_att_excel(download_portfolio_sync(name, van, att_tot)),
+            prune_after=att_tot)
 
     def _volk() -> None:
         nonlocal holdings, as_of
