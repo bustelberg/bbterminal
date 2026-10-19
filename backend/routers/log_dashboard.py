@@ -61,8 +61,12 @@ async def create_entry(body: LogEntryIn):
 async def update_entry(entry_id: int, body: LogEntryIn):
     """Update a recorded decision without changing its original meeting date."""
     def update() -> dict:
+        # A missing optional field must never erase a value saved by a previous version of the
+        # client. `exclude_unset` still preserves an explicit `null`, so a user who clears the
+        # weight in the edit form can deliberately remove it.
+        payload = body.model_dump(mode="json", exclude_unset=True)
         try:
-            result = (supabase.table("bc_log_entry").update(body.model_dump(mode="json"))
+            result = (supabase.table("bc_log_entry").update(payload)
                       .eq("id", entry_id).execute().data or [])
         except Exception as exc:
             raise HTTPException(500, f"Could not update log entry: {exc}") from exc
@@ -114,6 +118,14 @@ async def refresh_entry_price(entry_id: int):
 
 def _yahoo_return_since(isin: str, start: date) -> dict:
     """Calculate a return from the review-date close through the latest stored close."""
+    if start > date.today():
+        return {
+            "available": False,
+            "message": (
+                f"The review date {start.isoformat()} is in the future; "
+                "a Yahoo return cannot be calculated yet."
+            ),
+        }
     execution = (supabase.table("asset_execution").select("analysis_id")
                  .eq("isin", isin.strip().upper()).limit(1).execute().data or [])
     if not execution or not execution[0].get("analysis_id"):
@@ -207,7 +219,11 @@ def _refresh_logbook_job(ctx) -> str:
                 else:
                     skipped += 1
                     outcome = f"return unavailable - {result.get('message', 'no prices available')}"
-            ctx.progress(index + 1, total, f"{prefix}: {outcome}")
+            # A name is not a stable UI key (two decisions may name the same company), while the
+            # log-entry id identifies exactly which visible Yahoo-return cell can now repaint.
+            # It rides only on this completed-entry event; the intermediate fetch lines remain
+            # narration for the job receipt.
+            ctx.progress(index + 1, total, f"{prefix}: {outcome}", entry_id=int(entry["id"]))
         except Exception as exc:
             from jobs import JobCancelled  # noqa: PLC0415
             if isinstance(exc, JobCancelled):

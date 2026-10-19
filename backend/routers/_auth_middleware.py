@@ -175,6 +175,7 @@ _USER_ACTUAL_FILLS = re.compile(r"^/api/scheduled-strategies/\d+/actual-fills$")
 # FastAPI route exactly, so neither a neighbouring mutation nor a future child route inherits it.
 _COMPANY_SECTOR_OVERRIDE = re.compile(r"^/api/companies/\d+/sector-override$")
 _COMPANY_INVESTMENT_NOTE = re.compile(r"^/api/companies/\d+/investment-note$")
+_COMPANY_EGM_ASSUMPTION = re.compile(r"^/api/earnings/companies/\d+/egm-assumption$")
 
 
 def _is_company_sector_override(path: str) -> bool:
@@ -183,6 +184,10 @@ def _is_company_sector_override(path: str) -> bool:
 
 def _is_company_investment_note(path: str) -> bool:
     return _COMPANY_INVESTMENT_NOTE.match(path) is not None
+
+
+def _is_company_egm_assumption(path: str) -> bool:
+    return _COMPANY_EGM_ASSUMPTION.match(path) is not None
 
 #  Reads that arrive as post. This gate splits on HTTP method, so a compute-and-return endpoint
 # whose input is a LIST OF ISINS — too long for a URL — lands in the write tier and 403s for a user
@@ -260,6 +265,7 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     # Overview → "Refresh all from AIRS", both halves (accounts, then model portfolios).
     "/api/airs/vermogen/refresh/job",
     "/api/airs/model-portfolios/scan/job",
+    "/api/airs/model-portfolios/refresh/job",
     # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).
     "/api/airs/basket/fundamentals/ingest/job",
     # The Analyse modal's input tables → fetch ONE `no_data` holding's financials.
@@ -513,6 +519,7 @@ async def enforce_api_auth(
             or _USER_ACTUAL_FILLS.match(path) is not None
             or (request.method == "PUT" and _is_company_sector_override(path))
             or (request.method == "PUT" and _is_company_investment_note(path))
+            or (request.method == "PUT" and _is_company_egm_assumption(path))
             or _is_earnings_refresh(path)
             or _is_latest_close_refresh(path)
             or (request.method == "POST" and _is_user_refresh(path))

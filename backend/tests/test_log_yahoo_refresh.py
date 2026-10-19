@@ -53,6 +53,22 @@ def test_return_reader_stays_a_read_of_the_persisted_series(monkeypatch):
     assert result["as_of"] == "2026-10-09"
 
 
+def test_return_reader_explains_a_future_review_date(monkeypatch):
+    monkeypatch.setattr(log, "supabase", _fake_db())
+    class FrozenDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 10, 19)
+    monkeypatch.setattr(log, "date", FrozenDate)
+
+    result = log._yahoo_return_since("US0000000001", date(2027, 10, 16))
+
+    assert result == {
+        "available": False,
+        "message": "The review date 2027-10-16 is in the future; a Yahoo return cannot be calculated yet.",
+    }
+
+
 def test_decision_can_be_saved_without_an_isin():
     values = {"company_name": "Private company", "decision": "Watch", "conviction": 3}
     assert log.LogEntryIn(**values).isin == ""
@@ -77,6 +93,25 @@ def test_create_and_edit_preserve_every_decision_field(monkeypatch):
     assert updated["meeting_date"] == "2026-10-19"
     loaded = asyncio.run(log.get_entries())
     assert {key: loaded[0][key] for key in changed} == changed
+
+
+def test_create_persists_zero_weight_and_partial_edit_cannot_erase_a_weight(monkeypatch):
+    db = FakeSupabase({"bc_log_entry": [{
+        "id": 9, "company_name": "Existing", "isin": "US0000000001", "decision": "Hold",
+        "notes": "", "conviction": 3, "portfolio_weight": 4.5, "review_on": None,
+    }]})
+    monkeypatch.setattr(log, "supabase", db)
+
+    created = asyncio.run(log.create_entry(log.LogEntryIn(
+        company_name="Zero weight", isin="US0000000002", decision="Watch", conviction=3,
+        portfolio_weight=0,
+    )))
+    assert created["portfolio_weight"] == 0
+
+    # Simulate a legacy client that does not know about the optional weight field.
+    body = log.LogEntryIn(company_name="Renamed", isin="US0000000001", decision="Hold", conviction=3)
+    updated = asyncio.run(log.update_entry(9, body))
+    assert updated["portfolio_weight"] == 4.5
 
 
 def test_logbook_rows_include_the_yahoo_symbol_for_links(monkeypatch):

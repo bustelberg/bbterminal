@@ -22,14 +22,14 @@ from collections import Counter, defaultdict
 #  ALIASED. Three loops in this file already bind a variable called `date` (they iterate
 # `{date: value}` maps), and importing the type under that name shadows it inside them — the same
 # word meaning two things a few lines apart is how the wrong one gets called.
-from datetime import date as _date, timedelta
+from datetime import date as _date, datetime, timedelta, timezone
 from routers._blend_cache import cached_blend, cached_coverage, cached_metric_reads
 from routers._earnings_pg import rows_by_company_via_copy
 from routers._sse import sse_message as event
 import queue as _queue
 
-from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Query, Request, Response
+from pydantic import BaseModel, Field
 from fastapi.responses import StreamingResponse
 
 from deps import IN_CHUNK_SIZE, supabase
@@ -616,6 +616,51 @@ class PortfolioCompanyMetricsResponse(BaseModel):
 
     coverage: dict
     rows: list[PortfolioCompanyMetricsRow]
+
+
+class EgmAssumptionIn(BaseModel):
+    """The two analyst-entered inputs for the Expected Growth Model."""
+
+    eps_growth: float | None = Field(default=None, gt=-1)
+    exit_pe: float | None = Field(default=None, gt=0)
+
+
+@router.get("/api/earnings/egm-assumptions")
+async def get_egm_assumptions(company_id: list[int] = Query(default=[])):
+    """Return saved EGM assumptions for the companies visible in the modal."""
+    ids = sorted({value for value in company_id if value > 0})
+    if len(ids) > 500:
+        raise HTTPException(status_code=422, detail="At most 500 company ids may be requested")
+    if not ids:
+        return {"rows": []}
+
+    def _read() -> list[dict]:
+        return (supabase.table("company_egm_assumption")
+                .select("company_id,eps_growth,exit_pe,updated_at")
+                .in_("company_id", ids).execute().data or [])
+
+    return {"rows": await asyncio.to_thread(_read)}
+
+
+@router.put("/api/earnings/companies/{company_id}/egm-assumption")
+async def save_egm_assumption(company_id: int, body: EgmAssumptionIn):
+    """Persist the EGM assumptions shared by every Fundamental view of a company."""
+    def _save() -> dict:
+        _get_company_or_404(company_id)
+        if body.eps_growth is None and body.exit_pe is None:
+            supabase.table("company_egm_assumption").delete().eq("company_id", company_id).execute()
+            return {"company_id": company_id, "eps_growth": None, "exit_pe": None, "cleared": True}
+        payload = {
+            "company_id": company_id,
+            "eps_growth": body.eps_growth,
+            "exit_pe": body.exit_pe,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        rows = (supabase.table("company_egm_assumption")
+                .upsert(payload, on_conflict="company_id").execute().data or [])
+        return rows[0] if rows else payload
+
+    return await asyncio.to_thread(_save)
 
 
 def _fundamental_company_rows(coverage: dict) -> list[dict]:

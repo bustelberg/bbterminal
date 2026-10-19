@@ -520,29 +520,47 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     // reports always describe the same run.
     const needsModel = (rows ?? []).some((r) =>
       r.fixed_portfolio_id == null && (r.holdings ?? 0) >= MIN_REAL_HOLDINGS);
-    if (!needsModel && !force) {
-      console.warn('[AIRS models] skipped — every substantial account is paired');
-      return;
+    if (needsModel || force) {
+      setScanningModels(true);
+      console.warn('[AIRS models] scanning Stamgegevens → Model portefeuilles (minutes)…');
+      try {
+        const { id, done } = await startJob(
+          `${API_URL}/api/airs/model-portfolios/scan/job?force=${force ? 'true' : 'false'}`,
+          t.overview.scanningModels);
+        setModelsJob(id);
+        const job = await done;
+        //  `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
+        // outcome; this is the copy you can scroll back to after the card has dismissed itself.
+        if (job.status === 'failed') logDetail('model scan failed', job.summary);
+        else console.warn(`[AIRS models] ${job.status} — ${job.summary ?? ''}`);
+        // `Refresh all` must honour Cancel across its phases. Starting the valuation pass after a
+        // cancelled composition scan would turn a working Cancel into more minutes of work.
+        if (job.status !== 'done') return;
+      } catch (e) {
+        // A scan failure is reported separately: the account refresh has already stored its work.
+        console.warn('[AIRS models] scan failed — the accounts are unaffected', e);
+      } finally {
+        setScanningModels(false);
+        setModelsJob(null);
+      }
+    } else {
+      console.warn('[AIRS models] all substantial accounts are already paired');
     }
+
+    // Scanning discovers/repairs model compositions; it does NOT calculate their current return.
+    // The row Refresh does this through `refresh_portfolio_fully`. Run the shared batch equivalent
+    // even when no scan was necessary so Refresh all has the same result as refreshing every row.
     setScanningModels(true);
-    console.warn('[AIRS models] scanning Stamgegevens → Model portefeuilles (minutes)…');
     try {
       const { id, done } = await startJob(
-        `${API_URL}/api/airs/model-portfolios/scan/job?force=${force ? 'true' : 'false'}`,
-        t.overview.scanningModels);
+        `${API_URL}/api/airs/model-portfolios/refresh/job`,
+        'Refreshing paired model portfolios');
       setModelsJob(id);
       const job = await done;
-      //  `failed` GETS THE CONSOLE, THE OTHER TWO GET A LINE. The toast already carries the
-      // outcome; this is the copy you can scroll back to after the card has dismissed itself.
-      if (job.status === 'failed') logDetail('model scan failed', job.summary);
-      else console.warn(`[AIRS models] ${job.status} — ${job.summary ?? ''}`);
+      if (job.status === 'failed') logDetail('model portfolio refresh failed', job.summary);
+      else console.warn(`[AIRS models] valuation refresh ${job.status} — ${job.summary ?? ''}`);
     } catch (e) {
-      //  Reported, never raised into the account scan's result. A failure in a scan of DIFFERENT
-      // objects must not appear in the account refresh's error summary, or a portfolio refresh
-      // reports a fault in something it was never asked to fetch. One button, two subjects, two
-      // verdicts. (The case that taught this was the CRM export, folded into the account scrape
-      // until 2026-07; the feature is gone and the rule is not.)
-      console.warn('[AIRS models] scan failed — the accounts are unaffected', e);
+      console.warn('[AIRS models] valuation refresh failed — the accounts are unaffected', e);
     } finally {
       setScanningModels(false);
       setModelsJob(null);
@@ -1066,7 +1084,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               ? (modelsJob
                 ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
                 : 'Stop the scan. The account being read finishes first (seconds), then it stops — everything already downloaded is kept.')
-              : 'Reads every current AIRS account: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book, followed by every model portfolio. This can take several minutes.'}
+              : 'Reads every current AIRS account: Rapportage → Front-Office (Actieve · Interne · zonder consolidatie), then Rendement, Vermogensoverzicht, Mutaties and Model for each book. It also refreshes and recalculates every paired model portfolio, just like the row-level Refresh. This can take several minutes.'}
             className={`inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border transition-colors disabled:opacity-50 disabled:cursor-wait ${
               allJob
                 ? 'border-warn-500/50 text-warn-400 hover:bg-warn-500/10'

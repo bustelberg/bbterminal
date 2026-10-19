@@ -400,6 +400,41 @@ async def airs_model_portfolios_scan_job(force: bool = False):
     return {"job_id": job.id, "label": "Scan model portfolios", "already_running": reused}
 
 
+@router.post("/api/airs/model-portfolios/refresh/job")
+async def airs_model_portfolios_refresh_job():
+    """Rebuild the valuation of every paired model portfolio as one cancellable job.
+
+    ``/scan/job`` deliberately only discovers models and repairs compositions that are absent.
+    That is enough to make a newly discovered account linkable, but it does not run the model
+    valuation pipeline (composition -> instruments -> FX -> prices -> recompute).  The overview's
+    per-row Refresh *does* run that pipeline through ``refresh_portfolio_fully``.  Consequently a
+    fleet refresh could say it had completed while a row still showed an old model return until
+    its individual Refresh was pressed.
+
+    Keep the work in ``scheduler._body_airs_model_prices``: the scheduled AIRS refresh already
+    uses that exact batch helper, which in turn calls ``refresh_many`` and therefore the same
+    model half as the per-row action.  This route only gives that shared operation a user-visible,
+    cancellable job handle.
+    """
+    import jobs as job_registry  # noqa: PLC0415
+    from jobs import JobCancelled  # noqa: PLC0415
+    from scheduler import _body_airs_model_prices  # noqa: PLC0415
+
+    def _work(ctx) -> str:
+        message, _summary = _body_airs_model_prices(ctx)
+        # The shared batch function keeps every completed portfolio and stops at the next safe
+        # portfolio boundary.  A returned string would mark the job `done`, causing the button to
+        # claim the fleet was fully refreshed after a Cancel.
+        if ctx.cancelled:
+            raise JobCancelled(f"Cancelled — {message}")
+        return message
+
+    job, reused = job_registry.start(
+        "airs.models.refresh", "Refresh paired model portfolios", _work)
+    return {"job_id": job.id, "label": "Refresh paired model portfolios",
+            "already_running": reused}
+
+
 class StoredModelPortfolio(BaseModel):
     """A stored portfolio row. `holdings` is derived by the view from the positions, so it
     cannot drift from them — and it keeps three absences apart that are NOT the same thing:
