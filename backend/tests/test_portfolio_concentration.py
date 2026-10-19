@@ -40,7 +40,7 @@ class TestTheEffectiveCount:
     @pytest.mark.parametrize("n", [4, 10, 25])
     def test_n_equal_weights_gives_exactly_n(self, wire, n):
         wire([(f"Co{i}", 100.0) for i in range(n)], {f"I{i}": f"Co{i}" for i in range(n)})
-        got = K.compute_concentration([_h(f"Co{i}", f"I{i}", 100.0 / n) for i in range(n)], "ACWI")
+        got = K.compute_concentration([_h(f"Co{i}", f"I{i}", 100.0 / n) for i in range(n)], "SP500")
         assert got["effective_positions"] == pytest.approx(n, abs=1e-9)
         #  FRACTIONS. On percentages this would be 10,000/n and N_eff would read 0.0001.
         assert got["hhi"] == pytest.approx(1.0 / n, abs=1e-12)
@@ -51,14 +51,14 @@ class TestTheEffectiveCount:
         wire([(f"Co{i}", 100.0) for i in range(n)], {f"I{i}": f"Co{i}" for i in range(n)})
         ws = [10.0] * 5 + [50.0 / 35] * 35
         got = K.compute_concentration(
-            [_h(f"Co{i}", f"I{i}", w) for i, w in enumerate(ws)], "ACWI")
+            [_h(f"Co{i}", f"I{i}", w) for i, w in enumerate(ws)], "SP500")
         assert got["issuers"] == 40
         assert got["effective_positions"] < 20
         assert got["top5_pct"] == pytest.approx(50.0, abs=1e-9)
 
     def test_a_single_name_is_one(self, wire):
         wire([("Solo", 100.0)], {"I0": "Solo"})
-        got = K.compute_concentration([_h("Solo", "I0", 100.0)], "ACWI")
+        got = K.compute_concentration([_h("Solo", "I0", 100.0)], "SP500")
         assert got["hhi"] == pytest.approx(1.0, abs=1e-12)
         assert got["effective_positions"] == pytest.approx(1.0, abs=1e-12)
         #  C₂₀ OF A ONE-NAME BOOK IS 100%, not an error and not "C₁". Capping the label to the
@@ -68,7 +68,7 @@ class TestTheEffectiveCount:
     def test_the_cuts_are_monotonic(self, wire):
         wire([(f"Co{i}", 100.0) for i in range(30)], {f"I{i}": f"Co{i}" for i in range(30)})
         got = K.compute_concentration(
-            [_h(f"Co{i}", f"I{i}", 30.0 - i) for i in range(30)], "ACWI")
+            [_h(f"Co{i}", f"I{i}", 30.0 - i) for i in range(30)], "SP500")
         cuts = [got["top1_pct"], got["top3_pct"], got["top5_pct"],
                 got["top10_pct"], got["top20_pct"]]
         assert cuts == sorted(cuts)
@@ -84,7 +84,7 @@ class TestIssuersNotLines:
         got = K.compute_concentration([
             _h("Alphabet C", "US02079K1079", 30.0),
             _h("Alphabet A", "US02079K3059", 30.0),
-            _h("Apple", "US0378331005", 40.0)], "ACWI")
+            _h("Apple", "US0378331005", 40.0)], "SP500")
         assert got["issuers"] == 2
         assert got["top1_pct"] == pytest.approx(60.0, abs=1e-9)
         assert got["effective_positions"] == pytest.approx(1.0 / (0.36 + 0.16), abs=1e-9)
@@ -96,7 +96,7 @@ class TestBothDenominators:
         has a top-10 of 100% OF ITS STOCKS and 25% of itself, and both are true."""
         wire([("Co0", 100.0)], {"I0": "Co0"})
         got = K.compute_concentration([
-            _h("Co0", "I0", 25.0), _h("Fund", "IE1", 50.0, True), _h("Cash", "", 25.0)], "ACWI")
+            _h("Co0", "I0", 25.0), _h("Fund", "IE1", 50.0, True), _h("Cash", "", 25.0)], "SP500")
         assert got["top10_pct"] == pytest.approx(25.0, abs=1e-9)
         assert got["top10_of_book_pct"] == pytest.approx(25.0, abs=1e-9)
         assert got["stocks_pct"] == pytest.approx(25.0, abs=1e-9)
@@ -108,7 +108,7 @@ class TestAgainstTheIndex:
     def test_the_index_gets_the_same_treatment(self, wire):
         wire([(f"Co{i}", 100.0) for i in range(50)], {f"I{i}": f"Co{i}" for i in range(3)})
         got = K.compute_concentration(
-            [_h(f"Co{i}", f"I{i}", 100.0 / 3) for i in range(3)], "ACWI")
+            [_h(f"Co{i}", f"I{i}", 100.0 / 3) for i in range(3)], "SP500")
         assert got["benchmark_effective_positions"] == pytest.approx(50.0, abs=1e-9)
         #  Every row carries the index's weight in the same issuer, so a big position can be read
         # as a big BET or merely as a big company.

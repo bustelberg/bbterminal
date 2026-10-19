@@ -112,7 +112,7 @@ class TestTheIssuerNotTheLine:
         reads 100."""
         _bench(monkeypatch, [("Alphabet Inc", 100.0)])
         _grid(monkeypatch, {"US02079K1079": "Alphabet Inc Class C"})
-        got = A.compute_active_share([_h("Alphabet C", "US02079K1079", 100)], "ACWI")
+        got = A.compute_active_share([_h("Alphabet C", "US02079K1079", 100)], "SP500")
         assert got["active_share_pct"] < 1e-9, got["rows"]
 
     def test_two_classes_of_one_issuer_are_summed_not_replaced(self, monkeypatch):
@@ -122,7 +122,7 @@ class TestTheIssuerNotTheLine:
         _grid(monkeypatch, {"US02079K1079": "Alphabet Inc Class C",
                             "US02079K3059": "Alphabet Inc Class A"})
         got = A.compute_active_share(
-            [_h("Alphabet C", "US02079K1079", 60), _h("Alphabet A", "US02079K3059", 40)], "ACWI")
+            [_h("Alphabet C", "US02079K1079", 60), _h("Alphabet A", "US02079K3059", 40)], "SP500")
         assert got["active_share_pct"] < 1e-9
         assert got["n_holdings"] == 1
 
@@ -181,7 +181,7 @@ class TestTheDenominator:
         _bench(monkeypatch, [("Apple Inc", 100.0)])
         _grid(monkeypatch, {"US1": "Apple Inc"})    # 'XX9' bridges to nothing
         got = A.compute_active_share(
-            [_h("Apple", "US1", 50), _h(None, "XX9", 50)], "ACWI")
+            [_h("Apple", "US1", 50), _h(None, "XX9", 50)], "SP500")
         assert abs(got["active_share_pct"] - 50.0) < 1e-9
         assert [u["isin"] for u in got["unresolved"]] == ["XX9"]
 
@@ -210,7 +210,7 @@ class TestWhatItRefusesToHide:
         unpriceable name we do not hold makes active share read slightly LOW. Never exact."""
         _bench(monkeypatch, [("Apple Inc", 100.0)], covered=78.5)
         _grid(monkeypatch, {"US1": "Apple Inc"})
-        got = A.compute_active_share([_h("Apple", "US1", 100)], "ACWI")
+        got = A.compute_active_share([_h("Apple", "US1", 100)], "SP500")
         assert got["benchmark_covered_pct"] == 78.5
 
     def test_off_benchmark_is_the_selection_half_of_the_bet(self, monkeypatch):

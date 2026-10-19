@@ -511,15 +511,13 @@ export default function ActiveSharePanel({
                       {!r.residual && <span className="font-sans">
                         <InfoTip content={r.weight_calculation ? <div className="space-y-2 text-xs">
                           <p>{r.name}: iShares ACWI workbook weight on {r.weight_calculation.as_of}: {r.weight_calculation.initial_weight_pct.toFixed(4)}%.</p>
-                          {r.weight_calculation.prices.map((price, index) => <p key={index}>
+                          {(r.weight_calculation.prices ?? []).map((price, index) => <p key={index}>
                             {price.ticker}: €{price.start_price_eur?.toFixed(4)} ({price.start_date}) → €{price.end_price_eur?.toFixed(4)} ({price.end_date}).
                           </p>)}
                           <p>Yfinance EUR return: {r.weight_calculation.return_eur_pct.toFixed(4)}%.</p>
                           <p className="font-mono">{r.weight_calculation.initial_weight_pct.toFixed(4)} × (1 + {r.weight_calculation.return_eur_pct.toFixed(4)} / 100) ÷ {r.weight_calculation.normalisation_total.toFixed(4)} × 100 = {r.weight_calculation.result_pct.toFixed(4)}%</p>
                           <p>The denominator sums the workbook weights grown by each constituent’s EUR return.</p>
-                        </div> : undefined} text={r.workbook_weight_pct != null && r.yfinance_return_pct != null && r.normalisation_total != null
-                          ? `${data.benchmark ?? benchmark}: ${r.workbook_weight_pct.toFixed(4)}% workbook weight × (1 + ${r.yfinance_return_pct.toFixed(2)}% yfinance EUR return) ÷ ${r.normalisation_total.toFixed(4)} × 100 = ${(r.benchmark_pct ?? 0).toFixed(2)}%.`
-                          : `${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
+                        </div> : undefined} text={`${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
                       </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%` : '—'}
                       </span>

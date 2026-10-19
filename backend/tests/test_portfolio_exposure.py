@@ -53,7 +53,7 @@ class TestTheEurosFoldPerIssuer:
         got = E.compute_exposure([
             _h("Alphabet C", "US02079K1079", 30.0, 300_000.0, "USD"),
             _h("Alphabet A", "US02079K3059", 20.0, 200_000.0, "USD"),
-            _h("Nestle", "CH0038863350", 50.0, 500_000.0, "CHF")], "ACWI")
+            _h("Nestle", "CH0038863350", 50.0, 500_000.0, "CHF")], "SP500")
 
         assert (got["lines"], got["issuers"], got["folded_lines"]) == (3, 2, 1)
         alpha = next(p for p in got["positions"] if "Alphabet" in p["name"])
@@ -67,7 +67,7 @@ class TestTheEurosFoldPerIssuer:
         wire([(f"Co{i}", 100.0) for i in range(5)],
              {f"I{i}": {"name": f"Co{i}", "ccy": "EUR"} for i in range(5)})
         hold = [_h(f"Co{i}", f"I{i}", 20.0 + i, 100.0 * (20 + i), "EUR") for i in range(5)]
-        exp, conc = E.compute_exposure(hold, "ACWI"), K.compute_concentration(hold, "ACWI")
+        exp, conc = E.compute_exposure(hold, "SP500"), K.compute_concentration(hold, "SP500")
         assert exp["issuers"] == conc["issuers"]
         assert exp["positions"][0]["weight_pct"] == pytest.approx(conc["top1_pct"], abs=1e-9)
 
@@ -76,7 +76,7 @@ class TestTheEurosFoldPerIssuer:
         wire([(f"Co{i}", 100.0) for i in range(5)],
              {f"I{i}": {"name": f"Co{i}", "ccy": "EUR"} for i in range(5)})
         got = E.compute_exposure(
-            [_h(f"Co{i}", f"I{i}", 20.0, None, "EUR") for i in range(5)], "ACWI")
+            [_h(f"Co{i}", f"I{i}", 20.0, None, "EUR") for i in range(5)], "SP500")
         assert got["has_values"] is False
         assert got["sleeve_eur"] is None
         assert got["positions"][0]["value_eur"] is None
@@ -89,7 +89,7 @@ class TestCurrencyIsTrackedSeparately:
              {"US1": {"name": "Alphabet Inc", "ccy": "USD"},
               "CH1": {"name": "Nestle SA", "ccy": "CHF"}})
         got = E.compute_exposure([_h("Alphabet", "US1", 50.0, 500.0, "USD"),
-                                  _h("Nestle", "CH1", 50.0, 500.0, "CHF")], "ACWI")
+                                  _h("Nestle", "CH1", 50.0, 500.0, "CHF")], "SP500")
         by = {c["currency"]: c for c in got["currencies"]}
         assert sorted(by) == ["CHF", "USD"]
         assert sum(c["weight_pct"] for c in got["currencies"]) == pytest.approx(100.0, abs=1e-9)
@@ -102,7 +102,7 @@ class TestCurrencyIsTrackedSeparately:
              {"GB1": {"name": "Shell PLC", "ccy": "GBP"},
               "NL1": {"name": "Shell PLC", "ccy": "EUR"}})
         got = E.compute_exposure([_h("Shell LSE", "GB1", 60.0, 60.0, "GBP"),
-                                  _h("Shell AMS", "NL1", 40.0, 40.0, "EUR")], "ACWI")
+                                  _h("Shell AMS", "NL1", 40.0, 40.0, "EUR")], "SP500")
         assert got["issuers"] == 1
         assert got["positions"][0]["currencies"] == ["EUR", "GBP"]
 
@@ -110,7 +110,7 @@ class TestCurrencyIsTrackedSeparately:
         """ THE FLATTERING DEFAULT would make the book look more domestic than it is."""
         wire([("Co0", 100.0)], {"I0": {"name": "Co0", "ccy": "EUR"}})
         got = E.compute_exposure([_h("Co0", "I0", 50.0, 50.0, "EUR"),
-                                  _h("Mystery", "I9", 50.0, 50.0, None)], "ACWI")
+                                  _h("Mystery", "I9", 50.0, 50.0, None)], "SP500")
         assert got["currency_unknown_pct"] == pytest.approx(50.0, abs=1e-9)
         eur = next(c for c in got["currencies"] if c["currency"] == "EUR")
         assert eur["weight_pct"] == pytest.approx(50.0, abs=1e-9)
@@ -122,7 +122,7 @@ class TestBothDenominators:
         got = E.compute_exposure([
             _h("Co0", "I0", 25.0, 250.0, "EUR"),
             _h("Fund", "IE1", 50.0, 500.0, "EUR", is_fund=True),
-            _h("Cash", "", 25.0, 250.0, None)], "ACWI")
+            _h("Cash", "", 25.0, 250.0, None)], "SP500")
         assert got["sleeve_eur"] == pytest.approx(250.0, abs=1e-9)
         assert got["book_eur"] == pytest.approx(1000.0, abs=1e-9)
         #  Every other view excludes this and renormalises; the figure exists so that is visible.

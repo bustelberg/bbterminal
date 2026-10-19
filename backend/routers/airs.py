@@ -2075,6 +2075,23 @@ async def airs_basket_analysis(req: BasketRequest, benchmark: str = "SP500"):
     return await compute_basket_analysis_async(req.holdings, benchmark, req.label)
 
 
+class ActiveShareWeightPrice(BaseModel):
+    ticker: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    start_price_eur: float | None = None
+    end_price_eur: float | None = None
+
+
+class ActiveShareWeightCalculation(BaseModel):
+    as_of: str
+    initial_weight_pct: float
+    return_eur_pct: float
+    normalisation_total: float
+    result_pct: float
+    prices: list[ActiveShareWeightPrice] = []
+
+
 class ActiveShareRow(BaseModel):
     """One ISSUER, on both sides.  NOT one holding and not one listing — a book holding two share
     classes of the same company contributes ONE of these, with the weights summed. See
@@ -2088,7 +2105,7 @@ class ActiveShareRow(BaseModel):
     held: bool = False
     residual: bool = False
     workbook_weight_pct: float | None = None
-    weight_calculation: dict | None = None
+    weight_calculation: ActiveShareWeightCalculation | None = None
     yfinance_return_pct: float | None = None
     normalisation_total: float | None = None
 

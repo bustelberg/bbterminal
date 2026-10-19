@@ -156,7 +156,7 @@ export default function TrackingErrorView({
               value={pct2(data.active_return_ann_pct).replace('%', 'pp')}
               tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`Your current stock holdings returned ${data.portfolio_return_ann_pct?.toFixed(4) ?? '—'}% per year over this period, compared with ${data.benchmark_return_ann_pct?.toFixed(4) ?? '—'}% for ${data.benchmark}. The difference, calculated before rounding, is approximately ${subNum(data.active_return_ann_pct ?? 0, 2)} percentage points per year.`}
+                what={`Annualized portfolio return minus ${data.benchmark}'s return, in percentage points. Calculated before rounding.`}
                 where={where}
                 when={when}
                 worked={data.active_return_ann_pct == null ? '' : withWorked(

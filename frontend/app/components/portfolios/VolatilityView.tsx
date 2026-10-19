@@ -314,7 +314,7 @@ export default function VolatilityView({
                 </LineChart>
               </ResponsiveContainer>
             ) : <p className="py-10 text-center text-sm text-fg-muted">At least 12 months of overlapping returns are needed.</p>}
-            <p className="mt-3 text-center text-xs text-fg-faint">Each point shows annualized volatility over the preceding 12 months. Uses today's AIRS stock holdings and weights applied to historical EUR prices.</p>
+            <p className="mt-3 text-center text-xs text-fg-faint">Each point shows annualized volatility over the preceding 12 months. Uses today&apos;s AIRS stock holdings and weights applied to historical EUR prices.</p>
           </section>
 
         </>
