@@ -220,7 +220,7 @@ export function startLocalJob(
  */
 export function watchJob(id: string, title: string, after = 0,
                          seed?: { kind?: string; label?: string },
-                         onProgress?: (e: { done?: number; total?: number; message?: string })
+                         onProgress?: (e: { done?: number; total?: number; message?: string; entryId?: number })
                            => void,
                          presentation?: { label?: string }): Promise<JobToast> {
   // A server job must retain its machine-readable label for deduplication and
@@ -260,7 +260,7 @@ export function watchJob(id: string, title: string, after = 0,
         const e = raw as {
           type?: string; kind?: string; label?: string; message?: string; status?: JobStatus;
           done?: number; total?: number; summary?: string | null; cancel_requested?: boolean;
-          api_calls?: number;
+          api_calls?: number; entry_id?: number;
         };
         if (e.type === 'job') {
           backendLabel = e.label ?? backendLabel;
@@ -298,7 +298,8 @@ export function watchJob(id: string, title: string, after = 0,
         // if a listener misbehaves; see the note on `onProgress`.
         if (onProgress) {
           try {
-            onProgress({ done: e.done, total: e.total, message: e.message });
+            onProgress({ done: e.done, total: e.total, message: e.message,
+              ...(typeof e.entry_id === 'number' ? { entryId: e.entry_id } : {}) });
           } catch (err) {
             traceError('jobs', `an onProgress listener for ${id} threw`, err);
           }
@@ -324,7 +325,7 @@ export function watchJob(id: string, title: string, after = 0,
 export async function startJob(
   startUrl: string, title: string, init?: RequestInit,
   /** Per-progress-line callback — see `watchJob`. For callers whose screen the job rewrites. */
-  onProgress?: (e: { done?: number; total?: number; message?: string }) => void,
+  onProgress?: (e: { done?: number; total?: number; message?: string; entryId?: number }) => void,
   presentation?: { label?: string },
 ): Promise<{ id: string; done: Promise<JobToast>; body: Record<string, unknown> }> {
   //  `init` IS OPTIONAL AND MERGED AFTER `method`, so a caller can add a JSON body (the basket

@@ -61,6 +61,13 @@ type Payload = {
   rows: ApiRow[];
 };
 
+type EgmAssumption = {
+  company_id: number;
+  eps_growth: number | null;
+  exit_pe: number | null;
+  updated_at?: string | null;
+};
+
 /** The lightweight AIRS-book payload used to calculate the displayed portfolio weights. */
 type BookWeightsPayload = {
   as_of_date?: string | null;
@@ -903,6 +910,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
 }) {
   const [data, setData] = useState<Payload | null>(null);
   const [egmOverrides, setEgmOverrides] = useState<Record<string, EgmOverrides>>({});
+  const [egmSaveError, setEgmSaveError] = useState<string | null>(null);
   // `undefined` is loading; `null` means this view genuinely has no usable AIRS book.
   const [bookWeights, setBookWeights] = useState<BookWeightsPayload | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -923,6 +931,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   const [fundamentalsRevision, setFundamentalsRevision] = useState(0);
   const [loadingDotIndex, setLoadingDotIndex] = useState(0);
   const partialRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const egmSaveQueues = useRef(new Map<number, Promise<void>>());
+  const egmDirtyCompanyIds = useRef(new Set<number>());
   const [sorts, setSorts] = useState<Record<Model, Sort>>({
     dcf: { key: 'weight', direction: 'desc' },
     egm: { key: 'weight', direction: 'desc' },
@@ -1071,20 +1081,83 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
     setEgmOverrides(next);
   }, [data]);
 
-  const updateEgmOverride = useCallback((isin: string, field: keyof EgmOverrides, raw: string) => {
+  // Browser storage kept these assumptions alive on one device only. The database is now the
+  // source of truth, so the same company keeps its EGM inputs across browsers and portfolios.
+  // Local values remain in place when no server record exists, preserving pre-migration input.
+  useEffect(() => {
+    if (!data?.rows.length) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams();
+    for (const companyId of new Set(data.rows.map((row) => row.company_id))) {
+      params.append('company_id', String(companyId));
+    }
+    void (async () => {
+      try {
+        const response = await apiFetch(`${API_URL}/api/earnings/egm-assumptions?${params}`, {
+          signal: controller.signal,
+        });
+        const body = await response.json().catch(() => null) as { rows?: EgmAssumption[]; detail?: string } | null;
+        if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+        const savedByCompany = new Map((body?.rows ?? []).map((row) => [row.company_id, row]));
+        setEgmOverrides((current) => {
+          const next = { ...current };
+          for (const row of data.rows) {
+            if (egmDirtyCompanyIds.current.has(row.company_id)) continue;
+            const saved = savedByCompany.get(row.company_id);
+            if (!saved) continue;
+            next[row.isin] = {
+              growthRate: saved.eps_growth ?? undefined,
+              exitPE: saved.exit_pe ?? undefined,
+            };
+          }
+          return next;
+        });
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setEgmSaveError(error instanceof Error ? error.message : 'Could not load saved EGM assumptions.');
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, [data]);
+
+  const queueEgmSave = useCallback((companyId: number, values: EgmOverrides) => {
+    const previous = egmSaveQueues.current.get(companyId) ?? Promise.resolve();
+    const save = previous.catch(() => undefined).then(async () => {
+      const response = await apiFetch(`${API_URL}/api/earnings/companies/${companyId}/egm-assumption`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eps_growth: values.growthRate ?? null, exit_pe: values.exitPE ?? null }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(body?.detail ?? 'Could not save EGM assumptions.');
+      }
+    });
+    egmSaveQueues.current.set(companyId, save);
+    void save.then(
+      () => setEgmSaveError(null),
+      (error: unknown) => setEgmSaveError(error instanceof Error ? error.message : 'Could not save EGM assumptions.'),
+    );
+  }, []);
+
+  const updateEgmOverride = useCallback((companyId: number, isin: string, field: keyof EgmOverrides, raw: string) => {
     const number = raw.trim() === '' ? null : Number(raw);
     if (number != null && !Number.isFinite(number)) return;
-    setEgmOverrides((current) => ({
-      ...current,
-      [isin]: { ...current[isin], ...(number == null ? { [field]: undefined } : { [field]: number }) },
-    }));
+    egmDirtyCompanyIds.current.add(companyId);
+    const next = {
+      ...egmOverrides[isin],
+      ...(number == null ? { [field]: undefined } : { [field]: number }),
+    };
+    setEgmOverrides((current) => ({ ...current, [isin]: next }));
     try {
       const stored = JSON.parse(window.localStorage.getItem(egmStorageKey(isin)) ?? '{}') as Record<string, unknown>;
       if (number == null) delete stored[field];
       else stored[field] = number;
       window.localStorage.setItem(egmStorageKey(isin), JSON.stringify(stored));
     } catch { /* browser storage being unavailable must not block editing */ }
-  }, []);
+    queueEgmSave(companyId, next);
+  }, [egmOverrides, queueEgmSave]);
 
   const rows = useMemo(() => {
     const holdings = bookWeights?.rows ?? [];
@@ -1267,6 +1340,11 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
             Close
           </button>
         </div>
+        {model === 'egm' && egmSaveError && (
+          <p role="alert" className="border-b border-neg-500/30 bg-neg-500/10 px-5 py-2 text-xs text-neg-300">
+            Expected Growth assumptions were not saved: {egmSaveError}
+          </p>
+        )}
 
         <div className="min-h-0 flex-1 overflow-hidden px-6">
           <div className="h-full overflow-hidden">
@@ -1472,7 +1550,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             aria-label={`EPS growth for ${row.name}`}
                             value={row.egmAssumptions.growthRate == null ? '' : row.egmAssumptions.growthRate * 100}
                             placeholder="—"
-                            onChange={(event) => updateEgmOverride(row.isin, 'growthRate', event.target.value === ''
+                            onChange={(event) => updateEgmOverride(row.company_id, row.isin, 'growthRate', event.target.value === ''
                               ? '' : String(Number(event.target.value) / 100))}
                             className="w-16 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />}
                           what="The annual EPS growth rate. Enter it here or in the EGM tab."
@@ -1494,7 +1572,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             aria-label={`Exit P/E for ${row.name}`}
                             value={row.egmAssumptions.exitPE == null ? '' : row.egmAssumptions.exitPE}
                             placeholder="—"
-                            onChange={(event) => updateEgmOverride(row.isin, 'exitPE', event.target.value)}
+                            onChange={(event) => updateEgmOverride(row.company_id, row.isin, 'exitPE', event.target.value)}
                             className="w-16 rounded border border-neutral-700 bg-page px-1.5 py-0.5 text-right text-[12px] text-fg-strong focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30" />}
                           what="The P/E multiple assumed at the end of year five. Enter it here or in the EGM tab."
                           where="This assumption is saved per company and shared with the EGM tab."

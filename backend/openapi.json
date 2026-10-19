@@ -7525,6 +7525,37 @@
         "title": "DrawdownInfo",
         "type": "object"
       },
+      "EgmAssumptionIn": {
+        "description": "The two analyst-entered inputs for the Expected Growth Model.",
+        "properties": {
+          "eps_growth": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": -1.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Growth"
+          },
+          "exit_pe": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Pe"
+          }
+        },
+        "title": "EgmAssumptionIn",
+        "type": "object"
+      },
       "EtfOverlayHolding": {
         "description": "One diversifier ETF held alongside the momentum sleeve in a blended\nscheduled strategy. `benchmark_id` is a `benchmark` row; `weight_pct` is\nits target portfolio weight; the strategy (momentum) sleeve takes\n`100 - sum(weight_pct)`. `band_pct` is the symmetric drift band used only\nas a 'rebalance due' alert on /schedule \u2014 rebalances ride the momentum\ngrid (the blend resets to target on each grid rebalance), never off-grid.",
         "properties": {
@@ -19817,6 +19848,26 @@
         ]
       }
     },
+    "/api/airs/model-portfolios/refresh/job": {
+      "post": {
+        "description": "Rebuild the valuation of every paired model portfolio as one cancellable job.\n\n``/scan/job`` deliberately only discovers models and repairs compositions that are absent.\nThat is enough to make a newly discovered account linkable, but it does not run the model\nvaluation pipeline (composition -> instruments -> FX -> prices -> recompute).  The overview's\nper-row Refresh *does* run that pipeline through ``refresh_portfolio_fully``.  Consequently a\nfleet refresh could say it had completed while a row still showed an old model return until\nits individual Refresh was pressed.\n\nKeep the work in ``scheduler._body_airs_model_prices``: the scheduled AIRS refresh already\nuses that exact batch helper, which in turn calls ``refresh_many`` and therefore the same\nmodel half as the per-row action.  This route only gives that shared operation a user-visible,\ncancellable job handle.",
+        "operationId": "airs_model_portfolios_refresh_job_api_airs_model_portfolios_refresh_job_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Airs Model Portfolios Refresh Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/model-portfolios/scan": {
       "get": {
         "description": "Every model portfolio from Stamgegevens > Onderhoud portefeuilles > Model\nportefeuilles, with its FULL name (the list page truncates them). Persists as it goes.",
@@ -27138,6 +27189,57 @@
         ]
       }
     },
+    "/api/earnings/companies/{company_id}/egm-assumption": {
+      "put": {
+        "description": "Persist the EGM assumptions shared by every Fundamental view of a company.",
+        "operationId": "save_egm_assumption_api_earnings_companies__company_id__egm_assumption_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "company_id",
+            "required": true,
+            "schema": {
+              "title": "Company Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EgmAssumptionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Egm Assumption",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
     "/api/earnings/debt-ratio-inputs": {
       "post": {
         "description": "The base inputs behind the LTD / (Total Assets \u2212 Goodwill) ratio, per holding: Long-Term\nDebt, Total Assets and Goodwill per fiscal year, in the company's own reporting currency\n(millions).\n\n THE RAW LINES, NOT THE RATIO. `LTD / (Total Assets \u2212 Goodwill)` is derived on the client from\nthese three so the drill-down shows exactly what it is computed from (3 rows per company). A\nmissing Goodwill is a genuine 0 (no acquisitions); a missing Long-Term Debt line is NOT \u2014 the\nratio is blank there (Berkshire has no such line). Deduped by ISIN, weight is the share of the\nwhole book, holdings with no company row omitted.",
@@ -27213,6 +27315,51 @@
           }
         },
         "summary": "Dividend Yield Inputs",
+        "tags": [
+          "earnings"
+        ]
+      }
+    },
+    "/api/earnings/egm-assumptions": {
+      "get": {
+        "description": "Return saved EGM assumptions for the companies visible in the modal.",
+        "operationId": "get_egm_assumptions_api_earnings_egm_assumptions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "company_id",
+            "required": false,
+            "schema": {
+              "default": [],
+              "items": {
+                "type": "integer"
+              },
+              "title": "Company Id",
+              "type": "array"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Egm Assumptions",
         "tags": [
           "earnings"
         ]

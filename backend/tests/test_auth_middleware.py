@@ -249,6 +249,7 @@ class TestManagementDashboardRefreshesAreOpen:
         # Overview → "Refresh all from AIRS", both halves.
         ("POST", "/api/airs/vermogen/refresh/job"),
         ("POST", "/api/airs/model-portfolios/scan/job"),
+        ("POST", "/api/airs/model-portfolios/refresh/job"),
         # Overview → one row's Refresh, and the identical one in the Analyse modal's header.
         ("POST", "/api/airs/portfolios/BUS_WTS_StMerken_Dyn/refresh/job"),
         # Analyse modal → the fundamentals fill, over a paired model or a bare basket of ISINs.
@@ -417,6 +418,14 @@ class TestCompanySectorOverrideForUsers:
             ("PUT", "/api/companies/not-an-id/sector-override"),
         ):
             assert _run(monkeypatch, method, path, "user") == (403, False), path
+
+
+class TestCompanyEgmAssumptionForUsers:
+    def test_a_user_may_save_expected_growth_assumptions(self, monkeypatch):
+        assert _run(monkeypatch, "PUT", "/api/earnings/companies/42/egm-assumption", "user") == (200, True)
+
+    def test_neighbouring_earnings_mutations_remain_admin_only(self, monkeypatch):
+        assert _run(monkeypatch, "PUT", "/api/earnings/companies/42/other-setting", "user") == (403, False)
 
 
 class TestUnreachableIdentityProviderIsNot401:

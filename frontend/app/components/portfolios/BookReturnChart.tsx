@@ -116,6 +116,29 @@ const price = (value: number | null) => value == null ? '—' : value.toLocaleSt
   minimumFractionDigits: 2, maximumFractionDigits: 2,
 });
 
+/**
+ * The Yahoo holding drill-down is about the CURRENT model's instruments, not about how many
+ * month-end rows AIRS has published for its paired book.  A new book can have only an October
+ * AIRS observation while every listed holding has years of Yahoo closes; deriving the tabs from
+ * the chart therefore hid August and September behind an unrelated account-history gap.
+ *
+ * Keep the current month anchored to AIRS's latest observed date (it may be mid-month), then use
+ * literal calendar month-ends for the preceding closed months.  The backend already accepts a
+ * date inside the requested month and turns it into that month's first-to-last-close window.
+ */
+const recentYahooMonths = (latestDate: string, count = 3): { date: string; from: string }[] => {
+  const parsed = new Date(`${latestDate}T00:00:00Z`);
+  if (Number.isNaN(parsed.valueOf())) return [];
+  const year = parsed.getUTCFullYear();
+  const month = parsed.getUTCMonth();
+  return Array.from({ length: count }, (_, index) => {
+    const offset = count - index - 1;
+    if (offset === 0) return { date: latestDate, from: '' };
+    const monthEnd = new Date(Date.UTC(year, month - offset + 1, 0));
+    return { date: monthEnd.toISOString().slice(0, 10), from: '' };
+  });
+};
+
 function ReturnTooltip({ active, label, payload, benchmark }: {
   active?: boolean;
   label?: unknown;
@@ -399,6 +422,13 @@ export default function BookReturnChart(
   }
 
   const last = all[all.length - 1];
+  // A chart click may deliberately inspect an older AIRS point. Keep it as an extra tab rather
+  // than rendering a return with no selected control, while the normal dialog stays the latest
+  // three Yahoo months.
+  const yahooMonths = recentYahooMonths(last.date);
+  if (selectedMonth && !yahooMonths.some(({ date }) => date === selectedMonth)) {
+    yahooMonths.unshift({ date: selectedMonth, from: '' });
+  }
   // Include the common zero-return anchor, calendar month-ends, and the latest observation.
   const points = all.filter((p) => isCalendarMonthEnd(p.date));
   const anchorDate = data.return_from ?? all[0].date;
@@ -540,7 +570,7 @@ export default function BookReturnChart(
       </div>
       <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to view each holding&apos;s Yahoo return against the benchmark.</p>
       {monthlyModalOpen && selectedMonth && <MonthlyPerformance key={selectedMonth} portfolioId={portfolioId} portfolioName={portfolioName} month={selectedMonth}
-        months={points.map((point, index) => ({ date: point.date, from: points[index - 1]?.date ?? '' })).slice(1).slice(-6)}
+        months={yahooMonths}
         benchmark={benchmark} weightsQuery={weightsQuery} onSelect={setSelectedMonth}
         onClose={() => { setMonthlyModalOpen(false); setSelectedMonth(null); }} />}
     </div>
