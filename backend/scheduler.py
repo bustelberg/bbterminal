@@ -1223,7 +1223,7 @@ def _run_asset_price_refresh(trigger: str) -> None:
         # there was nothing to do — and with `--reload` in dev, restarts are constant. This is
         # a handful of queries (one grouped COPY), so the common case is a near-free no-op.
         watched = price_refresh.watched_isins()
-        stale, latest, considered = price_refresh.find_stale(isins=watched)
+        stale, latest, considered = price_refresh.find_stale(isins=watched, stale_days=1)
         # A resolved sold name with no rows at all is not "stale" (there is no
         # last date to compare), so repair that distinct case after the cheap
         # detection pass. This uses its existing symbol and cannot remap it.
@@ -1274,7 +1274,7 @@ def _run_asset_price_refresh(trigger: str) -> None:
             "(oldest %s) — fetching the gap",
             trigger, len(stale), considered, latest, stale[0]["last_close"],
         )
-        r = price_refresh.refresh_stale(isins=watched)
+        r = price_refresh.refresh_stale(isins=watched, stale_days=1)
         _log.warning(
             "[scheduler] asset price refresh (%s) done — %s moved, %s unchanged, %s failed",
             trigger, r["moved"], r["unchanged"], r["failed"],

@@ -178,8 +178,8 @@ class TestTheStartupCatchUp:
         import scheduler
 
         src = inspect.getsource(scheduler._run_asset_price_refresh)
-        find_at = src.index("find_stale(isins=watched)")
-        fetch_at = src.index("refresh_stale(isins=watched)")
+        find_at = src.index("find_stale(isins=watched, stale_days=1)")
+        fetch_at = src.index("refresh_stale(isins=watched, stale_days=1)")
         assert find_at < fetch_at
         assert "if not stale:" in src
         # Missing series are also backfilled in this branch, but a no-op must
@@ -336,7 +336,7 @@ class TestTheBootRace:
         src = inspect.getsource(scheduler._run_asset_price_refresh)
         gate = src.index("_await_db_ready(")
         assert gate < src.index("_q.is_worker_active()")
-        assert gate < src.index("find_stale(isins=watched)")
+        assert gate < src.index("find_stale(isins=watched, stale_days=1)")
         # ...and a database that never answers ends the job, rather than falling through into
         # queries that are all guaranteed to fail.
         assert "return" in src.split("_await_db_ready(", 1)[1][:200]
@@ -348,7 +348,7 @@ class TestTheBootRace:
         import scheduler
 
         src = inspect.getsource(scheduler._run_asset_price_refresh)
-        assert src.count("refresh_stale(isins=watched)") == 1
+        assert src.count("refresh_stale(isins=watched, stale_days=1)") == 1
         assert "for attempt" not in src
 
 
@@ -358,3 +358,15 @@ class TestACapMustSayItCapped:
         src = inspect.getsource(price_refresh.refresh_stale)
         assert '"skipped": skipped' in src
         assert "total_stale - limit" in src
+
+
+def test_daily_watchlist_includes_logbook_isins_without_review_dates(monkeypatch):
+    from tests._fake_supabase import FakeSupabase
+    monkeypatch.setattr(price_refresh, "supabase", FakeSupabase({
+        "airs_model_portfolio_position": [{"isin": "HELD"}],
+        "airs_holding": [],
+        "asset_post_close_watch": [{"isin": "SOLD"}],
+        "bc_log_entry": [{"isin": " us0378331005 ", "review_on": None},
+                         {"isin": ""}, {"isin": "   "}, {"isin": None}],
+    }))
+    assert price_refresh.watched_isins() == {"HELD", "SOLD", "US0378331005"}

@@ -77,10 +77,17 @@ async def etf_sector_allocation(isin: str) -> EtfSectorAllocationResponse:
         ) from exc
 
 
-def _save_performance_to_db(portfolio_name: str, rows: list[dict]):
+def _save_performance_to_db(portfolio_name: str, rows: list[dict], *,
+                            prune_after: str | None = None):
     """Upsert performance rows into the airs_performance table."""
     if not rows:
         return
+    # A prior request through an unvalued future date can leave a later, synthetic AIRS row in
+    # this month's cache. Remove it when a completed report replaces the live tail; otherwise
+    # `_year_perf` would correctly select the latest stored row and still show that bad value.
+    if prune_after:
+        (supabase.table("airs_performance").delete()
+         .eq("portefeuille", portfolio_name).gt("periode", prune_after).execute())
     for r in rows:
         supabase.table("airs_performance").upsert({
             "portefeuille": portfolio_name,
@@ -1799,6 +1806,21 @@ class BenchmarkReturnPoint(BaseModel):
     price_date: str
 
 
+class WeightedBenchmarkComponent(BaseModel):
+    """One priced sleeve within the stock-and-bond policy benchmark."""
+
+    name: str
+    weight_pct: float
+    label: str | None = None
+    ticker: str | None = None
+    start_date: str | None = None
+    start_price: float | None = None
+    end_date: str | None = None
+    end_price: float | None = None
+    currency: str | None = None
+    return_pct: float | None = None
+
+
 class BookValueSeries(BaseModel):
     """The book's value through time, and the return that value earned.
 
@@ -1826,6 +1848,8 @@ class BookValueSeries(BaseModel):
     benchmark_returns: list[BenchmarkReturnPoint] = []
     benchmark_return_pct: float | None = None
     benchmark_as_of: str | None = None
+    #: The Stocks/Bonds proxy marks behind a weighted benchmark, for the chart's provenance table.
+    benchmark_components: list[WeightedBenchmarkComponent] = []
     first_date: str | None = None
     last_date: str | None = None
     #: The first date we hold a snapshot for — where the series stops being AIRS's and becomes ours.
@@ -2604,6 +2628,9 @@ class PortfolioConcentration(BaseModel):
     benchmark_effective_positions: float | None = None
 
     top: list[ConcentrationRow] = []
+    #: Largest benchmark constituents, independently ranked so the reader can compare the two
+    #: actual top fives rather than only the benchmark weights of names we happen to hold.
+    benchmark_top: list[ConcentrationRow] = []
     benchmark_covered_pct: float | None = None
     #: When the index caps behind those weights were read — the same range the active-share
     #: response carries, because both weight the benchmark from one `members()` call.
@@ -3495,10 +3522,16 @@ async def airs_portfolio_download(
 ):
     """Return performance data. Serves from DB cache unless refresh=true or no cache."""
     today = dt_date.today()
+    live_end_requested = datum_tot is None
     if not datum_van:
         datum_van = f"{today.year}-01-01"
     if not datum_tot:
         datum_tot = today.isoformat()
+
+    # AIRS will generate a misleading time-weighted Rendement row when asked through an unvalued
+    # future date. The scheduled importer uses the same completed-market-day cap.
+    from airs_vermogen import latest_completed_market_date  # noqa: PLC0415
+    datum_tot = min(datum_tot, latest_completed_market_date())
 
     # Check what we already have in DB.
     db_rows: list[dict] = []
@@ -3535,7 +3568,8 @@ async def airs_portfolio_download(
             raise HTTPException(status_code=500, detail=f"Download failed: {e}")
 
         try:
-            await asyncio.to_thread(_save_performance_to_db, portfolio_name, fresh_rows)
+            await asyncio.to_thread(_save_performance_to_db, portfolio_name, fresh_rows,
+                                    prune_after=datum_tot if live_end_requested else None)
         except Exception:
             pass
 

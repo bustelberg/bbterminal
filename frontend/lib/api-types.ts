@@ -6779,6 +6779,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/log-dashboard/entries/{entry_id}/refresh-price": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Entry Price
+         * @description Fetch prices for one saved decision, preserving an existing Yahoo mapping.
+         */
+        post: operations["refresh_entry_price_api_log_dashboard_entries__entry_id__refresh_price_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/log-dashboard/news/{ticker}": {
         parameters: {
             query?: never;
@@ -6808,11 +6828,10 @@ export interface paths {
         };
         /**
          * Yahoo Return Since
-         * @description Stored Yahoo close-price return from the first close on/after ``since``.
+         * @description Stored Yahoo price return from the review-date close through the latest close.
          *
          *     Uses the asset pipeline's persisted Yahoo series, so opening a log entry
-         *     never silently makes a fresh vendor request. This is price return only;
-         *     dividends are intentionally not implied to be included.
+         *     never silently makes a fresh vendor request.
          */
         get: operations["yahoo_return_since_api_log_dashboard_yahoo_return__isin__get"];
         put?: never;
@@ -6840,6 +6859,23 @@ export interface paths {
          *     stored closes; a page view must never cause a burst of vendor requests.
          */
         post: operations["refresh_yahoo_returns_api_log_dashboard_yahoo_returns_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/log-dashboard/yahoo-returns/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Yahoo Returns Job */
+        post: operations["refresh_yahoo_returns_job_api_log_dashboard_yahoo_returns_refresh_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -10567,6 +10603,11 @@ export interface components {
             benchmark?: string | null;
             /** Benchmark As Of */
             benchmark_as_of?: string | null;
+            /**
+             * Benchmark Components
+             * @default []
+             */
+            benchmark_components?: components["schemas"]["WeightedBenchmarkComponent"][];
             /** Benchmark Return Pct */
             benchmark_return_pct?: number | null;
             /**
@@ -12336,8 +12377,11 @@ export interface components {
             conviction: number;
             /** Decision */
             decision: string;
-            /** Isin */
-            isin: string;
+            /**
+             * Isin
+             * @default
+             */
+            isin?: string;
             /**
              * Notes
              * @default
@@ -13292,6 +13336,11 @@ export interface components {
              * @default 0
              */
             benchmark_issuers?: number;
+            /**
+             * Benchmark Top
+             * @default []
+             */
+            benchmark_top?: components["schemas"]["ConcentrationRow"][];
             /** Benchmark Top10 Pct */
             benchmark_top10_pct?: number | null;
             /** Effective Positions */
@@ -14817,6 +14866,32 @@ export interface components {
             universe_label?: string | null;
             /** Vol Target */
             vol_target?: number | null;
+        };
+        /**
+         * WeightedBenchmarkComponent
+         * @description One priced sleeve within the stock-and-bond policy benchmark.
+         */
+        WeightedBenchmarkComponent: {
+            /** Currency */
+            currency?: string | null;
+            /** End Date */
+            end_date?: string | null;
+            /** End Price */
+            end_price?: number | null;
+            /** Label */
+            label?: string | null;
+            /** Name */
+            name: string;
+            /** Return Pct */
+            return_pct?: number | null;
+            /** Start Date */
+            start_date?: string | null;
+            /** Start Price */
+            start_price?: number | null;
+            /** Ticker */
+            ticker?: string | null;
+            /** Weight Pct */
+            weight_pct: number;
         };
         /** YearStat */
         YearStat: {
@@ -23249,6 +23324,37 @@ export interface operations {
             };
         };
     };
+    refresh_entry_price_api_log_dashboard_entries__entry_id__refresh_price_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     stock_news_api_log_dashboard_news__ticker__get: {
         parameters: {
             query?: never;
@@ -23314,6 +23420,26 @@ export interface operations {
         };
     };
     refresh_yahoo_returns_api_log_dashboard_yahoo_returns_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    refresh_yahoo_returns_job_api_log_dashboard_yahoo_returns_refresh_job_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -20,6 +20,9 @@ if (process.env.NODE_ENV === "production" && !process.env.NEXT_PUBLIC_API_URL) {
   );
 }
 
+// The Vercel build runs the frontend from this subdirectory, but `prebuild` reads the backend
+// OpenAPI document one level up. Keep Turbopack and output tracing on that same workspace root;
+// otherwise Vercel's post-build trace expects manifests in a different directory.
 const workspaceRoot = path.resolve(__dirname, '..');
 
 const nextConfig: NextConfig = {

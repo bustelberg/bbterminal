@@ -85,6 +85,20 @@ def test_physical_ishares_falls_back_to_justetf_when_the_issuer_page_fails(monke
     sector_allocation._CACHE.pop(isin, None)
 
 
+def test_xtrackers_utilities_falls_back_to_yahoo_when_justetf_is_unavailable(monkeypatch):
+    isin = "IE00BM67HQ30"
+    sentinel = object()
+    sector_allocation._CACHE.pop(isin, None)
+    monkeypatch.setattr(
+        sector_allocation, "_fetch_justetf",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("justETF gateway error")),
+    )
+    monkeypatch.setattr(sector_allocation, "_fetch_yahoo", lambda *_args, **_kwargs: sentinel)
+
+    assert sector_allocation.fetch_sector_allocation(isin) is sentinel
+    sector_allocation._CACHE.pop(isin, None)
+
+
 def test_parses_the_server_rendered_ishares_sector_payload():
     result = parse_ishares_sector_payload(
         _page(
@@ -194,3 +208,32 @@ def test_justetf_uses_complete_inline_table_when_there_is_no_show_more(monkeypat
         ("Industrials", 1.3),
     ]
     assert result.sectors[-1].provider_sectors == ["Business Services", "Industrials"]
+
+
+def test_justetf_retries_an_incomplete_page_without_caching_its_failure(monkeypatch):
+    incomplete = '<span data-testid="tl_etf-holdings_reference-date">As of 31/08/2026</span>'
+    complete = """
+      <span data-testid="tl_etf-holdings_reference-date">As of 31/08/2026</span>
+      <td data-testid="tl_etf-holdings_sectors_value_name">Utilities</td>
+      <td data-testid="tl_etf-holdings_sectors_value_percentage">100.00%</td>
+    """
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    pages = iter([incomplete, complete])
+    monkeypatch.setattr(sector_allocation.requests, "Session", Session)
+    monkeypatch.setattr(
+        sector_allocation, "_tracked_get",
+        lambda *_args, **_kwargs: type("Response", (), {"text": next(pages)})(),
+    )
+
+    result = sector_allocation._fetch_justetf("IE00BM67HQ30")
+
+    assert [(row.sector, row.weight_pct) for row in result.sectors] == [
+        ("Utilities", 100.0),
+    ]

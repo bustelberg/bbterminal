@@ -69,6 +69,7 @@ def compute_concentration(holdings: list[dict], benchmark: str,
     stocks_w, total_all = built["stocks_w"], built["total_all"]
 
     rows = sorted(port.values(), key=lambda r: -r["weight_pct"])
+    benchmark_rows = sorted(bench.values(), key=lambda r: -r["weight_pct"])
     p = _profile([r["weight_pct"] for r in rows])
     b = _profile([r["weight_pct"] for r in bench.values()])
 
@@ -92,6 +93,22 @@ def compute_concentration(holdings: list[dict], benchmark: str,
             #  The index's weight in the same issuer, so a big position can be read as a big BET
             # or merely as a big company. Apple at 6% is not concentration if the index holds 5%.
             "benchmark_pct": bench.get(r["key"], {}).get("weight_pct", 0.0),
+        })
+
+    benchmark_cumulative = 0.0
+    benchmark_top: list[dict] = []
+    for i, r in enumerate(benchmark_rows[:20], 1):
+        benchmark_cumulative += r["weight_pct"]
+        benchmark_top.append({
+            "rank": i,
+            # For an issuer present on both sides, use the book's display name in both tables.
+            # AIRS says "Nvidia" while ACWI says "NVIDIA CORP"; showing both makes the same
+            # company look like two different positions. Index-only names retain the index name.
+            "name": (port.get(r["key"]) or {}).get("name")
+            or r.get("name") or r.get("key") or f"{benchmark} constituent {i}",
+            "weight_pct": r["weight_pct"],
+            "cumulative_pct": benchmark_cumulative,
+            "benchmark_pct": r["weight_pct"],
         })
 
     return {
@@ -119,6 +136,7 @@ def compute_concentration(holdings: list[dict], benchmark: str,
         "benchmark_effective_positions": b["effective_positions"],
 
         "top": top,
+        "benchmark_top": benchmark_top,
         "benchmark_covered_pct": built["coverage"].get("covered_pct"),
         #  When the index side was measured. This view weights the benchmark by market cap,
         # exactly as active share does, so it owes the reader the same date range — a cap read

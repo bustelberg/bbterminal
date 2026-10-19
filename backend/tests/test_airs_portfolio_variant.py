@@ -35,6 +35,10 @@ class TestTheOrderingTrap:
         assert portfolio_variant("BUS_Offensief_FX") == "Offensief"
         assert portfolio_variant("BUS_DUTS_OFF_AFS") == "Offensief"
 
+    @pytest.mark.parametrize("name", ["BUS_IF_DYN", "BUS_IF_FX"])
+    def test_imagine_fund_is_the_reviewed_offensief_profile(self, name):
+        assert portfolio_variant(name) == "Offensief"
+
     @pytest.mark.parametrize("name", [
         "BUS_Bep_offensief_FX",     # the one that breaks under the wrong order
         "BUS_DUTS_BEPOF_AFS",       # BEPOF

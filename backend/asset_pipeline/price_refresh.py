@@ -96,8 +96,9 @@ def post_close_isins() -> set[str]:
 
 
 def watched_isins() -> set[str]:
-    """The bounded universe for the daily job: live holdings plus sold watch rows."""
-    return held_isins() | post_close_isins()
+    """The daily universe: holdings, sold watch rows and BC logbook instruments."""
+    logbook = {isin.strip().upper() for isin in _paged_isins("bc_log_entry") if isin.strip()}
+    return held_isins() | post_close_isins() | logbook
 
 
 def _executions(isins: set[str] | None) -> list[dict]:

@@ -104,6 +104,7 @@ type Row = Axis['rows'][number];
 type ScorecardBlock = {
   bucket: string; weight_pct: number; portfolio_return_pct: number | null;
   benchmark_return_pct: number | null; benchmark_ticker: string | null;
+  benchmark_start_date: string | null; benchmark_end_date: string | null;
   benchmark_start_value: number | null; benchmark_end_value: number | null;
   benchmark_currency: string | null; benchmark_fx_start: number | null; benchmark_fx_end: number | null;
 };
@@ -120,6 +121,8 @@ function isScorecardBlock(value: unknown): value is ScorecardBlock {
     && isNullableNumber(block.portfolio_return_pct)
     && isNullableNumber(block.benchmark_return_pct)
     && (block.benchmark_ticker === null || typeof block.benchmark_ticker === 'string')
+    && (block.benchmark_start_date === null || typeof block.benchmark_start_date === 'string')
+    && (block.benchmark_end_date === null || typeof block.benchmark_end_date === 'string')
     && isNullableNumber(block.benchmark_start_value)
     && isNullableNumber(block.benchmark_end_value)
     && (block.benchmark_currency === null || typeof block.benchmark_currency === 'string')
@@ -187,41 +190,55 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
   // with unknown fields. Validate it before rendering the optional detail.
   const blocks = (r?.block_returns ?? []).filter(isScorecardBlock);
   const shortReturn = (value: number | null) => (value == null ? 'n/a' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`);
-  const weightedTerms = blocks
-    .filter((block) => block.weight_pct > 0 && block.benchmark_return_pct != null)
-    .map((block) => `${block.weight_pct.toFixed(1)}% × ${shortReturn(block.benchmark_return_pct)}`);
-  const weightedResult = weightedTerms.length === blocks.filter((block) => block.weight_pct > 0).length
+  const weightedResult = blocks.every((block) => block.weight_pct === 0 || block.benchmark_return_pct != null)
     ? blocks.reduce((sum, block) => sum + block.weight_pct * Number(block.benchmark_return_pct ?? 0) / 100, 0)
     : null;
-  const priceRange = (block: ScorecardBlock) => block.benchmark_start_value == null || block.benchmark_end_value == null
-    ? 'n/a' : `${block.benchmark_start_value.toFixed(2)} → ${block.benchmark_end_value.toFixed(2)} ${block.benchmark_currency ?? ''}`;
-  const fxRange = (block: ScorecardBlock) => block.benchmark_fx_start == null || block.benchmark_fx_end == null
-    ? 'n/a' : `${block.benchmark_fx_start.toFixed(4)} → ${block.benchmark_fx_end.toFixed(4)}`;
+  const dateLabel = (value: string | null) => value
+    ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+      .format(new Date(`${value}T00:00:00Z`))
+    : 'n/a';
   const blockCalculation = blocks.length ? (
-    <div className="mt-3 space-y-1.5 border-t border-neutral-800/50 pt-3 text-[12px] leading-relaxed text-fg-soft">
-      <div className="grid grid-cols-[minmax(5rem,1fr)_3.5rem_4.5rem_minmax(5rem,1fr)_4.5rem_minmax(9rem,1fr)_minmax(8rem,1fr)] gap-x-2 px-2 text-[10px] font-medium uppercase tracking-wide text-fg-faint">
-        <span>Block</span><span className="text-right">Weight</span><span className="text-right">Portfolio</span><span>Benchmark</span><span className="text-right">EUR return</span><span className="text-right">Price start → end</span><span className="text-right">FX start → end</span>
-      </div>
-      {blocks.map((block) => {
-        const ticker = block.benchmark_ticker;
-        const href = ticker && ticker !== 'Cash'
-          ? `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/`
-          : null;
-        return <div key={block.bucket} className="grid grid-cols-[minmax(5rem,1fr)_3.5rem_4.5rem_minmax(5rem,1fr)_4.5rem_minmax(9rem,1fr)_minmax(8rem,1fr)] items-center gap-x-2 rounded-md bg-elevated/70 px-2 py-1.5">
-          <span className="font-medium text-fg">{block.bucket}</span>
-          <span className="text-right font-mono tabular-nums">{block.weight_pct.toFixed(1)}%</span>
-          <span className="text-right font-mono tabular-nums text-fg">{shortReturn(block.portfolio_return_pct)}</span>
-          {href ? <a href={href} target="_blank" rel="noreferrer" className="w-fit text-accent-300 underline decoration-accent-500/50 underline-offset-2 hover:text-accent-200">{ticker}</a> : <span>Cash</span>}
-          <span className="text-right font-mono tabular-nums text-fg">{shortReturn(block.benchmark_return_pct)}</span>
-          <span className="text-right font-mono tabular-nums text-fg-muted">{priceRange(block)}</span>
-          <span className="text-right font-mono tabular-nums text-fg-muted">{fxRange(block)}</span>
-        </div>;
-      })}
-      <div className="pt-2 text-fg-muted">EUR return = (end price ÷ end FX) ÷ (start price ÷ start FX) - 1</div>
-      <div className="text-fg-muted">
-        Weighted return = {weightedTerms.join(' + ')}
-        {weightedResult != null && ` = ${shortReturn(weightedResult)}`}
-      </div>
+    <div className="mt-3 overflow-x-auto border-t border-neutral-800/50 pt-3 text-[12px] leading-relaxed text-fg-soft">
+      <table className="w-full min-w-[54rem] border-separate border-spacing-y-1 text-left">
+        <thead className="text-[10px] uppercase tracking-wide text-fg-faint">
+          <tr>
+            <th className="px-2 py-1 font-medium">Weight</th>
+            <th className="px-2 py-1 font-medium">Benchmark</th>
+            <th className="px-2 py-1 font-medium">Start date</th>
+            <th className="px-2 py-1 font-medium text-right">Start price</th>
+            <th className="px-2 py-1 font-medium">Currency</th>
+            <th className="px-2 py-1 font-medium">End date</th>
+            <th className="px-2 py-1 font-medium text-right">End price</th>
+            <th className="px-2 py-1 font-medium text-right">Return</th>
+            <th className="px-2 py-1 font-medium text-right">Contribution</th>
+          </tr>
+        </thead>
+        <tbody>
+          {blocks.map((block) => {
+            const ticker = block.benchmark_ticker;
+            const href = ticker ? `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/` : null;
+            const contribution = block.benchmark_return_pct == null
+              ? null : block.weight_pct * block.benchmark_return_pct / 100;
+            return <tr key={block.bucket} className="bg-elevated/70">
+              <td className="rounded-l-md px-2 py-2 font-mono tabular-nums text-fg">{block.weight_pct.toFixed(1)}%</td>
+              <td className="px-2 py-2 font-mono tabular-nums text-fg">{href ? <a href={href} target="_blank" rel="noreferrer" className="text-accent-300 underline decoration-accent-500/50 underline-offset-2 hover:text-accent-200">{ticker}</a> : ticker}</td>
+              <td className="px-2 py-2 text-fg-muted">{dateLabel(block.benchmark_start_date)}</td>
+              <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{block.benchmark_start_value == null ? 'n/a' : block.benchmark_start_value.toFixed(2)}</td>
+              <td className="px-2 py-2 font-mono text-fg-muted">{block.benchmark_currency ?? 'n/a'}</td>
+              <td className="px-2 py-2 text-fg-muted">{dateLabel(block.benchmark_end_date)}</td>
+              <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{block.benchmark_end_value == null ? 'n/a' : block.benchmark_end_value.toFixed(2)}</td>
+              <td className="px-2 py-2 text-right font-mono tabular-nums text-fg">{shortReturn(block.benchmark_return_pct)}</td>
+              <td className="rounded-r-md px-2 py-2 text-right font-mono tabular-nums text-fg">{shortReturn(contribution)}</td>
+            </tr>;
+          })}
+        </tbody>
+        <tfoot>
+          <tr className="font-medium text-fg">
+            <td colSpan={8} className="px-2 pt-2 text-right">Weighted return</td>
+            <td className="px-2 pt-2 text-right font-mono tabular-nums">{shortReturn(weightedResult)}</td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
   ) : undefined;
   const sp = (v: number | null | undefined) => (v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`);
@@ -2064,6 +2081,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
         bucket,
         slice: (slices ?? []).find((s) => s.bucket === bucket),
         rows,
+        // The heading describes the rows immediately below it.  The allocation slice always
+        // uses the looked-through book, while a folded certificate can hide a small cash leg
+        // inside its wrapper; using that slice here made one visible 0.85% cash row read 1.00%.
+        weightNowPct: rows.reduce((total, h) => total + (h.weight_now_pct ?? 0), 0),
         // The class's own return: the Return column below, weighted by what each position was
         // worth when the window OPENED. Never by the Weight (now) column — see `classReturn.ts`.
         //  Cash has no `Beginwaarde` to divide by, and its return is nonetheless known exactly:
@@ -2140,10 +2161,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
         + (sum(sold.map((p) => p.result_eur)) ?? 0)) / (heldCap + (soldCap ?? 0)) * 100
       : null,
   };
-  // Within a cent of a point. The measured case lands at exactly 0.0000pp; the tolerance is for
-  // float noise across ~60 additions, not for a missing leg.
-  const reconciled = grand.contribution != null && realised?.book_ytd_pct != null
-    && Math.abs(grand.contribution - realised.book_ytd_pct) < 0.01;
+  // The backend owns the reconciliation verdict because it knows whether the holdings snapshot
+  // and AIRS's return report cover the same date. A local numerical comparison here used to turn
+  // that explicitly unknown state into a warning about an unexplained position.
+  const reconciliationKnown = realised?.reconciles === true || realised?.reconciles === false;
+  const reconciled = realised?.reconciles === true;
 
   const cmp = (a: BookHolding, b: BookHolding) => {
     // The two text columns sort as text.  An unclassified row sorts LAST either way, like an
@@ -2467,11 +2489,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 <td />
                 <td />
                 <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
-                  {num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%
+                  {num2(g.weightNowPct)}%
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.classRow.weightWhat(copy.bucket(bucketLabel(g.bucket)))}
-                    note={g.slice ? copy.classRow.chartWeightNote : copy.classRow.rowsWeightNote}
-                    how={copy.classRow.weightHow(`${num2(g.slice?.pct ?? g.rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0))}%`)} />
+                    note={copy.classRow.rowsWeightNote}
+                    how={copy.classRow.weightHow(`${num2(g.weightNowPct)}%`)} />
                 </td>
                 {/* The class's own four euro columns, summed — so a reader can see which CLASS
                     made the money, not only which position. */}
@@ -3196,7 +3218,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.info.bookReturnWhat}
                     note={copy.info.bookReturnNote}
-                    how={copy.reconciliation.compareHow(ppt(grand.contribution), fmtRet(realised?.book_ytd_pct), reconciled)} />
+                    how={reconciliationKnown
+                      ? copy.reconciliation.compareHow(ppt(grand.contribution), fmtRet(realised?.book_ytd_pct), reconciled)
+                      : copy.reconciliation.compareUnavailable(
+                        ppt(grand.contribution), fmtRet(realised?.book_ytd_pct),
+                        realised?.holdings_as_of ?? 'an unknown date',
+                        realised?.book_as_of ?? 'an unknown date')} />
                 </td>
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>
                   {ppt(grand.contribution)}
@@ -3212,7 +3239,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
       </div>
       {/* Silence is success; only show this line when the position contributions genuinely fail
           to reconcile to AIRS. Both figures must exist before we can claim a mismatch. */}
-      {grand.contribution != null && realised?.book_ytd_pct != null && !reconciled && (
+      {grand.contribution != null && realised?.book_ytd_pct != null && realised?.reconciles === false && (
         <div className="px-4 py-2 border-t border-neutral-800/40 text-[11px]">
           <span className="text-warn-500">
             {copy.reconciliation.mismatch(ppt(grand.contribution), fmtRet(realised.book_ytd_pct),

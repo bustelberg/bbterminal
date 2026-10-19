@@ -240,7 +240,10 @@ def build_issuer_weights(holdings: list[dict], benchmark: str,
         for row in file_rows:
             aid = int(row["analysis_id"])
             g = grid.get(aid, {})
-            price_members.append({"company_id": aid, "company_name": g.get("gf_company_name") or g.get("name") or row.get("name"),
+            # The ACWI workbook's constituent name is the stable fallback. A local asset-grid
+            # row may have a blank display name; preferring it made the benchmark top-five table
+            # show weights beside empty company cells.
+            price_members.append({"company_id": aid, "company_name": row.get("name") or g.get("gf_company_name") or g.get("name"),
                                   "isin": g.get("isin"), "currency": g.get("currency") or row.get("currency"),
                                   "gurufocus_ticker": row.get("yahoo_symbol"), "market_cap_eur": 1.0})
         lookback = (parsed - timedelta(days=45)).isoformat()

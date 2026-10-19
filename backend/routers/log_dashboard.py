@@ -10,7 +10,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from deps import supabase
+from deps import IN_CHUNK_SIZE, supabase
 from ingest._gurufocus_http import cf_get
 
 router = APIRouter(tags=["log dashboard"])
@@ -18,7 +18,7 @@ router = APIRouter(tags=["log dashboard"])
 
 class LogEntryIn(BaseModel):
     company_name: str = Field(min_length=1, max_length=200)
-    isin: str = Field(min_length=1, max_length=20)
+    isin: str = Field(default="", max_length=20)
     decision: str = Field(min_length=1, max_length=100)
     notes: str = Field(default="", max_length=8000)
     conviction: int = Field(ge=1, le=5)
@@ -27,8 +27,15 @@ class LogEntryIn(BaseModel):
 
 
 def _entries() -> list[dict]:
-    return (supabase.table("bc_log_entry").select("*")
-            .order("meeting_date", desc=True).order("id", desc=True).execute().data or [])
+    entries = (supabase.table("bc_log_entry").select("*")
+               .order("meeting_date", desc=True).order("id", desc=True).execute().data or [])
+    isins = sorted({entry["isin"] for entry in entries if entry.get("isin")})
+    symbols = {}
+    for offset in range(0, len(isins), IN_CHUNK_SIZE):
+        rows = (supabase.table("asset_execution").select("isin,yahoo_symbol")
+                .in_("isin", isins[offset:offset + IN_CHUNK_SIZE]).execute().data or [])
+        symbols.update({row["isin"]: row.get("yahoo_symbol") for row in rows})
+    return [{**entry, "yahoo_symbol": symbols.get(entry.get("isin"))} for entry in entries]
 
 
 @router.get("/api/log-dashboard/entries")
@@ -76,8 +83,37 @@ async def delete_entry(entry_id: int):
     return {"deleted": True}
 
 
+@router.post("/api/log-dashboard/entries/{entry_id}/refresh-price")
+async def refresh_entry_price(entry_id: int):
+    """Fetch prices for one saved decision, preserving an existing Yahoo mapping."""
+    def refresh() -> dict:
+        from asset_pipeline import price_refresh, store  # noqa: PLC0415
+
+        rows = (supabase.table("bc_log_entry").select("*")
+                .eq("id", entry_id).limit(1).execute().data or [])
+        if not rows:
+            raise HTTPException(404, "Log entry not found")
+        entry = rows[0]
+        isin = str(entry.get("isin") or "").strip().upper()
+        if not isin:
+            return {"available": False, "message": "Decision saved. No ISIN supplied; Yahoo prices cannot be fetched."}
+        executions = (supabase.table("asset_execution").select("analysis_id,yahoo_symbol")
+                      .eq("isin", isin).limit(1).execute().data or [])
+        if not executions:
+            store.store_one(isin)
+        elif not executions[0].get("analysis_id") or not executions[0].get("yahoo_symbol"):
+            return {"available": False, "message": "Decision saved. No Yahoo price series is linked to this ISIN."}
+        backfill = price_refresh.backfill_missing({isin})
+        prices = price_refresh.refresh_stale(held_only=False, stale_days=0, isins={isin})
+        if backfill.get("failed") or prices.get("failed"):
+            raise HTTPException(502, "Decision saved, but fetching Yahoo prices failed. Retry using Refresh Yahoo returns.")
+        return {"available": True, "message": "Decision saved. Yahoo prices fetched."}
+
+    return await asyncio.to_thread(refresh)
+
+
 def _yahoo_return_since(isin: str, start: date) -> dict:
-    """Read one already-persisted Yahoo price return without calling Yahoo."""
+    """Calculate a return from the review-date close through the latest stored close."""
     execution = (supabase.table("asset_execution").select("analysis_id")
                  .eq("isin", isin.strip().upper()).limit(1).execute().data or [])
     if not execution or not execution[0].get("analysis_id"):
@@ -89,12 +125,13 @@ def _yahoo_return_since(isin: str, start: date) -> dict:
     latest = (supabase.table("asset_price").select("target_date,close")
               .eq("analysis_id", aid).not_.is_("close", "null")
               .order("target_date", desc=True).limit(1).execute().data or [])
-    if not first or not latest or not first[0].get("close"):
-        return {"available": False, "message": "No Yahoo close is available from that date."}
+    if not first or not latest or first[0].get("close") is None or latest[0].get("close") is None:
+        return {"available": False,
+                "message": f"No Yahoo close is stored on or after the review date {start.isoformat()}."}
     start_row, end_row = first[0], latest[0]
     start_close, end_close = float(start_row["close"]), float(end_row["close"])
     if start_close <= 0:
-        return {"available": False, "message": "The starting Yahoo close is invalid."}
+        return {"available": False, "message": "The review-date Yahoo close is invalid."}
     return {
         "available": True,
         "return_pct": round((end_close / start_close - 1) * 100, 2),
@@ -106,17 +143,88 @@ def _yahoo_return_since(isin: str, start: date) -> dict:
 
 @router.get("/api/log-dashboard/yahoo-return/{isin}")
 async def yahoo_return_since(isin: str, since: str = Query(...)):
-    """Stored Yahoo close-price return from the first close on/after ``since``.
+    """Stored Yahoo price return from the review-date close through the latest close.
 
     Uses the asset pipeline's persisted Yahoo series, so opening a log entry
-    never silently makes a fresh vendor request. This is price return only;
-    dividends are intentionally not implied to be included.
+    never silently makes a fresh vendor request.
     """
     try:
         start = date.fromisoformat(since)
     except ValueError as exc:
         raise HTTPException(422, "since must be an ISO date") from exc
     return await asyncio.to_thread(_yahoo_return_since, isin, start)
+
+
+def _refresh_logbook_job(ctx) -> str:
+    from asset_pipeline import price_refresh  # noqa: PLC0415
+    from jobs import UserFacingJobError  # noqa: PLC0415
+
+    ctx.emit("progress", "Loading logbook decisions...", done=0, total=0)
+    entries = _entries()
+    total = len(entries)
+    available = skipped = failed = 0
+    refreshed: dict[str, str | None] = {}
+    ctx.progress(0, total, f"Found {total} decisions; checking ISINs and Yahoo mappings.")
+    for index, entry in enumerate(entries):
+        ctx.check()
+        name = entry.get("company_name") or entry.get("isin") or "Unnamed instrument"
+        isin = str(entry.get("isin") or "").strip().upper()
+        prefix = f"[{index + 1}/{total}] {name}"
+        def report(message):
+            ctx.emit("progress", f"{prefix}: {message}", done=index, total=total)
+        try:
+            if not isin:
+                skipped += 1
+                ctx.progress(index + 1, total, f"{prefix}: skipped - no ISIN.")
+                continue
+            if isin not in refreshed:
+                report(f"Checking Yahoo mapping for {isin}...")
+                mappings = (supabase.table("asset_execution").select("analysis_id,yahoo_symbol")
+                            .eq("isin", isin).limit(1).execute().data or [])
+                if not mappings or not mappings[0].get("analysis_id") or not mappings[0].get("yahoo_symbol"):
+                    refreshed[isin] = "no Yahoo mapping; link this ISIN in the asset pipeline first"
+                else:
+                    report(f"{mappings[0]['yahoo_symbol']}: checking and fetching missing price history...")
+                    backfill = price_refresh.backfill_missing({isin})
+                    ctx.check()
+                    report(f"{mappings[0]['yahoo_symbol']}: fetching latest Yahoo prices...")
+                    prices = price_refresh.refresh_stale(held_only=False, stale_days=0, isins={isin}, on_progress=report)
+                    if backfill.get("failed") or prices.get("failed") or prices.get("skipped") or backfill.get("skipped"):
+                        raise RuntimeError("Yahoo price fetch failed or was deferred; please retry")
+                    refreshed[isin] = None
+            if refreshed[isin]:
+                skipped += 1
+                outcome = f"unavailable - {refreshed[isin]}."
+            elif not entry.get("review_on"):
+                skipped += 1
+                outcome = "return unavailable - no review date."
+            else:
+                report("Reading latest stored Yahoo close...")
+                result = _yahoo_return_since(isin, date.fromisoformat(str(entry["review_on"])[:10]))
+                if result.get("available"):
+                    available += 1
+                    outcome = f"{result['return_pct']:+g}% from {result['start_date']} to {result['as_of']}."
+                else:
+                    skipped += 1
+                    outcome = f"return unavailable - {result.get('message', 'no prices available')}"
+            ctx.progress(index + 1, total, f"{prefix}: {outcome}")
+        except Exception as exc:
+            from jobs import JobCancelled  # noqa: PLC0415
+            if isinstance(exc, JobCancelled):
+                raise
+            failed += 1
+            ctx.progress(index + 1, total, f"{prefix}: FAILED - {exc}")
+    summary = f"{available} returns available; {skipped} unavailable/skipped; {failed} failed. {total} decisions checked."
+    if failed:
+        raise UserFacingJobError(summary)
+    return summary
+
+
+@router.post("/api/log-dashboard/yahoo-returns/refresh/job")
+async def refresh_yahoo_returns_job():
+    from jobs import start  # noqa: PLC0415
+    job, reused = start("log-yahoo-returns", "BC logbook", _refresh_logbook_job)
+    return {"job_id": job.id, "already_running": reused}
 
 
 @router.post("/api/log-dashboard/yahoo-returns/refresh")
@@ -129,7 +237,8 @@ async def refresh_yahoo_returns():
     def _refresh() -> dict:
         from asset_pipeline.price_refresh import backfill_missing, refresh_stale  # noqa: PLC0415
 
-        dated = [entry for entry in _entries() if entry.get("review_on")]
+        dated = [entry for entry in _entries()
+                 if entry.get("review_on") and str(entry.get("isin") or "").strip()]
         isins = {str(entry.get("isin") or "").strip().upper() for entry in dated}
         isins.discard("")
         # An already-resolved entry can legitimately have no historical rows

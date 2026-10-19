@@ -164,8 +164,8 @@ const en = {
     blendNote: (count: number) => `${count} routes in, each valued by the book that holds it, weighted by opening value`,
     blendHow: (math: string) => `Σ (each route’s share of this position × that route’s own return)\n\n${math}`,
     yfReturnHow: (pct: string, from: string) => `our own EUR close series — no AIRS book values this row\n\n${pct} since ${from}`,
-    airsReturnNote: (valuedBy?: string) => `${valuedBy ? `${valuedBy}: ` : ''}AIRS price and currency result plus net dividends attributable to the remaining shares; later sales can reduce this dividend leg, while later purchases never increase it`,
-    airsReturnHow: '(AIRS price result + AIRS currency result + net dividend × min(1, remaining shares ÷ shares on payment date)) ÷ AIRS Beginwaarde',
+    airsReturnNote: (valuedBy?: string) => `${valuedBy ? `${valuedBy}: ` : ''}The exact AIRS EUR value change plus net dividends attributable to the remaining shares; later sales can reduce this dividend leg, while later purchases never increase it.`,
+    airsReturnHow: '(AIRS current EUR value − AIRS Beginwaarde + net dividend × min(1, remaining shares ÷ shares on payment date)) ÷ AIRS Beginwaarde. If AIRS cannot align dividends, its reported Resultaat in % is shown instead.',
     routeTitle: (label: string, bookPct: string, value: string, rowPct?: string) => `${label}: ${bookPct}% of the book · ${value}${rowPct ? ` · ${rowPct}% of this position` : ''}`,
   },
   classRow: {
@@ -195,6 +195,7 @@ const en = {
   },
   reconciliation: {
     compareHow: (contribution: string, book: string, agrees: boolean) => `AIRS's own cumulatief_rendement against the Contribution total\n\n${contribution} from these rows vs ${book} from AIRS — they ${agrees ? 'agree' : 'do NOT agree'}`,
+    compareUnavailable: (contribution: string, book: string, holdingsDate: string, bookDate: string) => `Contribution total cannot be reconciled to AIRS yet\n\n${contribution} from positions valued ${holdingsDate} vs ${book} from AIRS through ${bookDate}. The dates differ, so this is not a missing-position check.`,
     mismatch: (sum: string, book: string, residual: string) => ` Contribution adds to ${sum} against AIRS's ${book}; ${residual} of the year is not explained by these rows.`,
   },
   /*  IT NAMES THE COUNTRIES, AND THE OLD COPY NAMED THE WRONG CAUSE. It used to say "the rest
@@ -368,8 +369,8 @@ const nl: AnalyseCopy = {
     blendNote: (count) => `${count} routes naar de positie, elk gewaardeerd door het boek dat deze aanhoudt en gewogen naar beginwaarde`,
     blendHow: (math) => `Σ (aandeel van elke route in deze positie × eigen rendement van die route)\n\n${math}`,
     yfReturnHow: (pct, from) => `onze eigen EUR-slotkoersreeks — geen AIRS-boekwaarden voor deze rij\n\n${pct} sinds ${from}`,
-    airsReturnNote: (valuedBy) => `${valuedBy ? `${valuedBy}: ` : ''}AIRS koers- en valutaresultaat plus nettodividend dat aan de resterende aandelen toekomt; latere verkopen kunnen dit dividenddeel verlagen, latere aankopen verhogen het nooit`,
-    airsReturnHow: '(AIRS koersresultaat + AIRS valutaresultaat + nettodividend × min(1, resterende aandelen ÷ aandelen op betaaldatum)) ÷ AIRS Beginwaarde',
+    airsReturnNote: (valuedBy) => `${valuedBy ? `${valuedBy}: ` : ''}Het exacte AIRS-koers- en valutaresultaat in EUR plus nettodividend dat aan de resterende aandelen toekomt; latere verkopen kunnen dit dividenddeel verlagen, latere aankopen verhogen het nooit.`,
+    airsReturnHow: '(huidige AIRS-waarde in EUR − AIRS Beginwaarde + nettodividend × min(1, resterende aandelen ÷ aandelen op betaaldatum)) ÷ AIRS Beginwaarde. Als AIRS het dividend niet kan uitlijnen, tonen we het gerapporteerde Resultaat in %.',
     routeTitle: (label, bookPct, value, rowPct) => `${label}: ${bookPct}% van het boek · ${value}${rowPct ? ` · ${rowPct}% van deze positie` : ''}`,
   },
   classRow: {
@@ -399,6 +400,7 @@ const nl: AnalyseCopy = {
   },
   reconciliation: {
     compareHow: (contribution, book, agrees) => `AIRS' eigen cumulatief_rendement tegenover het totaal Bijdrage\n\n${contribution} uit deze rijen versus ${book} uit AIRS — ze ${agrees ? 'komen overeen' : 'komen NIET overeen'}`,
+    compareUnavailable: (contribution, book, holdingsDate, bookDate) => `Het totaal Bijdrage kan nog niet met AIRS worden afgestemd\n\n${contribution} uit posities gewaardeerd op ${holdingsDate} versus ${book} uit AIRS tot ${bookDate}. De datums verschillen, dus dit is geen controle op ontbrekende posities.`,
     mismatch: (sum, book, residual) => ` Bijdrage telt op tot ${sum} tegenover AIRS' ${book}; ${residual} van het jaar wordt niet door deze rijen verklaard.`,
   },
   coverageWarning: (priced, total, pct, missing) => {

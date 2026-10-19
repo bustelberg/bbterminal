@@ -793,8 +793,6 @@ def _apply_book_source(result: dict, benchmark_label: str) -> None:
 _SCORECARD_BLOCKS = (
     ("Stocks", ("Equity", "ETF Equity"), "ACWI"),
     ("Bonds", ("Bonds",), "BONDS"),
-    ("Alternatives", ("Alternatives",), "ALTERNATIVES"),
-    ("Cash", ("Cash",), None),
 )
 
 _WEIGHTED_BENCHMARK_PROFILES_PATH = (
@@ -826,32 +824,34 @@ def _scorecard_block_returns(allocation: list[dict], bucket_returns: dict[str, f
     from routers._benchmark_etf import etf_returns  # noqa: PLC0415
 
     policy = _weighted_benchmark_profiles().get(variant or "")
-    scorecard_blocks = (
-        tuple(block for block in _SCORECARD_BLOCKS if block[0] in policy)
-        if policy else _SCORECARD_BLOCKS
-    )
+    # This is a policy benchmark, not a reconstruction of the book's current allocation.
+    # A product without a reviewed stock/bond policy has no weighted benchmark to show.
+    if not policy:
+        return {"block_returns": [], "benchmark_ytd_pct": None}
+    scorecard_blocks = _SCORECARD_BLOCKS
     proxy_labels = [proxy for _name, _buckets, proxy in scorecard_blocks if proxy]
     proxy = {label: etf_returns(label, [anchor]).get(anchor) for label in proxy_labels} if anchor else {}
     blocks: list[dict] = []
     for name, buckets, proxy_label in scorecard_blocks:
         slices = [s for s in allocation if s.get("bucket") in buckets]
-        weight = policy[name] if policy else sum(float(s.get("pct") or 0.0) for s in slices)
+        weight = policy[name]
         # A sleeve can consist of direct and ETF equities. Its return is weighted only over the
         # constituent slices that have a measured return; unknown is kept visible as null.
         measured = [(float(s.get("pct") or 0.0), bucket_returns.get(s.get("bucket"))) for s in slices]
         known = [(w, r) for w, r in measured if r is not None]
-        portfolio_return = (0.0 if name == "Cash" and weight else
-                            (sum(w * float(r) for w, r in known) / sum(w for w, _r in known)
-                             if known and sum(w for w, _r in known) > 0 else None))
-        benchmark_return = 0.0 if name == "Cash" and weight else ((proxy.get(proxy_label) or {}).get("eur_pct") if proxy_label else None)
+        portfolio_return = (sum(w * float(r) for w, r in known) / sum(w for w, _r in known)
+                            if known and sum(w for w, _r in known) > 0 else None)
+        benchmark_return = (proxy.get(proxy_label) or {}).get("eur_pct")
         blocks.append({"bucket": name, "weight_pct": weight, "portfolio_return_pct": portfolio_return,
                        "benchmark_return_pct": benchmark_return,
-                       "benchmark_ticker": (proxy.get(proxy_label) or {}).get("ticker") if proxy_label else "Cash",
-                       "benchmark_start_value": (proxy.get(proxy_label) or {}).get("start_price") if proxy_label else 1.0,
-                       "benchmark_end_value": (proxy.get(proxy_label) or {}).get("end_price") if proxy_label else 1.0,
-                       "benchmark_currency": (proxy.get(proxy_label) or {}).get("currency") if proxy_label else "EUR",
-                       "benchmark_fx_start": (proxy.get(proxy_label) or {}).get("fx_start") if proxy_label else 1.0,
-                       "benchmark_fx_end": (proxy.get(proxy_label) or {}).get("fx_end") if proxy_label else 1.0})
+                       "benchmark_ticker": (proxy.get(proxy_label) or {}).get("ticker"),
+                       "benchmark_start_date": (proxy.get(proxy_label) or {}).get("start_date"),
+                       "benchmark_end_date": (proxy.get(proxy_label) or {}).get("as_of"),
+                       "benchmark_start_value": (proxy.get(proxy_label) or {}).get("start_price"),
+                       "benchmark_end_value": (proxy.get(proxy_label) or {}).get("end_price"),
+                       "benchmark_currency": (proxy.get(proxy_label) or {}).get("currency"),
+                       "benchmark_fx_start": (proxy.get(proxy_label) or {}).get("fx_start"),
+                       "benchmark_fx_end": (proxy.get(proxy_label) or {}).get("fx_end")})
     def composite(key: str) -> float | None:
         usable = [b for b in blocks if b["weight_pct"] > 0 and b.get(key) is not None]
         covered = sum(b["weight_pct"] for b in usable)
@@ -1628,10 +1628,11 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
                  if a.get("model_portfolio_id") == portfolio_id), None)
     if not link:
         return None
-    # Some AIRS accounts have no asset_grid rows at all.  AITopSelectie OFF DYN is one: its
-    # twenty equity ISINs are valid and present in the paired model, but the grid lookup returns
-    # nothing, so the account resolver quite reasonably labels them Unclassified.  The paired
-    # model's category is the authoritative fallback for the book view in that case.
+    # The paired model supplies AIRS's intended asset class for its own positions.  The grid is
+    # still authoritative for sector, region and currency, but it can carry a broad wrapper
+    # class (Mint Tower is an ``equity`` fund there while AIRS explicitly marks it ``ALTBEL``).
+    # Use the model class wherever it is known so the book allocation says what AIRS says it
+    # holds; fall back to the resolver/grid only for instruments outside that model.
     model_categories = {
         p.get("isin"): _class_from_categorie(p.get("categorie"))
         for p in ref_positions_for(link["model_portfolio_id"])
@@ -1714,9 +1715,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         # `resolve_account_isins` normally supplies this, but older/cached rows and test/import
         # callers may only carry the raw instrument fields. Never let a missing persisted bucket
         # turn a plainly identifiable stock into Unclassified in the allocation bar.
-        bucket = r.get("bucket")
-        if bucket == UNKNOWN_BUCKET:
-            bucket = model_categories.get(isin) or bucket
+        bucket = model_categories.get(isin) or r.get("bucket")
         if not bucket:
             bucket = classify_bucket(None, _is_fund(grow, r.get("holding_name") or ""),
                                     isin, r.get("holding_name") or "", grow)

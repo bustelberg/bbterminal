@@ -77,7 +77,8 @@ function LoginForm() {
 
     setLoading(true)
 
-    if (mode === 'signup') {
+    try {
+      if (mode === 'signup') {
       // Send magic link — user clicks it, confirms ownership, then sets a password
       const { error } = await supabase.auth.signInWithOtp({
         email,
@@ -113,9 +114,15 @@ function LoginForm() {
         router.push('/')
         router.refresh()
       }
+      }
+    } catch (err) {
+      // Supabase throws a TypeError when its local gateway is temporarily unavailable. Keep that
+      // transport detail out of the page and let the person retry after the service reconnects.
+      console.warn('[login] authentication request could not reach Supabase:', err)
+      setError('The sign-in service is temporarily unavailable. Please try again in a moment.')
+    } finally {
+      setLoading(false)
     }
-
-    setLoading(false)
   }
 
   const signin = mode === 'signin'

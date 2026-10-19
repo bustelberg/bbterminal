@@ -508,6 +508,7 @@ def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
     return {
         "label": label,
         "ticker": ticker,
+        "currency": ccy,
         "source": "etf",
         "points": points,
         "return_pct": points[-1]["cum_pct"],

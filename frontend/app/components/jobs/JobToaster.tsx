@@ -35,6 +35,28 @@ const JOB_COPY: Record<Lang, {
 export function friendlyJobMessage(summary: string | null, lang: Lang): string | null {
   if (!summary) return summary;
   const plain = summary.replace(/\s(?:\u2014|\u2013)\s/g, '. ');
+  // AIRS sends structured scraper receipts such as "Rendement: ok. stored (0.3s)". They are
+  // useful in the job log, but a person watching Refresh all only needs to know what just changed.
+  const report = plain.match(/^(?:.+?\s+\u00b7\s+)?(Rendement|Vermogensoverzicht|Mutaties|Transacties|Model):\s*(ok|no_data|failed)(?:\..*)?$/i);
+  if (report) {
+    const key = report[1].toLowerCase();
+    const status = report[2].toLowerCase();
+    const en = {
+      rendement: 'returns', vermogensoverzicht: 'portfolio holdings', mutaties: 'cash movements',
+      transacties: 'transactions', model: 'model weights',
+    }[key] ?? report[1].toLowerCase();
+    const nl = {
+      rendement: 'rendement', vermogensoverzicht: 'portefeuilleposities', mutaties: 'kasmutaties',
+      transacties: 'transacties', model: 'modelwegingen',
+    }[key] ?? report[1].toLowerCase();
+    if (status === 'ok') return lang === 'nl' ? `De ${nl} zijn bijgewerkt.` : `The ${en} have been updated.`;
+    if (status === 'no_data') return lang === 'nl'
+      ? `AIRS heeft geen ${nl} voor deze portefeuille.`
+      : `AIRS has no ${en} for this portfolio.`;
+    return lang === 'nl'
+      ? `De ${nl} konden niet worden bijgewerkt.`
+      : `We could not update the ${en}.`;
+  }
   const cancelled = plain.match(/^cancelled before (.+?)\.\s*nothing was read\.?$/i);
   if (cancelled) {
     return lang === 'nl'
@@ -42,6 +64,14 @@ export function friendlyJobMessage(summary: string | null, lang: Lang): string |
       : `Cancelled before ${cancelled[1]}. No changes were made.`;
   }
   return plain;
+}
+
+/** Refresh all has two necessary AIRS stages: account data, then model compositions. Present them
+ * as one refresh rather than two unrelated cards. The model stage is the active continuation. */
+export function bundlePortfolioRefreshJobs(jobs: JobToast[]): JobToast[] {
+  return jobs.some((job) => job.kind === 'airs.models.scan')
+    ? jobs.filter((job) => job.kind !== 'airs.vermogen.refresh')
+    : jobs;
 }
 
 /**
@@ -74,7 +104,7 @@ export default function JobToaster() {
       {/*  KEYED ON `id:status`, SO GOING STALE REMOUNTS THE CARD. That is what lets the countdown
           be a `useState` initialiser instead of an effect — the card that appears when a job
           finishes is a new card, already armed with the right number of seconds. */}
-      {jobs.map((j) => <JobCard key={`${j.id}:${j.status}`} job={j} lang={lang} />)}
+      {bundlePortfolioRefreshJobs(jobs).map((j) => <JobCard key={`${j.id}:${j.status}`} job={j} lang={lang} />)}
     </div>
   );
 }
@@ -122,9 +152,16 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
   const busy = isAirsBusy(job);
   const unavailable = unavailableNotice(job.summary);
   const fundamentals = job.kind.startsWith('fundamentals.');
+  const portfolioRefresh = job.kind === 'airs.models.scan';
   const humanSummary = friendlyJobMessage(job.summary, lang);
   const humanMessage = friendlyJobMessage(job.message, lang);
-  const displayMessage = fundamentals
+  const displayMessage = portfolioRefresh
+    ? (job.status === 'done'
+        ? (lang === 'nl' ? 'De portefeuilles zijn bijgewerkt.' : 'The portfolios have been updated.')
+        : job.status === 'failed'
+          ? (lang === 'nl' ? 'Een deel van de portefeuilles kon niet worden bijgewerkt.' : 'Some portfolio data could not be updated.')
+          : (lang === 'nl' ? 'Portefeuillemodellen bijwerken…' : 'Updating portfolio models…'))
+    : fundamentals
     ? fundamentalJobMessage(humanSummary || humanMessage)
     : (humanSummary || humanMessage);
   const tone = unavailable || busy ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
@@ -165,6 +202,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
    */
   const [ms, setMs] = useState<number | null>(linger ? linger * 1000 : null);
   const [hover, setHover] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   // Derived, not stored: "at zero" and "fading" are the same fact, and holding it twice is how the
   // two come to disagree.
   const leaving = ms !== null && ms <= 0;
@@ -200,7 +238,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
                   ${leaving ? 'opacity-0 translate-x-4' : 'opacity-100 translate-x-0'}`}>
       <div className="flex items-start gap-2">
         <span className="min-w-0 flex-1 break-words text-xs font-medium text-fg-strong">
-          {job.title}
+          {portfolioRefresh ? (lang === 'nl' ? 'Portefeuilles verversen' : 'Refreshing portfolios') : job.title}
         </span>
         {/*  WHAT IT COST, AND ONLY WHEN IT COST SOMETHING. GuruFocus calls come out of a finite
             monthly quota, unlike our own database reads — so a reader deciding whether to press
@@ -240,11 +278,11 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
           empty because it is empty, not because an animation was given long enough to get there.
           The transition is one TICK, so it smooths the 100ms steps without ever lagging behind. */}
       <div className="h-1 rounded bg-overlay/10 overflow-hidden">
-        <div className={`h-full ${tone.bar} ${hover ? '' : 'transition-[width] ease-linear'}`}
+        <div className={`h-full ${tone.bar} ${running && pct === null ? 'animate-pulse opacity-40' : ''} ${hover ? '' : 'transition-[width] ease-linear'}`}
           style={{
             transitionDuration: `${TICK_MS}ms`,
             width: running
-              ? (pct === null ? '35%' : `${pct}%`)
+              ? (pct === null ? '100%' : `${pct}%`)
               : `${linger && ms !== null ? (ms / (linger * 1000)) * 100 : 100}%`,
           }} />
       </div>
@@ -281,6 +319,22 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
           {displayMessage}
         </p>
       )}
+
+      {job.details?.length ? (
+        <div>
+          <button type="button" onClick={() => setShowDetails((visible) => !visible)}
+            className="text-[11px] text-accent-400 hover:text-accent-300">
+            {showDetails ? (lang === 'nl' ? 'Details verbergen' : 'Hide details')
+              : (lang === 'nl' ? 'Details bekijken' : 'View details')}
+          </button>
+          {showDetails && (
+            <ol role="log" aria-live="polite"
+              className="mt-1.5 max-h-48 space-y-1 overflow-y-auto rounded-lg border border-neutral-800/60 bg-page/50 p-2 text-[11px] text-fg-muted">
+              {job.details.map((line, index) => <li key={`${index}:${line}`}>{line}</li>)}
+            </ol>
+          )}
+        </div>
+      ) : null}
 
       <div className="flex justify-end gap-2">
         {running && job.cancellable !== false && !job.cancelRequested && (

@@ -120,6 +120,24 @@
       "look_through_target": null
     },
     {
+      "nickname": "Bustelberg Imagine Fund",
+      "airs_names": [
+        "BUS_IF_DYN",
+        "BUS_IF_FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
+      "nickname": "Bustelberg 2.0 Offensief",
+      "airs_names": [
+        "BUS_2.0_ OFF_DYN",
+        "BUS_2.0_OFF_FX"
+      ],
+      "holding_aliases": [],
+      "look_through_target": null
+    },
+    {
       "nickname": "FamilieTopSelectie Beperkt Offensief",
       "airs_names": [
         "BUS_FTS_BEPOFF_DYN",

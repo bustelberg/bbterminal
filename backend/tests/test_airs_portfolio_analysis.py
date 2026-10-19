@@ -921,6 +921,21 @@ class TestBookWeighting:
         out = pa._book_port_items(7, {})
         assert out["alloc_items"] == [(100.0, "Equity")]
 
+    def test_paired_model_category_overrides_a_broad_grid_wrapper_class(self, monkeypatch):
+        # Mint Tower's grid row says ``equity`` because it is a fund wrapper, while the
+        # corresponding AIRS model position explicitly says ALTBEL.  Allocation must retain
+        # AIRS's intended Alternatives class instead of silently filing it under Equity.
+        self._wire(monkeypatch, rows=[
+            {"isin": "MINT", "current_value_eur": 100, "bucket": "Equity"},
+        ])
+        monkeypatch.setattr(pa, "ref_positions_for", lambda _id: [
+            {"isin": "MINT", "categorie": "ALTBEL"},
+        ])
+        out = pa._book_port_items(7, {})
+        assert out["alloc_items"] == [(100.0, "Alternatives")]
+        mint = next(h for h in out["holdings_detail"] if h["isin"] == "MINT")
+        assert mint["bucket"] == "Alternatives"
+
     def test_cash_is_its_own_bucket(self, monkeypatch):
         self._wire(monkeypatch, rows=[
             {"isin": "US1", "current_value_eur": 900, "asset_class": "Equity"},
