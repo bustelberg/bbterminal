@@ -195,7 +195,7 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
     sleeves = {
         name: etf_return_series(proxy, anchor, dates)
         for name, proxy in _WEIGHTED_BENCHMARK_SLEEVES.items()
-        if proxy and recognised[name] > 0
+        if proxy
     }
     # A benchmark is only comparable when every policy sleeve is fully observed.
     if any(not series for series in sleeves.values()):
@@ -239,6 +239,7 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
             "start_price": series.get("start_price"),
             "end_date": series.get("as_of"),
             "end_price": series.get("end_price"),
+            "currency": series.get("currency"),
             "return_pct": series.get("return_pct"),
         } for name, series in sleeves.items()],
     }
@@ -338,6 +339,7 @@ def value_series(portefeuille: str, benchmark_label: str | None = None,
         "benchmark_returns": benchmark.get("points") or [],
         "benchmark_return_pct": benchmark.get("return_pct"),
         "benchmark_as_of": benchmark.get("as_of"),
+        "benchmark_components": benchmark.get("components") or [],
         #  So the chart can say what it is looking at without counting. `first`/`last` are the span
         # we actually hold, which is the answer to "why does this start in June".
         "first_date": points[0]["date"] if points else None,

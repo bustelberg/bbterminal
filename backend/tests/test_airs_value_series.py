@@ -250,6 +250,29 @@ class TestTheReturnIsAirsOwnAndStartsTheYearAtZero:
         assert out["benchmark"] == "Weighted benchmark return (YTD) €"
         assert [p["cum_pct"] for p in out["benchmark_returns"]] == [0.0, 6.8, 13.6]
         assert out["benchmark_return_pct"] == 13.6
+        assert [component["name"] for component in out["benchmark_components"]] == ["Stocks", "Bonds"]
+
+    def test_zero_weight_bond_proxy_is_still_in_the_provenance(self, store, monkeypatch):
+        from routers import _benchmark_etf as benchmark_etf
+
+        m, seed = store
+        seed("airs_performance", [_perf("B", "2026-01-31", beginvermogen=1e6,
+                                         eindvermogen=1.01e6, cumulatief_rendement=1.0)])
+
+        def benchmark(label, _anchor, dates):
+            return {"label": label, "ticker": {"ACWI": "ACWI", "BONDS": "AGGH.AS"}[label],
+                    "currency": {"ACWI": "USD", "BONDS": "EUR"}[label],
+                    "points": [{"date": day, "cum_pct": float(i), "price_date": day}
+                               for i, day in enumerate(dates)],
+                    "return_pct": 1.0, "start_date": dates[0], "start_price": 10.0,
+                    "as_of": dates[-1], "end_price": 10.1}
+
+        monkeypatch.setattr(benchmark_etf, "etf_return_series", benchmark)
+        out = m.value_series("B", "SP500", {"Stocks": 100.0, "Bonds": 0.0})
+
+        assert [(component["name"], component["weight_pct"], component["currency"])
+                for component in out["benchmark_components"]] == [
+            ("Stocks", 100.0, "USD"), ("Bonds", 0.0, "EUR")]
 
     def test_weighted_benchmark_rejects_non_policy_sleeves(self, store, monkeypatch):
         m, seed = store

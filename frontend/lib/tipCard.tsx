@@ -147,7 +147,7 @@ export function Legend({ items }: { items: readonly FormulaSymbol[] }) {
   );
 }
 
-export function AspectCard({ what, where, when, how, worked, legend }: {
+export function AspectCard({ what, where, when, how, worked, legend, calculation }: {
   what: React.ReactNode;
   where?: React.ReactNode;
   when?: React.ReactNode;
@@ -156,6 +156,8 @@ export function AspectCard({ what, where, when, how, worked, legend }: {
   worked?: string;
   /** What each symbol in `worked` stands for. See {@link Legend}. */
   legend?: readonly FormulaSymbol[];
+  /** A caller-designed table or audit trail for a derived value. */
+  calculation?: React.ReactNode;
 }) {
   // The body comes from the caller's translated copy.  These four structural labels used to be
   // hard-coded English, producing a Dutch Deep Valuation explanation under English headings.
@@ -178,6 +180,7 @@ export function AspectCard({ what, where, when, how, worked, legend }: {
           {legend?.length ? <Legend items={legend} /> : null}
         </span>
       ) : null}
+      {calculation}
     </TipCard>
   );
 }

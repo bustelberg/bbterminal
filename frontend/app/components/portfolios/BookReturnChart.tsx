@@ -67,6 +67,11 @@ import { useAnalyseCopy } from './analyseCopy';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
 
 type WeightedBenchmarkBlock = { bucket: string; weight_pct: number };
+type WeightedBenchmarkComponent = {
+  name: string; weight_pct: number; ticker: string | null; start_date: string | null;
+  start_price: number | null; end_date: string | null; end_price: number | null;
+  currency: string | null; return_pct: number | null;
+};
 
 const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[], variant?: string | null) => {
   // Policy benchmark weights are an explicit product promise, not a reflection
@@ -400,6 +405,42 @@ export default function BookReturnChart(
   if (points[0]?.date !== anchorDate) points.unshift({ ...all[0], date: anchorDate, cum_pct: 0 });
   if (points.at(-1)?.date !== last.date) points.push(last);
   const first = points[0] ?? last;
+  const benchmarkComponents = (data as BookValueSeries & {
+    benchmark_components?: WeightedBenchmarkComponent[];
+  }).benchmark_components ?? [];
+  const dateLabel = (value: string | null) => value
+    ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+      .format(new Date(`${value}T00:00:00Z`))
+    : 'n/a';
+  const weightedBenchmarkReturn = benchmarkComponents.every((component) =>
+    component.weight_pct === 0 || component.return_pct != null)
+    ? benchmarkComponents.reduce((sum, component) => sum + component.weight_pct * Number(component.return_pct ?? 0) / 100, 0)
+    : null;
+  const weightedBenchmarkTable = benchmarkComponents.length ? (
+    <div className="mt-3 overflow-x-auto text-[12px] leading-relaxed text-fg-soft">
+      <table className="w-full min-w-[54rem] border-separate border-spacing-y-1 text-left">
+        <thead className="text-[10px] uppercase tracking-wide text-fg-faint"><tr>
+          <th className="px-2 py-1 font-medium">Weight</th><th className="px-2 py-1 font-medium">Benchmark</th>
+          <th className="px-2 py-1 font-medium">Start date</th><th className="px-2 py-1 font-medium text-right">Start price</th>
+          <th className="px-2 py-1 font-medium">Currency</th><th className="px-2 py-1 font-medium">End date</th>
+          <th className="px-2 py-1 font-medium text-right">End price</th><th className="px-2 py-1 font-medium text-right">Return</th>
+          <th className="px-2 py-1 font-medium text-right">Contribution</th>
+        </tr></thead>
+        <tbody>{benchmarkComponents.map((component) => {
+          const contribution = component.return_pct == null ? null : component.weight_pct * component.return_pct / 100;
+          return <tr key={component.name} className="bg-elevated/70">
+            <td className="rounded-l-md px-2 py-2 font-mono tabular-nums text-fg">{component.weight_pct.toFixed(1)}%</td>
+            <td className="px-2 py-2 font-mono text-fg"><a href={`https://finance.yahoo.com/quote/${encodeURIComponent(component.ticker ?? component.name)}/`} target="_blank" rel="noreferrer" className="text-accent-300 underline decoration-accent-500/50 underline-offset-2 hover:text-accent-200">{component.ticker ?? component.name}</a></td>
+            <td className="px-2 py-2 text-fg-muted">{dateLabel(component.start_date)}</td><td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{component.start_price?.toFixed(2) ?? 'n/a'}</td>
+            <td className="px-2 py-2 font-mono text-fg-muted">{component.currency ?? 'n/a'}</td><td className="px-2 py-2 text-fg-muted">{dateLabel(component.end_date)}</td>
+            <td className="px-2 py-2 text-right font-mono tabular-nums text-fg-muted">{component.end_price?.toFixed(2) ?? 'n/a'}</td><td className="px-2 py-2 text-right font-mono tabular-nums text-fg">{pct(component.return_pct)}</td>
+            <td className="rounded-r-md px-2 py-2 text-right font-mono tabular-nums text-fg">{pct(contribution)}</td>
+          </tr>;
+        })}</tbody>
+        <tfoot><tr className="font-medium text-fg"><td colSpan={8} className="px-2 pt-2 text-right">Weighted return</td><td className="px-2 pt-2 text-right font-mono tabular-nums">{pct(weightedBenchmarkReturn)}</td></tr></tfoot>
+      </table>
+    </div>
+  ) : undefined;
   const benchmarkByDate = new Map(
     (data.benchmark_returns ?? []).map((p) => [p.date, p.cum_pct] as const));
   const rows = points.map((p) => ({ ...p, t: ts(p.date),
@@ -445,21 +486,12 @@ export default function BookReturnChart(
             the book's value and that date's holding count are on every hover. What the header
             carries now is the one figure this chart exists to state, and a chip the reader has to
             step over to reach it is a cost with no reader. */}
-        {/*  NO `how` AND NO `worked` (2026-09-03, on request: "it's simply copied straight from
-            AIRS, no calculation needed"). This figure is READ — `cumulatief_rendement`, one column,
-            one row — so a chained-product formula under it described an arithmetic nobody here
-            performs, and the house rule already said so: no worked line over raw data. What is
-            left is what / where / when, which is the whole of the Active Share shape when there is
-            no maths to typeset.
-             AND EVERY LIVE FIGURE IS BADGED (`v()`). The dates were interpolated bare, so a
-            reader scanning the card could not tell this book's window from the sentence around it
-            — which is the one question badging exists to answer, and the only reason the card
-            carries them. The return itself is not repeated here: it is set in the header above. */}
-        <InfoTip className="ml-auto" content={<AspectCard
-          what="What the book has returned so far this year, from 0% at the start of it."
-          where={`AIRS's own Rendementen sheet — the same figure as the Return tile beside this, `
-            + `over ${v(all.length - 1)} published points.`}
-          when={`${v(data.return_from ?? first.date)} to ${v(last.date)}.`} />} />
+        {/* AIRS publishes this cumulative return directly. The card names its start and end values, rather than inventing a formula. */}
+        <InfoTip wide className="ml-auto" content={<AspectCard
+          what="Weighted stock-and-bond benchmark return for this risk profile."
+          where="Uses the fixed policy mix for the risk profile, not the portfolio’s current allocation."
+          how="ACWI and the bond proxy are combined at the configured risk-profile weights; alternatives and cash are excluded."
+          calculation={weightedBenchmarkTable} />} />
       </div>
       {/* The hover is deliberately docked below the plot. It may overlay the hint below while
           open, rather than reserving permanent empty space for a transient tooltip. */}

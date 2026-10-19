@@ -1826,6 +1826,8 @@ class BookValueSeries(BaseModel):
     benchmark_returns: list[BenchmarkReturnPoint] = []
     benchmark_return_pct: float | None = None
     benchmark_as_of: str | None = None
+    #: The Stocks/Bonds proxy marks behind a weighted benchmark, for the chart's provenance table.
+    benchmark_components: list[dict] = []
     first_date: str | None = None
     last_date: str | None = None
     #: The first date we hold a snapshot for — where the series stops being AIRS's and becomes ours.
