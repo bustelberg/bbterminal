@@ -178,8 +178,8 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     ),
     JobSpec(
         id="asset_price_refresh",
-        label="Yahoo price refresh (held instruments)",
-        fills="asset_price for every instrument held in a model portfolio",
+        label="Yahoo price refresh (watched instruments)",
+        fills="asset_price for holdings, post-sale watchlists and BC logbook instruments with Yahoo mappings",
         cadence="Every day, 06:00 UTC (+ on startup)",
         trigger={"day_of_week": "mon-sun", "hour": 6, "minute": 0, "timezone": "UTC"},
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},

@@ -77,3 +77,16 @@ def test_create_and_edit_preserve_every_decision_field(monkeypatch):
     assert updated["meeting_date"] == "2026-10-19"
     loaded = asyncio.run(log.get_entries())
     assert {key: loaded[0][key] for key in changed} == changed
+
+
+def test_logbook_rows_include_the_yahoo_symbol_for_links(monkeypatch):
+    monkeypatch.setattr(log, "supabase", FakeSupabase({
+        "bc_log_entry": [
+            {"id": 1, "meeting_date": "2026-10-19", "isin": "US0378331005"},
+            {"id": 2, "meeting_date": "2026-10-19", "isin": ""},
+        ],
+        "asset_execution": [{"isin": "US0378331005", "yahoo_symbol": "AAPL"}],
+    }))
+    rows = {row["id"]: row for row in log._entries()}
+    assert rows[1]["yahoo_symbol"] == "AAPL"
+    assert rows[2]["yahoo_symbol"] is None

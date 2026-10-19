@@ -10,7 +10,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from deps import supabase
+from deps import IN_CHUNK_SIZE, supabase
 from ingest._gurufocus_http import cf_get
 
 router = APIRouter(tags=["log dashboard"])
@@ -27,8 +27,15 @@ class LogEntryIn(BaseModel):
 
 
 def _entries() -> list[dict]:
-    return (supabase.table("bc_log_entry").select("*")
-            .order("meeting_date", desc=True).order("id", desc=True).execute().data or [])
+    entries = (supabase.table("bc_log_entry").select("*")
+               .order("meeting_date", desc=True).order("id", desc=True).execute().data or [])
+    isins = sorted({entry["isin"] for entry in entries if entry.get("isin")})
+    symbols = {}
+    for offset in range(0, len(isins), IN_CHUNK_SIZE):
+        rows = (supabase.table("asset_execution").select("isin,yahoo_symbol")
+                .in_("isin", isins[offset:offset + IN_CHUNK_SIZE]).execute().data or [])
+        symbols.update({row["isin"]: row.get("yahoo_symbol") for row in rows})
+    return [{**entry, "yahoo_symbol": symbols.get(entry.get("isin"))} for entry in entries]
 
 
 @router.get("/api/log-dashboard/entries")
