@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { NextConfig } from "next";
 
 /**
@@ -20,8 +19,6 @@ if (process.env.NODE_ENV === "production" && !process.env.NEXT_PUBLIC_API_URL) {
   );
 }
 
-const workspaceRoot = path.resolve(__dirname, '..');
-
 const nextConfig: NextConfig = {
   /* config options here */
   // Temporarily disabled: the React Compiler mis-optimizes our custom store
@@ -36,9 +33,10 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   devIndicators: false,
   allowedDevOrigins: ['127.0.0.1'],
-  outputFileTracingRoot: workspaceRoot,
+  outputFileTracingRoot: __dirname,
   turbopack: {
-    root: workspaceRoot,
+    // Resolve frontend dependencies from the app, where node_modules lives.
+    root: __dirname,
   },
 };
 

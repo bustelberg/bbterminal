@@ -10402,8 +10402,8 @@
             "type": "string"
           },
           "isin": {
+            "default": "",
             "maxLength": 20,
-            "minLength": 1,
             "title": "Isin",
             "type": "string"
           },
@@ -10441,7 +10441,6 @@
         },
         "required": [
           "company_name",
-          "isin",
           "decision",
           "conviction"
         ],

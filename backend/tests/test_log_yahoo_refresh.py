@@ -24,6 +24,7 @@ def test_batch_refresh_updates_series_then_returns_every_dated_entry(monkeypatch
     monkeypatch.setattr(log, "_entries", lambda: [
         {"id": 12, "isin": "US0000000001", "review_on": "2026-01-01"},
         {"id": 13, "isin": "US0000000001", "review_on": None},
+        {"id": 14, "isin": "", "review_on": "2026-01-01"},
     ])
     seen: list[set[str]] = []
     monkeypatch.setattr(price_refresh, "backfill_missing", lambda isins: seen.append(isins) or {
@@ -50,3 +51,29 @@ def test_return_reader_stays_a_read_of_the_persisted_series(monkeypatch):
     assert result["available"] is True
     assert result["start_date"] == "2026-01-02"
     assert result["as_of"] == "2026-10-09"
+
+
+def test_decision_can_be_saved_without_an_isin():
+    values = {"company_name": "Private company", "decision": "Watch", "conviction": 3}
+    assert log.LogEntryIn(**values).isin == ""
+    assert log.LogEntryIn(**values, isin="").model_dump()["isin"] == ""
+
+
+def test_create_and_edit_preserve_every_decision_field(monkeypatch):
+    db = FakeSupabase({"bc_log_entry": []})
+    monkeypatch.setattr(log, "supabase", db)
+    values = dict(company_name="Private instrument", isin="", decision="Watch",
+                  notes="First line\nSecond line", conviction=4, portfolio_weight=0,
+                  review_on="2026-11-01")
+    created = asyncio.run(log.create_entry(log.LogEntryIn(**values)))
+    assert {key: created[key] for key in values} == values
+    # The database supplies these; keep them unchanged when editing.
+    db.tables["bc_log_entry"][0].update(id=42, meeting_date="2026-10-19")
+    changed = dict(values, company_name="Edited instrument", isin="US0378331005",
+                   decision="Buy", notes="Updated", conviction=5,
+                   portfolio_weight=12.75, review_on=None)
+    updated = asyncio.run(log.update_entry(42, log.LogEntryIn(**changed)))
+    assert {key: updated[key] for key in changed} == changed
+    assert updated["meeting_date"] == "2026-10-19"
+    loaded = asyncio.run(log.get_entries())
+    assert {key: loaded[0][key] for key in changed} == changed

@@ -38,10 +38,12 @@ type ExternalAsset = {
  * zero-bar rows; offering one of those would let someone pick a company and get an empty panel,
  * which reads as a broken page rather than as an instrument we cannot price.
  */
-export default function CompanyPicker({ label, value, onPick }: {
+export default function CompanyPicker({ label, value, onPick, allowManual = false, manualAddLabel }: {
   label: string;
   value: AssetPick | null;
   onPick: (a: AssetPick | null) => void;
+  allowManual?: boolean;
+  manualAddLabel?: (name: string) => string;
 }) {
   const [q, setQ] = useState('');
   const [rows, setRows] = useState<AssetPick[]>([]);
@@ -74,7 +76,7 @@ export default function CompanyPicker({ label, value, onPick }: {
           const localRows = (b?.rows ?? []) as AssetPick[];
           setRows(localRows);
           setTruncated(Boolean(b?.truncated));
-          if (localRows.length) {
+          if (localRows.length || allowManual) {
             setExternalRows([]);
             return;
           }
@@ -94,7 +96,7 @@ export default function CompanyPicker({ label, value, onPick }: {
       })();
     }, 200);
     return () => { clearTimeout(t); ctrl.abort(); };
-  }, [q]);
+  }, [q, allowManual]);
 
   const addExternal = async () => {
     if (!selectedExternal || !isin.trim()) return;
@@ -156,14 +158,15 @@ export default function CompanyPicker({ label, value, onPick }: {
       <div className="flex gap-2">
         <input
           value={q}
-          onChange={(e) => { setQ(e.target.value); setOpen(true); setSelectedExternal(null); setIsin(''); setAddError(''); }}
+          onChange={(e) => { setQ(e.target.value); setRows([]); setExternalRows([]); setTruncated(false); setOpen(true); setSelectedExternal(null); setIsin(''); setAddError(''); }}
+          maxLength={allowManual ? 200 : undefined}
           onFocus={() => setOpen(true)}
           placeholder="Name, ISIN or ticker…"
           className="flex-1 min-w-0 bg-page border border-neutral-700 rounded-lg px-3 py-2 text-sm text-fg-strong placeholder-fg-faint focus:outline-none focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 transition-colors"
         />
       </div>
 
-      {open && q.trim().length >= 2 && (
+      {open && q.trim().length >= (allowManual ? 1 : 2) && (
         <div className="absolute z-20 mt-1 w-full max-h-72 overflow-auto bg-popover border border-neutral-800/40 rounded-lg shadow-lg">
           {busy && !rows.length && <p className="px-3 py-2 text-xs text-fg-subtle">Searching…</p>}
           {!busy && !rows.length && !externalRows.length && (
@@ -180,6 +183,13 @@ export default function CompanyPicker({ label, value, onPick }: {
               <div className="text-[11px] text-fg-faint font-mono truncate">{r.isin}</div>
             </button>
           ))}
+          {allowManual && (
+            <button type="button"
+              onClick={() => { onPick({ name: q.trim(), isin: '' }); setOpen(false); }}
+              className="w-full cursor-pointer border-t border-neutral-800/20 px-3 py-2 text-left text-sm text-accent-400 hover:bg-overlay/[0.04]">
+              {manualAddLabel?.(q.trim()) ?? `Add "${q.trim()}" manually`}
+            </button>
+          )}
           {selectedExternal && (
             <div className="border-t border-neutral-800/20 p-3 space-y-2 bg-overlay/[0.02]">
               <p className="text-xs text-fg-subtle">

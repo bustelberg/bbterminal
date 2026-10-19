@@ -18,7 +18,7 @@ router = APIRouter(tags=["log dashboard"])
 
 class LogEntryIn(BaseModel):
     company_name: str = Field(min_length=1, max_length=200)
-    isin: str = Field(min_length=1, max_length=20)
+    isin: str = Field(default="", max_length=20)
     decision: str = Field(min_length=1, max_length=100)
     notes: str = Field(default="", max_length=8000)
     conviction: int = Field(ge=1, le=5)
@@ -129,7 +129,8 @@ async def refresh_yahoo_returns():
     def _refresh() -> dict:
         from asset_pipeline.price_refresh import backfill_missing, refresh_stale  # noqa: PLC0415
 
-        dated = [entry for entry in _entries() if entry.get("review_on")]
+        dated = [entry for entry in _entries()
+                 if entry.get("review_on") and str(entry.get("isin") or "").strip()]
         isins = {str(entry.get("isin") or "").strip().upper() for entry in dated}
         isins.discard("")
         # An already-resolved entry can legitimately have no historical rows

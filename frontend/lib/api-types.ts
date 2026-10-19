@@ -12336,8 +12336,11 @@ export interface components {
             conviction: number;
             /** Decision */
             decision: string;
-            /** Isin */
-            isin: string;
+            /**
+             * Isin
+             * @default
+             */
+            isin?: string;
             /**
              * Notes
              * @default
