@@ -37,6 +37,29 @@ only for the whole book (funds and cash included) — a different portfolio agai
 """
 from __future__ import annotations
 
+import re
+from functools import lru_cache
+from datetime import date
+import time
+
+
+@lru_cache(maxsize=16)
+def _risk_prices(isins: tuple[str, ...], years: int, day: str, generation: int, loader):
+    """One price snapshot shared by all historical risk views for five minutes."""
+    return loader(list(isins), years)
+
+
+_FIXED_INCOME_NAME = re.compile(r"\b(perp|bond|obligat|coupon|treasur|gilt|bund|govie|"
+                                r"sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b"
+                                r"|\d[\.,]?\d*\s*%", re.I)
+
+
+def is_direct_equity_stock(holding: dict) -> bool:
+    """Direct operating-company equity only; certificates with a coupon are fixed income."""
+    return (not holding.get("is_fund")
+            and holding.get("bucket") in (None, "", "Equity")
+            and not _FIXED_INCOME_NAME.search(str(holding.get("name") or "")))
+
 #: Observations per year, per cadence — the `f` in the formula.
 #:  52, NOT 52.18. The weekly series is built by ISO week (`_by_week`), so a year contributes 52
 #: or 53 buckets and the annualisation constant has to be the bucket count, not the calendar.
@@ -133,7 +156,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     # to 1. Funds and cash are dropped, not zero-weighted; see `_active_share`.
     total_book_w = sum(max(0.0, float(h.get("weight_pct") or 0)) for h in holdings)
     stocks = [h for h in holdings
-              if not h.get("is_fund")
+              if is_direct_equity_stock(h)
               and (h.get("isin") or "").strip()
               and float(h.get("weight_pct") or 0) > 0]
     stocks_w = sum(float(h["weight_pct"]) for h in stocks)
@@ -157,11 +180,27 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         series = preloaded
     else:
         try:
-            series = _daily_eur([*isins, bench_isin], years)
+            series = _risk_prices(tuple(sorted([*isins, bench_isin])), years,
+                                  date.today().isoformat(), int(time.monotonic() // 300), _daily_eur)
         except Exception as e:  # noqa: BLE001 — a failed panel must not raise into the modal
             raise SeriesError(
                 f"The price series could not be loaded ({type(e).__name__}).") from e
 
+    # All measures use identical endpoints, anchored to the latest benchmark close. Retain the
+    # last observation at/before the five-year opening date as the return's starting price.
+    benchmark_prices = series.get(bench_isin) or []
+    if benchmark_prices:
+        end = benchmark_prices[-1][0]
+        end_date = date.fromisoformat(end)
+        try:
+            start = end_date.replace(year=end_date.year - years).isoformat()
+        except ValueError:
+            start = end_date.replace(year=end_date.year - years, day=28).isoformat()
+        clipped = {}
+        for isin, prices in series.items():
+            anchor = [row for row in prices if row[0] <= start]
+            clipped[isin] = (anchor[-1:] if anchor else []) + [row for row in prices if start < row[0] <= end]
+        series = clipped
     b_buckets = _bucket(series.get(bench_isin) or [], freq)
     p_buckets = {i: _bucket(series.get(i) or [], freq) for i in isins}
     priced = {i for i in isins if len(p_buckets[i]) >= 2}
@@ -269,6 +308,10 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
     st = annualized_stats(a.tolist(), periods_per_year=ppy)
     te = st.ann_vol
     mean_active = float(a.mean())
+    portfolio_ann = annualized_stats(built["portfolio"], periods_per_year=ppy).ann_return
+    benchmark_ann = annualized_stats(built["benchmark"], periods_per_year=ppy).ann_return
+    active_ann = (portfolio_ann - benchmark_ann
+                  if portfolio_ann is not None and benchmark_ann is not None else None)
 
     return {
         "available": True,
@@ -291,13 +334,13 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
         # one without the other is what makes the two get confused. Mean per period, and the same
         # figure annualised geometrically — a book can have a large TE and no active return at all.
         "mean_active_per_period_pct": mean_active * 100.0,
-        "active_return_ann_pct": (float(np.prod(1.0 + a) ** (ppy / len(a)) - 1.0) * 100.0
-                                  if np.all(1.0 + a > 0) else None),
+        "active_return_ann_pct": active_ann * 100 if active_ann is not None else None,
+        "portfolio_return_ann_pct": portfolio_ann * 100 if portfolio_ann is not None else None,
+        "benchmark_return_ann_pct": benchmark_ann * 100 if benchmark_ann is not None else None,
         #  Te is a denominator here, so a near-zero one is refused rather than printed as a huge
         # ratio. The information ratio is the active return per unit of the risk taken to get it.
         "information_ratio": (
-            None if not te or te <= 1e-9 or not np.all(1.0 + a > 0)
-            else float(np.prod(1.0 + a) ** (ppy / len(a)) - 1.0) / te),
+            None if not te or te <= 1e-9 or active_ann is None else active_ann / te),
         # How much of the sleeve the average observation actually spoke for — see the renormalisation
         # note above. 100% means every holding had a price at both ends of every step.
         "avg_weight_covered_pct": float(np.mean(weight_used)) * 100.0,

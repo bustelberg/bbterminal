@@ -131,26 +131,10 @@ def _mdd(returns: list[float]) -> float | None:
 def compute_drawdown(holdings: list[dict], benchmark: str,
                      frequency: str = "daily", years: int = 5) -> dict:
     """MDD of the reconstructed sleeve, its episodes with dates, and the cadence comparison."""
-    from routers._airs_portfolio_analysis import _daily_eur  # noqa: PLC0415
-    from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
-
     freq = frequency if frequency in PERIODS else "daily"
 
-    #  One load, three bucketings. The first `build_paired_series` call would do the load itself;
-    # doing it here and handing it over means the cadence comparison costs no extra round trips.
-    bench_isin = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
-    preloaded = None
-    if bench_isin:
-        isins = sorted({(h.get("isin") or "").strip().upper() for h in holdings
-                        if not h.get("is_fund") and (h.get("isin") or "").strip()})
-        if isins:
-            try:
-                preloaded = _daily_eur([*isins, bench_isin], years)
-            except Exception:  # noqa: BLE001 — fall through; the builder reports the real reason
-                preloaded = None
-
     try:
-        built = build_paired_series(holdings, benchmark, freq, years, preloaded=preloaded)
+        built = build_paired_series(holdings, benchmark, freq, years)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 

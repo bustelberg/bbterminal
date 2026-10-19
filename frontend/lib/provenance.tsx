@@ -9,7 +9,7 @@
  * at the digits. This attaches that whole answer to the value.
  *
  * The badge turns amber when the source-specific freshness policy says the value is stale, and the
- * popover states why. AIRS follows its 11:00 Amsterdam acquisition schedule; dated market feeds
+ * popover states why. AIRS follows its 08:00 Amsterdam acquisition schedule; dated market feeds
  * use their own observation dates. Rendered via {@link InfoTip} so it appears instantly and cannot
  * be clipped by an overflow ancestor.
  */
@@ -23,7 +23,7 @@ import { dialog } from './dialog';
 import { BADGE_NEUTRAL, BADGE_PILL, BADGE_WARN } from './badgeChrome';
 import { trimStop } from './provenanceText';
 import {
-  airsScheduleFreshness, businessDaysBehind, fetchedToday, lagOwner, snapshotFreshness,
+  airsScheduleFreshness, businessDaysBehind, fetchedToday, snapshotFreshness,
 } from './snapshotAge';
 
 export type SourceKey =
@@ -62,7 +62,7 @@ const isAirsSource = (source: SourceKey) => AIRS_SOURCES.has(source);
  * exposed so a sentence can use one of them instead of the whole thing.
  */
 const SOURCE: Record<SourceKey, { vendor: string; field: string; qualifier?: string }> = {
-  airs_volk: { vendor: 'AIRS', field: 'Vermogensoverzicht', qualifier: 'VOLK' },
+  airs_volk: { vendor: 'AIRS', field: 'Vermogensoverzicht' },
   airs_att: { vendor: 'AIRS', field: 'Rendementen', qualifier: 'ATT' },
   airs_model: { vendor: 'AIRS', field: 'Model-portefeuille' },
   yfinance: { vendor: 'yfinance', field: 'daily close' },
@@ -309,12 +309,6 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
   // the "this is simply the newest valuation AIRS has" prose — which is exactly the source-lag
   // explanation this card no longer trades in. A row read today is current; there is nothing to
   // explain and nothing to act on.
-  const lag = lagOwner(asOf, fetchedAt);
-  const whoseLag = isAirsSource(source) && fresh.stale && fetchedAt
-    ? { side: 'ours' as const, days: businessDaysBehind(fetchedAt.slice(0, 10)),
-      text: 'The latest scheduled 11:00 Amsterdam AIRS read is missing. Refreshing will ask AIRS '
-        + 'again now.' }
-    : lag?.side === 'ours' ? lag : null;
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
     <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}
@@ -360,14 +354,6 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
              ONLY WHEN STALE. A refresh button under a current figure invites a pointless vendor
             call, and it is the amber badge that makes this an answer rather than a decoration. */}
         {refreshAction && fresh.stale && <RefreshField action={refreshAction} />}
-        {/*  ONLY WHEN THE BADGE IS AMBER AND WE KNOW BOTH DATES. A "we read this today" line under
-            a fresh row is noise; under an amber one it is the difference between an action and a
-            dead end. See `whoseLag`. */}
-        {whoseLag && (
-          <Field label="Whose lag">
-            <span className="text-fg-soft leading-relaxed">{whoseLag.text}</span>
-          </Field>
-        )}
         {/*  THE MATHS IS TYPESET HERE TOO, NOT ONLY IN `AspectCard` (2026-09-01). The house
             style says every ⓘ on this dashboard states its arithmetic through `worked` + `legend`
             — and half the dashboard's cards are PROVENANCE cards, which had no way to. So the

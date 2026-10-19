@@ -230,7 +230,7 @@ describe('the icon and its card carry ONE verdict', () => {
     const today = new Date().toISOString().slice(0, 10);
     const f = provenanceFreshness(LONG_AGO, `${today}T13:00:00Z`, false, 'airs_att');
     expect(f.stale).toBe(false);
-    expect(f.label).toMatch(/current|pending/);
+    expect(f.label).toBe('');
     expect(f.label).not.toMatch(/old|trading day|valuation/);
   });
 
@@ -300,7 +300,7 @@ describe('the icon and its card carry ONE verdict', () => {
 describe('sourceLabel', () => {
   it('gives the badge’s own words for a source', () => {
     expect(sourceLabel('airs_model')).toBe('AIRS Model-portefeuille');
-    expect(sourceLabel('airs_volk')).toBe('AIRS Vermogensoverzicht (VOLK)');
+    expect(sourceLabel('airs_volk')).toBe('AIRS Vermogensoverzicht');
   });
 
   it(' keeps the benchmark’s three inputs apart', () => {

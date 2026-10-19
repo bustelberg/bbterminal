@@ -306,20 +306,26 @@ def backfill_missing(isins: set[str]) -> dict:
     again. The scheduler calls it only while the ingest worker is idle.
     """
     from asset_pipeline import store  # noqa: PLC0415
+    from asset_pipeline.yahoo import YahooThrottled  # noqa: PLC0415
 
     rows = _executions(isins)
     latest = latest_close_by_analysis(sorted({r["analysis_id"] for r in rows}))
     missing = [r for r in rows if r.get("yahoo_symbol") and r["analysis_id"] not in latest]
-    done = failed = 0
-    for r in missing:
+    done = failed = skipped = 0
+    for i, r in enumerate(missing):
         try:
             store.store_series(r["analysis_id"], r["yahoo_symbol"], None)
             done += 1
+        except YahooThrottled as e:
+            failed += 1
+            skipped = len(missing) - i - 1
+            log.warning("[price_refresh] backfill paused; %d deferred: %s", skipped, e)
+            break
         except Exception as e:  # noqa: BLE001
             failed += 1
             log.warning("[price_refresh] price backfill %s failed: %s", r["isin"], e)
         time.sleep(DEFAULT_SLEEP_S)
-    return {"missing": len(missing), "backfilled": done, "failed": failed}
+    return {"missing": len(missing), "backfilled": done, "failed": failed, "skipped": skipped}
 
 
 def refresh_stale(
@@ -335,6 +341,7 @@ def refresh_stale(
     `isins` scopes it to one caller's instruments — see `find_stale`.
     """
     from asset_pipeline import store  # noqa: PLC0415
+    from asset_pipeline.yahoo import YahooThrottled  # noqa: PLC0415
 
     stale, latest_all, considered = find_stale(held_only, stale_days, isins=isins)
     if latest_all is None:
@@ -354,6 +361,13 @@ def refresh_stale(
         try:
             if store.extend_series(aid, sym, was) is None:
                 store.store_series(aid, sym, None)      # no COPY path: slow, correct, never wrong
+        except YahooThrottled as e:
+            failed += 1
+            skipped += len(stale) - i
+            if on_progress:
+                on_progress(f"Yahoo refresh paused: {e}; {skipped} instrument(s) deferred")
+            log.warning("[price_refresh] refresh paused; %d deferred: %s", skipped, e)
+            break
         except Exception as e:  # noqa: BLE001
             failed += 1
             if on_progress:

@@ -8705,6 +8705,8 @@ export interface components {
         };
         /** ActiveShareHolding */
         ActiveShareHolding: {
+            /** Bucket */
+            bucket?: string | null;
             /** Currency */
             currency?: string | null;
             /**
@@ -8771,6 +8773,8 @@ export interface components {
             held?: boolean;
             /** Name */
             name: string;
+            /** Normalisation Total */
+            normalisation_total?: number | null;
             /**
              * Portfolio Pct
              * @default 0
@@ -8781,6 +8785,11 @@ export interface components {
              * @default false
              */
             residual?: boolean;
+            weight_calculation?: components["schemas"]["ActiveShareWeightCalculation"] | null;
+            /** Workbook Weight Pct */
+            workbook_weight_pct?: number | null;
+            /** Yfinance Return Pct */
+            yfinance_return_pct?: number | null;
         };
         /**
          * ActiveShareUnmatched
@@ -8800,6 +8809,37 @@ export interface components {
              * @default 0
              */
             weight_pct?: number;
+        };
+        /** ActiveShareWeightCalculation */
+        ActiveShareWeightCalculation: {
+            /** As Of */
+            as_of: string;
+            /** Initial Weight Pct */
+            initial_weight_pct: number;
+            /** Normalisation Total */
+            normalisation_total: number;
+            /**
+             * Prices
+             * @default []
+             */
+            prices?: components["schemas"]["ActiveShareWeightPrice"][];
+            /** Result Pct */
+            result_pct: number;
+            /** Return Eur Pct */
+            return_eur_pct: number;
+        };
+        /** ActiveShareWeightPrice */
+        ActiveShareWeightPrice: {
+            /** End Date */
+            end_date?: string | null;
+            /** End Price Eur */
+            end_price_eur?: number | null;
+            /** Start Date */
+            start_date?: string | null;
+            /** Start Price Eur */
+            start_price_eur?: number | null;
+            /** Ticker */
+            ticker?: string | null;
         };
         /** ActualFill */
         ActualFill: {
@@ -13726,6 +13766,13 @@ export interface components {
              * @default 0
              */
             risk_free_pct?: number;
+            /**
+             * Rolling Volatility
+             * @default []
+             */
+            rolling_volatility?: {
+                [key: string]: unknown;
+            }[];
             /** Sharpe */
             sharpe?: number | null;
             /** Sortino */
@@ -14604,6 +14651,8 @@ export interface components {
             benchmark: string;
             /** Benchmark Isin */
             benchmark_isin?: string | null;
+            /** Benchmark Return Ann Pct */
+            benchmark_return_ann_pct?: number | null;
             /** Cadence Note */
             cadence_note?: string | null;
             /**
@@ -14622,6 +14671,8 @@ export interface components {
             observations?: number;
             /** Periods Per Year */
             periods_per_year?: number | null;
+            /** Portfolio Return Ann Pct */
+            portfolio_return_ann_pct?: number | null;
             /**
              * Priced Holdings
              * @default 0

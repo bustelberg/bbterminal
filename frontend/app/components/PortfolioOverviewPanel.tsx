@@ -11,7 +11,7 @@ import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
-import { cancelJob, startJob } from '../../lib/stores/jobs';
+import { cancelJob, isAirsBusy, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
 import { PORTFOLIO_SECTORS } from './portfolios/etfSectorLookThrough';
 import { createLiveReload } from '../../lib/liveReload';
@@ -873,7 +873,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       // reports per book is the whole workflow; this adds the model portfolios, which supply the
       // readable nickname and the id-only views. Running it after the reader pressed Cancel would
       // be minutes more of exactly what they asked to stop.
-      if (job.status === 'done') {
+      if (job.status === 'done' && !isAirsBusy(job)) {
         await scanModels(force);
         setDetail({});
         setIsins({});
@@ -1383,7 +1383,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             name has no valuation date of its own, so `fetchedAt` alone is right:
                             the card badges it and prices its own freshness from it. */}
                         <Provenance source={r.fixed_name ? 'airs_model' : 'airs_volk'} kind="copied"
-                          fetchedAt={r.fixed_name ? r.model_fetched_at : r.fetched_at}
+                          /* The paired model supplies a structural display name, but its catalogue
+                             scan is not a prerequisite for a current account. Tie freshness to the
+                             book scan that Refresh all actually performs; otherwise a stale fixed-
+                             model catalogue leaves a freshly refreshed account orange. */
+                          fetchedAt={r.fetched_at}
                           what={r.fixed_name
                             ? 'The name of this account, read from the model portfolio it is paired with.'
                             : 'The name of this account, as AIRS itself calls it.'}

@@ -393,16 +393,16 @@ export default function BookReturnChart(
   }
 
   const last = all[all.length - 1];
-  // Complete calendar month-ends, plus the single newest observation for the live month. This is
-  // intentionally a complete display rule: no inception anchor, scrape-date or cash-flow marker
-  // may add a visual point between month-ends.
+  // Include the common zero-return anchor, calendar month-ends, and the latest observation.
   const points = all.filter((p) => isCalendarMonthEnd(p.date));
+  const anchorDate = data.return_from ?? all[0].date;
+  if (points[0]?.date !== anchorDate) points.unshift({ ...all[0], date: anchorDate, cum_pct: 0 });
   if (points.at(-1)?.date !== last.date) points.push(last);
   const first = points[0] ?? last;
   const benchmarkByDate = new Map(
     (data.benchmark_returns ?? []).map((p) => [p.date, p.cum_pct] as const));
   const rows = points.map((p) => ({ ...p, t: ts(p.date),
-    benchmark: benchmarkByDate.get(p.date) ?? null }));
+    benchmark: p.date === anchorDate ? 0 : benchmarkByDate.get(p.date) ?? null }));
   const up = (data.return_pct ?? 0) >= 0;
   /** Two series let Recharts colour each part of the return path by its own sign. A crossing gets
    * an interpolated 0% point in BOTH series: without it, the green/red segments stop at their last
@@ -460,10 +460,9 @@ export default function BookReturnChart(
             + `over ${v(all.length - 1)} published points.`}
           when={`${v(data.return_from ?? first.date)} to ${v(last.date)}.`} />} />
       </div>
-      {/* The return hover is deliberately docked below the plot.  Keep a slot for its tallest
-          form (date, portfolio and benchmark) so it neither obscures the line being inspected
-          nor collides with the drill-down hint below. */}
-      <div className="mb-[72px]">
+      {/* The hover is deliberately docked below the plot. It may overlay the hint below while
+          open, rather than reserving permanent empty space for a transient tooltip. */}
+      <div>
       <ResponsiveContainer width="100%" height={104}>
         <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
           onClick={(state: { activeLabel?: unknown }) => {
@@ -478,6 +477,7 @@ export default function BookReturnChart(
               six-week gap is drawn the same width as an overnight one. Plotted against real time,
               distance means elapsed time everywhere. */}
           <XAxis dataKey="t" type="number" scale="time" domain={['dataMin', 'dataMax']}
+            ticks={rows.map((row) => row.t)} interval="preserveStartEnd"
             tickFormatter={tick} minTickGap={28}
             tick={{ fontSize: 11, fill: chartTheme.axisTick }} />
           {/*  ZERO IS ALWAYS IN THE DOMAIN, unlike the value chart this replaced. There the

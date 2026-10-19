@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { useIsAdmin } from '../../../lib/hooks/useEffectiveRole';
 import { useLang, type Lang } from '../../../lib/i18n';
 import {
-  attachRunningJobs, cancelJob, dismissJob, jobsStore, LINGER_SECONDS, type JobToast,
+  attachRunningJobs, cancelJob, dismissJob, isAirsBusy, jobsStore, LINGER_SECONDS, type JobToast,
 } from '../../../lib/stores/jobs';
 import { fundamentalJobMessage } from './fundamentalJobMessage';
 
@@ -119,6 +119,7 @@ export function unavailableNotice(summary: string | null): UnavailableNotice | n
 
 function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
   const copy = JOB_COPY[lang];
+  const busy = isAirsBusy(job);
   const unavailable = unavailableNotice(job.summary);
   const fundamentals = job.kind.startsWith('fundamentals.');
   const humanSummary = friendlyJobMessage(job.summary, lang);
@@ -126,7 +127,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
   const displayMessage = fundamentals
     ? fundamentalJobMessage(humanSummary || humanMessage)
     : (humanSummary || humanMessage);
-  const tone = unavailable ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
+  const tone = unavailable || busy ? TONE.cancelled : (TONE[job.status] ?? TONE.running);
   const running = job.status === 'running';
   //  Indeterminate until a total arrives. `done/0` is NaN, and a bar that reads 100% before the
   // first step is worse than one that reads nothing.
@@ -144,7 +145,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
    * so hovering freezes the number rather than letting a background interval keep firing and drop
    * the card the moment you look away.
    */
-  const linger = LINGER_SECONDS[job.status] ?? 0;
+  const linger = busy ? 0 : (LINGER_SECONDS[job.status] ?? 0);
   /**
    *  Counted in milliseconds, not seconds, and that is a bug fix rather than a refinement.
    *
@@ -190,6 +191,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
 
   return (
     <div
+      role={busy ? 'alert' : 'status'}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       className={`pointer-events-auto bg-card border border-neutral-800/40 rounded-xl
@@ -227,7 +229,7 @@ function JobCard({ job, lang }: { job: JobToast; lang: Lang }) {
               //  The countdown is shown, not just run. A card that disappears on an invisible
               // timer reads as a bug the first time you watch it happen; a number ticking down
               // says it was always going to. `paused` on hover explains why it stopped.
-              : `${unavailable ? 'Unavailable' : copy.status[job.status as 'done' | 'failed' | 'cancelled']}${secondsLeft === null ? ''
+              : `${busy ? (lang === 'nl' ? 'Al bezig' : 'Already running') : unavailable ? 'Unavailable' : copy.status[job.status as 'done' | 'failed' | 'cancelled']}${secondsLeft === null ? ''
                 : hover ? ' · paused' : ` · ${secondsLeft}s`}`}
         </span>
       </div>

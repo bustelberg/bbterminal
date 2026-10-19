@@ -67,6 +67,19 @@ def test_shutdown_race_skips_work_without_a_traceback(monkeypatch, caplog):
     assert "Traceback" not in caplog.text
 
 
+def test_watchdog_retains_reserved_capacity_when_data_workers_are_full(monkeypatch):
+    executor = _Executor()
+    monkeypatch.setattr(S, "_scheduled_slots", threading.BoundedSemaphore(1))
+    assert S._scheduled_slots.acquire(False)
+    monkeypatch.setattr(S, "_maintenance_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(S, "_maintenance_executor", executor)
+    monkeypatch.setattr(S, "_scheduled_futures", {})
+    assert not S._submit_scheduled_work("prices", lambda: None)
+    assert S._submit_scheduled_work("job_watchdog", lambda: None)
+    executor.submitted[0].set_result(None)
+    assert S._submit_scheduled_work("table_size_sample", lambda: None)
+
+
 def test_production_scheduler_cap_keeps_room_for_request_workers(monkeypatch):
     monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "api.example.test")
     monkeypatch.setenv("SCHEDULED_JOB_WORKERS", "8")

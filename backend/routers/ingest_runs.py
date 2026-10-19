@@ -55,6 +55,9 @@ from ingest.phases import (
 
 router = APIRouter(tags=["ingest"])
 
+# Operations serialize inside the pipeline. Never accumulate waiting threads.
+_ingest_slot = threading.BoundedSemaphore(1)
+
 _VALID_JOB_NAMES = {
     # The split pipeline — two independently-triggerable operations
     # (scheduler tick + per-section Run-now), serialized so they never run
@@ -113,12 +116,42 @@ def _spawn_ingest(
         target = _run_smart_pipeline_sync
     else:
         target = _run_pipeline_sync
+    def _run():
+        try:
+            target(*args)
+        except BaseException as exc:
+            from ingest.phases.runlog import _now_utc_iso, _update_run  # noqa: PLC0415
+
+            _update_run(run_id, status="error", finished_at=_now_utc_iso(),
+                        current_message=f"Pipeline crashed: {type(exc).__name__}: {exc}")
+            raise
+        finally:
+            _ingest_slot.release()
+
     threading.Thread(
-        target=target,
-        args=args,
+        target=_run,
         daemon=True,
         name=f"pipeline-run-{run_id}",
     ).start()
+
+
+def _start_refresh(job_name: str, triggered_by: str, **kwargs) -> int:
+    """Reserve capacity before creating a durable run; roll back failed starts."""
+    if not _ingest_slot.acquire(blocking=False):
+        raise HTTPException(503, "Another pipeline operation is already admitted; retry later")
+    run_id = None
+    try:
+        run_id = _create_run(job_name, triggered_by)
+        _spawn_ingest(run_id, job_name, **kwargs)
+        return run_id
+    except BaseException as exc:
+        _ingest_slot.release()
+        if run_id is not None:
+            from ingest.phases.runlog import _now_utc_iso, _update_run  # noqa: PLC0415
+
+            _update_run(run_id, status="error", finished_at=_now_utc_iso(),
+                        current_message=f"Pipeline could not start: {type(exc).__name__}: {exc}")
+        raise
 
 
 def kick_off_refresh(job_name: str, triggered_by: str) -> int:
@@ -131,9 +164,7 @@ def kick_off_refresh(job_name: str, triggered_by: str) -> int:
         )
     if triggered_by not in ("auto", "manual"):
         raise ValueError(f"triggered_by must be 'auto' or 'manual', got {triggered_by!r}")
-    run_id = _create_run(job_name, triggered_by)
-    _spawn_ingest(run_id, job_name)
-    return run_id
+    return _start_refresh(job_name, triggered_by)
 
 
 @router.post("/api/ingest/scheduled-refresh/cron")
@@ -152,8 +183,7 @@ async def cron_scheduled_refresh(
             f"Unknown job_name {job_name!r}; expected one of {sorted(_VALID_JOB_NAMES)}",
         )
 
-    run_id = await asyncio.to_thread(_create_run, job_name, "auto")
-    _spawn_ingest(run_id, job_name)
+    run_id = await asyncio.to_thread(_start_refresh, job_name, "auto")
     return {"run_id": run_id, "status": "running", "job_name": job_name}
 
 
@@ -188,8 +218,10 @@ async def trigger_scheduled_refresh(
         raise HTTPException(400, "universe_price_refresh requires a `universe` label")
     if job_name == "companies_price_refresh" and not company_ids:
         raise HTTPException(400, "companies_price_refresh requires a non-empty `company_ids` list")
-    run_id = await asyncio.to_thread(_create_run, job_name, "manual")
-    _spawn_ingest(run_id, job_name, universe=universe, company_ids=company_ids, force=force)
+    run_id = await asyncio.to_thread(
+        _start_refresh, job_name, "manual",
+        universe=universe, company_ids=company_ids, force=force,
+    )
     return {
         "run_id": run_id, "status": "running", "job_name": job_name,
         "universe": universe, "company_count": len(company_ids or []), "force": force,

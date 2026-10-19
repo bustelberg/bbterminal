@@ -423,11 +423,11 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
               `The contribution of these ${rows.length} holdings to ${provenance.owner}.`)} /></td>
         </tr>
         {sorted.map((h, i) => (
-          // The intersection is the point: a name held on both sides is emphasised (tint + bold +
-          // a ringed dot); everything else — index names you don't own, your names not in the
-          // index — is faded so the shared holdings read at a glance without hiding the full lists.
+          // Shared holdings are emphasised (tint + bold + ringed dot). The other rows remain at
+          // normal strength: a comparator can have no constituents at all (for example Bonds),
+          // and absence of overlap is information, not a reason to make the holdings unreadable.
           <tr key={h.isin ?? `${h.name}-${i}`}
-            className={`border-t border-neutral-800/20 ${h.in_both ? 'bg-accent-500/15' : 'opacity-45'}`}>
+            className={`border-t border-neutral-800/20 ${h.in_both ? 'bg-accent-500/15' : ''}`}>
             <td className="py-1 pr-1 text-right font-mono text-fg-faint tabular-nums">{i + 1}</td>
             <td className="py-1 pr-2" title={h.name ?? ''}>
               <span className="flex items-center gap-1.5 min-w-0">

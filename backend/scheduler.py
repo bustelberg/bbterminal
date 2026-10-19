@@ -41,8 +41,9 @@ import logging
 import os
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -51,6 +52,7 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from job_runlog import record_run
+from common.background import BoundedExecutor
 from routers.ingest_runs import kick_off_refresh
 #  The schedule itself lives there, not here — see `_register`. Declaration only: no DB, no
 # APScheduler, so it is safe for both this module and the admin router to import.
@@ -89,12 +91,16 @@ def _scheduled_worker_count() -> int:
 
 
 _SCHEDULED_WORKERS = _scheduled_worker_count()
-_scheduled_executor = ThreadPoolExecutor(
+_scheduled_executor = BoundedExecutor(
     max_workers=_SCHEDULED_WORKERS, thread_name_prefix="scheduled-job",
 )
 _scheduled_futures: dict[str, Future] = {}
 _scheduled_futures_lock = threading.Lock()
 _scheduled_slots = threading.BoundedSemaphore(_SCHEDULED_WORKERS)
+# Health checks must still run when market-data or AIRS work occupies every slot.
+_maintenance_executor = BoundedExecutor(max_workers=1, thread_name_prefix="scheduled-health")
+_maintenance_slots = threading.BoundedSemaphore(1)
+_MAINTENANCE_JOBS = frozenset({"job_watchdog", "table_size_sample", "job_gap_scan"})
 
 # The queue intentionally runs one Yahoo/OpenFIGI slice at a time. A slow slice therefore makes
 # APScheduler print its own warning every 20 seconds; that is an expected backpressure mechanism,
@@ -563,24 +569,28 @@ def _submit_scheduled_work(name: str, work) -> bool:
     # Do not leave old ticks queued behind a long-running job.  A delayed price
     # refresh is less useful than tomorrow's on-time one, and an unbounded
     # executor queue is merely unbounded threads with the failure postponed.
-    if not _scheduled_slots.acquire(blocking=False):
-        _log.warning("[scheduler] %s not started: all %d scheduled workers are busy",
-                     name, _SCHEDULED_WORKERS)
+    maintenance = name in _MAINTENANCE_JOBS
+    slots = _maintenance_slots if maintenance else _scheduled_slots
+    executor = _maintenance_executor if maintenance else _scheduled_executor
+    if not slots.acquire(blocking=False):
+        _log.warning("[scheduler] %s not started: all %d %s workers are busy",
+                     name, 1 if maintenance else _SCHEDULED_WORKERS,
+                     "maintenance" if maintenance else "scheduled")
         return False
 
     with _scheduled_futures_lock:
         existing = _scheduled_futures.get(name)
         if existing is not None and not existing.done():
-            _scheduled_slots.release()
+            slots.release()
             _log.warning("[scheduler] %s not started: an earlier run is still pending or running", name)
             return False
         # A completed future is no longer an admission lock.  Pop it before
         # submitting so an exception from submit cannot leave a stale entry.
         _scheduled_futures.pop(name, None)
         try:
-            future = _scheduled_executor.submit(work)
+            future = executor.submit(work)
         except RuntimeError as e:
-            _scheduled_slots.release()
+            slots.release()
             # Uvicorn reload/interpreter shutdown can race an APScheduler
             # callback. It is an expected no-op: no work must start while the
             # process is leaving, and a traceback makes that normal lifecycle
@@ -601,7 +611,7 @@ def _submit_scheduled_work(name: str, work) -> bool:
             # in tests, but the invariant costs nothing to state here).
             if _scheduled_futures.get(name) is done:
                 _scheduled_futures.pop(name, None)
-            _scheduled_slots.release()
+            slots.release()
 
     future.add_done_callback(_finished)
     return True
@@ -1886,6 +1896,42 @@ def _fire_airs_vermogen() -> None:
     _spawn_body("airs_vermogen_refresh")
 
 
+def _maybe_kickstart_airs_vermogen() -> None:
+    """Recover an AIRS morning refresh interrupted by a Railway redeploy.
+
+    The four scheduled attempts are deliberately redundant: AIRS can publish its valuation at an
+    uncertain point in the morning.  What matters is one completed attempt, not which of 08:00,
+    09:00, 10:00 or 11:00 produced it.  APScheduler's clock is in-process, so a redeploy can miss
+    all remaining fires; consult the durable run log on boot and submit one catch-up only when no
+    attempt has completed successfully since Amsterdam midnight.
+
+    A healthy redeploy is a no-op.  A deployment that interrupted an in-flight scan retries from
+    the same body as the normal tick, which keeps account/model sequencing and run logging intact.
+    """
+    now = datetime.now(ZoneInfo("Europe/Amsterdam"))
+    if now.hour < 8:
+        return
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    try:
+        from deps import supabase  # noqa: PLC0415
+
+        rows = (supabase.table("scheduled_job_run")
+                .select("id")
+                .eq("job_id", "airs_vermogen_refresh")
+                .eq("status", "ok")
+                .gte("started_at", day_start.isoformat())
+                .limit(1).execute().data or [])
+    except Exception as e:  # noqa: BLE001 — a database that cannot be read cannot safely dedupe
+        _log.warning("[scheduler] AIRS boot catch-up could not read today's run history: %s: %s",
+                     type(e).__name__, e)
+        return
+    if rows:
+        return
+    _log.warning("[scheduler] no successful AIRS refresh recorded since %s; starting catch-up",
+                 now.date().isoformat())
+    _spawn_body("airs_vermogen_refresh")
+
+
 def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
       """ CANCEL LANDS BETWEEN ACCOUNTS, NEVER INSIDE ONE — `run_airs_vermogen_refresh_sync`
       already takes the `should_stop` hook and checks it at exactly that boundary, because an
@@ -2333,7 +2379,10 @@ def register_scheduler(app) -> None:
             _log.info("[scheduler] DISABLE_SCHEDULER set — in-process jobs not started")
             return
 
-        sched = BackgroundScheduler(timezone="UTC")
+        # These threads only dispatch; long work has separate bounded capacity.
+        sched = BackgroundScheduler(timezone="UTC", executors={
+            "default": {"type": "threadpool", "max_workers": 2},
+        })
         executor_log = logging.getLogger("apscheduler.executors.default")
         if not any(isinstance(f, _ExpectedQueueOverrunFilter) for f in executor_log.filters):
             executor_log.addFilter(_ExpectedQueueOverrunFilter())
@@ -2491,6 +2540,15 @@ def register_scheduler(app) -> None:
         except Exception as e:
             _log.warning(
                 "[scheduler] airs-models kickstart wrapper failed: %s: %s",
+                type(e).__name__, e,
+            )
+        # The AIRS refresh has four morning attempts. A Railway restart can land between them;
+        # consult the durable run log and recover immediately only when none succeeded today.
+        try:
+            _maybe_kickstart_airs_vermogen()
+        except Exception as e:
+            _log.warning(
+                "[scheduler] AIRS refresh kickstart wrapper failed: %s: %s",
                 type(e).__name__, e,
             )
         next_runs = {j.id: str(j.next_run_time) for j in sched.get_jobs()}

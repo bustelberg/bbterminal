@@ -83,7 +83,7 @@ export function workedContribution(w: string | null | undefined,
  * less than the index as a whole counts against you. That subtraction is the whole reason this
  * expression has three returns in it and is the one readers query.
  */
-export const ALLOCATION_TEX = String.raw`A = \left(w_p - w_b\right)\left(r_b - r_B\right)`;
+export const ALLOCATION_TEX = String.raw`\text{Allocation} = \left(w_p - w_b\right)\left(r_b - r_B\right)`;
 
 export function workedAllocation(wp: string | null | undefined, wb: string | null | undefined,
   rb: string | null | undefined, rB: string | null | undefined,
@@ -95,7 +95,7 @@ export function workedAllocation(wp: string | null | undefined, wb: string | nul
 }
 
 /** `S = w_b(rₚ − r_b)` — the selection effect, held at the index's own weight. */
-export const SELECTION_TEX = String.raw`S = w_b\left(r_p - r_b\right)`;
+export const SELECTION_TEX = String.raw`\text{Selection} = w_b\left(r_p - r_b\right)`;
 
 export function workedSelection(wb: string | null | undefined, rp: string | null | undefined,
   rb: string | null | undefined, result: string | null | undefined): string {
@@ -105,7 +105,7 @@ export function workedSelection(wb: string | null | undefined, rp: string | null
 }
 
 /** `I = (wₚ − w_b)(rₚ − r_b)` — the cross term. */
-export const INTERACTION_TEX = String.raw`I = \left(w_p - w_b\right)\left(r_p - r_b\right)`;
+export const INTERACTION_TEX = String.raw`\text{Interaction} = \left(w_p - w_b\right)\left(r_p - r_b\right)`;
 
 export function workedInteraction(wp: string | null | undefined, wb: string | null | undefined,
   rp: string | null | undefined, rb: string | null | undefined,
@@ -116,8 +116,8 @@ export function workedInteraction(wp: string | null | undefined, wb: string | nu
     : '');
 }
 
-/** `T = A + S + I` — a bucket's whole share of the excess. */
-export const TOTAL_TEX = String.raw`T = A + S + I`;
+/** The total is the three named attribution effects, not unexplained initials. */
+export const TOTAL_TEX = String.raw`\text{Total} = \text{Allocation} + \text{Selection} + \text{Interaction}`;
 
 export function workedTotal(a: string | null | undefined, sel: string | null | undefined,
   i: string | null | undefined, result: string | null | undefined): string {

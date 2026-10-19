@@ -37,6 +37,41 @@ def _h(name, isin, w, is_fund=False):
 
 
 class TestTheIdentities:
+    def test_workbook_weight_rollforward_exposes_actual_calculation(self, monkeypatch):
+        from types import SimpleNamespace
+        import index_universe.acwi.asset_membership as membership
+        import routers._asset_benchmark as prices
+        import routers._benchmark_index as pricing
+
+        monkeypatch.setattr(membership, "resolve", lambda: ([
+            {"analysis_id": 1, "name": "Berkshire Hathaway Inc", "weight_pct": 60, "currency": "EUR"},
+            {"analysis_id": 2, "name": "Apple Inc", "weight_pct": 40, "currency": "EUR"},
+        ], {"as_of": "15-Apr-2026"}))
+        class Grid:
+            def select(self, _columns): return self
+            def in_(self, _column, _ids): return self
+            def execute(self): return SimpleNamespace(data=[])
+        monkeypatch.setattr(A, "supabase", SimpleNamespace(table=lambda _name: Grid()))
+        monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {})
+        monkeypatch.setattr(prices, "window_marks", lambda *_args: {
+            1: {"start": ("2026-04-15", 100), "end": ("2026-10-15", 110)},
+            2: {"start": ("2026-04-15", 100), "end": ("2026-10-15", 90)},
+        })
+        monkeypatch.setattr(pricing, "_fx_to_eur", lambda *_args: {})
+        result = A.compute_active_share([_h("Berkshire Hathaway Inc", "US1", 100)], "ACWI")
+        row = next(r for r in result["rows"] if "Berkshire" in r["name"])
+        calc = row["weight_calculation"]
+        assert calc["as_of"] == "2026-04-15"
+        assert calc["initial_weight_pct"] == 60
+        assert abs(calc["return_eur_pct"] - 10) < 1e-9
+        assert abs(calc["normalisation_total"] - 102) < 1e-9
+        assert abs(row["benchmark_pct"] - 66 / 102 * 100) < 1e-9
+        assert calc["prices"][0]["start_price_eur"] == 100
+        # Exercise the HTTP response contract too: missing legacy cap metadata must not turn
+        # a valid workbook calculation into FastAPI's 500 response-validation error.
+        from routers.airs import ActiveShare
+        assert ActiveShare.model_validate(result).benchmark_caps_unstamped == 0
+
     def test_a_book_that_IS_the_index_has_no_active_share(self, monkeypatch):
         _bench(monkeypatch, [("Apple Inc", 60.0), ("Microsoft Corp", 40.0)])
         _grid(monkeypatch, {"US1": "Apple Inc", "US2": "Microsoft Corp"})
@@ -77,7 +112,7 @@ class TestTheIssuerNotTheLine:
         reads 100."""
         _bench(monkeypatch, [("Alphabet Inc", 100.0)])
         _grid(monkeypatch, {"US02079K1079": "Alphabet Inc Class C"})
-        got = A.compute_active_share([_h("Alphabet C", "US02079K1079", 100)], "ACWI")
+        got = A.compute_active_share([_h("Alphabet C", "US02079K1079", 100)], "SP500")
         assert got["active_share_pct"] < 1e-9, got["rows"]
 
     def test_two_classes_of_one_issuer_are_summed_not_replaced(self, monkeypatch):
@@ -87,7 +122,7 @@ class TestTheIssuerNotTheLine:
         _grid(monkeypatch, {"US02079K1079": "Alphabet Inc Class C",
                             "US02079K3059": "Alphabet Inc Class A"})
         got = A.compute_active_share(
-            [_h("Alphabet C", "US02079K1079", 60), _h("Alphabet A", "US02079K3059", 40)], "ACWI")
+            [_h("Alphabet C", "US02079K1079", 60), _h("Alphabet A", "US02079K3059", 40)], "SP500")
         assert got["active_share_pct"] < 1e-9
         assert got["n_holdings"] == 1
 
@@ -114,21 +149,31 @@ class TestTheDenominator:
             _h("Apple", "US1", 25),
             _h("iShares Core MSCI World", "IE1", 50, is_fund=True),
             _h("Liquiditeiten", "", 25),
-        ], "ACWI")
+        ], "SP500")
         companies = [r for r in got["rows"] if r["held"] and not r["residual"]]
         residual = [r for r in got["rows"] if r["residual"]]
         assert sum(r["portfolio_pct"] for r in companies) == 25.0
-        assert len(residual) == 1 and residual[0]["portfolio_pct"] == 75.0
-        assert got["active_share_pct"] == 75.0
+        assert not residual
+        assert got["active_share_pct"] == 0.0
         #  And the renormalisation is reported, never silent — 25 of 100 is the sleeve compared.
         assert abs(got["stocks_pct"] - 25.0) < 1e-9
 
     def test_a_book_with_no_individual_stocks_refuses(self, monkeypatch):
         _bench(monkeypatch, [("Apple Inc", 100.0)])
         _grid(monkeypatch, {})
-        got = A.compute_active_share([_h("iShares", "IE1", 100, is_fund=True)], "ACWI")
+        got = A.compute_active_share([_h("iShares", "IE1", 100, is_fund=True)], "SP500")
         assert got["available"] is False
         assert "no individual stocks" in got["reason"]
+
+    def test_a_non_fund_bond_certificate_is_not_an_equity_position(self, monkeypatch):
+        _bench(monkeypatch, [("Apple Inc", 100.0)])
+        _grid(monkeypatch, {"US1": "Apple Inc", "NL1": "Rabobank Certificaten"})
+        got = A.compute_active_share([
+            {**_h("Apple", "US1", 70), "bucket": "Equity"},
+            {**_h("6.5% Rabobank Certificaten 14-perp.", "NL1", 30), "bucket": "Equity"},
+        ], "SP500")
+        assert got["active_share_pct"] == 0.0
+        assert got["stocks_pct"] == 70.0
 
     def test_an_unmatchable_line_stays_active_rather_than_being_dropped(self, monkeypatch):
         """ DROPPING IT WOULD RENORMALISE THE REST UPWARD AND LOWER ACTIVE SHARE — the flattering
@@ -136,7 +181,7 @@ class TestTheDenominator:
         _bench(monkeypatch, [("Apple Inc", 100.0)])
         _grid(monkeypatch, {"US1": "Apple Inc"})    # 'XX9' bridges to nothing
         got = A.compute_active_share(
-            [_h("Apple", "US1", 50), _h(None, "XX9", 50)], "ACWI")
+            [_h("Apple", "US1", 50), _h(None, "XX9", 50)], "SP500")
         assert abs(got["active_share_pct"] - 50.0) < 1e-9
         assert [u["isin"] for u in got["unresolved"]] == ["XX9"]
 
@@ -165,7 +210,7 @@ class TestWhatItRefusesToHide:
         unpriceable name we do not hold makes active share read slightly LOW. Never exact."""
         _bench(monkeypatch, [("Apple Inc", 100.0)], covered=78.5)
         _grid(monkeypatch, {"US1": "Apple Inc"})
-        got = A.compute_active_share([_h("Apple", "US1", 100)], "ACWI")
+        got = A.compute_active_share([_h("Apple", "US1", 100)], "SP500")
         assert got["benchmark_covered_pct"] == 78.5
 
     def test_off_benchmark_is_the_selection_half_of_the_bet(self, monkeypatch):

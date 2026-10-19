@@ -51,11 +51,11 @@ function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 min-w-[8rem]">
-      <div className="text-[9px] uppercase tracking-wider text-fg-faint flex items-center gap-1">
+    <div className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
+      <div className="text-sm text-fg-faint flex items-center gap-1">
         {label}{info}
       </div>
-      <div className={`font-mono text-xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
+      <div className={`font-mono text-2xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
     </div>
   );
 }
@@ -82,7 +82,7 @@ export default function TrackingErrorView({
   //  A string key, not the array — `holdings` is rebuilt on every parent render, so depending on
   // its identity would refetch for ever.
   const requestUrl = `${API_URL}/api/airs/portfolio/tracking-error`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=shared-v1`;
   const requestBody = JSON.stringify({ holdings });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<TrackingError>(key, async () => {
@@ -140,18 +140,30 @@ export default function TrackingErrorView({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-fg-faint">{t.common.measured} {t.common.monthly}</span>
-      </div>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>}
+      {!data && !error && (
+        <div className="absolute inset-0 grid place-items-center text-center px-6" role="status">
+          <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
+        </div>
+      )}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
         <>
-          <div className="flex flex-wrap gap-2">
-            <Tile label={t.te.trackingError} value={pct2(data.tracking_error_pct)}
+          <div className="flex flex-wrap justify-center gap-3">
+            <Tile label={t.te.activeReturn}
+              value={pct2(data.active_return_ann_pct).replace('%', 'pp')}
+              tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
+              info={<InfoTip className="ml-0.5" content={<AspectCard
+                what={`Annualized portfolio return minus ${data.benchmark}'s return, in percentage points. Calculated before rounding.`}
+                where={where}
+                when={when}
+                worked={data.active_return_ann_pct == null ? '' : withWorked(
+                  String.raw`\text{Active return} = \text{Portfolio annualized return} - \text{Benchmark annualized return}`,
+                  String.raw`${subNum(data.portfolio_return_ann_pct ?? 0, 4)}\% - (${subNum(data.benchmark_return_ann_pct ?? 0, 4)}\%) \approx ${subNum(data.active_return_ann_pct, 2)}\text{pp}`)}
+                how="Each series is compounded and annualized separately, then the benchmark return is subtracted. This uses today's AIRS holdings and weights over the historical period; it is not your account's realized performance." />} />} />
+            <Tile label={t.te.trackingError} value={pct2(data.tracking_error_pct).replace('%', 'pp')}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.te.cards.te.what}
                 where={where}
@@ -177,73 +189,12 @@ export default function TrackingErrorView({
                   ? `${t.te.bandReading(subPct2(band.lo), subPct2(band.hi),
                     subPct2(band.centre), data.benchmark)} `
                   : '') + t.te.cards.te.how} />} />} />
-            <Tile label={t.te.activeReturn}
-              value={pct2(data.active_return_ann_pct)}
-              tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.te.cards.activeReturn.what}
-                where={where}
-                when={when}
-                worked={data.active_return_ann_pct == null ? '' : withWorked(
-                  String.raw`\left( \prod_t (1 + a_t) \right)^{f/T} - 1`,
-                  String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
-                  + String.raw` \;\Rightarrow\; ${subNum(data.active_return_ann_pct, 2)}\%`)}
-                legend={[
-                  { sym: String.raw`a_t`, is: t.te.legend.a },
-                  { sym: String.raw`\prod_t`, is: t.te.legend.prod },
-                  { sym: 'T', is: t.te.legend.T(data.observations) },
-                  { sym: 'f', is: t.te.legend.f(data.periods_per_year) },
-                ]}
-                how={t.te.cards.activeReturn.how} />} />} />
-            <Tile label={t.te.infoRatio}
-              value={data.information_ratio == null ? '—' : data.information_ratio.toFixed(2)}
-              tone={(data.information_ratio ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.te.cards.infoRatio.what}
-                where={where}
-                when={when}
-                worked={data.information_ratio == null || data.tracking_error_pct == null ? ''
-                  : withWorked(
-                    String.raw`IR = \dfrac{R_a}{TE}`,
-                    String.raw`\dfrac{${subNum(data.active_return_ann_pct ?? 0, 2)}\%}`
-                    + String.raw`{${subNum(data.tracking_error_pct, 2)}\%}`
-                    + ` = ${data.information_ratio.toFixed(2)}`)}
-                legend={[
-                  { sym: 'R_a', is: t.te.legend.Ra },
-                  { sym: String.raw`TE`, is: t.te.legend.te },
-                  { sym: String.raw`IR`, is: t.te.legend.IR },
-                ]}
-                how={t.te.cards.infoRatio.how} />} />} />
-            <Tile label={t.te.observations} value={`${data.observations}`} tone="text-fg-muted"
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.te.observationsWhat(data.frequency)}
-                where={where}
-                when={when}
-                how={t.te.cards.observations.how} />} />} />
           </div>
 
           {data.cadence_note && (
             <p className="text-[11px] text-warn-300">{data.cadence_note}</p>
           )}
 
-          <p className="text-[11px] text-fg-faint leading-relaxed">
-            {/*  THE BOOK IS NAMED AND THE WINDOW IS DATED, same rule as the cards above — see the
-                 on `when`. "Today's sleeve carried back 5 years" asserted a start date rather
-                than reporting one, and the grid rarely reaches the full five.  NOT badged: this
-                is a plain <p> outside the card system, and `v()` only renders inside one. */}
-            {`${portfolioName}'s stock sleeve at the selected AIRS weights, priced from `}
-            {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} — `}
-            not the book&apos;s realised history, so a name bought in March contributes its January
-            return. It is the same portfolio the Active share view describes.
-            {data.avg_weight_covered_pct != null && data.avg_weight_covered_pct < 99.5 && (
-              <>
-                {` The average period covered ${data.avg_weight_covered_pct.toFixed(2)}% of the sleeve`}
-                {` (${data.priced_holdings} of ${data.total_holdings} holdings priced); the rest were `}
-                renormalised over, never carried at zero.
-              </>
-            )}
-            {` Differenced against ${data.benchmark}'s investable tracker, f = ${periodsPerYear}.`}
-          </p>
         </>
       )}
     </div>

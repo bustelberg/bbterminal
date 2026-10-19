@@ -2075,6 +2075,23 @@ async def airs_basket_analysis(req: BasketRequest, benchmark: str = "SP500"):
     return await compute_basket_analysis_async(req.holdings, benchmark, req.label)
 
 
+class ActiveShareWeightPrice(BaseModel):
+    ticker: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    start_price_eur: float | None = None
+    end_price_eur: float | None = None
+
+
+class ActiveShareWeightCalculation(BaseModel):
+    as_of: str
+    initial_weight_pct: float
+    return_eur_pct: float
+    normalisation_total: float
+    result_pct: float
+    prices: list[ActiveShareWeightPrice] = []
+
+
 class ActiveShareRow(BaseModel):
     """One ISSUER, on both sides.  NOT one holding and not one listing — a book holding two share
     classes of the same company contributes ONE of these, with the weights summed. See
@@ -2087,6 +2104,10 @@ class ActiveShareRow(BaseModel):
     active_pct: float = 0.0
     held: bool = False
     residual: bool = False
+    workbook_weight_pct: float | None = None
+    weight_calculation: ActiveShareWeightCalculation | None = None
+    yfinance_return_pct: float | None = None
+    normalisation_total: float | None = None
 
 
 class ActiveShareUnmatched(BaseModel):
@@ -2155,6 +2176,7 @@ class ActiveShareHolding(BaseModel):
     #: was built; sending it back is what keeps ONE definition of "this is a fund, not a stock"
     #: rather than a second one here that could drift from the Stocks bucket on screen.
     is_fund: bool = False
+    bucket: str | None = None
     #: The position's EUR value — AIRS's own `current_value_eur`, not a `q·P·X` of ours.
     #:
     #:  OPTIONAL, because an ad-hoc basket has weights and no euros. Every euro figure in the
@@ -2240,6 +2262,8 @@ class TrackingError(BaseModel):
     #: confused. A book can have a large tracking error and no active return whatsoever.
     mean_active_per_period_pct: float | None = None
     active_return_ann_pct: float | None = None
+    portfolio_return_ann_pct: float | None = None
+    benchmark_return_ann_pct: float | None = None
     #: Active return per unit of the risk taken to earn it. Null when TE is ~0 (the denominator).
     information_ratio: float | None = None
 
@@ -2378,6 +2402,7 @@ class PortfolioVolatility(BaseModel):
     """
 
     available: bool = True
+    rolling_volatility: list[dict] = []
     reason: str | None = None
     benchmark: str
     frequency: str = "weekly"

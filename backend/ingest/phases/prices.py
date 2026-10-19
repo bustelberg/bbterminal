@@ -716,7 +716,7 @@ def refresh_held_benchmarks(run_id: int) -> int:
     Best-effort per benchmark (a fetch/upsert failure is logged + skipped).
     Returns the count refreshed."""
     from ingest.constants import DATA_CUTOFF  # noqa: PLC0415
-    from asset_pipeline.yahoo import closed_daily_bars  # noqa: PLC0415
+    from asset_pipeline.yahoo import YahooThrottled, closed_daily_bars  # noqa: PLC0415
 
     bids = _collect_held_benchmark_ids()
     if not bids:
@@ -748,6 +748,9 @@ def refresh_held_benchmarks(run_id: int) -> int:
                     rows[i:i + 500], on_conflict="benchmark_id,target_date"
                 ).execute()
             refreshed += 1
+        except YahooThrottled as e:
+            log.warning("[price_update] held benchmark refresh paused: %s", e)
+            break
         except Exception as e:
             log.warning("[price_update] benchmark %s refresh failed: %s: %s", bid, type(e).__name__, e)
     return refreshed

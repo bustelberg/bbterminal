@@ -168,6 +168,17 @@
       },
       "ActiveShareHolding": {
         "properties": {
+          "bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket"
+          },
           "currency": {
             "anyOf": [
               {
@@ -263,6 +274,17 @@
             "title": "Name",
             "type": "string"
           },
+          "normalisation_total": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Normalisation Total"
+          },
           "portfolio_pct": {
             "default": 0.0,
             "title": "Portfolio Pct",
@@ -272,6 +294,38 @@
             "default": false,
             "title": "Residual",
             "type": "boolean"
+          },
+          "weight_calculation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActiveShareWeightCalculation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "workbook_weight_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workbook Weight Pct"
+          },
+          "yfinance_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yfinance Return Pct"
           }
         },
         "required": [
@@ -312,6 +366,108 @@
           }
         },
         "title": "ActiveShareUnmatched",
+        "type": "object"
+      },
+      "ActiveShareWeightCalculation": {
+        "properties": {
+          "as_of": {
+            "title": "As Of",
+            "type": "string"
+          },
+          "initial_weight_pct": {
+            "title": "Initial Weight Pct",
+            "type": "number"
+          },
+          "normalisation_total": {
+            "title": "Normalisation Total",
+            "type": "number"
+          },
+          "prices": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ActiveShareWeightPrice"
+            },
+            "title": "Prices",
+            "type": "array"
+          },
+          "result_pct": {
+            "title": "Result Pct",
+            "type": "number"
+          },
+          "return_eur_pct": {
+            "title": "Return Eur Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "as_of",
+          "initial_weight_pct",
+          "return_eur_pct",
+          "normalisation_total",
+          "result_pct"
+        ],
+        "title": "ActiveShareWeightCalculation",
+        "type": "object"
+      },
+      "ActiveShareWeightPrice": {
+        "properties": {
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "end_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Price Eur"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "start_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Price Eur"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          }
+        },
+        "title": "ActiveShareWeightPrice",
         "type": "object"
       },
       "ActualFill": {
@@ -13936,6 +14092,15 @@
             "title": "Risk Free Pct",
             "type": "number"
           },
+          "rolling_volatility": {
+            "default": [],
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Rolling Volatility",
+            "type": "array"
+          },
           "sharpe": {
             "anyOf": [
               {
@@ -16380,6 +16545,17 @@
             ],
             "title": "Benchmark Isin"
           },
+          "benchmark_return_ann_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Ann Pct"
+          },
           "cadence_note": {
             "anyOf": [
               {
@@ -16433,6 +16609,17 @@
               }
             ],
             "title": "Periods Per Year"
+          },
+          "portfolio_return_ann_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Return Ann Pct"
           },
           "priced_holdings": {
             "default": 0,

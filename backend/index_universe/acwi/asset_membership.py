@@ -219,7 +219,10 @@ def resolve() -> tuple[list[dict], dict]:
         rows.setdefault(aid, {
             "analysis_id": aid, "source": SOURCE,
             "ticker": h.get("Ticker"), "exchange": h.get("Exchange"),
+            "name": h.get("Name"),
+            "currency": h.get("Currency"),
             "yahoo_symbol": held_sym, "source_as_of": as_of,
+            "weight_pct": float(str(h.get("Weight (%)") or h.get("Weight") or 0).replace("%", "").replace(",", ".")),
         })
     stats = {
         "as_of": as_of, "equities": len(equities), "resolved": len(rows),
@@ -252,7 +255,7 @@ def sync(label: str = ACWI_LABEL) -> dict:
         return {"status": "error", "detail": "resolved 0 assets; membership left unchanged", **stats}
 
     deps.supabase.table("index_file_membership").delete().eq("universe_id", uid).execute()
-    payload = [{**r, "universe_id": uid} for r in rows]
+    payload = [{**{k: v for k, v in r.items() if k not in {"name", "currency", "weight_pct"}}, "universe_id": uid} for r in rows]
     for i in range(0, len(payload), 200):        # `IN_CHUNK_SIZE` — the Cloudflare 502 guard
         deps.supabase.table("index_file_membership").insert(payload[i:i + 200]).execute()
 

@@ -22,6 +22,8 @@
  * the ratio equals its own parts.
  */
 import { apiFetch } from '../../../lib/apiFetch';
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
+import { chartTheme } from '../../../lib/chartTheme';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
@@ -76,7 +78,7 @@ export default function VolatilityView({
   const freq = 'monthly';
 
   const requestUrl = `${API_URL}/api/airs/portfolio/volatility`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=shared-v1`;
   const requestBody = JSON.stringify({ holdings });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<PortfolioVolatility>(key, async () => {
@@ -253,19 +255,13 @@ export default function VolatilityView({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 flex-wrap">
-        <span className="text-[11px] text-fg-faint">Measured monthly</span>
-        {/*  ANNUALISED IS MARKED ONCE, FOR THE WHOLE VIEW, and that is why the tiles no longer
-            carry "(ann.)". It applies to σ, downside deviation, the return and both ratios — but
-            only ONE tile ever said so, which left the other four looking like raw-period numbers next
-            to a "Weekly" control. A per-tile marker also could not survive naming the tiles after
-            the book and the index: "BUSTELBERG OFFENSIEF VOLATILITY (ANN.)" wraps to three lines
-            at 9px and breaks the row it is supposed to line up with. */}
-        <span className="text-[11px] text-fg-faint">{t.vol.shownAnnualised}</span>
-      </div>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>}
+      {!data && !error && (
+        <div className="absolute inset-0 grid place-items-center text-center px-6" role="status">
+          <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
+        </div>
+      )}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
@@ -286,64 +282,41 @@ export default function VolatilityView({
             the project rule for a dense table: it scrolls in its own box rather than squashing its
             columns or pushing the dialog sideways.
           */}
-          <div className="rounded-lg border border-neutral-800/40 overflow-x-auto">
-            <table className="w-full table-fixed text-xs min-w-[46rem]">
-              <thead>
-                <tr className="text-fg-faint [&>th]:px-2.5 [&>th]:py-1.5 [&>th]:font-medium
-                  [&>th]:text-[9px] [&>th]:uppercase [&>th]:tracking-wider [&>th]:align-bottom
-                  [&>th]:bg-inset">
-                  <th className="text-left w-[9rem]" />
-                  {MEASURES.map((m) => (
-                    <th key={m.key} className="text-right">
-                      <span className="inline-flex items-center gap-1">{m.label}{m.info}</span>
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {/*  THE BOOK FIRST AND IN THE STRONGER INK. Both rows are facts, but only one of
-                    them is the thing the reader opened this panel to look at. */}
-                <tr className="[&>td]:px-2.5 [&>td]:py-2 [&>td]:border-t
-                  [&>td]:border-neutral-800/20">
-                  <td className="text-fg-soft font-medium truncate" title={portfolioName}>
-                    {portfolioName}
-                  </td>
-                  {MEASURES.map((m) => (
-                    <td key={m.key}
-                      className={`text-right font-mono tabular-nums text-base ${m.ownTone ?? 'text-fg-strong'}`}>
-                      {m.own}
-                    </td>
-                  ))}
-                </tr>
-                <tr className="[&>td]:px-2.5 [&>td]:py-2 [&>td]:border-t
-                  [&>td]:border-neutral-800/20">
-                  <td className="text-fg-muted truncate" title={data.benchmark}>{data.benchmark}</td>
-                  {MEASURES.map((m) => (
-                    <td key={m.key}
-                      className="text-right font-mono tabular-nums text-base text-fg-muted">
-                      {m.bench}
-                    </td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
+          <div className="flex flex-wrap justify-center gap-2">
+            {MEASURES.filter((m) => m.key === 'vol' || m.key === 'dd').map((m) => (
+              <div key={m.key} className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
+                <div className="text-sm text-fg-faint flex items-center gap-1">{m.label}{m.info}</div>
+                <div className={`font-mono text-2xl tabular-nums ${m.ownTone ?? 'text-fg-strong'}`}>{m.own}</div>
+                <div className="mt-1 text-xs text-fg-muted">{data.benchmark}: <span className="font-mono tabular-nums">{m.bench}</span></div>
+              </div>
+            ))}
           </div>
 
           {data.cadence_note && <p className="text-[11px] text-fg-faint">{data.cadence_note}</p>}
+          {data.volatility_pct != null && data.benchmark_volatility_pct != null && data.benchmark_volatility_pct > 0 && (
+            <p className="text-center text-sm text-fg-soft">
+              {portfolioName} is <span className="font-mono font-semibold">{(data.volatility_pct / data.benchmark_volatility_pct).toFixed(2)}×</span> as volatile as {data.benchmark} over this period.
+            </p>
+          )}
+          <p className="text-center text-xs text-fg-muted">Downside deviation measures fluctuations below a 0% return; lower means smaller losses.</p>
+          <section className="rounded-xl border border-neutral-800/40 bg-elevated p-4">
+            <h5 className="mb-4 text-center text-base font-medium text-fg-strong">Rolling 12-month volatility</h5>
+            {(data.rolling_volatility?.length ?? 0) > 0 ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={data.rolling_volatility} margin={{ top: 8, right: 16, bottom: 4, left: 8 }}>
+                  <CartesianGrid stroke={chartTheme.gridEarnings} strokeDasharray="3 3" />
+                  <XAxis dataKey="date" minTickGap={50} tick={{ fontSize: 12, fill: chartTheme.axisTick }} tickFormatter={(date: string) => new Date(`${date}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'short', year: '2-digit', timeZone: 'UTC' })} />
+                  <YAxis domain={[0, 'auto']} tick={{ fontSize: 12, fill: chartTheme.axisTick }} tickFormatter={(value: number) => `${value.toFixed(0)}%`} />
+                  <Tooltip formatter={(value) => `${Number(value).toFixed(2)}%`} />
+                  <Legend />
+                  <Line type="monotone" dataKey="portfolio_pct" name={portfolioName} stroke={chartTheme.pos} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="benchmark_pct" name={data.benchmark} stroke={chartTheme.compare} strokeWidth={2} strokeDasharray="5 3" dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : <p className="py-10 text-center text-sm text-fg-muted">At least 12 months of overlapping returns are needed.</p>}
+            <p className="mt-3 text-center text-xs text-fg-faint">Each point shows annualized volatility over the preceding 12 months. Uses today&apos;s AIRS stock holdings and weights applied to historical EUR prices.</p>
+          </section>
 
-          <p className="text-[11px] text-fg-faint leading-relaxed">
-            {/*  THE BOOK IS NAMED AND THE WINDOW IS DATED — same fix as `TrackingErrorView`'s own
-                footnote. "Today's weights over 5 years" asserted a start date instead of reporting
-                one, and the paired grid rarely reaches the full five.  Not badged: a bare <p> is
-                outside the card system, and `v()` only renders inside one. */}
-            {`${portfolioName}'s stock sleeve at the selected AIRS weights, priced from `}
-            {`${data.window_from ?? 'an unrecorded start'} to ${data.window_to ?? 'an unrecorded end'} `}
-            {`(${data.priced_holdings} of ${data.total_holdings} priced). `}
-            Deposits and withdrawals cannot distort this — it is a weighted basket of instrument
-            returns, not an account value, so there are no flows in the series to strip out. The
-            cost is that the weights are today&apos;s: this is the volatility of the portfolio as it
-            stands, not the one the client lived through.
-          </p>
         </>
       )}
     </div>

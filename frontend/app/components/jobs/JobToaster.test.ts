@@ -1,8 +1,22 @@
 import { describe, expect, it } from 'vitest';
 
 import { friendlyJobMessage, unavailableNotice } from './JobToaster';
+import { isAirsBusy } from '../../../lib/stores/jobs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+
+describe('AIRS busy receipts', () => {
+  it.each(['refresh', 'scan'])('recognizes a refused %s so it cannot advance the workflow', (action) => {
+    expect(isAirsBusy({ status: 'done', summary:
+      `Another AIRS ${action} is already running — nothing was re-read` })).toBe(true);
+  });
+
+  it('keeps successful refreshes and genuine failures distinct', () => {
+    expect(isAirsBusy({ status: 'done', summary: '44/44 accounts, 1200 holdings' })).toBe(false);
+    expect(isAirsBusy({ status: 'failed', summary: 'Another AIRS scan is already running — nothing was re-read' })).toBe(false);
+    expect(isAirsBusy({ status: 'done', summary: null })).toBe(false);
+  });
+});
 
 describe('unavailableNotice', () => {
   it('turns the old TSX receipt into a complete user-facing explanation', () => {

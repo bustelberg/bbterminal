@@ -1952,6 +1952,7 @@ export function airsRiskHoldings(
       weight_now_pct: weightNow,
       weight_start_pct: startTotal > 0 ? start / startTotal * 100 : null,
       is_fund: !!h.is_fund,
+      bucket: h.bucket,
       value_eur: h.current_value_eur,
       currency: h.currency,
     };
@@ -3892,8 +3893,9 @@ export default function PortfolioAnalysisModal({
       onClick={onClose} role="dialog" aria-modal="true">
       {/* Fixed at 80% of the viewport width AND height; the charts span the full width and the
           drill-down dock opens full-width below them. */}
-      <div className="bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] overflow-auto p-5"
+      <div className={`relative bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] p-5 ${risk || why ? 'overflow-hidden' : 'overflow-auto'}`}
         onClick={(e) => e.stopPropagation()}>
+        <div hidden={risk || !!why}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="min-w-0">
             <h3 className="text-base font-mono font-semibold text-fg-strong">{name}</h3>
@@ -4292,6 +4294,7 @@ export default function PortfolioAnalysisModal({
             )}
           </>
         )}
+        </div>
       {/* The book's fetch time stops here. Holding trades carry their own source date. */}
       {/* Risk and attribution still describe this book, so they retain its provenance. */}
       {sectorFor && (
@@ -4302,7 +4305,12 @@ export default function PortfolioAnalysisModal({
         <CompanyNotesModal holding={notesFor} onClose={() => setNotesFor(null)} />
       )}
       {risk && data && (
-        <PanelDialog onClose={() => setRisk(false)}>
+        <div className="absolute inset-0 z-20 flex min-h-0 flex-col bg-page p-5">
+          <button type="button" onClick={() => setRisk(false)}
+            className="mb-4 w-fit cursor-pointer rounded-lg border border-neutral-800/40 bg-elevated px-5 py-2.5 text-sm font-semibold text-fg-strong transition-colors hover:border-accent-500/50 hover:text-accent-300">
+            ← Back to analysis
+          </button>
+          <div className="min-h-0 flex-1">
           {/*  THE HOLDINGS THE TABLE IS SHOWING, PASSED STRAIGHT THROUGH. The panel does not
               re-derive a weight or re-decide what is a fund — both were settled server-side when
               this payload was built, and a risk figure the Holdings table cannot reproduce is
@@ -4329,17 +4337,24 @@ export default function PortfolioAnalysisModal({
             // Vermogensoverzicht. Same distinction `source` already draws for the return.
             portfolioSource={source === 'model' ? 'airs_model' : 'airs_volk'}
             onClose={() => setRisk(false)} />
-        </PanelDialog>
+          </div>
+        </div>
       )}
       {why && data && (
-        <PanelDialog onClose={() => setWhy(null)}>
+        <div className="absolute inset-0 z-20 flex min-h-0 flex-col bg-page p-5">
+          <button type="button" onClick={() => setWhy(null)}
+            className="mb-4 w-fit cursor-pointer rounded-lg border border-neutral-800/40 bg-elevated px-5 py-2.5 text-sm font-semibold text-fg-strong transition-colors hover:border-accent-500/50 hover:text-accent-300">
+            ← Back to analysis
+          </button>
+          <div className="min-h-0 flex-1 overflow-auto">
           <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
             source={source} lookThrough={lookThrough}
             portfolioName={name}
             portfolioAsOf={data.returns?.portfolio_as_of}
             benchmarkAsOf={data.returns?.benchmark_as_of}
             onClose={() => setWhy(null)} />
-        </PanelDialog>
+          </div>
+        </div>
       )}
       <ProvenanceFetchedAt at={undefined}>
       {sectorAllocationFor && (

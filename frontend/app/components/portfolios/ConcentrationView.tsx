@@ -68,11 +68,11 @@ function Tile({ label, value, sub, tone, info }: {
   label: string; value: string; sub?: string; tone?: string; info?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 min-w-[8rem]">
-      <div className="text-[9px] uppercase tracking-wider text-fg-faint flex items-center gap-1">
+    <div className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
+      <div className="text-sm text-fg-faint flex items-center gap-1">
         {label}{info}
       </div>
-      <div className={`font-mono text-xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
+      <div className={`font-mono text-2xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
       {sub && <div className="text-[10px] text-fg-faint">{sub}</div>}
     </div>
   );
@@ -140,7 +140,11 @@ export default function ConcentrationView({
   return (
     <div className="space-y-3">
       {error && <p className="text-xs text-neg-300">{error}</p>}
-      {!data && !error && <p className="text-xs text-fg-subtle">{t.common.computing} <LoadingDots /></p>}
+      {!data && !error && (
+        <div className="absolute inset-0 grid place-items-center text-center px-6" role="status">
+          <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
+        </div>
+      )}
       {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
