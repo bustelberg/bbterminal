@@ -369,7 +369,7 @@ const nl: AnalyseCopy = {
     blendNote: (count) => `${count} routes naar de positie, elk gewaardeerd door het boek dat deze aanhoudt en gewogen naar beginwaarde`,
     blendHow: (math) => `Σ (aandeel van elke route in deze positie × eigen rendement van die route)\n\n${math}`,
     yfReturnHow: (pct, from) => `onze eigen EUR-slotkoersreeks — geen AIRS-boekwaarden voor deze rij\n\n${pct} sinds ${from}`,
-    airsReturnNote: (valuedBy) => `${valuedBy ? `${valuedBy}: ` : ''}De exacte AIRS-mutatie in EUR plus nettodividend dat aan de resterende aandelen toekomt; latere verkopen kunnen dit dividenddeel verlagen, latere aankopen verhogen het nooit.`,
+    airsReturnNote: (valuedBy) => `${valuedBy ? `${valuedBy}: ` : ''}Het exacte AIRS-koers- en valutaresultaat in EUR plus nettodividend dat aan de resterende aandelen toekomt; latere verkopen kunnen dit dividenddeel verlagen, latere aankopen verhogen het nooit.`,
     airsReturnHow: '(huidige AIRS-waarde in EUR − AIRS Beginwaarde + nettodividend × min(1, resterende aandelen ÷ aandelen op betaaldatum)) ÷ AIRS Beginwaarde. Als AIRS het dividend niet kan uitlijnen, tonen we het gerapporteerde Resultaat in %.',
     routeTitle: (label, bookPct, value, rowPct) => `${label}: ${bookPct}% van het boek · ${value}${rowPct ? ` · ${rowPct}% van deze positie` : ''}`,
   },
