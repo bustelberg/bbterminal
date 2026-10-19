@@ -41,7 +41,7 @@ import logging
 import os
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -52,6 +52,7 @@ from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from job_runlog import record_run
+from common.background import BoundedExecutor
 from routers.ingest_runs import kick_off_refresh
 #  The schedule itself lives there, not here — see `_register`. Declaration only: no DB, no
 # APScheduler, so it is safe for both this module and the admin router to import.
@@ -90,12 +91,16 @@ def _scheduled_worker_count() -> int:
 
 
 _SCHEDULED_WORKERS = _scheduled_worker_count()
-_scheduled_executor = ThreadPoolExecutor(
+_scheduled_executor = BoundedExecutor(
     max_workers=_SCHEDULED_WORKERS, thread_name_prefix="scheduled-job",
 )
 _scheduled_futures: dict[str, Future] = {}
 _scheduled_futures_lock = threading.Lock()
 _scheduled_slots = threading.BoundedSemaphore(_SCHEDULED_WORKERS)
+# Health checks must still run when market-data or AIRS work occupies every slot.
+_maintenance_executor = BoundedExecutor(max_workers=1, thread_name_prefix="scheduled-health")
+_maintenance_slots = threading.BoundedSemaphore(1)
+_MAINTENANCE_JOBS = frozenset({"job_watchdog", "table_size_sample", "job_gap_scan"})
 
 # The queue intentionally runs one Yahoo/OpenFIGI slice at a time. A slow slice therefore makes
 # APScheduler print its own warning every 20 seconds; that is an expected backpressure mechanism,
@@ -564,24 +569,28 @@ def _submit_scheduled_work(name: str, work) -> bool:
     # Do not leave old ticks queued behind a long-running job.  A delayed price
     # refresh is less useful than tomorrow's on-time one, and an unbounded
     # executor queue is merely unbounded threads with the failure postponed.
-    if not _scheduled_slots.acquire(blocking=False):
-        _log.warning("[scheduler] %s not started: all %d scheduled workers are busy",
-                     name, _SCHEDULED_WORKERS)
+    maintenance = name in _MAINTENANCE_JOBS
+    slots = _maintenance_slots if maintenance else _scheduled_slots
+    executor = _maintenance_executor if maintenance else _scheduled_executor
+    if not slots.acquire(blocking=False):
+        _log.warning("[scheduler] %s not started: all %d %s workers are busy",
+                     name, 1 if maintenance else _SCHEDULED_WORKERS,
+                     "maintenance" if maintenance else "scheduled")
         return False
 
     with _scheduled_futures_lock:
         existing = _scheduled_futures.get(name)
         if existing is not None and not existing.done():
-            _scheduled_slots.release()
+            slots.release()
             _log.warning("[scheduler] %s not started: an earlier run is still pending or running", name)
             return False
         # A completed future is no longer an admission lock.  Pop it before
         # submitting so an exception from submit cannot leave a stale entry.
         _scheduled_futures.pop(name, None)
         try:
-            future = _scheduled_executor.submit(work)
+            future = executor.submit(work)
         except RuntimeError as e:
-            _scheduled_slots.release()
+            slots.release()
             # Uvicorn reload/interpreter shutdown can race an APScheduler
             # callback. It is an expected no-op: no work must start while the
             # process is leaving, and a traceback makes that normal lifecycle
@@ -602,7 +611,7 @@ def _submit_scheduled_work(name: str, work) -> bool:
             # in tests, but the invariant costs nothing to state here).
             if _scheduled_futures.get(name) is done:
                 _scheduled_futures.pop(name, None)
-            _scheduled_slots.release()
+            slots.release()
 
     future.add_done_callback(_finished)
     return True
@@ -2370,7 +2379,10 @@ def register_scheduler(app) -> None:
             _log.info("[scheduler] DISABLE_SCHEDULER set — in-process jobs not started")
             return
 
-        sched = BackgroundScheduler(timezone="UTC")
+        # These threads only dispatch; long work has separate bounded capacity.
+        sched = BackgroundScheduler(timezone="UTC", executors={
+            "default": {"type": "threadpool", "max_workers": 2},
+        })
         executor_log = logging.getLogger("apscheduler.executors.default")
         if not any(isinstance(f, _ExpectedQueueOverrunFilter) for f in executor_log.filters):
             executor_log.addFilter(_ExpectedQueueOverrunFilter())

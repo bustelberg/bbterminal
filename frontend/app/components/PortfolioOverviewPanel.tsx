@@ -11,7 +11,7 @@ import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
 import { prefetchAnalysis } from '../../lib/analysisPrefetch';
-import { cancelJob, startJob } from '../../lib/stores/jobs';
+import { cancelJob, isAirsBusy, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
 import { PORTFOLIO_SECTORS } from './portfolios/etfSectorLookThrough';
 import { createLiveReload } from '../../lib/liveReload';
@@ -873,7 +873,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       // reports per book is the whole workflow; this adds the model portfolios, which supply the
       // readable nickname and the id-only views. Running it after the reader pressed Cancel would
       // be minutes more of exactly what they asked to stop.
-      if (job.status === 'done') {
+      if (job.status === 'done' && !isAirsBusy(job)) {
         await scanModels(force);
         setDetail({});
         setIsins({});

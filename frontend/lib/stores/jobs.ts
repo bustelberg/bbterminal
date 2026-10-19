@@ -19,6 +19,13 @@ import { runSSE } from '../stream';
 
 export type JobStatus = 'running' | 'done' | 'failed' | 'cancelled';
 
+/** Older AIRS servers report lock refusals as successful job receipts. */
+export function isAirsBusy(job: { status: JobStatus; summary: string | null }): boolean {
+  return job.status === 'done'
+    && /another AIRS (?:refresh|scan) is (?:already )?running/i.test(job.summary ?? '')
+    && /nothing was re-read/i.test(job.summary ?? '');
+}
+
 export type JobToast = {
   id: string;
   /** What the reader pressed — a company name, not the ISIN the server keys on. */

@@ -1,5 +1,32 @@
 # Deployment + in-process pipeline & scheduling
 
+## Outage containment (2026-10-19)
+
+Yahoo uses one in-process circuit across chart, search, profile and batch quote calls.
+A confirmed ban fails the current call and opens the circuit for `YAHOO_COOLDOWN`
+(default 90 seconds). Calls during that window fail without HTTP or cooldown sleeps.
+After the deadline one caller probes the canary; failed probes double the next
+cooldown up to `YAHOO_MAX_COOLDOWN` (900 seconds). Successful recovery resets it.
+`YAHOO_MAX_THROTTLES` is retired: workers no longer sleep through twelve retries.
+Batch quotes refresh expired authentication at most once per chunk.
+Backfill, stale-price and held-benchmark batches stop on a provider ban instead
+of walking every remaining instrument; price batches report deferred counts.
+
+Scheduled data jobs retain their bounded capacity; watchdog, gap scan and table-size
+sampling share a separate single maintenance worker. APScheduler itself has two
+dispatch threads. The bounded executor starts workers before enqueueing tasks, so
+a failed thread start cannot leave a rejected callable queued for later execution.
+Over-capacity ticks are dropped rather than queued; normal future ticks retry.
+
+HTTP/cron pipeline triggers admit at most one background pipeline at a time, before
+inserting an `ingest_run`; excess requests return 503. This also bounds waiting on
+the pipeline lock held by the scheduled daily sequence. Thread-start failures and
+uncaught worker failures finalize the run as `error` and release admission. A hung
+worker is not killed or replaced: its capacity remains occupied until it exits.
+The circuit and admission limits are process-local; the single scheduler replica
+assumption still applies. Deploy/restart once to clear threads stuck in the old
+cooldown loop; these changes cannot release already-running old code in place.
+
 > Split out of `CLAUDE.md` (2026-08-17) to keep the always-loaded file small. Content is verbatim; `CLAUDE.md` carries a one-line index entry pointing here.
 
 ## Deployment
