@@ -1204,6 +1204,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/model-portfolios/refresh/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Model Portfolios Refresh Job
+         * @description Rebuild the valuation of every paired model portfolio as one cancellable job.
+         *
+         *     ``/scan/job`` deliberately only discovers models and repairs compositions that are absent.
+         *     That is enough to make a newly discovered account linkable, but it does not run the model
+         *     valuation pipeline (composition -> instruments -> FX -> prices -> recompute).  The overview's
+         *     per-row Refresh *does* run that pipeline through ``refresh_portfolio_fully``.  Consequently a
+         *     fleet refresh could say it had completed while a row still showed an old model return until
+         *     its individual Refresh was pressed.
+         *
+         *     Keep the work in ``scheduler._body_airs_model_prices``: the scheduled AIRS refresh already
+         *     uses that exact batch helper, which in turn calls ``refresh_many`` and therefore the same
+         *     model half as the per-row action.  This route only gives that shared operation a user-visible,
+         *     cancellable job handle.
+         */
+        post: operations["airs_model_portfolios_refresh_job_api_airs_model_portfolios_refresh_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/model-portfolios/scan": {
         parameters: {
             query?: never;
@@ -5031,6 +5063,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/earnings/companies/{company_id}/egm-assumption": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Egm Assumption
+         * @description Persist the EGM assumptions shared by every Fundamental view of a company.
+         */
+        put: operations["save_egm_assumption_api_earnings_companies__company_id__egm_assumption_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/earnings/debt-ratio-inputs": {
         parameters: {
             query?: never;
@@ -5089,6 +5141,26 @@ export interface paths {
          *     Deduped by ISIN, weight is the share of the whole book, holdings with no company row omitted.
          */
         post: operations["dividend_yield_inputs_api_earnings_dividend_yield_inputs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/earnings/egm-assumptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Egm Assumptions
+         * @description Return saved EGM assumptions for the companies visible in the modal.
+         */
+        get: operations["get_egm_assumptions_api_earnings_egm_assumptions_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -11282,6 +11354,16 @@ export interface components {
             trough_date: string;
         };
         /**
+         * EgmAssumptionIn
+         * @description The two analyst-entered inputs for the Expected Growth Model.
+         */
+        EgmAssumptionIn: {
+            /** Eps Growth */
+            eps_growth?: number | null;
+            /** Exit Pe */
+            exit_pe?: number | null;
+        };
+        /**
          * EtfOverlayHolding
          * @description One diversifier ETF held alongside the momentum sleeve in a blended
          *     scheduled strategy. `benchmark_id` is a `benchmark` row; `weight_pct` is
@@ -16511,6 +16593,26 @@ export interface operations {
             };
         };
     };
+    airs_model_portfolios_refresh_job_api_airs_model_portfolios_refresh_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     airs_model_portfolios_scan_api_airs_model_portfolios_scan_get: {
         parameters: {
             query?: never;
@@ -21052,6 +21154,41 @@ export interface operations {
             };
         };
     };
+    save_egm_assumption_api_earnings_companies__company_id__egm_assumption_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                company_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EgmAssumptionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     debt_ratio_inputs_api_earnings_debt_ratio_inputs_post: {
         parameters: {
             query?: never;
@@ -21097,6 +21234,37 @@ export interface operations {
                 "application/json": components["schemas"]["FundamentalCoverageRequest"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_egm_assumptions_api_earnings_egm_assumptions_get: {
+        parameters: {
+            query?: {
+                company_id?: number[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
