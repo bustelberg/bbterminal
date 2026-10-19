@@ -95,8 +95,17 @@ _YAHOO_MUTUAL_FUNDS = {
 }
 
 _PRODUCTS = {
-    **{isin: {"name": name, "provider": "justetf"}
-       for isin, name in _JUSTETF_NAMES.items()},
+    **{
+        isin: {
+            "name": name,
+            "provider": "justetf",
+            # Yahoo identifies this exact London-listed share class as the ETF and publishes its
+            # sector weights. It is the fallback when justETF's edge returns 502 to our host.
+            **({"fallback": "yahoo", "symbol": "XDWU.L"}
+               if isin == "IE00BM67HQ30" else {}),
+        }
+        for isin, name in _JUSTETF_NAMES.items()
+    },
     **{isin: {"name": name, "provider": "yahoo", "symbol": symbol}
        for isin, (name, symbol) in _YAHOO_PRODUCTS.items()},
     **{isin: {"name": name, "provider": "yahoo_mutual_fund", "symbol": symbol}
@@ -277,20 +286,37 @@ def _fetch_ishares(isin: str, product: dict) -> EtfSectorAllocationResponse:
 
 
 def _fetch_justetf(isin: str) -> EtfSectorAllocationResponse:
+    """Read justETF's sector table, retrying one incomplete vendor response.
+
+    justETF can briefly return a successful but incomplete HTML document while its edge cache is
+    refreshing. A second request normally contains the complete table; failed parses are never
+    cached, so they cannot make a temporary upstream fault sticky.
+    """
     source_url = f"{_JUSTETF_ROOT}/en/etf-profile.html?isin={isin}"
-    with requests.Session() as session:
-        page = _tracked_get(session, source_url, source="justetf").text
-        callback = re.search(
-            r'Wicket\.Ajax\.ajax\(\{"u":"([^"]*loadMoreSectors[^"]*)"', page)
-        # Short sector lists are already complete in the server-rendered profile and deliberately
-        # have no "show more" callback. Xtrackers World Utilities is the concrete case: four rows
-        # summing to 100%, all inline. Only make the second request when justETF advertises it;
-        # `_validated_response` still rejects an inline table that is merely a partial preview.
-        expanded = page
-        if callback:
-            expanded_url = urljoin(_JUSTETF_ROOT, html.unescape(callback.group(1)))
-            expanded = _tracked_get(session, expanded_url, source="justetf").text
-    return parse_justetf_sector_payload(page, expanded, isin=isin)
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            with requests.Session() as session:
+                page = _tracked_get(session, source_url, source="justetf").text
+                callback = re.search(
+                    r'Wicket\.Ajax\.ajax\(\{"u":"([^"]*loadMoreSectors[^"]*)"', page)
+                # Short sector lists are already complete in the server-rendered profile and
+                # deliberately have no "show more" callback. Xtrackers World Utilities is the
+                # concrete case: four rows summing to 100%, all inline. Only make the second
+                # request when justETF advertises it; `_validated_response` still rejects an
+                # inline table that is merely a partial preview.
+                expanded = page
+                if callback:
+                    expanded_url = urljoin(_JUSTETF_ROOT, html.unescape(callback.group(1)))
+                    expanded = _tracked_get(session, expanded_url, source="justetf").text
+            return parse_justetf_sector_payload(page, expanded, isin=isin)
+        except Exception as exc:
+            last_error = exc
+            if attempt == 0:
+                _log.warning("[etf sectors] justETF returned an incomplete response for %s "
+                             "(%s: %s); retrying once", isin, type(exc).__name__, exc)
+    assert last_error is not None  # both attempts failed
+    raise last_error
 
 
 def _fetch_yahoo(isin: str, product: dict) -> EtfSectorAllocationResponse:
@@ -329,11 +355,17 @@ def fetch_sector_allocation(isin: str) -> EtfSectorAllocationResponse:
         else:  # pragma: no cover - registry construction makes this impossible
             raise ValueError(f"unknown fund sector provider {provider}")
     except Exception as exc:
-        if product.get("fallback") != "justetf":
+        fallback = product.get("fallback")
+        if fallback == "justetf":
+            _log.warning("[etf sectors] iShares failed for %s (%s: %s); trying justETF",
+                         isin, type(exc).__name__, exc)
+            allocation = _fetch_justetf(isin)
+        elif fallback == "yahoo":
+            _log.warning("[etf sectors] justETF failed for %s (%s: %s); trying Yahoo Finance",
+                         isin, type(exc).__name__, exc)
+            allocation = _fetch_yahoo(isin, product)
+        else:
             raise
-        _log.warning("[etf sectors] iShares failed for %s (%s: %s); trying justETF",
-                     isin, type(exc).__name__, exc)
-        allocation = _fetch_justetf(isin)
 
     with _CACHE_LOCK:
         _CACHE[isin] = (now, allocation)
