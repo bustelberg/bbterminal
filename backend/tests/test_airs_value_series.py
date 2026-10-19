@@ -226,7 +226,7 @@ class TestTheReturnIsAirsOwnAndStartsTheYearAtZero:
         assert out["benchmark_return_pct"] == 2.0
         assert out["benchmark_ticker"] == "SPY"
 
-    def test_weighted_benchmark_uses_each_scorecard_sleeve_on_the_book_dates(self, store, monkeypatch):
+    def test_weighted_benchmark_uses_only_the_stock_and_bond_policy_on_book_dates(self, store, monkeypatch):
         from routers import _benchmark_etf as benchmark_etf
 
         m, seed = store
@@ -236,8 +236,7 @@ class TestTheReturnIsAirsOwnAndStartsTheYearAtZero:
             _perf("B", "2026-02-28", beginvermogen=1.01e6, eindvermogen=1.02e6,
                   cumulatief_rendement=2.0)])
 
-        returns = {"ACWI": [0.0, 10.0, 20.0], "BONDS": [0.0, 2.0, 4.0],
-                   "ALTERNATIVES": [0.0, -4.0, -8.0]}
+        returns = {"ACWI": [0.0, 10.0, 20.0], "BONDS": [0.0, 2.0, 4.0]}
 
         def benchmark(label, _anchor, dates):
             return {"points": [{"date": day, "cum_pct": returns[label][i], "price_date": day}
@@ -245,12 +244,27 @@ class TestTheReturnIsAirsOwnAndStartsTheYearAtZero:
 
         monkeypatch.setattr(benchmark_etf, "etf_return_series", benchmark)
         out = m.value_series("B", "SP500", {
-            "Stocks": 60.0, "Bonds": 30.0, "Alternatives": 5.0, "Cash": 5.0,
+            "Stocks": 60.0, "Bonds": 40.0,
         })
 
         assert out["benchmark"] == "Weighted benchmark return (YTD) €"
-        assert [p["cum_pct"] for p in out["benchmark_returns"]] == [0.0, 6.4, 12.8]
-        assert out["benchmark_return_pct"] == 12.8
+        assert [p["cum_pct"] for p in out["benchmark_returns"]] == [0.0, 6.8, 13.6]
+        assert out["benchmark_return_pct"] == 13.6
+
+    def test_weighted_benchmark_rejects_non_policy_sleeves(self, store, monkeypatch):
+        m, seed = store
+        seed("airs_performance", [_perf("B", "2026-01-31", beginvermogen=1e6,
+                                         eindvermogen=1.01e6, cumulatief_rendement=1.0)])
+        monkeypatch.setattr("routers._benchmark_etf.etf_return_series", lambda label, _anchor, dates: {
+            "label": label, "ticker": "SPY", "points": [
+                {"date": day, "cum_pct": float(i), "price_date": day}
+                for i, day in enumerate(dates)], "return_pct": 1.0, "as_of": dates[-1]})
+
+        out = m.value_series("B", "SP500", {
+            "Stocks": 90.0, "Bonds": 0.0, "Cash": 10.0,
+        })
+
+        assert out["benchmark"] == "SP500"
 
     def test_every_period_is_a_point_because_each_is_year_to_date(self, store):
         """ THIS IS EXACTLY WHAT `_year_perf` MUST NOT DO. It takes the freshest row per MONTH,

@@ -96,6 +96,10 @@ class TestOverviewName:
 class TestManagementGroups:
     def test_only_the_named_bustelberg_profiles_are_in_bustelberg(self):
         assert ov._management_group("BUS_Offensief_Dyn") == "bustelberg"
+        assert ov._management_group("BUS_IF_DYN") == "bustelberg"
+        # AIRS's actual code has a space after the second underscore. Grouping deliberately
+        # normalizes punctuation and whitespace, so either spelling lands on the same tab.
+        assert ov._management_group("BUS_2.0_ OFF_DYN") == "bustelberg"
         assert ov._management_group("BUS_Ris_bepOff_Kl_AFS_Dy") == "topselecties"
 
     def test_only_the_named_toppenberg_profiles_are_in_toppenberg(self):
@@ -183,3 +187,19 @@ class TestOverviewRpcAssembly:
         assert rows[0]["link_source"] == "manual"
         assert rows[0]["link_reason"] == "reviewed"
         assert rows[0]["fixed_portfolio_id"] == 7
+
+    @pytest.mark.parametrize(("account", "expected_name"), [
+        ("BUS_IF_DYN", "Bustelberg Imagine Fund"),
+        ("BUS_2.0_ OFF_DYN", "Bustelberg 2.0 Offensief"),
+    ])
+    def test_new_bustelberg_accounts_are_visible_in_the_fast_overview(
+            self, monkeypatch, account, expected_name):
+        monkeypatch.setattr(ov, "_overview_payload", lambda: {
+            "accounts": [{"portefeuille": account, "has_stored_link": False, "isins": 0}],
+            "models": [],
+        })
+
+        rows = ov.list_overview()
+
+        assert [(row["dynamic_portefeuille"], row["management_group"], row["name"])
+                for row in rows] == [(account, "bustelberg", expected_name)]

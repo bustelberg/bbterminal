@@ -172,8 +172,6 @@ def book_return_window(portefeuille: str, benchmark_label: str | None = None) ->
 _WEIGHTED_BENCHMARK_SLEEVES = {
     "Stocks": "ACWI",
     "Bonds": "BONDS",
-    "Alternatives": "ALTERNATIVES",
-    "Cash": None,
 }
 _WEIGHTED_BENCHMARK_LABEL = "Weighted benchmark return (YTD) €"
 
@@ -182,13 +180,13 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
                                dates: list[str]) -> dict:
     """The scorecard's allocation benchmark, sampled on the book curve's dates.
 
-    The weights come from the same four sleeves the scorecard displays.  Cash contributes a
-    measured 0%, while every invested sleeve must have a price at every requested point: silently
-    renormalising a missing sleeve would turn a 70/30 benchmark into an all-equity one.
+    The weights are the reviewed Stocks/Bonds policy. Every invested sleeve must have a price at
+    every requested point: silently renormalising a missing sleeve would turn a 70/30 benchmark
+    into an all-equity one.
     """
-    recognised = {name: float(weights.get(name, 0.0))
-                  for name in _WEIGHTED_BENCHMARK_SLEEVES}
-    if (any(not isfinite(weight) or weight < 0 for weight in recognised.values())
+    recognised = {name: float(weights.get(name, 0.0)) for name in _WEIGHTED_BENCHMARK_SLEEVES}
+    if (set(weights) != set(_WEIGHTED_BENCHMARK_SLEEVES)
+            or any(not isfinite(weight) or weight < 0 for weight in recognised.values())
             or not 99.5 <= sum(recognised.values()) <= 100.5):
         return {}
 
@@ -199,7 +197,7 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
         for name, proxy in _WEIGHTED_BENCHMARK_SLEEVES.items()
         if proxy and recognised[name] > 0
     }
-    # A benchmark is only comparable when every non-cash sleeve is fully observed.
+    # A benchmark is only comparable when every policy sleeve is fully observed.
     if any(not series for series in sleeves.values()):
         return {}
     by_sleeve = {

@@ -42,6 +42,8 @@ _MANAGEMENT_GROUPS = {
     "busneutraaldyn": "bustelberg",
     "busbepoffensiefdyn": "bustelberg",
     "busoffensiefdyn": "bustelberg",
+    "busifdyn": "bustelberg",
+    "bus20offdyn": "bustelberg",
     "topsdefbehdyn": "toppenberg",
     "topsneubehdyn": "toppenberg",
     "topsbeoffbehdyn": "toppenberg",

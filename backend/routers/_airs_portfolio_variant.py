@@ -52,6 +52,14 @@ VARIANTS: tuple[str, ...] = ("Offensief", "Beperkt Offensief", "Neutraal", "Defe
 
 _SEP = re.compile(r"[^a-z0-9]+")
 
+# AIRS omits the risk token from the Imagine Fund codes.  This is a reviewed product
+# classification, not an inference from the display name: both representations of the same
+# AIRS portfolio must use the Offensief allocation policy and filters.
+_EXPLICIT_VARIANTS = {
+    "busifdyn": "Offensief",
+    "busiffx": "Offensief",
+}
+
 #  ORDERED. Beperkt Offensief MUST be tested before Offensief — see the module docstring.
 _RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Every spelling AIRS actually uses, measured: `Bep_offensief` (two tokens), `BEPOF`,
@@ -76,6 +84,9 @@ def portfolio_variant(name: str | None, omschrijving: str | None = None) -> str 
 
     Reads the NAME first (a code survives a typo; prose does not), then the description.
     """
+    key = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+    if explicit := _EXPLICIT_VARIANTS.get(key):
+        return explicit
     for source in (name, omschrijving):
         s = _norm(source)
         if not s:

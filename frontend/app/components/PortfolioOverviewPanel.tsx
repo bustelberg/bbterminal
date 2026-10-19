@@ -234,7 +234,7 @@ const collectionTitle: Record<PortfolioCollection, string> = {
 };
 
 const collectionNameOrder: Record<PortfolioCollection, string[]> = {
-  bustelberg: ['Bustelberg Defensief', 'Bustelberg Neutraal', 'Bustelberg Beperkt Offensief', 'Bustelberg Offensief'],
+  bustelberg: ['Bustelberg Defensief', 'Bustelberg Neutraal', 'Bustelberg Beperkt Offensief', 'Bustelberg Offensief', 'Bustelberg Imagine Fund', 'Bustelberg 2.0 Offensief'],
   toppenberg: ['Toppenberg Defensief', 'Toppenberg Neutraal', 'Toppenberg Beperkt Offensief', 'Toppenberg Offensief'],
   topselecties: [],
   test_topselecties: [],

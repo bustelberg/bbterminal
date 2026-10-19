@@ -76,11 +76,12 @@ const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[], var
     ? allocationProfiles[variant as keyof typeof allocationProfiles]
     : null;
   if (configured) return configured;
-  const names = new Set(['Stocks', 'Bonds', 'Alternatives', 'Cash']);
+  const names = new Set(['Stocks', 'Bonds']);
   const weights = Object.fromEntries(blocks
     .filter((block) => names.has(block.bucket) && Number.isFinite(block.weight_pct))
     .map((block) => [block.bucket, block.weight_pct]));
-  return Object.keys(weights).length === 4 ? weights : null;
+  return Object.keys(weights).length === 2
+    && Math.abs(Number(weights.Stocks) + Number(weights.Bonds) - 100) < 0.01 ? weights : null;
 };
 
 /** `2026-08-26` → a UTC timestamp.  UTC, not local: a date-only string parsed as local time
