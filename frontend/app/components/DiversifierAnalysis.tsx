@@ -10,6 +10,7 @@ import BenchmarkSection from './diversifier/BenchmarkSection';
 import ManualPortfolioSection from './diversifier/ManualPortfolioSection';
 import SavedPortfoliosSection from './diversifier/SavedPortfoliosSection';
 import { useDiversifier } from './diversifier/useDiversifier';
+import { annualizedMonthlyVolatility, monthlySharpeRatio, compoundAnnualGrowth, topDailyDrawdowns, type DailyDrawdown } from './diversifier/pairVolatility';
 import { useFxCurrencies } from '../../lib/hooks/apiData';
 import type { AssetWeight, CorrelationResponse, DiversifierResult, DrawdownInfo, EtfPairCorrelationResponse, OptimizeResponse } from '../../lib/types/api';
 
@@ -19,8 +20,8 @@ const fmtNum = (v: number | null | undefined, dp = 2) =>
   v == null ? '—' : v.toFixed(dp);
 const fmtSigned = (v: number | null | undefined, dp = 2) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(dp)}`;
-// Fraction (0.03) → signed percent ("+3.0%").
-const fmtSignedPct = (v: number | null | undefined, dp = 1) =>
+// Fraction (0.03) → signed percent ("+3.00%").
+const fmtSignedPct = (v: number | null | undefined, dp = 2) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
 const pnlClass = (v: number | null | undefined) =>
   v == null ? 'text-fg-subtle' : v >= 0 ? 'text-pos-400' : 'text-neg-400';
@@ -51,8 +52,7 @@ export default function DiversifierAnalysis() {
       <div className="px-8 py-5 border-b border-neutral-800/60">
         <h1 className="text-lg font-semibold text-fg-strong">Diversifier</h1>
         <p className="text-xs text-fg-subtle mt-0.5">
-          Pick a backtest, add ETFs, and see which ones are least correlated with your
-          strategy — and how much each lifts Sharpe/Sortino when blended in.
+          Compare your strategy with funds, then explore a better mix.
         </p>
       </div>
 
@@ -99,6 +99,10 @@ export default function DiversifierAnalysis() {
               </div>
             )}
 
+          </div>
+          <details className="mt-4">
+            <summary className="cursor-pointer text-xs text-fg-muted hover:text-fg-strong">Analysis settings</summary>
+            <div className="mt-3 flex flex-wrap items-end gap-3">
             <div className="w-28">
               <label className="text-fg-subtle text-xs block mb-1">Risk-free %</label>
               <input
@@ -195,22 +199,8 @@ export default function DiversifierAnalysis() {
                 className="w-full bg-page border border-neutral-700 rounded-lg px-3 py-2 text-fg-strong text-sm font-mono focus:border-accent-500 focus:ring-1 focus:ring-accent-500/30 outline-none"
               />
             </div>
-            <button
-              onClick={d.runCorrelation}
-              disabled={!canRun}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-accent-600 hover:bg-accent-500 text-fg-strong transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {d.running ? <LoadingDots /> : 'Compute correlation'}
-            </button>
-            <button
-              onClick={d.runOptimize}
-              disabled={d.selectedRunId == null || d.selectedEtfIds.size === 0 || d.optimizing}
-              title="Optimize the diversifier share around your strategy, with a drift-rebalance band"
-              className="px-4 py-2 rounded-lg text-sm font-medium border border-accent-500 text-accent-400 hover:bg-accent-600/10 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {d.optimizing ? <LoadingDots /> : 'Optimize portfolio'}
-            </button>
-          </div>
+            </div>
+          </details>
 
           {/* Selected backtest's saved headline stats — the baseline to beat. */}
           {d.backtestStats && d.backtestStats.sharpe_ratio != null && (
@@ -228,7 +218,9 @@ export default function DiversifierAnalysis() {
         </div>
 
         {/* Shared history filter. */}
-        <div className="flex items-center gap-2">
+        <details className="rounded-xl border border-neutral-800/40 bg-card p-4">
+          <summary className="cursor-pointer text-sm text-fg-muted">Manage funds &amp; history filter</summary>
+        <div className="mt-4 flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-fg-muted" title="Keep only funds whose history starts before Jan 1 of this year — young funds shorten the optimizer's common window">
             Require history before
             <input
@@ -267,23 +259,47 @@ export default function DiversifierAnalysis() {
           emptyText={d.cutoffYear ? `No funds with history before ${d.cutoffYear}.` : 'No funds yet — add one above.'}
           loading={d.loadingLists}
         />
-        <div className="flex items-center gap-3">
+        </details>
+        <div className="rounded-xl border border-neutral-800/40 bg-card p-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-sm font-medium text-fg-strong">Choose funds</h3>
+            <button onClick={d.toggleSelectAll} className="text-xs text-accent-400">Select / clear all</button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {d.visibleEtfs.map((fund) => (
+              <label key={fund.benchmark_id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm ${d.selectedEtfIds.has(fund.benchmark_id) ? 'border-accent-500 bg-accent-600/10 text-fg-strong' : 'border-neutral-700 text-fg-muted'}`} title={fund.name}>
+                <input type="checkbox" checked={d.selectedEtfIds.has(fund.benchmark_id)} onChange={() => d.toggleEtf(fund.benchmark_id)} className="accent-accent-500" />
+                {fund.ticker}
+              </label>
+            ))}
+            {d.visibleEtfs.length === 0 && <p className="text-xs text-fg-subtle">Add funds in Manage funds above.</p>}
+          </div>
+        <div className="flex flex-wrap items-center gap-3">
           <button onClick={d.runEtfPairCorrelation} disabled={!((d.selectedEtfIds.size === 2) || (d.selectedRunId != null && d.selectedEtfIds.size === 1)) || d.etfPairRunning} className="rounded-lg border border-accent-500 px-4 py-2 text-sm font-medium text-accent-400 transition-colors hover:bg-accent-600/10 disabled:cursor-not-allowed disabled:opacity-40">
             {d.etfPairRunning ? <LoadingDots /> : 'Compare selected pair'}
           </button>
-          <span className="text-xs text-fg-subtle">Select two funds, or select a strategy and one fund. Expand a year, then a month, to inspect their shared daily returns.</span>
+          <button onClick={d.runCorrelation} disabled={!canRun} className="rounded-lg border border-neutral-700 px-4 py-2 text-sm text-fg-muted disabled:opacity-40">{d.running ? <LoadingDots /> : 'Compare all funds'}</button>
+          <button onClick={d.runOptimize} disabled={!canRun || d.optimizing} className="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-fg-strong disabled:opacity-40">{d.optimizing ? <LoadingDots /> : 'Find best mix'}</button>
         </div>
+          <p className="text-xs text-fg-subtle">Choose one fund to compare with your strategy, or two to compare with each other.</p>
+        </div>
+
+        {d.etfPairResult && <EtfPairCorrelationCard result={d.etfPairResult} riskFreePct={d.riskFreePct} />}
+        {d.result && <ResultsCard result={d.result} />}
 
         {/* ── Portfolio optimization ────────────────────────────────── */}
         {d.optimizeResult && d.compareBenchmarkId != null && d.optimizeResult.benchmark?.benchmark_id !== d.compareBenchmarkId && (
           <div className="rounded-lg bg-warn-500/10 border border-warn-500/20 px-4 py-2.5 text-sm text-warn-400">
-            Click <span className="font-medium">Optimize portfolio</span>{' '}to apply the selected benchmark comparison.
+            Click <span className="font-medium">Find best mix</span>{' '}to apply the selected benchmark comparison.
           </div>
         )}
         {d.optimizeResult && <OptimizeCard result={d.optimizeResult} onSetIsin={d.setBenchmarkIsin} />}
 
         {/* ── Manual portfolio backtest (below the optimizer) ───────── */}
         {d.selectedRunId != null && (
+          <details className="rounded-xl border border-neutral-800/40 bg-card p-4">
+            <summary className="cursor-pointer text-sm text-fg-muted">Build a custom portfolio</summary>
+            <div className="mt-4">
           <ManualPortfolioSection
             funds={d.etfs.filter((e) => d.selectedEtfIds.has(e.benchmark_id))}
             weights={d.manualWeights}
@@ -303,35 +319,100 @@ export default function DiversifierAnalysis() {
             onAddByTicker={(t) => d.addEtf(t, { select: true })}
             adding={d.adding}
           />
+            </div>
+          </details>
         )}
         {d.manualResult && <OptimizeCard result={d.manualResult} title="Portfolio backtest · manual weights" onSetIsin={d.setBenchmarkIsin} />}
 
         {/* ── Saved portfolios (named overlays, on-demand state) ────── */}
+        <details className="rounded-xl border border-neutral-800/40 bg-card p-4">
+          <summary className="cursor-pointer text-sm text-fg-muted">Saved portfolios · {d.savedPortfolios.length}</summary>
+          <div className="mt-4">
         <SavedPortfoliosSection
           portfolios={d.savedPortfolios}
           state={d.portfolioState}
           onView={d.viewPortfolioState}
           onDelete={d.deletePortfolio}
         />
+          </div>
+        </details>
 
         {/* Correlation results */}
-        {d.result && <ResultsCard result={d.result} />}
-        {d.etfPairResult && <EtfPairCorrelationCard result={d.etfPairResult} />}
       </div>
     </div>
   );
 }
 
-function EtfPairCorrelationCard({ result }: { result: EtfPairCorrelationResponse }) {
+function EtfPairCorrelationCard({ result, riskFreePct }: { result: EtfPairCorrelationResponse; riskFreePct: number }) {
   const first = result.first;
   const second = result.second;
+  const firstDaily = result.daily.map((day) => day.first_return);
+  const secondDaily = result.daily.map((day) => day.second_return);
+  const firstCagr = compoundAnnualGrowth(firstDaily);
+  const secondCagr = compoundAnnualGrowth(secondDaily);
+  const firstVol = annualizedMonthlyVolatility(firstDaily, 252);
+  const secondVol = annualizedMonthlyVolatility(secondDaily, 252);
+  const firstSharpe = monthlySharpeRatio(firstDaily, riskFreePct / 100, 252);
+  const secondSharpe = monthlySharpeRatio(secondDaily, riskFreePct / 100, 252);
+  const firstDrawdowns = topDailyDrawdowns(result.daily.map((day) => ({ date: day.date, return: day.first_return })));
+  const secondDrawdowns = topDailyDrawdowns(result.daily.map((day) => ({ date: day.date, return: day.second_return })));
   return <div className="bg-card rounded-xl border border-neutral-800/40 p-5">
     <div className="flex flex-wrap items-baseline justify-between gap-3">
       <div><h3 className="text-xs font-medium uppercase tracking-wider text-fg-muted">Pair comparison</h3><p className="mt-1 text-sm text-fg-strong"><span className="font-mono">{first.ticker}</span> <span className="text-fg-subtle">×</span> <span className="font-mono">{second.ticker}</span></p></div>
-      <div className={`font-mono text-lg font-medium ${corrClass(result.correlation ?? null)}`}>{result.correlation == null ? 'Correlation —' : `Correlation ${result.correlation.toFixed(2)}`}</div>
+      <div title="Pearson correlation of returns between consecutive shared trading dates." className={`font-mono text-lg font-medium ${corrClass(result.correlation ?? null)}`}>{result.correlation == null ? 'Daily correlation —' : `Daily correlation ${result.correlation.toFixed(2)}`}</div>
     </div>
-    <p className="mt-2 text-xs text-fg-subtle">{result.overlap_months} shared months · {result.overlap_from ?? '—'} to {result.overlap_to ?? '—'} · returns are aligned to dates both instruments have.</p>
+    <p className="mt-2 text-xs text-fg-subtle">{result.daily.length} shared daily observations · {result.daily[0]?.date ?? '—'} to {result.daily.at(-1)?.date ?? '—'}</p>
+    {result.daily.length < 2 && <p className="mt-2 text-xs text-fg-subtle">Daily metrics require saved daily history for both instruments. Re-run and save older backtests to include it.</p>}
+    <div className="mt-4 flex flex-wrap items-baseline gap-x-6 gap-y-2 rounded-lg bg-page/50 px-3 py-3 text-sm" title="Compounded growth over all shared daily returns, annualized using 252 observations per year, matching the annual return used in the Sharpe ratio.">
+      <span className="text-xs text-fg-subtle">CAGR</span>
+      <span className="text-fg-muted">{first.ticker} <span className="ml-1 font-mono text-fg-strong">{fmtPct(firstCagr)}</span></span>
+      <span className="text-fg-muted">{second.ticker} <span className="ml-1 font-mono text-fg-strong">{fmtPct(secondCagr)}</span></span>
+      <span className="text-xs text-fg-subtle">Shared daily observations · annualized compound growth</span>
+    </div>
+    <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-2 rounded-lg bg-page/50 px-3 py-3 text-sm" title="Sample standard deviation of shared daily returns × √252. Returns are calculated between consecutive shared trading dates.">
+      <span className="text-xs text-fg-subtle">Annualized volatility</span>
+      <span className="text-fg-muted">{first.ticker} <span className="ml-1 font-mono text-fg-strong">{fmtPct(firstVol)}</span></span>
+      <span className="text-fg-muted">{second.ticker} <span className="ml-1 font-mono text-fg-strong">{fmtPct(secondVol)}</span></span>
+      <span className="text-xs text-fg-subtle">Daily observations · lower means smaller swings</span>
+    </div>
+    <div className="mt-2 flex flex-wrap items-baseline gap-x-6 gap-y-2 rounded-lg bg-page/50 px-3 py-3 text-sm" title="Geometric annual return (252 observations per year) minus the annual risk-free rate, divided by annualized daily volatility.">
+      <span className="text-xs text-fg-subtle">Sharpe ratio</span>
+      <span className="text-fg-muted">{first.ticker} <span className="ml-1 font-mono text-fg-strong">{fmtNum(firstSharpe)}</span></span>
+      <span className="text-fg-muted">{second.ticker} <span className="ml-1 font-mono text-fg-strong">{fmtNum(secondSharpe)}</span></span>
+      <span className="text-xs text-fg-subtle">Daily observations · risk-free {fmtNum(riskFreePct, 1)}% · higher is better</span>
+    </div>
+    <div className="mt-5">
+      <h4 className="text-sm font-medium text-fg-strong">Top 5 drawdowns (daily)</h4>
+      <p className="mt-1 text-xs text-fg-subtle">Largest separate peak-to-recovery episodes over the shared daily period. Each instrument is ranked independently; ongoing declines are included.</p>
+      <div className="mt-3 grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <PairDrawdowns label={first.ticker} episodes={firstDrawdowns} hasHistory={result.daily.length >= 2} />
+        <PairDrawdowns label={second.ticker} episodes={secondDrawdowns} hasHistory={result.daily.length >= 2} />
+      </div>
+    </div>
+    <p className="mt-2 text-xs text-fg-subtle">Comparison excludes incomplete starting years and includes the latest year to date. Returns table: {result.overlap_months} shared months · {result.overlap_from ?? '—'} to {result.overlap_to ?? '—'}. The optimizer uses monthly returns.</p>
     <DrilldownReturnTable result={result} />
+  </div>;
+}
+
+function PairDrawdowns({ label, episodes, hasHistory }: { label: string; episodes: DailyDrawdown[]; hasHistory: boolean }) {
+  return <div className="overflow-auto rounded-lg border border-neutral-800/50 p-3">
+    <h5 className="mb-2 text-sm font-medium text-fg-strong">{label}</h5>
+    {episodes.length === 0 ? <p className="text-xs text-fg-subtle">{hasHistory ? 'No drawdowns in this period.' : 'Daily history unavailable.'}</p> : <table className="w-full whitespace-nowrap text-xs">
+      <thead className="text-fg-subtle"><tr>
+        <th className="px-2 py-2 text-left font-medium">Rank</th>
+        <th className="px-2 py-2 text-right font-medium">Decline</th>
+        <th className="px-2 py-2 text-left font-medium">Peak</th>
+        <th className="px-2 py-2 text-left font-medium">Trough</th>
+        <th className="px-2 py-2 text-left font-medium">Recovery / still down</th>
+      </tr></thead>
+      <tbody>{episodes.map((episode, index) => <tr key={`${episode.peakDate}-${episode.troughDate}`} className="border-t border-neutral-800/40 text-fg-muted">
+        <td className="px-2 py-2">{index + 1}</td>
+        <td className="px-2 py-2 text-right font-mono text-neg-400">{fmtPct(episode.depth)}</td>
+        <td className="px-2 py-2">{episode.peakDate ?? 'Period start'}</td>
+        <td className="px-2 py-2">{episode.troughDate}</td>
+        <td className="px-2 py-2" title={episode.recoveryDate ? undefined : 'Decline from this episode’s peak at the last shared daily observation.'}>{episode.recoveryDate ?? <span className="font-mono text-neg-400">{fmtPct(episode.remainingDrawdown)} below peak</span>}</td>
+      </tr>)}</tbody>
+    </table>}
   </div>;
 }
 
@@ -344,6 +425,7 @@ function DrilldownReturnTable({ result }: { result: EtfPairCorrelationResponse }
     setOpenYear((current) => current === year ? null : year);
     setOpenMonth(null);
   };
+  if (result.annual.length === 0) return <p className="mt-5 text-xs text-fg-subtle">No returns available after excluding the incomplete starting year.</p>;
   return <div className="mt-5"><h4 className="mb-2 text-xs font-medium uppercase tracking-wider text-fg-subtle">Returns by period</h4><div className="max-h-[34rem] overflow-auto rounded-lg border border-neutral-800/50"><table className="w-full text-sm"><thead className="sticky top-0 z-10 bg-card"><tr className="border-b border-neutral-800/60 text-xs text-fg-subtle"><th className="px-3 py-2 text-left font-medium">Period</th><th className="px-3 py-2 text-right font-medium font-mono">{result.first.ticker}</th><th className="px-3 py-2 text-right font-medium font-mono">{result.second.ticker}</th></tr></thead><tbody>{result.annual.map((year) => <Fragment key={year.year}><tr onClick={() => toggleYear(year.year)} className="cursor-pointer border-b border-neutral-800/40 hover:bg-inset/30"><td className="px-3 py-1.5 font-mono text-xs text-fg-strong">{openYear === year.year ? '▾' : '▸'} {year.year}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(year.first_return)}`}>{fmtSignedPct(year.first_return)}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(year.second_return)}`}>{fmtSignedPct(year.second_return)}</td></tr>{openYear === year.year && monthsForYear(year.year).map((month) => <Fragment key={month.month}><tr onClick={() => setOpenMonth((current) => current === month.month ? null : month.month)} className="cursor-pointer border-b border-neutral-800/30 bg-page/30 hover:bg-inset/30"><td className="px-3 py-1.5 pl-8 font-mono text-xs text-fg-muted">{openMonth === month.month ? '▾' : '▸'} {month.month}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(month.first_return)}`}>{fmtSignedPct(month.first_return)}</td><td className={`px-3 py-1.5 text-right font-mono ${pnlClass(month.second_return)}`}>{fmtSignedPct(month.second_return)}</td></tr>{openMonth === month.month && <>{daysForMonth(month.month).map((day) => <tr key={day.date} className="border-b border-neutral-800/20 bg-page/50"><td className="px-3 py-1 pl-14 font-mono text-xs text-fg-subtle">{day.date}</td><td className={`px-3 py-1 text-right font-mono text-xs ${pnlClass(day.first_return)}`}>{fmtSignedPct(day.first_return)}</td><td className={`px-3 py-1 text-right font-mono text-xs ${pnlClass(day.second_return)}`}>{fmtSignedPct(day.second_return)}</td></tr>)}{daysForMonth(month.month).length === 0 && <tr className="border-b border-neutral-800/20 bg-page/50"><td colSpan={3} className="px-3 py-2 pl-14 text-xs text-fg-subtle">No shared daily history is stored for this month.</td></tr>}</>}</Fragment>)}</Fragment>)}</tbody></table></div></div>;
 }
 

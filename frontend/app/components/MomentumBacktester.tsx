@@ -673,8 +673,8 @@ export default function MomentumBacktester() {
 
             {/* Auto-save status. Variant sweeps + single-strategy runs are
                 saved automatically with a default name when they finish.
-                The pill shows the resulting name; rename / delete are in
-                the saved-backtests dropdown in the page header. */}
+                The pill shows the resulting name and lets the user rename
+                it here without returning to the page header. */}
             {saving && hasVariants && (
               <div className="bg-card border border-neutral-800/40 rounded-lg px-4 py-3 text-fg-muted text-sm flex items-center gap-2">
                 <Spinner />
@@ -687,6 +687,14 @@ export default function MomentumBacktester() {
                 <span className="text-accent-300 font-medium">
                   {savedRuns.find((r) => r.run_id === loadedRunId)?.name}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => void renameBacktest(loadedRunId, savedRuns.find((r) => r.run_id === loadedRunId)?.name ?? '')}
+                  disabled={renamingRunId === loadedRunId || savedRunsLoading}
+                  className="rounded border border-accent-500/40 px-2 py-1 text-xs font-medium text-accent-300 transition-colors hover:bg-accent-500/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {renamingRunId === loadedRunId ? 'Renaming…' : 'Rename'}
+                </button>
                 {hasVariants && (
                   <span className="text-accent-400/70 text-xs">
                     · {Object.keys(variants).length} variants

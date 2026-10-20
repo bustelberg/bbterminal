@@ -396,6 +396,87 @@ def _daily_returns_from_curve(records: list[dict]) -> dict[str, float]:
     return out
 
 
+def _aligned_daily_returns(
+    first_levels: list[tuple[str, float]], second_levels: list[tuple[str, float]],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Align equity levels BEFORE differencing, so returns span identical dates.
+
+    Intersecting already-computed daily returns compares different intervals
+    around exchange holidays and drops the absent day's gains from drawdowns.
+    """
+    import math
+
+    def clean(levels):
+        out = {}
+        for day, raw in levels:
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value > 0:
+                out[str(day)[:10]] = value
+        return out
+
+    first, second = clean(first_levels), clean(second_levels)
+    days = sorted(set(first) & set(second))
+    return (
+        {day: first[day] / first[previous] - 1 for previous, day in zip(days, days[1:])},
+        {day: second[day] / second[previous] - 1 for previous, day in zip(days, days[1:])},
+    )
+
+
+def _curve_levels(records: list[dict]) -> list[tuple[str, float]]:
+    levels = []
+    for row in records:
+        try:
+            levels.append((str(row["date"])[:10], 1 + float(row["cumulative_return_pct"]) / 100))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return levels
+
+
+def _strategy_monthly_returns(
+    result: dict, variant_key: str | None, monthly_records: list[dict],
+) -> dict[str, float]:
+    """Return calendar-month strategy returns from its displayed equity curve.
+
+    The backtest's yearly-performance grid is calculated from ``daily_records``.
+    Diversifier comparisons must use that same curve before resampling it to
+    month-end; deriving from ``monthly_records`` can select a different
+    (rebalance-period) chain and produces irreconcilable calendar returns.
+
+    Old saved runs did not persist a daily curve, so retain the monthly-record
+    path as a compatibility fallback.  Open periods remain excluded when their
+    month is known, because a partial month is not comparable to a completed
+    ETF month.
+    """
+    daily = _daily_records_for_scope(result, variant_key)
+    open_months = {
+        str(record.get("date"))[:7]
+        for record in monthly_records
+        if isinstance(record, dict) and record.get("is_open") and record.get("date")
+    }
+    if daily:
+        # The cumulative curve is an equity-index level, so it can be
+        # resampled exactly like price data: last observed level per month,
+        # then month-over-month simple return.
+        levels: list[tuple[str, float]] = []
+        for record in daily:
+            if not isinstance(record, dict) or record.get("date") is None:
+                continue
+            try:
+                level = 1.0 + float(record["cumulative_return_pct"]) / 100.0
+            except (KeyError, TypeError, ValueError):
+                continue
+            if level > 0:
+                levels.append((str(record["date"])[:10], level))
+        returns = div.prices_to_monthly_returns(levels)
+        returns = {month: value for month, value in returns.items() if month not in open_months}
+        if returns:
+            return returns
+    return div.monthly_records_to_returns(monthly_records)
+
+
 async def _run_name(run_id: int) -> str:
     resp = await asyncio.to_thread(
         lambda: supabase.table("backtest_run")
@@ -474,7 +555,7 @@ async def correlation(req: CorrelationRequest):
                 "available_variant_keys": ambiguous,
             },
         )
-    strategy_returns = div.monthly_records_to_returns(monthly)
+    strategy_returns = _strategy_monthly_returns(result, req.variant_key, monthly)
     if len(strategy_returns) < 2:
         raise HTTPException(
             422,
@@ -561,8 +642,23 @@ def _etf_pair_response(first_meta: dict, first_returns: dict[str, float],
                        second_meta: dict, second_returns: dict[str, float],
                        first_daily: dict[str, float] | None = None,
                        second_daily: dict[str, float] | None = None) -> EtfPairCorrelationResponse:
-    """Build a direct comparison on each pair's shared monthly/daily windows."""
+    """Compare from the first calendar-year boundary through the latest data.
+
+    Drop an incomplete leading year from BOTH monthly history and daily
+    metrics. Keep the trailing year even when only YTD observations exist.
+    Daily returns were aligned before differencing, so the first January
+    return retains its prior-year-end equity anchor.
+    """
     first_values, second_values, months = div.align(first_returns, second_returns)
+    shared_days = sorted(set(first_daily or {}) & set(second_daily or {}))
+    if months:
+        start_year = int(months[0][:4]) + (months[0][5:7] != "01")
+        cutoff = f"{start_year}-01"
+        keep = [i for i, month in enumerate(months) if month >= cutoff]
+        first_values = [first_values[i] for i in keep]
+        second_values = [second_values[i] for i in keep]
+        months = [months[i] for i in keep]
+        shared_days = [day for day in shared_days if day >= f"{cutoff}-01"]
     annual: list[EtfPairYear] = []
     for year in sorted({int(month[:4]) for month in months}):
         indices = [i for i, month in enumerate(months) if int(month[:4]) == year]
@@ -576,13 +672,16 @@ def _etf_pair_response(first_meta: dict, first_returns: dict[str, float],
     return EtfPairCorrelationResponse(
         first=EtfPairAsset(**({"kind": "etf"} | first_meta)),
         second=EtfPairAsset(**({"kind": "etf"} | second_meta)),
-        correlation=div.pearson(first_values, second_values), overlap_months=len(months),
+        correlation=div.pearson(
+            [first_daily[day] for day in shared_days],
+            [second_daily[day] for day in shared_days],
+        ), overlap_months=len(months),
         overlap_from=months[0] if months else None, overlap_to=months[-1] if months else None,
         annual=annual,
         monthly=[EtfPairMonth(month=month, first_return=first_values[i], second_return=second_values[i])
                  for i, month in enumerate(months)],
         daily=[EtfPairDay(date=day, first_return=first_daily[day], second_return=second_daily[day])
-               for day in sorted(set(first_daily or {}) & set(second_daily or {}))],
+               for day in shared_days],
     )
 
 
@@ -609,12 +708,14 @@ async def _pair_comparison(req: EtfPairCorrelationRequest) -> EtfPairCorrelation
                 "error": "This backtest has multiple variants; choose one.",
                 "available_variant_keys": ambiguous,
             })
-        strategy_returns = div.monthly_records_to_returns(monthly)
-        strategy_daily = _daily_returns_from_curve(_daily_records_for_scope(result, req.variant_key))
+        strategy_returns = _strategy_monthly_returns(result, req.variant_key, monthly)
         if len(strategy_returns) < 2:
             raise HTTPException(422, "The selected strategy has fewer than two completed months.")
         benchmark = meta[ids[0]]
         prices = await _load_benchmark_prices(ids[0])
+        strategy_daily, benchmark_daily = _aligned_daily_returns(
+            _curve_levels(_daily_records_for_scope(result, req.variant_key)), prices,
+        )
         first = {
             "kind": "strategy", "backtest_run_id": req.backtest_run_id,
             "ticker": "Strategy", "name": await _run_name(req.backtest_run_id),
@@ -622,19 +723,20 @@ async def _pair_comparison(req: EtfPairCorrelationRequest) -> EtfPairCorrelation
         second = {"kind": "etf", **benchmark}
         response = _etf_pair_response(
             first, strategy_returns, second, div.prices_to_monthly_returns(prices),
-            strategy_daily, _daily_returns_from_prices(prices))
+            strategy_daily, benchmark_daily)
     else:
         first_row, second_row = (meta[bid] for bid in ids)
         first_prices, second_prices = await asyncio.gather(
             _load_benchmark_prices(ids[0]), _load_benchmark_prices(ids[1]))
         first = {"kind": "etf", **first_row}
         second = {"kind": "etf", **second_row}
+        first_daily, second_daily = _aligned_daily_returns(first_prices, second_prices)
         response = _etf_pair_response(
             first, div.prices_to_monthly_returns(first_prices),
             second, div.prices_to_monthly_returns(second_prices),
-            _daily_returns_from_prices(first_prices), _daily_returns_from_prices(second_prices))
+            first_daily, second_daily)
     if response.overlap_months < 2:
-        raise HTTPException(422, "The selected pair has fewer than two shared monthly returns.")
+        raise HTTPException(422, "The selected pair has fewer than two shared monthly returns after excluding the incomplete starting year.")
     return response
 
 
@@ -783,7 +885,7 @@ async def optimize(req: OptimizeRequest):
                 "available_variant_keys": ambiguous,
             },
         )
-    strategy_returns = div.monthly_records_to_returns(monthly)
+    strategy_returns = _strategy_monthly_returns(result, req.variant_key, monthly)
     if len(strategy_returns) < 2:
         raise HTTPException(422, "The selected backtest has fewer than 2 completed months.")
 
@@ -882,7 +984,7 @@ async def simulate(req: SimulateRequest):
             400,
             detail={"error": "This backtest is a variant bundle; choose a variant.", "available_variant_keys": ambiguous},
         )
-    strategy_returns = div.monthly_records_to_returns(monthly)
+    strategy_returns = _strategy_monthly_returns(result, req.variant_key, monthly)
     if len(strategy_returns) < 2:
         raise HTTPException(422, "The selected backtest has fewer than 2 completed months.")
 
@@ -1073,7 +1175,7 @@ async def _portfolio_strategy_returns(p: dict) -> tuple[dict, str, str | None, s
     _summary, monthly, ambiguous = _select_scope(blob, p.get("variant_key"))
     if ambiguous is not None:
         raise HTTPException(422, "Base backtest is an unresolved variant bundle.")
-    returns = div.monthly_records_to_returns(monthly)
+    returns = _strategy_monthly_returns(blob, p.get("variant_key"), monthly)
     if len(returns) < 2:
         raise HTTPException(422, "Base backtest has fewer than 2 completed months.")
     return returns, await _run_name(int(rid)), None, (max(returns) if returns else None)
@@ -1237,7 +1339,7 @@ async def strategy_stats(run_id: int, variant_key: str | None = None):
     if ambiguous is not None:
         return BacktestStats(run_id=run_id, name=run_name, available_variant_keys=ambiguous)
 
-    months = sorted(div.monthly_records_to_returns(monthly))
+    months = sorted(_strategy_monthly_returns(result, variant_key, monthly))
     return BacktestStats(
         run_id=run_id,
         name=run_name,
