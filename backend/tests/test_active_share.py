@@ -16,6 +16,69 @@ from __future__ import annotations
 import routers._active_share as A
 
 
+def test_workbook_identity_bridges_amazon_and_sp_global_spellings(monkeypatch):
+    from index_universe.acwi.holdings import load_acwi_holdings
+    import index_universe.acwi.asset_membership as membership
+    import routers._asset_benchmark as prices
+    import routers._benchmark_index as pricing
+
+    workbook, as_of = load_acwi_holdings()
+    names = {h["Ticker"]: h["Name"] for h in workbook}
+    file_rows = [{"analysis_id": aid, "name": names[ticker], "weight_pct": 50, "currency": "EUR"}
+                 for aid, ticker in [(1, "AMZN"), (2, "SPGI")]]
+    monkeypatch.setattr(membership, "resolve", lambda: (file_rows, {"as_of": as_of}))
+    monkeypatch.setattr(A, "load_rows_via_copy", lambda *_args: [])
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
+        "US0231351067": {"analysis_id": 1, "gf_company_name": "Amazon.com Inc"},
+        "US78409V1044": {"analysis_id": 2, "gf_company_name": "S&P Global Inc."},
+    })
+    monkeypatch.setattr(prices, "window_marks", lambda *_args: {
+        aid: {"start": ("2026-04-15", 100), "end": ("2026-10-15", 110)} for aid in (1, 2)
+    })
+    monkeypatch.setattr(pricing, "_fx_to_eur", lambda *_args: {})
+    got = A.compute_active_share([
+        _h("Amazon.com Inc", "US0231351067", 50),
+        _h("S&P Global Inc", "US78409V1044", 50),
+    ], "ACWI")
+    assert got["n_in_benchmark"] == 2
+    assert got["off_benchmark_pct"] == 0
+    assert got["active_share_pct"] < 1e-9
+    assert len(got["rows"]) == 2
+    assert all(r["benchmark_pct"] > 0 for r in got["rows"] if r["held"])
+
+
+def test_benchmark_work_is_shared_and_invalidates_on_data_change(monkeypatch):
+    import routers._analysis_cache as cache
+    stamp = ["risk-test-original"]
+    calls = []
+    monkeypatch.setattr(cache, "fingerprint", lambda: stamp[0])
+    monkeypatch.setattr(A, "_load_benchmark_weights", lambda *_args: calls.append(1) or {"bench": {}})
+    first = A._benchmark_weights("ACWI", None)
+    first["bench"]["mutated"] = True
+    assert A._benchmark_weights("ACWI", None) == {"bench": {}}
+    assert len(calls) == 1
+    stamp[0] = "risk-test-refreshed"
+    A._benchmark_weights("ACWI", None)
+    assert len(calls) == 2
+
+
+def test_missing_price_does_not_turn_a_member_into_an_off_benchmark_position(monkeypatch):
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"amazon com": {"name": "AMAZON COM INC", "weight_pct": 0},
+                  "apple": {"name": "APPLE INC", "weight_pct": 100}},
+        "coverage": {}, "issuer_by_asset": {1: "amazon com"},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
+        "US0231351067": {"analysis_id": 1, "gf_company_name": "Amazon.com Inc"},
+    })
+    got = A.compute_active_share([_h("Amazon", "US0231351067", 100)], "ACWI")
+    assert got["n_in_benchmark"] == 1
+    assert got["off_benchmark_pct"] == 0
+    held = next(r for r in got["rows"] if r["held"])
+    assert held["in_benchmark"] is True
+    assert held["benchmark_pct"] == 0
+
+
 def _bench(monkeypatch, names_caps: list[tuple[str, float]], covered=100.0):
     """Stand in for `_asset_benchmark.members` — (company_name, market_cap_eur)."""
     mem = [{"company_name": n, "isin": f"X{i:09d}", "market_cap_eur": c}

@@ -10,6 +10,7 @@ import { useBucketDetailCopy } from './bucketDetailCopy';
 import { workedContribution, workedPriceReturn, workedReturn, workedWeight } from './attributionFormulas';
 import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
 import LoadingDots from './LoadingDots';
+import BenchmarkMembershipMark from './BenchmarkMembershipMark';
 
 type Attr = ModelPortfolioAttribution;
 type Bucket = NonNullable<Attr['rows']>[number];
@@ -434,10 +435,7 @@ export function Holdings({ rows, provenance, startLabel = 'Start of window', wei
                 {/* Held on BOTH sides — a ringed dot so the overlap between your book and the index
                     is obvious. Matched by ISIN first, then by company so a share class still counts
                     as one business (backend `_overlaps`). */}
-                {h.in_both && (
-                  <span className="w-2 h-2 rounded-full bg-accent-500 shrink-0 ring-2 ring-accent-500/25"
-                    title={t.inBothTitle} />
-                )}
+                <BenchmarkMembershipMark member={h.in_both} label={t.inBothTitle} />
                 <span className={`truncate ${h.in_both ? 'text-fg-strong font-medium' : 'text-fg-soft'}`}>{h.name ?? '—'}</span>
                 <Provenance source={provenance.nameSource} asOf={provenance.startWeightAsOf}
                   historical={provenance.nameSource === 'benchmark_caps'} kind="copied"

@@ -227,17 +227,19 @@ const REPORT_LABELS: Record<string, string> = {
 };
 
 
-export type PortfolioCollection = 'bustelberg' | 'toppenberg' | 'topselecties' | 'test_topselecties';
+export type PortfolioCollection = 'bustelberg' | 'toppenberg' | 'imagine_fund' | 'topselecties' | 'test_topselecties';
 
 const collectionTitle: Record<PortfolioCollection, string> = {
   bustelberg: 'Bustelberg portfolios',
+  imagine_fund: 'Imagine Fund',
   toppenberg: 'Toppenberg portfolios',
   topselecties: 'Building blocks',
   test_topselecties: 'Test TopSelecties',
 };
 
 const collectionNameOrder: Record<PortfolioCollection, string[]> = {
-  bustelberg: ['Bustelberg Defensief', 'Bustelberg Neutraal', 'Bustelberg Beperkt Offensief', 'Bustelberg Offensief', 'Bustelberg Imagine Fund', 'Bustelberg 2.0 Offensief'],
+  bustelberg: ['Bustelberg Defensief', 'Bustelberg Neutraal', 'Bustelberg Beperkt Offensief', 'Bustelberg Offensief', 'Bustelberg 2.0 Offensief'],
+  imagine_fund: ['Imagine Fund'],
   toppenberg: ['Toppenberg Defensief', 'Toppenberg Neutraal', 'Toppenberg Beperkt Offensief', 'Toppenberg Offensief'],
   topselecties: [],
   test_topselecties: [],

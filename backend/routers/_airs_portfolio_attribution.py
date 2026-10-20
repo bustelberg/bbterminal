@@ -86,7 +86,7 @@ _prewarming: set[tuple] = set()
 
 # Bump when the response's calculation semantics change. A data fingerprint invalidates changed
 # source data; it cannot invalidate a correct-data response shaped by an older implementation.
-_ATTRIBUTION_CACHE_VERSION = "attribution-matching-account-month-v17"
+_ATTRIBUTION_CACHE_VERSION = "attribution-workbook-membership-v18"
 
 
 def _weighted(rows: list[tuple[float, float]]) -> float:

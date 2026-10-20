@@ -8896,6 +8896,11 @@ export interface components {
              * @default false
              */
             held?: boolean;
+            /**
+             * In Benchmark
+             * @default false
+             */
+            in_benchmark?: boolean;
             /** Name */
             name: string;
             /** Normalisation Total */

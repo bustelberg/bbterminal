@@ -91,6 +91,28 @@ class TestIssuersNotLines:
 
 
 class TestBothDenominators:
+    @pytest.mark.parametrize("include_non_stocks", [False, True])
+    def test_top_positions_preserve_whole_book_weights_matching_active_share(self, wire, include_non_stocks):
+        wire([("NVIDIA Corp", 60.0), ("Apple Inc", 40.0)],
+             {"NVDA": "NVIDIA Corp", "AAPL": "Apple Inc"})
+        holdings = [_h("Nvidia", "NVDA", 3.49), _h("Apple", "AAPL", 42.13)]
+        if include_non_stocks:
+            holdings += [_h("Fund", "IE1", 30.0, True), _h("Cash", "", 24.38)]
+
+        concentration = K.compute_concentration(holdings, "SP500")
+        active = A.compute_active_share(holdings, "SP500")
+        active_weights = {r["name"]: r["portfolio_pct"] for r in active["rows"] if r["held"]}
+        for row in concentration["top"]:
+            assert row["weight_pct"] == pytest.approx(active_weights[row["name"]])
+        nvidia = next(r for r in concentration["top"] if r["name"] == "Nvidia")
+        assert nvidia["weight_pct"] == pytest.approx(3.49)
+        assert concentration["top"][-1]["cumulative_pct"] == pytest.approx(45.62)
+        assert concentration["top1_pct"] == pytest.approx(42.13)
+        for field in ("top3_pct", "top5_pct", "top10_pct", "top20_pct", "top10_of_book_pct", "stocks_pct"):
+            assert concentration[field] == pytest.approx(45.62)
+        # HHI remains a stock-sleeve measure, unaffected by the display's whole-book denominator.
+        assert concentration["hhi"] == pytest.approx((3.49 / 45.62) ** 2 + (42.13 / 45.62) ** 2)
+
     def test_the_sleeve_and_the_whole_book_are_both_reported(self, wire):
         """ THE CHOICE CHANGES THE NUMBER, so neither is made silently. A book that is 25% stocks
         has a top-10 of 100% OF ITS STOCKS and 25% of itself, and both are true."""

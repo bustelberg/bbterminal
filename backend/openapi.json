@@ -270,6 +270,11 @@
             "title": "Held",
             "type": "boolean"
           },
+          "in_benchmark": {
+            "default": false,
+            "title": "In Benchmark",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"

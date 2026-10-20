@@ -2159,6 +2159,8 @@ class ActiveShareRow(BaseModel):
     name: str
     portfolio_pct: float = 0.0
     benchmark_pct: float = 0.0
+    #: Membership is independent of whether a rolled-forward price is available.
+    in_benchmark: bool = False
     #: `portfolio_pct - benchmark_pct`. Positive = overweight; a name we do not hold is negative.
     active_pct: float = 0.0
     held: bool = False
@@ -2820,8 +2822,7 @@ class AttributionName(BaseModel):
     # Matched by ISIN first, then by company, so BOTH "AMD" == "Advanced Micro Devices Inc" (one
     # ISIN, two names) and Alphabet class A == class C (two ISINs, one business) resolve. See
     # `_airs_portfolio_attribution._overlaps` — neither key alone is sufficient.
-    # Only populated for the per-bucket holdings lists; the contributor/detractor lists leave it
-    # false.
+    # Populated for both bucket holdings and contributor/detractor summary lists.
     in_both: bool = False
 
 
