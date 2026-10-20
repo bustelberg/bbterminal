@@ -16,11 +16,15 @@ function attributionSource(): string {
 }
 
 describe('attribution table layout', () => {
-  it('uses one fixed column grid for every period and axis', () => {
+  it('keeps a fixed column grid with compact default and expanded effects layouts', () => {
     const s = attributionSource();
-    expect(s).toContain('min-w-[1600px] table-fixed');
+    expect(s).toContain('const [showExtraEffects, setShowExtraEffects] = useState(false)');
+    expect(s).toContain('w-full table-fixed text-[12px]');
+    expect(s).toContain("showExtraEffects ? 'min-w-[1600px]' : 'min-w-[1250px]'");
     expect(s).toContain('<col className="w-[12%]" />');
-    expect(s).toContain('<col span={8} className="w-[11%]" />');
+    expect(s).toContain('<col span={showExtraEffects ? 8 : 6} />');
+    expect(s).toContain('aria-pressed={showExtraEffects}');
+    expect(s).toContain('colSpan={showExtraEffects ? 9 : 7}');
   });
 });
 
