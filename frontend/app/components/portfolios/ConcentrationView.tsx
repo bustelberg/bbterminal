@@ -68,7 +68,7 @@ export default function ConcentrationView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
-  const requestUrl = `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}&view=top-five-v3`
+  const requestUrl = `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}&view=whole-portfolio-weights-v6`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
   const requestBody = JSON.stringify({ holdings });
   const key = riskRequestKey(requestUrl, requestBody);
@@ -161,7 +161,18 @@ export default function ConcentrationView({
               <table className="w-full text-[11px]">
                 <thead><tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium"><th className="text-left">Company</th><th className="text-right">Weight</th></tr></thead>
                 <tbody>{rows.slice(0, 5).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
-                  <td className="text-fg-soft">{row.name || `Position ${row.rank}`}</td><td className="text-right font-mono tabular-nums">{pct2(row.weight_pct)}</td>
+                  <td className="text-fg-soft">{row.name || `Position ${row.rank}`}</td>
+                  <td className="text-right font-mono tabular-nums">
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                      {pct2(row.weight_pct)}
+                      <InfoTip content={<AspectCard
+                        what={`${row.name}: ${pct2(row.weight_pct)} of the entire ${portfolioName} portfolio, not just its stock sleeve.`}
+                        where={sourceLabel(portfolioSource)}
+                        when={whenBook}
+                        how="Current AIRS company value divided by the whole portfolio value × 100. Share classes of the same company are combined. Uses the same whole-portfolio weights as Active Share; cash, funds and bonds are not removed from the denominator."
+                      />} />
+                    </span>
+                  </td>
                 </tr>)}</tbody>
               </table>
             </div>
@@ -170,7 +181,23 @@ export default function ConcentrationView({
               <table className="w-full text-[11px]">
                 <thead><tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium"><th className="text-left">Company</th><th className="text-right">Weight</th></tr></thead>
                 <tbody>{benchmarkRows.slice(0, 5).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
-                  <td className="text-fg-soft">{row.name || `${data.benchmark} constituent ${row.rank}`}</td><td className="text-right font-mono tabular-nums">{pct2(row.weight_pct)}</td>
+                  <td className="text-fg-soft">{row.name || `${data.benchmark} constituent ${row.rank}`}</td>
+                  <td className="text-right font-mono tabular-nums">
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                      {pct2(row.weight_pct)}
+                      <InfoTip content={<AspectCard
+                        what={`${row.name}: ${pct2(row.weight_pct)} of ${data.benchmark}. Share classes of the same company are combined.`}
+                        where={data.benchmark === 'ACWI'
+                          ? 'Bundled iShares ACWI holdings workbook and stored Yahoo Finance prices.'
+                          : `${data.benchmark} constituents and stored Yahoo Finance market capitalisations.`}
+                        when={data.benchmark === 'ACWI'
+                          ? 'Workbook snapshot rolled forward to the latest available prices.' : whenBoth}
+                        how={data.benchmark === 'ACWI'
+                          ? 'Each workbook weight is multiplied by its EUR price growth since the snapshot, then divided by the sum of all priced constituents’ grown weights × 100. Uses the same benchmark weights as Active Share.'
+                          : 'Company market capitalisation divided by the total market capitalisation of the priced benchmark constituents × 100.'}
+                      />} />
+                    </span>
+                  </td>
                 </tr>)}</tbody>
               </table>
             </div>

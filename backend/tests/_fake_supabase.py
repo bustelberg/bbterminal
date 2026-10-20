@@ -54,6 +54,8 @@ class _Query:
         self._limit: int | None = None
         self._mode = "select"
         self._payload: Any = None
+        self._conflict_columns: list[str] = []
+        self._ignore_duplicates = False
 
     # ── builder verbs ────────────────────────────────────────────
     def select(self, *_a, **_k) -> "_Query":
@@ -65,10 +67,10 @@ class _Query:
         return self
 
     def upsert(self, payload: Any, **_kwargs: Any) -> "_Query":
-        # Conflict resolution isn't modelled — for the code under test only
-        # the returned row count matters, so an upsert behaves like an insert
-        # (rows are appended, the batch is echoed back as `.data`). The
-        # on_conflict / ignore_duplicates kwargs are accepted and ignored.
+        # Explicit conflict keys support update-in-place persistence tests. Without keys the
+        # fake still appends: it has no database schema from which to infer a primary key.
+        self._conflict_columns = [c.strip() for c in (_kwargs.get("on_conflict") or "").split(",") if c.strip()]
+        self._ignore_duplicates = bool(_kwargs.get("ignore_duplicates"))
         self._mode, self._payload = "insert", payload
         return self
 
@@ -165,6 +167,21 @@ class _Query:
 
         if self._mode == "insert":
             payloads = self._payload if isinstance(self._payload, list) else [self._payload]
+            if self._conflict_columns:
+                changed = []
+                for payload in payloads:
+                    existing = next((r for r in self._rows if all(
+                        r.get(c) == payload.get(c) for c in self._conflict_columns)), None)
+                    if existing is not None:
+                        if self._ignore_duplicates:
+                            continue
+                        existing.update(payload)
+                    else:
+                        existing = dict(payload)
+                        self._rows.append(existing)
+                    changed.append(dict(existing))
+                self._store.writes.append(("insert", self._table, None, len(changed)))
+                return _Result(changed)
             inserted = [dict(p) for p in payloads]
             self._rows.extend(inserted)
             self._store.writes.append(("insert", self._table, None, len(inserted)))

@@ -50,7 +50,7 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
         return {"available": False, "reason": e.reason, "benchmark": benchmark}
 
     port = built["port"]
-    stocks_w, total_all = built["stocks_w"], built["total_all"]
+    stocks_w = built["stocks_w"]
 
     stocks = [h for h in holdings
               if not h.get("is_fund")
@@ -81,7 +81,10 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
             "weight_pct": 0.0, "value_eur": 0.0 if have_values else None, "lines": 0,
             "currencies": set(),
         })
-        slot["weight_pct"] += w
+        # Position percentages retain the input's complete-book denominator, matching Active
+        # Share and Concentration even when non-stock holdings were filtered out by the caller.
+        # `w` remains sleeve-normalised only for the separate currency breakdown below.
+        slot["weight_pct"] += float(h["weight_pct"])
         slot["lines"] += 1
         if val is not None and slot["value_eur"] is not None:
             slot["value_eur"] += val
@@ -127,7 +130,7 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
         "folded_lines": len(stocks) - len(rows),
         "sleeve_eur": sleeve_eur,
         "book_eur": book_eur,
-        "stocks_pct": (stocks_w / total_all * 100.0) if total_all > 0 else None,
+        "stocks_pct": stocks_w,
         # What is NOT in the sleeve: funds, cash, bonds, and any line without a usable ISIN.
         "other_eur": (None if sleeve_eur is None or book_eur is None else book_eur - sleeve_eur),
         "positions": rows,

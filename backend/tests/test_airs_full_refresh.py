@@ -52,7 +52,19 @@ def halves(monkeypatch):
     monkeypatch.setattr("airs_vermogen.refresh_one_portfolio", _book)
     monkeypatch.setattr("routers._airs_portfolio_refresh.refresh_portfolio", _model)
     monkeypatch.setattr(F, "_pair", lambda pf, pid: (pf or BOOK, pid if pid is not None else MODEL_ID))
+    monkeypatch.setattr('routers._airs_price_check.refresh_price_checks',
+                        lambda *args, **kwargs: {'saved': 1, 'errors': {}})
     return calls
+
+
+def test_price_check_runs_after_both_halves(monkeypatch, halves):
+    observed = []
+    def save(accounts, **kwargs):
+        observed.append((list(halves), accounts))
+        return {'saved': 1, 'errors': {}}
+    monkeypatch.setattr('routers._airs_price_check.refresh_price_checks', save)
+    assert F.refresh_portfolio_fully(portefeuille=BOOK)['status'] == 'ok'
+    assert observed == [([('book', BOOK), ('model', MODEL_ID)], [BOOK])]
 
 
 class TestBothHalvesRun:

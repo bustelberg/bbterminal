@@ -96,7 +96,7 @@ class TestOverviewName:
 class TestManagementGroups:
     def test_only_the_named_bustelberg_profiles_are_in_bustelberg(self):
         assert ov._management_group("BUS_Offensief_Dyn") == "bustelberg"
-        assert ov._management_group("BUS_IF_DYN") == "bustelberg"
+        assert ov._management_group("BUS_IF_DYN") == "imagine_fund"
         # AIRS's actual code has a space after the second underscore. Grouping deliberately
         # normalizes punctuation and whitespace, so either spelling lands on the same tab.
         assert ov._management_group("BUS_2.0_ OFF_DYN") == "bustelberg"
@@ -156,6 +156,7 @@ class TestOverviewRpcAssembly:
     def test_rpc_payload_is_the_only_database_input_for_the_fast_path(self, monkeypatch):
         """The SQL RPC owns all relational reads; Python only applies reviewed naming rules."""
         payload = {
+            'price_checks': {'BUS_Offensief_Dyn': {'checked_at': '2026-10-20', 'result': {'rows': []}}},
             "accounts": [{
                 "portefeuille": "BUS_Offensief_Dyn",
                 "account_display_name": None,
@@ -187,9 +188,10 @@ class TestOverviewRpcAssembly:
         assert rows[0]["link_source"] == "manual"
         assert rows[0]["link_reason"] == "reviewed"
         assert rows[0]["fixed_portfolio_id"] == 7
+        assert rows[0]['saved_price_check'] == payload['price_checks']['BUS_Offensief_Dyn']
 
     @pytest.mark.parametrize(("account", "expected_name"), [
-        ("BUS_IF_DYN", "Bustelberg Imagine Fund"),
+        ("BUS_IF_DYN", "Imagine Fund"),
         ("BUS_2.0_ OFF_DYN", "Bustelberg 2.0 Offensief"),
     ])
     def test_new_bustelberg_accounts_are_visible_in_the_fast_overview(
@@ -202,4 +204,4 @@ class TestOverviewRpcAssembly:
         rows = ov.list_overview()
 
         assert [(row["dynamic_portefeuille"], row["management_group"], row["name"])
-                for row in rows] == [(account, "bustelberg", expected_name)]
+                for row in rows] == [(account, "imagine_fund" if account == 'BUS_IF_DYN' else "bustelberg", expected_name)]

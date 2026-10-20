@@ -465,6 +465,10 @@ def _last_closes(isins: list[str], as_of: str) -> dict[str, dict]:
     out: dict[str, dict] = {}
     if df.empty:
         return out
+    from common.quote_range import recent_close_range  # noqa: PLC0415
+
+    ranges = {aid: recent_close_range(group.to_dict('records'), as_of)
+              for aid, group in df.groupby('entity_id')}
     # Latest row per instrument.
     df = df.sort_values("date").groupby("entity_id", as_index=False).last()
     for rec in df.to_dict("records"):
@@ -473,7 +477,7 @@ def _last_closes(isins: list[str], as_of: str) -> dict[str, dict]:
             continue
         out[r["isin"]] = {"close": float(rec["close"]), "currency": r.get("currency"),
                           "date": str(rec["date"])[:10], "symbol": r.get("yahoo_symbol"),
-                          "name": r.get("name")}
+                          "name": r.get("name"), "recent_range": ranges.get(rec['entity_id'])}
     return out
 
 
@@ -655,7 +659,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         holdings = _dedupe(supabase.table("airs_holding")
                            .select("holding_name,isin,quantity,currency,weight,current_value_eur,"
                                    "start_value_eur,ytd_return_eur,fund_result_eur,fx_result_eur,"
-                                   "airs_result_pct")
+                                   "airs_result_pct,current_price_local")
                            .eq("portefeuille", portefeuille).eq("as_of_date", as_of)
                            .limit(500).execute().data or [])
     if not holdings:
@@ -825,6 +829,10 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
             "isin_override_note": (pin or {}).get("note"),
             "implied_price_eur": round(implied, 4) if implied else None,
             "our_price_eur": round(native_eur, 4) if native_eur else None,
+            "airs_price_local": h.get("current_price_local"),
+            "our_price_local": (c or {}).get("close"),
+            "our_price_currency": (c or {}).get("currency"),
+            "recent_close_range": (c or {}).get("recent_range"),
             "price_ratio": round(ratio, 4) if ratio else None,
             "verdict": verdict,
             "our_instrument": (c or {}).get("name"),

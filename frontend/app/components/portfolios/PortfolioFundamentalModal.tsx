@@ -30,6 +30,7 @@ import {
   workedImpliedPrice,
 } from './valuationFormulas';
 import { ANALYSE_COPY } from './analyseCopy';
+import { stockPriceTooltip } from './stockPriceTooltip';
 
 type ApiMetric = MetricRow & { recorded_at?: string | null };
 
@@ -45,6 +46,10 @@ type ApiRow = {
   company_id: number;
   isin: string;
   name: string;
+  yahoo_symbol?: string | null;
+  stock_price?: number | null;
+  stock_price_currency?: string | null;
+  stock_price_date?: string | null;
   weight_pct: number;
   book_weight?: BookWeight | null;
   currency?: string | null;
@@ -607,7 +612,7 @@ function historicalOcfInputs(working: HistoricalOcfWorking,
   }));
 }
 
-function dcfRow(row: ApiRow, today: string, egmOverrides?: EgmOverrides) {
+export function dcfRow(row: ApiRow, today: string, egmOverrides?: EgmOverrides) {
   const src = reverseDcfSource(row.metrics, today);
   const working = reverseDcfWorking(row.metrics, today);
   const forward = forwardLegs({
@@ -1383,7 +1388,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                     info="Each row's current share of the paired AIRS book, calculated from VOLK Huidige waarde."
                     className="sticky left-[23rem] z-40 w-24 min-w-24 max-w-24 bg-page" />
                   <NumericHeader sortKey="price" label="Stock price"
-                    info="The latest stored GuruFocus closing price. The currency code is the company's GuruFocus exchange currency; the value is not converted to EUR."
+                    info="The share price used by the valuation models, in the same currency as their financial inputs. The info tooltip shows the original Yahoo quote and applied currency conversion."
                     className="sticky left-[29rem] z-40 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page shadow-[6px_0_8px_-6px_var(--color-neutral-700)]" />
                   {model === 'dcf' ? RATES.map((rate) => (
                     <NumericHeader key={rate} sortKey={`rate:${rate}`}
@@ -1445,7 +1450,11 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                     <td className="sticky left-12 z-20 w-80 min-w-80 max-w-80 bg-page px-3 py-2">
                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate font-medium text-fg-strong" title={row.name}>{row.name}</div>
+                          {row.yahoo_symbol ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(row.yahoo_symbol)}/`}
+                            target="_blank" rel="noopener noreferrer"
+                            className="block truncate font-medium text-fg-strong hover:text-accent-400 hover:underline"
+                            title={`${row.name} — Yahoo Finance (${row.yahoo_symbol})`}>{row.name}</a>
+                            : <div className="truncate font-medium text-fg-strong" title={row.name}>{row.name}</div>}
                           <div className="font-mono text-[10px] text-fg-faint">{row.isin}</div>
                         </div>
                         <span className="flex shrink-0 items-center gap-1.5">
@@ -1499,10 +1508,12 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                         <span className="text-left text-[10px] text-fg-faint">{row.currency ?? ''}</span>
                         <span className="text-right">{row.src.price == null ? '—' : inputNumber.format(row.src.price)}</span>
                         <InfoTip wide className="font-sans text-fg-faint" content={<AspectCard
-                          what={`The latest stored closing price for ${row.name}.`}
-                          where="GuruFocus closing-price history."
-                          when={<InputObservationRows inputs={row.stockPriceInputs} />}
-                          how="Select the newest stored close; the currency shown in the cell is the company's GuruFocus exchange currency." />} />
+                          what={`The share price used by all valuation models for ${row.name}, in ${row.currency ?? 'the financial-input currency'}.`}
+                          where={`Yahoo Finance (${row.yahoo_symbol ?? row.isin}).`}
+                          when={row.src.priceDate ?? 'No converted price available'}
+                          how={stockPriceTooltip({ modelPrice: row.src.price, modelCurrency: row.currency,
+                            modelDate: row.src.priceDate, nativePrice: row.stock_price,
+                            nativeCurrency: row.stock_price_currency, nativeDate: row.stock_price_date })} />} />
                       </span>
                     </td>
                     {model === 'dcf' ? row.growth.map((cell) => (
@@ -1512,7 +1523,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                         what={row.dcfStartingFcf != null && row.dcfStartingFcf <= 0
                           ? `No growth rate can be solved at ${(cell.discountRate * 100).toFixed(0)}% because normalised starting FCF is zero or negative.`
                           : `Annual FCF growth implied by the share price at a ${(cell.discountRate * 100).toFixed(0)}% discount rate.`}
-                        where={`GuruFocus close price, diluted shares and ${row.dcfForward ? 'FY1 consensus' : 'latest reported'} cash-flow inputs stored for ${row.name}.`}
+                        where={`Yahoo close converted to the model currency, with GuruFocus diluted shares and ${row.dcfForward ? 'FY1 consensus' : 'latest reported'} cash-flow inputs for ${row.name}.`}
                         retrieved={[row.source_fetched_at.financials,
                           row.dcfForward ? row.source_fetched_at.estimates : null]}
                         applies={[row.src.priceDate, row.src.sharesDate, row.src.flowBasis.date,
@@ -1534,7 +1545,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           value={row.forwardPE == null ? '—' : `${inputNumber.format(row.forwardPE)}×`}
                           what="The forward price-to-earnings multiple used as the model's starting valuation."
                           where={row.forwardPeDerived
-                            ? 'Latest stored GuruFocus close price divided by FY1 consensus EPS.'
+                            ? 'Latest stored Yahoo close, converted to the model currency, divided by FY1 consensus EPS.'
                             : 'GuruFocus Forward PE Ratio indicator.'}
                           retrieved={row.forwardPeDerived
                             ? [row.source_fetched_at.estimates]
@@ -1580,7 +1591,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                           applies={['End of year five']}
                           how="This portfolio view uses only the exit P/E entered in the EGM tab." />
                         <ValuationCell tone="egm" emphasis
-                          value={row.egmResult.fairValue == null ? '—' : inputNumber.format(row.egmResult.fairValue)}
+                          value={row.egmResult.fairValue == null ? '—' : `${inputNumber.format(row.egmResult.fairValue)} ${row.currency ?? ''}`}
                           what="The highest price today that still meets the model's 10% annual return hurdle."
                           where="FY1 consensus EPS, expected EPS growth, dividend yield and the historical or default exit P/E."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials]}
@@ -1600,7 +1611,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                         <ValuationCell tone="egm"
                           value={row.egmResult.upside == null ? '—' : `${row.egmResult.upside >= 0 ? '+' : ''}${(row.egmResult.upside * 100).toFixed(2)}%`}
                           what="The difference between model fair value and the latest stored share price."
-                          where="The Expected Growth Model fair value and GuruFocus close price."
+                          where="The Expected Growth Model fair value and Yahoo close, both in the model currency."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials]}
                           applies={[row.egm.priceDate, row.egm.epsNextFYDate,
                             row.egm.dividendYieldDate, ...row.estimateDates, ...row.medianPeDates]}
@@ -1640,7 +1651,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             { sym: 'n', is: `the ${row.egmAssumptions.years}-year forecast horizon` },
                           ]} />
                         <ValuationCell tone="egm"
-                          value={row.egmResult.impliedPrice == null ? '—' : inputNumber.format(row.egmResult.impliedPrice)}
+                          value={row.egmResult.impliedPrice == null ? '—' : `${inputNumber.format(row.egmResult.impliedPrice)} ${row.currency ?? ''}`}
                           what="The share price implied at the end of year ten."
                           where="Current price and forward P/E, expected EPS growth and the historical or default exit P/E."
                           retrieved={[row.source_fetched_at.estimates, row.source_fetched_at.financials,
@@ -1732,7 +1743,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             <ValuationCell key={`pe:${year}`} tone="eps"
                               value={multiple == null ? '—' : `${inputNumber.format(multiple)}×`}
                               what={`The latest stock price expressed as a multiple of the ${period} EPS.`}
-                              where={`GuruFocus close price, annual statements and analyst estimates stored for ${row.name}.`}
+                              where={`Yahoo close converted to the model currency, with GuruFocus annual statements and analyst estimates for ${row.name}.`}
                               retrieved={[epsMetric?.recorded_at]}
                               applies={[row.src.priceDate, epsMetric?.target_date]}
                               inputs={[
@@ -1799,7 +1810,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             <ValuationCell key={`pOcf:${year}`} tone="ocf"
                               value={multiple == null ? '—' : `${inputNumber.format(multiple)}×`}
                               what={`The latest stock price expressed as a multiple of ${period} per diluted share.`}
-                              where={`GuruFocus close price, diluted shares, statements and estimates stored for ${row.name}.`}
+                              where={`Yahoo close converted to the model currency, with GuruFocus diluted shares, statements and estimates for ${row.name}.`}
                               retrieved={[metric?.recorded_at]}
                               applies={[row.src.priceDate, metric?.target_date]}
                               inputs={[

@@ -16,6 +16,7 @@ import {
 } from './attributionFormulas';
 import AirsWeightCalculation from './AirsWeightCalculation';
 import ReturnCalculation from './ReturnCalculation';
+import BenchmarkMembershipMark from './BenchmarkMembershipMark';
 
 /**
  * WHY the model beat or lagged the index — Brinson-Fachler.
@@ -155,9 +156,9 @@ function Th({ label, prov, align = 'right', simpleInfo }: {
   );
 }
 
-function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf,
+export function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf,
   weightHow, returnHow,
-  owner = 'the model', held = true }: {
+  owner = 'the model', held = true, benchmark = 'the benchmark' }: {
   title: string;
   rows: NonNullable<ModelPortfolioAttribution['top_contributors']>;
   hint?: string;
@@ -175,6 +176,7 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
   owner?: string;
   /** False for the index's winners you do NOT own: same columns, different meaning. */
   held?: boolean;
+  benchmark?: string;
 }) {
   const copy = useAttributionCopy();
   if (!rows?.length) return null;
@@ -233,6 +235,7 @@ function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf
             <tr key={`${r.isin ?? r.ticker ?? r.name}`} className="border-t border-neutral-800/20">
               <td className="py-1 pr-2 text-fg truncate" title={r.name ?? r.ticker ?? r.isin ?? ''}>
                 <span className="flex min-w-0 items-center gap-1.5">
+                  <BenchmarkMembershipMark member={held && r.in_both} label={copy.names.shared(benchmark)} />
                   <span className="truncate">{r.name ?? r.ticker ?? r.isin}</span>
                 </span>
               </td>
@@ -376,6 +379,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
 }) {
   const copy = useAttributionCopy();
   const [axis, setAxis] = useState<Axis>('sector');
+  const [showExtraEffects, setShowExtraEffects] = useState(false);
   // Keep the fully-shaped response for every period while this panel is open. The backend also
   // prewarms and fingerprints these exact requests, but retaining the responses here means a
   // Jan → Feb → Jan click is synchronous: no spinner, no HTTP trip, no chance to recompute.
@@ -392,7 +396,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
   const selectedMonth = monthOffset ? attributionMonths[monthOffset - 1]?.value : undefined;
   // Keep browser responses compatible with the payload version. The server uses the matching
   // cache version so a deployed calculation upgrade cannot leave a live modal showing old maths.
-  const requestKey = JSON.stringify({ attributionPayload: 'rolled-opening-weights-with-prices-v3', id, benchmark, window, axis, source, lookThrough,
+  const requestKey = JSON.stringify({ attributionPayload: 'workbook-membership-markers-v4', id, benchmark, window, axis, source, lookThrough,
     month: selectedMonth ?? 'ytd', refreshVersion });
   const data = periodCache.current.get(requestKey)
     ?? (loaded?.key === requestKey ? loaded.value : null);
@@ -612,6 +616,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
           </div></div>
         </div>
         <div className="absolute right-0 top-0 flex items-center gap-2 shrink-0">
+          <button type="button" aria-pressed={showExtraEffects} onClick={() => setShowExtraEffects((show) => !show)}
+            className="rounded-lg border border-neutral-700 px-2 py-1 text-[12px] text-fg-subtle hover:bg-overlay/5">
+            {showExtraEffects ? copy.chrome.hideExtraEffects : copy.chrome.showExtraEffects}
+          </button>
           <select value={axis}
             onChange={(e) => { setError(null); setOpenBucket(null); setAxis(e.target.value as Axis); }}
             className="bg-page border border-neutral-700 rounded-lg px-2 py-1 text-[12px] text-fg focus:border-accent-500">
@@ -777,10 +785,10 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             {/* Fixed columns keep the table still while YTD/month/axis requests replace their
                 values. Without an explicit layout the browser sized each response from its
                 labels and numbers, so clicking Jan visibly shifted every column. */}
-            <table className="w-full min-w-[1600px] table-fixed text-[12px]">
+            <table className={`w-full table-fixed text-[12px] ${showExtraEffects ? 'min-w-[1600px]' : 'min-w-[1250px]'}`}>
               <colgroup>
                 <col className="w-[12%]" />
-                <col span={8} className="w-[11%]" />
+                <col span={showExtraEffects ? 8 : 6} />
               </colgroup>
               <thead className="sticky top-0 z-[1] bg-card">
                 <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
@@ -835,7 +843,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       how={copy.prov.selectionHow}
                       worked={workedSelection(null, null, null, null)}
                       legend={copy.prov.effectLegend(benchmark, w)} />} />
-                  <Th label={copy.headers.interaction}
+                  {showExtraEffects && <><Th label={copy.headers.interaction}
                     prov={<Provenance source="derived" column note="interaction (the cross term)"
                       what={copy.prov.interactionWhat}
                       where={copy.prov.interactionWhere}
@@ -847,7 +855,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     prov={<Provenance source="derived" column kind="formula" note={`this ${w}'s share of the excess`}
                       what={`Each ${w}'s whole share of the excess. The column sums to the excess, and that identity is checked, not assumed.`}
                       how={copy.prov.totalHow}
-                      worked={workedTotal(null, null, null, null)} />} />
+                      worked={workedTotal(null, null, null, null)} />} /></>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-800/20">
@@ -967,7 +975,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                             worked={workedSelection(`${wt(wB)}%`, rP, rB, pp(r.selection_pct))}
                             legend={copy.prov.effectLegend(benchmark, w)} />} />
                       </td>
-                      <td className="px-2 py-1.5 text-right font-mono">
+                      {showExtraEffects && <><td className="px-2 py-1.5 text-right font-mono">
                         <Eff v={n(r.interaction_pct)}
                           prov={<Provenance source="derived" note={`interaction — ${r.bucket}`}
                             what={copy.prov.interactionWhatFor(r.bucket)}
@@ -983,11 +991,11 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                           prov={<Provenance source="derived" kind="formula" note={`${r.bucket}'s share of the excess`}
                             what={`${r.bucket}'s whole share of the excess.`}
                             how={`${pp(r.allocation_pct)} + ${pp(r.selection_pct)} + ${pp(r.interaction_pct)} = ${pp(r.total_pct)}.`} />} />
-                      </td>
+                      </td></>}
                     </tr>
                     {open && (
                       <tr className="bg-inset/60">
-                        <td colSpan={9} className="px-3 py-3">
+                        <td colSpan={showExtraEffects ? 9 : 7} className="px-3 py-3">
                           <BucketNames row={r} bucket={r.bucket} benchmark={benchmark}
                             startLabel={startLabel} portfolioProvenance={portfolioHoldingProvenance}
                             benchmarkProvenance={benchmarkHoldingProvenance} />
@@ -1043,17 +1051,17 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                     <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.selection_pct} prov={<Provenance source="derived" kind="formula"
                       what="Bond selection effect." note="bond sleeve selection"
                       how={`${bondCoverageNote} It compares your bond return with the dedicated comparator at the policy allocation.`} />} /></td>
-                    <td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.interaction_pct} prov={<Provenance source="derived" kind="formula"
+                    {showExtraEffects && <><td className="px-2 py-1.5 text-right font-mono"><Eff v={bondsSleeve.interaction_pct} prov={<Provenance source="derived" kind="formula"
                       what="Bond interaction effect." note="bond sleeve interaction"
                       how={`${bondCoverageNote} It captures the combined allocation and return difference.`} />} /></td>
                     <td className="px-2 py-1.5 text-right font-mono font-semibold">
                       <Eff v={bondsSleeve.impact_pct} prov={<Provenance source="derived" kind="formula"
                         what="Bonds' whole contribution to the portfolio-versus-policy gap."
                         note="bond sleeve impact" how={`${bondCoverageNote} It compares your bond return contribution with the same-coverage policy comparator contribution.`} />} />
-                    </td>
+                    </td></>}
                   </tr>
                   {open && <tr className="bg-inset/60">
-                    <td colSpan={9} className="px-3 py-3">
+                    <td colSpan={showExtraEffects ? 9 : 7} className="px-3 py-3">
                       <BucketNames row={{ portfolio_holdings: bondsSleeve.holdings ?? [], benchmark_holdings: [] }}
                         bucket="Bonds" benchmark={bondsSleeve.comparator ?? 'bond comparator'}
                         startLabel={startLabel} portfolioProvenance={portfolioHoldingProvenance}
@@ -1064,7 +1072,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                 })()}
               </tbody>
               <tfoot>
-                {data.fund_implementation_residual_pct != null && (
+                {showExtraEffects && data.fund_implementation_residual_pct != null && (
                   <tr className="border-t border-neutral-800/25 text-fg-soft">
                     <td colSpan={8} className="px-2 py-1.5">
                       ETF implementation residual
@@ -1108,7 +1116,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                         what="Sum of the Selection column."
                         how="Adds the values above in this column." />} />
                   </td>
-                  <td className="px-2 py-1.5 text-right font-mono">
+                  {showExtraEffects && <><td className="px-2 py-1.5 text-right font-mono">
                     <Eff v={interactionColumnTotal}
                       prov={<Provenance source="derived" kind="formula" note="column total"
                         what="Sum of the Interaction column."
@@ -1119,7 +1127,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
                       prov={<Provenance source="derived" kind="formula" note="column total"
                         what="Sum of the Total column."
                         how="Adds the values above in this column." />} />
-                  </td>
+                  </td></>}
                 </tr>
               </tfoot>
             </table>
@@ -1137,11 +1145,11 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
               <span className="font-semibold text-fg-strong">Holdings behind the result</span>
             </summary>
             <div className="grid gap-5 border-t border-neutral-800/25 px-3 py-3 md:grid-cols-3">
-            <Names title={copy.names.contributors} rows={data.top_contributors ?? []}
+            <Names title={copy.names.contributors} rows={data.top_contributors ?? []} benchmark={benchmark}
               weightSrc={pWeightSource} returnSrc={pSrc}
               weightAsOf={data.start} returnAsOf={benchmarkAsOf}
               weightHow={pWeightSrc} returnHow={pReturnHow} />
-            <Names title={copy.names.detractors} rows={data.top_detractors ?? []}
+            <Names title={copy.names.detractors} rows={data.top_detractors ?? []} benchmark={benchmark}
               weightSrc={pWeightSource} returnSrc={pSrc}
               weightAsOf={data.start} returnAsOf={benchmarkAsOf}
               weightHow={pWeightSrc} returnHow={pReturnHow} />

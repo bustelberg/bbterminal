@@ -206,7 +206,7 @@ export default function ActiveSharePanel({
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}&weight_method=workbook-rollforward-v4-airs-weights`
+  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}&weight_method=workbook-identity-v5`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
   const activeBody = JSON.stringify({ holdings: weightedHoldings });
   const key = riskRequestKey(activeUrl, activeBody);
@@ -519,7 +519,8 @@ export default function ActiveSharePanel({
                           <p>The denominator sums the workbook weights grown by each constituent’s EUR return.</p>
                         </div> : undefined} text={`${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
                       </span>}
-                      {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%` : '—'}
+                      {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%`
+                        : r.in_benchmark ? <span title="Index member; price unavailable for the weight calculation">{data.benchmark ?? benchmark}</span> : '—'}
                       </span>
                     </td>
                     {/*  NO TONE ON THE NUMBER ITSELF beyond direction. An overweight is not a

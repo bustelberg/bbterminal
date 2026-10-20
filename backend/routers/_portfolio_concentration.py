@@ -8,11 +8,10 @@ understates concentration exactly where it matters: at the top, where the ten la
 Two views of the same book that disagreed about how many positions it has would be worse than
 either.
 
- CASH AND FUNDS ARE OUT OF THE DENOMINATOR, AND BOTH ANSWERS ARE RETURNED because the choice
-genuinely changes the number. The panel's convention throughout is "the individual stocks are 100%",
-which is what makes C₁₀ comparable with another book's — but a book that is 30% cash really is less
-concentrated in absolute terms, and hiding that would be its own distortion. So `top10_pct` is of
-the sleeve and `top10_of_book_pct` is of everything, side by side, each labelled.
+ HHI AND EFFECTIVE POSITIONS describe the stock sleeve, normalised to 100%. Position weights
+and top-N totals retain the input's whole-portfolio percentage denominator, just as Active Share
+does. A caller may already have filtered out cash, funds and bonds; their absence must never
+rescale the remaining company weights upward.
 
  HHI IS THE BETTER NUMBER AND C₁₀ IS THE ONE PEOPLE ASK FOR. A cut at exactly ten is arbitrary:
 two books with the same C₁₀ can be an even ten-name portfolio and one dominated by its top three.
@@ -66,20 +65,22 @@ def compute_concentration(holdings: list[dict], benchmark: str,
         return {"available": False, "reason": e.reason, "benchmark": benchmark}
 
     port, bench = built["port"], built["bench"]
-    stocks_w, total_all = built["stocks_w"], built["total_all"]
+    stocks_w = built["stocks_w"]
 
     rows = sorted(port.values(), key=lambda r: -r["weight_pct"])
     benchmark_rows = sorted(bench.values(), key=lambda r: -r["weight_pct"])
     p = _profile([r["weight_pct"] for r in rows])
     b = _profile([r["weight_pct"] for r in bench.values()])
 
-    # The sleeve as a share of everything — the scale factor between the two denominators.
-    sleeve_share = (stocks_w / total_all) if total_all > 0 else None
+    # Inputs are percentages of the complete portfolio, even when the caller sends only stocks.
+    # Undo build_issuer_weights' stock-sleeve normalisation exactly as Active Share does. Dividing
+    # by total_all instead would turn a prefiltered 45.62% sleeve into a fictitious 100% portfolio.
+    sleeve_share = stocks_w / 100.0
 
     # Company rows use the actual complete-book AIRS weights shown in Attribution. The sleeve
     # profile above remains available for HHI/effective-position comparisons, while the table no
     # longer makes the visible companies pretend to fill 100% of the book.
-    book_scale = sleeve_share or 0.0
+    book_scale = sleeve_share
     cumulative = 0.0
     top: list[dict] = []
     for i, r in enumerate(rows[:20], 1):
@@ -117,17 +118,16 @@ def compute_concentration(holdings: list[dict], benchmark: str,
         "issuers": p["n"],
         "benchmark_issuers": b["n"],
 
-        #  Of the sleeve. The panel's convention, and the one that compares across books.
+        # Whole-portfolio percentages, matching the company rows and Active Share.
         "top1_pct": None if p["cuts"].get(1) is None else p["cuts"][1] * book_scale,
         "top3_pct": None if p["cuts"].get(3) is None else p["cuts"][3] * book_scale,
         "top5_pct": None if p["cuts"].get(5) is None else p["cuts"][5] * book_scale,
         "top10_pct": None if p["cuts"].get(10) is None else p["cuts"][10] * book_scale,
         "top20_pct": None if p["cuts"].get(20) is None else p["cuts"][20] * book_scale,
-        #  Of the whole book, cash and funds included — the other honest answer to the same
-        # question. Returned rather than chosen between; see the module header.
-        "top10_of_book_pct": (None if p["cuts"].get(10) is None or sleeve_share is None
-                              else p["cuts"][10] * sleeve_share),
-        "stocks_pct": None if sleeve_share is None else sleeve_share * 100.0,
+        # Retained API alias: the top-N totals now all use the whole-book denominator.
+        "top10_of_book_pct": (None if p["cuts"].get(10) is None
+                              else p["cuts"][10] * book_scale),
+        "stocks_pct": stocks_w,
 
         "hhi": p["hhi"],
         "effective_positions": p["effective_positions"],

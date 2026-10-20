@@ -86,7 +86,7 @@ _prewarming: set[tuple] = set()
 
 # Bump when the response's calculation semantics change. A data fingerprint invalidates changed
 # source data; it cannot invalidate a correct-data response shaped by an older implementation.
-_ATTRIBUTION_CACHE_VERSION = "attribution-native-price-audit-v16"
+_ATTRIBUTION_CACHE_VERSION = "attribution-workbook-membership-v18"
 
 
 def _weighted(rows: list[tuple[float, float]]) -> float:
@@ -220,6 +220,29 @@ def _overlaps(h: dict, other_isins: set[str], other_names: list[str]) -> bool:
     return bool(root) and any(_company_root(o) == root for o in other_names)
 
 
+def _monthly_book_return(portfolio_id: int, start: str, end: str) -> dict:
+    """Read AIRS's own `rendement` for this month, never its cumulative YTD.
+
+    One month may have many partial observations. Take the latest within the
+    requested month, and carry its date so the price-based legs end there too.
+    An absent/null monthly return stays unavailable; YTD is not a fallback.
+    """
+    from deps import supabase  # noqa: PLC0415
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+
+    account = next((row.get("portefeuille") for row in list_account_links().get("accounts", [])
+                    if row.get("model_portfolio_id") == portfolio_id), None)
+    if not account:
+        return {}
+    rows = (supabase.table("airs_performance").select("periode,rendement")
+            .eq("portefeuille", account).gte("periode", start).lte("periode", end)
+            .order("periode", desc=True).order("fetched_at", desc=True).limit(1)
+            .execute().data or [])
+    if not rows:
+        return {}
+    return {"return_pct": rows[0].get("rendement"), "as_of": str(rows[0]["periode"])[:10]}
+
+
 def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
                         window: str = "ytd", axis: str = "sector",
                         source: str = "book", look_through: bool = False, month: str | None = None) -> dict:
@@ -256,11 +279,17 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
 
     base_start = start
     month_end = None
+    monthly_account = {}
     if month:
         chosen = date.fromisoformat(month[:10])
         start = chosen.replace(day=1).isoformat()
         next_month = (chosen.replace(day=28) + timedelta(days=4)).replace(day=1)
         month_end = min(date.today(), next_month - timedelta(days=1)).isoformat()
+        if source == "book":
+            monthly_account = _monthly_book_return(portfolio_id, start, month_end)
+            # AIRS may be a day behind the latest market prices, particularly
+            # in the current month. Compare the same ending observation.
+            month_end = monthly_account.get("as_of") or month_end
     holdings = portfolio_legs(source, portfolio_id, eff, base_start, look_through=look_through)
     if holdings is None:
         return {"portfolio_id": portfolio_id, "name": p["name"], "benchmark": benchmark_label,
@@ -710,13 +739,18 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
     # between them — the reader's only options were to pick one or to assume a bug. So the gap is
     # computed and returned, and the panel states it.
     #
-    # Read straight off `_book_return`, never recomputed: re-deriving the account's return "the
-    # same way" here is precisely how a second surface starts disagreeing with the first.
+    # Read AIRS's own monthly `rendement` or YTD `cumulatief_rendement`.
+    # Mixing the latter into a monthly benchmark created spurious residuals.
     account_return = account_excess = unattributed = None
     if source == "book":
         from ._airs_portfolio_analysis import _book_return  # noqa: PLC0415
 
-        account_return = (_book_return(portfolio_id, start, None) or {}).get("book_ytd_pct")
+        if month:
+            account_return = monthly_account.get("return_pct")
+        else:
+            book = _book_return(portfolio_id, start, None) or {}
+            if book.get("book_comparable"):
+                account_return = book.get("book_ytd_pct")
         if account_return is not None and r_b_total is not None:
             account_excess = account_return - r_b_total
             unattributed = account_excess - excess
@@ -727,10 +761,10 @@ def compute_attribution(portfolio_id: int, benchmark_label: str = SP500_LABEL,
         "[attribution] %s (%s/%s): %.2f%% stock sleeve × (%+.2f%% − benchmark %+.2f%%) "
         "= %+.2fpp explained; "
         "account %s%s",
-        p["name"], axis, window, portfolio_share * 100.0, r_p_total, r_b_total, excess,
+        p["name"], axis, start[:7] if month else window, portfolio_share * 100.0, r_p_total, r_b_total, excess,
         f"{account_excess:+.2f}pp" if account_excess is not None else "n/a",
-        (f", leaving {unattributed:+.2f}pp in cash / closed positions / flows — no sector to "
-         f"attribute it to" if unattributed is not None else ""))
+        (f", leaving {unattributed:+.2f}pp unattributed (cash / excluded holdings / closed positions / flows)"
+         if unattributed is not None else ""))
 
     excl_w = sum(e["weight_pct"] for e in excluded)
     excl_priced = [e for e in excluded if e["return_pct"] is not None]

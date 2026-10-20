@@ -264,6 +264,7 @@ _USER_POST_READ_PATHS: frozenset[str] = frozenset({
 _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     # Overview → "Refresh all from AIRS", both halves (accounts, then model portfolios).
     "/api/airs/vermogen/refresh/job",
+    "/api/airs/vermogen/price-checks/job",
     "/api/airs/model-portfolios/scan/job",
     "/api/airs/model-portfolios/refresh/job",
     # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).

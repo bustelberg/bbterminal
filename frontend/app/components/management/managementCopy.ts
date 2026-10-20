@@ -35,7 +35,7 @@ type TabCopy = { label: string; note: string };
 export type ManagementCopy = {
   page: {
     title: string;
-    tabs: { bustelberg: TabCopy; toppenberg: TabCopy; topselecties: TabCopy; test_topselecties: TabCopy };
+    tabs: { bustelberg: TabCopy; toppenberg: TabCopy; imagine_fund: TabCopy; topselecties: TabCopy; test_topselecties: TabCopy };
   };
   common: {
     loading: string;
@@ -166,6 +166,7 @@ const en: ManagementCopy = {
     title: 'Management Dashboard',
     tabs: {
       bustelberg: { label: 'Bustelberg', note: 'Bustelberg risk-profile portfolios.' },
+      imagine_fund: { label: 'Imagine Fund', note: 'Bustelberg Imagine Fund.' },
       toppenberg: { label: 'Toppenberg', note: 'Toppenberg risk-profile portfolios.' },
       topselecties: { label: 'TopSelecties', note: 'Building blocks without risk-profile labels.' },
       test_topselecties: { label: 'Test TopSelecties', note: 'Test-only TopSelecties, kept separate from the live set.' },
@@ -304,6 +305,7 @@ const nl: ManagementCopy = {
     title: 'Managementdashboard',
     tabs: {
       bustelberg: { label: 'Bustelberg', note: 'Bustelberg-portefeuilles per risicoprofiel.' },
+      imagine_fund: { label: 'Imagine Fund', note: 'De portefeuille van Bustelberg Imagine Fund.' },
       toppenberg: { label: 'Toppenberg', note: 'Toppenberg-portefeuilles per risicoprofiel.' },
       topselecties: { label: 'TopSelecties', note: 'Bouwstenen zonder risicoprofiel in de naam.' },
       test_topselecties: { label: 'Test TopSelecties', note: 'Test-TopSelecties, gescheiden van de live set.' },

@@ -70,6 +70,25 @@ class TestTheEurosFoldPerIssuer:
         exp, conc = E.compute_exposure(hold, "SP500"), K.compute_concentration(hold, "SP500")
         assert exp["issuers"] == conc["issuers"]
         assert exp["positions"][0]["weight_pct"] == pytest.approx(conc["top1_pct"], abs=1e-9)
+        assert exp["positions"][0]["weight_pct"] == pytest.approx(24.0)
+
+    @pytest.mark.parametrize("include_non_stocks", [False, True])
+    def test_company_weights_match_active_share_with_a_partial_stock_sleeve(self, wire, include_non_stocks):
+        wire([("NVIDIA Corp", 100.0)], {"NVDA": {"name": "NVIDIA Corp", "ccy": "USD"}})
+        holdings = [_h("Nvidia", "NVDA", 3.49, 349.0, "USD")]
+        if include_non_stocks:
+            holdings += [_h("Fund", "IE1", 70.0, 7000.0, "EUR", is_fund=True),
+                         _h("Cash", "", 26.51, 2651.0)]
+        exposure = E.compute_exposure(holdings, "SP500")
+        concentration = K.compute_concentration(holdings, "SP500")
+        active = A.compute_active_share(holdings, "SP500")
+        held = next(r for r in active["rows"] if r["held"])
+        assert exposure["positions"][0]["weight_pct"] == pytest.approx(3.49)
+        assert exposure["positions"][0]["weight_pct"] == pytest.approx(held["portfolio_pct"])
+        assert exposure["positions"][0]["weight_pct"] == pytest.approx(concentration["top1_pct"])
+        assert exposure["stocks_pct"] == pytest.approx(3.49)
+        # The currency distribution is intentionally a separate stock-sleeve percentage.
+        assert exposure["currencies"][0]["weight_pct"] == pytest.approx(100)
 
     def test_a_basket_has_weights_and_no_euros(self, wire):
         """ ABSENT, NOT ZERO. Zero would claim the position is worthless."""

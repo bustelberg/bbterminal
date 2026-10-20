@@ -2058,6 +2058,11 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             pricing_message, pricing = _body_airs_model_prices(ctx)
             summary["pricing"] = pricing
             _log.info("[scheduler] AIRS paired-model pricing: %s", pricing_message)
+            from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
+            step(0, 0, "Saving daily AIRS / Yahoo price checks")
+            summary['price_checks'] = refresh_price_checks(should_stop=stop)
+            if summary['price_checks']['errors']:
+                failures.append(f"price checks: {summary['price_checks']['errors']}")
             # Do not wait for someone to open Analyse before beginning its YTD/monthly
             # attribution work. This uses the bounded scheduler pool and is coalesced by name,
             # so the four morning AIRS ticks cannot create a fan-out of duplicate warmers.

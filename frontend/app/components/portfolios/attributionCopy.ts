@@ -15,6 +15,7 @@ const en = {
     loading: 'Computing attribution', error: 'Attribution could not be computed.',
     residual: (value: string) => `The attribution does not reconcile. Difference: ${value}.`,
     drivers: 'Holdings behind the result',
+    showExtraEffects: 'Show Interact. & Total', hideExtraEffects: 'Hide Interact. & Total',
   },
   headers: {
     name: 'Name', weight: 'Weight', ret: 'Ret.', contribution: 'Contr.',
@@ -122,6 +123,7 @@ const nl: AttributionCopy = {
     loading: 'Attributie berekenen', error: 'De attributie kon niet worden berekend.',
     residual: (value) => `De attributie sluit niet aan. Verschil: ${value}.`,
     drivers: 'Posities achter het resultaat',
+    showExtraEffects: 'Toon Interactie & Totaal', hideExtraEffects: 'Verberg Interactie & Totaal',
   },
   headers: {
     name: 'Naam', weight: 'Gewicht', ret: 'Rend.', contribution: 'Bijdr.',
