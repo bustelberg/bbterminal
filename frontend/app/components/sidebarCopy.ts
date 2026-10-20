@@ -28,6 +28,7 @@ export type NavKey =
   | '/backtest'
   | '/momentum'
   | '/diversifier'
+  | '/etf-comparison'
   | '/universe'
   | '/longequity-universe'
   | '/sp500'
@@ -77,6 +78,7 @@ const EN: SidebarCopy = {
     '/backtest': 'Backtest',
     '/momentum': 'Sector Momentum',
     '/diversifier': 'Diversifier',
+    '/etf-comparison': 'ETF comparison',
     '/universe': 'Universe Overview',
     '/longequity-universe': 'LongEquity Universe',
     '/sp500': 'S&P 500 Universe',
@@ -126,6 +128,7 @@ const NL: SidebarCopy = {
     '/backtest': 'Backtest',
     '/momentum': 'Sectormomentum',
     '/diversifier': 'Diversifier',
+    '/etf-comparison': 'ETF-vergelijking',
     '/universe': 'Universumoverzicht',
     '/longequity-universe': 'LongEquity-universum',
     '/sp500': 'S&P 500-universum',

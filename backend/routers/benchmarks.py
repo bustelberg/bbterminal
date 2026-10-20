@@ -22,14 +22,31 @@ import logging
 import re
 from datetime import date
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from deps import supabase
 from routers import _blend_cache
+from routers._etf_comparison import EtfComparisonResult
 from ingest.constants import DATA_CUTOFF
 
 router = APIRouter(tags=["benchmarks"])
+
+@router.get("/api/benchmarks/etf-comparison", response_model=EtfComparisonResult)
+async def etf_comparison(
+    start: date,
+    ticker: str = Query(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9^.=_-]+$"),
+    benchmark: str = Query(default="ACWI", min_length=1, max_length=40, pattern=r"^[A-Za-z0-9^.=_-]+$"),
+):
+    """Read-only Yahoo adjusted-return comparison over this ETF's own date window."""
+    from routers._etf_comparison import load
+
+    if start >= date.today():
+        raise HTTPException(status_code=422, detail="Choose a start date before today.")
+    try:
+        return await asyncio.to_thread(load, ticker.upper(), benchmark.upper(), start)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 #  The fill's worker count moved with the fill — `routers/_fundamental_fill.FILL_WORKERS`, where
 # the measurement behind the number lives beside the loop it governs. Two copies of a concurrency

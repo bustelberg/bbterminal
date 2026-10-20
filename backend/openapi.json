@@ -7628,6 +7628,109 @@
         "title": "EgmAssumptionIn",
         "type": "object"
       },
+      "EtfComparisonPoint": {
+        "properties": {
+          "benchmark_pct": {
+            "title": "Benchmark Pct",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "etf_pct": {
+            "title": "Etf Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "etf_pct",
+          "benchmark_pct"
+        ],
+        "title": "EtfComparisonPoint",
+        "type": "object"
+      },
+      "EtfComparisonResult": {
+        "properties": {
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Currency"
+          },
+          "benchmark_return_pct": {
+            "title": "Benchmark Return Pct",
+            "type": "number"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "end": {
+            "title": "End",
+            "type": "string"
+          },
+          "excess_pp": {
+            "title": "Excess Pp",
+            "type": "number"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/EtfComparisonPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "requested_start": {
+            "title": "Requested Start",
+            "type": "string"
+          },
+          "start": {
+            "title": "Start",
+            "type": "string"
+          },
+          "ticker": {
+            "title": "Ticker",
+            "type": "string"
+          },
+          "total_return_pct": {
+            "title": "Total Return Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "ticker",
+          "benchmark",
+          "requested_start",
+          "start",
+          "end",
+          "currency",
+          "benchmark_currency",
+          "total_return_pct",
+          "benchmark_return_pct",
+          "excess_pp",
+          "points"
+        ],
+        "title": "EtfComparisonResult",
+        "type": "object"
+      },
       "EtfOverlayHolding": {
         "description": "One diversifier ETF held alongside the momentum sleeve in a blended\nscheduled strategy. `benchmark_id` is a `benchmark` row; `weight_pct` is\nits target portfolio weight; the strategy (momentum) sleeve takes\n`100 - sum(weight_pct)`. `band_pct` is the symmetric drift band used only\nas a 'rebalance due' alert on /schedule \u2014 rebalances ride the momentum\ngrid (the blend resets to target on each grid rebalance), never off-grid.",
         "properties": {
@@ -25463,6 +25566,75 @@
           }
         },
         "summary": "Ingest Company Fundamentals Job",
+        "tags": [
+          "benchmarks"
+        ]
+      }
+    },
+    "/api/benchmarks/etf-comparison": {
+      "get": {
+        "description": "Read-only Yahoo adjusted-return comparison over this ETF's own date window.",
+        "operationId": "etf_comparison_api_benchmarks_etf_comparison_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "start",
+            "required": true,
+            "schema": {
+              "format": "date",
+              "title": "Start",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ticker",
+            "required": true,
+            "schema": {
+              "maxLength": 40,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9^.=_-]+$",
+              "title": "Ticker",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "maxLength": 40,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9^.=_-]+$",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EtfComparisonResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Etf Comparison",
         "tags": [
           "benchmarks"
         ]

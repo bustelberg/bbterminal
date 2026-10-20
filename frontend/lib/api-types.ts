@@ -3807,6 +3807,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmarks/etf-comparison": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Etf Comparison
+         * @description Read-only Yahoo adjusted-return comparison over this ETF's own date window.
+         */
+        get: operations["etf_comparison_api_benchmarks_etf_comparison_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/benchmarks/index/{label}": {
         parameters: {
             query?: never;
@@ -11392,6 +11412,40 @@ export interface components {
             eps_growth?: number | null;
             /** Exit Pe */
             exit_pe?: number | null;
+        };
+        /** EtfComparisonPoint */
+        EtfComparisonPoint: {
+            /** Benchmark Pct */
+            benchmark_pct: number;
+            /** Date */
+            date: string;
+            /** Etf Pct */
+            etf_pct: number;
+        };
+        /** EtfComparisonResult */
+        EtfComparisonResult: {
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Currency */
+            benchmark_currency: string | null;
+            /** Benchmark Return Pct */
+            benchmark_return_pct: number;
+            /** Currency */
+            currency: string | null;
+            /** End */
+            end: string;
+            /** Excess Pp */
+            excess_pp: number;
+            /** Points */
+            points: components["schemas"]["EtfComparisonPoint"][];
+            /** Requested Start */
+            requested_start: string;
+            /** Start */
+            start: string;
+            /** Ticker */
+            ticker: string;
+            /** Total Return Pct */
+            total_return_pct: number;
         };
         /**
          * EtfOverlayHolding
@@ -19844,6 +19898,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["JobStarted"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    etf_comparison_api_benchmarks_etf_comparison_get: {
+        parameters: {
+            query: {
+                start: string;
+                ticker: string;
+                benchmark?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EtfComparisonResult"];
                 };
             };
             /** @description Validation Error */
