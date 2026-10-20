@@ -9,6 +9,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from deps import supabase
+from common.price_history import filter_listing_rows
 
 from . import geo, yahoo
 
@@ -246,6 +247,7 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
         rows.append(row)
     # Trim the leading zero-volume backfill head (settlement-only / carried
     # rows) so the stored series starts at real trading data. No-op for FX/index.
+    rows = filter_listing_rows(rows, symbol)
     rows = yahoo.trim_leading_no_volume(rows)
     stored = 0
     for i in range(0, len(rows), _CHUNK):
@@ -277,7 +279,7 @@ def store_series(analysis_id: int, symbol: str, first_ts: int | None) -> int:
     # SAME window `w`, so no extra Yahoo call. Best-effort: never fails the store.
     try:
         from . import parquet  # noqa: PLC0415
-        pq = parquet.write(symbol, parquet.build_frame(w))
+        pq = parquet.write(symbol, parquet.build_frame(w, symbol=symbol))
         if pq:
             upd["parquet_path"], upd["parquet_rows"] = pq
     except Exception:  # noqa: BLE001
@@ -342,6 +344,8 @@ def extend_series(analysis_id: int, symbol: str, since: str) -> int | None:
     # NOT `trim_leading_no_volume` — that trims the head of a FULL series (the settlement-only
     # backfill). Here the "head" is just wherever this window happens to start, and trimming it
     # would silently drop real bars.
+
+    rows = filter_listing_rows(rows, symbol)
 
     stored = 0
     for i in range(0, len(rows), _CHUNK):

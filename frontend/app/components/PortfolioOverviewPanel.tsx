@@ -30,6 +30,9 @@ import type {
   AirsPortfolioOverview,
 } from '../../lib/types/api';
 import { useMgmtCopy } from './management/managementCopy';
+import { usePriceChecks } from './management/usePriceChecks';
+import { useForcePriceChecks } from './management/useForcePriceChecks';
+import { PriceCheckBadge, PriceCheckDetails, usePriceCheckCopy } from './management/PriceCheckPanel';
 
 // These are substantial, self-contained workspaces that only exist after a row action. Keeping
 // them out of the overview chunk makes opening /management-dashboard about the table, rather than
@@ -264,6 +267,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // and `_auth_middleware.py::_USER_REFRESH_PATHS` is the same split on the server.
   const isAdmin = useIsAdmin();
   const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
+  const priceCheckAccounts = (rows ?? []).filter((row) => row.management_group === collection && canAnalyse(row));
+  const priceChecks = usePriceChecks(priceCheckAccounts);
+  const forcedPriceChecks = useForcePriceChecks();
+  const priceCopy = usePriceCheckCopy();
+  const [openPriceCheck, setOpenPriceCheck] = useState<string | null>(null);
   // Bustelberg and Toppenberg open from Offensief down to Defensief; TopSelecties open A–Z.
   // The name comparator still uses the explicit profile order.
   const [storedSort, setStoredSort] = useState<TableSort>(() => defaultTableSort(collection));
@@ -287,7 +295,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
   // One cache refresh per account per mounted dashboard. The server also de-duplicates jobs, but
   // this avoids attaching a second toast every time somebody collapses and re-expands the row.
-  const priceRefreshStartedRef = useRef<Set<string>>(new Set());
   const [hideSmall, setHideSmall] = useState(true);
   // The allocation-policy editor. Mounted only while open — it fetches its own grid, and a policy
   // nobody asked to see is not worth a request on every page load.
@@ -618,8 +625,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // re-fetching left the open row on "Loading holdings…" for ever, since nothing re-requests until
   // the next click — the row had to be collapsed and re-expanded by hand to recover.
   const loadDetail = useCallback(async (p: string) => {
-    // Timed because the cached response must stay quick. The former 11.5-second Yahoo
-    // freshening runs below as a job only after this response has painted the expanded row.
+    // Expanding holdings is read-only. Daily/manual refresh workflows own Yahoo validation.
     const t0 = performance.now();
     // Fetched together: a holding briefly showing its value without its identity, or worse with
     // the wrong one, is not an improvement over showing neither.
@@ -642,29 +648,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     setDetail((d) => ({ ...d, [p]: holdings }));
     if (resolved) setIsins((m) => ({ ...m, [p]: resolved }));
 
-    if (!resolved || priceRefreshStartedRef.current.has(p)) return;
-    priceRefreshStartedRef.current.add(p);
-    void (async () => {
-      try {
-        const { done } = await startJob(
-          `${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins/refresh-prices/job`,
-          `${p}: price validation`,
-        );
-        const job = await done;
-        if (job.status === 'failed') return;
-
-        // The job writes the normal close cache. Re-read just this account so the already-open
-        // row adopts the fresher validation without reloading its holdings or the overview.
-        const refreshed = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(p)}/isins`);
-        if (!refreshed.ok) return;
-        const fresh = (await refreshed.json()) as AirsAccountIsins;
-        setIsins((m) => ({ ...m, [p]: fresh }));
-      } catch (error) {
-        // The cached answer remains useful; a failed optional freshness upgrade must not hide it.
-        priceRefreshStartedRef.current.delete(p);
-        logDetail(`background price validation for ${p} failed`, error);
-      }
-    })();
   }, []);
 
   const loadOverview = useCallback(async () => {
@@ -735,6 +718,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     // and therefore a second toast, which is the duplicate card this guard exists to prevent. The
     // ref, not `refreshingRows`: React batches, so two clicks in one tick see the same stale Set.
     if (refreshingRef.current.has(portefeuille)) return;
+    priceChecks.beginRefresh([portefeuille]);
     // Do not let a route return during this manual refresh paint a snapshot that it is replacing.
     invalidateOverviewCache();
     refreshingRef.current = new Set(refreshingRef.current).add(portefeuille);
@@ -753,12 +737,14 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       // wrote every account it got through, so leaving the pre-refresh figures on screen would
       // hide real work that was really done — the same rule the bulk fundamentals fill follows.
       if (job.status === 'failed') logDetail(`refresh ${portefeuille} failed`, job.summary);
+      const validation = priceChecks.refresh(portefeuille);
       setDetail((d) => { const n = { ...d }; delete n[portefeuille]; return n; });
       setIsins((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       await loadOverview();
       //  Dropping the cache is only half of it. An OPEN row re-renders straight into
       // "Loading holdings…" and stays there, because only a click re-requests — so re-fetch here.
       if (open === portefeuille) await loadDetail(portefeuille);
+      await validation;
     } catch (e) {
       logDetail(`refresh ${portefeuille} threw`, e);
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
@@ -846,6 +832,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // on each press turns a quick check into 48 account downloads plus ~61 model XLS downloads.
   const refreshAll = async (force = false) => {
     if (refreshingAll) return;
+    const priceAccounts = priceCheckAccounts.map((row) => row.dynamic_portefeuille);
+    priceChecks.beginRefresh(priceAccounts);
     // See refreshOne: this run changes the source of every overview row.
     invalidateOverviewCache();
     setRefreshingAll(true);
@@ -900,6 +888,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         await loadOverview();
       }
       if (open) await loadDetail(open);   // same trap as refreshOne — an open row must re-fetch
+      await priceChecks.refreshMany(priceAccounts);
     } catch (e) {
       logDetail('fleet refresh threw', e);
       setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
@@ -1079,7 +1068,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           <button type="button"
             onClick={() => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(); } }}
             // Inert only in the gap between the press and the job id arriving — see the row button.
-            disabled={refreshingAll && !allJob}
+            disabled={!!forcedPriceChecks.progress || (refreshingAll && !allJob)}
             title={allJob
               ? (modelsJob
                 ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
@@ -1103,6 +1092,20 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               by admins only — a non-admin reading what the bands are supposed to be is exactly the
               use this has for them, and hiding it would leave the numbers on this page with no
               stated target at all. */}
+          <button type="button" disabled={refreshingAll || refreshingRows.size > 0 || !!forcedPriceChecks.progress || !priceCheckAccounts.length}
+            title={priceCopy.forceAllHint}
+            onClick={() => {
+              const accounts = priceCheckAccounts.map((row) => ({ id: row.dynamic_portefeuille, name: row.name }));
+              priceChecks.beginRefresh(accounts.map((account) => account.id));
+              void forcedPriceChecks.run(accounts, priceCopy.forceAll, async () => {
+                invalidateOverviewCache();
+                await priceChecks.refreshMany(accounts.map((account) => account.id));
+                await loadOverview();
+              });
+            }}
+            className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            {priceCopy.forceAll}
+          </button>
           <button type="button" onClick={() => setShowBands(true)}
             title={t.overview.allocationBandsHint}
             className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
@@ -1169,7 +1172,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               content and the PAGE scrolls it. The horizontal container has to stay — 17 columns
               are wider than a phone, and the repo rule is that a dense table scrolls inside its
               own box so the page never scrolls sideways. */}
-          <table className="w-full text-[13px] whitespace-nowrap">
+          <table className="w-full min-w-[80rem] table-fixed text-[13px] whitespace-nowrap">
+            <colgroup><col className="w-10" /><col className="w-[28rem]" /><col /><col className="w-28" /><col className="w-36" /><col className="w-40" /><col className="w-12" /></colgroup>
             <thead className="bg-card z-10 [&_th]:bg-card">
               <tr className="text-fg-faint text-[12px] uppercase tracking-wide border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1184,6 +1188,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <SortTh label="Current month" k="month" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD." />
+                <th className="px-3 py-1.5 text-left font-medium"><span className="sr-only">{priceCopy.column}</span></th>
                 {/* Rightmost, and unlabelled: a destructive action wants distance from the figures,
                     not a heading advertising it. */}
                 <th className="px-3 py-1.5 font-medium text-right w-8" />
@@ -1296,7 +1301,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                                 // press, nothing moving, no way out — so while it runs there is
                                 // always something to press, and afterwards there is nothing left
                                 // to ask for.
-                                disabled={stopping}
+                                disabled={stopping || (!!forcedPriceChecks.progress && !busy)}
                                 title={stopping
                                   ? 'Cancelling — the account being downloaded finishes first.'
                                   : cancellable
@@ -1426,6 +1431,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           what="What this account returned in the most recent month AIRS has closed."
                           note="rendement — AIRS's return for the most recent month" />
                       </td>
+                      <td className="px-3 py-1.5">
+                        {canAnalyse(r) ? <PriceCheckBadge state={priceChecks.checks[r.dynamic_portefeuille]}
+                          expanded={openPriceCheck === r.dynamic_portefeuille}
+                          onClick={() => setOpenPriceCheck((current) => current === r.dynamic_portefeuille ? null : r.dynamic_portefeuille)} /> : '—'}
+                      </td>
                       <td className="px-3 py-1.5 text-right">
                         {/*  stopPropagation — the row is the expand toggle, and a delete that also
                             opened the detail would leave a confirm sitting over a panel loading
@@ -1443,6 +1453,13 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                         )}
                       </td>
                     </tr>
+                    {openPriceCheck === r.dynamic_portefeuille && (
+                      <tr><td colSpan={7} className="px-3 py-3 bg-inset">
+                        <PriceCheckDetails state={priceChecks.checks[r.dynamic_portefeuille]}
+                          refreshing={refreshingAll || !!forcedPriceChecks.progress || refreshingRows.has(r.dynamic_portefeuille)}
+                          onRetry={() => void refreshOne(r.dynamic_portefeuille, r.name)} />
+                      </td></tr>
+                    )}
                     {isOpen && (
                       <tr>
                         <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">

@@ -1449,6 +1449,13 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         })
         _log.info("[airs_vermogen] %s refresh — %s (%s)",
                   triggered_by, _STATUS["message"], detail)
+        if triggered_by != 'auto' and not cancelled_at:
+            from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
+            _emit('progress', message='Saving AIRS / Yahoo price checks')
+            _STATUS['price_checks'] = refresh_price_checks(names, should_stop=should_stop)
+            if _STATUS['price_checks']['errors']:
+                _STATUS['status'] = 'error'
+                _STATUS['message'] += '; some price checks could not be saved'
         return dict(_STATUS)
     finally:
         _STATUS["running"] = False

@@ -22,6 +22,7 @@ import pandas as pd
 from supabase import Client
 
 from deps import IN_CHUNK_SIZE
+from common.price_history import LISTING_STARTS, listing_start
 from timeseries import ENTITY_COL, SeriesUnavailable, load_series
 from .universe import load_company_asset_map
 
@@ -82,6 +83,19 @@ def _load_yahoo(supabase: Client, company_ids: list[int], start_date: date,
         )
     if df.empty:
         return _empty(value_col)
+    # Protect existing stored histories as well as future ingests. Do not rely
+    # on a refresh deleting old rows: the user must be able to rerun immediately.
+    # Only two reviewed symbols are queried, so this never pages over the grid.
+    if start_date < max(LISTING_STARTS.values()):
+        listings = (supabase.table("asset_analysis").select("analysis_id,symbol")
+                    .in_("symbol", list(LISTING_STARTS)).execute().data or [])
+        starts = {int(row["analysis_id"]): pd.Timestamp(listing_start(row["symbol"]))
+                  for row in listings if row.get("analysis_id") is not None}
+        if starts:
+            boundaries = df[ENTITY_COL].map(starts)
+            df = df[boundaries.isna() | (pd.to_datetime(df["date"]) >= boundaries)].copy()
+            if df.empty:
+                return _empty(value_col)
     out = df.rename(columns={"date": "target_date"}).copy()
     out["company_id"] = out[ENTITY_COL].map(analysis_to_company)
     out = out.dropna(subset=["company_id", value_col])

@@ -234,8 +234,8 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     ),
     JobSpec(
         id="airs_vermogen_refresh",
-        label="AIRS portfolios + models refresh",
-        fills="airs_holding · airs_performance · airs_mutatie · airs_model_portfolio* · asset_price",
+        label="AIRS portfolios + models + price checks",
+        fills="airs_holding · airs_performance · airs_mutatie · airs_model_portfolio* · asset_price · airs_price_check",
         cadence="Every day, 08:00, 09:00, 10:00, and 11:00 Amsterdam",
         # One sequential AIRS run: account values, model compositions, then model pricing. Keeping
         # those phases in one job prevents two Playwright/AirSPMS sessions from colliding. AIRS
@@ -245,7 +245,7 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         options={"coalesce": True, "misfire_grace_time": 3600},
         max_age_hours=80,
         note="Full AIRS re-scan at every run: every account, all model compositions, and "
-             "paired-model prices at 08:00, 09:00, 10:00 and 11:00 Amsterdam; APScheduler "
+             "paired-model prices, then saved price checks at 08:00, 09:00, 10:00 and 11:00 Amsterdam; APScheduler "
              "handles DST.",
     ),
     JobSpec(

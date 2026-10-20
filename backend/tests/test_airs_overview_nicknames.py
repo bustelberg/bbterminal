@@ -156,6 +156,7 @@ class TestOverviewRpcAssembly:
     def test_rpc_payload_is_the_only_database_input_for_the_fast_path(self, monkeypatch):
         """The SQL RPC owns all relational reads; Python only applies reviewed naming rules."""
         payload = {
+            'price_checks': {'BUS_Offensief_Dyn': {'checked_at': '2026-10-20', 'result': {'rows': []}}},
             "accounts": [{
                 "portefeuille": "BUS_Offensief_Dyn",
                 "account_display_name": None,
@@ -187,6 +188,7 @@ class TestOverviewRpcAssembly:
         assert rows[0]["link_source"] == "manual"
         assert rows[0]["link_reason"] == "reviewed"
         assert rows[0]["fixed_portfolio_id"] == 7
+        assert rows[0]['saved_price_check'] == payload['price_checks']['BUS_Offensief_Dyn']
 
     @pytest.mark.parametrize(("account", "expected_name"), [
         ("BUS_IF_DYN", "Bustelberg Imagine Fund"),

@@ -818,7 +818,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh Account Isin Prices Job
-         * @description Refresh stale Yahoo closes after an expanded row has already rendered.
+         * @description Explicitly refresh stale Yahoo closes and persist the account's price check.
          *
          *     ``resolve_account_isins`` owns the stale-price test and writes any newly fetched closes to
          *     the normal cache. A tracked, keyed job makes repeated expands join one refresh instead of
@@ -2121,6 +2121,23 @@ export interface paths {
         get: operations["airs_scan_api_airs_scan_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/vermogen/price-checks/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Force Account Price Checks Job */
+        post: operations["force_account_price_checks_job_api_airs_vermogen_price_checks_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -9136,6 +9153,8 @@ export interface components {
         AirsAccountIsins: {
             /** As Of */
             as_of?: string | null;
+            /** Checked At */
+            checked_at?: string | null;
             /** Model Name */
             model_name?: string | null;
             /** Model Source */
@@ -9416,6 +9435,8 @@ export interface components {
          *     we declined; re-scan the model portfolio to fix it.
          */
         AirsHoldingIsin: {
+            /** Airs Price Local */
+            airs_price_local?: number | null;
             /** Airs Result Pct */
             airs_result_pct?: number | null;
             /** Bucket */
@@ -9463,16 +9484,24 @@ export interface components {
             linked_portfolio_name?: string | null;
             /** Our Instrument */
             our_instrument?: string | null;
+            /** Our Price Currency */
+            our_price_currency?: string | null;
             /** Our Price Date */
             our_price_date?: string | null;
             /** Our Price Eur */
             our_price_eur?: number | null;
+            /** Our Price Local */
+            our_price_local?: number | null;
             /** Price Lag Days */
             price_lag_days?: number | null;
             /** Price Ratio */
             price_ratio?: number | null;
             /** Quantity */
             quantity?: number | null;
+            /** Recent Close Range */
+            recent_close_range?: {
+                [key: string]: unknown;
+            } | null;
             /** Region */
             region?: string | null;
             /** Sector */
@@ -9546,15 +9575,7 @@ export interface components {
             /** Percentage */
             percentage?: number | null;
         };
-        /**
-         * AirsPortfolioOverview
-         * @description A portfolio: your name for it, AIRS's numbers for it.
-         *
-         *      `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
-         *     book is paired with, and 27 of 28 pairings are an unconfirmed name match. A wrong pairing
-         *     puts a real book's money under another strategy's name, and — because the risk variants of a
-         *     strategy hold the SAME instruments — nothing else on the row would look wrong.
-         */
+        /** AirsPortfolioOverview */
         AirsPortfolioOverview: {
             /** As Of */
             as_of?: string | null;
@@ -9616,6 +9637,10 @@ export interface components {
             reconciles?: boolean | null;
             /** Residual Eur */
             residual_eur?: number | null;
+            /** Saved Price Check */
+            saved_price_check?: {
+                [key: string]: unknown;
+            } | null;
             /** Withdrawals Eur */
             withdrawals_eur?: number | null;
             /** Ytd Pct */
@@ -11622,6 +11647,11 @@ export interface components {
              */
             unit?: string;
         };
+        /** ForcePriceChecksRequest */
+        ForcePriceChecksRequest: {
+            /** Accounts */
+            accounts: string[];
+        };
         /**
          * FundamentalCoverageRequest
          * @description A current AIRS book, model portfolio, or explicit basket of (isin, weight).
@@ -13375,8 +13405,16 @@ export interface components {
             source_fetched_at: {
                 [key: string]: string | null;
             };
+            /** Stock Price */
+            stock_price?: number | null;
+            /** Stock Price Currency */
+            stock_price_currency?: string | null;
+            /** Stock Price Date */
+            stock_price_date?: string | null;
             /** Weight Pct */
             weight_pct: number;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
         };
         /**
          * PortfolioConcentration
@@ -16007,7 +16045,9 @@ export interface operations {
     };
     airs_account_isins_api_airs_accounts__portefeuille__isins_get: {
         parameters: {
-            query?: never;
+            query?: {
+                stored_check?: boolean;
+            };
             header?: never;
             path: {
                 portefeuille: string;
@@ -17651,6 +17691,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    force_account_price_checks_job_api_airs_vermogen_price_checks_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForcePriceChecksRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

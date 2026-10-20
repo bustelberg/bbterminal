@@ -605,6 +605,10 @@ class PortfolioCompanyMetricsRow(BaseModel):
     company_id: int
     isin: str
     name: str
+    yahoo_symbol: str | None = None
+    stock_price: float | None = None
+    stock_price_currency: str | None = None
+    stock_price_date: str | None = None
     weight_pct: float
     currency: str | None = None
     source_fetched_at: dict[str, str | None]
@@ -992,6 +996,7 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
                 "quarterly_estimate_history__eps_nri_estimate__surprise_pct",
             ]
         by_company: dict[int, list[dict]] = {cid: [] for cid in cids}
+        native_prices: dict[int, dict] = {}
 
         def collect(query) -> None:
             offset = 0
@@ -1016,16 +1021,20 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
                 offset = 0
                 while True:
                     batch = (supabase.table("company_yahoo_price")
-                             .select("company_id,target_date,close")
+                             .select("company_id,target_date,close,currency")
                              .in_("company_id", chunk)
                              .gte("target_date", (_date.today() - timedelta(days=45)).isoformat())
                              .order("company_id").order("target_date")
                              .range(offset, offset + 999).execute().data or [])
                     for row in batch:
+                        cid = int(row['company_id'])
+                        if row.get('close') is not None and str(row['target_date']) > str(native_prices.get(cid, {}).get('target_date', '')):
+                            native_prices[cid] = row
                         by_company.setdefault(int(row["company_id"]), []).append({
                             "metric_code": "close_price", "target_date": row["target_date"],
                             "numeric_value": row.get("close"), "is_prediction": False,
                             "recorded_at": None,
+                            '_quote_currency': row.get('currency'),
                         })
                     if len(batch) < 1000:
                         break
@@ -1040,6 +1049,33 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
                             .in_("company_id", cids[start:start + 100]).execute().data or []):
                 meta[int(company["company_id"])] = company
 
+        # Valuation inputs stay in their financial-data currency; the UI separately displays
+        # the untouched Yahoo quote and its OWN currency, never the GuruFocus exchange label.
+        from routers._benchmark_index import _fx_to_eur  # noqa: PLC0415
+        from routers._fundamental_currency import valuation_price  # noqa: PLC0415
+        currencies = set()
+        for cid, quote in native_prices.items():
+            financial_currency = (meta.get(cid, {}).get('gurufocus_exchange') or {}).get('currency_code')
+            if financial_currency and quote.get('currency') and financial_currency != quote['currency']:
+                currencies.update([financial_currency, quote['currency']])
+        fx = _fx_to_eur(currencies, (_date.today() - timedelta(days=70)).isoformat(), _date.today().isoformat()) if currencies else {}
+        for cid, metrics in by_company.items():
+            financial_currency = (meta.get(cid, {}).get('gurufocus_exchange') or {}).get('currency_code')
+            for metric in metrics:
+                if '_quote_currency' not in metric:
+                    continue
+                quote_currency = metric.pop('_quote_currency')
+                when = str(metric['target_date'])[:10]
+                metric['numeric_value'] = valuation_price(metric.get('numeric_value'), quote_currency,
+                                                         financial_currency, when, fx)
+
+        yahoo_symbols = {}
+        isins = list({holding['isin'] for holding in companies if holding.get('isin')})
+        for offset in range(0, len(isins), 100):
+            for mapping in (supabase.table('asset_execution').select('isin,yahoo_symbol')
+                            .in_('isin', isins[offset:offset + 100]).eq('status', 'ok').execute().data or []):
+                if mapping.get('yahoo_symbol'):
+                    yahoo_symbols[mapping['isin']] = mapping['yahoo_symbol']
         result_by_company: dict[int, dict] = {}
         for holding in companies:
             cid = int(holding["company_id"])
@@ -1051,6 +1087,10 @@ async def portfolio_company_metrics(body: FundamentalCoverageRequest):
             result_by_company[cid] = {
                 "company_id": cid,
                 "isin": holding["isin"],
+                "yahoo_symbol": yahoo_symbols.get(holding['isin']),
+                "stock_price": native_prices.get(cid, {}).get('close'),
+                "stock_price_currency": native_prices.get(cid, {}).get('currency'),
+                "stock_price_date": native_prices.get(cid, {}).get('target_date'),
                 "name": holding.get("company_name") or holding.get("name")
                         or company.get("company_name") or holding["isin"],
                 "weight_pct": float(holding.get("weight_pct") or 0),

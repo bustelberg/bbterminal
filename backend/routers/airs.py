@@ -3669,6 +3669,22 @@ async def airs_vermogen_refresh(force: bool = False):
     return {"status": "started", "force": force}
 
 
+class ForcePriceChecksRequest(BaseModel):
+    accounts: list[str] = Field(min_length=1, max_length=200)
+
+
+@router.post('/api/airs/vermogen/price-checks/job')
+async def force_account_price_checks_job(body: ForcePriceChecksRequest):
+    import hashlib  # noqa: PLC0415
+    import jobs as job_registry  # noqa: PLC0415
+    from routers._airs_force_price_checks import force_price_checks  # noqa: PLC0415
+    accounts = sorted(set(body.accounts))
+    scope = hashlib.sha256(json.dumps(accounts).encode()).hexdigest()[:16]
+    job, reused = job_registry.start(f'airs.price-checks.{scope}', 'Force price checks',
+                                     lambda ctx: force_price_checks(accounts, ctx))
+    return {'job_id': job.id, 'label': 'Force price checks', 'already_running': reused}
+
+
 @router.post("/api/airs/vermogen/refresh/job")
 async def airs_vermogen_refresh_job(force: bool = False):
     """The fleet re-scan as a CANCELLABLE JOB — the "Refresh all" button.
@@ -4233,6 +4249,7 @@ class AirsAccountLinkRequest(BaseModel):
 
 
 class AirsPortfolioOverview(BaseModel):
+    saved_price_check: dict | None = None
     """A portfolio: your name for it, AIRS's numbers for it.
 
      `link_source` IS PART OF THE ROW, NOT A DETAIL. `name` comes from the Fixed portfolio this
@@ -4376,6 +4393,10 @@ class AirsHoldingIsin(BaseModel):
     isin_override_note: str | None = None
     implied_price_eur: float | None = None
     our_price_eur: float | None = None
+    airs_price_local: float | None = None
+    our_price_local: float | None = None
+    our_price_currency: str | None = None
+    recent_close_range: dict | None = None
     price_ratio: float | None = None
     # ok | price_mismatch | stale_price | cross_listed | unpriced.
     #  `stale_price` IS NOT A SOFTER `price_mismatch`. The ratio is out of tolerance, but our close
@@ -4448,6 +4469,7 @@ class AirsModelPositionLeftover(BaseModel):
 
 
 class AirsAccountIsins(BaseModel):
+    checked_at: str | None = None
     portefeuille: str
     model_name: str | None = None
     model_source: str | None = None
@@ -4463,7 +4485,7 @@ class AirsAccountIsins(BaseModel):
 
 
 @router.get("/api/airs/accounts/{portefeuille}/isins", response_model=AirsAccountIsins)
-async def airs_account_isins(portefeuille: str):
+async def airs_account_isins(portefeuille: str, stored_check: bool = False):
     """An account's holdings with an ISIN attached to each, price-checked.
 
     The account has the money and no ISIN; its model has the ISINs and nothing AIRS values.
@@ -4473,30 +4495,34 @@ async def airs_account_isins(portefeuille: str):
     "Vanguard ESG Global Corporate Bond UCITS ETF EUR Hedged" — Acc and Inc, €4.79 vs €3.99,
     and they compound differently).
     """
+    if stored_check:
+        from routers._airs_price_check import saved_price_checks  # noqa: PLC0415
+        saved = await asyncio.to_thread(saved_price_checks, [portefeuille])
+        check = saved.get(portefeuille) or {}
+        return {**(check.get('result') or {'portefeuille': portefeuille, 'rows': []}),
+                'checked_at': check.get('checked_at')}
     from routers._airs_holding_isin import resolve_account_isins_async  # noqa: PLC0415
 
     # An expand must be bounded by database reads, not by a vendor call for a stale Yahoo close.
-    # The UI starts the price refresh as a job after it has rendered this cached answer. Keeping
-    # the blocking mode off this public route also prevents a query parameter from reintroducing
-    # the very expand delay it is meant to remove.
+    # Daily/manual refresh workflows save checks. Opening holdings must never start vendor work.
     return await resolve_account_isins_async(portefeuille, freshen=False)
 
 
 @router.post("/api/airs/accounts/{portefeuille}/isins/refresh-prices/job")
 async def refresh_account_isin_prices_job(portefeuille: str):
-    """Refresh stale Yahoo closes after an expanded row has already rendered.
+    """Explicitly refresh stale Yahoo closes and persist the account's price check.
 
     ``resolve_account_isins`` owns the stale-price test and writes any newly fetched closes to
     the normal cache. A tracked, keyed job makes repeated expands join one refresh instead of
     creating concurrent Yahoo work for the same account.
     """
     import jobs as job_registry  # noqa: PLC0415
-    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+    from routers._airs_price_check import save_price_check  # noqa: PLC0415
 
     def _work(ctx) -> str:
         ctx.progress(0, 0, f"Refreshing stale price checks for {portefeuille}...")
         ctx.check()
-        result = resolve_account_isins(portefeuille, freshen=True)
+        result = save_price_check(portefeuille)['result']
         ctx.check()
         count = len(result.get("rows") or [])
         ctx.progress(1, 1, f"Price checks refreshed for {count} holdings")

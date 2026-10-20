@@ -18,6 +18,7 @@ import time
 import pandas as pd
 
 from deps import supabase
+from common.price_history import filter_listing_rows
 
 from . import yahoo
 
@@ -36,7 +37,7 @@ def _safe_path(symbol: str) -> str:
     return f"{safe}.parquet"
 
 
-def build_frame(result: dict | None) -> pd.DataFrame | None:
+def build_frame(result: dict | None, *, symbol: str | None = None) -> pd.DataFrame | None:
     """Full daily OHLCV + adj_close + dividends + splits from one Yahoo v8
     `chart.result[0]` (as returned by `yahoo.chart_window`, which requests
     events). Drops today's partial bar + the leading zero-volume backfill head
@@ -82,7 +83,8 @@ def build_frame(result: dict | None) -> pd.DataFrame | None:
         return None
     # Trim the leading zero-volume backfill head (settlement-only / carried rows)
     # — reuse the same helper store_series uses. Operates on the 'volume' key.
-    rows = yahoo.trim_leading_no_volume(rows)
+    symbol = symbol or (result.get("meta") or {}).get("symbol") or ""
+    rows = yahoo.trim_leading_no_volume(filter_listing_rows(rows, symbol, date_key="date"))
     if not rows:
         return None
     df = pd.DataFrame(rows, columns=COLUMNS)

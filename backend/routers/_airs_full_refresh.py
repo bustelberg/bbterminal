@@ -312,6 +312,13 @@ def refresh_portfolio_fully(
                      else "cancelled" if "cancelled" in states
                      else "ok" if states else "error")
     _say(f"{label} — {out['status']}")
+    if portefeuille and 'book' in halves and out['status'] == 'ok':
+        from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
+        _say(f'{label} — saving price check')
+        accounts = [portefeuille] + [row['portefeuille'] for row in (out.get('book') or {}).get('cascaded', [])]
+        out['price_checks'] = refresh_price_checks(accounts, should_stop=should_stop)
+        if out['price_checks']['errors']:
+            out['status'] = 'error'
     return out
 
 

@@ -25,6 +25,7 @@ from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING
 
 from deps import supabase
+from common.price_history import PRICE_HISTORY_VERSION
 
 if TYPE_CHECKING:
     # Avoid the import cycle: BacktestRequest lives in backtest_stream.py
@@ -131,6 +132,7 @@ def backtest_strategy_hash(req: "BacktestRequest") -> str:
     two runs cache to the same row only when their FULL config matches."""
     payload = {
         "start_date": req.start_date,
+        "price_history_version": PRICE_HISTORY_VERSION,
         "end_date": req.end_date,
         "signal_weights": req.signal_weights or {},
         "category_weights": req.category_weights or {},

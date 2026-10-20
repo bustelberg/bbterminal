@@ -236,8 +236,13 @@ def _list_overview_from_payload(payload: dict) -> list[dict]:
 def list_overview() -> list[dict]:
     """One row per AIRS Dynamic portfolio, from one database RPC where available."""
     if (payload := _overview_payload()) is not None:
-        return _list_overview_from_payload(payload)
-    return _list_overview_legacy()
+        rows = _list_overview_from_payload(payload)
+        checks = payload.get('price_checks') or {}
+        for row in rows:
+            row['saved_price_check'] = checks.get(row['dynamic_portefeuille'])
+        return rows
+    else:
+        return _list_overview_legacy()
 
 
 def _list_overview_legacy() -> list[dict]:
