@@ -285,7 +285,7 @@ export default function VolatilityView({
           <div className="flex flex-col items-center gap-2">
             <p className="text-sm font-medium text-fg-subtle text-center">{t.vol.question(portfolioName, data.benchmark)}</p>
             <div className="flex flex-wrap justify-center gap-2">
-              {MEASURES.filter((m) => m.key === 'vol' || m.key === 'dd').map((m) => (
+              {MEASURES.filter((m) => m.key === 'vol').map((m) => (
               <div key={m.key} className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
                 <div className="text-sm text-fg-faint flex items-center gap-1">{m.label}{m.info}</div>
                 <div className={`font-mono text-2xl tabular-nums ${m.ownTone ?? 'text-fg-strong'}`}>{m.own}</div>
@@ -301,7 +301,6 @@ export default function VolatilityView({
               {portfolioName} is <span className="font-mono font-semibold">{(data.volatility_pct / data.benchmark_volatility_pct).toFixed(2)}×</span> as volatile as {data.benchmark} over this period.
             </p>
           )}
-          <p className="text-center text-xs text-fg-muted">Downside deviation measures fluctuations below a 0% return; lower means smaller losses.</p>
           <section className="rounded-xl border border-neutral-800/40 bg-elevated p-4">
             <h5 className="mb-4 text-center text-base font-medium text-fg-strong">Rolling 12-month volatility</h5>
             {(data.rolling_volatility?.length ?? 0) > 0 ? (
