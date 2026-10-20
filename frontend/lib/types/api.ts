@@ -183,5 +183,6 @@ export type HoldingTiming = components['schemas']['HoldingTiming'];
 export type AirsHoldingSegment = components['schemas']['AirsHoldingSegment'];
 export type AirsHoldingIsin = components['schemas']['AirsHoldingIsin'];
 export type AirsAccountModelLink = components['schemas']['AirsAccountModelLink'];
+export type EtfComparisonResult = components['schemas']['EtfComparisonResult'];
 export type AirsAccountModelLinks = components['schemas']['AirsAccountModelLinks'];
 export type AirsModelChoice = components['schemas']['AirsModelChoice'];

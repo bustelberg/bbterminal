@@ -48,6 +48,7 @@ const navItems: NavEntry[] = [
   { href: '/backtest' },
   { href: '/momentum' },
   { href: '/diversifier' },
+  { href: '/etf-comparison' },
   {
     href: '/universe',
     children: [
