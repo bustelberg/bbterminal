@@ -522,10 +522,35 @@ export default function BookReturnChart(
           where="Uses the fixed policy mix for the risk profile, not the portfolio’s current allocation."
           how="ACWI and the bond proxy are combined at the configured risk-profile weights; alternatives and cash are excluded."
           calculation={weightedBenchmarkTable} />} />
+        <button type="button"
+          className="group inline-flex shrink-0 cursor-pointer items-center gap-1 rounded px-1.5 py-1 text-[11px] font-medium text-fg-muted transition-colors hover:bg-overlay/[0.03] hover:text-accent-400 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500"
+          aria-haspopup="dialog"
+          onClick={() => { setSelectedMonth(last.date); setMonthlyModalOpen(true); }}>
+          Explain returns
+          <svg aria-hidden="true" viewBox="0 0 16 16" fill="none"
+            className="size-3 text-fg-faint transition-colors group-hover:text-accent-400"
+            stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 12 12 4M5 4h7v7" />
+          </svg>
+        </button>
       </div>
-      {/* The hover is deliberately docked below the plot. It may overlay the hint below while
-          open, rather than reserving permanent empty space for a transient tooltip. */}
-      <div>
+      {/* The hover is docked below the plot without reserving permanent empty space. */}
+      <div role="button" tabIndex={0}
+        aria-label="Open monthly holding returns"
+        className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-accent-500"
+        onClickCapture={() => {
+          // The entire plot, axes and margins open the latest month. A specific chart point's
+          // bubbling handler below can then select its own month instead.
+          setSelectedMonth(last.date);
+          setMonthlyModalOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            setSelectedMonth(last.date);
+            setMonthlyModalOpen(true);
+          }
+        }}>
       <ResponsiveContainer width="100%" height={104}>
         <AreaChart data={colouredRows} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}
           onClick={(state: { activeLabel?: unknown }) => {
@@ -568,7 +593,6 @@ export default function BookReturnChart(
         </AreaChart>
       </ResponsiveContainer>
       </div>
-      <p className="px-0.5 pt-1 text-[10px] text-fg-faint">Click a month to view each holding&apos;s Yahoo return against the benchmark.</p>
       {monthlyModalOpen && selectedMonth && <MonthlyPerformance key={selectedMonth} portfolioId={portfolioId} portfolioName={portfolioName} month={selectedMonth}
         months={yahooMonths}
         benchmark={benchmark} weightsQuery={weightsQuery} onSelect={setSelectedMonth}
