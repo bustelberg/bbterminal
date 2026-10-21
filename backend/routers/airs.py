@@ -1587,6 +1587,9 @@ class ModelPortfolioAnalysis(BaseModel):
     # with no risk profile has no policy, and inventing one would be worse than drawing nothing.
     variant: str | None = None
     bands: list[AllocationBand] = []
+    #: Canonical fixed Stocks/Bonds policy for this profile.  This travels with the analysis so
+    #: browser views cannot drift from the backend's scorecard and benchmark calculations.
+    risk_profile_policy: dict[str, float] | None = None
     benchmark: str
     # Which side the portfolio bars weight by: "model" (nominal strategy weights) or "book" (the
     # paired AIRS book's actual EUR holdings). Only the WEIGHTS change — classification and the
@@ -2272,6 +2275,37 @@ class ActiveShareRequest(BaseModel):
     benchmark_weights: dict[str, float] | None = None
 
 
+class RiskDataQuality(BaseModel):
+    """Whether the supplied portfolio is admissible for a displayed five-year risk metric."""
+
+    available: bool
+    #: `ready` only when every required holdings, FX and benchmark monthly mark is present.
+    status: str
+    benchmark: str
+    reason: str | None = None
+    years: int
+    window_from: str | None = None
+    window_to: str | None = None
+    priced_holdings: int = 0
+    total_holdings: int = 0
+    benchmark_isin: str | None = None
+
+
+@router.post("/api/airs/portfolio/risk-data-quality", response_model=RiskDataQuality)
+async def airs_portfolio_risk_data_quality(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                           years: int = 5):
+    """Strict preflight for dashboards and production monitors.
+
+    This is deliberately a read-only verdict. It neither refreshes nor silently substitutes a
+    shorter history; callers can alert or enqueue the named stale dependency from `reason`.
+    """
+    from routers._tracking_error import assess_risk_data_quality  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        assess_risk_data_quality, [h.model_dump() for h in req.holdings], benchmark, years,
+        benchmark_weights=req.benchmark_weights)
+
+
 @router.post("/api/airs/portfolio/active-share", response_model=ActiveShare)
 async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = "ACWI",
                                       benchmark_start: str | None = None):
@@ -2449,7 +2483,8 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
 
     return await asyncio.to_thread(
         compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
-        frequency, years, benchmark_weights=req.benchmark_weights)
+        frequency, years, benchmark_weights=req.benchmark_weights,
+        require_complete_history=True)
 
 
 class PortfolioVolatility(BaseModel):
@@ -2525,7 +2560,7 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
 
     return await asyncio.to_thread(
         compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
-        benchmark_weights=req.benchmark_weights)
+        benchmark_weights=req.benchmark_weights, require_complete_history=True)
 
 
 class DrawdownEpisode(BaseModel):
@@ -2613,7 +2648,7 @@ async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACW
 
     return await asyncio.to_thread(
         compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
-        benchmark_weights=req.benchmark_weights)
+        benchmark_weights=req.benchmark_weights, require_complete_history=True)
 
 
 class ConcentrationRow(BaseModel):
@@ -4883,16 +4918,19 @@ class AllocationBandGrid(BaseModel):
     variants: list[str]
     buckets: list[str]
     cells: list[AllocationBand]
+    benchmark_profiles: dict[str, dict[str, float]] = {}
 
 
 @router.get("/api/airs/allocation-bands", response_model=AllocationBandGrid)
 async def airs_allocation_bands():
     """The allocation policy — JSON defaults plus any administrator overrides."""
     from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands  # noqa: PLC0415
+    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles  # noqa: PLC0415
     from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
 
     cells = await asyncio.to_thread(load_bands)
-    return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": cells}
+    return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": cells,
+            "benchmark_profiles": _weighted_benchmark_profiles()}
 
 
 @router.put("/api/airs/allocation-bands", response_model=AllocationBandGrid)
@@ -4903,6 +4941,7 @@ async def airs_set_allocation_bands(body: list[AllocationBand]):
     full policy.
     """
     from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands, save_bands  # noqa: PLC0415
+    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles  # noqa: PLC0415
     from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
 
     def _run() -> dict:
@@ -4910,7 +4949,8 @@ async def airs_set_allocation_bands(body: list[AllocationBand]):
             save_bands([c.model_dump() for c in body])
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
-        return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": load_bands()}
+        return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": load_bands(),
+                "benchmark_profiles": _weighted_benchmark_profiles()}
 
     return await asyncio.to_thread(_run)
 

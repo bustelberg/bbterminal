@@ -36,7 +36,8 @@ from routers._tracking_error import PERIODS, SeriesError, build_paired_series
 
 def compute_volatility(holdings: list[dict], benchmark: str,
                        frequency: str = "weekly", years: int = 5,
-                       benchmark_weights: dict[str, float] | None = None) -> dict:
+                       benchmark_weights: dict[str, float] | None = None,
+                       require_complete_history: bool = False) -> dict:
     """σ of the risk sleeve's own returns, its downside half, and the benchmark's for scale."""
     import numpy as np  # noqa: PLC0415
 
@@ -45,6 +46,7 @@ def compute_volatility(holdings: list[dict], benchmark: str,
     freq = frequency if frequency in PERIODS else "weekly"
     try:
         built = build_paired_series(holdings, benchmark, freq, years,
+                                    require_complete_holdings=require_complete_history,
                                     benchmark_weights=benchmark_weights)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}

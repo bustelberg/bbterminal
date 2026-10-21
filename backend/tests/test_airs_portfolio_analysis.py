@@ -12,6 +12,23 @@ import pytest
 from routers import _airs_portfolio_analysis as pa
 
 
+class TestRiskProfilePolicySource:
+    def test_analysis_policy_is_the_single_versioned_backend_policy(self, monkeypatch):
+        """Browser surfaces must receive the same Neutraal mix the backend calculates with."""
+        import routers._airs_allocation_bands as allocation_bands
+        monkeypatch.setattr(allocation_bands, "load_bands", lambda: [])
+        got = pa._variant_bands("BUS_Neutraal", None)
+
+        assert got["variant"] == "Neutraal"
+        assert got["risk_profile_policy"] == {"Stocks": 60.0, "Bonds": 40.0}
+
+    def test_unprofiled_products_do_not_receive_an_invented_policy(self):
+        got = pa._variant_bands("TopSelectie Alternatives", None)
+
+        assert got["variant"] is None
+        assert got["risk_profile_policy"] is None
+
+
 class TestBookScorecardWindow:
     def test_benchmark_uses_the_same_funded_book_window_as_the_chart(self, monkeypatch):
         from routers import _airs_value_series as series

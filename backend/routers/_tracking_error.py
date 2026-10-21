@@ -135,6 +135,39 @@ class SeriesError(Exception):
         self.reason = reason
 
 
+def assess_risk_data_quality(holdings: list[dict], benchmark: str,
+                             years: int = 5,
+                             benchmark_weights: dict[str, float] | None = None) -> dict:
+    """The strict, reusable admission gate for displayed five-year risk metrics.
+
+    Keeping this separate from a particular statistic makes it callable by a production monitor:
+    the answer is whether the input data supports *any* risk calculation, before a chart chooses a
+    formula.  Monthly coverage is intentional—daily markets have different holiday calendars.
+    """
+    try:
+        built = build_paired_series(
+            holdings, benchmark, "monthly", years,
+            require_complete_holdings=True,
+            benchmark_weights=benchmark_weights,
+        )
+    except SeriesError as e:
+        return {"available": False, "status": "incomplete", "benchmark": benchmark,
+                "reason": e.reason, "years": years}
+    dates = sorted(d for d in built["obs_dates"] if d)
+    return {
+        "available": True,
+        "status": "ready",
+        "benchmark": built.get("benchmark_label", benchmark),
+        "reason": None,
+        "years": years,
+        "window_from": dates[0] if dates else None,
+        "window_to": dates[-1] if dates else None,
+        "priced_holdings": built["priced"],
+        "total_holdings": built["total"],
+        "benchmark_isin": built["benchmark_isin"],
+    }
+
+
 def build_paired_series(holdings: list[dict], benchmark: str,
                         frequency: str = "weekly", years: int = 5,
                         preloaded: dict | None = None,

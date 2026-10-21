@@ -12718,6 +12718,10 @@ export interface components {
             /** Portfolio Id */
             portfolio_id?: number | null;
             realised?: components["schemas"]["RealisedBlock"] | null;
+            /** Risk Profile Policy */
+            risk_profile_policy?: {
+                [key: string]: number;
+            } | null;
             returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
             /**
              * Timings Ms

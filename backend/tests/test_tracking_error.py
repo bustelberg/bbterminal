@@ -151,6 +151,50 @@ class TestTheDefinition:
 
 
 class TestWhatItRefuses:
+    def test_quality_gate_reports_ready_policy_inputs(self, monkeypatch):
+        dates = _weekdays(1_600)
+        prices = _prices([0.001] * (len(dates) - 1), dates)
+        import routers._airs_portfolio_analysis as PA
+        monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: {
+            ONE: prices, BOND: prices, BENCH: prices, BOND_BENCH: prices,
+        })
+
+        got = T.assess_risk_data_quality([
+            {"isin": ONE, "name": "Stock", "weight_pct": 60.0, "bucket": "Equity"},
+            {"isin": BOND, "name": "Bond", "weight_pct": 40.0, "bucket": "Bonds"},
+        ], "ACWI", benchmark_weights={"Stocks": 60, "Bonds": 40})
+
+        assert got["available"] is True
+        assert got["status"] == "ready"
+        assert got["benchmark"] == "60% ACWI + 40% AGGH.AS"
+
+    @pytest.mark.parametrize("metric", ["correlation", "volatility", "drawdown"])
+    def test_every_headline_risk_metric_refuses_incomplete_five_year_history(self, metric, monkeypatch):
+        """The API paths set the strict gate; one chart must not be looser than another."""
+        dates = _weekdays(1_600)
+        prices = _prices([0.001] * (len(dates) - 1), dates)
+        import routers._airs_portfolio_analysis as PA
+        monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: {
+            ONE: [(d, value) for d, value in prices if not d.startswith("2024-06")],
+            BENCH: prices,
+        })
+        holdings = [{"isin": ONE, "name": "One", "weight_pct": 100.0, "is_fund": False}]
+        if metric == "correlation":
+            from routers._portfolio_correlation_risk import compute_risk_correlation
+            got = compute_risk_correlation(holdings, "ACWI", frequency="monthly",
+                                           require_complete_history=True)
+        elif metric == "volatility":
+            from routers._portfolio_volatility import compute_volatility
+            got = compute_volatility(holdings, "ACWI", frequency="monthly",
+                                     require_complete_history=True)
+        else:
+            from routers._portfolio_drawdown import compute_drawdown
+            got = compute_drawdown(holdings, "ACWI", frequency="daily",
+                                   require_complete_history=True)
+
+        assert got["available"] is False
+        assert "Incomplete five-year price or FX history" in got["reason"]
+
     def test_monthly_return_refuses_a_benchmark_shorter_than_five_years(self, wire, monkeypatch):
         """Two years of benchmark history clears the 24-month floor but is not five years."""
         dates = _weekdays(1_600)

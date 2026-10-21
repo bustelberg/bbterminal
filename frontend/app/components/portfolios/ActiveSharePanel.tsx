@@ -48,7 +48,6 @@ import DrawdownView from './DrawdownView';
 import ConcentrationView from './ConcentrationView';
 import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
-import allocationProfiles from '../../config/weightedBenchmarkAllocations.json';
 
 /**
  * One body for all six risk views.
@@ -140,7 +139,7 @@ function Tile({ label, value, tone, info, simpleInfo, suffix }: {
 
 export default function ActiveSharePanel({
   holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
-  portfolioSource, weightComponentsNow, weightTotalNow, variant,
+  portfolioSource, weightComponentsNow, weightTotalNow, riskProfilePolicy,
   onClose,
 }: {
   holdings: ActiveShareHolding[];
@@ -171,9 +170,9 @@ export default function ActiveSharePanel({
    * happens to be right for whichever kind of book was opened first.
    */
   portfolioSource: SourceKey;
-  /** The reviewed AIRS risk profile.  It fixes the Stocks/Bonds policy benchmark for every
+  /** Canonical reviewed policy from the analysis response. It fixes the Stocks/Bonds benchmark for every
    * return-based risk view; Active Share and Concentration remain stock-sleeve measures. */
-  variant?: string | null;
+  riskProfilePolicy?: Record<string, number> | null;
   weightComponentsNow?: AirsWeightComponent[];
   weightComponentsStart?: AirsWeightComponent[];
   weightTotalNow?: number | null;
@@ -203,9 +202,7 @@ export default function ActiveSharePanel({
   const weightedHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
-  const riskBenchmarkWeights = variant && variant in allocationProfiles
-    ? allocationProfiles[variant as keyof typeof allocationProfiles]
-    : undefined;
+  const riskBenchmarkWeights = riskProfilePolicy ?? undefined;
   const riskHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
   );

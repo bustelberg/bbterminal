@@ -4194,7 +4194,7 @@ export default function PortfolioAnalysisModal({
                         <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
                           portfolioName={name}
                           benchmark={benchmark}
-                          variant={data.variant}
+                          policyWeights={data.risk_profile_policy}
                           benchmarkBlocks={(data.returns?.block_returns ?? []).filter(isScorecardBlock)} />
                       </div>
                     )}
@@ -4346,7 +4346,7 @@ export default function PortfolioAnalysisModal({
               (`holdings: int`), so the obvious name silently types as a number. */}
           <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
             holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
-            variant={data.variant}
+            riskProfilePolicy={data.risk_profile_policy}
             //  The book's dates travel with its weights. The panel cannot derive them — an array
             // of holdings carries no date — so without these its When line can only assume
             // "today", which is exactly what it used to do.

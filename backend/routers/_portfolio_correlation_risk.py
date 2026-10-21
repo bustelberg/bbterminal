@@ -48,7 +48,8 @@ _TOP_PAIRS = 8
 
 def compute_risk_correlation(holdings: list[dict], benchmark: str,
                              frequency: str = "monthly", years: int = 5,
-                             benchmark_weights: dict[str, float] | None = None) -> dict:
+                             benchmark_weights: dict[str, float] | None = None,
+                             require_complete_history: bool = False) -> dict:
     """ρ to the benchmark, the variance identity behind it, and the position-by-position matrix."""
     import numpy as np  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
@@ -56,6 +57,7 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
     freq = frequency if frequency in PERIODS else "monthly"
     try:
         built = build_paired_series(holdings, benchmark, freq, years,
+                                    require_complete_holdings=require_complete_history,
                                     benchmark_weights=benchmark_weights)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
