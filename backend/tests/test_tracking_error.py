@@ -19,7 +19,9 @@ import pytest
 import routers._tracking_error as T
 
 BENCH = "IE00B6R52259"      # the ACWI tracker `_BENCHMARK_RISK_ETF` maps to
+BOND_BENCH = "IE00BDBRDM35" # the EUR-hedged AGGH tracker used by risk profiles
 ONE = "US0000000001"
+BOND = "IE0000000002"
 
 
 def _weekdays(n: int) -> list[str]:
@@ -57,6 +59,31 @@ def _run(freq: str = "daily", holdings=None, *, require_complete_return: bool = 
 
 
 class TestTheDefinition:
+    def test_risk_profile_uses_bonds_in_the_portfolio_and_fixed_policy_benchmark(self, monkeypatch):
+        """A Neutral profile is a 60/40 portfolio, never a stocks-only ACWI comparison."""
+        dates = _weekdays(400)
+        stock_returns = [0.02] * 399
+        bond_returns = [0.01] * 399
+        acwi_returns = [0.03] * 399
+        aggh_returns = [0.005] * 399
+        import routers._airs_portfolio_analysis as PA
+        T._risk_prices.cache_clear()
+        monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: {
+            ONE: _prices(stock_returns, dates), BOND: _prices(bond_returns, dates),
+            BENCH: _prices(acwi_returns, dates), BOND_BENCH: _prices(aggh_returns, dates),
+        })
+
+        built = T.build_paired_series([
+            {"isin": ONE, "name": "Stock", "weight_pct": 60.0, "bucket": "Equity"},
+            {"isin": BOND, "name": "Bond", "weight_pct": 40.0, "bucket": "Bonds"},
+            {"name": "Cash", "weight_pct": 10.0, "bucket": "Cash"},
+        ], "ACWI", "daily", 5, benchmark_weights={"Stocks": 60, "Bonds": 40})
+
+        assert built["portfolio"][0] == pytest.approx(0.016)
+        assert built["benchmark"][0] == pytest.approx(0.020)
+        assert built["benchmark_label"] == "60% ACWI + 40% AGGH.AS"
+        assert built["total"] == 2
+
     def test_non_stock_positions_stay_in_the_airs_denominator(self, wire):
         dates = _weekdays(400)
         wire([0.01] * 399, [0.0] * 399, dates)

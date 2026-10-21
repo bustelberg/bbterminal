@@ -20,7 +20,7 @@ TWR exists to produce, arrived at by never introducing the problem.
 So this is the volatility of the portfolio AS IT STANDS, not the volatility the client actually
 experienced — a name bought in March contributes its January return. The book's realised, chain-
 linked TWR exists (`_airs_portfolio_perf`) but describes the WHOLE book including funds and cash,
-which is a different portfolio from the stock sleeve every other view in this panel measures. One
+which is a different portfolio from the policy sleeve every other return view in this panel measures. One
 portfolio per panel beats one more number.
 
  DOWNSIDE DEVIATION IS SORTINO'S, NOT THE SEMI-DEVIATION. It divides by ALL n observations and
@@ -35,15 +35,17 @@ from routers._tracking_error import PERIODS, SeriesError, build_paired_series
 
 
 def compute_volatility(holdings: list[dict], benchmark: str,
-                       frequency: str = "weekly", years: int = 5) -> dict:
-    """σ of the stock sleeve's own returns, its downside half, and the benchmark's for scale."""
+                       frequency: str = "weekly", years: int = 5,
+                       benchmark_weights: dict[str, float] | None = None) -> dict:
+    """σ of the risk sleeve's own returns, its downside half, and the benchmark's for scale."""
     import numpy as np  # noqa: PLC0415
 
     from momentum.diversification import annualized_stats  # noqa: PLC0415
 
     freq = frequency if frequency in PERIODS else "weekly"
     try:
-        built = build_paired_series(holdings, benchmark, freq, years)
+        built = build_paired_series(holdings, benchmark, freq, years,
+                                    benchmark_weights=benchmark_weights)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 
@@ -78,7 +80,7 @@ def compute_volatility(holdings: list[dict], benchmark: str,
     return {
         "available": True,
         "rolling_volatility": rolling,
-        "benchmark": benchmark,
+        "benchmark": built.get("benchmark_label", benchmark),
         "frequency": freq,
         "periods_per_year": ppy,
         "observations": int(p.size),

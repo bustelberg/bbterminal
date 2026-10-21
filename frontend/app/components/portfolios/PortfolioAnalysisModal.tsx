@@ -4346,6 +4346,7 @@ export default function PortfolioAnalysisModal({
               (`holdings: int`), so the obvious name silently types as a number. */}
           <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
             holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
+            variant={data.variant}
             //  The book's dates travel with its weights. The panel cannot derive them — an array
             // of holdings carries no date — so without these its When line can only assume
             // "today", which is exactly what it used to do.

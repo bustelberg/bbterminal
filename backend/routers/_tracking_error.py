@@ -28,7 +28,7 @@ so an artificially LOW covariance makes the active return look more volatile tha
 offered because it is what people ask for, and it is labelled as inflated rather than quietly
 served.
 
- THE PORTFOLIO SERIES IS SYNTHETIC: today's stock sleeve at today's weights, carried backwards.
+ THE PORTFOLIO SERIES IS SYNTHETIC: today's selected sleeve at today's weights, carried backwards.
 It is NOT the book's realised history — a name bought in March contributes its January return here.
 That is the standard "tracking error of the portfolio as it stands", it is the only series that
 describes the SAME portfolio the active-share tile beside it describes, and the panel says so. The
@@ -59,6 +59,18 @@ def is_direct_equity_stock(holding: dict) -> bool:
     return (not holding.get("is_fund")
             and holding.get("bucket") in (None, "", "Equity")
             and not _FIXED_INCOME_NAME.search(str(holding.get("name") or "")))
+
+
+def is_risk_profile_holding(holding: dict) -> bool:
+    """A priced Stocks/Bonds policy constituent, excluding cash and alternatives.
+
+    Unlike Active Share, a risk-profile return is deliberately a whole policy-portfolio measure:
+    equity funds and bonds belong in it.  The policy benchmark itself has only these two sleeves,
+    so admitting alternatives or cash here would compare unlike portfolios.
+    """
+    return (holding.get("bucket") in {"Equity", "ETF Equity", "Bonds"}
+            and bool((holding.get("isin") or "").strip())
+            and float(holding.get("weight_pct") or 0) > 0)
 
 #: Observations per year, per cadence — the `f` in the formula.
 #:  52, NOT 52.18. The weekly series is built by ISO week (`_by_week`), so a year contributes 52
@@ -126,7 +138,8 @@ class SeriesError(Exception):
 def build_paired_series(holdings: list[dict], benchmark: str,
                         frequency: str = "weekly", years: int = 5,
                         preloaded: dict | None = None,
-                        require_complete_holdings: bool = False) -> dict:
+                        require_complete_holdings: bool = False,
+                        benchmark_weights: dict[str, float] | None = None) -> dict:
     """The portfolio and benchmark return series, on ONE aligned period grid.
 
      SHARED BY TRACKING ERROR AND CORRELATION SO THE IDENTITY BETWEEN THEM HOLDS ON SCREEN.
@@ -155,27 +168,60 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     freq = frequency if frequency in PERIODS else "weekly"
 
     bench_isin = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
-    if not bench_isin:
+    policy_weights = (benchmark_weights or {})
+    is_policy_benchmark = bool(policy_weights)
+    if is_policy_benchmark:
+        try:
+            stocks_weight = float(policy_weights.get("Stocks", 0))
+            bonds_weight = float(policy_weights.get("Bonds", 0))
+        except (TypeError, ValueError):
+            raise SeriesError("The risk-profile benchmark weights are invalid.")
+        if (stocks_weight < 0 or bonds_weight < 0
+                or abs(stocks_weight + bonds_weight - 100.0) > 0.01):
+            raise SeriesError("The risk-profile benchmark must contain Stocks and Bonds totaling 100%.")
+        benchmark_isins = {
+            "ACWI": _BENCHMARK_RISK_ETF["ACWI"],
+            "BONDS": _BENCHMARK_RISK_ETF["BONDS"],
+        }
+        active_benchmark_names = [name for name, weight in (("ACWI", stocks_weight), ("BONDS", bonds_weight))
+                                  if weight > 0]
+        if not active_benchmark_names:
+            raise SeriesError("The risk-profile benchmark has no positive-weight sleeve.")
+        benchmark_label = " + ".join(
+            f"{(stocks_weight if name == 'ACWI' else bonds_weight):g}% "
+            f"{'AGGH.AS' if name == 'BONDS' else name}"
+            for name in active_benchmark_names)
+    elif not bench_isin:
         raise SeriesError(
             f"{benchmark} has no investable tracker in our price world, so there is no series to "
             f"measure against. Available: {', '.join(sorted(_BENCHMARK_RISK_ETF))}.")
+    else:
+        benchmark_isins = {benchmark.upper(): bench_isin}
+        active_benchmark_names = [benchmark.upper()]
+        benchmark_label = benchmark
 
-    #  The sleeve, exactly as active share defines it — individual stocks with an ISIN, renormalised
-    # to 1. Funds and cash are dropped, not zero-weighted; see `_active_share`.
+    # Generic baskets retain Active Share's individual-stock sleeve. Risk-profile portfolios
+    # instead use their investable Stocks/Bonds sleeve, which is the only like-for-like companion
+    # to their fixed ACWI/AGGH policy benchmark.
     total_book_w = sum(max(0.0, float(h.get("weight_pct") or 0)) for h in holdings)
     stocks = [h for h in holdings
-              if is_direct_equity_stock(h)
+              if (is_risk_profile_holding(h) if is_policy_benchmark else is_direct_equity_stock(h))
               and (h.get("isin") or "").strip()
               and float(h.get("weight_pct") or 0) > 0]
     stocks_w = sum(float(h["weight_pct"]) for h in stocks)
     if stocks_w <= 0 or total_book_w <= 0:
-        raise SeriesError("This book holds no individual stocks with an ISIN to compare.")
+        raise SeriesError("This book holds no priced Stocks or Bonds constituent to compare."
+                          if is_policy_benchmark
+                          else "This book holds no individual stocks with an ISIN to compare.")
 
     names: dict[str, str] = {}
     weight: dict[str, float] = {}
     for h in stocks:
         k = (h["isin"] or "").strip().upper()
-        weight[k] = weight.get(k, 0.0) + float(h["weight_pct"]) / total_book_w
+        # A profile comparison is a return on the investable Stocks/Bonds sleeve. Cash and
+        # alternatives are intentionally outside that policy, so they are not a zero-return drag.
+        denominator = stocks_w if is_policy_benchmark else total_book_w
+        weight[k] = weight.get(k, 0.0) + float(h["weight_pct"]) / denominator
         if h.get("name"):
             names.setdefault(k, str(h["name"]))
     isins = sorted(weight)
@@ -188,7 +234,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         series = preloaded
     else:
         try:
-            series = _risk_prices(tuple(sorted([*isins, bench_isin])), years,
+            series = _risk_prices(tuple(sorted([*isins, *benchmark_isins.values()])), years,
                                   date.today().isoformat(), int(time.monotonic() // 300), _daily_eur)
         except Exception as e:  # noqa: BLE001 — a failed panel must not raise into the modal
             raise SeriesError(
@@ -196,7 +242,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
 
     # All measures use identical endpoints, anchored to the latest benchmark close. Retain the
     # last observation at/before the five-year opening date as the return's starting price.
-    benchmark_prices = series.get(bench_isin) or []
+    benchmark_prices = series.get(next(iter(benchmark_isins.values()))) or []
     opening_marks: dict[str, bool] = {}
     if benchmark_prices:
         end = benchmark_prices[-1][0]
@@ -217,7 +263,22 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             anchor = [row for row in prices if row[0] <= start]
             clipped[isin] = (anchor[-1:] if anchor else []) + [row for row in prices if start < row[0] <= end]
         series = clipped
-    b_buckets = _bucket(series.get(bench_isin) or [], freq)
+    raw_buckets = {name: _bucket(series.get(isin) or [], freq)
+                   for name, isin in benchmark_isins.items()}
+    if is_policy_benchmark:
+        common_benchmark_keys = sorted(set.intersection(*(set(raw_buckets[name]) for name in active_benchmark_names)))
+        b_buckets: dict = {}
+        if common_benchmark_keys:
+            wealth = 1.0
+            b_buckets[common_benchmark_keys[0]] = wealth
+            for prev, cur in zip(common_benchmark_keys, common_benchmark_keys[1:]):
+                r = sum((stocks_weight if name == "ACWI" else bonds_weight) / 100.0
+                        * (raw_buckets[name][cur] / raw_buckets[name][prev] - 1.0)
+                        for name in active_benchmark_names)
+                wealth *= 1.0 + r
+                b_buckets[cur] = wealth
+    else:
+        b_buckets = raw_buckets[benchmark.upper()]
     p_buckets = {i: _bucket(series.get(i) or [], freq) for i in isins}
     priced = {i for i in isins if len(p_buckets[i]) >= 2}
     if not priced or len(b_buckets) < 2:
@@ -238,12 +299,13 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         # It cannot diagnose a month ALL holdings lost — that month is absent before the return
         # loop sees it. The benchmark buckets define the requested five-year window instead.
         missing = [i for i in isins if any(key not in p_buckets[i] for key in b_buckets)]
-        missing_opening_mark = [i for i in [bench_isin, *isins] if not opening_marks.get(i)]
-        if bench_isin in missing_opening_mark:
-            missing.insert(0, bench_isin)
-        missing.extend(i for i in missing_opening_mark if i != bench_isin and i not in missing)
+        benchmark_isin_values = list(benchmark_isins.values())
+        missing_opening_mark = [i for i in [*benchmark_isin_values, *isins] if not opening_marks.get(i)]
+        if any(i in missing_opening_mark for i in benchmark_isin_values):
+            missing.insert(0, f"{benchmark_label} tracker")
+        missing.extend(i for i in missing_opening_mark if i not in benchmark_isin_values and i not in missing)
         if missing:
-            labels = [f"{benchmark} tracker" if i == bench_isin else names.get(i, i)
+            labels = [i if i == f"{benchmark_label} tracker" else names.get(i, i)
                       for i in missing]
             shown = ", ".join(labels[:3])
             suffix = "" if len(labels) <= 3 else f", and {len(labels) - 3} more"
@@ -306,23 +368,24 @@ def build_paired_series(holdings: list[dict], benchmark: str,
 
     # The real calendar date each observation ended on — from the BENCHMARK series, which spans
     # every key in `keys` by construction (they are its own buckets, intersected).
-    ends = _bucket_end_dates(series.get(bench_isin) or [], freq)
+    ends = _bucket_end_dates(series.get(next(iter(benchmark_isins.values()))) or [], freq)
     return {"frequency": freq, "periods_per_year": PERIODS[freq], "keys": keys,
             "active": active, "portfolio": port, "benchmark": bench_r,
             "obs_keys": obs_keys, "obs_dates": [ends.get(k) for k in obs_keys],
             "per_holding": per_holding, "weight_used": weight_used,
             "names": names, "weight": weight, "series": series,
-            "priced": len(priced), "total": len(isins), "benchmark_isin": bench_isin}
+            "priced": len(priced), "total": len(isins),
+            "benchmark_isin": ", ".join(
+                f"{'AGGH.AS' if name == 'BONDS' else name}: {benchmark_isins[name]}"
+                for name in active_benchmark_names),
+            "benchmark_label": benchmark_label}
 
 
 def compute_tracking_error(holdings: list[dict], benchmark: str,
                            frequency: str = "weekly", years: int = 5,
-                           require_complete_return: bool = False) -> dict:
-    """Realised TE of the book's individual stocks against `benchmark`'s investable tracker.
-
-    `holdings` are the rows the Analyse modal is showing — the same input, and the same stocks-only
-    renormalisation, as `compute_active_share`, so the two tiles describe ONE portfolio.
-    """
+                           require_complete_return: bool = False,
+                           benchmark_weights: dict[str, float] | None = None) -> dict:
+    """Realised TE of the displayed risk sleeve against its investable benchmark."""
     import numpy as np  # noqa: PLC0415
 
     from momentum.diversification import annualized_stats  # noqa: PLC0415
@@ -337,6 +400,7 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
             # smaller, data-dependent portfolio. Daily/weekly TE remains available to the other
             # callers because exchange holidays are expected at those cadences.
             require_complete_holdings=(require_complete_return and freq == "monthly"),
+            benchmark_weights=benchmark_weights,
         )
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
@@ -359,7 +423,7 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
 
     return {
         "available": True,
-        "benchmark": benchmark,
+        "benchmark": built.get("benchmark_label", benchmark),
         "frequency": freq,
         "periods_per_year": ppy,
         "observations": len(active),

@@ -129,12 +129,14 @@ def _mdd(returns: list[float]) -> float | None:
 
 
 def compute_drawdown(holdings: list[dict], benchmark: str,
-                     frequency: str = "daily", years: int = 5) -> dict:
+                     frequency: str = "daily", years: int = 5,
+                     benchmark_weights: dict[str, float] | None = None) -> dict:
     """MDD of the reconstructed sleeve, its episodes with dates, and the cadence comparison."""
     freq = frequency if frequency in PERIODS else "daily"
 
     try:
-        built = build_paired_series(holdings, benchmark, freq, years)
+        built = build_paired_series(holdings, benchmark, freq, years,
+                                    benchmark_weights=benchmark_weights)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 
@@ -151,14 +153,15 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
             continue
         try:
             other = build_paired_series(holdings, benchmark, f, years,
-                                        preloaded=built.get("series"))
+                                        preloaded=built.get("series"),
+                                        benchmark_weights=benchmark_weights)
             by_freq[f] = _mdd(other["portfolio"])
         except SeriesError:
             by_freq[f] = None
 
     return {
         "available": True,
-        "benchmark": benchmark,
+        "benchmark": built.get("benchmark_label", benchmark),
         "frequency": freq,
         "periods_per_year": built["periods_per_year"],
         "observations": len(built["portfolio"]),

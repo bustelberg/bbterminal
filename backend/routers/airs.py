@@ -2267,6 +2267,9 @@ class ActiveShareRequest(BaseModel):
     """
 
     holdings: list[ActiveShareHolding] = []
+    #: Fixed Stocks/Bonds policy weights for a risk-profile portfolio.  Omitted by generic
+    #: baskets, which retain the single-index stock-sleeve analytics.
+    benchmark_weights: dict[str, float] | None = None
 
 
 @router.post("/api/airs/portfolio/active-share", response_model=ActiveShare)
@@ -2291,7 +2294,7 @@ async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = 
 
 
 class TrackingError(BaseModel):
-    """Realised (ex-post) tracking error of the stock sleeve — see `routers/_tracking_error.py`.
+    """Realised (ex-post) tracking error of the selected risk sleeve — see `routers/_tracking_error.py`.
 
      `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
@@ -2347,10 +2350,9 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
                                         frequency: str = "weekly", years: int = 5):
     """Volatility of the active return, annualised — the Risk panel's second view.
 
-     THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
-    individual stocks, renormalised to 100%), and sharing the request model is what stops them
-    drifting into describing two — an active share over the stock sleeve beside a tracking error
-    over the whole book would be two answers to two questions under one heading.
+     The request shares the holdings body with `active-share`, while its optional policy weights
+    select the whole Stocks/Bonds risk sleeve.  Active Share remains a stock-sleeve structural
+    metric; return-based risk metrics use the portfolio's fixed policy comparator.
 
      SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
     every holding plus the tracker, and most opens of the Risk panel never switch to it.
@@ -2359,7 +2361,8 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
 
     return await asyncio.to_thread(
         compute_tracking_error, [h.model_dump() for h in req.holdings], benchmark,
-        frequency, years, require_complete_return=True)
+        frequency, years, require_complete_return=True,
+        benchmark_weights=req.benchmark_weights)
 
 
 class CorrelationPair(BaseModel):
@@ -2446,11 +2449,11 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
 
     return await asyncio.to_thread(
         compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
-        frequency, years)
+        frequency, years, benchmark_weights=req.benchmark_weights)
 
 
 class PortfolioVolatility(BaseModel):
-    """σ of the stock sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
+    """σ of the selected risk sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
 
      SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
     correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
@@ -2521,7 +2524,8 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
     from routers._portfolio_volatility import compute_volatility  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years)
+        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
+        benchmark_weights=req.benchmark_weights)
 
 
 class DrawdownEpisode(BaseModel):
@@ -2600,7 +2604,7 @@ class PortfolioDrawdown(BaseModel):
 @router.post("/api/airs/portfolio/drawdown", response_model=PortfolioDrawdown)
 async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACWI",
                                   frequency: str = "daily", years: int = 5):
-    """Peak-to-trough falls of the reconstructed stock sleeve, with their dates.
+    """Peak-to-trough falls of the reconstructed risk sleeve, with their dates.
 
      ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
     is free, so the frequency comparison costs no extra round trips.
@@ -2608,7 +2612,8 @@ async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACW
     from routers._portfolio_drawdown import compute_drawdown  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years)
+        compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
+        benchmark_weights=req.benchmark_weights)
 
 
 class ConcentrationRow(BaseModel):

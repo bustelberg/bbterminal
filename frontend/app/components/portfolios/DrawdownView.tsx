@@ -65,10 +65,11 @@ function Tile({ label, value, tone, info }: {
 }
 
 export default function DrawdownView({
-  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+  holdings, benchmark, benchmarkWeights, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
+  benchmarkWeights?: Record<string, number>;
   /** The book's identity, forwarded from the panel — see `ActiveSharePanel`'s own props. */
   portfolioName: string;
   portfolioAsOf?: string | null;
@@ -78,7 +79,7 @@ export default function DrawdownView({
   const t = useRiskCopy();
   const requestUrl = `${API_URL}/api/airs/portfolio/drawdown`
     + `?benchmark=${encodeURIComponent(benchmark)}&frequency=daily&years=5&data_window=shared-v1`;
-  const requestBody = JSON.stringify({ holdings });
+  const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<PortfolioDrawdown>(key, async () => {
     const r = await apiFetch(requestUrl, {

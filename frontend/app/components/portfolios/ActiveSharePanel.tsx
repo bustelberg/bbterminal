@@ -48,6 +48,7 @@ import DrawdownView from './DrawdownView';
 import ConcentrationView from './ConcentrationView';
 import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
+import allocationProfiles from '../../config/weightedBenchmarkAllocations.json';
 
 /**
  * One body for all six risk views.
@@ -139,7 +140,7 @@ function Tile({ label, value, tone, info, simpleInfo, suffix }: {
 
 export default function ActiveSharePanel({
   holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
-  portfolioSource, weightComponentsNow, weightTotalNow,
+  portfolioSource, weightComponentsNow, weightTotalNow, variant,
   onClose,
 }: {
   holdings: ActiveShareHolding[];
@@ -170,6 +171,9 @@ export default function ActiveSharePanel({
    * happens to be right for whichever kind of book was opened first.
    */
   portfolioSource: SourceKey;
+  /** The reviewed AIRS risk profile.  It fixes the Stocks/Bonds policy benchmark for every
+   * return-based risk view; Active Share and Concentration remain stock-sleeve measures. */
+  variant?: string | null;
   weightComponentsNow?: AirsWeightComponent[];
   weightComponentsStart?: AirsWeightComponent[];
   weightTotalNow?: number | null;
@@ -198,6 +202,12 @@ export default function ActiveSharePanel({
     useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active');
   const weightedHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
+  );
+  const riskBenchmarkWeights = variant && variant in allocationProfiles
+    ? allocationProfiles[variant as keyof typeof allocationProfiles]
+    : undefined;
+  const riskHoldings = useMemo(
+    () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
   );
   const selectedPortfolioAsOf = portfolioAsOf;
   const benchmarkStart = null;
@@ -314,10 +324,10 @@ export default function ActiveSharePanel({
         ? 'overflow-hidden' : 'overflow-auto space-y-3'}`}>
 
       {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
-          lazy load real rather than merely hidden. It takes the SAME holdings, so both views
-          describe one portfolio; see `compute_tracking_error`. */}
+          lazy load real rather than merely hidden.  Return-based views receive the policy sleeve;
+          Active Share itself remains the deliberately narrower stock-sleeve measure. */}
       {view === 'te' && (
-        <TrackingErrorView holdings={weightedHoldings}
+        <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           benchmark={data?.benchmark ?? benchmark}
           //  The same book identity the active-share cards carry. This view measures the same
           // sleeve, so its cards owe the reader the same answer to "whose weights, read when, from
@@ -326,19 +336,19 @@ export default function ActiveSharePanel({
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'corr' && (
-        <CorrelationView holdings={weightedHoldings}
+        <CorrelationView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           benchmark={data?.benchmark ?? benchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'vol' && (
-        <VolatilityView holdings={weightedHoldings}
+        <VolatilityView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           benchmark={data?.benchmark ?? benchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'dd' && (
-        <DrawdownView holdings={weightedHoldings}
+        <DrawdownView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
           benchmark={data?.benchmark ?? benchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
