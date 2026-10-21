@@ -49,11 +49,11 @@ def wire(monkeypatch):
     return _wire
 
 
-def _run(freq: str = "daily", holdings=None):
+def _run(freq: str = "daily", holdings=None, *, require_complete_return: bool = False):
     return T.compute_tracking_error(
         holdings if holdings is not None
         else [{"isin": ONE, "name": "One", "weight_pct": 100.0, "is_fund": False}],
-        "ACWI", frequency=freq)
+        "ACWI", frequency=freq, require_complete_return=require_complete_return)
 
 
 class TestTheDefinition:
@@ -124,6 +124,49 @@ class TestTheDefinition:
 
 
 class TestWhatItRefuses:
+    def test_monthly_return_refuses_a_benchmark_shorter_than_five_years(self, wire, monkeypatch):
+        """Two years of benchmark history clears the 24-month floor but is not five years."""
+        dates = _weekdays(1_600)
+        returns = [0.001] * (len(dates) - 1)
+        prices = _prices(returns, dates)
+        import routers._airs_portfolio_analysis as PA
+        monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: {
+            ONE: prices,
+            # Enough monthly returns to calculate a statistic, but no opening mark five years
+            # before the final close. This must not be annualised and labelled as five years.
+            BENCH: prices[-700:],
+        })
+
+        got = _run("monthly", require_complete_return=True)
+
+        assert got["available"] is False
+        assert "Incomplete five-year price or FX history" in got["reason"]
+        assert "ACWI tracker" in got["reason"]
+
+    def test_monthly_return_refuses_a_holding_with_missing_historical_prices(self, wire, monkeypatch):
+        """A production FX-page cap once made a holding vanish from the window's early months.
+
+        The old code returned a plausible annualised return for the surviving sleeve. The return
+        tile promises the *exact* portfolio over five years, so incomplete monthly coverage must
+        be an explicit refusal instead.
+        """
+        dates = _weekdays(1_600)
+        returns = [0.001] * (len(dates) - 1)
+        import routers._airs_portfolio_analysis as PA
+        prices = _prices(returns, dates)
+        monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: {
+            # The holding has enough prices to look priceable, but one historical month was lost
+            # — precisely the shape a truncated FX read can produce.
+            ONE: [(d, value) for d, value in prices if not d.startswith("2024-06")],
+            BENCH: prices,
+        })
+
+        got = _run("monthly", require_complete_return=True)
+
+        assert got["available"] is False
+        assert "Incomplete five-year price or FX history" in got["reason"]
+        assert "One" in got["reason"]
+
     def test_too_few_observations(self, wire):
         dates = _weekdays(40)
         rng = np.random.default_rng(6)

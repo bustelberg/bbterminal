@@ -61,8 +61,8 @@ export default function ComparisonRow({ etf, benchmark, revision }: {
         {current?.error ? <p role="alert" className="text-neg-400">{current.error}</p>
           : !start ? <p>Choose a starting date.</p> : <p role="status">Loading {etf.ticker} vs {benchmark}…</p>}
       </div>}
-      {data && <div className="h-56" role="img" aria-label={`${etf.name} ${pct(data.total_return_pct)} versus ${data.benchmark} ${pct(data.benchmark_return_pct)} from ${data.start} to ${data.end}`}>
-        <ResponsiveContainer width="100%" height="100%">
+      {data && <div className="h-56 min-w-0" role="img" aria-label={`${etf.name} ${pct(data.total_return_pct)} versus ${data.benchmark} ${pct(data.benchmark_return_pct)} from ${data.start} to ${data.end}`}>
+        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={224} initialDimension={{ width: 1, height: 224 }}>
           <LineChart data={data.points} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
             <CartesianGrid stroke={chartTheme.grid} strokeDasharray="3 3" />
             <XAxis dataKey="date" minTickGap={45} tick={{ fill: chartTheme.axisTick, fontSize: 11 }} />

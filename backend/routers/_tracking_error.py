@@ -125,7 +125,8 @@ class SeriesError(Exception):
 
 def build_paired_series(holdings: list[dict], benchmark: str,
                         frequency: str = "weekly", years: int = 5,
-                        preloaded: dict | None = None) -> dict:
+                        preloaded: dict | None = None,
+                        require_complete_holdings: bool = False) -> dict:
     """The portfolio and benchmark return series, on ONE aligned period grid.
 
      SHARED BY TRACKING ERROR AND CORRELATION SO THE IDENTITY BETWEEN THEM HOLDS ON SCREEN.
@@ -137,6 +138,13 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     Returns `{keys, active, portfolio, benchmark, per_holding, weight_used, priced, total}` — the
     per-holding returns ride along because the correlation MATRIX needs them, and rebuilding them
     from a second pass over the same buckets is the same trap one level down.
+
+    `require_complete_holdings` is for the displayed five-year return. A missing historical FX
+    rate used to make one holding disappear from the early part of the series while the endpoint
+    still returned a confident annualised result. That is not a partially measured version of the
+    requested portfolio; it is a different portfolio. Monthly buckets are used for this strict
+    check so ordinary cross-market holiday differences at daily cadence remain measurable by the
+    risk views that intentionally support them.
 
     Raises `SeriesError` with a reader-ready reason rather than returning a sentinel: every caller
     turns it into the same `{available: False, reason}` shape.
@@ -189,6 +197,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     # All measures use identical endpoints, anchored to the latest benchmark close. Retain the
     # last observation at/before the five-year opening date as the return's starting price.
     benchmark_prices = series.get(bench_isin) or []
+    opening_marks: dict[str, bool] = {}
     if benchmark_prices:
         end = benchmark_prices[-1][0]
         end_date = date.fromisoformat(end)
@@ -196,6 +205,13 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             start = end_date.replace(year=end_date.year - years).isoformat()
         except ValueError:
             start = end_date.replace(year=end_date.year - years, day=28).isoformat()
+        # Keep this fact before clipping. A series that begins two years into the requested
+        # window can still provide the 24 monthly observations needed for risk statistics, but it
+        # cannot support a number labelled "five-year annualised return".
+        opening_marks = {
+            isin: any(row[0] <= start for row in prices)
+            for isin, prices in series.items()
+        }
         clipped = {}
         for isin, prices in series.items():
             anchor = [row for row in prices if row[0] <= start]
@@ -216,6 +232,25 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         raise SeriesError(
             f"Only {max(0, len(keys) - 1)} {freq} observations overlap with {benchmark}; "
             f"{MIN_OBS[freq]} is the floor.")
+
+    if require_complete_holdings:
+        # `keys` is intentionally the union of available holding buckets for the risk metrics.
+        # It cannot diagnose a month ALL holdings lost — that month is absent before the return
+        # loop sees it. The benchmark buckets define the requested five-year window instead.
+        missing = [i for i in isins if any(key not in p_buckets[i] for key in b_buckets)]
+        missing_opening_mark = [i for i in [bench_isin, *isins] if not opening_marks.get(i)]
+        if bench_isin in missing_opening_mark:
+            missing.insert(0, bench_isin)
+        missing.extend(i for i in missing_opening_mark if i != bench_isin and i not in missing)
+        if missing:
+            labels = [f"{benchmark} tracker" if i == bench_isin else names.get(i, i)
+                      for i in missing]
+            shown = ", ".join(labels[:3])
+            suffix = "" if len(labels) <= 3 else f", and {len(labels) - 3} more"
+            raise SeriesError(
+                "Incomplete five-year price or FX history for "
+                f"{shown}{suffix}. Refresh the affected price and FX histories before "
+                "calculating this portfolio's annualised return.")
 
     active: list[float] = []
     port: list[float] = []
@@ -281,7 +316,8 @@ def build_paired_series(holdings: list[dict], benchmark: str,
 
 
 def compute_tracking_error(holdings: list[dict], benchmark: str,
-                           frequency: str = "weekly", years: int = 5) -> dict:
+                           frequency: str = "weekly", years: int = 5,
+                           require_complete_return: bool = False) -> dict:
     """Realised TE of the book's individual stocks against `benchmark`'s investable tracker.
 
     `holdings` are the rows the Analyse modal is showing — the same input, and the same stocks-only
@@ -293,7 +329,15 @@ def compute_tracking_error(holdings: list[dict], benchmark: str,
 
     freq = frequency if frequency in PERIODS else "weekly"
     try:
-        built = build_paired_series(holdings, benchmark, freq, years)
+        built = build_paired_series(
+            holdings, benchmark, freq, years,
+            # The returns displayed beside the tracking error make the strong claim that this
+            # exact current sleeve was held throughout the five-year window. Refuse that claim
+            # when a holding vanishes from even one monthly bucket instead of quietly measuring a
+            # smaller, data-dependent portfolio. Daily/weekly TE remains available to the other
+            # callers because exchange holidays are expected at those cadences.
+            require_complete_holdings=(require_complete_return and freq == "monthly"),
+        )
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 

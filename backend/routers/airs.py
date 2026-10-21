@@ -2359,7 +2359,7 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
 
     return await asyncio.to_thread(
         compute_tracking_error, [h.model_dump() for h in req.holdings], benchmark,
-        frequency, years)
+        frequency, years, require_complete_return=True)
 
 
 class CorrelationPair(BaseModel):
