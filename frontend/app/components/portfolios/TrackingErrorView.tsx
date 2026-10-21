@@ -36,6 +36,17 @@ import type { ActiveShareHolding } from './ActiveSharePanel';
 
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 
+/** The full CAGR substitution behind a return tile, using this response's paired-close window. */
+function annualisedReturnWorked(totalPct: number | null | undefined,
+                                factor: number | null | undefined,
+                                annualPct: number | null | undefined) {
+  if (totalPct == null || factor == null || annualPct == null) return '';
+  return withWorked(
+    String.raw`R_{ann} = (1 + R_{window})^{f/T} - 1`,
+    String.raw`(1 + ${subNum(totalPct / 100, 6)})^{${subNum(factor, 4)}} - 1 = ${subNum(annualPct, 2)}\%`,
+  );
+}
+
 /**
  *  The symbols moved to `riskCopy.te.legend` (2026-09-01) — DEFINED ONCE, NOW IN TWO LANGUAGES.
  * Four cards share `aₜ`, `T` and `f`, and written per tile the definitions drift on the first edit:
@@ -64,6 +75,7 @@ export default function TrackingErrorView({
   holdings, benchmark, benchmarkWeights, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
 }: {
   holdings: ActiveShareHolding[];
+  portefeuille?: string | null;
   benchmark: string;
   benchmarkWeights?: Record<string, number>;
   /**
@@ -83,7 +95,9 @@ export default function TrackingErrorView({
   //  A string key, not the array — `holdings` is rebuilt on every parent render, so depending on
   // its identity would refetch for ever.
   const requestUrl = `${API_URL}/api/airs/portfolio/tracking-error`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=shared-v1`;
+    // v4 adds the component start/end marks used by the audit table. This must be a new cache
+    // identity: an earlier response is mathematically valid but cannot explain every displayed row.
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=available-history-v1`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<TrackingError>(key, async () => {
@@ -95,7 +109,10 @@ export default function TrackingErrorView({
     return b as TrackingError;
   }, 'tracking-error', 'the tracking error could not be computed');
 
-  const periodsPerYear = 12;
+  const comparison = data?.historical_comparison;
+  const portfolioCagr = comparison?.available ? comparison.portfolio_cagr_pct : null;
+  const activeReturn = comparison?.available ? comparison.active_return_pp : null;
+  const benchmarkHistory = data?.benchmark_history;
 
   /**
    *  The reading the number does not give anyone on its own — see `activeBand`. A tracking error
@@ -109,8 +126,6 @@ export default function TrackingErrorView({
    */
   const band = oneSigmaBand(
     data?.mean_active_per_period_pct, data?.periods_per_year, data?.tracking_error_pct);
-  const activeReturnAverage = data?.active_return_ann_pct == null ? 'n/a'
-    : `${data.active_return_ann_pct >= 0 ? '+' : ''}${data.active_return_ann_pct.toFixed(2)}pp`;
 
   /**
    * What every card in this view is measured from, built once.
@@ -120,7 +135,7 @@ export default function TrackingErrorView({
    * naming different vendors for one number is unreconcilable from the outside.
    */
   const where = data?.available
-    ? `${v(data.observations)} monthly return comparisons. Portfolio prices use `
+    ? `${v(data.observations)} ${v(data.frequency)} return comparisons. Portfolio prices use `
       + `${v(sourceField('yfinance'))} from ${v(sourceVendor('yfinance'))}, with weights from `
       + `${v(sourceLabel(portfolioSource))}. The benchmark is ${v(data.benchmark)} tracker `
       + `${v(data.benchmark_isin ?? 'not resolved')}.`
@@ -156,28 +171,65 @@ export default function TrackingErrorView({
         <>
           <div className="flex flex-col items-center gap-3">
             <div className="flex flex-col items-center gap-1">
-              <p className="text-sm font-medium text-fg-subtle">{t.te.activeReturnQuestion(portfolioName, data.benchmark)}</p>
+              <p className="text-xs text-fg-faint">Five-year performance · {benchmarkHistory?.start_date ?? '—'} to {benchmarkHistory?.end_date ?? '—'}</p>
               <div className="flex flex-wrap items-center justify-center gap-2">
-              <Tile label={t.te.benchmarkReturn(data.benchmark)} value={pct2(data.benchmark_return_ann_pct)} />
-              <span aria-hidden="true" className="text-xl text-fg-faint">+</span>
-            <Tile label={t.te.activeReturn}
-              value={pct2(data.active_return_ann_pct).replace('%', 'pp')}
-              tone={(data.active_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`Annualized portfolio return minus ${data.benchmark}'s return, in percentage points. Calculated before rounding.`}
-                where={where}
-                when={when}
-                worked={data.active_return_ann_pct == null ? '' : withWorked(
-                  String.raw`\text{Active return} = \text{Portfolio annualized return} - \text{Benchmark annualized return}`,
-                  String.raw`${subNum(data.portfolio_return_ann_pct ?? 0, 4)}\% - (${subNum(data.benchmark_return_ann_pct ?? 0, 4)}\%) \approx ${subNum(data.active_return_ann_pct, 2)}\text{pp}`)}
-                how="Each series is compounded and annualized separately, then the benchmark return is subtracted. This uses today's AIRS holdings and weights over the historical period; it is not your account's realized performance." />} />} />
+              <Tile label={`${portfolioName} CAGR (5 years, today's weights)`} value={pct2(portfolioCagr)}
+                info={<InfoTip wide content={<AspectCard
+                  what="Five-year reconstruction using today's weights among holdings with available history."
+                  where="AIRS weights and EUR-converted historical holding prices."
+                  when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
+                  how={comparison?.available
+                    ? `Cumulative return: ${pct2(comparison.total_return_pct)} over ${comparison.years_elapsed?.toFixed(4)} years. At each period, current weights of holdings with prices at both endpoints are scaled to 100%. Newer holdings join as history becomes available. Minimum coverage: ${pct2(comparison.min_weight_covered_pct)}; average: ${pct2(comparison.avg_weight_covered_pct)}.`
+                    : comparison?.reason ?? 'Five-year history is unavailable.'}
+                  worked={annualisedReturnWorked(comparison?.total_return_pct,
+                    comparison?.years_elapsed ? 1 / comparison.years_elapsed : null, portfolioCagr)}
+                  calculation={<div className="space-y-1 border-t border-neutral-800/40 pt-2 text-xs">
+                    {comparison?.holdings_history?.map(holding => <div key={holding.isin}>
+                      {holding.name} · {holding.weight_pct.toFixed(2)}% · {holding.first_used ? `included from ${holding.first_used}` : 'no usable history'}
+                    </div>)}
+                  </div>}
+                />} />} />
+              <span aria-hidden="true" className="text-xl text-fg-faint">−</span>
+              <Tile label={`${data.benchmark} CAGR (${data.benchmark_history?.complete ? '5 years' : 'available history'})`} value={pct2(benchmarkHistory?.complete ? benchmarkHistory.cagr_pct : null)}
+                info={<InfoTip wide className="ml-0.5" content={<AspectCard
+                  what={`CAGR of ${data.benchmark} over its ${data.benchmark_history?.complete ? 'five-year' : 'available'} history.`}
+                  where="EUR-converted benchmark price histories at the configured policy weights."
+                  when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
+                  how="Compound the policy-weighted returns on shared trading dates, then annualise the resulting growth using the actual calendar years elapsed."
+                  calculation={benchmarkHistory?.components?.length ? (
+                    <div className="border-t border-neutral-800/40 pt-2 text-[11px]">
+                      <div className="mb-1 font-medium text-fg-subtle">Benchmark legs — {benchmarkHistory.complete ? 'last five years' : 'available benchmark history'} ({benchmarkHistory.start_date} to {benchmarkHistory.end_date})</div>
+                      <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-2 gap-y-1 tabular-nums">
+                        <span className="text-fg-faint">Leg</span><span className="text-right text-fg-faint">Weight</span><span className="text-right text-fg-faint">Start EUR</span><span className="text-right text-fg-faint">End EUR</span><span className="text-right text-fg-faint">Window</span><span className="text-right text-fg-faint">CAGR</span>
+                        {benchmarkHistory.components.map((component) => <div key={component.name} className="contents">
+                          <span>{component.name}</span>
+                          <span className="text-right">{component.weight_pct.toFixed(1)}%</span>
+                          <span className="text-right">{component.start_price_eur == null ? '—' : `${component.start_price_eur.toFixed(2)} · ${component.start_date ?? '—'}`}</span>
+                          <span className="text-right">{component.end_price_eur == null ? '—' : `${component.end_price_eur.toFixed(2)} · ${component.end_date ?? '—'}`}</span>
+                          <span className="text-right">{pct2(component.window_return_pct)}</span>
+                          <span className="text-right">{pct2(component.annualized_return_pct)}</span>
+                        </div>)}
+                      </div>
+                      <p className="mt-2 font-medium">Policy benchmark CAGR over this period: {pct2(benchmarkHistory.cagr_pct)}</p>
+                      <p className="mt-1 text-fg-muted">EUR-adjusted closes. Policy weights are rebalanced on shared trading dates. The five-year comparison uses these dates; the tracking-error window is stated separately.</p>
+                    </div>
+                  ) : null} />} />} />
               <span aria-hidden="true" className="text-xl text-fg-faint">=</span>
-              <Tile label={t.te.portfolioReturn(portfolioName)} value={pct2(data.portfolio_return_ann_pct)}
-                tone={(data.portfolio_return_ann_pct ?? 0) >= 0 ? 'text-pos-300' : 'text-neg-300'} />
+              <Tile label="Active return (5 years)" value={activeReturn == null ? '—' : `${activeReturn.toFixed(2)}pp`}
+                info={<InfoTip content={<AspectCard
+                  what="Today's portfolio five-year CAGR minus the policy benchmark five-year CAGR."
+                  when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
+                  how={activeReturn == null ? 'Requires usable holding histories throughout the five-year window.'
+                    : `${pct2(portfolioCagr)} − ${pct2(benchmarkHistory?.cagr_pct)} = ${activeReturn.toFixed(2)}pp`}
+                />} />} />
               </div>
+              {comparison?.coverage_adjusted && <p className="max-w-2xl text-center text-xs text-fg-faint">
+                Available-history reconstruction · current weights scaled to 100% among priced holdings each period · minimum coverage {pct2(comparison.min_weight_covered_pct)}, average {pct2(comparison.avg_weight_covered_pct)}.
+              </p>}
+              {!comparison?.available && <p className="max-w-2xl text-center text-xs text-fg-faint">{comparison?.reason}</p>}
             </div>
             <div className="flex flex-col items-center">
-              <p className="mb-1 text-sm font-medium text-fg-subtle">{t.te.trackingErrorQuestion(activeReturnAverage)}</p>
+              <p className="mb-1 text-xs text-fg-faint">Tracking error window: {data.window_from} to {data.window_to} · {data.observations} {data.frequency} returns{data.preliminary ? ' · preliminary' : ''}</p>
               <Tile label={t.te.trackingError} value={pct2(data.tracking_error_pct).replace('%', 'pp')}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.te.cards.te.what}
@@ -185,8 +237,8 @@ export default function TrackingErrorView({
                 when={when}
                 worked={data.tracking_error_pct == null ? '' : withWorked(
                   String.raw`a_t = R_t^{\,p} - R_t^{\,b}\quad\Rightarrow\quad TE = \sqrt{\dfrac{\sum_t (a_t - \bar{a})^2}{T - 1}}\;\sqrt{f}`,
-                  String.raw`T = ${data.observations},\; f = ${data.periods_per_year}`
-                  + String.raw` \;\Rightarrow\; ${subNum(data.tracking_error_pct, 2)}\%`
+                  String.raw`\bar{a} = ${subNum(data.mean_active_per_period_pct ?? 0, 4)}\%,\; \sigma_a = ${subNum(data.active_return_std_per_period_pct ?? 0, 4)}\%,\; T = ${data.observations},\; f = ${data.periods_per_year}`
+                  + String.raw` \;\Rightarrow\; ${subNum(data.active_return_std_per_period_pct ?? 0, 4)}\% \times \sqrt{${data.periods_per_year}} = ${subNum(data.tracking_error_pct, 2)}\%`
                   //  A second worked line, because the band is a second piece of arithmetic and
                   // not a restatement of the first. `\\[4pt]` is the same separator `withWorked`
                   // puts between the symbolic and substituted halves, so all three lines set as
@@ -207,9 +259,6 @@ export default function TrackingErrorView({
             </div>
           </div>
 
-          {data.cadence_note && (
-            <p className="text-[11px] text-warn-300">{data.cadence_note}</p>
-          )}
 
         </>
       )}

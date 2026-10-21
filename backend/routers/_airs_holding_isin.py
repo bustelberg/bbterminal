@@ -440,6 +440,19 @@ def _close_lag_days(close: dict | None, as_of: str) -> int | None:
         return None
 
 
+def _price_check_served_by(isin: str | None, aliases: dict[str, str],
+                           own_listing_price_isins: set[str]) -> str | None:
+    """The fundamentals alias, only when it also supplies this row's price.
+
+    An alias normally means the price comes from another security and the comparison is therefore
+    deliberately not comparable. A reviewed ``alias_price_override`` keeps that relationship for
+    company/fundamentals identity but prices the held ADR/share class from its own listing. The
+    dashboard must receive no ``served_by`` marker in that case or it hides a valid comparison.
+    """
+    normalized = (isin or '').strip().upper()
+    return None if normalized in own_listing_price_isins else aliases.get(normalized)
+
+
 def _last_closes(isins: list[str], as_of: str) -> dict[str, dict]:
     """{isin: {close, currency, date}} — the instrument's own latest close, as we hold it.
 
@@ -696,9 +709,11 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     # call that `price_mismatch` on every such holding, which is a false alarm on a link we made
     # on purpose. They get their own verdict instead — see `cross_listed`.
     from asset_pipeline.isin_alias import load_aliases  # noqa: PLC0415
+    from asset_pipeline.symbol_override import alias_price_override_isins  # noqa: PLC0415
 
     with _phase(t, "aliases_overrides"):
         aliased = load_aliases()
+        own_listing_price_isins = alias_price_override_isins()
         overrides = _load_bucket_overrides(isins)   # manual Class pins, keyed by ISIN — they win
     #  BEFORE the closes are read, never after: the check below is a comparison, and half of it
     # comes from here. See `_freshen` — a series that merely stopped updating reads as a wrong
@@ -780,7 +795,7 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
         #  Not a mismatch, and not 'ok' EITHER. This ISIN is served by another instrument on
         # purpose, so a price difference is EXPECTED and proves nothing about the identity —
         # calling it `ok` would claim the price confirmed something it never tested.
-        served_by = aliased.get(isin or "")
+        served_by = _price_check_served_by(isin, aliased, own_listing_price_isins)
         if served_by and verdict == "price_mismatch":
             verdict = "cross_listed"
 

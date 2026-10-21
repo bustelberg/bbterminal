@@ -131,6 +131,16 @@ def _needs_repoint(isin: str, symbol: str) -> bool:
     return (cur[0].get("yahoo_symbol") or "") != symbol
 
 
+def _has_usable_override_series(score: dict | None) -> bool:
+    """Validate a reviewed symbol without rejecting a zero-volume mutual-fund NAV."""
+    if not score:
+        return False
+    if float(score.get("med_adv_eur") or 0) > 0:
+        return True
+    return ((score.get("quote_type") or "").upper() == "MUTUALFUND"
+            and int(score.get("price_bars") or 0) > 0)
+
+
 def apply_symbol_overrides(only_isin: str | None = None) -> int:
     """Repoint every overridden ISIN onto its named symbol. Returns rows changed.
 
@@ -193,7 +203,7 @@ def _repoint(isin: str, symbol: str) -> bool:
 
     #  Probe before storing. A named symbol is a claim, not a listing.
     sc = _score_retry(symbol)
-    if not sc or not float(sc.get("med_adv_eur") or 0):
+    if not _has_usable_override_series(sc):
         _log.warning("[symbol_override] %s -> %s: no price series. NOT applied — a symbol with "
                      "no bars is not a listing (the GODE.DE incident).", isin, symbol)
         return False

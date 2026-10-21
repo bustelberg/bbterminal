@@ -8902,6 +8902,14 @@ export interface components {
          */
         ActiveShareRow: {
             /**
+             * Bucket
+             */
+            bucket?: string | null;
+            /**
+             * Yahoo Symbol
+             */
+            yahoo_symbol?: string | null;
+            /**
              * Active Pct
              * @default 0
              */
@@ -14880,6 +14888,30 @@ export interface components {
          *     disagree — so every label says "realised" rather than leaving the reader to assume.
          */
         TrackingError: {
+            historical_comparison?: {
+                coverage_adjusted?: boolean;
+                min_weight_covered_pct?: number | null;
+                avg_weight_covered_pct?: number | null;
+                holdings_history?: { isin: string; name: string; weight_pct: number; first_used?: string | null }[];
+                available: boolean;
+                reason?: string | null;
+                source?: string | null;
+                start_date?: string | null;
+                end_date?: string | null;
+                portfolio_cagr_pct?: number | null;
+                benchmark_cagr_pct?: number | null;
+                active_return_pp?: number | null;
+                total_return_pct?: number | null;
+                years_elapsed?: number | null;
+                benchmark_components?: NonNullable<components['schemas']['TrackingError']['benchmark_components']>;
+            } | null;
+            benchmark_history?: {
+                components: NonNullable<components['schemas']['TrackingError']['benchmark_components']>;
+                cagr_pct?: number | null;
+                start_date?: string | null;
+                end_date?: string | null;
+                complete?: boolean;
+            } | null;
             /** Active Return Ann Pct */
             active_return_ann_pct?: number | null;
             /**
@@ -14895,6 +14927,17 @@ export interface components {
             benchmark_isin?: string | null;
             /** Benchmark Return Ann Pct */
             benchmark_return_ann_pct?: number | null;
+            benchmark_components?: {
+                name: string;
+                isin: string;
+                weight_pct: number;
+                window_return_pct?: number | null;
+                annualized_return_pct?: number | null;
+                start_date?: string | null;
+                start_price_eur?: number | null;
+                end_date?: string | null;
+                end_price_eur?: number | null;
+            }[];
             /** Cadence Note */
             cadence_note?: string | null;
             /**
@@ -14902,6 +14945,13 @@ export interface components {
              * @default monthly
              */
             frequency?: string;
+            /** History Limited */
+            history_limited?: boolean;
+            preliminary?: boolean;
+            portfolio_return_total_pct?: number | null;
+            benchmark_return_total_pct?: number | null;
+            annualization_factor?: number | null;
+            active_return_std_per_period_pct?: number | null;
             /** Information Ratio */
             information_ratio?: number | null;
             /** Mean Active Per Period Pct */

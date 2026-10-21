@@ -117,3 +117,28 @@ class TestTheOverridesFileIsWellFormed:
         """REL.L is a London pence quote, not AIRS's held EUR Amsterdam line."""
         got = {e["isin"]: e["symbol"] for e in _entries()}
         assert got["GB00B2B0DG97"] == "REN.AS"
+
+    def test_argenx_uses_the_brussels_eur_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["NL0010832176"] == "ARGX.BR"
+
+    def test_pro_medicus_uses_the_asx_aud_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["AU000000PME8"] == "PME.AX"
+
+    def test_roko_uses_the_stockholm_sek_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["SE0023950795"] == "ROKO-B.ST"
+
+    def test_risk_profile_bond_tracker_is_pinned_to_aggh(self):
+        """A fresh environment must bootstrap the fixed policy benchmark without fuzzy search."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["IE00BDBRDM35"] == "AGGH.AS"
+
+    def test_letko_fund_uses_its_reviewed_yahoo_series(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["IE000MEQP5U8"] == "0P0001TPVP.F"
+
+    def test_aqr_apex_fund_uses_its_reviewed_yahoo_series(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["LU1662495628"] == "0P0001BD8Q.F"

@@ -2168,6 +2168,10 @@ class ActiveShareRow(BaseModel):
     active_pct: float = 0.0
     held: bool = False
     residual: bool = False
+    #: Present for a risk-profile comparison, so Stocks and Bonds can be shown separately.
+    bucket: str | None = None
+    #: Verified stored listing used for the optional Yahoo Finance quote link.
+    yahoo_symbol: str | None = None
     workbook_weight_pct: float | None = None
     weight_calculation: ActiveShareWeightCalculation | None = None
     yfinance_return_pct: float | None = None
@@ -2273,6 +2277,7 @@ class ActiveShareRequest(BaseModel):
     #: Fixed Stocks/Bonds policy weights for a risk-profile portfolio.  Omitted by generic
     #: baskets, which retain the single-index stock-sleeve analytics.
     benchmark_weights: dict[str, float] | None = None
+    portefeuille: str | None = None
 
 
 class RiskDataQuality(BaseModel):
@@ -2324,7 +2329,47 @@ async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = 
     from routers._active_share import compute_active_share  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start)
+        compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
+        req.benchmark_weights)
+
+
+class TrackingErrorBenchmarkComponent(BaseModel):
+    """One policy benchmark leg, measured over the exact tracking-error window."""
+    name: str
+    isin: str
+    weight_pct: float
+    window_return_pct: float | None = None
+    annualized_return_pct: float | None = None
+    start_date: str | None = None
+    start_price_eur: float | None = None
+    end_date: str | None = None
+    end_price_eur: float | None = None
+
+
+class TrackingErrorBenchmarkHistory(BaseModel):
+    components: list[TrackingErrorBenchmarkComponent] = []
+    cagr_pct: float | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    complete: bool = False
+
+
+class HistoricalPortfolioComparison(BaseModel):
+    available: bool
+    reason: str | None = None
+    source: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    total_return_pct: float | None = None
+    portfolio_cagr_pct: float | None = None
+    benchmark_cagr_pct: float | None = None
+    active_return_pp: float | None = None
+    years_elapsed: float | None = None
+    coverage_adjusted: bool = False
+    min_weight_covered_pct: float | None = None
+    avg_weight_covered_pct: float | None = None
+    holdings_history: list[dict] = []
+    benchmark_components: list[TrackingErrorBenchmarkComponent] = []
 
 
 class TrackingError(BaseModel):
@@ -2354,6 +2399,21 @@ class TrackingError(BaseModel):
     #: the card states real dates rather than asserting a trailing window.
     window_from: str | None = None
     window_to: str | None = None
+    #: True when newer holdings shorten the calculation to their exact common price window.
+    history_limited: bool = False
+    #: A newly launched holding left too few monthly returns, so the exact common daily sample is
+    #: shown instead. It is real data, but intentionally labelled as preliminary.
+    preliminary: bool = False
+    #: The geometric return over the exact paired window, before annualisation.
+    portfolio_return_total_pct: float | None = None
+    benchmark_return_total_pct: float | None = None
+    benchmark_components: list[TrackingErrorBenchmarkComponent] = []
+    benchmark_history: TrackingErrorBenchmarkHistory | None = None
+    historical_comparison: HistoricalPortfolioComparison | None = None
+    #: Annualised return uses `(1 + total return) ** annualization_factor - 1`.
+    annualization_factor: float | None = None
+    #: Sample standard deviation of active returns at the displayed cadence, before `√f` scaling.
+    active_return_std_per_period_pct: float | None = None
 
     tracking_error_pct: float | None = None
     #:  THE QUANTITY TE IS THE SPREAD **OF**, returned beside it because the two are constantly
@@ -2396,7 +2456,7 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
     return await asyncio.to_thread(
         compute_tracking_error, [h.model_dump() for h in req.holdings], benchmark,
         frequency, years, require_complete_return=True,
-        benchmark_weights=req.benchmark_weights)
+        benchmark_weights=req.benchmark_weights, portefeuille=req.portefeuille)
 
 
 class CorrelationPair(BaseModel):
@@ -2731,7 +2791,8 @@ async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str =
     from routers._portfolio_concentration import compute_concentration  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_concentration, [h.model_dump() for h in req.holdings], benchmark, benchmark_start)
+        compute_concentration, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
+        req.benchmark_weights)
 
 
 class ExposurePosition(BaseModel):
@@ -3940,6 +4001,20 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
         #   flag at its own first boundary and returns cancelled, which `job_verdict` reports.
         if not ctx.cancelled:
             ctx.progress(0, 0, "Preparing refresh…")
+            # This is the verified repair path for the Risk tab's ACWI/AGGH dependency.  The
+            # toast says exactly what is happening; unlike an inline warning it never implies a
+            # background backfill merely because one is scheduled for later.
+            ctx.progress(0, 0, "Refreshing risk benchmark prices…")
+            try:
+                from asset_pipeline.price_refresh import refresh_risk_trackers  # noqa: PLC0415
+                repaired = refresh_risk_trackers()
+                backfill = repaired["backfill"]
+                ctx.progress(0, 0,
+                             f"Risk benchmark prices refreshed: {backfill['backfilled']} "
+                             "missing history series backfilled")
+            except Exception as e:  # noqa: BLE001 — a book refresh remains useful on its own
+                _log.warning("[airs refresh] risk benchmark prices not refreshed: %s: %s",
+                             type(e).__name__, e)
             try:
                 from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
                 refresh_index_proxies(bypass_daily_guard=True)
@@ -4535,7 +4610,7 @@ class AirsAccountIsins(BaseModel):
 
 
 @router.get("/api/airs/accounts/{portefeuille}/isins", response_model=AirsAccountIsins)
-async def airs_account_isins(portefeuille: str, stored_check: bool = False):
+async def airs_account_isins(portefeuille: str, stored_check: bool = False, response: Response = None):
     """An account's holdings with an ISIN attached to each, price-checked.
 
     The account has the money and no ISIN; its model has the ISINs and nothing AIRS values.
@@ -4546,6 +4621,10 @@ async def airs_account_isins(portefeuille: str, stored_check: bool = False):
     and they compound differently).
     """
     if stored_check:
+        # This is read immediately after a row job writes it. A browser or intermediary copy would
+        # leave the modal showing an old ratio even though the Yahoo close has been refreshed.
+        if response is not None:
+            response.headers['Cache-Control'] = 'no-store'
         from routers._airs_price_check import saved_price_checks  # noqa: PLC0415
         saved = await asyncio.to_thread(saved_price_checks, [portefeuille])
         check = saved.get(portefeuille) or {}

@@ -18,10 +18,16 @@ describe('dashboard price checks', () => {
     expect(needsPriceReview(within)).toBe(true);
     const outside = summarize(holding({ airs_price_local: 19, recent_close_range: range }));
     expect(outside.items[0].rangeAssessment).toBe('outside');
-    for (const recent_close_range of [{ ...range, count: 4 }, { ...range, end: '2026-10-01' }, null]) {
-      expect(summarize(holding({ recent_close_range })).items[0].rangeAssessment).toBe('insufficient');
-    }
-    expect(summarize(holding({ currency: 'AUD', recent_close_range: range })).items[0].rangeAssessment).toBe('insufficient');
+    expect(summarize(holding({ recent_close_range: { ...range, count: 4 } })).items[0].rangeAssessment).toBe('insufficient');
+    expect(summarize(holding({ recent_close_range: { ...range, end: '2026-10-01' } })).items[0].rangeAssessment).toBe('staleRange');
+    expect(summarize(holding({ recent_close_range: null })).items[0].rangeAssessment).toBe('insufficient');
+    expect(summarize(holding({ currency: 'AUD', recent_close_range: range })).items[0].rangeAssessment).toBe('notComparable');
+  });
+  it('does not call a linked listing with five displayed closes insufficient history', () => {
+    const range = { low: 20, high: 25, start: '2026-10-12', end: '2026-10-16', count: 5 };
+    const linked = summarize(holding({ served_by: 'OTHER_ISIN', recent_close_range: range })).items[0];
+    expect(linked.rangeAssessment).toBe('notComparable');
+    expect(linked.status).toBe('linked');
   });
   it('compares native prices without FX and refuses different currencies or quote units', () => {
     const summary = summarize(holding({ airs_price_local: 21.51, our_price_local: 24.14,

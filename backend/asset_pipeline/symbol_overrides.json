@@ -158,10 +158,46 @@
       "note": "This is the current ISIN of the held European/Xetra ordinary share, quoted in EUR. Automatic resolution selected LIN, the USD NYSE line, which cannot be directly compared with AIRS's EUR price. Pin Yahoo's Xetra listing LIN.DE for the native EUR security."
     },
     {
+      "isin": "NL0010832176",
+      "symbol": "ARGX.BR",
+      "name": "argenx SE",
+      "note": "The held Euronext Brussels ordinary share is quoted in EUR. Automatic resolution selected ARGX, the USD Nasdaq ADS, which cannot be directly compared with AIRS's EUR price. Pin Yahoo's Brussels listing ARGX.BR for the native EUR security."
+    },
+    {
+      "isin": "AU000000PME8",
+      "symbol": "PME.AX",
+      "name": "Pro Medicus Limited",
+      "note": "The held Australian ordinary share is quoted on the ASX in AUD. Automatic resolution selected PMCUF, a USD OTC line, which cannot be directly compared with AIRS's AUD price. Pin Yahoo's ASX listing PME.AX for the native AUD security."
+    },
+    {
+      "isin": "SE0023950795",
+      "symbol": "ROKO-B.ST",
+      "name": "Röko AB (publ)",
+      "note": "The held Swedish B share is quoted on Nasdaq Stockholm in SEK. Automatic resolution selected ROKOBS.XC, a cross-listing, rather than the native Stockholm price series. Pin Yahoo's ROKO-B.ST listing for the exact Swedish ordinary share."
+    },
+    {
       "isin": "GB00B2B0DG97",
       "symbol": "REN.AS",
       "name": "RELX PLC",
       "note": "The held Euronext Amsterdam ordinary share is quoted in EUR. Automatic resolution selected REL.L, the London pence line, which is a different quote currency and unit from AIRS's EUR price. Pin Yahoo's Amsterdam listing REN.AS for the native EUR security."
+    },
+    {
+      "isin": "IE00BDBRDM35",
+      "symbol": "AGGH.AS",
+      "name": "iShares Core Global Aggregate Bond UCITS ETF EUR Hedged Acc",
+      "note": "This is the fixed bond tracker in every risk-profile benchmark. OpenFIGI identifies the ETF but Yahoo's generic ISIN search does not discover its Amsterdam listing, leaving tracking error unavailable. Pin AGGH.AS so a new environment can bootstrap its EUR price history automatically."
+    },
+    {
+      "isin": "IE000MEQP5U8",
+      "symbol": "0P0001TPVP.F",
+      "name": "Letko Brosseau Global Emerging Markets Equity Fund EUR Acc",
+      "note": "The held EUR fund is listed on Yahoo Finance as 0P0001TPVP.F in Frankfurt. Generic ISIN/name search returns no candidate, which falsely makes the risk history incomplete. Pin the reviewed fund listing so its own EUR series, rather than an unrelated emerging-markets proxy, is used."
+    },
+    {
+      "isin": "LU1662495628",
+      "symbol": "0P0001BD8Q.F",
+      "name": "AQR Apex UCITS Fund IAEFT EUR Acc",
+      "note": "Yahoo's exact ISIN search identifies the Frankfurt mutual-fund series 0P0001BD8Q.F. Generic resolution left the fund unmapped, even though a reviewed EUR NAV history exists."
     }
   ]
 }

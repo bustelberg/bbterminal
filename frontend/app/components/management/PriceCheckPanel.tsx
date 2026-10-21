@@ -19,7 +19,7 @@ const en = {
   delta: 'Difference', dates: 'AIRS / Yahoo dates', status: 'Status', recheck: 'Recheck', rechecking: 'Rechecking…',
   matched: 'No extreme differences found in the available prices.',
   clear: 'No extreme gaps',
-  range: '5-day close range', within: 'Possible timing difference', outside: 'Outside range · investigate', insufficient: 'Not enough recent history',
+  range: '5-day close range', within: 'Possible timing difference', outside: 'Outside range · investigate', insufficient: 'Not enough recent history', notComparable: 'Not comparable', staleRange: 'Price range is stale',
   note: 'Only listed stocks and ETFs are shown. Native prices are compared only in the same currency and quote unit, without FX conversion. Only gaps of 5% or more are shown and trigger alerts. Different dates are flagged as stale.',
   end: 'The range uses five stored trading-session closes before the AIRS report date, not intraday highs/lows or a statistical confidence interval. Being inside suggests timing, not proof. Checks use stored prices; Refresh updates the source data.',
   states: { matched: 'Matched', warning: 'Warning (>2%)', difference: 'Difference (≥5%)', stale: 'Different dates / stale', linked: 'Linked listing — not comparable', unavailable: 'Price unavailable' } satisfies Record<PriceStatus, string>,
@@ -37,7 +37,7 @@ const nl: Copy = {
   methodology: 'Hoe deze controle werkt', subtitle: 'Beursgenoteerde aandelen en ETF’s · alleen verschillen ≥5%', dateDifference: 'Koersdatums verschillen',
   delta: 'Verschil', dates: 'Datums AIRS / Yahoo', status: 'Status', recheck: 'Opnieuw controleren', rechecking: 'Controleren…', matched: 'Geen extreme verschillen gevonden in de beschikbare koersen.',
   clear: 'Geen extreme verschillen',
-  range: '5-daags slotkoersbereik', within: 'Mogelijk tijdsverschil', outside: 'Buiten bereik · onderzoeken', insufficient: 'Onvoldoende recente historie',
+  range: '5-daags slotkoersbereik', within: 'Mogelijk tijdsverschil', outside: 'Buiten bereik · onderzoeken', insufficient: 'Onvoldoende recente historie', notComparable: 'Niet vergelijkbaar', staleRange: 'Koersbereik is verouderd',
   note: 'Alleen beursgenoteerde aandelen en ETF’s worden getoond. Lokale koersen worden alleen vergeleken bij dezelfde valuta en koerseenheid, zonder valutaomrekening. Alleen verschillen vanaf 5% worden getoond en geven een melding. Andere datums gelden als verouderd.',
   end: 'Het bereik gebruikt vijf opgeslagen slotkoersen vóór de AIRS-rapportdatum, geen intradagbereik of statistisch betrouwbaarheidsinterval. Binnen het bereik suggereert timing, maar bewijst niets. Verversen werkt de brongegevens bij.',
   states: { matched: 'Komt overeen', warning: 'Waarschuwing (>2%)', difference: 'Verschil (≥5%)', stale: 'Andere datums / verouderd', linked: 'Gekoppelde notering — niet vergelijkbaar', unavailable: 'Koers ontbreekt' },
@@ -94,7 +94,9 @@ export function PriceCheckDetails({ state, onRetry, onRecheckRow, recheckingIsin
   const summary = state?.summary;
   const affected = summary?.items.filter(isExtremeDifference) ?? [];
   const displayed = showAll ? summary?.items ?? [] : affected;
-  if (state && !state.pending && !state.error && !displayed.length) return null;
+  // “View prices” must still explain a bond-only account rather than opening a modal whose body
+  // disappears after the stock/ETF eligibility filter leaves no rows.
+  if (state && !state.pending && !state.error && !displayed.length && !showAll) return null;
   const price = (value: number | null) => value == null ? '—' : value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   return <div className="rounded-lg border border-neutral-800/40 bg-card p-4 space-y-3">
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -104,7 +106,9 @@ export function PriceCheckDetails({ state, onRetry, onRecheckRow, recheckingIsin
     </div>
     {state?.checkedAt && <p className="text-xs text-fg-subtle">{t.checkedOn}: {new Date(state.checkedAt).toLocaleString()}</p>}
     {state?.error && <p role="alert" className="text-xs text-warn-400">{t.failed}</p>}
-    {!state || state.pending ? <p className="text-xs text-fg-subtle">{t.checking}</p> : displayed.length > 0 ?
+    {/* Keep the existing table mounted while its replacement snapshot is loading. Replacing it
+        with a short “Checking…” line collapses the scroll container and sends the reader to top. */}
+    {!state || (state.pending && !summary) ? <p className="text-xs text-fg-subtle">{t.checking}</p> : displayed.length > 0 ?
       <div className="overflow-auto"><table className="w-full whitespace-nowrap text-xs">
         <thead><tr className="border-b border-neutral-800/40 text-fg-subtle">
           {[t.holding, t.certificate, t.airs, t.yahoo, t.delta, t.range, t.status, ''].map((label, index) => <th key={`${label}-${index}`} className={`px-3 py-2 font-medium ${index === 7 ? 'w-28 text-right' : index > 1 && index < 5 ? 'text-right' : 'text-left'}`}>{label}</th>)}
@@ -116,7 +120,7 @@ export function PriceCheckDetails({ state, onRetry, onRecheckRow, recheckingIsin
           <td className="px-3 py-3 text-right"><span className="font-mono tabular-nums">{price(row.yahoo)} {row.yahooCurrency}</span><span className="mt-1 block text-fg-subtle">{row.yahooDate ?? '—'}</span></td>
           <td className={`px-3 py-3 text-right font-mono tabular-nums font-medium ${isExtremeDifference(row) ? 'text-neg-400' : 'text-fg-muted'}`} title="(AIRS price / Yahoo price − 1) × 100">{row.difference == null || row.status === 'linked' ? '—' : (() => { const difference = Math.abs(row.difference) < 0.005 ? 0 : row.difference; return `${difference > 0 ? '+' : ''}${difference.toFixed(2)}%`; })()}</td>
           <td className="px-3 py-3">{row.recentRange ? <><span className="font-mono tabular-nums">{price(row.recentRange.low)}–{price(row.recentRange.high)} {row.yahooCurrency}</span><span className="mt-1 block text-fg-subtle">{row.recentRange.start} → {row.recentRange.end}{row.recentRange.count < 5 ? ` · ${row.recentRange.count}/5` : ''}</span></> : '—'}</td>
-          <td className="px-3 py-3"><span className={`inline-block rounded-md px-2 py-1 ${row.rangeAssessment === 'outside' ? 'bg-neg-500/10 text-neg-400' : 'bg-warn-500/10 text-warn-400'}`}>{t[row.rangeAssessment]}</span>{row.airsDate !== row.yahooDate && <span className="mt-1 block text-fg-subtle">{t.dateDifference}</span>}</td>
+          <td className={`px-3 py-3 ${row.rangeAssessment === 'insufficient' ? 'text-center' : ''}`}><span className={`inline-block rounded-md px-2 py-1 ${row.rangeAssessment === 'outside' ? 'bg-neg-500/10 text-neg-400' : row.rangeAssessment === 'notComparable' ? 'bg-neutral-700/30 text-fg-subtle' : 'bg-warn-500/10 text-warn-400'}`}>{t[row.rangeAssessment]}</span>{row.airsDate !== row.yahooDate && <span className="mt-1 block text-fg-subtle">{t.dateDifference}</span>}</td>
           <td className="w-28 px-3 py-3 text-right">{row.isin && onRecheckRow && <button type="button"
             disabled={recheckingIsins?.has(row.isin)} onClick={() => onRecheckRow(row.isin!, row.name)}
             title={t.recheck} className="w-24 rounded-md border border-neutral-700 px-2 py-1 text-xs text-fg-subtle opacity-0 transition-opacity hover:border-accent-500/50 hover:text-accent-300 focus:opacity-100 group-hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50">

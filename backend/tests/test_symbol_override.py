@@ -69,6 +69,14 @@ class TestItIsIdempotent:
         monkeypatch.setattr(symbol_override, "_repoint", _boom)
         assert symbol_override.apply_symbol_overrides() == 0
 
+    def test_reviewed_mutual_fund_uses_closed_nav_bars_not_volume(self):
+        assert symbol_override._has_usable_override_series({
+            "quote_type": "MUTUALFUND", "med_adv_eur": 0, "price_bars": 40,
+        })
+        assert not symbol_override._has_usable_override_series({
+            "quote_type": "ETF", "med_adv_eur": 0, "price_bars": 40,
+        })
+
 
 class TestItRepointsADriftedRow:
     def test_a_row_naming_the_wrong_symbol_is_repointed(self, monkeypatch):

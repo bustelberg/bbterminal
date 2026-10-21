@@ -20,6 +20,7 @@ function normalizeQuoteUnit(value: number | null, currency: string | null) {
 }
 
 export type PriceStatus = 'matched' | 'warning' | 'difference' | 'stale' | 'linked' | 'unavailable';
+export type RangeAssessment = 'within' | 'outside' | 'insufficient' | 'notComparable' | 'staleRange';
 export type PriceItem = {
   key: string; name: string; isin: string | null; instrument: string | null;
   yahooSymbol: string | null;
@@ -27,7 +28,7 @@ export type PriceItem = {
   airs: number | null; yahoo: number | null; difference: number | null;
   airsCurrency: string | null; yahooCurrency: string | null;
   recentRange: { low: number; high: number; start: string; end: string; count: number } | null;
-  rangeAssessment: 'within' | 'outside' | 'insufficient';
+  rangeAssessment: RangeAssessment;
   airsDate: string | null; yahooDate: string | null; status: PriceStatus;
 };
 export type PriceSummary = {
@@ -61,9 +62,13 @@ export function summarizePrices(data: AirsAccountIsins): PriceSummary {
       ? { low: rawRange.low / normalizedYahoo.divisor, high: rawRange.high / normalizedYahoo.divisor,
         start: rawRange.start, end: rawRange.end, count: rawRange.count } : null;
     const rangeAge = recentRange && airsDate ? (Date.parse(airsDate) - Date.parse(recentRange.end)) / 86400000 : NaN;
-    const rangeAssessment = !valid || row.served_by || row.verdict === 'cross_listed'
-      || !recentRange || recentRange.count !== 5 || !(rangeAge > 0 && rangeAge <= 7)
-      ? 'insufficient' : airs >= recentRange.low - 0.005 && airs <= recentRange.high + 0.005 ? 'within' : 'outside';
+    // A missing five-session range is distinct from a linked listing or an incompatible currency.
+    // Calling all of those “not enough history” hid the real reason when five closes were plainly
+    // displayed in the adjacent column.
+    const rangeAssessment: RangeAssessment = !valid || row.served_by || row.verdict === 'cross_listed'
+      ? 'notComparable' : !recentRange || recentRange.count !== 5
+        ? 'insufficient' : !(rangeAge > 0 && rangeAge <= 7)
+          ? 'staleRange' : airs >= recentRange.low - 0.005 && airs <= recentRange.high + 0.005 ? 'within' : 'outside';
     let status: PriceStatus;
     if (row.served_by || row.verdict === 'cross_listed') status = 'linked';
     else if (!valid || !airsDate || !yahooDate) status = 'unavailable';

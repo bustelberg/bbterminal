@@ -54,7 +54,8 @@ def is_direct_equity_stock(holding: dict) -> bool:
 
 # What a portfolio line must have before it can be compared with an index at all.
 #  `currency` IS THE LISTING'S, and the exposure view needs it — see `_portfolio_exposure`.
-_GRID_COLS = "isin,gf_company_name,name,currency,status,analysis_id"
+_GRID_COLS = "isin,gf_company_name,name,currency,status,analysis_id,yahoo_symbol"
+_EXECUTION_COLS = "isin,analysis_id,yahoo_symbol,name,status"
 
 # Trailing corporate forms, stripped before two names are called the same issuer. Deliberately
 # SHORT and suffix-only — see `_issuer_key`.
@@ -67,6 +68,20 @@ _SUFFIX = re.compile(
 _CLASS = re.compile(
     r"[\s,.]+(class\s+[a-c]|cl\s+[a-c]|series\s+[a-c]|[ab]\s+shares|shares\s+[ab]|"
     r"sponsored\s+adr|unsponsored\s+adr|adr|ads|reg\s*s|registered)\.?$", re.I)
+
+_ETF_NAME = re.compile(r"\b(etf|ucits|ishares|vanguard|invesco)\b", re.I)
+
+
+def _policy_bucket(holding: dict) -> str:
+    """Display bucket for an Active Share policy row."""
+    # AIRS occasionally labels an ETF as plain Equity. Bonds win first because a bond ETF is
+    # still a bond in this comparison.
+    if holding.get("bucket") == "Bonds":
+        return "Bonds"
+    if (holding.get("bucket") == "ETF Equity" or holding.get("is_fund")
+            or _ETF_NAME.search(str(holding.get("name") or ""))):
+        return "Stock ETFs"
+    return "Stocks"
 
 
 def _issuer_key(name: str | None) -> str:
@@ -126,6 +141,30 @@ def _grid_by_isin(isins: list[str]) -> dict[str, dict]:
         prev = out.get(key)
         if prev is None or ((r.get("gf_company_name") or "") and not (prev.get("gf_company_name") or "")):
             out[key] = r
+    return out
+
+
+def _execution_by_isin(isins: list[str]) -> dict[str, dict]:
+    """The authoritative saved execution identity for each requested ISIN.
+
+    ``asset_grid`` is a denormalised reporting view.  It is useful for display data, but an
+    Active Share issuer match must not disappear while that view is rebuilding or lagging behind
+    ``asset_execution``.  The latter is the exact identity source used to resolve ACWI members.
+    Only healthy executions are eligible: a failed resolver must never manufacture an overlap.
+    """
+    if not isins:
+        return {}
+    rows = load_rows_via_copy("asset_execution", _EXECUTION_COLS, "isin", isins)
+    if rows is None:
+        rows = []
+        for i in range(0, len(isins), IN_CHUNK_SIZE):
+            rows += (supabase.table("asset_execution").select(_EXECUTION_COLS)
+                     .in_("isin", isins[i:i + IN_CHUNK_SIZE]).execute().data or [])
+    out: dict[str, dict] = {}
+    for row in rows:
+        isin = (row.get("isin") or "").strip().upper()
+        if isin and row.get("status") == "ok" and row.get("analysis_id") is not None:
+            out[isin] = row
     return out
 
 
@@ -199,22 +238,139 @@ def build_issuer_weights(holdings: list[dict], benchmark: str,
     index = _benchmark_weights(benchmark, benchmark_start)
     bench, coverage = index["bench"], index["coverage"]
     # Join the two data vendors through our asset identity, never through display spelling.
+    # ``asset_grid`` can temporarily lag the execution record after a resolver repair.  Fill
+    # just those missing identities from ``asset_execution`` — the same source ACWI membership
+    # uses — so a real ACWI name cannot turn into a dash during that refresh window.
     canonical = index["issuer_by_asset"]
     if canonical:
-        p_entries = [
-            (canonical.get(int(grid[isin]["analysis_id"]), key)
-             if grid.get(isin, {}).get("analysis_id") is not None else key, name, weight)
-            for (key, name, weight), h in zip(p_entries, stocks)
-            for isin in [(h.get("isin") or "").strip().upper()]
+        missing_identity_isins = [
+            (h.get("isin") or "").strip().upper() for h in stocks
+            if (h.get("isin") or "").strip().upper()
+            and (grid.get((h.get("isin") or "").strip().upper()) or {}).get("analysis_id") is None
         ]
+        executions = _execution_by_isin(sorted(set(missing_identity_isins)))
+        bridged_entries: list[tuple[str, str, float]] = []
+        for (key, name, weight), holding in zip(p_entries, stocks):
+            isin = (holding.get("isin") or "").strip().upper()
+            # A grid row without an ID is still useful for its display name, but it must not mask
+            # a healthy execution row that does have the canonical company identity.
+            analysis_id = ((grid.get(isin) or {}).get("analysis_id")
+                           or (executions.get(isin) or {}).get("analysis_id"))
+            bridged_entries.append((canonical.get(int(analysis_id), key)
+                                    if analysis_id is not None else key, name, weight))
+        p_entries = bridged_entries
         port = _fold(p_entries)
 
     return {"port": port, "bench": bench, "stocks_w": stocks_w, "total_all": total_all,
             "unresolved": unresolved, "coverage": coverage}
 
 
+def _risk_profile_holding(holding: dict) -> bool:
+    """A Stocks/Bonds constituent for the reviewed policy comparison."""
+    return (holding.get("bucket") in {"Equity", "ETF Equity", "Bonds"}
+            and bool((holding.get("isin") or "").strip())
+            and float(holding.get("weight_pct") or 0) > 0)
+
+
+def build_policy_issuer_weights(holdings: list[dict], benchmark: str,
+                                benchmark_start: str | None,
+                                policy_weights: dict[str, float]) -> dict:
+    """Whole Stocks/Bonds book versus its fixed ACWI/AGGH policy benchmark.
+
+    Bonds remain in this version: allocation to the bond sleeve is one of the policy decisions
+    being measured. AGGH.AS is a single transparent benchmark position because we do not have
+    constituent-level membership data for the aggregate-bond ETF.
+    """
+    try:
+        stock_target = float(policy_weights.get("Stocks", 0.0))
+        bond_target = float(policy_weights.get("Bonds", 0.0))
+    except (TypeError, ValueError):
+        raise IssuerError("The risk-profile benchmark weights are invalid.")
+    if stock_target < 0 or bond_target < 0 or abs(stock_target + bond_target - 100.0) > 0.01:
+        raise IssuerError("The risk-profile benchmark must contain Stocks and Bonds totaling 100%.")
+
+    selected = [h for h in holdings if _risk_profile_holding(h)]
+    total = sum(float(h["weight_pct"]) for h in selected)
+    if total <= 0:
+        raise IssuerError("This book holds no Stocks or Bonds constituent to compare.")
+
+    direct = [h for h in selected if is_direct_equity_stock(h)]
+    # The stored execution symbol is the only quote link we may show. Fetch it for every policy
+    # holding, including ETFs, but never manufacture a Yahoo URL from a fund name.
+    grid = _grid_by_isin(sorted({(h.get("isin") or "").strip().upper() for h in selected}))
+    # Do not duplicate the ACWI issuer bridge here. The conventional Active Share builder has
+    # the reviewed workbook/asset identity join (including cross-listings and accented names such
+    # as Hermès and L'Oréal); policy mode must reuse it rather than approximate it a second way.
+    direct_built = (build_issuer_weights(holdings, benchmark, benchmark_start) if direct else None)
+    index = _benchmark_weights(benchmark, benchmark_start)
+    entries: list[tuple[str, str, float]] = []
+    unresolved: list[dict] = []
+    buckets: dict[str, str] = {}
+    symbols: dict[str, str] = {}
+    direct_isins = {(h.get("isin") or "").strip().upper() for h in direct}
+
+    port = {}
+    if direct_built:
+        direct_scale = direct_built["stocks_w"] / total
+        direct_buckets_by_name = {
+            str(h.get("name") or ""): _policy_bucket(h) for h in direct
+        }
+        port = {
+            key: {**row, "weight_pct": row["weight_pct"] * direct_scale,
+                  "bucket": direct_buckets_by_name.get(str(row.get("name") or ""), "Stocks")}
+            for key, row in direct_built["port"].items()
+        }
+        unresolved.extend({**row, "weight_pct": row["weight_pct"] * direct_scale}
+                          for row in direct_built["unresolved"])
+
+    for h in selected:
+        isin = (h.get("isin") or "").strip().upper()
+        name = h.get("name") or isin
+        # Bonds and funds are investable positions but not ACWI companies. Keeping their ISIN as
+        # the identity makes the lack of overlap explicit instead of silently dropping it.
+        if isin in direct_isins:
+            # Already folded and identity-matched by `build_issuer_weights` above.
+            continue
+        key = f"isin:{isin}"
+        if key.startswith("isin:"):
+            unresolved.append({"name": name, "isin": isin,
+                               "weight_pct": float(h["weight_pct"]) / total * 100.0})
+        entries.append((key, name, float(h["weight_pct"]) / total * 100.0))
+        buckets[key] = _policy_bucket(h)
+        symbol = str((grid.get(isin) or {}).get("yahoo_symbol") or "").strip()
+        if symbol:
+            symbols[key] = symbol
+
+    bench = {
+        key: {**row, "weight_pct": row["weight_pct"] * stock_target / 100.0}
+        for key, row in (direct_built or index)["bench"].items()
+    }
+    if bond_target > 0:
+        bench["benchmark:aggh.as"] = {
+            "key": "benchmark:aggh.as", "name": "AGGH.AS", "weight_pct": bond_target,
+        }
+    label = " + ".join(
+        f"{weight:g}% {name}"
+        for name, weight in (("ACWI", stock_target), ("AGGH.AS", bond_target)) if weight > 0
+    )
+    stocks_w = sum(float(h["weight_pct"]) for h in selected if h.get("bucket") != "Bonds")
+    for key, row in _fold(entries).items():
+        if key in port:
+            port[key]["weight_pct"] += row["weight_pct"]
+        else:
+            port[key] = {**row, "bucket": buckets.get(key, "Stocks")}
+        port[key]["bucket"] = buckets.get(key, port[key].get("bucket", "Stocks"))
+        port[key]["yahoo_symbol"] = symbols.get(key)
+    for key, row in bench.items():
+        row["bucket"] = "Bonds" if key == "benchmark:aggh.as" else "Stocks"
+    return {"port": port, "bench": bench, "stocks_w": stocks_w, "total_all": total,
+            "unresolved": unresolved, "coverage": index["coverage"], "label": label,
+            "whole_policy": True}
+
+
 def compute_active_share(holdings: list[dict], benchmark: str,
-                         benchmark_start: str | None = None) -> dict:
+                         benchmark_start: str | None = None,
+                         benchmark_weights: dict[str, float] | None = None) -> dict:
     """Active share of the book's individual stocks against `benchmark`.
 
     `holdings` are the rows the Analyse modal is already showing — `{isin, weight_pct, name,
@@ -223,16 +379,16 @@ def compute_active_share(holdings: list[dict], benchmark: str,
     a number the table cannot be made to reproduce.
     """
     try:
-        built = build_issuer_weights(holdings, benchmark, benchmark_start)
+        built = (build_policy_issuer_weights(holdings, benchmark, benchmark_start, benchmark_weights)
+                 if benchmark_weights else build_issuer_weights(holdings, benchmark, benchmark_start))
     except IssuerError as e:
         return {"available": False, "reason": e.reason, "benchmark": benchmark}
     sleeve_port, bench = built["port"], built["bench"]
     stocks_w, total_all = built["stocks_w"], built["total_all"]
     unresolved, coverage = built["unresolved"], built["coverage"]
 
-    # Active share is an equity-sleeve measure. The builder has already normalised its direct
-    # stock vector to 100%; funds, cash, bonds and fixed-income certificates do not reappear as a
-    # synthetic residual bet against ACWI.
+    # Generic books use the conventional equity sleeve; risk-profile books compare their entire
+    # investable Stocks/Bonds sleeve with the reviewed policy benchmark.
     port = sleeve_port
 
     # ── ½ Σ |wᵖ − wᵇ| over the UNION ───────────────────────────────────────────────────────────
@@ -252,22 +408,27 @@ def compute_active_share(holdings: list[dict], benchmark: str,
             "yfinance_return_pct": (bench.get(key) or {}).get("yfinance_return_pct"),
             "normalisation_total": (bench.get(key) or {}).get("normalisation_total"),
             "weight_calculation": (bench.get(key) or {}).get("weight_calculation"),
+            # Policy rows retain their Stocks/Bonds identity so the UI can separate the two
+            # sleeves without trying to infer an asset class from a display name.
+            "bucket": (port.get(key) or bench.get(key) or {}).get("bucket"),
+            "yahoo_symbol": (port.get(key) or bench.get(key) or {}).get("yahoo_symbol"),
         })
     active_share = sum(abs(r["active_pct"]) for r in rows) / 2.0
     overlap = sum(min(r["portfolio_pct"], r["benchmark_pct"]) for r in rows)
 
     # Keep the stock-sleeve Active share identity above, but display the literal AIRS share of
     # the complete book. The input weights retain that denominator even after non-stocks filter out.
-    for row in rows:
-        row["portfolio_pct"] *= stocks_w / 100.0
-        row["active_pct"] = row["portfolio_pct"] - row["benchmark_pct"]
+    if not built.get("whole_policy"):
+        for row in rows:
+            row["portfolio_pct"] *= stocks_w / 100.0
+            row["active_pct"] = row["portfolio_pct"] - row["benchmark_pct"]
     rows.sort(key=lambda row: -abs(row["active_pct"]))
 
     held = [r for r in rows if r["held"] and not r["residual"]]
     in_bench = [r for r in held if r["in_benchmark"]]
     return {
         "available": True,
-        "benchmark": benchmark,
+        "benchmark": built.get("label") or benchmark,
         "active_share_pct": active_share,
         #  Returned, not left to the client as `100 − AS`. The identity is the POINT (it is what
         # makes active share a share of something), and a reader checking it against the two

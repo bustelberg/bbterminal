@@ -1228,6 +1228,11 @@ def _run_asset_price_refresh(trigger: str) -> None:
         # last date to compare), so repair that distinct case after the cheap
         # detection pass. This uses its existing symbol and cannot remap it.
         backfill = price_refresh.backfill_missing(watched)
+        # A handful of reviewed funds publish their official NAV outside Yahoo. Keep those exact
+        # sources on the same daily path: otherwise they are only repaired after a user opens a
+        # risk view that has already failed. This is a bounded, reviewed list (currently one
+        # source), never a search or a guessed proxy.
+        nav_fallback = price_refresh.backfill_nav_fallbacks(watched)
 
         # Analyse also shows benchmark returns derived from a small set of Yahoo ETF proxies.
         # These used to be refreshed only from the smart daily pipeline, which is conditional on
@@ -1255,12 +1260,15 @@ def _run_asset_price_refresh(trigger: str) -> None:
             detail = f"all {considered} watched instrument(s) current as of {latest}"
             if backfill["backfilled"]:
                 detail += f"; {backfill['backfilled']} absent series backfilled"
+            if nav_fallback["stored"]:
+                detail += f"; {nav_fallback['stored']} published NAV fallback refreshed"
             if proxies_refreshed is not None:
                 detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
             else:
                 rec.skip(detail)
             rec.done(detail, considered=considered, latest=str(latest), stale=0,
                      price_backfilled=backfill["backfilled"],
+                     nav_fallback_refreshed=nav_fallback["stored"],
                      analyse_benchmark_proxies_refreshed=proxies_refreshed)
             return
 
@@ -1282,10 +1290,13 @@ def _run_asset_price_refresh(trigger: str) -> None:
         detail = f"{r['moved']} moved, {r['unchanged']} unchanged, {r['failed']} failed"
         if proxies_refreshed is not None:
             detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
+        if nav_fallback["stored"]:
+            detail += f"; {nav_fallback['stored']} published NAV fallback refreshed"
         rec.done(detail,
                  considered=considered, stale=len(stale), moved=r["moved"],
                  unchanged=r["unchanged"], failed=r["failed"],
                  price_backfilled=backfill["backfilled"],
+                 nav_fallback_refreshed=nav_fallback["stored"],
                  analyse_benchmark_proxies_refreshed=proxies_refreshed)
       except Exception as e:  # noqa: BLE001
         #  Caught here, so the record must be set by hand. `record_run` marks a run failed off the

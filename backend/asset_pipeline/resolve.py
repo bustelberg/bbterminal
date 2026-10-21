@@ -269,6 +269,13 @@ def _score(symbol: str) -> dict | None:
         for i in range(min(len(cl), len(vl), len(ts)))
         if cl[i] and vl[i] and yahoo.is_closed_bar(ts[i])  # skip today's partial bar
     ]
+    # A mutual fund reports a daily NAV, not exchange turnover. Preserve the count of usable
+    # closes independently of ADV so a reviewed fund listing can be validated without inventing
+    # liquidity that does not exist.
+    price_bars = sum(
+        1 for i in range(min(len(cl), len(ts)))
+        if cl[i] is not None and yahoo.is_closed_bar(ts[i])
+    )
     med = st.median(vals) if vals else 0.0
     ft = meta.get("firstTradeDate")
     start = yahoo.utc_dt(ft).date().isoformat() if ft else None
@@ -277,6 +284,7 @@ def _score(symbol: str) -> dict | None:
         "currency": ccy,
         "exchange": meta.get("fullExchangeName"),
         "med_adv_eur": med,
+        "price_bars": price_bars,
         "first_date": start,
         "first_ts": ft,
         "years": round(_years(start), 1),

@@ -58,6 +58,75 @@ def _run(freq: str = "daily", holdings=None, *, require_complete_return: bool = 
         "ACWI", frequency=freq, require_complete_return=require_complete_return)
 
 
+class TestBenchmarkHistory:
+    def test_new_holding_joins_after_two_prices_and_old_weights_are_renormalised(self):
+        days = ["2021-10-19", "2024-10-19", "2026-10-19"]
+        built = {
+            "benchmark_component_weights": {"ACWI": 100},
+            "benchmark_component_isins": {"ACWI": BENCH},
+            "weight": {ONE: .6, BOND: .4}, "names": {ONE: "Old", BOND: "New"},
+            "series": {
+                BENCH: list(zip(days, [100, 100, 100])),
+                ONE: list(zip(days, [100, 110, 121])),
+                BOND: list(zip(days[1:], [100, 120])),
+            },
+        }
+        got = T._current_weights_history(built, 5)
+        assert got["available"]
+        # First period earns the old holding's 10% at 100% weight. Second earns 60/40 of 10/20%.
+        assert got["total_return_pct"] == pytest.approx((1.1 * 1.14 - 1) * 100)
+        assert got["min_weight_covered_pct"] == pytest.approx(60)
+        assert got["avg_weight_covered_pct"] == pytest.approx(80)
+        assert got["coverage_adjusted"]
+        assert got["holdings_history"][1]["first_used"] == days[1]
+        assert got["active_return_pp"] == pytest.approx(got["portfolio_cagr_pct"])
+
+    def test_no_priced_holdings_for_a_period_is_not_a_flat_return(self):
+        built = {
+            "benchmark_component_weights": {"ACWI": 100},
+            "benchmark_component_isins": {"ACWI": BENCH},
+            "weight": {ONE: 1}, "names": {},
+            "series": {BENCH: [("2021-10-19", 100), ("2026-10-19", 120)], ONE: []},
+        }
+        got = T._current_weights_history(built, 5)
+        assert not got["available"]
+        assert "No holdings" in got["reason"]
+
+    def test_current_weights_five_year_comparison_uses_matching_benchmark_dates(self, wire):
+        dates = _weekdays(1600)
+        returns = [0.0001] * (len(dates) - 1)
+        wire(returns, returns, dates)
+        result = _run("monthly", require_complete_return=True)
+        comparison = result["historical_comparison"]
+        assert comparison["available"]
+        assert comparison["portfolio_cagr_pct"] == pytest.approx(comparison["benchmark_cagr_pct"])
+        assert comparison["active_return_pp"] == pytest.approx(0)
+        assert comparison["start_date"] == result["benchmark_history"]["start_date"]
+        assert comparison["end_date"] == result["benchmark_history"]["end_date"]
+
+    def test_young_portfolio_does_not_shorten_five_year_benchmark(self):
+        built = {
+            "keys": ["2026-09-10", "2026-10-19"],
+            "benchmark_component_weights": {"ACWI": 60, "BONDS": 40},
+            "benchmark_component_isins": {"ACWI": BENCH, "BONDS": BOND_BENCH},
+            "series": {
+                BENCH: [("2021-10-19", 100), ("2026-09-10", 150), ("2026-10-19", 160)],
+                BOND_BENCH: [("2021-10-19", 5), ("2026-09-10", 4.8), ("2026-10-19", 4.9)],
+            },
+        }
+        got = T._benchmark_history(built, 5)
+        assert got["start_date"] == "2021-10-19"
+        assert got["end_date"] == "2026-10-19"
+        assert got["complete"] is True
+        stock = got["components"][0]
+        assert stock["start_price_eur"] == 100
+        assert stock["end_price_eur"] == 160
+        assert stock["window_return_pct"] == pytest.approx(60)
+        elapsed = (date.fromisoformat("2026-10-19") - date.fromisoformat("2021-10-19")).days / 365.25
+        wealth = (1 + .6 * .5 + .4 * (-.04)) * (1 + .6 * (160 / 150 - 1) + .4 * (4.9 / 4.8 - 1))
+        assert got["cagr_pct"] == pytest.approx((wealth ** (1 / elapsed) - 1) * 100)
+
+
 class TestTheDefinition:
     def test_risk_profile_uses_bonds_in_the_portfolio_and_fixed_policy_benchmark(self, monkeypatch):
         """A Neutral profile is a 60/40 portfolio, never a stocks-only ACWI comparison."""
@@ -83,6 +152,21 @@ class TestTheDefinition:
         assert built["benchmark"][0] == pytest.approx(0.020)
         assert built["benchmark_label"] == "60% ACWI + 40% AGGH.AS"
         assert built["total"] == 2
+
+    def test_missing_aggh_history_names_the_broken_policy_tracker(self, monkeypatch):
+        dates = _weekdays(400)
+        import routers._airs_portfolio_analysis as PA
+        T._risk_prices.cache_clear()
+        monkeypatch.setattr(PA, "_daily_eur", lambda _isins, _years: {
+            ONE: _prices([0.01] * 399, dates),
+            BOND: _prices([0.0] * 399, dates),
+            BENCH: _prices([0.01] * 399, dates),
+        })
+        with pytest.raises(T.SeriesError, match=r"AGGH\.AS"):
+            T.build_paired_series([
+                {"isin": ONE, "name": "Stock", "weight_pct": 60.0, "bucket": "Equity"},
+                {"isin": BOND, "name": "Bond", "weight_pct": 40.0, "bucket": "Bonds"},
+            ], "ACWI", "daily", 5, benchmark_weights={"Stocks": 60, "Bonds": 40})
 
     def test_non_stock_positions_stay_in_the_airs_denominator(self, wire):
         dates = _weekdays(400)
@@ -151,6 +235,43 @@ class TestTheDefinition:
 
 
 class TestWhatItRefuses:
+    def test_no_common_history_repairs_once_then_retries(self, monkeypatch):
+        dates = _weekdays(500)
+        prices = _prices([0.001] * (len(dates) - 1), dates)
+        repaired = False
+        import routers._airs_portfolio_analysis as PA
+
+        def _load(_isins, _years):
+            return {ONE: prices if repaired else [], BENCH: prices}
+
+        def _repair(isins, years):
+            nonlocal repaired
+            assert {ONE, BENCH} <= isins
+            assert years == 5
+            repaired = True
+            T._risk_prices.cache_clear()
+
+        monkeypatch.setattr(PA, "_daily_eur", _load)
+        monkeypatch.setattr(T, "_repair_risk_inputs", _repair)
+        T._risk_prices.cache_clear()
+
+        got = _run("monthly", require_complete_return=True)
+
+        assert repaired is True
+        assert got["available"] is True
+
+    def test_no_common_history_names_unpriced_holdings_after_repair(self, monkeypatch):
+        import routers._airs_portfolio_analysis as PA
+        monkeypatch.setattr(PA, "_daily_eur", lambda _isins, _years: {ONE: [], BENCH: []})
+        monkeypatch.setattr(T, "_repair_risk_inputs", lambda _isins, _years: None)
+        T._risk_prices.cache_clear()
+
+        got = _run("monthly", require_complete_return=True)
+
+        assert got["available"] is False
+        assert "Automatic price and FX repair" in got["reason"]
+        assert "One" in got["reason"]
+
     def test_quality_gate_reports_ready_policy_inputs(self, monkeypatch):
         dates = _weekdays(1_600)
         prices = _prices([0.001] * (len(dates) - 1), dates)
@@ -169,8 +290,8 @@ class TestWhatItRefuses:
         assert got["benchmark"] == "60% ACWI + 40% AGGH.AS"
 
     @pytest.mark.parametrize("metric", ["correlation", "volatility", "drawdown"])
-    def test_every_headline_risk_metric_refuses_incomplete_five_year_history(self, metric, monkeypatch):
-        """The API paths set the strict gate; one chart must not be looser than another."""
+    def test_every_headline_risk_metric_uses_the_latest_complete_window(self, metric, monkeypatch):
+        """All headline metrics retain the exact sleeve, even when its window is shorter."""
         dates = _weekdays(1_600)
         prices = _prices([0.001] * (len(dates) - 1), dates)
         import routers._airs_portfolio_analysis as PA
@@ -192,11 +313,12 @@ class TestWhatItRefuses:
             got = compute_drawdown(holdings, "ACWI", frequency="daily",
                                    require_complete_history=True)
 
-        assert got["available"] is False
-        assert "Incomplete five-year price or FX history" in got["reason"]
+        assert got["available"] is True
+        if metric != "drawdown":
+            assert got["window_from"] >= "2024-07"
 
-    def test_monthly_return_refuses_a_benchmark_shorter_than_five_years(self, wire, monkeypatch):
-        """Two years of benchmark history clears the 24-month floor but is not five years."""
+    def test_monthly_return_uses_a_benchmark_shorter_than_five_years(self, wire, monkeypatch):
+        """A young benchmark produces an honestly labelled common window, not a refusal."""
         dates = _weekdays(1_600)
         returns = [0.001] * (len(dates) - 1)
         prices = _prices(returns, dates)
@@ -210,16 +332,15 @@ class TestWhatItRefuses:
 
         got = _run("monthly", require_complete_return=True)
 
-        assert got["available"] is False
-        assert "Incomplete five-year price or FX history" in got["reason"]
-        assert "ACWI tracker" in got["reason"]
+        assert got["available"] is True
+        assert got["history_limited"] is True
+        assert got["window_from"] >= prices[-700][0][:7]
 
-    def test_monthly_return_refuses_a_holding_with_missing_historical_prices(self, wire, monkeypatch):
+    def test_monthly_return_uses_the_latest_continuous_window_after_a_gap(self, wire, monkeypatch):
         """A production FX-page cap once made a holding vanish from the window's early months.
 
-        The old code returned a plausible annualised return for the surviving sleeve. The return
-        tile promises the *exact* portfolio over five years, so incomplete monthly coverage must
-        be an explicit refusal instead.
+        The return stays exact: it starts after the gap rather than silently dropping the holding
+        from early months or presenting the result as a five-year number.
         """
         dates = _weekdays(1_600)
         returns = [0.001] * (len(dates) - 1)
@@ -234,9 +355,9 @@ class TestWhatItRefuses:
 
         got = _run("monthly", require_complete_return=True)
 
-        assert got["available"] is False
-        assert "Incomplete five-year price or FX history" in got["reason"]
-        assert "One" in got["reason"]
+        assert got["available"] is True
+        assert got["history_limited"] is True
+        assert got["window_from"] >= "2024-07"
 
     def test_too_few_observations(self, wire):
         dates = _weekdays(40)
@@ -246,6 +367,38 @@ class TestWhatItRefuses:
         assert got["available"] is False
         #  The floor is named. "Not enough data" sends the reader to guess whether it is a bug.
         assert str(T.MIN_OBS["daily"]) in got["reason"]
+
+    def test_monthly_short_history_uses_an_exact_preliminary_daily_measure(self, monkeypatch):
+        """New funds have real daily closes well before they have 12 monthly returns."""
+        dates = _weekdays(28)
+        prices = _prices([0.001] * (len(dates) - 1), dates)
+        import routers._airs_portfolio_analysis as PA
+        monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: {ONE: prices, BENCH: prices})
+        T._risk_prices.cache_clear()
+
+        got = _run("monthly", require_complete_return=True)
+
+        assert got["available"] is True
+        assert got["preliminary"] is True
+        assert got["frequency"] == "daily"
+        assert got["observations"] == len(dates) - 1
+        # The UI's audit cards receive the actual compounded window return and exponent, rather
+        # than having to reverse-engineer rounded annualised figures.
+        assert got["portfolio_return_total_pct"] is not None
+        assert got["benchmark_return_total_pct"] is not None
+        assert got["annualization_factor"] == pytest.approx(252 / (len(dates) - 1))
+        assert got["active_return_std_per_period_pct"] is not None
+        component = got["benchmark_components"]
+        assert len(component) == 1
+        assert component[0]["name"] == "ACWI"
+        assert component[0]["isin"] == BENCH
+        assert component[0]["weight_pct"] == 100.0
+        assert component[0]["window_return_pct"] == pytest.approx(got["benchmark_return_total_pct"])
+        assert component[0]["annualized_return_pct"] == pytest.approx(got["benchmark_return_ann_pct"])
+        assert component[0]["start_price_eur"] == pytest.approx(prices[0][1])
+        assert component[0]["end_price_eur"] == pytest.approx(prices[-1][1])
+        assert component[0]["start_date"] == prices[0][0]
+        assert component[0]["end_date"] == prices[-1][0]
 
     def test_a_benchmark_with_no_investable_tracker(self, wire):
         dates = _weekdays(400)

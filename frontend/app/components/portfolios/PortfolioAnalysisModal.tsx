@@ -4345,6 +4345,7 @@ export default function PortfolioAnalysisModal({
                `book_holdings`, NOT `holdings`: the latter is a COUNT on this payload
               (`holdings: int`), so the obvious name silently types as a number. */}
           <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
+            portefeuille={data.book_portefeuille}
             holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
             riskProfilePolicy={data.risk_profile_policy}
             //  The book's dates travel with its weights. The panel cannot derive them — an array
