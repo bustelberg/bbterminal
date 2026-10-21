@@ -34,6 +34,10 @@ describe('dashboard price checks', () => {
       expect(newPriceDifferences(null, different)).toBe(0);
     }
   });
+  it('keeps the resolved Yahoo symbol so the discrepancy can be inspected at its source', () => {
+    const item = summarize(holding({ yahoo_symbol: 'ENI.MI' })).items[0];
+    expect(item.yahooSymbol).toBe('ENI.MI');
+  });
   it('excludes High Income Quality fund by ISIN from rows, counts and alerts', () => {
     const excluded = holding({ isin: 'CH1369849273', holding_name: 'High Income Quality fund', airs_price_local: 1000 });
     const summary = summarize(holding(), excluded);
@@ -71,12 +75,14 @@ describe('dashboard price checks', () => {
     expect(needsPriceReview(summary)).toBe(true); // The stale 20% gap is still worth investigating.
   });
 
-  it('excludes cash but keeps unpriceable investments in the coverage denominator', () => {
+  it('limits the exception list to listed equities and ETFs', () => {
     const summary = summarize(holding(), holding({ holding_name: 'Cash', bucket: 'Cash' }),
-      holding({ holding_name: 'Certificate', our_price_local: null }));
+      holding({ holding_name: 'Bond', bucket: 'Bonds', our_price_local: null }),
+      holding({ holding_name: 'ETF', is_etf: true, certificate_holding: 'Star certificate', our_price_local: null }));
     expect(summary.total).toBe(2);
     expect(summary.checked).toBe(1);
     expect(summary.unavailable).toBe(1);
+    expect(summary.items[1].certificate).toBe('Star certificate');
     expect(needsPriceReview(summarize(holding()))).toBe(false);
     expect(summarize().checked).toBe(0);
   });

@@ -4448,9 +4448,16 @@ class AirsHoldingIsin(BaseModel):
     # newest bar sat six days back, and every stored bar matched Yahoo to the cent.
     verdict: str
     our_instrument: str | None = None
+    yahoo_symbol: str | None = None
+    # The Toppenberg certificate whose strategy contains this instrument. Only present on the
+    # look-through price-check rows; a regular holding has no wrapper certificate.
+    certificate_holding: str | None = None
     # The date of the close on OUR side of the ratio, and how far it sits from `as_of`. A ratio
     # without its two dates cannot be argued with.
     our_price_date: str | None = None
+    #: AIRS valuation date for this row. Usually the account-wide `as_of`; Toppenberg price
+    #: checks look through certificates, so an underlying strategy can have its own snapshot.
+    airs_price_date: str | None = None
     price_lag_days: int | None = None
     # Set when this ISIN is deliberately served by ANOTHER ISIN's instrument (an ADR priced from
     # the main company's listing).  The two do not trade at the same number — TSMC is 1 ADR = 5
@@ -4515,6 +4522,8 @@ class AirsAccountIsins(BaseModel):
     model_name: str | None = None
     model_source: str | None = None
     as_of: str | None = None
+    looked_through_certificates: bool = False
+    looked_through_accounts: list[str] = []
     reason: str | None = None
     # Per-phase milliseconds for THIS request — see `_airs_holding_isin._phase`. Expanding a row
     # is a dozen distinct steps and the slow one is not the obvious one, so the breakdown travels

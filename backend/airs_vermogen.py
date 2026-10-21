@@ -222,7 +222,7 @@ def _expire_valuation_memo() -> None:
         _reset_valuation_memo()
 
 
-def _discover_portfolios() -> list[str]:
+def _discover_portfolios(*, should_stop=None) -> list[str]:
     """Current live AirSPMS portfolio names, scraped fresh (Playwright)."""
     from airs_scanner import scan_portfolios_sync  # noqa: PLC0415
     from airs_portfolio_exclusions import is_excluded_portfolio  # noqa: PLC0415
@@ -243,7 +243,7 @@ def _discover_portfolios() -> list[str]:
             _emit("discovery", step=kw.get("step"), declared=kw.get("declared"),
                   message=f"  {kw['message']}")
 
-    result = scan_portfolios_sync(_sink)
+    result = scan_portfolios_sync(_sink, should_stop=should_stop)
     rows = result if result else captured
     names: list[str] = []
     for r in rows:
@@ -1172,8 +1172,27 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
 
         degraded: str | None = None
         try:
-            names = _discover_portfolios()
+            if should_stop is not None and should_stop():
+                _emit("cancelled", step="discovery", message="Cancelled before portfolio discovery")
+                _STATUS.update({
+                    "status": "cancelled", "cancelled_at": "portfolio discovery",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "message": "CANCELLED during portfolio discovery — no accounts were read",
+                    "detail": "Cancelled before AIRS portfolio discovery completed",
+                })
+                return dict(_STATUS)
+            names = (_discover_portfolios(should_stop=should_stop) if should_stop is not None
+                     else _discover_portfolios())
         except Exception as e:
+            from airs_scanner import AirsScanCancelled  # noqa: PLC0415
+            if isinstance(e, AirsScanCancelled):
+                _STATUS.update({
+                    "status": "cancelled", "cancelled_at": "portfolio discovery",
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "message": "CANCELLED during portfolio discovery — no accounts were read",
+                    "detail": "Cancelled at a Playwright-safe discovery boundary",
+                })
+                return dict(_STATUS)
             #  Discovery is the riskiest step and was the only fatal one (2026-08-22). It is the
             # single place that drives somebody else's UI with a browser, and a menu item that
             # became unclickable ended a 46-account run at step one:

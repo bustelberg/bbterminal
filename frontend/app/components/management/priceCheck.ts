@@ -6,6 +6,8 @@ const PRICE_CHECK_EXCLUDED_ISINS = new Set(['CH1369849273']); // High Income Qua
 export type PriceStatus = 'matched' | 'warning' | 'difference' | 'stale' | 'linked' | 'unavailable';
 export type PriceItem = {
   key: string; name: string; isin: string | null; instrument: string | null;
+  yahooSymbol: string | null;
+  certificate: string | null;
   airs: number | null; yahoo: number | null; difference: number | null;
   airsCurrency: string | null; yahooCurrency: string | null;
   recentRange: { low: number; high: number; start: string; end: string; count: number } | null;
@@ -18,13 +20,15 @@ export type PriceSummary = {
 };
 
 export function summarizePrices(data: AirsAccountIsins): PriceSummary {
-  const items = (data.rows ?? []).filter((row) => row.bucket !== 'Cash'
+  // This is an exception list for listed equities only. Bonds and other instruments need their
+  // own quote-unit-aware checks; comparing their clean price to an issuer's share price is noise.
+  const items = (data.rows ?? []).filter((row) => row.bucket === 'Equity'
     && !PRICE_CHECK_EXCLUDED_ISINS.has(row.isin?.trim().toUpperCase() ?? '')).map((row): PriceItem => {
     const airs = row.airs_price_local ?? null;
     const yahoo = row.our_price_local ?? null;
     const airsCurrency = row.currency?.trim() || null;
     const yahooCurrency = row.our_price_currency?.trim() || null;
-    const airsDate = data.as_of?.slice(0, 10) ?? null;
+    const airsDate = row.airs_price_date?.slice(0, 10) ?? data.as_of?.slice(0, 10) ?? null;
     const yahooDate = row.our_price_date?.slice(0, 10) ?? null;
     const valid = !!airsCurrency && airsCurrency === yahooCurrency
       && typeof airs === 'number' && Number.isFinite(airs) && airs > 0
@@ -48,7 +52,8 @@ export function summarizePrices(data: AirsAccountIsins): PriceSummary {
     else status = 'matched';
     return {
       key: JSON.stringify([row.isin ?? '', row.holding_name]), name: row.holding_name,
-      isin: row.isin ?? null, instrument: row.our_instrument ?? null,
+      isin: row.isin ?? null, instrument: row.our_instrument ?? null, yahooSymbol: row.yahoo_symbol ?? null,
+      certificate: row.certificate_holding ?? null,
       airs, yahoo, difference, airsCurrency, yahooCurrency, airsDate, yahooDate, status, recentRange, rangeAssessment,
     };
   });

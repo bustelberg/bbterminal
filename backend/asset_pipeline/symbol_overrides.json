@@ -101,6 +101,12 @@
       "symbol": "WAB",
       "name": "Westinghouse Air Brake Technologies Corp",
       "note": "The Leonteq constituent is the US ordinary share. The automatic resolver chose WAB.VI, a Vienna proxy; the verified Yahoo primary listing is WAB, which preserves the US security and its longer native price history."
+    },
+    {
+      "isin": "PLDINPL00011",
+      "symbol": "DNP.WA",
+      "name": "Dino Polska S.A.",
+      "note": "The held Polish ordinary share trades on the Warsaw Stock Exchange as DNP.WA. Automatic resolution selected 0TCP.IL, a London listing with a different price scale (PLN 38.80 in AIRS versus PLN 77.50), producing a false -49.94% price-check alarm. Pin the Warsaw ordinary so the comparison uses the exact ISIN's native PLN price series."
     }
   ]
 }

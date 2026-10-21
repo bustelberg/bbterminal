@@ -20,6 +20,8 @@ Two independent changes, one pinned here and one in `airs_scanner`:
 """
 from __future__ import annotations
 
+import pytest
+
 import airs_vermogen as V
 
 
@@ -114,3 +116,65 @@ class TestTheMenuClickCannotFailTheScan:
 
         assert [k for k, _ in seen] == ["progress"], seen
         assert "navigating straight to the selection page" in seen[0][1]
+
+
+class TestDiscoveryCancellation:
+    def test_delay_checks_cancel_every_200ms(self):
+        import airs_scanner
+
+        waits: list[int] = []
+        events: list[tuple[str, str]] = []
+
+        class Page:
+            def wait_for_timeout(self, milliseconds):
+                waits.append(milliseconds)
+
+        with pytest.raises(airs_scanner.AirsScanCancelled):
+            airs_scanner._wait_with_cancellation(
+                Page(), 3000, lambda: len(waits) >= 1,
+                lambda kind, **kw: events.append((kind, kw["message"])), "portfolio selection")
+
+        assert waits == [200]
+        assert events == [("cancelled", "Cancelled during portfolio selection")]
+
+    def test_table_wait_polls_for_cancel_instead_of_waiting_ten_seconds(self):
+        import airs_scanner
+
+        waits: list[int] = []
+
+        class Frame:
+            def wait_for_selector(self, _selector, *, timeout):
+                waits.append(timeout)
+                raise airs_scanner.PlaywrightTimeoutError("still loading")
+
+        with pytest.raises(airs_scanner.AirsScanCancelled):
+            airs_scanner._wait_for_selector_with_cancellation(
+                Frame(), "tr.list_dataregel", 10_000, lambda: len(waits) >= 1,
+                lambda *_a, **_kw: None, "portfolio table page 1")
+
+        assert waits == [200]
+
+    def test_cancel_during_discovery_does_not_fall_back_to_or_scan_the_roster(self, monkeypatch):
+        import airs_scanner
+
+        calls = 0
+
+        def should_stop():
+            nonlocal calls
+            calls += 1
+            return calls > 1
+
+        def discovery(*, should_stop):
+            assert should_stop(), "the discovery worker must receive the live cancellation flag"
+            raise airs_scanner.AirsScanCancelled("cancelled during portfolio table page 1")
+
+        monkeypatch.setattr(V, "_discover_portfolios", discovery)
+        monkeypatch.setattr(V, "_roster_names", lambda: pytest.fail("cancel must not use fallback"))
+
+        result = V.run_airs_vermogen_refresh_sync(triggered_by="test", should_stop=should_stop)
+
+        assert result["status"] == "cancelled"
+        assert result["cancelled_at"] == "portfolio discovery"
+        assert "no accounts were read" in result["message"]
+        assert V._LOCK.acquire(blocking=False), "discovery cancellation must release the AIRS lock"
+        V._LOCK.release()

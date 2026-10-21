@@ -60,6 +60,45 @@ class AirsAccessForbiddenError(RuntimeError):
         self.detail = detail
 
 
+class AirsScanCancelled(RuntimeError):
+    """Discovery was stopped at a Playwright-safe boundary."""
+
+
+def _stop_if_requested(should_stop, send_event, where: str) -> None:
+    """Cooperatively stop discovery without abandoning a browser operation mid-flight."""
+    if should_stop is not None and should_stop():
+        send_event("cancelled", step="cancelled", message=f"Cancelled during {where}")
+        raise AirsScanCancelled(f"cancelled during {where}")
+
+
+def _wait_with_cancellation(page, milliseconds: int, should_stop, send_event, where: str) -> None:
+    """Make intentional Playwright delays responsive instead of sleeping through Cancel."""
+    remaining = milliseconds
+    while remaining > 0:
+        _stop_if_requested(should_stop, send_event, where)
+        interval = min(200, remaining)
+        page.wait_for_timeout(interval)
+        remaining -= interval
+    _stop_if_requested(should_stop, send_event, where)
+
+
+def _wait_for_selector_with_cancellation(frame, selector: str, timeout_ms: int,
+                                         should_stop, send_event, where: str) -> None:
+    """Poll a selector in short waits so one 10-second timeout cannot mask Cancel."""
+    deadline = time.monotonic() + timeout_ms / 1000
+    while True:
+        _stop_if_requested(should_stop, send_event, where)
+        remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+        try:
+            frame.wait_for_selector(selector, timeout=min(200, remaining_ms))
+        except PlaywrightTimeoutError:
+            if time.monotonic() >= deadline:
+                raise
+        else:
+            _stop_if_requested(should_stop, send_event, where)
+            return
+
+
 def _looks_forbidden(diag: str) -> bool:
     """True when a `_capture_login_diagnostics` string indicates the page
     we landed on was a 403 / forbidden / access-denied gateway response
@@ -673,14 +712,16 @@ def _selectie_count(frame) -> int | None:
 
 # ─── Scanner (uses its own browser for DOM scraping) ──────────────────────────
 
-def scan_portfolios_sync(send_event):
+def scan_portfolios_sync(send_event, should_stop=None):
     """Run Playwright scan synchronously (call from a thread)."""
     with sync_playwright() as p:
         browser, page = _new_browser_page(p)
 
         try:
+            _stop_if_requested(should_stop, send_event, "portfolio discovery")
             send_event("progress", step="login", status="in_progress", message="Navigating to login page...")
             _login(page)
+            _stop_if_requested(should_stop, send_event, "login")
             send_event("progress", step="login", status="done", message="Logged in successfully")
 
             # Rapportage > Front-Office.  BEST EFFORT — see `_open_front_office` for why a menu
@@ -695,7 +736,7 @@ def scan_portfolios_sync(send_event):
 
             send_event("progress", step="navigate", status="in_progress", message="Selecting internal portfolios...")
             content.goto(f"{BASE_URL}/{FRONT_OFFICE_SELECTIE_PATH}?{FRONT_OFFICE_FILTERS}")
-            page.wait_for_timeout(3000)
+            _wait_with_cancellation(page, 3000, should_stop, send_event, "portfolio selection")
             send_event("progress", step="navigate", status="done", message="Navigated to internal portfolio selection")
 
             #  AIRS States its own count, and we never read it. The selection page prints
@@ -718,8 +759,11 @@ def scan_portfolios_sync(send_event):
             page_num = 1
 
             while True:
+                _stop_if_requested(should_stop, send_event, f"portfolio table page {page_num}")
                 send_event("progress", step="scrape", status="in_progress", message=f"Reading portfolio table (page {page_num})...")
-                content.wait_for_selector('tr.list_dataregel', timeout=10000)
+                _wait_for_selector_with_cancellation(
+                    content, 'tr.list_dataregel', 10000, should_stop, send_event,
+                    f"portfolio table page {page_num}")
 
                 rows = content.query_selector_all('tr.list_dataregel')
                 before = len(portfolios)
@@ -760,8 +804,10 @@ def scan_portfolios_sync(send_event):
                     break
 
                 page_num += 1
+                _stop_if_requested(should_stop, send_event, f"portfolio table page {page_num}")
                 next_link.click()
-                page.wait_for_timeout(2000)
+                _wait_with_cancellation(page, 2000, should_stop, send_event,
+                                        f"portfolio table page {page_num}")
 
             if dupes:
                 send_event("progress", step="scrape", status="in_progress",
@@ -787,6 +833,8 @@ def scan_portfolios_sync(send_event):
             send_event("portfolios", data=portfolios)
             send_event("done", message=f"Scan complete. Found {len(portfolios)} portfolios.")
             return portfolios
+        except AirsScanCancelled:
+            raise
         except AirsAccessForbiddenError as e:
             send_event(
                 "error",

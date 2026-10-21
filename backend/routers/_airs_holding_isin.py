@@ -836,6 +836,10 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
             "price_ratio": round(ratio, 4) if ratio else None,
             "verdict": verdict,
             "our_instrument": (c or {}).get("name"),
+            # Persist the actual Yahoo listing used for this comparison.  The display name can
+            # be ambiguous (and sometimes reveals a bad match), while the symbol is a stable
+            # link target for investigating it.
+            "yahoo_symbol": (c or {}).get("symbol"),
             # WHEN our side of the comparison is from. A ratio without its two dates cannot be
             # argued with — and this is the field that distinguishes "wrong listing" from "old
             # price", which look identical in the number alone.

@@ -9180,6 +9180,10 @@ export interface components {
             as_of?: string | null;
             /** Checked At */
             checked_at?: string | null;
+            /** Looked Through Certificates */
+            looked_through_certificates?: boolean;
+            /** Looked Through Accounts */
+            looked_through_accounts?: string[];
             /** Model Name */
             model_name?: string | null;
             /** Model Source */
@@ -9509,10 +9513,16 @@ export interface components {
             linked_portfolio_name?: string | null;
             /** Our Instrument */
             our_instrument?: string | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
+            /** Certificate Holding */
+            certificate_holding?: string | null;
             /** Our Price Currency */
             our_price_currency?: string | null;
             /** Our Price Date */
             our_price_date?: string | null;
+            /** Airs Price Date */
+            airs_price_date?: string | null;
             /** Our Price Eur */
             our_price_eur?: number | null;
             /** Our Price Local */

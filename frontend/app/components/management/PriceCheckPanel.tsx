@@ -14,13 +14,13 @@ const en = {
   partial: 'Incomplete check', showIssues: 'Show affected portfolios', showAll: 'Show all portfolios',
   attention: (n: number) => `${n} portfolios need a price check`,
   alert: 'New price differences after refresh', dismiss: 'Dismiss alert',
-  title: 'Price differences', holding: 'Holding', airs: 'AIRS', yahoo: 'Yahoo close',
-  methodology: 'How this check works', subtitle: 'Native currency · gaps ≥5% only', dateDifference: 'Quote dates differ',
+  title: 'Price differences', holding: 'Holding', certificate: 'Certificate', airs: 'AIRS', yahoo: 'Yahoo close',
+  methodology: 'How this check works', subtitle: 'Listed stocks and ETFs · gaps ≥5% only', dateDifference: 'Quote dates differ',
   delta: 'Difference', dates: 'AIRS / Yahoo dates', status: 'Status',
   matched: 'No extreme differences found in the available prices.',
   clear: 'No extreme gaps',
   range: '5-day close range', within: 'Possible timing difference', outside: 'Outside range · investigate', insufficient: 'Not enough recent history',
-  note: 'Native prices are compared only in the same currency and quote unit, without FX conversion. Only gaps of 5% or more are shown and trigger alerts. Different dates are flagged as stale. Missing, linked or different-currency prices are not comparable; cash is excluded.',
+  note: 'Only listed stocks and ETFs are shown. Native prices are compared only in the same currency and quote unit, without FX conversion. Only gaps of 5% or more are shown and trigger alerts. Different dates are flagged as stale.',
   end: 'The range uses five stored trading-session closes before the AIRS report date, not intraday highs/lows or a statistical confidence interval. Being inside suggests timing, not proof. Checks use stored prices; Refresh updates the source data.',
   states: { matched: 'Matched', warning: 'Warning (>2%)', difference: 'Difference (≥5%)', stale: 'Different dates / stale', linked: 'Linked listing — not comparable', unavailable: 'Price unavailable' } satisfies Record<PriceStatus, string>,
 };
@@ -33,12 +33,12 @@ const nl: Copy = {
   checked: (n, total) => `${n}/${total} gecontroleerd`, differences: (n) => `${n} ${n === 1 ? 'verschil' : 'verschillen'}`, stale: (n) => `${n} verouderd`,
   partial: 'Onvolledige controle', showIssues: 'Toon betrokken portefeuilles', showAll: 'Toon alle portefeuilles',
   attention: (n) => `${n} portefeuilles vereisen een koerscontrole`, alert: 'Nieuwe koersverschillen na verversen', dismiss: 'Melding sluiten',
-  title: 'Koersverschillen', holding: 'Positie', airs: 'AIRS', yahoo: 'Yahoo-slotkoers',
-  methodology: 'Hoe deze controle werkt', subtitle: 'Lokale valuta · alleen verschillen ≥5%', dateDifference: 'Koersdatums verschillen',
+  title: 'Koersverschillen', holding: 'Positie', certificate: 'Certificaat', airs: 'AIRS', yahoo: 'Yahoo-slotkoers',
+  methodology: 'Hoe deze controle werkt', subtitle: 'Beursgenoteerde aandelen en ETF’s · alleen verschillen ≥5%', dateDifference: 'Koersdatums verschillen',
   delta: 'Verschil', dates: 'Datums AIRS / Yahoo', status: 'Status', matched: 'Geen extreme verschillen gevonden in de beschikbare koersen.',
   clear: 'Geen extreme verschillen',
   range: '5-daags slotkoersbereik', within: 'Mogelijk tijdsverschil', outside: 'Buiten bereik · onderzoeken', insufficient: 'Onvoldoende recente historie',
-  note: 'Lokale koersen worden alleen vergeleken bij dezelfde valuta en koerseenheid, zonder valutaomrekening. Alleen verschillen vanaf 5% worden getoond en geven een melding. Andere datums gelden als verouderd. Ontbrekende, gekoppelde of verschillende valuta zijn niet vergelijkbaar; liquiditeiten tellen niet mee.',
+  note: 'Alleen beursgenoteerde aandelen en ETF’s worden getoond. Lokale koersen worden alleen vergeleken bij dezelfde valuta en koerseenheid, zonder valutaomrekening. Alleen verschillen vanaf 5% worden getoond en geven een melding. Andere datums gelden als verouderd.',
   end: 'Het bereik gebruikt vijf opgeslagen slotkoersen vóór de AIRS-rapportdatum, geen intradagbereik of statistisch betrouwbaarheidsinterval. Binnen het bereik suggereert timing, maar bewijst niets. Verversen werkt de brongegevens bij.',
   states: { matched: 'Komt overeen', warning: 'Waarschuwing (>2%)', difference: 'Verschil (≥5%)', stale: 'Andere datums / verouderd', linked: 'Gekoppelde notering — niet vergelijkbaar', unavailable: 'Koers ontbreekt' },
 };
@@ -46,6 +46,10 @@ export function usePriceCheckCopy() { const [lang] = useLang(); return lang === 
 
 const tone = (summary: PriceSummary) => needsPriceReview(summary) ? 'text-neg-400 border-neg-500/30'
   : 'text-fg-subtle border-neutral-700';
+
+function yahooQuoteUrl(symbol: string) {
+  return `https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/`;
+}
 
 export function PriceCheckBadge({ state, expanded, onClick }: { state?: PriceCheckState; expanded: boolean; onClick: () => void }) {
   const t = usePriceCheckCopy();
@@ -79,10 +83,11 @@ export function PriceCheckDetails({ state, onRetry, refreshing = false }: { stat
     {!state || state.pending ? <p className="text-xs text-fg-subtle">{t.checking}</p> : affected.length > 0 ?
       <div className="overflow-auto"><table className="w-full whitespace-nowrap text-xs">
         <thead><tr className="border-b border-neutral-800/40 text-fg-subtle">
-          {[t.holding, t.airs, t.yahoo, t.delta, t.range, t.status].map((label, index) => <th key={label} className={`px-3 py-2 font-medium ${index > 0 && index < 4 ? 'text-right' : 'text-left'}`}>{label}</th>)}
+          {[t.holding, t.certificate, t.airs, t.yahoo, t.delta, t.range, t.status].map((label, index) => <th key={label} className={`px-3 py-2 font-medium ${index > 1 && index < 5 ? 'text-right' : 'text-left'}`}>{label}</th>)}
         </tr></thead>
-        <tbody>{affected.map((row) => <tr key={row.key} className="border-b border-neutral-800/30 text-fg-muted">
-          <td className="px-3 py-3"><span className="block font-medium text-fg-strong">{row.name}</span><span className="mt-1 block font-mono text-fg-subtle">{row.isin ?? '—'}</span>{row.instrument && row.instrument !== row.name && <span className="mt-1 block max-w-64 whitespace-normal text-fg-subtle">Yahoo: {row.instrument}</span>}</td>
+        <tbody>{affected.map((row) => <tr key={row.key} className="border-b border-neutral-800/30 text-fg-muted hover:bg-overlay/5">
+          <td className="min-w-60 px-3 py-3 font-medium text-fg-strong">{row.yahooSymbol ? <a href={yahooQuoteUrl(row.yahooSymbol)} target="_blank" rel="noreferrer" title={`Open ${row.yahooSymbol} on Yahoo Finance`} className="hover:text-accent-400 hover:underline">{row.name} <span aria-hidden="true">↗</span></a> : row.name}</td>
+          <td className="max-w-48 px-3 py-3 whitespace-normal text-fg-subtle">{row.certificate ?? '—'}</td>
           <td className="px-3 py-3 text-right"><span className="font-mono tabular-nums">{price(row.airs)} {row.airsCurrency}</span><span className="mt-1 block text-fg-subtle">{row.airsDate ?? '—'}</span></td>
           <td className="px-3 py-3 text-right"><span className="font-mono tabular-nums">{price(row.yahoo)} {row.yahooCurrency}</span><span className="mt-1 block text-fg-subtle">{row.yahooDate ?? '—'}</span></td>
           <td className="px-3 py-3 text-right font-mono tabular-nums font-medium text-neg-400" title="(AIRS price / Yahoo price − 1) × 100">{row.difference == null || row.status === 'linked' ? '—' : `${row.difference >= 0 ? '+' : ''}${row.difference.toFixed(2)}%`}</td>

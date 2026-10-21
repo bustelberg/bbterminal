@@ -78,3 +78,8 @@ class TestTheOverridesFileIsWellFormed:
         workbook's listing."""
         got = {e["isin"]: e["symbol"] for e in _entries()}
         assert got["NL0015001FS8"] == "FER.MC"
+
+    def test_dino_polska_uses_its_warsaw_ordinary_listing(self):
+        """0TCP.IL is not the native PLN listing and creates a false price-check gap."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["PLDINPL00011"] == "DNP.WA"
