@@ -63,3 +63,58 @@ def test_toppenberg_price_check_replaces_certificates_with_child_strategy_holdin
     assert [row['isin'] for row in saved['rows']] == ['US0000000001', 'IE00DIRECT']
     assert saved['rows'][0]['airs_price_date'] == '2026-10-20'
     assert saved['rows'][0]['certificate_holding'] == 'Star Selection Index'
+
+
+def test_row_recheck_fetches_only_the_selected_resolved_series(monkeypatch):
+    fake = FakeSupabase({'airs_price_check': [], 'asset_execution': [
+        {'isin': 'JP3837800006', 'analysis_id': 77, 'yahoo_symbol': '7741.T'},
+    ]})
+    monkeypatch.setattr(checks, 'supabase', fake)
+    monkeypatch.setattr(checks, '_apply_symbol_overrides', lambda: 0)
+    freshens = []
+    monkeypatch.setattr(checks, '_checked_rows', lambda account, *, freshen: (
+        freshens.append(freshen) or {'portefeuille': account, 'as_of': '2026-10-21'},
+        [{'holding_name': 'HOYA Corporation', 'isin': 'JP3837800006', 'yahoo_symbol': '7741.T'}], []))
+    fetched = []
+    monkeypatch.setattr('asset_pipeline.store.store_series',
+                        lambda analysis_id, symbol, _from: fetched.append((analysis_id, symbol)))
+
+    saved = checks.recheck_price_check_row('TOPS_OFF_BEH_DYN', ' jp3837800006 ')
+
+    assert fetched == [(77, '7741.T')]
+    assert freshens == [False, False]
+    assert saved['result']['rows'][0]['isin'] == 'JP3837800006'
+
+
+def test_row_recheck_prefers_a_small_incremental_window_when_history_exists(monkeypatch):
+    fake = FakeSupabase({'airs_price_check': [], 'asset_execution': [
+        {'isin': 'JP3837800006', 'analysis_id': 77, 'yahoo_symbol': '7741.T'},
+    ], 'asset_price': [
+        {'analysis_id': 77, 'target_date': '2026-10-20', 'close': 27_000},
+    ]})
+    monkeypatch.setattr(checks, 'supabase', fake)
+    monkeypatch.setattr(checks, '_apply_symbol_overrides', lambda: 0)
+    monkeypatch.setattr(checks, '_checked_rows', lambda account, *, freshen: (
+        {'portefeuille': account}, [{'holding_name': 'HOYA Corporation', 'isin': 'JP3837800006'}], []))
+    extended = []
+    monkeypatch.setattr('asset_pipeline.store.extend_series',
+                        lambda analysis_id, symbol, since: extended.append((analysis_id, symbol, since)) or 3)
+    monkeypatch.setattr('asset_pipeline.store.store_series',
+                        lambda *_args: (_ for _ in ()).throw(AssertionError('must not reload full history')))
+
+    checks.recheck_price_check_row('TOPS_OFF_BEH_DYN', 'JP3837800006')
+
+    assert extended == [(77, '7741.T', '2026-10-20')]
+
+
+def test_row_recheck_refuses_an_isin_not_displayed_by_the_account(monkeypatch):
+    monkeypatch.setattr(checks, '_apply_symbol_overrides', lambda: 0)
+    monkeypatch.setattr(checks, '_checked_rows', lambda account, *, freshen: (
+        {'portefeuille': account}, [{'isin': 'US0000000001'}], []))
+
+    try:
+        checks.recheck_price_check_row('BOOK', 'JP3837800006')
+    except ValueError as exc:
+        assert 'not a displayed holding' in str(exc)
+    else:
+        raise AssertionError('row recheck must not refresh an arbitrary ISIN')

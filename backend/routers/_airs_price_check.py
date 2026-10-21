@@ -57,10 +57,9 @@ def _apply_symbol_overrides() -> int:
     return apply_symbol_overrides()
 
 
-def save_price_check(account: str, *, enforce_symbol_overrides: bool = True) -> dict:
-    if enforce_symbol_overrides:
-        _apply_symbol_overrides()
-    result, checked_rows, child_accounts = _checked_rows(account, freshen=True)
+def _save_price_check(account: str, *, freshen: bool) -> dict:
+    """Build and persist one account's compact comparison snapshot."""
+    result, checked_rows, child_accounts = _checked_rows(account, freshen=freshen)
     # Keep overview payloads compact: analysis/classification details are fetched only on expand.
     fields = {'holding_name', 'isin', 'bucket', 'currency', 'airs_price_local', 'our_price_local',
               'our_price_currency', 'our_price_date', 'our_instrument', 'recent_close_range',
@@ -75,6 +74,51 @@ def save_price_check(account: str, *, enforce_symbol_overrides: bool = True) -> 
              'result': result}
     supabase.table('airs_price_check').upsert(saved, on_conflict='portefeuille').execute()
     return saved
+
+
+def save_price_check(account: str, *, enforce_symbol_overrides: bool = True) -> dict:
+    if enforce_symbol_overrides:
+        _apply_symbol_overrides()
+    return _save_price_check(account, freshen=True)
+
+
+def recheck_price_check_row(account: str, isin: str) -> dict:
+    """Force Yahoo to reload one displayed holding, then save the account snapshot.
+
+    The membership check happens against ``_checked_rows`` rather than directly against the
+    parent account: Toppenberg's displayed equities belong to mapped child strategies, not to the
+    certificate wrapper in the parent book.  We deliberately use the pinned execution symbol and
+    ``store_series`` (not stale detection), because this is an operator-requested recheck and is
+    commonly used immediately after correcting a listing.
+    """
+    normalized = (isin or '').strip().upper()
+    if not normalized:
+        raise ValueError('ISIN is required')
+    _apply_symbol_overrides()
+    _parent, rows, _children = _checked_rows(account, freshen=False)
+    if normalized not in {(row.get('isin') or '').strip().upper() for row in rows}:
+        raise ValueError(f'{normalized} is not a displayed holding of {account}')
+    execution = (supabase.table('asset_execution')
+                 .select('analysis_id,yahoo_symbol')
+                 .eq('isin', normalized).limit(1).execute().data or [])
+    if not execution or not execution[0].get('analysis_id') or not execution[0].get('yahoo_symbol'):
+        raise ValueError(f'{normalized} has no resolved Yahoo listing')
+    from asset_pipeline import store  # noqa: PLC0415
+    row = execution[0]
+    # Rechecking a row normally means "get the newest close", not "rewrite decades of bars".
+    # Start with the overlapping incremental window; only a missing COPY/statistics path falls
+    # back to the full, slower reload used for a genuinely unpriced instrument.
+    latest = (supabase.table('asset_price').select('target_date')
+              .eq('analysis_id', row['analysis_id']).not_.is_('close', 'null')
+              .order('target_date', desc=True).limit(1).execute().data or [])
+    if latest and latest[0].get('target_date'):
+        if store.extend_series(row['analysis_id'], row['yahoo_symbol'], latest[0]['target_date']) is None:
+            store.store_series(row['analysis_id'], row['yahoo_symbol'], None)
+    else:
+        store.store_series(row['analysis_id'], row['yahoo_symbol'], None)
+    # Do not freshen every sibling after the selected row has completed. The saved snapshot reads
+    # the new close and preserves the other rows exactly as they were until separately refreshed.
+    return _save_price_check(account, freshen=False)
 
 
 def saved_price_checks(accounts: list[str], *, client=None) -> dict[str, dict]:

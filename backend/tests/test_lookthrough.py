@@ -267,7 +267,7 @@ class TestTheBookSideIsExpandedToo:
         monkeypatch.setattr(A, "_grid", lambda isins: {})
         monkeypatch.setattr("routers._airs_lookthrough._datum_of", lambda pid: None)
         monkeypatch.setattr("routers._airs_lookthrough._positions_of",
-                            lambda pid, d: [{"isin": "JP3786800000", "fonds": "HOYA Corporation",
+                            lambda pid, d: [{"isin": "JP3837800006", "fonds": "HOYA Corporation",
                                              "percentage": 100.0, "categorie": "AAND"}])
         out = A._expand_book_rows([
             {"isin": "CH0000000001", "holding_name": "AzieTopSelectie certificate",

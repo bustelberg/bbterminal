@@ -4582,6 +4582,27 @@ async def refresh_account_isin_prices_job(portefeuille: str):
     return {"job_id": job.id, "label": portefeuille, "already_running": reused}
 
 
+@router.post("/api/airs/accounts/{portefeuille}/isins/{isin}/refresh-price/job")
+async def refresh_account_isin_price_job(portefeuille: str, isin: str):
+    """Force-refresh one displayed holding's Yahoo series and save its account check."""
+    import jobs as job_registry  # noqa: PLC0415
+    from routers._airs_price_check import recheck_price_check_row  # noqa: PLC0415
+
+    normalized = isin.strip().upper()
+
+    def _work(ctx) -> str:
+        ctx.progress(0, 0, f"Refreshing Yahoo price for {normalized}...")
+        ctx.check()
+        recheck_price_check_row(portefeuille, normalized)
+        ctx.check()
+        ctx.progress(1, 1, f"Price refreshed for {normalized}")
+        return f"Price refreshed for {normalized}"
+
+    job, reused = job_registry.start("airs.account-holding-price-check",
+                                     f"{portefeuille}:{normalized}", _work)
+    return {"job_id": job.id, "label": normalized, "already_running": reused}
+
+
 class AirsAccountTransactions(BaseModel):
     """One account's AIRS Transacties, as the SHEET — no schema imposed on it.
 

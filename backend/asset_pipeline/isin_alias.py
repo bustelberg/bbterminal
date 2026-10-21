@@ -48,6 +48,13 @@ def load_aliases() -> dict[str, str]:
 def apply_aliases(only_isin: str | None = None) -> int:
     """Point every aliased execution row at its canonical's instrument. Returns rows changed."""
     aliases = load_aliases()
+    # A rare, explicit exception can keep this relationship for fundamentals via ``canonical()``
+    # but use the held ADR/share class's own symbol for prices. Both this guard and
+    # ``apply_symbol_overrides`` consult the same checked-in declaration, so their order cannot
+    # silently switch the execution row back and forth.
+    from .symbol_override import alias_price_override_isins  # noqa: PLC0415
+    aliases = {isin: canonical_isin for isin, canonical_isin in aliases.items()
+               if isin not in alias_price_override_isins()}
     if only_isin:
         aliases = {k: v for k, v in aliases.items() if k == only_isin}
     if not aliases:

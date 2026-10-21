@@ -32,7 +32,7 @@ import type {
 import { useMgmtCopy } from './management/managementCopy';
 import { usePriceChecks } from './management/usePriceChecks';
 import { useForcePriceChecks } from './management/useForcePriceChecks';
-import { PriceCheckBadge, PriceCheckDetails, usePriceCheckCopy } from './management/PriceCheckPanel';
+import { PriceCheckBadge, PriceCheckModal, usePriceCheckCopy } from './management/PriceCheckPanel';
 
 // These are substantial, self-contained workspaces that only exist after a row action. Keeping
 // them out of the overview chunk makes opening /management-dashboard about the table, rather than
@@ -58,7 +58,6 @@ function prefetchModelAnalysis(id: number) {
     return body;
   });
 }
-
 /**
  * The one table: a portfolio, by the name you gave it, on AIRS's own numbers.
  *
@@ -273,7 +272,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const priceChecks = usePriceChecks(priceCheckAccounts);
   const forcedPriceChecks = useForcePriceChecks();
   const priceCopy = usePriceCheckCopy();
-  const [openPriceCheck, setOpenPriceCheck] = useState<string | null>(null);
+  const [openPriceCheck, setOpenPriceCheck] = useState<{ account: string; showAll: boolean } | null>(null);
+  // A row recheck is independent: only its own button is busy while the shared job toast reports
+  // progress. A single global boolean would incorrectly grey out the whole comparison table.
+  const [recheckingPriceIsins, setRecheckingPriceIsins] = useState<ReadonlySet<string>>(() => new Set());
+  const priceCheckPortfolio = openPriceCheck == null ? null
+    : priceCheckAccounts.find((row) => row.dynamic_portefeuille === openPriceCheck.account) ?? null;
   // Bustelberg and Toppenberg open from Offensief down to Defensief; TopSelecties open A–Z.
   // The name comparator still uses the explicit profile order.
   const [storedSort, setStoredSort] = useState<TableSort>(() => defaultTableSort(collection));
@@ -763,6 +767,28 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       // would sit showing pre-scan figures while the row behind it updated, which reads as the
       // button having done nothing. A counter, not a boolean: two scans in a row must both land.
       setRefreshSeq((s) => s + 1);
+    }
+  };
+
+  /** Re-fetch one listed holding's Yahoo series; the rest of the saved check is left untouched. */
+  const recheckPriceRow = async (portefeuille: string, isin: string, holdingName: string) => {
+    if (recheckingPriceIsins.has(isin) || refreshingRows.has(portefeuille) || forcedPriceChecks.progress) return;
+    setRecheckingPriceIsins((current) => new Set(current).add(isin));
+    try {
+      const { done } = await startJob(
+        `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/isins/${encodeURIComponent(isin)}/refresh-price/job`,
+        `${holdingName} — Yahoo price`, undefined, undefined, { label: holdingName });
+      const job = await done;
+      if (job.status === 'failed') logDetail(`price recheck ${portefeuille}:${isin} failed`, job.summary);
+      await priceChecks.refresh(portefeuille);
+    } catch (e) {
+      logDetail(`price recheck ${portefeuille}:${isin} threw`, e);
+    } finally {
+      setRecheckingPriceIsins((current) => {
+        const next = new Set(current);
+        next.delete(isin);
+        return next;
+      });
     }
   };
 
@@ -1434,9 +1460,17 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           note="rendement — AIRS's return for the most recent month" />
                       </td>
                       <td className="px-3 py-1.5">
-                        {canAnalyse(r) ? <PriceCheckBadge state={priceChecks.checks[r.dynamic_portefeuille]}
-                          expanded={openPriceCheck === r.dynamic_portefeuille}
-                          onClick={() => setOpenPriceCheck((current) => current === r.dynamic_portefeuille ? null : r.dynamic_portefeuille)} /> : '—'}
+                        {canAnalyse(r) ? (() => {
+                          return <div className="flex items-center gap-1">
+                            <PriceCheckBadge state={priceChecks.checks[r.dynamic_portefeuille]}
+                              onClick={() => setOpenPriceCheck({ account: r.dynamic_portefeuille, showAll: false })} />
+                            <button type="button" title={priceCopy.viewPricesHint}
+                              onClick={(event) => { event.stopPropagation(); setOpenPriceCheck({ account: r.dynamic_portefeuille, showAll: true }); }}
+                              className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-fg-subtle opacity-0 transition-opacity hover:border-accent-500/50 hover:text-accent-300 focus:opacity-100 group-hover:opacity-100">
+                              {priceCopy.viewPrices}
+                            </button>
+                          </div>;
+                        })() : '—'}
                       </td>
                       <td className="px-3 py-1.5 text-right">
                         {/*  stopPropagation — the row is the expand toggle, and a delete that also
@@ -1455,13 +1489,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                         )}
                       </td>
                     </tr>
-                    {openPriceCheck === r.dynamic_portefeuille && (
-                      <tr><td colSpan={7} className="px-3 py-3 bg-inset">
-                        <PriceCheckDetails state={priceChecks.checks[r.dynamic_portefeuille]}
-                          refreshing={refreshingAll || !!forcedPriceChecks.progress || refreshingRows.has(r.dynamic_portefeuille)}
-                          onRetry={() => void refreshOne(r.dynamic_portefeuille, r.name)} />
-                      </td></tr>
-                    )}
                     {isOpen && (
                       <tr>
                         <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">
@@ -1495,6 +1522,16 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
             </tbody>
           </table>
         </div>
+      )}
+      {priceCheckPortfolio && (
+        <PriceCheckModal name={priceCheckPortfolio.name}
+          state={priceChecks.checks[priceCheckPortfolio.dynamic_portefeuille]}
+          refreshing={refreshingAll || !!forcedPriceChecks.progress || refreshingRows.has(priceCheckPortfolio.dynamic_portefeuille)}
+          showAll={openPriceCheck?.showAll}
+          recheckingIsins={recheckingPriceIsins}
+          onRecheckRow={(isin, name) => void recheckPriceRow(priceCheckPortfolio.dynamic_portefeuille, isin, name)}
+          onRetry={() => void refreshOne(priceCheckPortfolio.dynamic_portefeuille, priceCheckPortfolio.name)}
+          onClose={() => setOpenPriceCheck(null)} />
       )}
       {analyse && (
         //  Keyed by portfolio. The modal deliberately does NOT clear `data` when its request key
@@ -1542,7 +1579,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     </section>
   );
 }
-
 /**
  *  `unpriced` IS NOT A PASS — the name matched and NOTHING checked it, which for a fund is
  * exactly where the share-class trap lives (IE00BNDS1P30 vs IE00BNDS1Q47: both "Vanguard ESG

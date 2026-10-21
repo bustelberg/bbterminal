@@ -83,3 +83,37 @@ class TestTheOverridesFileIsWellFormed:
         """0TCP.IL is not the native PLN listing and creates a false price-check gap."""
         got = {e["isin"]: e["symbol"] for e in _entries()}
         assert got["PLDINPL00011"] == "DNP.WA"
+
+    def test_hoya_uses_its_tokyo_ordinary_listing(self):
+        """The TopSelectie look-through holds the Japanese ordinary, not an ADR."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["JP3837800006"] == "7741.T"
+
+    def test_native_asml_and_tsmc_adr_price_listings_are_pinned(self):
+        got = {e["isin"]: e for e in _entries()}
+        assert got["NL0010273215"]["symbol"] == "ASML.AS"
+        assert got["US8740391003"]["symbol"] == "TSM"
+        assert got["US8740391003"]["alias_price_override"] is True
+
+    def test_alibaba_uses_the_hong_kong_ordinary_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["KYG017191142"] == "9988.HK"
+
+    def test_baidu_uses_the_hong_kong_class_a_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["KYG070341048"] == "9888.HK"
+
+    def test_shell_uses_the_amsterdam_eur_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["GB00BP6MXD84"] == "SHELL.AS"
+
+    def test_linde_uses_the_xetra_eur_listing_for_both_issued_isins(self):
+        """The native EUR ordinary must not be compared with the USD NYSE line."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["IE00BZ12WP82"] == "LIN.DE"
+        assert got["IE000S9YS762"] == "LIN.DE"
+
+    def test_relx_uses_the_amsterdam_eur_listing(self):
+        """REL.L is a London pence quote, not AIRS's held EUR Amsterdam line."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["GB00B2B0DG97"] == "REN.AS"

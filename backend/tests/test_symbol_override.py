@@ -115,6 +115,14 @@ class TestItRefusesToFightTheAliasTable:
             assert symbol_override.apply_symbol_overrides() == 0
         assert ISIN in caplog.text, "a refusal nobody can see is a silent drop"
 
+    def test_reviewed_alias_price_exception_uses_its_own_listing(self, monkeypatch):
+        _patch(monkeypatch, alias=True)
+        monkeypatch.setattr(symbol_override, "alias_price_override_isins", lambda: {ISIN})
+        seen = []
+        monkeypatch.setattr(symbol_override, "_repoint", lambda isin, symbol: seen.append((isin, symbol)) or True)
+        assert symbol_override.apply_symbol_overrides() == 1
+        assert seen == [(ISIN, RIGHT)]
+
 
 class TestScoping:
     def test_only_isin_applies_just_that_one(self, monkeypatch):

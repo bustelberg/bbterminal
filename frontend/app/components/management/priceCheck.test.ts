@@ -27,12 +27,23 @@ describe('dashboard price checks', () => {
     const summary = summarize(holding({ airs_price_local: 21.51, our_price_local: 24.14,
       implied_price_eur: 999, our_price_eur: 1 }));
     expect(summary.items[0].difference).toBeCloseTo((21.51 / 24.14 - 1) * 100);
-    for (const currency of ['AUD', 'GBp', null]) {
+    for (const currency of ['AUD', null]) {
       const different = summarize(holding({ currency, our_price_currency: 'GBP', airs_price_local: 1000 }));
       expect(different.items[0].status).toBe('unavailable');
       expect(different.items[0].difference).toBeNull();
       expect(newPriceDifferences(null, different)).toBe(0);
     }
+  });
+  it('normalizes Yahoo London pence into pounds before comparing the native price', () => {
+    const range = { low: 2_400, high: 2_460, start: '2026-10-14', end: '2026-10-20', count: 5 };
+    const item = summarize(holding({ currency: 'GBP', our_price_currency: 'GBp',
+      airs_price_local: 24.2, our_price_local: 2_420, recent_close_range: range })).items[0];
+    expect(item.airsCurrency).toBe('GBP');
+    expect(item.yahooCurrency).toBe('GBP');
+    expect(item.yahoo).toBe(24.2);
+    expect(item.difference).toBe(0);
+    expect(item.recentRange).toMatchObject({ low: 24, high: 24.6 });
+    expect(item.status).toBe('matched');
   });
   it('keeps the resolved Yahoo symbol so the discrepancy can be inspected at its source', () => {
     const item = summarize(holding({ yahoo_symbol: 'ENI.MI' })).items[0];

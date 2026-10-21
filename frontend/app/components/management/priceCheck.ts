@@ -3,6 +3,22 @@ import type { AirsAccountIsins } from '../../../lib/types/api';
 // Explicit dashboard comparison exclusions; do not change the underlying instrument mapping.
 const PRICE_CHECK_EXCLUDED_ISINS = new Set(['CH1369849273']); // High Income Quality fund
 
+// Yahoo labels London closes as GBp (pence), while AIRS reports the same native price in GBP.
+// A quote unit is not a different currency: normalize both before comparing or displaying a range.
+const QUOTE_UNIT_NORMALIZATION: Record<string, { currency: string; divisor: number }> = {
+  GBp: { currency: 'GBP', divisor: 100 },
+  GBX: { currency: 'GBP', divisor: 100 },
+};
+
+function normalizeQuoteUnit(value: number | null, currency: string | null) {
+  const unit = currency ? QUOTE_UNIT_NORMALIZATION[currency] : undefined;
+  return {
+    value: value == null || !unit ? value : value / unit.divisor,
+    currency: unit?.currency ?? currency,
+    divisor: unit?.divisor ?? 1,
+  };
+}
+
 export type PriceStatus = 'matched' | 'warning' | 'difference' | 'stale' | 'linked' | 'unavailable';
 export type PriceItem = {
   key: string; name: string; isin: string | null; instrument: string | null;
@@ -24,10 +40,14 @@ export function summarizePrices(data: AirsAccountIsins): PriceSummary {
   // own quote-unit-aware checks; comparing their clean price to an issuer's share price is noise.
   const items = (data.rows ?? []).filter((row) => row.bucket === 'Equity'
     && !PRICE_CHECK_EXCLUDED_ISINS.has(row.isin?.trim().toUpperCase() ?? '')).map((row): PriceItem => {
-    const airs = row.airs_price_local ?? null;
-    const yahoo = row.our_price_local ?? null;
-    const airsCurrency = row.currency?.trim() || null;
-    const yahooCurrency = row.our_price_currency?.trim() || null;
+    const rawAirsCurrency = row.currency?.trim() || null;
+    const rawYahooCurrency = row.our_price_currency?.trim() || null;
+    const normalizedAirs = normalizeQuoteUnit(row.airs_price_local ?? null, rawAirsCurrency);
+    const normalizedYahoo = normalizeQuoteUnit(row.our_price_local ?? null, rawYahooCurrency);
+    const airs = normalizedAirs.value;
+    const yahoo = normalizedYahoo.value;
+    const airsCurrency = normalizedAirs.currency;
+    const yahooCurrency = normalizedYahoo.currency;
     const airsDate = row.airs_price_date?.slice(0, 10) ?? data.as_of?.slice(0, 10) ?? null;
     const yahooDate = row.our_price_date?.slice(0, 10) ?? null;
     const valid = !!airsCurrency && airsCurrency === yahooCurrency
@@ -38,7 +58,8 @@ export function summarizePrices(data: AirsAccountIsins): PriceSummary {
     const recentRange = rawRange && typeof rawRange.low === 'number' && Number.isFinite(rawRange.low)
       && typeof rawRange.high === 'number' && Number.isFinite(rawRange.high) && rawRange.low > 0 && rawRange.high >= rawRange.low
       && typeof rawRange.start === 'string' && typeof rawRange.end === 'string' && typeof rawRange.count === 'number'
-      ? { low: rawRange.low, high: rawRange.high, start: rawRange.start, end: rawRange.end, count: rawRange.count } : null;
+      ? { low: rawRange.low / normalizedYahoo.divisor, high: rawRange.high / normalizedYahoo.divisor,
+        start: rawRange.start, end: rawRange.end, count: rawRange.count } : null;
     const rangeAge = recentRange && airsDate ? (Date.parse(airsDate) - Date.parse(recentRange.end)) / 86400000 : NaN;
     const rangeAssessment = !valid || row.served_by || row.verdict === 'cross_listed'
       || !recentRange || recentRange.count !== 5 || !(rangeAge > 0 && rangeAge <= 7)
