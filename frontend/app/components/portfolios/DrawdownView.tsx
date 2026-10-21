@@ -77,7 +77,7 @@ export default function DrawdownView({
 }) {
   const t = useRiskCopy();
   const requestUrl = `${API_URL}/api/airs/portfolio/drawdown`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=monthly&years=5&data_window=shared-v1`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=daily&years=5&data_window=shared-v1`;
   const requestBody = JSON.stringify({ holdings });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<PortfolioDrawdown>(key, async () => {
@@ -161,8 +161,8 @@ export default function DrawdownView({
                     <th className="text-left">{t.dd.peak}</th>
                     <th className="text-left">{t.dd.trough}</th>
                     <th className="text-right">{t.dd.colDepth}</th>
-                    <th className="text-right">Fall (months)</th>
-                    <th className="text-right">Recovery (months)</th>
+                    <th className="text-right">Fall (trading days)</th>
+                    <th className="text-right">Recovery (trading days)</th>
                   </tr>
                 </thead>
                 <tbody>
