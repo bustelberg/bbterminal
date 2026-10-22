@@ -179,7 +179,7 @@ export default function TrackingErrorView({
                   where="AIRS weights and EUR-converted historical holding prices."
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
                   how={comparison?.available
-                    ? `Cumulative return: ${pct2(comparison.total_return_pct)} over ${comparison.years_elapsed?.toFixed(4)} years. At each period, current weights of holdings with prices at both endpoints are scaled to 100%. Newer holdings join as history becomes available. Minimum coverage: ${pct2(comparison.min_weight_covered_pct)}; average: ${pct2(comparison.avg_weight_covered_pct)}.`
+                    ? `Eligible current holdings are rescaled to 100% each period. Coverage: minimum ${pct2(comparison.min_weight_covered_pct)}; average ${pct2(comparison.avg_weight_covered_pct)}.`
                     : comparison?.reason ?? 'Five-year history is unavailable.'}
                   worked={annualisedReturnWorked(comparison?.total_return_pct,
                     comparison?.years_elapsed ? 1 / comparison.years_elapsed : null, portfolioCagr)}
