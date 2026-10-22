@@ -1893,16 +1893,10 @@ def _fire_airs_vermogen() -> None:
 
      IT FORCES. The manual button is incremental — it skips an account fully scanned in the last
     `AIRS_FRESH_HOURS` — but this is the once-a-day pass that has to actually pick up the day's
-    valuation. Somebody pressing Refresh all at 08:00, before AIRS had valued the books, would
+    valuation. Somebody pressing Refresh all before AIRS has valued the books would
     otherwise make this job skip the whole fleet and the new valuation would land a day late.
-    (That sentence said "the 11:00 job" and the tick has been 10:00 for months — a restated time is
-    a time that goes stale. The schedule is declared once, in `scheduled_jobs.SCHEDULED_JOBS`.)
-
-     AND THAT SAME REASONING NOW CUTS THE OTHER WAY, SINCE THE TICK MOVED TO 09:30 (2026-08-13).
-    If AIRS has not valued the books by then, this run stores YESTERDAY's valuation — and because
-    it forces and fires once, nothing re-reads it until tomorrow. The symptom is holdings that are
-    a full day behind while looking perfectly current. If that appears, add a second attempt later
-    in the morning; do not move this one earlier.
+    The schedule is declared once, in `scheduled_jobs.SCHEDULED_JOBS`. It runs at 12:00 Amsterdam,
+    which avoids the earlier stale-valuation race while keeping the once-daily forced scan bounded.
     """
     _spawn_body("airs_vermogen_refresh")
 
@@ -1910,9 +1904,8 @@ def _fire_airs_vermogen() -> None:
 def _maybe_kickstart_airs_vermogen() -> None:
     """Recover an AIRS morning refresh interrupted by a Railway redeploy.
 
-    The four scheduled attempts are deliberately redundant: AIRS can publish its valuation at an
-    uncertain point in the morning.  What matters is one completed attempt, not which of 08:00,
-    09:00, 10:00 or 11:00 produced it.  APScheduler's clock is in-process, so a redeploy can miss
+     The one daily 12:00 Amsterdam attempt is the durable target. APScheduler's clock is in-process,
+    so a redeploy can miss
     all remaining fires; consult the durable run log on boot and submit one catch-up only when no
     attempt has completed successfully since Amsterdam midnight.
 

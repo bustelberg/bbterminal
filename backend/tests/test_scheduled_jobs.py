@@ -112,14 +112,14 @@ class TestOptInJobs:
             "day_of_week": "mon", "hour": 7, "minute": 0, "timezone": "UTC",
         }
 
-    def test_airs_refresh_checks_for_new_daily_data_each_hour_from_eight_to_eleven(self):
+    def test_airs_refresh_runs_once_daily_at_noon(self):
         spec = {s.id: s for s in SCHEDULED_JOBS}["airs_vermogen_refresh"]
         assert spec.trigger == {
-            "day_of_week": "mon-sun", "hour": "8,9,10,11", "minute": 0,
+            "day_of_week": "mon-sun", "hour": 12, "minute": 0,
             "timezone": "Europe/Amsterdam",
         }
-        assert spec.cadence == "Every day, 08:00, 09:00, 10:00, and 11:00 Amsterdam"
-        assert "Full AIRS re-scan at every run" in spec.note
+        assert spec.cadence == "Every day, 12:00 Amsterdam"
+        assert "Full AIRS re-scan every day at 12:00 Amsterdam" in spec.note
 
 
 

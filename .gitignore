@@ -233,6 +233,9 @@ frontend/node_modules/
 
 /node_modules
 
+# Local spreadsheet-artifact build workspace; generated dependencies must not be committed.
+/artifact-build/
+
 # Postgres binary dumps (e.g. bbterminal_dump.pgdump)
 *.pgdump
 
