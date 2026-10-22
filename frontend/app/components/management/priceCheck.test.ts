@@ -18,21 +18,42 @@ describe('dashboard price checks', () => {
     expect(needsPriceReview(within)).toBe(true);
     const outside = summarize(holding({ airs_price_local: 19, recent_close_range: range }));
     expect(outside.items[0].rangeAssessment).toBe('outside');
-    for (const recent_close_range of [{ ...range, count: 4 }, { ...range, end: '2026-10-01' }, null]) {
-      expect(summarize(holding({ recent_close_range })).items[0].rangeAssessment).toBe('insufficient');
-    }
-    expect(summarize(holding({ currency: 'AUD', recent_close_range: range })).items[0].rangeAssessment).toBe('insufficient');
+    expect(summarize(holding({ recent_close_range: { ...range, count: 4 } })).items[0].rangeAssessment).toBe('insufficient');
+    expect(summarize(holding({ recent_close_range: { ...range, end: '2026-10-01' } })).items[0].rangeAssessment).toBe('staleRange');
+    expect(summarize(holding({ recent_close_range: null })).items[0].rangeAssessment).toBe('insufficient');
+    expect(summarize(holding({ currency: 'AUD', recent_close_range: range })).items[0].rangeAssessment).toBe('notComparable');
+  });
+  it('does not call a linked listing with five displayed closes insufficient history', () => {
+    const range = { low: 20, high: 25, start: '2026-10-12', end: '2026-10-16', count: 5 };
+    const linked = summarize(holding({ served_by: 'OTHER_ISIN', recent_close_range: range })).items[0];
+    expect(linked.rangeAssessment).toBe('notComparable');
+    expect(linked.status).toBe('linked');
   });
   it('compares native prices without FX and refuses different currencies or quote units', () => {
     const summary = summarize(holding({ airs_price_local: 21.51, our_price_local: 24.14,
       implied_price_eur: 999, our_price_eur: 1 }));
     expect(summary.items[0].difference).toBeCloseTo((21.51 / 24.14 - 1) * 100);
-    for (const currency of ['AUD', 'GBp', null]) {
+    for (const currency of ['AUD', null]) {
       const different = summarize(holding({ currency, our_price_currency: 'GBP', airs_price_local: 1000 }));
       expect(different.items[0].status).toBe('unavailable');
       expect(different.items[0].difference).toBeNull();
       expect(newPriceDifferences(null, different)).toBe(0);
     }
+  });
+  it('normalizes Yahoo London pence into pounds before comparing the native price', () => {
+    const range = { low: 2_400, high: 2_460, start: '2026-10-14', end: '2026-10-20', count: 5 };
+    const item = summarize(holding({ currency: 'GBP', our_price_currency: 'GBp',
+      airs_price_local: 24.2, our_price_local: 2_420, recent_close_range: range })).items[0];
+    expect(item.airsCurrency).toBe('GBP');
+    expect(item.yahooCurrency).toBe('GBP');
+    expect(item.yahoo).toBe(24.2);
+    expect(item.difference).toBe(0);
+    expect(item.recentRange).toMatchObject({ low: 24, high: 24.6 });
+    expect(item.status).toBe('matched');
+  });
+  it('keeps the resolved Yahoo symbol so the discrepancy can be inspected at its source', () => {
+    const item = summarize(holding({ yahoo_symbol: 'ENI.MI' })).items[0];
+    expect(item.yahooSymbol).toBe('ENI.MI');
   });
   it('excludes High Income Quality fund by ISIN from rows, counts and alerts', () => {
     const excluded = holding({ isin: 'CH1369849273', holding_name: 'High Income Quality fund', airs_price_local: 1000 });
@@ -71,12 +92,14 @@ describe('dashboard price checks', () => {
     expect(needsPriceReview(summary)).toBe(true); // The stale 20% gap is still worth investigating.
   });
 
-  it('excludes cash but keeps unpriceable investments in the coverage denominator', () => {
+  it('limits the exception list to listed equities and ETFs', () => {
     const summary = summarize(holding(), holding({ holding_name: 'Cash', bucket: 'Cash' }),
-      holding({ holding_name: 'Certificate', our_price_local: null }));
+      holding({ holding_name: 'Bond', bucket: 'Bonds', our_price_local: null }),
+      holding({ holding_name: 'ETF', is_etf: true, certificate_holding: 'Star certificate', our_price_local: null }));
     expect(summary.total).toBe(2);
     expect(summary.checked).toBe(1);
     expect(summary.unavailable).toBe(1);
+    expect(summary.items[1].certificate).toBe('Star certificate');
     expect(needsPriceReview(summarize(holding()))).toBe(false);
     expect(summarize().checked).toBe(0);
   });

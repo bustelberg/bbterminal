@@ -39,6 +39,7 @@ import { riskRequestKey, useRiskResult } from './useRiskResult';
  *  beside rows summing to 79.53 invites the arithmetic to be redone and found wrong. Counts
  *  (issuers, observations, lines, periods) stay integers — they ARE integers. */
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
+const TOP_POSITIONS = 10;
 
 function Tile({ label, value, sub, tone, info }: {
   label: string; value: string; sub?: string; tone?: string; info?: React.ReactNode;
@@ -56,7 +57,7 @@ function Tile({ label, value, sub, tone, info }: {
 
 export default function ConcentrationView({
   holdings, benchmark, benchmarkStart, portfolioName, portfolioAsOf, portfolioFetchedAt,
-  portfolioSource,
+  portfolioSource, benchmarkWeights,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
@@ -66,11 +67,13 @@ export default function ConcentrationView({
   portfolioAsOf?: string | null;
   portfolioFetchedAt?: string | null;
   portfolioSource: SourceKey;
+  /** Fixed Stocks/Bonds policy for a risk-profile benchmark. */
+  benchmarkWeights?: Record<string, number>;
 }) {
   const t = useRiskCopy();
   const requestUrl = `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}&view=whole-portfolio-weights-v6`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
-  const requestBody = JSON.stringify({ holdings });
+  const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<PortfolioConcentration>(key, async () => {
     const r = await apiFetch(requestUrl, {
@@ -157,10 +160,10 @@ export default function ConcentrationView({
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Top 5 {portfolioName} positions</div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Top {TOP_POSITIONS} {portfolioName} positions</div>
               <table className="w-full text-[11px]">
                 <thead><tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium"><th className="text-left">Company</th><th className="text-right">Weight</th></tr></thead>
-                <tbody>{rows.slice(0, 5).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
+                <tbody>{rows.slice(0, TOP_POSITIONS).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
                   <td className="text-fg-soft">{row.name || `Position ${row.rank}`}</td>
                   <td className="text-right font-mono tabular-nums">
                     <span className="inline-flex items-center gap-1 whitespace-nowrap">
@@ -177,10 +180,10 @@ export default function ConcentrationView({
               </table>
             </div>
             <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Top 5 {data.benchmark} positions</div>
+              <div className="mb-1 text-[10px] uppercase tracking-wider text-fg-faint">Top {TOP_POSITIONS} {data.benchmark} positions</div>
               <table className="w-full text-[11px]">
                 <thead><tr className="text-fg-faint [&>th]:py-1 [&>th]:font-medium"><th className="text-left">Company</th><th className="text-right">Weight</th></tr></thead>
-                <tbody>{benchmarkRows.slice(0, 5).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
+                <tbody>{benchmarkRows.slice(0, TOP_POSITIONS).map((row) => <tr key={row.name} className="[&>td]:border-t [&>td]:border-neutral-800/20 [&>td]:py-1">
                   <td className="text-fg-soft">{row.name || `${data.benchmark} constituent ${row.rank}`}</td>
                   <td className="text-right font-mono tabular-nums">
                     <span className="inline-flex items-center gap-1 whitespace-nowrap">

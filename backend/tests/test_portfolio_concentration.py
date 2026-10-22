@@ -136,3 +136,24 @@ class TestAgainstTheIndex:
         # as a big BET or merely as a big company.
         assert all(r["benchmark_pct"] == pytest.approx(2.0, abs=1e-9) for r in got["top"])
         assert got["top"][-1]["cumulative_pct"] == pytest.approx(100.0, abs=1e-9)
+
+    def test_risk_profile_uses_the_full_stock_and_bond_policy_benchmark(self, wire, monkeypatch):
+        wire([], {"NVDA": "Nvidia"})
+        monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+            "bench": {
+                "nvidia": {"key": "nvidia", "name": "Nvidia", "weight_pct": 60.0},
+                "apple": {"key": "apple", "name": "Apple", "weight_pct": 40.0},
+            },
+            "coverage": {}, "issuer_by_asset": {},
+        })
+        got = K.compute_concentration(
+            [_h("Nvidia", "NVDA", 100.0)], "ACWI",
+            benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
+
+        assert got["benchmark"] == "60% ACWI + 40% AGGH.AS"
+        assert got["benchmark_issuers"] == 3
+        assert got["benchmark_top"][0]["name"] == "AGGH.AS"
+        assert got["benchmark_top"][0]["weight_pct"] == pytest.approx(40.0)
+        assert got["benchmark_top"][1]["weight_pct"] == pytest.approx(36.0)
+        assert got["benchmark_effective_positions"] == pytest.approx(
+            1.0 / (0.4 ** 2 + 0.36 ** 2 + 0.24 ** 2), abs=1e-9)

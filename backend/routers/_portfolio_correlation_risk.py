@@ -47,14 +47,21 @@ _TOP_PAIRS = 8
 
 
 def compute_risk_correlation(holdings: list[dict], benchmark: str,
-                             frequency: str = "monthly", years: int = 5) -> dict:
+                             frequency: str = "monthly", years: int = 5,
+                             benchmark_weights: dict[str, float] | None = None,
+                             require_complete_history: bool = False,
+                             minimum_observations: int | None = None,
+                             preliminary: bool = False) -> dict:
     """ρ to the benchmark, the variance identity behind it, and the position-by-position matrix."""
     import numpy as np  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
 
     freq = frequency if frequency in PERIODS else "monthly"
     try:
-        built = build_paired_series(holdings, benchmark, freq, years)
+        built = build_paired_series(holdings, benchmark, freq, years,
+                                    require_complete_holdings=require_complete_history,
+                                    benchmark_weights=benchmark_weights,
+                                    minimum_observations=minimum_observations)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 
@@ -117,11 +124,12 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
 
     return {
         "available": True,
-        "benchmark": benchmark,
+        "benchmark": built.get("benchmark_label", benchmark),
         "frequency": freq,
         "periods_per_year": ppy,
         "observations": len(a),
         "years": years,
+        "preliminary": preliminary,
         #  The window the paired grid actually reached, not `years` back from today — identical
         # reasoning to `_tracking_error`, and it must be the SAME two dates because both views read
         # one `build_paired_series`. Two panels quoting different windows for one series is the
@@ -164,6 +172,10 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         "total_holdings": built["total"],
         "min_observations": MIN_OBS[freq],
         "cadence_note": (
+            "Preliminary daily correlation: the exact current sleeve has fewer than 12 shared monthly "
+            "returns. This uses its available daily closes (at least 10), rather than inventing "
+            "pre-launch monthly history."
+            if preliminary else
             "Daily closes are not synchronous — the tracker closes at 16:30 London, a US holding at "
             "21:00 — which mechanically LOWERS every correlation measured against it. Weekly spans "
             "the gap: measured on this book, Microsoft vs ACWI reads 0.38 daily against 0.50 weekly."

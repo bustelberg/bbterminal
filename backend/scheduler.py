@@ -1228,6 +1228,11 @@ def _run_asset_price_refresh(trigger: str) -> None:
         # last date to compare), so repair that distinct case after the cheap
         # detection pass. This uses its existing symbol and cannot remap it.
         backfill = price_refresh.backfill_missing(watched)
+        # A handful of reviewed funds publish their official NAV outside Yahoo. Keep those exact
+        # sources on the same daily path: otherwise they are only repaired after a user opens a
+        # risk view that has already failed. This is a bounded, reviewed list (currently one
+        # source), never a search or a guessed proxy.
+        nav_fallback = price_refresh.backfill_nav_fallbacks(watched)
 
         # Analyse also shows benchmark returns derived from a small set of Yahoo ETF proxies.
         # These used to be refreshed only from the smart daily pipeline, which is conditional on
@@ -1255,12 +1260,15 @@ def _run_asset_price_refresh(trigger: str) -> None:
             detail = f"all {considered} watched instrument(s) current as of {latest}"
             if backfill["backfilled"]:
                 detail += f"; {backfill['backfilled']} absent series backfilled"
+            if nav_fallback["stored"]:
+                detail += f"; {nav_fallback['stored']} published NAV fallback refreshed"
             if proxies_refreshed is not None:
                 detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
             else:
                 rec.skip(detail)
             rec.done(detail, considered=considered, latest=str(latest), stale=0,
                      price_backfilled=backfill["backfilled"],
+                     nav_fallback_refreshed=nav_fallback["stored"],
                      analyse_benchmark_proxies_refreshed=proxies_refreshed)
             return
 
@@ -1282,10 +1290,13 @@ def _run_asset_price_refresh(trigger: str) -> None:
         detail = f"{r['moved']} moved, {r['unchanged']} unchanged, {r['failed']} failed"
         if proxies_refreshed is not None:
             detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
+        if nav_fallback["stored"]:
+            detail += f"; {nav_fallback['stored']} published NAV fallback refreshed"
         rec.done(detail,
                  considered=considered, stale=len(stale), moved=r["moved"],
                  unchanged=r["unchanged"], failed=r["failed"],
                  price_backfilled=backfill["backfilled"],
+                 nav_fallback_refreshed=nav_fallback["stored"],
                  analyse_benchmark_proxies_refreshed=proxies_refreshed)
       except Exception as e:  # noqa: BLE001
         #  Caught here, so the record must be set by hand. `record_run` marks a run failed off the
@@ -1882,16 +1893,10 @@ def _fire_airs_vermogen() -> None:
 
      IT FORCES. The manual button is incremental — it skips an account fully scanned in the last
     `AIRS_FRESH_HOURS` — but this is the once-a-day pass that has to actually pick up the day's
-    valuation. Somebody pressing Refresh all at 08:00, before AIRS had valued the books, would
+    valuation. Somebody pressing Refresh all before AIRS has valued the books would
     otherwise make this job skip the whole fleet and the new valuation would land a day late.
-    (That sentence said "the 11:00 job" and the tick has been 10:00 for months — a restated time is
-    a time that goes stale. The schedule is declared once, in `scheduled_jobs.SCHEDULED_JOBS`.)
-
-     AND THAT SAME REASONING NOW CUTS THE OTHER WAY, SINCE THE TICK MOVED TO 09:30 (2026-08-13).
-    If AIRS has not valued the books by then, this run stores YESTERDAY's valuation — and because
-    it forces and fires once, nothing re-reads it until tomorrow. The symptom is holdings that are
-    a full day behind while looking perfectly current. If that appears, add a second attempt later
-    in the morning; do not move this one earlier.
+    The schedule is declared once, in `scheduled_jobs.SCHEDULED_JOBS`. It runs at 12:00 Amsterdam,
+    which avoids the earlier stale-valuation race while keeping the once-daily forced scan bounded.
     """
     _spawn_body("airs_vermogen_refresh")
 
@@ -1899,9 +1904,8 @@ def _fire_airs_vermogen() -> None:
 def _maybe_kickstart_airs_vermogen() -> None:
     """Recover an AIRS morning refresh interrupted by a Railway redeploy.
 
-    The four scheduled attempts are deliberately redundant: AIRS can publish its valuation at an
-    uncertain point in the morning.  What matters is one completed attempt, not which of 08:00,
-    09:00, 10:00 or 11:00 produced it.  APScheduler's clock is in-process, so a redeploy can miss
+     The one daily 12:00 Amsterdam attempt is the durable target. APScheduler's clock is in-process,
+    so a redeploy can miss
     all remaining fires; consult the durable run log on boot and submit one catch-up only when no
     attempt has completed successfully since Amsterdam midnight.
 

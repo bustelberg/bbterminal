@@ -72,6 +72,25 @@ class TestItFetchesTheGapNotTheHistory:
         assert "trim_leading_no_volume(rows)" in inspect.getsource(store.store_series)
 
 
+class TestReviewedNavFallbacks:
+    def test_fresh_fund_has_an_explicit_non_yahoo_nav_source(self):
+        source = price_refresh._NAV_FALLBACKS["NL0012171417"]
+        assert source["provider"] == "IEX"
+        assert source["issue_id"] == "60051939"
+        assert source["currency"] == "EUR"
+
+    def test_iex_parser_uses_valid_positive_daily_marks(self, monkeypatch):
+        class Response:
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return {"HistoricalData": [[1483920000000, 25.8038], [1484006400000, 0], ["bad", 30]]}
+
+        monkeypatch.setattr(price_refresh.requests, "get", lambda *_args, **_kwargs: Response())
+        assert price_refresh._iex_nav_rows("60051939") == [("2017-01-09", 25.8038)]
+
+
 class TestTheSchedulerJob:
     def test_it_stands_down_while_the_resolver_is_using_yahoo(self):
         """ The ingest queue is THE single Yahoo consumer by design. Yahoo answers an overloaded
@@ -186,6 +205,14 @@ class TestTheStartupCatchUp:
         # still stop before the ordinary stale-series fetch.
         branch = src.split("if not stale:", 1)[1].split("_log.warning(", 1)[0]
         assert "return" in branch
+
+    def test_reviewed_nav_fallbacks_refresh_with_the_daily_prices(self):
+        """A non-Yahoo fund must not wait for a failed risk calculation to receive its NAV."""
+        import scheduler
+
+        src = inspect.getsource(scheduler._run_asset_price_refresh)
+        assert "backfill_nav_fallbacks(watched)" in src
+        assert src.index("backfill_nav_fallbacks(watched)") < src.index("if not stale:")
 
     def test_the_startup_path_ALSO_yields_to_the_resolver(self):
         """The queue guard lives in the shared body, so it cannot be bypassed by the startup
@@ -369,4 +396,55 @@ def test_daily_watchlist_includes_logbook_isins_without_review_dates(monkeypatch
         "bc_log_entry": [{"isin": " us0378331005 ", "review_on": None},
                          {"isin": ""}, {"isin": "   "}, {"isin": None}],
     }))
-    assert price_refresh.watched_isins() == {"HELD", "SOLD", "US0378331005"}
+    from routers._asset_financials import _BENCHMARK_RISK_ETF
+    assert price_refresh.watched_isins() == {
+        "HELD", "SOLD", "US0378331005", *_BENCHMARK_RISK_ETF.values(),
+    }
+
+
+def test_interactive_risk_tracker_repair_uses_the_normal_backfill_and_stale_paths(monkeypatch):
+    calls = []
+    from routers._asset_financials import _BENCHMARK_RISK_ETF
+    expected = set(_BENCHMARK_RISK_ETF.values())
+    monkeypatch.setattr(price_refresh, "_executions",
+                        lambda _isins: [{"isin": isin} for isin in expected])
+    monkeypatch.setattr(price_refresh, "backfill_missing",
+                        lambda isins: calls.append(("backfill", isins)) or {"backfilled": 1})
+    monkeypatch.setattr(price_refresh, "refresh_stale",
+                        lambda **kwargs: calls.append(("stale", kwargs)) or {"moved": 2})
+
+    got = price_refresh.refresh_risk_trackers()
+
+    assert calls[0] == ("backfill", expected)
+    assert calls[1] == ("stale", {"isins": expected, "stale_days": 1})
+    assert got["backfill"]["backfilled"] == 1
+
+
+def test_interactive_risk_tracker_repair_bootstraps_a_missing_execution(monkeypatch):
+    from asset_pipeline import queue, symbol_override
+    from routers._asset_financials import _BENCHMARK_RISK_ETF
+
+    missing = _BENCHMARK_RISK_ETF["BONDS"]
+    calls = []
+    monkeypatch.setattr(price_refresh, "_executions", lambda _isins: [
+        {"isin": isin} for name, isin in _BENCHMARK_RISK_ETF.items() if name != "BONDS"
+    ])
+    monkeypatch.setattr(queue, "enqueue", lambda isins, **kwargs:
+                        calls.append(("enqueue", isins, kwargs)) or {"queued": len(isins)})
+    monkeypatch.setattr(queue, "process_slice", lambda **kwargs:
+                        calls.append(("process", kwargs)) or {"processed": 1, "ok": 1})
+    monkeypatch.setattr(symbol_override, "apply_symbol_overrides", lambda **kwargs:
+                        calls.append(("repoint", kwargs)) or 1)
+    monkeypatch.setattr(price_refresh, "backfill_missing", lambda _isins: {"backfilled": 1})
+    monkeypatch.setattr(price_refresh, "refresh_stale", lambda **_kwargs: {"moved": 1})
+
+    got = price_refresh.refresh_risk_trackers()
+
+    assert calls == [
+        ("enqueue", [missing], {"skip_existing": False}),
+        ("process", {"isins": [missing]}),
+        ("repoint", {"only_isin": missing}),
+    ]
+    assert got["missing_execution"] == [missing]
+    assert got["bootstrap"]["ok"] == 1
+    assert got["bootstrap"]["repointed"] == 1

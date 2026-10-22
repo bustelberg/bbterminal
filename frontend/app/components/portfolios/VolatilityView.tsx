@@ -64,10 +64,11 @@ const LEGEND = {
 };
 
 export default function VolatilityView({
-  holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+  holdings, benchmark, benchmarkWeights, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
+  benchmarkWeights?: Record<string, number>;
   /** The book's identity, forwarded from the panel — see `ActiveSharePanel`'s own props. */
   portfolioName: string;
   portfolioAsOf?: string | null;
@@ -79,7 +80,7 @@ export default function VolatilityView({
 
   const requestUrl = `${API_URL}/api/airs/portfolio/volatility`
     + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=shared-v1`;
-  const requestBody = JSON.stringify({ holdings });
+  const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<PortfolioVolatility>(key, async () => {
     const r = await apiFetch(requestUrl, {

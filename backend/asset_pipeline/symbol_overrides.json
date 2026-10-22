@@ -101,6 +101,103 @@
       "symbol": "WAB",
       "name": "Westinghouse Air Brake Technologies Corp",
       "note": "The Leonteq constituent is the US ordinary share. The automatic resolver chose WAB.VI, a Vienna proxy; the verified Yahoo primary listing is WAB, which preserves the US security and its longer native price history."
+    },
+    {
+      "isin": "PLDINPL00011",
+      "symbol": "DNP.WA",
+      "name": "Dino Polska S.A.",
+      "note": "The held Polish ordinary share trades on the Warsaw Stock Exchange as DNP.WA. Automatic resolution selected 0TCP.IL, a London listing with a different price scale (PLN 38.80 in AIRS versus PLN 77.50), producing a false -49.94% price-check alarm. Pin the Warsaw ordinary so the comparison uses the exact ISIN's native PLN price series."
+    },
+    {
+      "isin": "JP3837800006",
+      "symbol": "7741.T",
+      "name": "HOYA Corporation",
+      "note": "The held Japanese ordinary share trades on the Tokyo Stock Exchange as 7741.T. Pin Yahoo's native Tokyo listing so look-through pricing and historical returns use the exact JP3837800006 security rather than an ADR or cross-listed proxy."
+    },
+    {
+      "isin": "NL0010273215",
+      "symbol": "ASML.AS",
+      "name": "ASML Holding N.V.",
+      "note": "The held Dutch ordinary share is EUR-denominated on Euronext Amsterdam. Automatic resolution chose the USD Nasdaq ADR (ASML), which leaves a native-currency AIRS comparison unavailable. Pin ASML.AS so the check uses the exact EUR security."
+    },
+    {
+      "isin": "US8740391003",
+      "symbol": "TSM",
+      "name": "Taiwan Semiconductor Manufacturing Company Limited ADR",
+      "alias_price_override": true,
+      "note": "The held security is the USD NYSE ADR. It remains canonically linked to TW0002330008 for company fundamentals, but price checks must use its own USD Yahoo series (TSM), not Taiwan ordinary 2330.TW in TWD."
+    },
+    {
+      "isin": "KYG017191142",
+      "symbol": "9988.HK",
+      "name": "Alibaba Group Holding Limited",
+      "note": "The held Hong Kong ordinary share is quoted in HKD. Automatic resolution selected AHLA.DE, a EUR cross-listing, which makes the native AIRS-versus-Yahoo check incomparable. Pin Yahoo's Hong Kong listing 9988.HK for the exact ordinary share."
+    },
+    {
+      "isin": "KYG070341048",
+      "symbol": "9888.HK",
+      "name": "Baidu, Inc. Class A",
+      "note": "The held Hong Kong Class A share is quoted in HKD. Automatic resolution selected 9888N.MX, a Mexican cross-listing in MXN, which cannot be compared to AIRS's HKD price. Pin the native Hong Kong listing 9888.HK."
+    },
+    {
+      "isin": "GB00BP6MXD84",
+      "symbol": "SHELL.AS",
+      "name": "Shell plc",
+      "note": "The held Amsterdam ordinary share is quoted in EUR. Automatic resolution selected SHEL, the USD NYSE ADR, which cannot be directly compared with AIRS's EUR price. Pin Yahoo's Euronext Amsterdam listing SHELL.AS."
+    },
+    {
+      "isin": "IE00BZ12WP82",
+      "symbol": "LIN.DE",
+      "name": "Linde plc",
+      "note": "The held European/Xetra ordinary share is quoted in EUR. Automatic resolution selected LIN, the USD NYSE line, which cannot be directly compared with AIRS's EUR price. Pin Yahoo's Xetra listing LIN.DE for the native EUR security."
+    },
+    {
+      "isin": "IE000S9YS762",
+      "symbol": "LIN.DE",
+      "name": "Linde plc",
+      "note": "This is the current ISIN of the held European/Xetra ordinary share, quoted in EUR. Automatic resolution selected LIN, the USD NYSE line, which cannot be directly compared with AIRS's EUR price. Pin Yahoo's Xetra listing LIN.DE for the native EUR security."
+    },
+    {
+      "isin": "NL0010832176",
+      "symbol": "ARGX.BR",
+      "name": "argenx SE",
+      "note": "The held Euronext Brussels ordinary share is quoted in EUR. Automatic resolution selected ARGX, the USD Nasdaq ADS, which cannot be directly compared with AIRS's EUR price. Pin Yahoo's Brussels listing ARGX.BR for the native EUR security."
+    },
+    {
+      "isin": "AU000000PME8",
+      "symbol": "PME.AX",
+      "name": "Pro Medicus Limited",
+      "note": "The held Australian ordinary share is quoted on the ASX in AUD. Automatic resolution selected PMCUF, a USD OTC line, which cannot be directly compared with AIRS's AUD price. Pin Yahoo's ASX listing PME.AX for the native AUD security."
+    },
+    {
+      "isin": "SE0023950795",
+      "symbol": "ROKO-B.ST",
+      "name": "Röko AB (publ)",
+      "note": "The held Swedish B share is quoted on Nasdaq Stockholm in SEK. Automatic resolution selected ROKOBS.XC, a cross-listing, rather than the native Stockholm price series. Pin Yahoo's ROKO-B.ST listing for the exact Swedish ordinary share."
+    },
+    {
+      "isin": "GB00B2B0DG97",
+      "symbol": "REN.AS",
+      "name": "RELX PLC",
+      "note": "The held Euronext Amsterdam ordinary share is quoted in EUR. Automatic resolution selected REL.L, the London pence line, which is a different quote currency and unit from AIRS's EUR price. Pin Yahoo's Amsterdam listing REN.AS for the native EUR security."
+    },
+    {
+      "isin": "IE00BDBRDM35",
+      "symbol": "AGGH.AS",
+      "name": "iShares Core Global Aggregate Bond UCITS ETF EUR Hedged Acc",
+      "note": "This is the fixed bond tracker in every risk-profile benchmark. OpenFIGI identifies the ETF but Yahoo's generic ISIN search does not discover its Amsterdam listing, leaving tracking error unavailable. Pin AGGH.AS so a new environment can bootstrap its EUR price history automatically."
+    },
+    {
+      "isin": "IE000MEQP5U8",
+      "symbol": "0P0001TPVP.F",
+      "name": "Letko Brosseau Global Emerging Markets Equity Fund EUR Acc",
+      "note": "The held EUR fund is listed on Yahoo Finance as 0P0001TPVP.F in Frankfurt. Generic ISIN/name search returns no candidate, which falsely makes the risk history incomplete. Pin the reviewed fund listing so its own EUR series, rather than an unrelated emerging-markets proxy, is used."
+    },
+    {
+      "isin": "LU1662495628",
+      "symbol": "0P0001BD8Q.F",
+      "name": "AQR Apex UCITS Fund IAEFT EUR Acc",
+      "note": "Yahoo's exact ISIN search identifies the Frankfurt mutual-fund series 0P0001BD8Q.F. Generic resolution left the fund unmapped, even though a reviewed EUR NAV history exists."
     }
   ]
 }

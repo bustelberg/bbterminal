@@ -2437,14 +2437,18 @@ def _variant_bands(name: str | None, omschrijving: str | None) -> dict:
     if not variant:
         _log.warning("[analysis] %r is not offered at a risk profile — no allocation bands drawn",
                      name)
-        return {"variant": None, "bands": []}
+        return {"variant": None, "bands": [], "risk_profile_policy": None}
     bands = [b for b in load_bands()
              if b["variant"] == variant
              # A cell with nothing set is not a band. Sending it would draw a zero-width region at
              # the origin, which reads as "the policy says hold none of this".
              and any(b[f] is not None for f in ("min_pct", "default_pct", "max_pct"))]
     _log.debug("[analysis] %r -> profile %s, %d band(s) recorded", name, variant, len(bands))
-    return {"variant": variant, "bands": bands}
+    # This is returned with the analysis rather than duplicated in browser code.  The policy is a
+    # calculation input (not display copy): the scorecard, return chart and Risk tab must all use
+    # the exact same versioned weights in production.
+    return {"variant": variant, "bands": bands,
+            "risk_profile_policy": _weighted_benchmark_profiles().get(variant)}
 
 
 def compute_portfolio_analysis(portfolio_id: int,

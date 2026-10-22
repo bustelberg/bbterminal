@@ -99,6 +99,106 @@ def _h(name, isin, w, is_fund=False):
     return {"name": name, "isin": isin, "weight_pct": w, "is_fund": is_fund}
 
 
+def test_risk_profile_active_share_uses_the_stock_and_bond_policy(monkeypatch):
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"nvidia": {"key": "nvidia", "name": "Nvidia", "weight_pct": 100.0}},
+        "coverage": {}, "issuer_by_asset": {},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
+        "NVDA": {"isin": "NVDA", "gf_company_name": "Nvidia"},
+    })
+    got = A.compute_active_share([
+        {**_h("Nvidia", "NVDA", 60.0), "bucket": "Equity"},
+        {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
+    ], "ACWI", benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
+
+    assert got["benchmark"] == "60% ACWI + 40% AGGH.AS"
+    assert got["active_share_pct"] == 40.0
+    assert sum(row["portfolio_pct"] for row in got["rows"] if row["held"]) == 100.0
+    assert any(row["name"] == "AGGH.AS" and row["benchmark_pct"] == 40.0 for row in got["rows"])
+    assert next(row for row in got["rows"] if row["name"] == "Active bond")["bucket"] == "Bonds"
+    assert next(row for row in got["rows"] if row["name"] == "Nvidia")["bucket"] == "Stocks"
+
+
+def test_risk_profile_reuses_the_acwi_asset_identity_bridge_for_direct_stocks(monkeypatch):
+    """Policy mode must not turn an ACWI member into an unmatched name."""
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"hermes international": {
+            "key": "hermes international", "name": "HERMES INTERNATIONAL", "weight_pct": 100.0,
+        }},
+        "coverage": {}, "issuer_by_asset": {7: "hermes international"},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
+        "FR0000052292": {"analysis_id": 7, "gf_company_name": "Hermes Internationale"},
+    })
+    got = A.compute_active_share([
+        {**_h("Hermes Internationale", "FR0000052292", 60.0), "bucket": "Equity"},
+        {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
+    ], "ACWI", benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
+    hermes = next(row for row in got["rows"] if row["name"] == "Hermes Internationale")
+    assert hermes["in_benchmark"] is True
+    assert hermes["benchmark_pct"] == 60.0
+
+
+def test_execution_identity_keeps_an_acwi_member_matched_while_asset_grid_lags(monkeypatch):
+    """The source-of-truth execution mapping must repair a stale grid identity."""
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"loreal": {"key": "loreal", "name": "LOREAL", "weight_pct": 100.0}},
+        "coverage": {}, "issuer_by_asset": {41: "loreal"},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
+        "FR0000120321": {"gf_company_name": "L'Oreal"},
+    })
+    monkeypatch.setattr(A, "_execution_by_isin", lambda _ids: {
+        "FR0000120321": {"analysis_id": 41, "yahoo_symbol": "OR.PA", "status": "ok"},
+    })
+    got = A.compute_active_share([_h("L' Oreal", "FR0000120321", 100)], "ACWI")
+    loreal = next(row for row in got["rows"] if row["held"])
+    assert loreal["in_benchmark"] is True
+    assert loreal["benchmark_pct"] == 100.0
+
+
+def test_risk_profile_marks_equity_etfs_as_their_own_table_section(monkeypatch):
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"nvidia": {"key": "nvidia", "name": "Nvidia", "weight_pct": 100.0}},
+        "coverage": {}, "issuer_by_asset": {},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {})
+    got = A.compute_active_share([
+        {**_h("World ETF", "ETF", 60.0, is_fund=True), "bucket": "ETF Equity"},
+        {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
+    ], "ACWI", benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
+    assert next(row for row in got["rows"] if row["name"] == "World ETF")["bucket"] == "Stock ETFs"
+
+
+def test_risk_profile_recognises_an_etf_misclassified_as_plain_equity(monkeypatch):
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"nvidia": {"key": "nvidia", "name": "Nvidia", "weight_pct": 100.0}},
+        "coverage": {}, "issuer_by_asset": {},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {})
+    got = A.compute_active_share([
+        {**_h("iShares MSCI Wld Mom Fact ETF EUR", "ETF", 60.0), "bucket": "Equity"},
+        {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
+    ], "ACWI", benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
+    assert next(row for row in got["rows"] if row["name"].startswith("iShares"))["bucket"] == "Stock ETFs"
+
+
+def test_risk_profile_returns_only_the_verified_yahoo_symbol_for_a_held_etf(monkeypatch):
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"nvidia": {"key": "nvidia", "name": "Nvidia", "weight_pct": 100.0}},
+        "coverage": {}, "issuer_by_asset": {},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
+        "ETF": {"isin": "ETF", "yahoo_symbol": "IWMO.AS"},
+    })
+    got = A.compute_active_share([
+        {**_h("iShares MSCI Wld Mom Fact ETF EUR", "ETF", 60.0, is_fund=True), "bucket": "ETF Equity"},
+        {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
+    ], "ACWI", benchmark_weights={"Stocks": 60.0, "Bonds": 40.0})
+    assert next(row for row in got["rows"] if row["name"].startswith("iShares"))["yahoo_symbol"] == "IWMO.AS"
+
+
 class TestTheIdentities:
     def test_workbook_weight_rollforward_exposes_actual_calculation(self, monkeypatch):
         from types import SimpleNamespace

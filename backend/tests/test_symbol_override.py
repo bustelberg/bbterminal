@@ -69,6 +69,14 @@ class TestItIsIdempotent:
         monkeypatch.setattr(symbol_override, "_repoint", _boom)
         assert symbol_override.apply_symbol_overrides() == 0
 
+    def test_reviewed_mutual_fund_uses_closed_nav_bars_not_volume(self):
+        assert symbol_override._has_usable_override_series({
+            "quote_type": "MUTUALFUND", "med_adv_eur": 0, "price_bars": 40,
+        })
+        assert not symbol_override._has_usable_override_series({
+            "quote_type": "ETF", "med_adv_eur": 0, "price_bars": 40,
+        })
+
 
 class TestItRepointsADriftedRow:
     def test_a_row_naming_the_wrong_symbol_is_repointed(self, monkeypatch):
@@ -114,6 +122,14 @@ class TestItRefusesToFightTheAliasTable:
         with caplog.at_level("ERROR"):
             assert symbol_override.apply_symbol_overrides() == 0
         assert ISIN in caplog.text, "a refusal nobody can see is a silent drop"
+
+    def test_reviewed_alias_price_exception_uses_its_own_listing(self, monkeypatch):
+        _patch(monkeypatch, alias=True)
+        monkeypatch.setattr(symbol_override, "alias_price_override_isins", lambda: {ISIN})
+        seen = []
+        monkeypatch.setattr(symbol_override, "_repoint", lambda isin, symbol: seen.append((isin, symbol)) or True)
+        assert symbol_override.apply_symbol_overrides() == 1
+        assert seen == [(ISIN, RIGHT)]
 
 
 class TestScoping:

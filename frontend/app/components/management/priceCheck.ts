@@ -3,13 +3,32 @@ import type { AirsAccountIsins } from '../../../lib/types/api';
 // Explicit dashboard comparison exclusions; do not change the underlying instrument mapping.
 const PRICE_CHECK_EXCLUDED_ISINS = new Set(['CH1369849273']); // High Income Quality fund
 
+// Yahoo labels London closes as GBp (pence), while AIRS reports the same native price in GBP.
+// A quote unit is not a different currency: normalize both before comparing or displaying a range.
+const QUOTE_UNIT_NORMALIZATION: Record<string, { currency: string; divisor: number }> = {
+  GBp: { currency: 'GBP', divisor: 100 },
+  GBX: { currency: 'GBP', divisor: 100 },
+};
+
+function normalizeQuoteUnit(value: number | null, currency: string | null) {
+  const unit = currency ? QUOTE_UNIT_NORMALIZATION[currency] : undefined;
+  return {
+    value: value == null || !unit ? value : value / unit.divisor,
+    currency: unit?.currency ?? currency,
+    divisor: unit?.divisor ?? 1,
+  };
+}
+
 export type PriceStatus = 'matched' | 'warning' | 'difference' | 'stale' | 'linked' | 'unavailable';
+export type RangeAssessment = 'within' | 'outside' | 'insufficient' | 'notComparable' | 'staleRange';
 export type PriceItem = {
   key: string; name: string; isin: string | null; instrument: string | null;
+  yahooSymbol: string | null;
+  certificate: string | null;
   airs: number | null; yahoo: number | null; difference: number | null;
   airsCurrency: string | null; yahooCurrency: string | null;
   recentRange: { low: number; high: number; start: string; end: string; count: number } | null;
-  rangeAssessment: 'within' | 'outside' | 'insufficient';
+  rangeAssessment: RangeAssessment;
   airsDate: string | null; yahooDate: string | null; status: PriceStatus;
 };
 export type PriceSummary = {
@@ -18,13 +37,19 @@ export type PriceSummary = {
 };
 
 export function summarizePrices(data: AirsAccountIsins): PriceSummary {
-  const items = (data.rows ?? []).filter((row) => row.bucket !== 'Cash'
+  // This is an exception list for listed equities only. Bonds and other instruments need their
+  // own quote-unit-aware checks; comparing their clean price to an issuer's share price is noise.
+  const items = (data.rows ?? []).filter((row) => row.bucket === 'Equity'
     && !PRICE_CHECK_EXCLUDED_ISINS.has(row.isin?.trim().toUpperCase() ?? '')).map((row): PriceItem => {
-    const airs = row.airs_price_local ?? null;
-    const yahoo = row.our_price_local ?? null;
-    const airsCurrency = row.currency?.trim() || null;
-    const yahooCurrency = row.our_price_currency?.trim() || null;
-    const airsDate = data.as_of?.slice(0, 10) ?? null;
+    const rawAirsCurrency = row.currency?.trim() || null;
+    const rawYahooCurrency = row.our_price_currency?.trim() || null;
+    const normalizedAirs = normalizeQuoteUnit(row.airs_price_local ?? null, rawAirsCurrency);
+    const normalizedYahoo = normalizeQuoteUnit(row.our_price_local ?? null, rawYahooCurrency);
+    const airs = normalizedAirs.value;
+    const yahoo = normalizedYahoo.value;
+    const airsCurrency = normalizedAirs.currency;
+    const yahooCurrency = normalizedYahoo.currency;
+    const airsDate = row.airs_price_date?.slice(0, 10) ?? data.as_of?.slice(0, 10) ?? null;
     const yahooDate = row.our_price_date?.slice(0, 10) ?? null;
     const valid = !!airsCurrency && airsCurrency === yahooCurrency
       && typeof airs === 'number' && Number.isFinite(airs) && airs > 0
@@ -34,11 +59,16 @@ export function summarizePrices(data: AirsAccountIsins): PriceSummary {
     const recentRange = rawRange && typeof rawRange.low === 'number' && Number.isFinite(rawRange.low)
       && typeof rawRange.high === 'number' && Number.isFinite(rawRange.high) && rawRange.low > 0 && rawRange.high >= rawRange.low
       && typeof rawRange.start === 'string' && typeof rawRange.end === 'string' && typeof rawRange.count === 'number'
-      ? { low: rawRange.low, high: rawRange.high, start: rawRange.start, end: rawRange.end, count: rawRange.count } : null;
+      ? { low: rawRange.low / normalizedYahoo.divisor, high: rawRange.high / normalizedYahoo.divisor,
+        start: rawRange.start, end: rawRange.end, count: rawRange.count } : null;
     const rangeAge = recentRange && airsDate ? (Date.parse(airsDate) - Date.parse(recentRange.end)) / 86400000 : NaN;
-    const rangeAssessment = !valid || row.served_by || row.verdict === 'cross_listed'
-      || !recentRange || recentRange.count !== 5 || !(rangeAge > 0 && rangeAge <= 7)
-      ? 'insufficient' : airs >= recentRange.low - 0.005 && airs <= recentRange.high + 0.005 ? 'within' : 'outside';
+    // A missing five-session range is distinct from a linked listing or an incompatible currency.
+    // Calling all of those “not enough history” hid the real reason when five closes were plainly
+    // displayed in the adjacent column.
+    const rangeAssessment: RangeAssessment = !valid || row.served_by || row.verdict === 'cross_listed'
+      ? 'notComparable' : !recentRange || recentRange.count !== 5
+        ? 'insufficient' : !(rangeAge > 0 && rangeAge <= 7)
+          ? 'staleRange' : airs >= recentRange.low - 0.005 && airs <= recentRange.high + 0.005 ? 'within' : 'outside';
     let status: PriceStatus;
     if (row.served_by || row.verdict === 'cross_listed') status = 'linked';
     else if (!valid || !airsDate || !yahooDate) status = 'unavailable';
@@ -48,7 +78,8 @@ export function summarizePrices(data: AirsAccountIsins): PriceSummary {
     else status = 'matched';
     return {
       key: JSON.stringify([row.isin ?? '', row.holding_name]), name: row.holding_name,
-      isin: row.isin ?? null, instrument: row.our_instrument ?? null,
+      isin: row.isin ?? null, instrument: row.our_instrument ?? null, yahooSymbol: row.yahoo_symbol ?? null,
+      certificate: row.certificate_holding ?? null,
       airs, yahoo, difference, airsCurrency, yahooCurrency, airsDate, yahooDate, status, recentRange, rangeAssessment,
     };
   });

@@ -1587,6 +1587,9 @@ class ModelPortfolioAnalysis(BaseModel):
     # with no risk profile has no policy, and inventing one would be worse than drawing nothing.
     variant: str | None = None
     bands: list[AllocationBand] = []
+    #: Canonical fixed Stocks/Bonds policy for this profile.  This travels with the analysis so
+    #: browser views cannot drift from the backend's scorecard and benchmark calculations.
+    risk_profile_policy: dict[str, float] | None = None
     benchmark: str
     # Which side the portfolio bars weight by: "model" (nominal strategy weights) or "book" (the
     # paired AIRS book's actual EUR holdings). Only the WEIGHTS change — classification and the
@@ -2165,6 +2168,10 @@ class ActiveShareRow(BaseModel):
     active_pct: float = 0.0
     held: bool = False
     residual: bool = False
+    #: Present for a risk-profile comparison, so Stocks and Bonds can be shown separately.
+    bucket: str | None = None
+    #: Verified stored listing used for the optional Yahoo Finance quote link.
+    yahoo_symbol: str | None = None
     workbook_weight_pct: float | None = None
     weight_calculation: ActiveShareWeightCalculation | None = None
     yfinance_return_pct: float | None = None
@@ -2267,6 +2274,41 @@ class ActiveShareRequest(BaseModel):
     """
 
     holdings: list[ActiveShareHolding] = []
+    #: Fixed Stocks/Bonds policy weights for a risk-profile portfolio.  Omitted by generic
+    #: baskets, which retain the single-index stock-sleeve analytics.
+    benchmark_weights: dict[str, float] | None = None
+    portefeuille: str | None = None
+
+
+class RiskDataQuality(BaseModel):
+    """Whether the supplied portfolio is admissible for a displayed five-year risk metric."""
+
+    available: bool
+    #: `ready` only when every required holdings, FX and benchmark monthly mark is present.
+    status: str
+    benchmark: str
+    reason: str | None = None
+    years: int
+    window_from: str | None = None
+    window_to: str | None = None
+    priced_holdings: int = 0
+    total_holdings: int = 0
+    benchmark_isin: str | None = None
+
+
+@router.post("/api/airs/portfolio/risk-data-quality", response_model=RiskDataQuality)
+async def airs_portfolio_risk_data_quality(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                           years: int = 5):
+    """Strict preflight for dashboards and production monitors.
+
+    This is deliberately a read-only verdict. It neither refreshes nor silently substitutes a
+    shorter history; callers can alert or enqueue the named stale dependency from `reason`.
+    """
+    from routers._tracking_error import assess_risk_data_quality  # noqa: PLC0415
+
+    return await asyncio.to_thread(
+        assess_risk_data_quality, [h.model_dump() for h in req.holdings], benchmark, years,
+        benchmark_weights=req.benchmark_weights)
 
 
 @router.post("/api/airs/portfolio/active-share", response_model=ActiveShare)
@@ -2287,11 +2329,60 @@ async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = 
     from routers._active_share import compute_active_share  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start)
+        compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
+        req.benchmark_weights)
+
+
+class TrackingErrorBenchmarkComponent(BaseModel):
+    """One policy benchmark leg, measured over the exact tracking-error window."""
+    name: str
+    isin: str
+    weight_pct: float
+    window_return_pct: float | None = None
+    annualized_return_pct: float | None = None
+    start_date: str | None = None
+    start_price_eur: float | None = None
+    end_date: str | None = None
+    end_price_eur: float | None = None
+
+
+class TrackingErrorBenchmarkHistory(BaseModel):
+    components: list[TrackingErrorBenchmarkComponent] = []
+    cagr_pct: float | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    complete: bool = False
+
+
+class HistoricalPortfolioHolding(BaseModel):
+    """One holding used in the available-history CAGR reconstruction."""
+
+    isin: str
+    name: str
+    weight_pct: float
+    first_used: str | None = None
+
+
+class HistoricalPortfolioComparison(BaseModel):
+    available: bool
+    reason: str | None = None
+    source: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    total_return_pct: float | None = None
+    portfolio_cagr_pct: float | None = None
+    benchmark_cagr_pct: float | None = None
+    active_return_pp: float | None = None
+    years_elapsed: float | None = None
+    coverage_adjusted: bool = False
+    min_weight_covered_pct: float | None = None
+    avg_weight_covered_pct: float | None = None
+    holdings_history: list[HistoricalPortfolioHolding] = []
+    benchmark_components: list[TrackingErrorBenchmarkComponent] = []
 
 
 class TrackingError(BaseModel):
-    """Realised (ex-post) tracking error of the stock sleeve — see `routers/_tracking_error.py`.
+    """Realised (ex-post) tracking error of the selected risk sleeve — see `routers/_tracking_error.py`.
 
      `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
@@ -2317,6 +2408,21 @@ class TrackingError(BaseModel):
     #: the card states real dates rather than asserting a trailing window.
     window_from: str | None = None
     window_to: str | None = None
+    #: True when newer holdings shorten the calculation to their exact common price window.
+    history_limited: bool = False
+    #: A newly launched holding left too few monthly returns, so the exact common daily sample is
+    #: shown instead. It is real data, but intentionally labelled as preliminary.
+    preliminary: bool = False
+    #: The geometric return over the exact paired window, before annualisation.
+    portfolio_return_total_pct: float | None = None
+    benchmark_return_total_pct: float | None = None
+    benchmark_components: list[TrackingErrorBenchmarkComponent] = []
+    benchmark_history: TrackingErrorBenchmarkHistory | None = None
+    historical_comparison: HistoricalPortfolioComparison | None = None
+    #: Annualised return uses `(1 + total return) ** annualization_factor - 1`.
+    annualization_factor: float | None = None
+    #: Sample standard deviation of active returns at the displayed cadence, before `√f` scaling.
+    active_return_std_per_period_pct: float | None = None
 
     tracking_error_pct: float | None = None
     #:  THE QUANTITY TE IS THE SPREAD **OF**, returned beside it because the two are constantly
@@ -2347,10 +2453,9 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
                                         frequency: str = "weekly", years: int = 5):
     """Volatility of the active return, annualised — the Risk panel's second view.
 
-     THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
-    individual stocks, renormalised to 100%), and sharing the request model is what stops them
-    drifting into describing two — an active share over the stock sleeve beside a tracking error
-    over the whole book would be two answers to two questions under one heading.
+     The request shares the holdings body with `active-share`, while its optional policy weights
+    select the whole Stocks/Bonds risk sleeve.  Active Share remains a stock-sleeve structural
+    metric; return-based risk metrics use the portfolio's fixed policy comparator.
 
      SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
     every holding plus the tracker, and most opens of the Risk panel never switch to it.
@@ -2359,7 +2464,8 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
 
     return await asyncio.to_thread(
         compute_tracking_error, [h.model_dump() for h in req.holdings], benchmark,
-        frequency, years, require_complete_return=True)
+        frequency, years, require_complete_return=True,
+        benchmark_weights=req.benchmark_weights, portefeuille=req.portefeuille)
 
 
 class CorrelationPair(BaseModel):
@@ -2390,6 +2496,9 @@ class RiskCorrelation(BaseModel):
     #: different windows for one series is what the shared builder exists to prevent.
     window_from: str | None = None
     window_to: str | None = None
+    #: True when the exact sleeve has too little monthly history and the view falls back to its
+    #: available daily closes. This is a real, shorter sample — never synthetic pre-launch data.
+    preliminary: bool = False
 
     #: ρ between the book's return series and the benchmark's. Full precision — `r_squared` is its
     #: square, and a rounded ρ beside an unrounded R² would not reconcile on screen.
@@ -2443,14 +2552,28 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
     exist.
     """
     from routers._portfolio_correlation_risk import compute_risk_correlation  # noqa: PLC0415
+    from routers._tracking_error import MIN_PRELIMINARY_DAILY_OBS  # noqa: PLC0415
 
-    return await asyncio.to_thread(
+    monthly = await asyncio.to_thread(
         compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
-        frequency, years)
+        frequency, years, benchmark_weights=req.benchmark_weights,
+        require_complete_history=True)
+    if monthly.get("available") or frequency != "monthly":
+        return monthly
+
+    # Preserve the precise current sleeve. A newly added holding can leave just one monthly
+    # return while still having enough daily closes for a useful, explicitly preliminary ρ.
+    daily = await asyncio.to_thread(
+        compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
+        "daily", years, benchmark_weights=req.benchmark_weights,
+        require_complete_history=True,
+        minimum_observations=MIN_PRELIMINARY_DAILY_OBS,
+        preliminary=True)
+    return daily if daily.get("available") else monthly
 
 
 class PortfolioVolatility(BaseModel):
-    """σ of the stock sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
+    """σ of the selected risk sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
 
      SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
     correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
@@ -2521,7 +2644,8 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
     from routers._portfolio_volatility import compute_volatility  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years)
+        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
+        benchmark_weights=req.benchmark_weights, require_complete_history=True)
 
 
 class DrawdownEpisode(BaseModel):
@@ -2600,7 +2724,7 @@ class PortfolioDrawdown(BaseModel):
 @router.post("/api/airs/portfolio/drawdown", response_model=PortfolioDrawdown)
 async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACWI",
                                   frequency: str = "daily", years: int = 5):
-    """Peak-to-trough falls of the reconstructed stock sleeve, with their dates.
+    """Peak-to-trough falls of the reconstructed risk sleeve, with their dates.
 
      ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
     is free, so the frequency comparison costs no extra round trips.
@@ -2608,7 +2732,8 @@ async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACW
     from routers._portfolio_drawdown import compute_drawdown  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years)
+        compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
+        benchmark_weights=req.benchmark_weights, require_complete_history=True)
 
 
 class ConcentrationRow(BaseModel):
@@ -2691,7 +2816,8 @@ async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str =
     from routers._portfolio_concentration import compute_concentration  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_concentration, [h.model_dump() for h in req.holdings], benchmark, benchmark_start)
+        compute_concentration, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
+        req.benchmark_weights)
 
 
 class ExposurePosition(BaseModel):
@@ -3900,6 +4026,20 @@ async def airs_portfolio_refresh_job(portefeuille: str, cascade: bool = True):
         #   flag at its own first boundary and returns cancelled, which `job_verdict` reports.
         if not ctx.cancelled:
             ctx.progress(0, 0, "Preparing refresh…")
+            # This is the verified repair path for the Risk tab's ACWI/AGGH dependency.  The
+            # toast says exactly what is happening; unlike an inline warning it never implies a
+            # background backfill merely because one is scheduled for later.
+            ctx.progress(0, 0, "Refreshing risk benchmark prices…")
+            try:
+                from asset_pipeline.price_refresh import refresh_risk_trackers  # noqa: PLC0415
+                repaired = refresh_risk_trackers()
+                backfill = repaired["backfill"]
+                ctx.progress(0, 0,
+                             f"Risk benchmark prices refreshed: {backfill['backfilled']} "
+                             "missing history series backfilled")
+            except Exception as e:  # noqa: BLE001 — a book refresh remains useful on its own
+                _log.warning("[airs refresh] risk benchmark prices not refreshed: %s: %s",
+                             type(e).__name__, e)
             try:
                 from routers._benchmark_etf import refresh_index_proxies  # noqa: PLC0415
                 refresh_index_proxies(bypass_daily_guard=True)
@@ -4408,9 +4548,16 @@ class AirsHoldingIsin(BaseModel):
     # newest bar sat six days back, and every stored bar matched Yahoo to the cent.
     verdict: str
     our_instrument: str | None = None
+    yahoo_symbol: str | None = None
+    # The Toppenberg certificate whose strategy contains this instrument. Only present on the
+    # look-through price-check rows; a regular holding has no wrapper certificate.
+    certificate_holding: str | None = None
     # The date of the close on OUR side of the ratio, and how far it sits from `as_of`. A ratio
     # without its two dates cannot be argued with.
     our_price_date: str | None = None
+    #: AIRS valuation date for this row. Usually the account-wide `as_of`; Toppenberg price
+    #: checks look through certificates, so an underlying strategy can have its own snapshot.
+    airs_price_date: str | None = None
     price_lag_days: int | None = None
     # Set when this ISIN is deliberately served by ANOTHER ISIN's instrument (an ADR priced from
     # the main company's listing).  The two do not trade at the same number — TSMC is 1 ADR = 5
@@ -4475,6 +4622,8 @@ class AirsAccountIsins(BaseModel):
     model_name: str | None = None
     model_source: str | None = None
     as_of: str | None = None
+    looked_through_certificates: bool = False
+    looked_through_accounts: list[str] = []
     reason: str | None = None
     # Per-phase milliseconds for THIS request — see `_airs_holding_isin._phase`. Expanding a row
     # is a dozen distinct steps and the slow one is not the obvious one, so the breakdown travels
@@ -4486,7 +4635,7 @@ class AirsAccountIsins(BaseModel):
 
 
 @router.get("/api/airs/accounts/{portefeuille}/isins", response_model=AirsAccountIsins)
-async def airs_account_isins(portefeuille: str, stored_check: bool = False):
+async def airs_account_isins(portefeuille: str, stored_check: bool = False, response: Response = None):
     """An account's holdings with an ISIN attached to each, price-checked.
 
     The account has the money and no ISIN; its model has the ISINs and nothing AIRS values.
@@ -4497,6 +4646,10 @@ async def airs_account_isins(portefeuille: str, stored_check: bool = False):
     and they compound differently).
     """
     if stored_check:
+        # This is read immediately after a row job writes it. A browser or intermediary copy would
+        # leave the modal showing an old ratio even though the Yahoo close has been refreshed.
+        if response is not None:
+            response.headers['Cache-Control'] = 'no-store'
         from routers._airs_price_check import saved_price_checks  # noqa: PLC0415
         saved = await asyncio.to_thread(saved_price_checks, [portefeuille])
         check = saved.get(portefeuille) or {}
@@ -4531,6 +4684,27 @@ async def refresh_account_isin_prices_job(portefeuille: str):
 
     job, reused = job_registry.start("airs.account-price-check", portefeuille, _work)
     return {"job_id": job.id, "label": portefeuille, "already_running": reused}
+
+
+@router.post("/api/airs/accounts/{portefeuille}/isins/{isin}/refresh-price/job")
+async def refresh_account_isin_price_job(portefeuille: str, isin: str):
+    """Force-refresh one displayed holding's Yahoo series and save its account check."""
+    import jobs as job_registry  # noqa: PLC0415
+    from routers._airs_price_check import recheck_price_check_row  # noqa: PLC0415
+
+    normalized = isin.strip().upper()
+
+    def _work(ctx) -> str:
+        ctx.progress(0, 0, f"Refreshing Yahoo price for {normalized}...")
+        ctx.check()
+        recheck_price_check_row(portefeuille, normalized)
+        ctx.check()
+        ctx.progress(1, 1, f"Price refreshed for {normalized}")
+        return f"Price refreshed for {normalized}"
+
+    job, reused = job_registry.start("airs.account-holding-price-check",
+                                     f"{portefeuille}:{normalized}", _work)
+    return {"job_id": job.id, "label": normalized, "already_running": reused}
 
 
 class AirsAccountTransactions(BaseModel):
@@ -4878,16 +5052,19 @@ class AllocationBandGrid(BaseModel):
     variants: list[str]
     buckets: list[str]
     cells: list[AllocationBand]
+    benchmark_profiles: dict[str, dict[str, float]] = {}
 
 
 @router.get("/api/airs/allocation-bands", response_model=AllocationBandGrid)
 async def airs_allocation_bands():
     """The allocation policy — JSON defaults plus any administrator overrides."""
     from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands  # noqa: PLC0415
+    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles  # noqa: PLC0415
     from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
 
     cells = await asyncio.to_thread(load_bands)
-    return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": cells}
+    return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": cells,
+            "benchmark_profiles": _weighted_benchmark_profiles()}
 
 
 @router.put("/api/airs/allocation-bands", response_model=AllocationBandGrid)
@@ -4898,6 +5075,7 @@ async def airs_set_allocation_bands(body: list[AllocationBand]):
     full policy.
     """
     from routers._airs_allocation_bands import POLICY_BUCKETS, load_bands, save_bands  # noqa: PLC0415
+    from routers._airs_portfolio_analysis import _weighted_benchmark_profiles  # noqa: PLC0415
     from routers._airs_portfolio_variant import VARIANTS  # noqa: PLC0415
 
     def _run() -> dict:
@@ -4905,7 +5083,8 @@ async def airs_set_allocation_bands(body: list[AllocationBand]):
             save_bands([c.model_dump() for c in body])
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
-        return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": load_bands()}
+        return {"variants": list(VARIANTS), "buckets": list(POLICY_BUCKETS), "cells": load_bands(),
+                "benchmark_profiles": _weighted_benchmark_profiles()}
 
     return await asyncio.to_thread(_run)
 

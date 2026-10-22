@@ -24,6 +24,7 @@ from routers._airs_holding_isin import (
     _MAX_CLOSE_LAG_DAYS,
     _close_lag_days,
     _dedupe,
+    _price_check_served_by,
     classify_bucket,
 )
 
@@ -77,6 +78,18 @@ class TestAStalePriceIsNotAWrongListing:
 
     def test_an_unparseable_date_yields_no_lag_rather_than_raising(self):
         assert _close_lag_days({"date": "not-a-date"}, "2026-07-29") is None
+
+
+class TestAliasPriceExceptions:
+    """An ADR can share a company/fundamentals identity without sharing its price listing."""
+
+    ADR, ORD = "US8740391003", "TW0002330008"
+
+    def test_normal_alias_is_marked_as_not_price_comparable(self):
+        assert _price_check_served_by(self.ADR, {self.ADR: self.ORD}, set()) == self.ORD
+
+    def test_reviewed_own_listing_exception_keeps_the_price_comparison_visible(self):
+        assert _price_check_served_by(self.ADR, {self.ADR: self.ORD}, {self.ADR}) is None
 
 
 class TestTheAccountBillsOneInstrumentOnSeveralLines:

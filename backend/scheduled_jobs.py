@@ -236,16 +236,16 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         id="airs_vermogen_refresh",
         label="AIRS portfolios + models + price checks",
         fills="airs_holding · airs_performance · airs_mutatie · airs_model_portfolio* · asset_price · airs_price_check",
-        cadence="Every day, 08:00, 09:00, 10:00, and 11:00 Amsterdam",
+        cadence="Every day, 12:00 Amsterdam",
         # One sequential AIRS run: account values, model compositions, then model pricing. Keeping
-        # those phases in one job prevents two Playwright/AirSPMS sessions from colliding. AIRS
-        # often publishes its daily data before 11:00, so probe hourly from 08:00 through 11:00.
-        trigger={"day_of_week": "mon-sun", "hour": "8,9,10,11", "minute": 0,
+        # those phases in one job prevents two Playwright/AirSPMS sessions from colliding. Noon is
+        # late enough for AIRS to publish its daily valuations without repeated morning re-scans.
+        trigger={"day_of_week": "mon-sun", "hour": 12, "minute": 0,
                  "timezone": "Europe/Amsterdam"},
         options={"coalesce": True, "misfire_grace_time": 3600},
         max_age_hours=80,
-        note="Full AIRS re-scan at every run: every account, all model compositions, and "
-             "paired-model prices, then saved price checks at 08:00, 09:00, 10:00 and 11:00 Amsterdam; APScheduler "
+        note="Full AIRS re-scan every day at 12:00 Amsterdam: every account, all model compositions, and "
+             "paired-model prices, then saved price checks; APScheduler "
              "handles DST.",
     ),
     JobSpec(

@@ -5,10 +5,18 @@ The measured case: TSMC's NYSE ADR (`US8740391003`) is served by the Taiwan ordi
 """
 from __future__ import annotations
 
+import pytest
+
 from asset_pipeline import isin_alias
 from tests._fake_supabase import FakeSupabase
 
 ADR, ORD = "US8740391003", "TW0002330008"
+
+
+@pytest.fixture(autouse=True)
+def _ignore_checked_in_price_exceptions(monkeypatch):
+    """Most alias invariants describe the ordinary alias path, not the TSM ADR exception."""
+    monkeypatch.setattr("asset_pipeline.symbol_override.alias_price_override_isins", lambda: set())
 
 
 def _tables(alias=True, adr_gf=True, ord_gf=False):
@@ -96,6 +104,14 @@ class TestItIsIdempotentAndSurvivesAReResolve:
         assert isin_alias.apply_aliases() == 1
         adr = next(r for r in fake.tables["asset_execution"] if r["isin"] == ADR)
         assert adr["yahoo_symbol"] == "2330.TW" and adr["analysis_id"] == 9040
+
+    def test_explicit_price_exception_leaves_the_adr_on_its_own_listing(self, monkeypatch):
+        fake = FakeSupabase(_tables())
+        monkeypatch.setattr(isin_alias, "supabase", fake)
+        monkeypatch.setattr("asset_pipeline.symbol_override.alias_price_override_isins", lambda: {ADR})
+        assert isin_alias.apply_aliases() == 0
+        adr = next(r for r in fake.tables["asset_execution"] if r["isin"] == ADR)
+        assert adr["yahoo_symbol"] == "TSM" and adr["currency"] == "USD"
 
 
 class TestTheGuruFocusListingFollowsTheSameRule:

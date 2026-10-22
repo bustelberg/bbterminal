@@ -62,7 +62,6 @@ import { v } from '../../../lib/dynamicValue';
 import InfoTip from '../InfoTip';
 import { traceError } from '../../../lib/debugTrace';
 import type { BookValueSeries } from '../../../lib/types/api';
-import allocationProfiles from '../../config/weightedBenchmarkAllocations.json';
 import { useAnalyseCopy } from './analyseCopy';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
 
@@ -73,14 +72,10 @@ type WeightedBenchmarkComponent = {
   currency: string | null; return_pct: number | null;
 };
 
-const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[], variant?: string | null) => {
-  // Policy benchmark weights are an explicit product promise, not a reflection
-  // of whatever the book happens to hold today. The JSON is shipped with the
-  // frontend, so changing the policy is a normal deploy with no DB migration.
-  const configured = variant && variant in allocationProfiles
-    ? allocationProfiles[variant as keyof typeof allocationProfiles]
-    : null;
-  if (configured) return configured;
+const weightedBenchmarkWeights = (blocks: readonly WeightedBenchmarkBlock[], policy?: Record<string, number> | null) => {
+  // The analysis response is the canonical policy source.  Falling back to the returned scorecard
+  // blocks retains a useful chart for older cached payloads without inventing a frontend policy.
+  if (policy) return policy;
   const names = new Set(['Stocks', 'Bonds']);
   const weights = Object.fromEntries(blocks
     .filter((block) => names.has(block.bucket) && Number.isFinite(block.weight_pct))
@@ -372,14 +367,14 @@ export default function BookReturnChart(
     refreshSeq = 0,
     benchmark,
     benchmarkBlocks = [],
-    variant,
-  }: { portfolioId: number; portfolioName?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; variant?: string | null },
+    policyWeights,
+  }: { portfolioId: number; portfolioName?: string | null; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; policyWeights?: Record<string, number> | null },
 ) {
   const [data, setData] = useState<BookValueSeries | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [monthlyModalOpen, setMonthlyModalOpen] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-  const weights = weightedBenchmarkWeights(benchmarkBlocks, variant);
+  const weights = weightedBenchmarkWeights(benchmarkBlocks, policyWeights);
   const weightsQuery = weights ? `&benchmark_weights=${encodeURIComponent(JSON.stringify(weights))}` : '';
 
   useEffect(() => {

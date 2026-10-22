@@ -56,15 +56,56 @@ def _profile(weights_pct: list[float]) -> dict:
     }
 
 
+def _policy_benchmark(bench: dict, weights: dict[str, float] | None) -> tuple[dict, str]:
+    """Turn ACWI into the reviewed Stocks/Bonds policy benchmark when one is supplied.
+
+    The bond sleeve is deliberately one investable AGGH.AS position.  We have constituent-level
+    weights for ACWI, but not for the aggregate-bond ETF; pretending its thousands of bonds were
+    individual benchmark companies would fabricate precision.  Including the ETF itself makes
+    the 40% policy allocation visible and leaves the concentration arithmetic exact.
+    """
+    if not weights:
+        return bench, ""
+    try:
+        stocks = float(weights.get("Stocks", 0.0))
+        bonds = float(weights.get("Bonds", 0.0))
+    except (TypeError, ValueError):
+        raise IssuerError("The risk-profile benchmark weights are invalid.")
+    if stocks < 0 or bonds < 0 or abs(stocks + bonds - 100.0) > 0.01:
+        raise IssuerError("The risk-profile benchmark must contain Stocks and Bonds totaling 100%.")
+
+    scaled = {
+        key: {**row, "weight_pct": row["weight_pct"] * stocks / 100.0}
+        for key, row in bench.items()
+    }
+    if bonds > 0:
+        scaled["benchmark:aggh.as"] = {
+            "key": "benchmark:aggh.as",
+            "name": "AGGH.AS",
+            "weight_pct": bonds,
+        }
+    label = " + ".join(
+        f"{weight:g}% {name}"
+        for name, weight in (("ACWI", stocks), ("AGGH.AS", bonds)) if weight > 0
+    )
+    return scaled, label
+
+
 def compute_concentration(holdings: list[dict], benchmark: str,
-                          benchmark_start: str | None = None) -> dict:
-    """C₁₀ / HHI / N_eff for the book's stock sleeve, beside the benchmark's own."""
+                          benchmark_start: str | None = None,
+                          benchmark_weights: dict[str, float] | None = None) -> dict:
+    """C₁₀ / HHI / N_eff for the book's stock sleeve, beside its policy benchmark."""
     try:
         built = build_issuer_weights(holdings, benchmark, benchmark_start)
     except IssuerError as e:
         return {"available": False, "reason": e.reason, "benchmark": benchmark}
 
-    port, bench = built["port"], built["bench"]
+    port, index_bench = built["port"], built["bench"]
+    try:
+        bench, policy_label = _policy_benchmark(index_bench, benchmark_weights)
+    except IssuerError as e:
+        return {"available": False, "reason": e.reason, "benchmark": benchmark}
+    benchmark_label = policy_label or benchmark
     stocks_w = built["stocks_w"]
 
     rows = sorted(port.values(), key=lambda r: -r["weight_pct"])
@@ -114,7 +155,7 @@ def compute_concentration(holdings: list[dict], benchmark: str,
 
     return {
         "available": True,
-        "benchmark": benchmark,
+        "benchmark": benchmark_label,
         "issuers": p["n"],
         "benchmark_issuers": b["n"],
 

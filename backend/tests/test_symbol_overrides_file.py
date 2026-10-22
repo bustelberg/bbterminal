@@ -78,3 +78,67 @@ class TestTheOverridesFileIsWellFormed:
         workbook's listing."""
         got = {e["isin"]: e["symbol"] for e in _entries()}
         assert got["NL0015001FS8"] == "FER.MC"
+
+    def test_dino_polska_uses_its_warsaw_ordinary_listing(self):
+        """0TCP.IL is not the native PLN listing and creates a false price-check gap."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["PLDINPL00011"] == "DNP.WA"
+
+    def test_hoya_uses_its_tokyo_ordinary_listing(self):
+        """The TopSelectie look-through holds the Japanese ordinary, not an ADR."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["JP3837800006"] == "7741.T"
+
+    def test_native_asml_and_tsmc_adr_price_listings_are_pinned(self):
+        got = {e["isin"]: e for e in _entries()}
+        assert got["NL0010273215"]["symbol"] == "ASML.AS"
+        assert got["US8740391003"]["symbol"] == "TSM"
+        assert got["US8740391003"]["alias_price_override"] is True
+
+    def test_alibaba_uses_the_hong_kong_ordinary_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["KYG017191142"] == "9988.HK"
+
+    def test_baidu_uses_the_hong_kong_class_a_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["KYG070341048"] == "9888.HK"
+
+    def test_shell_uses_the_amsterdam_eur_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["GB00BP6MXD84"] == "SHELL.AS"
+
+    def test_linde_uses_the_xetra_eur_listing_for_both_issued_isins(self):
+        """The native EUR ordinary must not be compared with the USD NYSE line."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["IE00BZ12WP82"] == "LIN.DE"
+        assert got["IE000S9YS762"] == "LIN.DE"
+
+    def test_relx_uses_the_amsterdam_eur_listing(self):
+        """REL.L is a London pence quote, not AIRS's held EUR Amsterdam line."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["GB00B2B0DG97"] == "REN.AS"
+
+    def test_argenx_uses_the_brussels_eur_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["NL0010832176"] == "ARGX.BR"
+
+    def test_pro_medicus_uses_the_asx_aud_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["AU000000PME8"] == "PME.AX"
+
+    def test_roko_uses_the_stockholm_sek_listing(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["SE0023950795"] == "ROKO-B.ST"
+
+    def test_risk_profile_bond_tracker_is_pinned_to_aggh(self):
+        """A fresh environment must bootstrap the fixed policy benchmark without fuzzy search."""
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["IE00BDBRDM35"] == "AGGH.AS"
+
+    def test_letko_fund_uses_its_reviewed_yahoo_series(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["IE000MEQP5U8"] == "0P0001TPVP.F"
+
+    def test_aqr_apex_fund_uses_its_reviewed_yahoo_series(self):
+        got = {e["isin"]: e["symbol"] for e in _entries()}
+        assert got["LU1662495628"] == "0P0001BD8Q.F"

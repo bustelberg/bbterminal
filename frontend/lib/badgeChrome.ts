@@ -35,4 +35,4 @@ export const BADGE_PILL = 'px-1.5 py-px rounded-full text-[10px] font-medium whi
  * sets as a lozenge and that is fine; two radii one line apart is what makes two badges read as
  * two unrelated conventions.
  */
-export const BADGE_VALUE = 'inline-block px-1.5 rounded-full font-mono tabular-nums';
+export const BADGE_VALUE = 'inline-block align-baseline px-0.5 rounded-full text-[0.9em] leading-[1.25] font-mono tabular-nums';

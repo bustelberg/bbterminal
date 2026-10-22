@@ -27,7 +27,7 @@
  * precision, and the table's own column header already said Company while the counts beside it
  * said issuers. Same rename in Concentration and Effective positions, which fold identically.
  */
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
@@ -139,10 +139,12 @@ function Tile({ label, value, tone, info, simpleInfo, suffix }: {
 
 export default function ActiveSharePanel({
   holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
-  portfolioSource, weightComponentsNow, weightTotalNow,
+  portfolioSource, weightComponentsNow, weightTotalNow, riskProfilePolicy,
+  portefeuille,
   onClose,
 }: {
   holdings: ActiveShareHolding[];
+  portefeuille?: string | null;
   benchmark: string;
   /** The book's own name, so its date line names the thing it dates rather than saying "the book".
    *   It is on screen anyway (the modal's heading), which is what makes it the shortest possible
@@ -170,6 +172,9 @@ export default function ActiveSharePanel({
    * happens to be right for whichever kind of book was opened first.
    */
   portfolioSource: SourceKey;
+  /** Canonical reviewed policy from the analysis response. It fixes the Stocks/Bonds benchmark for every
+   * return-based risk view; Active Share and Concentration remain stock-sleeve measures. */
+  riskProfilePolicy?: Record<string, number> | null;
   weightComponentsNow?: AirsWeightComponent[];
   weightComponentsStart?: AirsWeightComponent[];
   weightTotalNow?: number | null;
@@ -199,6 +204,10 @@ export default function ActiveSharePanel({
   const weightedHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
+  const riskBenchmarkWeights = riskProfilePolicy ?? undefined;
+  const riskHoldings = useMemo(
+    () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
+  );
   const selectedPortfolioAsOf = portfolioAsOf;
   const benchmarkStart = null;
   const selectedWeightComponents = weightComponentsNow;
@@ -208,7 +217,10 @@ export default function ActiveSharePanel({
   // the parent, so depending on the array itself would refetch forever.
   const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}&weight_method=workbook-identity-v5`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
-  const activeBody = JSON.stringify({ holdings: weightedHoldings });
+  const activeBody = JSON.stringify({
+    holdings: riskBenchmarkWeights ? riskHoldings : weightedHoldings,
+    benchmark_weights: riskBenchmarkWeights,
+  });
   const key = riskRequestKey(activeUrl, activeBody);
   const { data, error } = useRiskResult<ActiveShare>(key, async () => {
     const r = await apiFetch(activeUrl, {
@@ -219,10 +231,28 @@ export default function ActiveSharePanel({
     return b as ActiveShare;
   }, 'active-share', 'the active share could not be computed');
 
+  // The active-share response names a policy benchmark for people ("60% ACWI + 40% AGGH.AS").
+  // The four return endpoints and Concentration still need the canonical ACWI key to resolve
+  // their benchmark constituents; their request body carries the policy separately.
+  const riskBenchmark = riskBenchmarkWeights ? benchmark : (data?.benchmark ?? benchmark);
+
   //  `?? []` ON BOTH — every list on this payload is optional in the generated types (the
   // Pydantic default makes it so), and `.filter` on undefined is a blank panel with no error.
   const all: ActiveShareRow[] = data?.rows ?? [];
   const rows = all.filter((r) => r.held && !r.residual);
+  // A policy comparator has two real asset sleeves. Keeping its bond ETFs among the company rows
+  // obscures the allocation decision the policy benchmark is meant to make visible.
+  const rowGroups = (() => {
+    const stocks = rows.filter((row) => row.bucket === 'Stocks');
+    const stockEtfs = rows.filter((row) => row.bucket === 'Stock ETFs');
+    const bonds = rows.filter((row) => row.bucket === 'Bonds');
+    if (!stockEtfs.length && !bonds.length) return [{ label: '', rows }];
+    return [
+      { label: 'Stocks', rows: stocks },
+      { label: 'Stock ETFs', rows: stockEtfs },
+      { label: 'Bonds', rows: bonds },
+    ].filter((group) => group.rows.length > 0);
+  })();
   const maxBet = Math.max(0, ...all.map((r) => Math.abs(r.active_pct ?? 0)));
   /**
    * The footer row's sums — over the ROWS ON SCREEN, not over `all`.
@@ -314,11 +344,12 @@ export default function ActiveSharePanel({
         ? 'overflow-hidden' : 'overflow-auto space-y-3'}`}>
 
       {/*  MOUNTED ONLY WHILE SELECTED — unmounting drops its fetch, which is what makes the
-          lazy load real rather than merely hidden. It takes the SAME holdings, so both views
-          describe one portfolio; see `compute_tracking_error`. */}
+          lazy load real rather than merely hidden.  Return-based views receive the policy sleeve;
+          Active Share itself remains the deliberately narrower stock-sleeve measure. */}
       {view === 'te' && (
-        <TrackingErrorView holdings={weightedHoldings}
-          benchmark={data?.benchmark ?? benchmark}
+        <TrackingErrorView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
+          portefeuille={portefeuille}
+          benchmark={riskBenchmark}
           //  The same book identity the active-share cards carry. This view measures the same
           // sleeve, so its cards owe the reader the same answer to "whose weights, read when, from
           // where" — and a second copy of those facts would be a second thing to keep true.
@@ -326,26 +357,27 @@ export default function ActiveSharePanel({
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'corr' && (
-        <CorrelationView holdings={weightedHoldings}
-          benchmark={data?.benchmark ?? benchmark}
+        <CorrelationView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
+          benchmark={riskBenchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'vol' && (
-        <VolatilityView holdings={weightedHoldings}
-          benchmark={data?.benchmark ?? benchmark}
+        <VolatilityView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
+          benchmark={riskBenchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'dd' && (
-        <DrawdownView holdings={weightedHoldings}
-          benchmark={data?.benchmark ?? benchmark}
+        <DrawdownView holdings={riskHoldings} benchmarkWeights={riskBenchmarkWeights}
+          benchmark={riskBenchmark}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
       )}
       {view === 'conc' && (
         <ConcentrationView holdings={weightedHoldings}
-          benchmark={data?.benchmark ?? benchmark}
+          benchmarkWeights={riskBenchmarkWeights}
+          benchmark={riskBenchmark}
           benchmarkStart={benchmarkStart}
           portfolioName={portfolioName} portfolioAsOf={selectedPortfolioAsOf}
           portfolioFetchedAt={portfolioFetchedAt} portfolioSource={portfolioSource} />
@@ -468,11 +500,25 @@ export default function ActiveSharePanel({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {rowGroups.map((group) => (
+                  <Fragment key={group.label || 'positions'}>
+                    {group.label && <tr>
+                      <td colSpan={5} className="border-t border-neutral-700/50 bg-overlay/[0.03] px-2.5 py-1.5
+                        text-[10px] font-semibold uppercase tracking-wider text-fg-faint">
+                        {group.label}
+                      </td>
+                    </tr>}
+                    {group.rows.map((r) => (
                   <tr key={r.name}
                     className="[&>td]:px-2.5 [&>td]:py-1 [&>td]:border-t [&>td]:border-neutral-800/20">
                     <td className="text-fg-soft">
-                      {r.residual ? t.active.otherPositions : r.name}
+                      {r.residual ? t.active.otherPositions : r.yahoo_symbol ? (
+                        <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(r.yahoo_symbol)}/`}
+                          target="_blank" rel="noreferrer" title={`Open ${r.yahoo_symbol} on Yahoo Finance`}
+                          className="hover:text-accent-300 hover:underline underline-offset-2">
+                          {r.name}
+                        </a>
+                      ) : r.name}
                       {!r.held && !r.residual && (
                         <span className="ml-1.5 text-[10px] text-fg-faint">
                           {t.active.notHeld}
@@ -520,7 +566,8 @@ export default function ActiveSharePanel({
                         </div> : undefined} text={`${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
                       </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%`
-                        : r.in_benchmark ? <span title="Index member; price unavailable for the weight calculation">{data.benchmark ?? benchmark}</span> : '—'}
+                        : r.in_benchmark ? <span title="Index member; price unavailable for the weight calculation">{data.benchmark ?? benchmark}</span>
+                          : <span title="Not a constituent of the policy benchmark; this is not a price-return field">—</span>}
                       </span>
                     </td>
                     {/*  NO TONE ON THE NUMBER ITSELF beyond direction. An overweight is not a
@@ -532,6 +579,8 @@ export default function ActiveSharePanel({
                     </td>
                     <td className="pr-2.5"><Bar v={r.active_pct ?? 0} max={maxBet} /></td>
                   </tr>
+                    ))}
+                  </Fragment>
                 ))}
               </tbody>
               </table>

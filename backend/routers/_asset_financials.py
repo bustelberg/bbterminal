@@ -1620,6 +1620,9 @@ _BENCHMARK_RISK_ETF = {
     "SP500": "US78462F1030",   # SPDR S&P 500 ETF Trust
     "ACWI": "IE00B6R52259",    # iShares MSCI ACWI UCITS ETF USD Acc
     "AEX": "IE00B0M62Y33",     # iShares AEX UCITS ETF EUR (Dist)
+    # EUR-hedged global aggregate bonds.  Risk-profile benchmarks use this beside ACWI, and it
+    # must travel through the same EUR price/FX pipeline as every holding.
+    "BONDS": "IE00BDBRDM35",    # iShares Core Global Aggregate Bond UCITS ETF EUR Hedged Acc
 }
 
 

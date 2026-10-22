@@ -35,7 +35,10 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Callable
+
+import requests
 
 from deps import IN_CHUNK_SIZE, supabase
 
@@ -46,6 +49,17 @@ _PAGE = 1000
 # Days behind the freshest close we hold before a series counts as stale. 1 would flag every
 # market whose close simply hasn't published yet; 3 clears a weekend.
 DEFAULT_STALE_DAYS = 3
+
+# A very small, reviewed escape hatch for funds that publish an official NAV but are not carried
+# by Yahoo. The source ID is the provider's own instrument identifier, never a guessed proxy.
+_NAV_FALLBACKS: dict[str, dict[str, str]] = {
+    "NL0012171417": {
+        "provider": "IEX",
+        "issue_id": "60051939",
+        "name": "Fresh Fixed Income Fund",
+        "currency": "EUR",
+    },
+}
 
 # Yahoo answers an overloaded caller with an EMPTY result rather than a 429, so we never race it.
 DEFAULT_SLEEP_S = 0.4
@@ -96,13 +110,21 @@ def post_close_isins() -> set[str]:
 
 
 def watched_isins() -> set[str]:
-    """The daily universe: holdings, sold watch rows and BC logbook instruments."""
+    """The daily universe, including the shared risk-benchmark trackers.
+
+    A risk-profile comparison is unusable when ACWI or AGGH has no stored history, even if every
+    held instrument is current.  These tracker ISINs are not necessarily in a portfolio table, so
+    they must be explicitly watched for both an absent-series backfill and ordinary stale refresh.
+    """
+    from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+
     logbook = {isin.strip().upper() for isin in _paged_isins("bc_log_entry") if isin.strip()}
-    return held_isins() | post_close_isins() | logbook
+    trackers = {isin.strip().upper() for isin in _BENCHMARK_RISK_ETF.values() if isin.strip()}
+    return held_isins() | post_close_isins() | logbook | trackers
 
 
 def _executions(isins: set[str] | None) -> list[dict]:
-    cols = "isin,analysis_id,yahoo_symbol,name,status"
+    cols = "isin,analysis_id,yahoo_symbol,name,status,currency"
     rows: list[dict] = []
     if isins is None:
         off = 0
@@ -327,6 +349,146 @@ def backfill_missing(isins: set[str]) -> dict:
             log.warning("[price_refresh] price backfill %s failed: %s", r["isin"], e)
         time.sleep(DEFAULT_SLEEP_S)
     return {"missing": len(missing), "backfilled": done, "failed": failed, "skipped": skipped}
+
+
+def _iex_nav_rows(issue_id: str) -> list[tuple[str, float]]:
+    """Read IEX's published interday NAV chart into closed `{date, close}` marks."""
+    url = f"https://beursspel.iex.nl/Ajax/ChartData/interday.ashx?Id={issue_id}"
+    response = requests.get(url, timeout=20, headers={"User-Agent": "bbterminal/1.0"})
+    response.raise_for_status()
+    points = (response.json() or {}).get("HistoricalData") or []
+    rows: dict[str, float] = {}
+    for point in points:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+        try:
+            stamp, close = int(point[0]), float(point[1])
+        except (TypeError, ValueError):
+            continue
+        if close > 0:
+            rows[datetime.fromtimestamp(stamp / 1000, tz=timezone.utc)
+                 .date().isoformat()] = close
+    return sorted(rows.items())
+
+
+def backfill_nav_fallbacks(isins: set[str]) -> dict:
+    """Persist reviewed non-Yahoo fund NAVs into the ordinary shared price store."""
+    wanted = sorted(set(isins) & set(_NAV_FALLBACKS))
+    stored = failed = 0
+    for isin in wanted:
+        source = _NAV_FALLBACKS[isin]
+        symbol = f"{source['provider']}:{source['issue_id']}"
+        try:
+            marks = _iex_nav_rows(source["issue_id"])
+            if not marks:
+                raise ValueError("source returned no usable NAV marks")
+            supabase.table("asset_analysis").upsert({
+                "symbol": symbol, "asset_class": "fund", "label": source["name"],
+                "currency": source["currency"], "first_date": marks[0][0],
+                "years": round((datetime.now().date() - datetime.fromisoformat(marks[0][0]).date()).days / 365.25, 1),
+                "updated_at": datetime.now().astimezone().isoformat(),
+            }, on_conflict="symbol").execute()
+            analysis = (supabase.table("asset_analysis").select("analysis_id")
+                        .eq("symbol", symbol).limit(1).execute().data or [])
+            if not analysis:
+                raise ValueError("could not create fallback analysis asset")
+            analysis_id = analysis[0]["analysis_id"]
+            supabase.table("asset_execution").upsert({
+                "isin": isin, "analysis_id": analysis_id, "yahoo_symbol": None,
+                "name": source["name"], "currency": source["currency"], "status": "ok",
+                "asset_class": "fund",
+                "reason": f"reviewed NAV fallback: {source['provider']} issue {source['issue_id']}",
+                "updated_at": datetime.now().astimezone().isoformat(),
+            }, on_conflict="isin").execute()
+            rows = [{"analysis_id": analysis_id, "target_date": day, "close": close, "volume": 0}
+                    for day, close in marks]
+            for offset in range(0, len(rows), 500):
+                supabase.table("asset_price").upsert(
+                    rows[offset:offset + 500], on_conflict="analysis_id,target_date").execute()
+            supabase.table("asset_analysis").update({
+                "price_from": marks[0][0], "price_to": marks[-1][0], "bars": len(marks),
+                "updated_at": datetime.now().astimezone().isoformat(),
+            }).eq("analysis_id", analysis_id).execute()
+            stored += 1
+        except Exception as exc:  # noqa: BLE001 — one third-party source cannot break all repairs
+            failed += 1
+            log.warning("[price_refresh] NAV fallback %s failed: %s", isin, exc)
+    # This function is also called by the scheduled refresher, outside the explicit risk-repair
+    # path below. Make a newly published NAV visible to the next risk request immediately rather
+    # than leaving the five-minute price-matrix cache to expire on its own.
+    if stored:
+        try:
+            from routers._tracking_error import _risk_prices  # noqa: PLC0415
+            from routers._analysis_cache import invalidate  # noqa: PLC0415
+            _risk_prices.cache_clear()
+            invalidate()
+        except Exception as exc:  # noqa: BLE001 — a completed NAV refresh remains valid
+            log.warning("[price_refresh] could not invalidate risk caches after NAV fallback: %s", exc)
+    return {"eligible": len(wanted), "stored": stored, "failed": failed}
+
+
+def repair_price_histories(isins: set[str], *, years: int = 5) -> dict:
+    """Repair the narrowly scoped Yahoo and FX inputs needed for one risk calculation.
+
+    Called only after the paired-series builder cannot find one common monthly mark.  It resolves
+    absent executions, reapplies reviewed symbols, backfills absent Yahoo histories and repairs the
+    associated FX coverage, then clears the read caches before the caller retries once.
+    """
+    isins = {isin.strip().upper() for isin in isins if isin and isin.strip()}
+    # A price refresh cannot repair an ISIN that has never entered ``asset_execution``: there is
+    # no analysis id or Yahoo symbol for ``backfill_missing`` to fetch. Bootstrap it through the
+    # paced resolver first; then a reviewed symbol override can correct a fuzzy ISIN match.
+    resolved = _executions(isins)
+    present = {(row.get("isin") or "").strip().upper() for row in resolved}
+    missing_execution = sorted(isins - present)
+    bootstrap = {"queued": 0, "processed": 0, "ok": 0, "failed": 0, "unmapped": 0}
+    if missing_execution:
+        from asset_pipeline import queue  # noqa: PLC0415
+        from asset_pipeline.symbol_override import apply_symbol_overrides  # noqa: PLC0415
+        queued = queue.enqueue(missing_execution, skip_existing=False)
+        processed = queue.process_slice(isins=missing_execution)
+        # A few reviewed trackers have Yahoo symbols that generic ISIN search does not discover
+        # (AGGH is one). Its file override is applied after the queue has created a placeholder:
+        # an override must repair a real row, never invent one from a ticker alone.
+        repointed = sum(apply_symbol_overrides(only_isin=isin) for isin in missing_execution)
+        bootstrap = {**bootstrap, **queued, **processed, "repointed": repointed}
+    backfill = backfill_missing(isins)
+    nav_fallback = backfill_nav_fallbacks(isins)
+    stale = refresh_stale(isins=isins, stale_days=1)
+
+    # `_daily_eur` converts each close before bucketing it. A complete Yahoo series can therefore
+    # still disappear if a newly encountered quote currency has no historic ECB/peg data.
+    from asset_pipeline.fx import SUBUNIT  # noqa: PLC0415
+    from routers._asset_dividends import _backfill_fx_history  # noqa: PLC0415
+    need_from = (datetime.now().date() - timedelta(days=365 * years + 10)).isoformat()
+    fx_repaired: dict[str, str | None] = {}
+    # Re-read after a bootstrap: a previously unmapped holding may now carry its Yahoo currency.
+    for row in _executions(isins):
+        currency = (row.get("currency") or "").strip()
+        code = SUBUNIT.get(currency, (currency, 1.0))[0]
+        if code and code != "EUR":
+            fx_repaired[code] = _backfill_fx_history(code, need_from)
+    # Risk views cache their loaded price matrix for five minutes. A tracker repair must be
+    # visible on the very next modal request, not after that TTL happens to expire.
+    try:
+        from routers._tracking_error import _risk_prices  # noqa: PLC0415
+        from routers._analysis_cache import invalidate  # noqa: PLC0415
+        _risk_prices.cache_clear()
+        invalidate()
+    except Exception as exc:  # noqa: BLE001 — completed market-data repair remains valid
+        log.warning("[price_refresh] could not invalidate risk caches after tracker repair: %s", exc)
+    return {"inputs": len(isins), "missing_execution": missing_execution,
+            "bootstrap": bootstrap, "backfill": backfill, "nav_fallback": nav_fallback, "stale": stale,
+            "fx": fx_repaired}
+
+
+def refresh_risk_trackers() -> dict:
+    """Repair the ACWI/AGGH tracker series used by every risk-profile calculation."""
+    from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+
+    isins = {isin.strip().upper() for isin in _BENCHMARK_RISK_ETF.values() if isin.strip()}
+    repaired = repair_price_histories(isins)
+    return {"trackers": len(isins), **repaired}
 
 
 def refresh_stale(

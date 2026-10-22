@@ -25,7 +25,10 @@ export function usePriceChecks(accounts: AirsPortfolioOverview[]) {
     setChecks((current) => ({ ...current, [account]: { summary: previous.current[account] ?? null, pending: true, error: false } }));
     try {
       // Explicit refresh completion: read the saved check, never run validation here.
-      const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(account)}/isins?stored_check=true`, { noReadCache: true });
+      // A row job has just rewritten this snapshot. Bypass every cache layer, not only the app's
+      // memory cache, or the modal can recalculate its difference from the pre-refresh response.
+      const response = await apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(account)}/isins?stored_check=true&refresh=${Date.now()}`,
+        { noReadCache: true, cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json() as AirsAccountIsins;
       if (data.portefeuille !== account || !Array.isArray(data.rows)) throw new Error('Invalid price-check response');

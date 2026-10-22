@@ -18,10 +18,10 @@ same store path, same refusal on a symbol with no bars.
     a wrong-listing fix as an alias would assert a relationship between two securities that does
     not exist, and would then quietly price one off the other for ever.
 
- THE TWO MUST NOT BOTH CLAIM ONE ISIN. An alias points the row at another ISIN's instrument and
-    this points it at a named symbol; applied in either order they fight, and which one wins would
-    depend on call order rather than on intent. `apply_symbol_overrides` refuses an ISIN that is
-    also aliased and says so, rather than picking a winner.
+ THE TWO MUST NOT BOTH CLAIM ONE ISIN — except an explicitly marked ``alias_price_override``.
+    That narrow exception keeps an alias for company/fundamentals identity while pricing the exact
+    held security from its own listed series (TSMC's USD ADR versus the Taiwan ordinary). It is a
+    reviewed file decision, and both applications honour it, so call order cannot choose a winner.
 
  A ZERO-BAR SYMBOL IS REFUSED, EVEN THOUGH A HUMAN NAMED IT. Naming a symbol by hand does not
     make it a listing — the GODE.DE incident wrote ten structured products onto one empty series
@@ -75,6 +75,22 @@ def load_file_overrides() -> dict[str, str]:
         return {}
 
 
+def alias_price_override_isins() -> set[str]:
+    """Aliased ISINs explicitly permitted to retain their own listed price series.
+
+    The regular alias remains available through ``canonical()`` for fundamentals. This is only a
+    price identity exception and must be declared alongside the reviewed symbol pin.
+    """
+    try:
+        raw = json.loads(_FILE.read_text(encoding="utf-8"))
+        return {(e.get("isin") or "").strip().upper() for e in raw.get("overrides", [])
+                if e.get("alias_price_override") and (e.get("isin") or "").strip()}
+    except Exception as e:  # noqa: BLE001 — same fail-safe as load_file_overrides
+        _log.error("[symbol_override] could not read alias price exceptions (%s: %s)",
+                   type(e).__name__, e)
+        return set()
+
+
 def load_symbol_overrides() -> dict[str, str]:
     """{isin: the Yahoo symbol it must resolve to} — the file merged over the table.
 
@@ -115,6 +131,16 @@ def _needs_repoint(isin: str, symbol: str) -> bool:
     return (cur[0].get("yahoo_symbol") or "") != symbol
 
 
+def _has_usable_override_series(score: dict | None) -> bool:
+    """Validate a reviewed symbol without rejecting a zero-volume mutual-fund NAV."""
+    if not score:
+        return False
+    if float(score.get("med_adv_eur") or 0) > 0:
+        return True
+    return ((score.get("quote_type") or "").upper() == "MUTUALFUND"
+            and int(score.get("price_bars") or 0) > 0)
+
+
 def apply_symbol_overrides(only_isin: str | None = None) -> int:
     """Repoint every overridden ISIN onto its named symbol. Returns rows changed.
 
@@ -132,9 +158,10 @@ def apply_symbol_overrides(only_isin: str | None = None) -> int:
     from .isin_alias import load_aliases  # noqa: PLC0415
 
     aliased = load_aliases()
+    alias_price_overrides = alias_price_override_isins()
     changed = 0
     for isin, symbol in sorted(overrides.items()):
-        if isin in aliased:
+        if isin in aliased and isin not in alias_price_overrides:
             _log.error(
                 "[symbol_override] %s is BOTH symbol-overridden (-> %s) and aliased (-> %s). "
                 "Refusing to apply either from here: delete whichever is wrong. An alias shares "
@@ -176,7 +203,7 @@ def _repoint(isin: str, symbol: str) -> bool:
 
     #  Probe before storing. A named symbol is a claim, not a listing.
     sc = _score_retry(symbol)
-    if not sc or not float(sc.get("med_adv_eur") or 0):
+    if not _has_usable_override_series(sc):
         _log.warning("[symbol_override] %s -> %s: no price series. NOT applied — a symbol with "
                      "no bars is not a listing (the GODE.DE incident).", isin, symbol)
         return False
