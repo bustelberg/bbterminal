@@ -3744,6 +3744,9 @@ export default function PortfolioAnalysisModal({
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
               + `?benchmark=${benchmark}&weight_by=${source}&source=${source}`
               + `&look_through=${lookThrough}`
+              // Sector/region/currency require the full benchmark constituent grid. The opening
+              // overview does not render those charts, so defer that work until Stocks is selected.
+              + `&include_axes=${assetFilter === EQUITY_BUCKET}`
               + (assetFilter ? `&bucket=${encodeURIComponent(assetFilter)}` : ''));
           const body = await r.json().catch(() => null);
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);

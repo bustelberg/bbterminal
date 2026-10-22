@@ -1663,7 +1663,8 @@ class ModelPortfolioAnalysis(BaseModel):
 async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP500",
                                         weight_by: str = "model", source: str = "model",
                                         bucket: str | None = None,
-                                        look_through: bool = False):
+                                        look_through: bool = False,
+                                        include_axes: bool = False):
     """Sector / region / currency split of one model portfolio, beside the benchmark's.
 
     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
@@ -1688,7 +1689,7 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     src = source if source in ("model", "book") else "book"
     bucket_filter = bucket if bucket in BUCKET_ORDER else None
     return await compute_portfolio_analysis_async(
-        portfolio_id, benchmark, basis, src, bucket_filter, look_through)
+        portfolio_id, benchmark, basis, src, bucket_filter, look_through, include_axes)
 
 
 class HoldingTradeEffect(BaseModel):
@@ -2572,6 +2573,54 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
     return daily if daily.get("available") else monthly
 
 
+@router.post("/api/airs/portfolio/risk-correlation/repair/job")
+async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchmark: str = "ACWI",
+                                                years: int = 5):
+    """Repair the exact market-data inputs a preliminary risk view is waiting for.
+
+    Correlation and Volatility start this only after showing their honest short daily sample.  It
+    is deliberately an owned job endpoint, rather than a generic job runner: this route alone
+    knows which held instruments and benchmark trackers its calculation may refresh.
+    """
+    import hashlib  # noqa: PLC0415
+    import jobs as job_registry  # noqa: PLC0415
+    from asset_pipeline.price_refresh import repair_price_histories  # noqa: PLC0415
+    from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+
+    holdings_isins = {
+        (holding.isin or "").strip().upper()
+        for holding in req.holdings
+        if (holding.isin or "").strip() and float(holding.weight_pct or 0) > 0
+    }
+    # A policy benchmark is a blend of these two real trackers.  Otherwise use the one tracker
+    # selected by the request; an unknown benchmark simply leaves validation to the calculation.
+    if req.benchmark_weights:
+        tracker_isins = {value for value in _BENCHMARK_RISK_ETF.values() if value}
+    else:
+        tracker = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
+        tracker_isins = {tracker} if tracker else set()
+    isins = holdings_isins | tracker_isins
+    if not isins:
+        raise HTTPException(422, "No priced holdings or benchmark tracker are available to repair.")
+
+    # The input fingerprint is the job identity.  Reopening the same preliminary view attaches to
+    # its existing toast instead of issuing a second set of vendor refreshes.
+    fingerprint = hashlib.sha256("|".join(sorted(isins)).encode()).hexdigest()[:12]
+    label = f"correlation:{fingerprint}"
+
+    def _work(ctx) -> str:
+        ctx.progress(0, len(isins), "Checking price and FX history for the risk views…")
+        ctx.check()
+        repaired = repair_price_histories(isins, years=years)
+        ctx.check()
+        ctx.progress(len(isins), len(isins), "Risk price history checked")
+        return (f"Risk price history checked for {len(isins)} instruments "
+                f"({repaired.get('backfill', {}).get('stored', 0)} price histories stored)")
+
+    job, reused = job_registry.start("airs.risk-correlation-repair", label, _work)
+    return {"job_id": job.id, "label": label, "already_running": reused}
+
+
 class PortfolioVolatility(BaseModel):
     """σ of the selected risk sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
 
@@ -2597,6 +2646,9 @@ class PortfolioVolatility(BaseModel):
     #: correlation responses carry — one shared `build_paired_series`, one window.
     window_from: str | None = None
     window_to: str | None = None
+    #: True when the exact sleeve has too little monthly history and the view falls back to its
+    #: real available daily closes. It is labelled preliminary, never back-filled synthetically.
+    preliminary: bool = False
 
     volatility_pct: float | None = None
     benchmark_volatility_pct: float | None = None
@@ -2642,10 +2694,21 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
     identical series the other three do.
     """
     from routers._portfolio_volatility import compute_volatility  # noqa: PLC0415
+    from routers._tracking_error import MIN_PRELIMINARY_DAILY_OBS  # noqa: PLC0415
 
-    return await asyncio.to_thread(
+    monthly = await asyncio.to_thread(
         compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
         benchmark_weights=req.benchmark_weights, require_complete_history=True)
+    if monthly.get("available") or frequency != "monthly":
+        return monthly
+
+    # The exact sleeve may only have one completed monthly return but still enough real daily
+    # closes for a useful, explicitly provisional volatility estimate.
+    daily = await asyncio.to_thread(
+        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, "daily", years,
+        benchmark_weights=req.benchmark_weights, require_complete_history=True,
+        minimum_observations=MIN_PRELIMINARY_DAILY_OBS, preliminary=True)
+    return daily if daily.get("available") else monthly
 
 
 class DrawdownEpisode(BaseModel):

@@ -29,7 +29,6 @@ const STAGES = [
   'underlying certificate holdings',
   'portfolio allocation and benchmark',
   'AIRS book holdings and returns',
-  'sector, region and currency views',
 ] as const;
 
 export default function AnalyseLoading({ label }: {

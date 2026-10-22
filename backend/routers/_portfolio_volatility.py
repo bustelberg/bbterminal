@@ -37,7 +37,9 @@ from routers._tracking_error import PERIODS, SeriesError, build_paired_series
 def compute_volatility(holdings: list[dict], benchmark: str,
                        frequency: str = "weekly", years: int = 5,
                        benchmark_weights: dict[str, float] | None = None,
-                       require_complete_history: bool = False) -> dict:
+                       require_complete_history: bool = False,
+                       minimum_observations: int | None = None,
+                       preliminary: bool = False) -> dict:
     """σ of the risk sleeve's own returns, its downside half, and the benchmark's for scale."""
     import numpy as np  # noqa: PLC0415
 
@@ -47,7 +49,8 @@ def compute_volatility(holdings: list[dict], benchmark: str,
     try:
         built = build_paired_series(holdings, benchmark, freq, years,
                                     require_complete_holdings=require_complete_history,
-                                    benchmark_weights=benchmark_weights)
+                                    benchmark_weights=benchmark_weights,
+                                    minimum_observations=minimum_observations)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 
@@ -87,6 +90,7 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         "periods_per_year": ppy,
         "observations": int(p.size),
         "years": years,
+        "preliminary": preliminary,
         #  The window the paired grid reached — the SAME two dates the tracking-error and
         # correlation responses carry, because all three read one `build_paired_series`. Three
         # panels quoting three windows for one series is exactly what sharing it prevents.
@@ -123,6 +127,10 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         "priced_holdings": built["priced"],
         "total_holdings": built["total"],
         "cadence_note": (
+            "Preliminary daily volatility: the exact current sleeve has fewer than 12 shared "
+            "monthly returns. This uses its available daily closes (at least 10), rather than "
+            "inventing pre-launch monthly history."
+            if preliminary else
             "Daily volatility is the standard basis and is NOT distorted by the closing-time gap "
             "that affects beta, correlation and tracking error — those compare two series, and a "
             "volatility compares a series with itself."

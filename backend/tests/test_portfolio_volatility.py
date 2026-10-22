@@ -13,6 +13,7 @@ is what the last test here pins.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 
 import numpy as np
@@ -60,6 +61,32 @@ def book(monkeypatch):
 
 
 class TestTheFormula:
+    def test_endpoint_falls_back_to_preliminary_daily_sample(self, monkeypatch):
+        """The Volatility tab follows the exact same honest short-history rule as Correlation."""
+        import routers.airs as airs
+        import routers._portfolio_volatility as volatility
+
+        calls = []
+
+        def fake_compute(_holdings, _benchmark, frequency, _years, **kwargs):
+            calls.append((frequency, kwargs))
+            return ({"available": False, "benchmark": "ACWI", "frequency": "monthly",
+                     "reason": "Only 1 monthly observations overlap with ACWI; 12 is the floor."}
+                    if frequency == "monthly" else
+                    {"available": True, "benchmark": "ACWI", "frequency": "daily",
+                     "preliminary": kwargs["preliminary"], "observations": 10})
+
+        monkeypatch.setattr(volatility, "compute_volatility", fake_compute)
+        result = asyncio.run(airs.airs_portfolio_volatility(
+            airs.ActiveShareRequest(holdings=[]), "ACWI", "monthly", 5))
+
+        assert result["available"] and result["preliminary"] is True
+        assert calls == [
+            ("monthly", {"benchmark_weights": None, "require_complete_history": True}),
+            ("daily", {"benchmark_weights": None, "require_complete_history": True,
+                       "minimum_observations": 10, "preliminary": True}),
+        ]
+
     def test_rolling_chart_uses_twelve_aligned_monthly_returns(self, book):
         from routers._tracking_error import build_paired_series
         built = build_paired_series(book, "ACWI", "monthly", 5)

@@ -14651,6 +14651,11 @@
             ],
             "title": "Periods Per Year"
           },
+          "preliminary": {
+            "default": false,
+            "title": "Preliminary",
+            "type": "boolean"
+          },
           "priced_holdings": {
             "default": 0,
             "title": "Priced Holdings",
@@ -20916,6 +20921,16 @@
               "title": "Look Through",
               "type": "boolean"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_axes",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Axes",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -22232,6 +22247,68 @@
           }
         },
         "summary": "Airs Portfolio Risk Correlation",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/risk-correlation/repair/job": {
+      "post": {
+        "description": "Repair the exact market-data inputs a preliminary risk view is waiting for.\n\nCorrelation and Volatility start this only after showing their honest short daily sample.  It\nis deliberately an owned job endpoint, rather than a generic job runner: this route alone\nknows which held instruments and benchmark trackers its calculation may refresh.",
+        "operationId": "repair_portfolio_risk_correlation_job_api_airs_portfolio_risk_correlation_repair_job_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Years",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Repair Portfolio Risk Correlation Job",
         "tags": [
           "airs"
         ]
