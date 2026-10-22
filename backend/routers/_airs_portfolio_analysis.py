@@ -2456,7 +2456,8 @@ def compute_portfolio_analysis(portfolio_id: int,
                                weight_by: str = "model",
                                source: str = "model",
                                bucket_filter: str | None = None,
-                               look_through: bool = False) -> dict:
+                               look_through: bool = False,
+                               include_axes: bool = True) -> dict:
     """The portfolio's composition beside the benchmark's, on one set of buckets.
 
     `source` ("model" | "book") picks where the RETURN numbers come from: the yfinance model
@@ -2545,7 +2546,10 @@ def compute_portfolio_analysis(portfolio_id: int,
     # --- the benchmark side -------------------------------------------------------------
     # Deduped, one row per company (the GOOGL/GOOG double-count is 11.3% of the index), and drawn
     # from the ASSET world so it is classified and priced exactly like the portfolio is.
-    bench, bench_coverage = _bench_members(benchmark_label)
+    # The whole index membership and its asset-grid classification are needed only by the three
+    # Stocks charts.  The opening screen shows the AIRS scorecard, allocation and holdings table,
+    # so making it wait for hundreds of benchmark constituents is wasted cold-start work.
+    bench, bench_coverage = _bench_members(benchmark_label) if include_axes else ([], {})
     bench_isins = sorted({m["isin"] for m in bench if m.get("isin")})
     bgrid = _grid(bench_isins)
     bench_items: list[tuple[float, tuple[str, str, str]]] = []
@@ -2771,7 +2775,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         bucket_returns.setdefault(CASH_BUCKET, 0.0)
 
     axes = []
-    for axis in ("sector", "region", "currency"):
+    for axis in (("sector", "region", "currency") if include_axes else ()):
         #  Current weights, and this reverses 2026-07-31 (2026-09-03, on request: "Sector, Region
         # and Currency should all use daily up to date weights from AIRS"). These bars were moved
         # ONTO the attribution basis then — Beginwaarde over the attributable legs — so that a
@@ -3869,7 +3873,8 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
                                            weight_by: str = "model",
                                            source: str = "model",
                                            bucket_filter: str | None = None,
-                                           look_through: bool = False) -> dict:
+                                           look_through: bool = False,
+                                           include_axes: bool = True) -> dict:
     """The Analyse modal's one request.
 
      THE READ MEMO IS OPENED **HERE**, AT THE REQUEST BOUNDARY, NOT INSIDE THE COMPUTATION.
@@ -3904,7 +3909,7 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
-    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter, look_through,
+    key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter, look_through, include_axes,
            COMPOSITION_BASIS)
     # The fingerprint is a database read, so it goes to a thread like everything else here.
     fp = await asyncio.to_thread(ac.fingerprint)
@@ -3914,7 +3919,7 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
     with read_cache(f"analysis:{portfolio_id}"):
         out = await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
-                                      weight_by, source, bucket_filter, look_through)
+                                      weight_by, source, bucket_filter, look_through, include_axes)
     #  Stored against the fingerprint read BEFORE the computation, deliberately. If a write lands
     # mid-computation the payload is a mix of both states — filing it under the OLD fingerprint
     # means the next request (which sees the new one) misses and recomputes. Filing it under a

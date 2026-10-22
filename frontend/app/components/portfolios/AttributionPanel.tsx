@@ -158,7 +158,7 @@ function Th({ label, prov, align = 'right', simpleInfo }: {
 
 export function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, returnAsOf,
   weightHow, returnHow,
-  owner = 'the model', held = true, benchmark = 'the benchmark' }: {
+  owner = 'the model', held = true, benchmark = 'the benchmark', showMembershipMark = true }: {
   title: string;
   rows: NonNullable<ModelPortfolioAttribution['top_contributors']>;
   hint?: string;
@@ -177,6 +177,8 @@ export function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, ret
   /** False for the index's winners you do NOT own: same columns, different meaning. */
   held?: boolean;
   benchmark?: string;
+  /** The contributor ranking is already explicitly scoped to this book; omit its redundant dot. */
+  showMembershipMark?: boolean;
 }) {
   const copy = useAttributionCopy();
   if (!rows?.length) return null;
@@ -235,7 +237,8 @@ export function Names({ title, rows, hint, weightSrc, returnSrc, weightAsOf, ret
             <tr key={`${r.isin ?? r.ticker ?? r.name}`} className="border-t border-neutral-800/20">
               <td className="py-1 pr-2 text-fg truncate" title={r.name ?? r.ticker ?? r.isin ?? ''}>
                 <span className="flex min-w-0 items-center gap-1.5">
-                  <BenchmarkMembershipMark member={held && r.in_both} label={copy.names.shared(benchmark)} />
+                  {showMembershipMark && <BenchmarkMembershipMark member={held && r.in_both}
+                    label={copy.names.shared(benchmark)} />}
                   <span className="truncate">{r.name ?? r.ticker ?? r.isin}</span>
                 </span>
               </td>
@@ -1146,6 +1149,7 @@ export default function AttributionPanel({ id, benchmark, window, source = 'mode
             </summary>
             <div className="grid gap-5 border-t border-neutral-800/25 px-3 py-3 md:grid-cols-3">
             <Names title={copy.names.contributors} rows={data.top_contributors ?? []} benchmark={benchmark}
+              showMembershipMark={false}
               weightSrc={pWeightSource} returnSrc={pSrc}
               weightAsOf={data.start} returnAsOf={benchmarkAsOf}
               weightHow={pWeightSrc} returnHow={pReturnHow} />

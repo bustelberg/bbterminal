@@ -21,6 +21,7 @@
  * 0. Both are called "downside deviation"; this is the one the Sortino beside it is built on, so
  * the ratio equals its own parts.
  */
+import { useEffect, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { chartTheme } from '../../../lib/chartTheme';
@@ -36,6 +37,12 @@ import { withWorked, subNum } from './workedFormula';
 import type { PortfolioVolatility } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
+import { invalidateReadCache } from '../../../lib/readCache';
+import { startJob } from '../../../lib/stores/jobs';
+
+// One automatic repair per exact sleeve is enough: a genuinely new instrument cannot acquire
+// pre-launch history, and reopening the preliminary view must not repeat vendor work.
+const startedPreliminaryRepairs = new Set<string>();
 
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const signed2 = (v: number | null | undefined) =>
@@ -81,7 +88,9 @@ export default function VolatilityView({
   const requestUrl = `${API_URL}/api/airs/portfolio/volatility`
     + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=shared-v1`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
-  const key = riskRequestKey(requestUrl, requestBody);
+  const repairIdentity = riskRequestKey(requestUrl, requestBody);
+  const [repairVersion, setRepairVersion] = useState(0);
+  const key = `${repairIdentity}\nrepair:${repairVersion}`;
   const { data, error } = useRiskResult<PortfolioVolatility>(key, async () => {
     const r = await apiFetch(requestUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
@@ -90,6 +99,24 @@ export default function VolatilityView({
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
     return b as PortfolioVolatility;
   }, 'volatility', 'the volatility could not be computed');
+
+  useEffect(() => {
+    if (!data?.available || !data.preliminary || startedPreliminaryRepairs.has(repairIdentity)) return;
+    startedPreliminaryRepairs.add(repairIdentity);
+    void startJob(
+      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=5`,
+      'Repairing risk price history',
+      { headers: { 'Content-Type': 'application/json' }, body: requestBody },
+    ).then(async ({ done }) => {
+      const job = await done;
+      if (job.status === 'done') {
+        invalidateReadCache('volatility history repaired');
+        setRepairVersion((version) => version + 1);
+      }
+    }).catch(() => {
+      // The standard job popup reports failures; retain the real preliminary sample either way.
+    });
+  }, [benchmark, data?.available, data?.preliminary, repairIdentity, requestBody]);
 
   const period = 'month';
 

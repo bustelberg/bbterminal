@@ -34,7 +34,8 @@ from routers._tracking_error import (
     build_paired_series,
 )
 
-#: Fewest overlapping observations a PAIR of holdings needs before its ρ is reported.
+#: Fewest overlapping observations a PAIR of holdings needs before its ρ is reported in a
+#: normal, non-preliminary result.
 #:
 #:  A CORRELATION OVER TEN WEEKS IS NOISE WITH A SIGN. Its standard error is ~1/√n, so at n=10 a
 #: reading of 0.30 is indistinguishable from 0.0 and from 0.6 alike — and rendered as a coloured
@@ -94,7 +95,17 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
     # arrival silently rewriting the whole matrix. `DataFrame.corr` pairs each column pair on the
     # periods both of them have; `min_periods` then nulls the pairs that are still too thin.
     frame = pd.DataFrame({i: per[i] for i in sorted(per)})
-    corr = frame.corr(min_periods=MIN_PAIR_OBS)
+    # A preliminary result exists specifically because the exact sleeve has at least the supplied
+    # daily floor but not enough monthly history.  Requiring the normal 30 observations here would
+    # make its headline truthful but every matrix cell blank.  Keep the normal 30-period standard
+    # for established histories; use the same explicitly labelled provisional floor for both
+    # headline and matrix, so the screen never presents an empty "result".
+    pair_min_observations = (
+        min(MIN_PAIR_OBS, minimum_observations)
+        if preliminary and minimum_observations is not None
+        else MIN_PAIR_OBS
+    )
+    corr = frame.corr(min_periods=pair_min_observations)
 
     #  Ordered by weight, descending — a matrix ordered alphabetically or by ISIN puts the two
     # positions that actually matter at opposite corners. The reader is looking for concentration.
@@ -165,12 +176,12 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         # to justify — and deriving an operand FROM the result is backwards in any case.
         "pair_rho_sum": (sum(r["rho"] for r in pairs) if pairs else None),
         "pairs_measured": len(pairs),
-        "min_pair_observations": MIN_PAIR_OBS,
+        "min_pair_observations": pair_min_observations,
         "least_correlated": by_rho[:_TOP_PAIRS],
         "most_correlated": list(reversed(by_rho[-_TOP_PAIRS:])),
         "priced_holdings": built["priced"],
         "total_holdings": built["total"],
-        "min_observations": MIN_OBS[freq],
+        "min_observations": minimum_observations or MIN_OBS[freq],
         "cadence_note": (
             "Preliminary daily correlation: the exact current sleeve has fewer than 12 shared monthly "
             "returns. This uses its available daily closes (at least 10), rather than inventing "

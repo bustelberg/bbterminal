@@ -1901,6 +1901,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolio/risk-correlation/repair/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Portfolio Risk Correlation Job
+         * @description Repair the exact market-data inputs a preliminary risk view is waiting for.
+         *
+         *     Correlation and Volatility start this only after showing their honest short daily sample.  It
+         *     is deliberately an owned job endpoint, rather than a generic job runner: this route alone
+         *     knows which held instruments and benchmark trackers its calculation may refresh.
+         */
+        post: operations["repair_portfolio_risk_correlation_job_api_airs_portfolio_risk_correlation_repair_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolio/risk-data-quality": {
         parameters: {
             query?: never;
@@ -14118,6 +14142,11 @@ export interface components {
             /** Periods Per Year */
             periods_per_year?: number | null;
             /**
+             * Preliminary
+             * @default false
+             */
+            preliminary?: boolean;
+            /**
              * Priced Holdings
              * @default 0
              */
@@ -17045,6 +17074,7 @@ export interface operations {
                 source?: string;
                 bucket?: string | null;
                 look_through?: boolean;
+                include_axes?: boolean;
             };
             header?: never;
             path: {
@@ -17749,6 +17779,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RiskCorrelation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repair_portfolio_risk_correlation_job_api_airs_portfolio_risk_correlation_repair_job_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
