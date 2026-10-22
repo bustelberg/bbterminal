@@ -1210,10 +1210,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
                 <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
                 <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                <SortTh label="YTD" k="ytd" align="right"
+                <SortTh label="AIRS YTD" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
-                <SortTh label="Current month" k="month" align="right"
+                <SortTh label="AIRS Current month" k="month" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD." />
                 <th className="px-3 py-1.5 text-left font-medium"><span className="sr-only">{priceCopy.column}</span></th>

@@ -16054,6 +16054,11 @@
             ],
             "title": "Portfolio Vol Pct"
           },
+          "preliminary": {
+            "default": false,
+            "title": "Preliminary",
+            "type": "boolean"
+          },
           "priced_holdings": {
             "default": 0,
             "title": "Priced Holdings",

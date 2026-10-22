@@ -11,6 +11,7 @@ no test ever needs to reconcile them.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date, timedelta
 
 import numpy as np
@@ -95,6 +96,36 @@ class TestTheIdentityThatLinksItToTrackingError:
             "ACWI")
         assert got["benchmark_corr"] == pytest.approx(1.0, abs=1e-9)
         assert got["active_vol_pct"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_risk_correlation_endpoint_falls_back_to_preliminary_daily_sample(monkeypatch):
+    """One monthly return is not a correlation, but ten real daily returns are informative."""
+    import routers.airs as airs
+
+    calls = []
+
+    def fake_compute(_holdings, _benchmark, frequency, _years, **kwargs):
+        calls.append((frequency, kwargs))
+        if frequency == "monthly":
+            return {"available": False, "benchmark": "ACWI", "frequency": "monthly",
+                    "reason": "Only 1 monthly observations overlap with ACWI; 12 is the floor."}
+        return {"available": True, "benchmark": "ACWI", "frequency": "daily",
+                "preliminary": kwargs["preliminary"], "observations": 10}
+
+    import routers._portfolio_correlation_risk as risk
+    monkeypatch.setattr(risk, "compute_risk_correlation", fake_compute)
+
+    result = asyncio.run(airs.airs_portfolio_risk_correlation(
+        airs.ActiveShareRequest(holdings=[]), "ACWI", "monthly", 5))
+
+    assert result["available"]
+    assert result["frequency"] == "daily"
+    assert result["preliminary"] is True
+    assert calls == [
+        ("monthly", {"benchmark_weights": None, "require_complete_history": True}),
+        ("daily", {"benchmark_weights": None, "require_complete_history": True,
+                   "minimum_observations": 10, "preliminary": True}),
+    ]
 
 
 class TestTheMatrix:

@@ -2496,6 +2496,9 @@ class RiskCorrelation(BaseModel):
     #: different windows for one series is what the shared builder exists to prevent.
     window_from: str | None = None
     window_to: str | None = None
+    #: True when the exact sleeve has too little monthly history and the view falls back to its
+    #: available daily closes. This is a real, shorter sample — never synthetic pre-launch data.
+    preliminary: bool = False
 
     #: ρ between the book's return series and the benchmark's. Full precision — `r_squared` is its
     #: square, and a rounded ρ beside an unrounded R² would not reconcile on screen.
@@ -2549,11 +2552,24 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
     exist.
     """
     from routers._portfolio_correlation_risk import compute_risk_correlation  # noqa: PLC0415
+    from routers._tracking_error import MIN_PRELIMINARY_DAILY_OBS  # noqa: PLC0415
 
-    return await asyncio.to_thread(
+    monthly = await asyncio.to_thread(
         compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
         frequency, years, benchmark_weights=req.benchmark_weights,
         require_complete_history=True)
+    if monthly.get("available") or frequency != "monthly":
+        return monthly
+
+    # Preserve the precise current sleeve. A newly added holding can leave just one monthly
+    # return while still having enough daily closes for a useful, explicitly preliminary ρ.
+    daily = await asyncio.to_thread(
+        compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
+        "daily", years, benchmark_weights=req.benchmark_weights,
+        require_complete_history=True,
+        minimum_observations=MIN_PRELIMINARY_DAILY_OBS,
+        preliminary=True)
+    return daily if daily.get("available") else monthly
 
 
 class PortfolioVolatility(BaseModel):

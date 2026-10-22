@@ -14630,6 +14630,11 @@ export interface components {
             /** Portfolio Vol Pct */
             portfolio_vol_pct?: number | null;
             /**
+             * Preliminary
+             * @default false
+             */
+            preliminary?: boolean;
+            /**
              * Priced Holdings
              * @default 0
              */
