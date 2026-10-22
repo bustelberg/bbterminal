@@ -2354,6 +2354,15 @@ class TrackingErrorBenchmarkHistory(BaseModel):
     complete: bool = False
 
 
+class HistoricalPortfolioHolding(BaseModel):
+    """One holding used in the available-history CAGR reconstruction."""
+
+    isin: str
+    name: str
+    weight_pct: float
+    first_used: str | None = None
+
+
 class HistoricalPortfolioComparison(BaseModel):
     available: bool
     reason: str | None = None
@@ -2368,7 +2377,7 @@ class HistoricalPortfolioComparison(BaseModel):
     coverage_adjusted: bool = False
     min_weight_covered_pct: float | None = None
     avg_weight_covered_pct: float | None = None
-    holdings_history: list[dict] = []
+    holdings_history: list[HistoricalPortfolioHolding] = []
     benchmark_components: list[TrackingErrorBenchmarkComponent] = []
 
 

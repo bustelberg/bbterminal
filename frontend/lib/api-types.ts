@@ -831,6 +831,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/isins/{isin}/refresh-price/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Account Isin Price Job
+         * @description Force-refresh one displayed holding's Yahoo series and save its account check.
+         */
+        post: operations["refresh_account_isin_price_job_api_airs_accounts__portefeuille__isins__isin__refresh_price_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/link": {
         parameters: {
             query?: never;
@@ -1818,7 +1838,7 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Drawdown
-         * @description Peak-to-trough falls of the reconstructed stock sleeve, with their dates.
+         * @description Peak-to-trough falls of the reconstructed risk sleeve, with their dates.
          *
          *      ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
          *     is free, so the frequency comparison costs no extra round trips.
@@ -1881,6 +1901,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/portfolio/risk-data-quality": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Portfolio Risk Data Quality
+         * @description Strict preflight for dashboards and production monitors.
+         *
+         *     This is deliberately a read-only verdict. It neither refreshes nor silently substitutes a
+         *     shorter history; callers can alert or enqueue the named stale dependency from `reason`.
+         */
+        post: operations["airs_portfolio_risk_data_quality_api_airs_portfolio_risk_data_quality_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/portfolio/tracking-error": {
         parameters: {
             query?: never;
@@ -1894,10 +1937,9 @@ export interface paths {
          * Airs Portfolio Tracking Error
          * @description Volatility of the active return, annualised — the Risk panel's second view.
          *
-         *      THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the
-         *     individual stocks, renormalised to 100%), and sharing the request model is what stops them
-         *     drifting into describing two — an active share over the stock sleeve beside a tracking error
-         *     over the whole book would be two answers to two questions under one heading.
+         *      The request shares the holdings body with `active-share`, while its optional policy weights
+         *     select the whole Stocks/Bonds risk sleeve.  Active Share remains a stock-sleeve structural
+         *     metric; return-based risk metrics use the portfolio's fixed policy comparator.
          *
          *      SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
          *     every holding plus the tracker, and most opens of the Risk panel never switch to it.
@@ -8888,11 +8930,17 @@ export interface components {
          *     step — one route serves both, the same way `basket/analysis` does for the composition.
          */
         ActiveShareRequest: {
+            /** Benchmark Weights */
+            benchmark_weights?: {
+                [key: string]: number;
+            } | null;
             /**
              * Holdings
              * @default []
              */
             holdings?: components["schemas"]["ActiveShareHolding"][];
+            /** Portefeuille */
+            portefeuille?: string | null;
         };
         /**
          * ActiveShareRow
@@ -8901,14 +8949,6 @@ export interface components {
          *     `_active_share._issuer_key`.
          */
         ActiveShareRow: {
-            /**
-             * Bucket
-             */
-            bucket?: string | null;
-            /**
-             * Yahoo Symbol
-             */
-            yahoo_symbol?: string | null;
             /**
              * Active Pct
              * @default 0
@@ -8919,6 +8959,8 @@ export interface components {
              * @default 0
              */
             benchmark_pct?: number;
+            /** Bucket */
+            bucket?: string | null;
             /**
              * Held
              * @default false
@@ -8946,6 +8988,8 @@ export interface components {
             weight_calculation?: components["schemas"]["ActiveShareWeightCalculation"] | null;
             /** Workbook Weight Pct */
             workbook_weight_pct?: number | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
             /** Yfinance Return Pct */
             yfinance_return_pct?: number | null;
         };
@@ -9188,10 +9232,16 @@ export interface components {
             as_of?: string | null;
             /** Checked At */
             checked_at?: string | null;
-            /** Looked Through Certificates */
-            looked_through_certificates?: boolean;
-            /** Looked Through Accounts */
+            /**
+             * Looked Through Accounts
+             * @default []
+             */
             looked_through_accounts?: string[];
+            /**
+             * Looked Through Certificates
+             * @default false
+             */
+            looked_through_certificates?: boolean;
             /** Model Name */
             model_name?: string | null;
             /** Model Source */
@@ -9472,6 +9522,8 @@ export interface components {
          *     we declined; re-scan the model portfolio to fix it.
          */
         AirsHoldingIsin: {
+            /** Airs Price Date */
+            airs_price_date?: string | null;
             /** Airs Price Local */
             airs_price_local?: number | null;
             /** Airs Result Pct */
@@ -9480,6 +9532,8 @@ export interface components {
             bucket?: string | null;
             /** Bucket Overridden */
             bucket_overridden?: boolean | null;
+            /** Certificate Holding */
+            certificate_holding?: string | null;
             /** Company Id */
             company_id?: number | null;
             /** Continent */
@@ -9521,16 +9575,10 @@ export interface components {
             linked_portfolio_name?: string | null;
             /** Our Instrument */
             our_instrument?: string | null;
-            /** Yahoo Symbol */
-            yahoo_symbol?: string | null;
-            /** Certificate Holding */
-            certificate_holding?: string | null;
             /** Our Price Currency */
             our_price_currency?: string | null;
             /** Our Price Date */
             our_price_date?: string | null;
-            /** Airs Price Date */
-            airs_price_date?: string | null;
             /** Our Price Eur */
             our_price_eur?: number | null;
             /** Our Price Local */
@@ -9561,6 +9609,8 @@ export interface components {
             verdict: string;
             /** Weight */
             weight?: number | null;
+            /** Yahoo Symbol */
+            yahoo_symbol?: string | null;
             /** Ytd Return Eur */
             ytd_return_eur?: number | null;
         };
@@ -9775,6 +9825,15 @@ export interface components {
          *     without a frontend change, which is the only way the two cannot drift.
          */
         AllocationBandGrid: {
+            /**
+             * Benchmark Profiles
+             * @default {}
+             */
+            benchmark_profiles?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
             /** Buckets */
             buckets: string[];
             /** Cells */
@@ -12033,6 +12092,62 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
+        /** HistoricalPortfolioComparison */
+        HistoricalPortfolioComparison: {
+            /** Active Return Pp */
+            active_return_pp?: number | null;
+            /** Available */
+            available: boolean;
+            /** Avg Weight Covered Pct */
+            avg_weight_covered_pct?: number | null;
+            /** Benchmark Cagr Pct */
+            benchmark_cagr_pct?: number | null;
+            /**
+             * Benchmark Components
+             * @default []
+             */
+            benchmark_components?: components["schemas"]["TrackingErrorBenchmarkComponent"][];
+            /**
+             * Coverage Adjusted
+             * @default false
+             */
+            coverage_adjusted?: boolean;
+            /** End Date */
+            end_date?: string | null;
+            /**
+             * Holdings History
+             * @default []
+             */
+            holdings_history?: components["schemas"]["HistoricalPortfolioHolding"][];
+            /** Min Weight Covered Pct */
+            min_weight_covered_pct?: number | null;
+            /** Portfolio Cagr Pct */
+            portfolio_cagr_pct?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Start Date */
+            start_date?: string | null;
+            /** Total Return Pct */
+            total_return_pct?: number | null;
+            /** Years Elapsed */
+            years_elapsed?: number | null;
+        };
+        /**
+         * HistoricalPortfolioHolding
+         * @description One holding used in the available-history CAGR reconstruction.
+         */
+        HistoricalPortfolioHolding: {
+            /** First Used */
+            first_used?: string | null;
+            /** Isin */
+            isin: string;
+            /** Name */
+            name: string;
+            /** Weight Pct */
+            weight_pct: number;
+        };
         /** HoldingIsinOverride */
         HoldingIsinOverride: {
             /** Holding Name */
@@ -12736,11 +12851,11 @@ export interface components {
             /** Portfolio Id */
             portfolio_id?: number | null;
             realised?: components["schemas"]["RealisedBlock"] | null;
+            returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
             /** Risk Profile Policy */
             risk_profile_policy?: {
                 [key: string]: number;
             } | null;
-            returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
             /**
              * Timings Ms
              * @default {}
@@ -13947,7 +14062,7 @@ export interface components {
         };
         /**
          * PortfolioVolatility
-         * @description σ of the stock sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
+         * @description σ of the selected risk sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
          *
          *      SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
          *     correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
@@ -14535,6 +14650,38 @@ export interface components {
             /** Years */
             years?: number | null;
         };
+        /**
+         * RiskDataQuality
+         * @description Whether the supplied portfolio is admissible for a displayed five-year risk metric.
+         */
+        RiskDataQuality: {
+            /** Available */
+            available: boolean;
+            /** Benchmark */
+            benchmark: string;
+            /** Benchmark Isin */
+            benchmark_isin?: string | null;
+            /**
+             * Priced Holdings
+             * @default 0
+             */
+            priced_holdings?: number;
+            /** Reason */
+            reason?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Total Holdings
+             * @default 0
+             */
+            total_holdings?: number;
+            /** Window From */
+            window_from?: string | null;
+            /** Window To */
+            window_to?: string | null;
+            /** Years */
+            years: number;
+        };
         /** SaveBacktestRequest */
         SaveBacktestRequest: {
             /** Config */
@@ -14877,7 +15024,7 @@ export interface components {
         };
         /**
          * TrackingError
-         * @description Realised (ex-post) tracking error of the stock sleeve — see `routers/_tracking_error.py`.
+         * @description Realised (ex-post) tracking error of the selected risk sleeve — see `routers/_tracking_error.py`.
          *
          *      `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
          *     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
@@ -14888,32 +15035,12 @@ export interface components {
          *     disagree — so every label says "realised" rather than leaving the reader to assume.
          */
         TrackingError: {
-            historical_comparison?: {
-                coverage_adjusted?: boolean;
-                min_weight_covered_pct?: number | null;
-                avg_weight_covered_pct?: number | null;
-                holdings_history?: { isin: string; name: string; weight_pct: number; first_used?: string | null }[];
-                available: boolean;
-                reason?: string | null;
-                source?: string | null;
-                start_date?: string | null;
-                end_date?: string | null;
-                portfolio_cagr_pct?: number | null;
-                benchmark_cagr_pct?: number | null;
-                active_return_pp?: number | null;
-                total_return_pct?: number | null;
-                years_elapsed?: number | null;
-                benchmark_components?: NonNullable<components['schemas']['TrackingError']['benchmark_components']>;
-            } | null;
-            benchmark_history?: {
-                components: NonNullable<components['schemas']['TrackingError']['benchmark_components']>;
-                cagr_pct?: number | null;
-                start_date?: string | null;
-                end_date?: string | null;
-                complete?: boolean;
-            } | null;
             /** Active Return Ann Pct */
             active_return_ann_pct?: number | null;
+            /** Active Return Std Per Period Pct */
+            active_return_std_per_period_pct?: number | null;
+            /** Annualization Factor */
+            annualization_factor?: number | null;
             /**
              * Available
              * @default true
@@ -14923,21 +15050,18 @@ export interface components {
             avg_weight_covered_pct?: number | null;
             /** Benchmark */
             benchmark: string;
+            /**
+             * Benchmark Components
+             * @default []
+             */
+            benchmark_components?: components["schemas"]["TrackingErrorBenchmarkComponent"][];
+            benchmark_history?: components["schemas"]["TrackingErrorBenchmarkHistory"] | null;
             /** Benchmark Isin */
             benchmark_isin?: string | null;
             /** Benchmark Return Ann Pct */
             benchmark_return_ann_pct?: number | null;
-            benchmark_components?: {
-                name: string;
-                isin: string;
-                weight_pct: number;
-                window_return_pct?: number | null;
-                annualized_return_pct?: number | null;
-                start_date?: string | null;
-                start_price_eur?: number | null;
-                end_date?: string | null;
-                end_price_eur?: number | null;
-            }[];
+            /** Benchmark Return Total Pct */
+            benchmark_return_total_pct?: number | null;
             /** Cadence Note */
             cadence_note?: string | null;
             /**
@@ -14945,13 +15069,12 @@ export interface components {
              * @default monthly
              */
             frequency?: string;
-            /** History Limited */
+            historical_comparison?: components["schemas"]["HistoricalPortfolioComparison"] | null;
+            /**
+             * History Limited
+             * @default false
+             */
             history_limited?: boolean;
-            preliminary?: boolean;
-            portfolio_return_total_pct?: number | null;
-            benchmark_return_total_pct?: number | null;
-            annualization_factor?: number | null;
-            active_return_std_per_period_pct?: number | null;
             /** Information Ratio */
             information_ratio?: number | null;
             /** Mean Active Per Period Pct */
@@ -14965,6 +15088,13 @@ export interface components {
             periods_per_year?: number | null;
             /** Portfolio Return Ann Pct */
             portfolio_return_ann_pct?: number | null;
+            /** Portfolio Return Total Pct */
+            portfolio_return_total_pct?: number | null;
+            /**
+             * Preliminary
+             * @default false
+             */
+            preliminary?: boolean;
             /**
              * Priced Holdings
              * @default 0
@@ -14985,6 +15115,49 @@ export interface components {
             window_to?: string | null;
             /** Years */
             years?: number | null;
+        };
+        /**
+         * TrackingErrorBenchmarkComponent
+         * @description One policy benchmark leg, measured over the exact tracking-error window.
+         */
+        TrackingErrorBenchmarkComponent: {
+            /** Annualized Return Pct */
+            annualized_return_pct?: number | null;
+            /** End Date */
+            end_date?: string | null;
+            /** End Price Eur */
+            end_price_eur?: number | null;
+            /** Isin */
+            isin: string;
+            /** Name */
+            name: string;
+            /** Start Date */
+            start_date?: string | null;
+            /** Start Price Eur */
+            start_price_eur?: number | null;
+            /** Weight Pct */
+            weight_pct: number;
+            /** Window Return Pct */
+            window_return_pct?: number | null;
+        };
+        /** TrackingErrorBenchmarkHistory */
+        TrackingErrorBenchmarkHistory: {
+            /** Cagr Pct */
+            cagr_pct?: number | null;
+            /**
+             * Complete
+             * @default false
+             */
+            complete?: boolean;
+            /**
+             * Components
+             * @default []
+             */
+            components?: components["schemas"]["TrackingErrorBenchmarkComponent"][];
+            /** End Date */
+            end_date?: string | null;
+            /** Start Date */
+            start_date?: string | null;
         };
         /** UniverseRenameRequest */
         UniverseRenameRequest: {
@@ -16205,6 +16378,38 @@ export interface operations {
             header?: never;
             path: {
                 portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_account_isin_price_job_api_airs_accounts__portefeuille__isins__isin__refresh_price_job_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+                isin: string;
             };
             cookie?: never;
         };
@@ -17539,6 +17744,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RiskCorrelation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_portfolio_risk_data_quality_api_airs_portfolio_risk_data_quality_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskDataQuality"];
                 };
             };
             /** @description Validation Error */

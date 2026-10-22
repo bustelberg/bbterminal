@@ -240,6 +240,20 @@
       "ActiveShareRequest": {
         "description": "The holdings the Analyse modal is ALREADY showing.\n\n THE WEIGHTS COME FROM THE CLIENT ON PURPOSE, WHICH IS THE OPPOSITE OF THIS FILE'S USUAL\nRULE. Everywhere else a weight is computed server-side precisely so two surfaces cannot\ndisagree \u2014 but this panel sits one click from the Holdings table, and its whole job is to\ndescribe THAT book. Re-deriving the weights here would give the risk figure a second\ndenominator (start weights? design percentages? looked-through or not?) and the first question\nanybody asks of a 71% active share is which rows produced it. So it consumes the displayed\nnumbers, and cannot disagree with the table by construction.\n\n IT ALSO REMOVES THE SECOND HOLDINGS PIPELINE. A model portfolio and an ad-hoc basket reach\nthis with the same body, so unlike Attribution there is no `portfolio_id` variant to keep in\nstep \u2014 one route serves both, the same way `basket/analysis` does for the composition.",
         "properties": {
+          "benchmark_weights": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Weights"
+          },
           "holdings": {
             "default": [],
             "items": {
@@ -247,6 +261,17 @@
             },
             "title": "Holdings",
             "type": "array"
+          },
+          "portefeuille": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portefeuille"
           }
         },
         "title": "ActiveShareRequest",
@@ -264,6 +289,17 @@
             "default": 0.0,
             "title": "Benchmark Pct",
             "type": "number"
+          },
+          "bucket": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bucket"
           },
           "held": {
             "default": false,
@@ -320,6 +356,17 @@
               }
             ],
             "title": "Workbook Weight Pct"
+          },
+          "yahoo_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yahoo Symbol"
           },
           "yfinance_return_pct": {
             "anyOf": [
@@ -1172,6 +1219,19 @@
             ],
             "title": "Checked At"
           },
+          "looked_through_accounts": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Looked Through Accounts",
+            "type": "array"
+          },
+          "looked_through_certificates": {
+            "default": false,
+            "title": "Looked Through Certificates",
+            "type": "boolean"
+          },
           "model_name": {
             "anyOf": [
               {
@@ -1886,6 +1946,17 @@
       "AirsHoldingIsin": {
         "description": "One account holding, with the ISIN we believe it is \u2014 and how much to believe it.\n\n `verdict` IS THE FIELD THAT MATTERS, AND `name_score` IS NOT.\n  ok             the implied price agrees with that ISIN's own close (FX-converted)\n  price_mismatch it does NOT \u2014 the ISIN is not what the book holds, or the book drifted\n  unpriced       we have no series for it, so there is NOTHING confirming the name match\n  unmatched      NO ISIN: the model has no position for this holding\n  cross_listed   the prices differ, and they are SUPPOSED to \u2014 this ISIN's execution row is\n                 deliberately served by another instrument (`asset_isin_alias`), e.g. an ADR\n                 priced from the main company's listing. Not a fault, and not a pass either. at all\n\n`unpriced` is not a pass. The name matched and nothing checked it \u2014 which for a fund is\nexactly where the Acc/Inc share-class trap lives.\n\n `unmatched` AND `price_mismatch` ARE OPPOSITE FINDINGS, NOT DEGREES OF ONE. A mismatch means\nthe row pairing is RIGHT and the ISIN on it is wrong (a share class, a venue) \u2014 a finding\nabout the model. `unmatched` means the pairing itself was refused: the name says a different\ninstrument and the price independently agrees, which is what a STALE model snapshot looks like\nwhen the book has since swapped a position. `rejected_isin`/`rejected_fonds` name the leftover\nwe declined; re-scan the model portfolio to fix it.",
         "properties": {
+          "airs_price_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Airs Price Date"
+          },
           "airs_price_local": {
             "anyOf": [
               {
@@ -1929,6 +2000,17 @@
               }
             ],
             "title": "Bucket Overridden"
+          },
+          "certificate_holding": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certificate Holding"
           },
           "company_id": {
             "anyOf": [
@@ -2295,6 +2377,17 @@
               }
             ],
             "title": "Weight"
+          },
+          "yahoo_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Yahoo Symbol"
           },
           "ytd_return_eur": {
             "anyOf": [
@@ -2938,6 +3031,17 @@
       "AllocationBandGrid": {
         "description": "The whole policy, always complete: every profile \u00d7 every invested class.\n\n`variants` and `buckets` ship with it so the editor renders the grid the SERVER knows about\nrather than a copy of it \u2014 add a fifth risk profile to `VARIANTS` and the editor grows a column\nwithout a frontend change, which is the only way the two cannot drift.",
         "properties": {
+          "benchmark_profiles": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "number"
+              },
+              "type": "object"
+            },
+            "default": {},
+            "title": "Benchmark Profiles",
+            "type": "object"
+          },
           "buckets": {
             "items": {
               "type": "string"
@@ -9141,6 +9245,196 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HistoricalPortfolioComparison": {
+        "properties": {
+          "active_return_pp": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Return Pp"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "avg_weight_covered_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Weight Covered Pct"
+          },
+          "benchmark_cagr_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Cagr Pct"
+          },
+          "benchmark_components": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TrackingErrorBenchmarkComponent"
+            },
+            "title": "Benchmark Components",
+            "type": "array"
+          },
+          "coverage_adjusted": {
+            "default": false,
+            "title": "Coverage Adjusted",
+            "type": "boolean"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "holdings_history": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/HistoricalPortfolioHolding"
+            },
+            "title": "Holdings History",
+            "type": "array"
+          },
+          "min_weight_covered_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Weight Covered Pct"
+          },
+          "portfolio_cagr_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Cagr Pct"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "total_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Return Pct"
+          },
+          "years_elapsed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Years Elapsed"
+          }
+        },
+        "required": [
+          "available"
+        ],
+        "title": "HistoricalPortfolioComparison",
+        "type": "object"
+      },
+      "HistoricalPortfolioHolding": {
+        "description": "One holding used in the available-history CAGR reconstruction.",
+        "properties": {
+          "first_used": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Used"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "weight_pct"
+        ],
+        "title": "HistoricalPortfolioHolding",
+        "type": "object"
+      },
       "HoldingIsinOverride": {
         "properties": {
           "holding_name": {
@@ -11034,6 +11328,20 @@
                 "type": "null"
               }
             ]
+          },
+          "risk_profile_policy": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Profile Policy"
           },
           "timings_ms": {
             "additionalProperties": {
@@ -14179,7 +14487,7 @@
         "type": "object"
       },
       "PortfolioVolatility": {
-        "description": "\u03c3 of the stock sleeve's OWN returns \u2014 see `routers/_portfolio_volatility.py`.\n\n SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the\ncorrelation view puts inside `\u03c3\u2090\u00b2 = \u03c3\u209a\u00b2 + \u03c3\u1d47\u00b2 \u2212 2\u03c1\u03c3\u209a\u03c3\u1d47`. Two \u03c3\u209a one click apart that\ndisagreed would tell the reader one of them is wrong and nothing about which.\n\n NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an\naccount-value series \u2014 it is a weighted basket of instrument price returns \u2014 so a deposit or a\nwithdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost\nis the other caveat: the weights are TODAY'S, carried backwards.",
+        "description": "\u03c3 of the selected risk sleeve's OWN returns \u2014 see `routers/_portfolio_volatility.py`.\n\n SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the\ncorrelation view puts inside `\u03c3\u2090\u00b2 = \u03c3\u209a\u00b2 + \u03c3\u1d47\u00b2 \u2212 2\u03c1\u03c3\u209a\u03c3\u1d47`. Two \u03c3\u209a one click apart that\ndisagreed would tell the reader one of them is wrong and nothing about which.\n\n NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an\naccount-value series \u2014 it is a weighted basket of instrument price returns \u2014 so a deposit or a\nwithdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost\nis the other caveat: the weights are TODAY'S, carried backwards.",
         "properties": {
           "available": {
             "default": true,
@@ -15818,6 +16126,89 @@
         "title": "RiskCorrelation",
         "type": "object"
       },
+      "RiskDataQuality": {
+        "description": "Whether the supplied portfolio is admissible for a displayed five-year risk metric.",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "benchmark": {
+            "title": "Benchmark",
+            "type": "string"
+          },
+          "benchmark_isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Isin"
+          },
+          "priced_holdings": {
+            "default": 0,
+            "title": "Priced Holdings",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "total_holdings": {
+            "default": 0,
+            "title": "Total Holdings",
+            "type": "integer"
+          },
+          "window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window From"
+          },
+          "window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window To"
+          },
+          "years": {
+            "title": "Years",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available",
+          "status",
+          "benchmark",
+          "years"
+        ],
+        "title": "RiskDataQuality",
+        "type": "object"
+      },
       "SaveBacktestRequest": {
         "properties": {
           "config": {
@@ -16784,7 +17175,7 @@
         "type": "object"
       },
       "TrackingError": {
-        "description": "Realised (ex-post) tracking error of the stock sleeve \u2014 see `routers/_tracking_error.py`.\n\n `TE = \u221a(1/(T\u22121) \u03a3 (a\u209c \u2212 \u0101)\u00b2) \u00b7 \u221af`, WITH \u0101 SUBTRACTED and Bessel applied. The other\nconvention (\u221a(\u03a3a\u209c\u00b2/T)) is also called tracking error and is a different number; this codebase\npicks one and routes it through `annualized_stats`, the same function every other volatility on\nthe screen goes through.\n\n EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely\ndisagree \u2014 so every label says \"realised\" rather than leaving the reader to assume.",
+        "description": "Realised (ex-post) tracking error of the selected risk sleeve \u2014 see `routers/_tracking_error.py`.\n\n `TE = \u221a(1/(T\u22121) \u03a3 (a\u209c \u2212 \u0101)\u00b2) \u00b7 \u221af`, WITH \u0101 SUBTRACTED and Bessel applied. The other\nconvention (\u221a(\u03a3a\u209c\u00b2/T)) is also called tracking error and is a different number; this codebase\npicks one and routes it through `annualized_stats`, the same function every other volatility on\nthe screen goes through.\n\n EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely\ndisagree \u2014 so every label says \"realised\" rather than leaving the reader to assume.",
         "properties": {
           "active_return_ann_pct": {
             "anyOf": [
@@ -16796,6 +17187,28 @@
               }
             ],
             "title": "Active Return Ann Pct"
+          },
+          "active_return_std_per_period_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Return Std Per Period Pct"
+          },
+          "annualization_factor": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualization Factor"
           },
           "available": {
             "default": true,
@@ -16816,6 +17229,24 @@
           "benchmark": {
             "title": "Benchmark",
             "type": "string"
+          },
+          "benchmark_components": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TrackingErrorBenchmarkComponent"
+            },
+            "title": "Benchmark Components",
+            "type": "array"
+          },
+          "benchmark_history": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrackingErrorBenchmarkHistory"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "benchmark_isin": {
             "anyOf": [
@@ -16839,6 +17270,17 @@
             ],
             "title": "Benchmark Return Ann Pct"
           },
+          "benchmark_return_total_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Return Total Pct"
+          },
           "cadence_note": {
             "anyOf": [
               {
@@ -16854,6 +17296,21 @@
             "default": "monthly",
             "title": "Frequency",
             "type": "string"
+          },
+          "historical_comparison": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HistoricalPortfolioComparison"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history_limited": {
+            "default": false,
+            "title": "History Limited",
+            "type": "boolean"
           },
           "information_ratio": {
             "anyOf": [
@@ -16903,6 +17360,22 @@
               }
             ],
             "title": "Portfolio Return Ann Pct"
+          },
+          "portfolio_return_total_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Portfolio Return Total Pct"
+          },
+          "preliminary": {
+            "default": false,
+            "title": "Preliminary",
+            "type": "boolean"
           },
           "priced_holdings": {
             "default": 0,
@@ -16974,6 +17447,148 @@
           "benchmark"
         ],
         "title": "TrackingError",
+        "type": "object"
+      },
+      "TrackingErrorBenchmarkComponent": {
+        "description": "One policy benchmark leg, measured over the exact tracking-error window.",
+        "properties": {
+          "annualized_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Return Pct"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "end_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Price Eur"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          },
+          "start_price_eur": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Price Eur"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          },
+          "window_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Return Pct"
+          }
+        },
+        "required": [
+          "name",
+          "isin",
+          "weight_pct"
+        ],
+        "title": "TrackingErrorBenchmarkComponent",
+        "type": "object"
+      },
+      "TrackingErrorBenchmarkHistory": {
+        "properties": {
+          "cagr_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cagr Pct"
+          },
+          "complete": {
+            "default": false,
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "components": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/TrackingErrorBenchmarkComponent"
+            },
+            "title": "Components",
+            "type": "array"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End Date"
+          },
+          "start_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start Date"
+          }
+        },
+        "title": "TrackingErrorBenchmarkHistory",
         "type": "object"
       },
       "UniverseRenameRequest": {
@@ -19290,6 +19905,56 @@
         ]
       }
     },
+    "/api/airs/accounts/{portefeuille}/isins/{isin}/refresh-price/job": {
+      "post": {
+        "description": "Force-refresh one displayed holding's Yahoo series and save its account check.",
+        "operationId": "refresh_account_isin_price_job_api_airs_accounts__portefeuille__isins__isin__refresh_price_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "isin",
+            "required": true,
+            "schema": {
+              "title": "Isin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Refresh Account Isin Price Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/accounts/{portefeuille}/link": {
       "delete": {
         "description": "Forget the human decision for this holding and fall back to the automatic guess. NOT the\nsame as linking it to nothing \u2014 that is a decision too, and is stored as a null.\n\n`portefeuille` names which table the request came from; the row it clears is the same one the\nmodel-portfolio screen writes, because the link is keyed on the holding.",
@@ -21367,7 +22032,7 @@
     },
     "/api/airs/portfolio/drawdown": {
       "post": {
-        "description": "Peak-to-trough falls of the reconstructed stock sleeve, with their dates.\n\n ONE PRICE LOAD SERVES ALL THREE CADENCES \u2014 the load is the expensive part and re-bucketing\nis free, so the frequency comparison costs no extra round trips.",
+        "description": "Peak-to-trough falls of the reconstructed risk sleeve, with their dates.\n\n ONE PRICE LOAD SERVES ALL THREE CADENCES \u2014 the load is the expensive part and re-bucketing\nis free, so the frequency comparison costs no extra round trips.",
         "operationId": "airs_portfolio_drawdown_api_airs_portfolio_drawdown_post",
         "parameters": [
           {
@@ -21567,9 +22232,73 @@
         ]
       }
     },
+    "/api/airs/portfolio/risk-data-quality": {
+      "post": {
+        "description": "Strict preflight for dashboards and production monitors.\n\nThis is deliberately a read-only verdict. It neither refreshes nor silently substitutes a\nshorter history; callers can alert or enqueue the named stale dependency from `reason`.",
+        "operationId": "airs_portfolio_risk_data_quality_api_airs_portfolio_risk_data_quality_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Years",
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RiskDataQuality"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Portfolio Risk Data Quality",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/portfolio/tracking-error": {
       "post": {
-        "description": "Volatility of the active return, annualised \u2014 the Risk panel's second view.\n\n THE SAME BODY AS `active-share`, DELIBERATELY. The two views describe ONE portfolio (the\nindividual stocks, renormalised to 100%), and sharing the request model is what stops them\ndrifting into describing two \u2014 an active share over the stock sleeve beside a tracking error\nover the whole book would be two answers to two questions under one heading.\n\n SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for\nevery holding plus the tracker, and most opens of the Risk panel never switch to it.",
+        "description": "Volatility of the active return, annualised \u2014 the Risk panel's second view.\n\n The request shares the holdings body with `active-share`, while its optional policy weights\nselect the whole Stocks/Bonds risk sleeve.  Active Share remains a stock-sleeve structural\nmetric; return-based risk metrics use the portfolio's fixed policy comparator.\n\n SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for\nevery holding plus the tracker, and most opens of the Risk panel never switch to it.",
         "operationId": "airs_portfolio_tracking_error_api_airs_portfolio_tracking_error_post",
         "parameters": [
           {
