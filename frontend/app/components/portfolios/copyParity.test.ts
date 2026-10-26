@@ -129,6 +129,9 @@ const SHARED = new Set([...FINANCE_EN, ...AIRS_FIELDS, ...SAME_WORD, ...IDENTIFI
 
 // Proper names and labels kept in English in both languages.
 const SHARED_PATHS: Record<string, Set<string>> = {
+  analyseCopy: new Set([
+    'actions.attribution', // User-requested feature name: Performance in both languages.
+  ]),
   managementCopy: new Set([
     'page.tabs.bustelberg.label', 'page.tabs.toppenberg.label', 'page.tabs.imagine_fund.label', 'page.tabs.topselecties.label', 'page.tabs.test_topselecties.label',
   ]),

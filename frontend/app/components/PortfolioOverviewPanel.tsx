@@ -1545,6 +1545,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         // when it finishes so the modal re-reads what the scan rebuilt.
         <PortfolioAnalysisModal key={analyse.id ?? analyse.name} id={analyse.id} basket={analyse.basket}
           name={analyse.name}
+          reportAccount={analyse.pf}
           onRefresh={analyse.pf ? () => void refreshOne(analyse.pf!, analyse.name) : undefined}
           refreshing={!!analyse.pf && refreshingRows.has(analyse.pf)}
           refreshTitle="Re-scan this portfolio's AIRS Rendement + Vermogensoverzicht now."

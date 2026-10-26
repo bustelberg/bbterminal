@@ -173,9 +173,9 @@ def _login(page):
     if not broker_username or not broker_password:
         raise RuntimeError("BROKER_USERNAME or BROKER_PASSWORD not set in .env")
 
-    page.goto(f"{BASE_URL}/login.php")
-    page.wait_for_load_state("domcontentloaded")
     try:
+        # External resources can keep `load` pending after the form is ready.
+        page.goto(f"{BASE_URL}/login.php", wait_until="domcontentloaded")
         page.fill("#username", broker_username, timeout=30000)
     except Exception as e:
         diag = _capture_login_diagnostics(page)

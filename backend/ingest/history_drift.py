@@ -27,6 +27,7 @@ HOW MUCH else moved, and only the full series answers that.
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
@@ -43,7 +44,12 @@ log = logging.getLogger(__name__)
 # Stateless (no cursor to lose), deterministic, and every company comes round
 # within five weekly runs (seven advances the day-of-year bucket by two mod five).
 SLICE_DIVISOR = 5
-WORKERS = 8
+def _worker_count() -> int:
+    """Keep this nested pool within Railway's small process thread allowance."""
+    return 1 if os.environ.get("RAILWAY_PUBLIC_DOMAIN") else 8
+
+
+WORKERS = _worker_count()
 #  The probe reads close price only, and that halves the bill for nothing lost.
 # The corporate actions that rewrite history re-scale BOTH series — a 1-for-40
 # multiplies price by 40 and divides volume by 40 — so the close alone detects
@@ -146,8 +152,12 @@ def check_drift(
                     f"{exch}:{tic} {metric}: {d0} stored {v0:.4f} vs vendor {v1:.4f} "
                     f"(×{v1 / v0:.4f})" if v0 else f"{exch}:{tic} {metric}: {d0} moved")
 
-    with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="drift") as ex:
-        list(ex.map(_one, cids))
+    if WORKERS == 1:
+        for cid in cids:
+            _one(cid)
+    else:
+        with ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="drift") as ex:
+            list(ex.map(_one, cids))
 
     _say(
         f"Drift probe: {len(cids)} companies, {counters['probes']} request(s) "

@@ -89,9 +89,13 @@ export function summarizePrices(data: AirsAccountIsins): PriceSummary {
     unavailable: count('unavailable'), linked: count('linked') };
 }
 
-/** Large gaps with older quotes remain suspects, not confirmed same-date errors. */
+/** A difference requires comparable quote dates; stale gaps need a refresh first. */
 export const isExtremeDifference = (row: PriceItem) =>
-  row.status !== 'linked' && row.status !== 'unavailable' && row.difference != null
+  row.status === 'difference' && row.difference != null
+  && Math.abs(row.difference) >= 5 - 1e-9;
+
+export const isStalePriceGap = (row: PriceItem) =>
+  row.status === 'stale' && row.difference != null
   && Math.abs(row.difference) >= 5 - 1e-9;
 
 export const needsPriceReview = (summary?: PriceSummary | null) => !!summary &&

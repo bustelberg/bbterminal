@@ -38,7 +38,7 @@ class TestLoadAllCompanies:
         ]
         # Stale-first: cid 3 has no price row (sorts first), then oldest, then newest.
         rpc = {
-            "company_latest_close_price_dates": [
+            "company_latest_metric_dates_for": [
                 {"company_id": 1, "latest_target_date": "2026-03-01"},  # newest
                 {"company_id": 2, "latest_target_date": "2026-01-01"},  # oldest
                 # company 3 absent → "" key sorts before any date

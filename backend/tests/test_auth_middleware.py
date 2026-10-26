@@ -248,6 +248,7 @@ class TestManagementDashboardRefreshesAreOpen:
     REFRESHES = (
         # Overview → "Refresh all from AIRS", both halves.
         ("POST", "/api/airs/vermogen/refresh/job"),
+        ("POST", "/api/airs/portfolio/risk-correlation/repair/job"),
         ("POST", "/api/airs/model-portfolios/scan/job"),
         ("POST", "/api/airs/model-portfolios/refresh/job"),
         # Overview → one row's Refresh, and the identical one in the Analyse modal's header.

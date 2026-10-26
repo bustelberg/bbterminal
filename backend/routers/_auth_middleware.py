@@ -265,6 +265,8 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     # Overview → "Refresh all from AIRS", both halves (accounts, then model portfolios).
     "/api/airs/vermogen/refresh/job",
     "/api/airs/vermogen/price-checks/job",
+    # Risk → Correlation automatically repairs the held Yahoo/FX inputs behind a preliminary view.
+    "/api/airs/portfolio/risk-correlation/repair/job",
     "/api/airs/model-portfolios/scan/job",
     "/api/airs/model-portfolios/refresh/job",
     # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).
@@ -288,6 +290,8 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
 _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Analyse → fetch exactly one month's AIRS reports, with progress/cancel.
+    re.compile(r"^/api/airs/accounts/[^/]+/monthly-report/job$"),
     # Overview → one row's Refresh (re-scan this book's AIRS reports).
     re.compile(r"^/api/airs/portfolios/[^/]+/refresh/job$"),
     # Overview's stale Yahoo price checks run after the expanded row renders from its cache.

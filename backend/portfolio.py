@@ -79,6 +79,9 @@ class ParsedHolding:
     fund_result_eur: Optional[float] = None       # Fondsresultaat  (performance leg, EUR)
     fx_result_eur: Optional[float] = None         # Valutaresultaat (FX leg, EUR)
     airs_result_pct: Optional[float] = None       # Resultaat in %
+    # Preserve fractional fund/share units for historical per-unit comparisons.
+    # The legacy integer quantity remains unchanged for existing consumers.
+    quantity_exact: Optional[float] = None
 
 
 def _norm(name: object) -> str:
@@ -240,6 +243,7 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
             fund_result_eur=_num(row, col_fund_result),
             fx_result_eur=_num(row, col_fx_result),
             airs_result_pct=_num(row, col_result_pct),
+            quantity_exact=float(qty) if qty is not None and pd.notna(qty) else None,
         ))
 
     return results

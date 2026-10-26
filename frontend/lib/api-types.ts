@@ -913,6 +913,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/monthly-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Monthly Report
+         * @description Stored AIRS reports for a calendar month; opening never starts a scrape.
+         */
+        get: operations["airs_monthly_report_api_airs_accounts__portefeuille__monthly_report_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/accounts/{portefeuille}/monthly-report/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Airs Monthly Report Job
+         * @description Acquire one historical month, with progress and cooperative cancellation.
+         */
+        post: operations["airs_monthly_report_job_api_airs_accounts__portefeuille__monthly_report_job_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/return-reconciliation": {
         parameters: {
             query?: never;
@@ -1895,6 +1935,30 @@ export interface paths {
          *     exist.
          */
         post: operations["airs_portfolio_risk_correlation_api_airs_portfolio_risk_correlation_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/risk-correlation/repair/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Portfolio Risk Correlation Job
+         * @description Repair the exact market-data inputs a preliminary risk view is waiting for.
+         *
+         *     Correlation and Volatility start this only after showing their honest short daily sample.  It
+         *     is deliberately an owned job endpoint, rather than a generic job runner: this route alone
+         *     knows which held instruments and benchmark trackers its calculation may refresh.
+         */
+        post: operations["repair_portfolio_risk_correlation_job_api_airs_portfolio_risk_correlation_repair_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -14118,6 +14182,11 @@ export interface components {
             /** Periods Per Year */
             periods_per_year?: number | null;
             /**
+             * Preliminary
+             * @default false
+             */
+            preliminary?: boolean;
+            /**
              * Priced Holdings
              * @default 0
              */
@@ -16540,6 +16609,72 @@ export interface operations {
             };
         };
     };
+    airs_monthly_report_api_airs_accounts__portefeuille__monthly_report_get: {
+        parameters: {
+            query: {
+                month: string;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_monthly_report_job_api_airs_accounts__portefeuille__monthly_report_job_post: {
+        parameters: {
+            query: {
+                month: string;
+            };
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_account_return_reconciliation_api_airs_accounts__portefeuille__return_reconciliation_get: {
         parameters: {
             query?: never;
@@ -17045,6 +17180,7 @@ export interface operations {
                 source?: string;
                 bucket?: string | null;
                 look_through?: boolean;
+                include_axes?: boolean;
             };
             header?: never;
             path: {
@@ -17749,6 +17885,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RiskCorrelation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repair_portfolio_risk_correlation_job_api_airs_portfolio_risk_correlation_repair_job_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                years?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

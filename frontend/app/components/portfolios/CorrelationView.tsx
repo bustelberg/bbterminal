@@ -23,6 +23,7 @@
  * against that pair's 4.9). A second convention on a second matrix in the same app would be worse
  * than either.
  */
+import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
@@ -37,6 +38,13 @@ import { withWorked, subNum } from './workedFormula';
 import type { RiskCorrelation } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
+import { invalidateReadCache } from '../../../lib/readCache';
+import { startJob } from '../../../lib/stores/jobs';
+
+// A repair may conclude that an instrument genuinely only began trading recently.  Start one
+// repair per exact sleeve during this browser session, rather than spending vendor calls again
+// every time the reader reopens the still-honest preliminary view.
+const startedPreliminaryRepairs = new Set<string>();
 
 const rho2 = (v: number | null | undefined) =>
   (v == null ? '—' : v.toFixed(2));
@@ -103,7 +111,11 @@ export default function CorrelationView({
   const requestUrl = `${API_URL}/api/airs/portfolio/risk-correlation`
     + `?benchmark=${encodeURIComponent(benchmark)}&frequency=monthly&years=5&data_window=shared-v1`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
-  const key = riskRequestKey(requestUrl, requestBody);
+  const repairIdentity = riskRequestKey(requestUrl, requestBody);
+  const [repairVersion, setRepairVersion] = useState(0);
+  // A completed repair invalidates the shared read cache and advances this key, causing this one
+  // view to ask again immediately instead of waiting for the reader to close and reopen the tab.
+  const key = `${repairIdentity}\nrepair:${repairVersion}`;
   const { data, error } = useRiskResult<RiskCorrelation>(key, async () => {
     const r = await apiFetch(requestUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
@@ -112,6 +124,25 @@ export default function CorrelationView({
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
     return b as RiskCorrelation;
   }, 'risk-correlation', 'the correlations could not be computed');
+
+  useEffect(() => {
+    if (!data?.available || !data.preliminary || startedPreliminaryRepairs.has(repairIdentity)) return;
+    startedPreliminaryRepairs.add(repairIdentity);
+    void startJob(
+      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=5`,
+      'Repairing risk price history',
+      { headers: { 'Content-Type': 'application/json' }, body: requestBody },
+    ).then(async ({ done }) => {
+      const job = await done;
+      if (job.status === 'done') {
+        invalidateReadCache('risk correlation history repaired');
+        setRepairVersion((version) => version + 1);
+      }
+    }).catch(() => {
+      // `startJob` reports the failure through the standard job popup.  The preliminary numbers
+      // remain visible; a failed repair must not replace actual observed data with an error state.
+    });
+  }, [benchmark, data?.available, data?.preliminary, repairIdentity, requestBody]);
 
   const labels = data?.labels ?? [];
   /** Every pair the matrix COULD have — n(n−1)/2.  Printed beside the measured count so a

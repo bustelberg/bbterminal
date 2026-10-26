@@ -339,9 +339,9 @@ class TestBackgroundPeriodPrewarm:
         assert at.prewarm_attribution_periods(12, "ACWI") == 4
         assert seen == [None, "2026-03-01", "2026-02-01", "2026-01-01"]
 
-    def test_scheduler_starts_the_server_side_warmer_after_model_prices(self):
+    def test_scheduler_no_longer_warms_the_retired_attribution_view(self):
         import scheduler
 
         src = inspect.getsource(scheduler._body_airs_vermogen)
-        assert "prewarm_paired_attributions(\"ACWI\")" in src
-        assert '"airs_attribution_prewarm"' in src
+        assert "prewarm_paired_attributions" not in src
+        assert '"airs_attribution_prewarm"' not in src

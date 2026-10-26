@@ -23,6 +23,7 @@ describe('Analyse primary-view copy', () => {
 
   it('does not leave ordinary English labels in Dutch', () => {
     const sameByDesign = new Set([
+      'actions.attribution', // User-chosen feature name: Performance in both languages.
       'chrome.benchmark', 'axes.sector', 'holdings.via', 'holdings.sector', 'holdings.momentum',
       'holdings.result', 'holdings.price', 'holdings.currency', 'holdings.rest',
       'holdings.direct', 'row.momentumNote',

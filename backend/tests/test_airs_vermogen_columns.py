@@ -57,6 +57,10 @@ def _one(overrides: dict | None = None):
 class TestAirsOwnColumnsAreCarried:
     """The six columns we used to drop on the floor."""
 
+    def test_fractional_quantity_is_preserved_for_monthly_unit_price_returns(self):
+        h = _one({"Aantal": 0.625})
+        assert h.quantity_exact == pytest.approx(0.625)
+
     def test_every_airs_column_is_parsed(self):
         h = _one()
         assert h.cost_basis_local == 41000.00

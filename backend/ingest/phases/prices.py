@@ -95,41 +95,9 @@ def _load_all_companies() -> list[dict]:
             break
         offset += page
 
-    # Most-stale-first ordering. One RPC fetches the latest close_price
-    # target_date per company; companies with no row come back with NULL
-    # which we map to the empty string so they sort lexicographically
-    # before any real date. Failure here just falls back to insertion
-    # order — the phase still works, just without prioritization.
-    #
-    # Pagination: PostgREST caps responses at `db-max-rows` (1000 in the
-    # cloud project, 10000 in local Docker Supabase via config.toml). The
-    # RPC returns one row per company (~2800) so without paging in prod
-    # only the first 1000 would have stale-priority — see the 2G Energy
-    # incident on /companies that exposed the same trap on the
-    # company_universe_labels RPC.
+    # Bound database work per statement and reuse the already-loaded IDs.
     try:
-        latest_by_cid: dict[int, str] = {}
-        page = 1000
-        offset = 0
-        for _attempt in range(20):
-            latest_resp = (
-                supabase.rpc("company_latest_close_price_dates", {})
-                .range(offset, offset + page - 1)
-                .execute()
-            )
-            batch = latest_resp.data or []
-            if not batch:
-                break
-            added = 0
-            for row in batch:
-                cid = int(row["company_id"])
-                if cid in latest_by_cid:
-                    continue
-                latest_by_cid[cid] = row.get("latest_target_date") or ""
-                added += 1
-            if added == 0 or len(batch) < page:
-                break
-            offset += page
+        latest_by_cid = _latest_close_dates_for([c["cid"] for c in out])
         out.sort(key=lambda c: latest_by_cid.get(c["cid"], ""))
     except Exception as e:
         logging.getLogger(__name__).warning(
@@ -790,17 +758,33 @@ def _collect_held_companies(run_id: int) -> list[dict]:
     return out
 
 
+def _latest_close_dates_for(company_ids: list[int]) -> dict[int, str]:
+    """Read latest GuruFocus dates with bounded, indexed company seeks.
+
+    Paging the global RPC limits response size but may still compute the full
+    universe on each page. The scoped RPC bounds database work as well.
+    """
+    latest: dict[int, str] = {}
+    for start in range(0, len(company_ids), 100):
+        rows = supabase.rpc("company_latest_metric_dates_for", {
+            "p_company_ids": company_ids[start:start + 100],
+            "p_metric_code": "close_price",
+        }).execute().data or []
+        for row in rows:
+            cid, day = row.get("company_id"), row.get("latest_target_date")
+            if cid is not None and day:
+                latest[int(cid)] = str(day)[:10]
+    return latest
+
+
 def _latest_close_dates_all() -> dict[int, str]:
-    """`company_id → latest close-price date (YYYY-MM-DD)` for every company,
-    via the `company_latest_close_price_dates` RPC (same source the prices
-    phase sorts on + `/api/data/price-coverage`). Paginated past the
-    PostgREST 1000-row cap. Empty dict on error / no data."""
+    """Latest dates for all companies, in bounded batches. Empty on error."""
     latest_by_cid: dict[int, str] = {}
     page, offset = 1000, 0
     for _ in range(20):
         try:
             resp = (
-                supabase.rpc("company_latest_close_price_dates", {})
+                supabase.table("company").select("company_id").order("company_id")
                 .range(offset, offset + page - 1)
                 .execute()
             )
@@ -812,11 +796,12 @@ def _latest_close_dates_all() -> dict[int, str]:
         batch = resp.data or []
         if not batch:
             break
-        for row in batch:
-            cid = row.get("company_id")
-            d = row.get("latest_target_date")
-            if cid is not None and d:
-                latest_by_cid[int(cid)] = str(d)[:10]
+        try:
+            latest_by_cid.update(_latest_close_dates_for([int(r["company_id"]) for r in batch]))
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "[prices] latest-close batch failed: %s: %s", type(e).__name__, e)
+            return {}
         if len(batch) < page:
             break
         offset += page

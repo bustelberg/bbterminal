@@ -24,7 +24,7 @@ import {
 import { trace, traceError } from '../../../lib/debugTrace';
 import { loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
-import AttributionPanel from './AttributionPanel';
+import MonthlyReportPanel from './MonthlyReportPanel';
 import PanelDialog from './PanelDialog';
 import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
 import BookReturnChart from './BookReturnChart';
@@ -132,11 +132,10 @@ function isScorecardBlock(value: unknown): value is ScorecardBlock {
 
 /** The headline band: return + excess (both sources), so the "did it earn its excess?" read is
  *  answered before scrolling. */
-function Scorecard({ returns, benchmark, onAttribution, attributionActive, onReload }: {
+function Scorecard({ returns, benchmark, onReload, fillWidth = false }: {
   returns?: ModelPortfolioAnalysis['returns'];
   benchmark: string;
-  onAttribution?: () => void;      // launches the YTD Brinson attribution; omitted for a basket
-  attributionActive?: boolean;
+  fillWidth?: boolean;
   /**  RE-READS THE ANALYSIS. Without it a targeted refresh stores new closes the tile never
    *  shows — the reader presses it, is told it worked, and the number does not move. */
   onReload?: () => void;
@@ -278,14 +277,13 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
   // The portfolio leg's own source follows the Book/Strategy toggle — AIRS's flow-aware account
   // return, or our yfinance reconstruction of the model.
   const pSrc: SourceKey = r?.source === 'book' ? 'airs_att' : 'yfinance';
-  // Centred on the chips (the row is `items-center`), so the operators hold the middle of the band
-  // rather than hanging off one edge of it.
-  const op = 'text-base font-mono text-fg-faint shrink-0';
+  // Chips stretch to equal height; operators keep their own vertical centre.
+  const op = 'text-base font-mono text-fg-faint shrink-0 self-center';
   return (
     //  `self-center` LIVES ON THE WRAPPER NOW, not here. This is stacked above the book's return
     // chart in a column that takes ITS width from this row, so centring this row inside that
     // column would leave the equation and the chart under it on two different left edges.
-    <div className="flex items-center gap-2 flex-wrap">
+    <div className={`flex items-stretch gap-2 flex-wrap ${fillWidth ? 'w-full [&>div]:flex-1' : ''}`}>
       {/*  THE € IS ON BOTH RETURN CHIPS, NOT JUST THE BENCHMARK'S. Marking one side of a
           subtraction with a currency implies the other side is in something else; the row is an
           equation and both legs are EUR (which is the return basis everywhere in this app —
@@ -321,16 +319,6 @@ function Scorecard({ returns, benchmark, onAttribution, attributionActive, onRel
       <span className={op} aria-hidden>=</span>
       <Chip label={copy.score.excess} value={spp(excess)} valueClass={tone(excess)}
         hint={copy.score.excessHint} />
-      {onAttribution && (
-        <button type="button" onClick={onAttribution}
-          title={copy.score.attributionTitle}
-          className={`ml-1 cursor-pointer rounded-lg border px-3 py-1.5 min-w-[6rem] text-xs font-medium transition-colors flex items-center justify-center ${
-            attributionActive
-              ? 'bg-accent-600 text-white border-transparent'
-              : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
-          {copy.actions.attribution}
-        </button>
-      )}
     </div>
   );
 }
@@ -3518,10 +3506,12 @@ const HEADER_CTL_STOP = `${HEADER_CTL_BASE} border-warn-500/40 text-warn-400 `
   + 'hover:bg-warn-500/10 hover:border-warn-500/60';
 
 export default function PortfolioAnalysisModal({
-  id, name, basket, onRefresh, refreshing = false, refreshTitle, refreshTick = null,
+  id, name, basket, reportAccount, onRefresh, refreshing = false, refreshTitle, refreshTick = null,
   onCancelRefresh, cancelRequested = false, cancelTitle, refreshSeq = 0, onClose,
 }: {
   id?: number; name: string; basket?: Basket; onClose: () => void;
+  /** Exact dashboard account, including accounts without a linked model. */
+  reportAccount?: string;
   /**
    * The row's own `Refresh (AIRS + prices + FX)`, hoisted onto this modal — the SAME handler, not
    * a second one.
@@ -3591,18 +3581,8 @@ export default function PortfolioAnalysisModal({
   // Drives both the composition weighting (`weight_by`) and the return source (`source`); the
   // benchmark and the sector/region/currency vocabulary stay yfinance either way.
   const source: 'model' | 'book' = isBasket ? 'model' : 'book';
-  // Which window's excess the reader asked "why" about. Null = not asked.
-  const [why, setWhy] = useState<'ytd' | 'since' | null>(null);
-  /**
-   * The Risk panel (active share). Its own flag rather than a third value on `why`, because it is
-   * not a window: `why` selects WHICH PERIOD to attribute, and active share has no period at all
-   * — it is today's weights against today's index. Folding it in would give
-   * `window={why}` a value `AttributionPanel` cannot mean anything by.
-   *
-   *  The three panels are mutually exclusive and each opener closes the others. They render in
-   * the same slot under the charts; two at once would push the second off the fold with no hint
-   * that it had opened.
-   */
+  // Report and Risk share the detail surface; their openers close the other view.
+  const [reportOpen, setReportOpen] = useState(false);
   const [risk, setRisk] = useState(false);
   /**
    * One membership choice for every holdings-based view. OFF means the book owns the certificate
@@ -3744,6 +3724,9 @@ export default function PortfolioAnalysisModal({
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
               + `?benchmark=${benchmark}&weight_by=${source}&source=${source}`
               + `&look_through=${lookThrough}`
+              // Sector/region/currency require the full benchmark constituent grid. The opening
+              // overview does not render those charts, so defer that work until Stocks is selected.
+              + `&include_axes=${assetFilter === EQUITY_BUCKET}`
               + (assetFilter ? `&bucket=${encodeURIComponent(assetFilter)}` : ''));
           const body = await r.json().catch(() => null);
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
@@ -3920,9 +3903,9 @@ export default function PortfolioAnalysisModal({
       onClick={onClose} role="dialog" aria-modal="true">
       {/* Fixed at 80% of the viewport width AND height; the charts span the full width and the
           drill-down dock opens full-width below them. */}
-      <div className={`relative bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] p-5 ${risk || why ? 'overflow-hidden' : 'overflow-auto'}`}
+      <div className={`relative bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] p-5 ${risk || reportOpen ? 'overflow-hidden' : 'overflow-auto'}`}
         onClick={(e) => e.stopPropagation()}>
-        <div hidden={risk || !!why}>
+        <div hidden={risk || reportOpen}>
         <div className="flex items-start justify-between gap-3 mb-4">
           <div className="min-w-0">
             <h3 className="text-base font-mono font-semibold text-fg-strong">{name}</h3>
@@ -4005,7 +3988,7 @@ export default function PortfolioAnalysisModal({
           <>
             {/* Top: the allocation bars (the class selector) beside — when NOTHING is selected —
                 the whole-portfolio return / vs-benchmark / excess scorecard, or, when a class IS
-                selected, ONLY that class's own return (+ Attribution for Stocks). Empty for an
+                selected, ONLY that class's own return. Empty for an
                 ad-hoc basket.
 
                  CENTRED, AND THAT IS ONLY SAFE BECAUSE THE RIGHT-HAND SLOT NO LONGER CHANGES
@@ -4030,7 +4013,7 @@ export default function PortfolioAnalysisModal({
                       .reduce((a, p) => a + (p.contribution_pct ?? 0), 0)
                     : null}
                   onSelect={isBasket ? undefined : (b) => {
-                    setWhy(null); setRisk(false); setAssetFilter(b); }} />
+                    setReportOpen(false); setRisk(false); setAssetFilter(b); }} />
               )}
               {/*  ONE SLOT, ONE WIDTH, IN BOTH STATES — this is what lets the row above be
                   centred without the allocation bars moving. Both arms of the ternary occupy the
@@ -4063,7 +4046,7 @@ export default function PortfolioAnalysisModal({
 
                    `justify-items-center` so the narrower selected content sits centred in the
                   reserved space rather than pinned to its left edge. */}
-              <div className="grid items-center justify-items-center self-center">
+              <div className={`grid items-center justify-items-center self-center ${!selected ? 'min-w-0 flex-1' : ''}`}>
               {selected && (
                 <div aria-hidden
                   className="col-start-1 row-start-1 invisible h-0 overflow-hidden pointer-events-none">
@@ -4071,7 +4054,7 @@ export default function PortfolioAnalysisModal({
                     onReload={() => setReloadSeq((n) => n + 1)} />
                 </div>
               )}
-              <div className="col-start-1 row-start-1 min-w-0">
+              <div className={`col-start-1 row-start-1 min-w-0 ${!selected ? 'w-full' : ''}`}>
               {selected
                 ? (
                   <div className="self-center flex items-stretch gap-3">
@@ -4089,47 +4072,6 @@ export default function PortfolioAnalysisModal({
                       <SleeveTile bucket={selected} slices={data.allocation}
                         asOf={data.holdings_as_of ?? data.as_of} />
                     )}
-                    {/* Attribution (Brinson) is an EQUITY analysis — offered ONLY on the Stocks
-                        sleeve, never on a bond/cash/fund sleeve or the whole-portfolio view.
-
-                         ITS HEIGHT IS ITS OWN, NOT BORROWED FROM A SIBLING. This used to carry no
-                        vertical padding at all and took its size from `items-stretch` against the
-                        `SleeveTile` beside it — which is exactly the tile the line above removes on
-                        Stocks (2026-08-05). On the ONE sleeve this button renders on, its only
-                        source of height had gone, so it collapsed to a squat text-xs strip. Box
-                        metrics are copied from `SleeveTile` and the min-height stands in for the
-                        two lines of content that tile has and a one-word button does not. */}
-                    {selected === EQUITY_BUCKET && (
-                      <button type="button"
-                        onClick={() => { setRisk(false); setWhy(why === 'ytd' ? null : 'ytd'); }}
-                        title={copy.score.attributionTitle}
-                        className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
-                          why === 'ytd'
-                            ? 'bg-accent-600 text-white border-transparent'
-                            : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
-                        {copy.actions.attribution}
-                      </button>
-                    )}
-                    {/*  A STRUCTURAL MEASURE BESIDE A RETURN ONE, AND THE LABEL HAS TO CARRY
-                        THAT. Attribution decomposes what the book EARNED; this describes what it
-                        IS — how far its stock sleeve sits from the index, today, regardless of
-                        performance. Same sleeve rule as the button beside it: an active share is
-                        an EQUITY statement, so it is offered only on Stocks.
-
-                         AND IT IS NOT GATED ON `id`. Unlike Attribution it takes the holdings in
-                        its request body, so an ad-hoc basket answers it too — see
-                        `ActiveShareRequest`. */}
-                    {selected === EQUITY_BUCKET && (
-                      <button type="button"
-                        onClick={() => { setWhy(null); setRisk(!risk); }}
-                        title={copy.score.riskTitle}
-                        className={`cursor-pointer rounded-lg border px-4 py-3 min-w-[10rem] min-h-[4.25rem] flex items-center justify-center text-xs font-medium transition-colors ${
-                          risk
-                            ? 'bg-accent-600 text-white border-transparent'
-                            : 'bg-elevated border-neutral-800/40 text-fg-muted hover:text-accent-300 hover:border-accent-500/50'}`}>
-                        {copy.actions.risk}
-                      </button>
-                    )}
                   </div>
                 )
                 /*  THE FALLBACK IS THE SELECTED BENCHMARK, NOT A LITERAL. `data` is fetched for
@@ -4137,29 +4079,27 @@ export default function PortfolioAnalysisModal({
                    if the server ever omits the echo the label still names what was asked for. A
                    hardcoded 'SP500' here would print one index's name over another's numbers —
                    invisible, and it survived the default changing to ACWI at exactly four sites. */
-                /*  THE SCORECARD AND THE BOOK'S RETURN CHART ARE ONE COLUMN, AND THE EQUATION
-                    SETS THE WIDTH — moved here 2026-09-01 on request ("put the return − vs acwi
-                    return = excess tiles above the return ytd plot, so it's nicely aligned, same
-                    total width"). The chart used to sit to the RIGHT of the Excess chip at a
-                    hardcoded `w-[24rem]`, a number that matched the three chips beside it only by
-                    coincidence and stopped matching the moment a benchmark's name changed the
-                    middle chip's width.
-                     SO THERE IS NO WIDTH HERE AT ALL, AND THAT IS THE POINT. A column shrink-
-                    wraps to its widest child; the chips are that child, and the chart stretches to
-                    them. Re-introducing a fixed width would restore the drift this removes.
-                     AND THE CHART IS `w-0 min-w-full`, WHICH IS THE WHOLE MECHANISM. A column
-                    shrink-wraps to the WIDEST child, so left at `auto` the chart's card — its
-                    header row of "Return YTD / +35.36% / Monthly / ⓘ" — competes with the equation
-                    to set the width, and the alignment would hold or not depending on how long a
-                    percentage happened to be. `width: 0` is a DEFINITE width, so this child
-                    contributes nothing to that calculation and the chips alone decide; `min-width:
-                    100%` then resolves against the width they set and stretches the chart back
-                    across it. Both halves are needed: `w-0` alone leaves a zero-width chart,
-                    because a definite cross-size opts out of the column's default `stretch`. */
+                /* The scorecard and chart share the left grid column. Report and
+                   Risk occupy the right column, aligned with the scorecard row. */
                 : (
-                  <div className="flex flex-col gap-2 self-center min-w-0">
+                  <div className="grid w-full grid-cols-1 items-start gap-x-6 gap-y-2 self-center min-w-0 lg:grid-cols-2">
                     <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark}
-                    onReload={() => setReloadSeq((n) => n + 1)} />
+                      onReload={() => setReloadSeq((n) => n + 1)} fillWidth />
+                        <nav aria-label={copy.lang === 'nl' ? 'Verdieping' : 'Further analysis'}
+                          className="col-start-1 row-start-2 flex min-h-11 items-stretch justify-self-end self-stretch gap-2 lg:col-start-2 lg:row-start-1">
+                          {(reportAccount || (!isBasket && id != null)) && (
+                            <button type="button" onClick={() => { setRisk(false); setReportOpen(true); }}
+                              title={copy.score.attributionTitle}
+                              className="flex min-w-[6rem] items-center justify-center rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
+                              {copy.actions.attribution}
+                            </button>
+                          )}
+                          <button type="button" onClick={() => { setReportOpen(false); setRisk(true); }}
+                            title={copy.score.riskTitle}
+                            className="flex min-w-[6rem] items-center justify-center rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
+                            {copy.actions.risk}
+                          </button>
+                        </nav>
                     {/*  ITS LAST POINT IS THE `Return` CHIP ABOVE IT, BY CONSTRUCTION. Both read
                         AIRS's own `cumulatief_rendement` — the chart through `value-series`, the
                         chip through `_airs_accounts._year_perf` — so the curve lands on the number
@@ -4187,7 +4127,7 @@ export default function PortfolioAnalysisModal({
                         column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
                         child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
-                      <div className="w-0 min-w-full min-h-[15.5rem]">
+                      <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] lg:row-start-2">
                         {/* `BookReturnChart` fetches independently and initially renders one line.
                             Reserve the final chart card's plot/tooltip footprint here, before that
                             request completes, so its arrival cannot move the scorecard above it. */}
@@ -4369,19 +4309,18 @@ export default function PortfolioAnalysisModal({
           </div>
         </div>
       )}
-      {why && data && (
+      {reportOpen && data && (
         <div className="absolute inset-0 z-20 flex min-h-0 flex-col bg-page p-5">
-          <button type="button" onClick={() => setWhy(null)}
+          <button type="button" onClick={() => setReportOpen(false)}
             className="mb-4 w-fit cursor-pointer rounded-lg border border-neutral-800/40 bg-elevated px-5 py-2.5 text-sm font-semibold text-fg-strong transition-colors hover:border-accent-500/50 hover:text-accent-300">
             ← Back to analysis
           </button>
           <div className="min-h-0 flex-1 overflow-auto">
-          <AttributionPanel id={id ?? 0} benchmark={data.benchmark ?? benchmark} window={why}
-            source={source} lookThrough={lookThrough}
-            portfolioName={name}
-            portfolioAsOf={data.returns?.portfolio_as_of}
-            benchmarkAsOf={data.returns?.benchmark_as_of}
-            onClose={() => setWhy(null)} />
+          <MonthlyReportPanel portefeuille={reportAccount ?? data.book_portefeuille} name={name}
+            overviewReturns={(reportAccount ?? data.book_portefeuille) === data.book_portefeuille ? {
+              portfolio: data.returns?.portfolio_ytd_pct, benchmark: data.returns?.benchmark_ytd_pct,
+              asOf: data.returns?.portfolio_as_of, from: data.returns?.ytd_from,
+            } : undefined} />
           </div>
         </div>
       )}

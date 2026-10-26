@@ -129,6 +129,28 @@ def test_risk_correlation_endpoint_falls_back_to_preliminary_daily_sample(monkey
 
 
 class TestTheMatrix:
+    def test_preliminary_daily_matrix_uses_its_explicit_ten_day_floor(self, monkeypatch):
+        """A preliminary 10-day answer must not ship with a completely empty matrix."""
+        dates = _weekdays(16)
+        rng = np.random.default_rng(7)
+        benchmark_returns = rng.normal(0.0004, 0.01, len(dates) - 1)
+        payload = {
+            BENCH: _prices(benchmark_returns, dates),
+            "US0000000001": _prices(0.9 * benchmark_returns + rng.normal(0, 0.004, len(benchmark_returns)), dates),
+            "US0000000002": _prices(0.6 * benchmark_returns + rng.normal(0, 0.007, len(benchmark_returns)), dates),
+        }
+        import routers._airs_portfolio_analysis as PA
+        monkeypatch.setattr(PA, "_daily_eur", lambda isins, years: payload)
+        got = C.compute_risk_correlation([
+            {"isin": "US0000000001", "name": "One", "weight_pct": 50.0, "is_fund": False},
+            {"isin": "US0000000002", "name": "Two", "weight_pct": 50.0, "is_fund": False},
+        ], "ACWI", frequency="daily", require_complete_history=True,
+           minimum_observations=10, preliminary=True)
+        assert got["available"], got.get("reason")
+        assert got["min_pair_observations"] == 10
+        assert got["pairs_measured"] == 1
+        assert got["matrix"][0][1] is not None
+
     def test_it_is_square_symmetric_and_unit_on_the_diagonal(self, book):
         got = C.compute_risk_correlation(book, "ACWI")
         m, labels = got["matrix"], got["labels"]
