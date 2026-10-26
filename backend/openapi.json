@@ -20124,6 +20124,106 @@
         ]
       }
     },
+    "/api/airs/accounts/{portefeuille}/monthly-report": {
+      "get": {
+        "description": "Stored AIRS reports for a calendar month; opening never starts a scrape.",
+        "operationId": "airs_monthly_report_api_airs_accounts__portefeuille__monthly_report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "title": "Month",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Monthly Report",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/monthly-report/job": {
+      "post": {
+        "description": "Acquire one historical month, with progress and cooperative cancellation.",
+        "operationId": "airs_monthly_report_job_api_airs_accounts__portefeuille__monthly_report_job_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "month",
+            "required": true,
+            "schema": {
+              "title": "Month",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Monthly Report Job",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/accounts/{portefeuille}/return-reconciliation": {
       "get": {
         "description": "Why this book's own YTD is not the YTD its open positions add up to.\n\nReads both sides from the loaders the other panels already use \u2014 `_year_perf` for the book,\n`account_holdings` for the positions \u2014 so the reconciliation cannot quietly disagree with\neither of the figures it is reconciling.",
