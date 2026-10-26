@@ -3863,6 +3863,27 @@ class ForcePriceChecksRequest(BaseModel):
     accounts: list[str] = Field(min_length=1, max_length=200)
 
 
+@router.get('/api/airs/accounts/{portefeuille}/monthly-report')
+async def airs_monthly_report(portefeuille: str, month: str):
+    """Stored AIRS reports for a calendar month; opening never starts a scrape."""
+    from routers._airs_monthly_report import read_report
+    return await asyncio.to_thread(read_report, portefeuille, month)
+
+
+@router.post('/api/airs/accounts/{portefeuille}/monthly-report/job')
+async def airs_monthly_report_job(portefeuille: str, month: str):
+    """Acquire one historical month, with progress and cooperative cancellation."""
+    import jobs as job_registry
+    from routers._airs_monthly_report import _account, collect_report, month_window
+    month_window(month)
+    await asyncio.to_thread(_account, portefeuille)
+    label = f'{portefeuille} · Report {month}'
+    job, reused = job_registry.start(
+        f'airs.monthly-report.{portefeuille}.{month}', label,
+        lambda ctx: collect_report(portefeuille, month, ctx))
+    return {'job_id': job.id, 'label': label, 'already_running': reused}
+
+
 @router.post('/api/airs/vermogen/price-checks/job')
 async def force_account_price_checks_job(body: ForcePriceChecksRequest):
     import hashlib  # noqa: PLC0415

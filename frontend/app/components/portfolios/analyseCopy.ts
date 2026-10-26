@@ -7,7 +7,7 @@ const en = {
   lang: 'en',
   actions: {
     close: 'Close', refresh: 'Refresh', refreshing: 'Refreshing…', cancel: 'Cancel',
-    cancelling: 'Cancelling…', attribution: 'Attribution', risk: 'Risk', fundamental: 'Fundamental',
+    cancelling: 'Cancelling…', attribution: 'Report', risk: 'Risk', fundamental: 'Fundamental',
     sectorAllocation: 'Sector mix',
     cancelRefresh: 'Cancel this refresh', refreshPortfolio: 'Refresh this portfolio',
     cancellingTitle: 'Cancelling — the account being downloaded finishes first.',
@@ -34,7 +34,7 @@ const en = {
     portfolioHowBook: 'Flow-aware and includes income, over the calendar year — a deposit does not flatter it.',
     portfolioHowModel: 'Σ(weightᵢ × returnᵢ) over the model’s holdings, each priced from its yfinance closes and converted to EUR at each date’s own rate, so the currency leg is included. Price return: dividends are not.',
     excessHint: "The portfolio's return minus the benchmark's, in percentage POINTS — the two figures to the left, subtracted.  It does NOT equal the Attribution table's total: that decomposes the index constituent by constituent, so it reconciles to the rebuilt index rather than to the ETF figure shown here.",
-    attributionTitle: 'Why? — break the excess into allocation vs selection (Brinson-Fachler attribution).',
+    attributionTitle: 'Monthly AIRS report: results, portfolio valuations, transactions and income.',
     riskTitle: 'Risk — how far the stock sleeve sits from the benchmark (active share), and how much that difference has actually moved (realised tracking error).',
   },
   allocation: {
@@ -225,7 +225,7 @@ const nl: AnalyseCopy = {
   lang: 'nl',
   actions: {
     close: 'Sluiten', refresh: 'Vernieuwen', refreshing: 'Vernieuwen…', cancel: 'Annuleren',
-    cancelling: 'Annuleren…', attribution: 'Attributie', risk: 'Risico', fundamental: 'Fundamenteel',
+    cancelling: 'Annuleren…', attribution: 'Report', risk: 'Risico', fundamental: 'Fundamenteel',
     sectorAllocation: 'Sectorverdeling',
     cancelRefresh: 'Deze vernieuwing annuleren', refreshPortfolio: 'Deze portefeuille vernieuwen',
     cancellingTitle: 'Annuleren — de rekening die nu wordt gedownload wordt eerst voltooid.',
@@ -249,7 +249,7 @@ const nl: AnalyseCopy = {
     portfolioHowBook: 'Houdt rekening met stortingen en onttrekkingen en bevat inkomsten, over het kalenderjaar — een storting vleit dit cijfer dus niet.',
     portfolioHowModel: 'Σ(gewichtᵢ × rendementᵢ) over de posities van het model. Elke positie gebruikt yfinance-slotkoersen en wordt op elke datum tegen de eigen koers naar EUR omgerekend, zodat het valuta-effect is inbegrepen. Koersrendement: dividenden zijn uitgesloten.',
     excessHint: 'Het rendement van de portefeuille minus dat van de benchmark, in PROCENTPUNTEN — de twee cijfers links van elkaar afgetrokken.  Dit is NIET gelijk aan het totaal in de attributietabel: die ontleedt de index per constituent en sluit daarom aan op de herbouwde index in plaats van op het hier getoonde ETF-cijfer.',
-    attributionTitle: 'Waarom? — splits het meerrendement uit in allocatie en selectie (Brinson-Fachler-attributie).',
+    attributionTitle: 'Maandrapportage uit AIRS: resultaten, portefeuillewaarderingen, transacties en inkomsten.',
     riskTitle: 'Risico — hoe ver het aandelendeel van de benchmark afwijkt (active share) en hoeveel die afwijking werkelijk heeft bewogen (gerealiseerde tracking error).',
   },
   allocation: {

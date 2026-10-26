@@ -2094,16 +2094,8 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             summary['price_checks'] = refresh_price_checks(should_stop=stop)
             if summary['price_checks']['errors']:
                 failures.append(f"price checks: {summary['price_checks']['errors']}")
-            # Do not wait for someone to open Analyse before beginning its YTD/monthly
-            # attribution work. This uses the bounded scheduler pool and is coalesced by name,
-            # so the four morning AIRS ticks cannot create a fan-out of duplicate warmers.
-            def _warm_attribution() -> None:
-                from routers._airs_portfolio_attribution import prewarm_paired_attributions  # noqa: PLC0415
-                warmed = prewarm_paired_attributions("ACWI")
-                _log.info("[scheduler] AIRS attribution prewarm: %s", warmed)
-
-            summary["attribution_prewarm_started"] = _submit_scheduled_work(
-                "airs_attribution_prewarm", _warm_attribution)
+            # Report now reads AIRS's own monthly observations and dated exports.
+            # No Yahoo/Brinson attribution warming is needed after this scan.
         except _Cancelled:
             raise
         except Exception as e:

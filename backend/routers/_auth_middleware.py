@@ -290,6 +290,8 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
 _USER_PROXY_REFRESH = re.compile(r"^/api/benchmarks/proxy/\w+/refresh$")
 
 _USER_REFRESH_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Analyse → fetch exactly one month's AIRS reports, with progress/cancel.
+    re.compile(r"^/api/airs/accounts/[^/]+/monthly-report/job$"),
     # Overview → one row's Refresh (re-scan this book's AIRS reports).
     re.compile(r"^/api/airs/portfolios/[^/]+/refresh/job$"),
     # Overview's stale Yahoo price checks run after the expanded row renders from its cache.
