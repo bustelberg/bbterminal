@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+import os
 import random
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -80,7 +81,15 @@ _log = logging.getLogger(__name__)
 # 1.58s end to end). What is left per company is one COPY and a handful of round trips, so the
 # binding constraint is now the GLOBAL gate in `_api_request` (`_min_interval()`), which no worker count can
 # go faster than. More threads would queue on that lock instead of on the database.
-FILL_WORKERS = 3
+def _fill_worker_count() -> int:
+    """Keep the nested fill pool inside Railway's process-wide thread budget."""
+    # A scheduled drift probe and this fill can overlap on Monday.  The
+    # GuruFocus request governor already serialises the API-bound portion, so
+    # serial production writes trade negligible throughput for reliable starts.
+    return 1 if os.environ.get("RAILWAY_PUBLIC_DOMAIN") else 3
+
+
+FILL_WORKERS = _fill_worker_count()
 
 #: The substring `fetch_financials` puts in its error when the vendor answers with a full template
 #: and no periods, and how many of those in a row end the run. See `vendor_down` in
@@ -711,7 +720,15 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                      outcome=outcome, failed=bool(r["error"]))
 
     stopped = False
-    if work:
+    if work and FILL_WORKERS == 1:
+        # A serial fill can run on the admitted job thread without creating
+        # another worker on a process already at its thread limit.
+        try:
+            for company in work:
+                _one(company)
+        except JobCancelled:
+            stopped = True
+    elif work:
         with ThreadPoolExecutor(max_workers=FILL_WORKERS, thread_name_prefix="fill") as pool:
             #  `submit` + explicit futures, NOT `pool.map`, AND THE REASON IS THE `finally`.
             # `map` submits every item up front too, so a Cancel used to leave ~1,600 queued work

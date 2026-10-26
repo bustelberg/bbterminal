@@ -318,8 +318,12 @@ def process_slice(limit: int = SLICE, verbose: bool = False,
         return outcome
 
     try:
-        with ThreadPoolExecutor(max_workers=workers) as ex:
-            results = list(ex.map(_tracked_one, ids))
+        if workers == 1:
+            # Reuse the caller's thread on constrained production hosts.
+            results = [_tracked_one(isin) for isin in ids]
+        else:
+            with ThreadPoolExecutor(max_workers=workers) as ex:
+                results = list(ex.map(_tracked_one, ids))
     except RuntimeError as exc:
         if "can't start new thread" not in str(exc).lower():
             raise

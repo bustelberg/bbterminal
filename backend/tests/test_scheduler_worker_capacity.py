@@ -87,6 +87,43 @@ def test_production_scheduler_cap_keeps_room_for_request_workers(monkeypatch):
     assert S._scheduled_worker_count() == 2
 
 
+def test_benchmark_log_context_implements_the_fill_cancellation_protocol():
+    ctx = S._LogCtx(lambda: False)
+    ctx.check()
+    assert ctx.cancelled is False
+    ctx.spent(2)
+    ctx.progress(1, 2, "Loaded a constituent", company_id=1)
+    assert ctx.counts["calls"] == 2
+
+    cancelled = S._LogCtx(lambda: True)
+    try:
+        cancelled.check()
+    except S._Cancelled:
+        pass
+    else:
+        raise AssertionError("a cancelled scheduled fill must stop at its next check")
+
+
+def test_benchmark_fill_does_not_turn_cancellation_into_an_index_failure(monkeypatch):
+    monkeypatch.setattr(S, "_FUNDAMENTAL_INDICES", ("ACWI",))
+    monkeypatch.setattr(S, "_fundamental_company_ids", lambda _label: [(1, "NYSE")])
+    monkeypatch.setattr("ingest.api_usage.remaining_budget", lambda _supabase: {"usa": 3000})
+    monkeypatch.setattr("routers._fundamental_fill.fill_company_ids", lambda ctx, *_args, **_kw: ctx.check())
+
+    with __import__("pytest").raises(S._Cancelled):
+        S._body_benchmark_fundamentals(type("Ctx", (), {"cancelled": True})())
+
+
+def test_nested_market_data_pools_are_serial_on_railway(monkeypatch):
+    from ingest import history_drift
+    from routers import _fundamental_fill
+
+    monkeypatch.setenv("RAILWAY_PUBLIC_DOMAIN", "api.example.test")
+
+    assert history_drift._worker_count() == 1
+    assert _fundamental_fill._fill_worker_count() == 1
+
+
 def test_queue_overrun_filter_only_hides_the_expected_apscheduler_message():
     filt = S._ExpectedQueueOverrunFilter()
     expected = logging.LogRecord("apscheduler.executors.default", logging.WARNING, "", 0,

@@ -1636,8 +1636,27 @@ class _LogCtx:
             # happily and the toast shows the message alone.
             self._step(0, 0, f"{self._label} · {message}" if self._label else message)
 
+    @property
     def cancelled(self) -> bool:
         return bool(self._cancelled())
+
+    def spent(self, calls: int) -> None:
+        self.counts["calls"] = self.counts.get("calls", 0) + calls
+
+    def progress(self, done: int, total: int, message: str = "", **_data) -> None:
+        self.emit("info", message)
+
+    def check(self) -> None:
+        """Match the cancellable job-context protocol used by the shared fill.
+
+        Scheduled runs do not have a registry ``JobCtx``, but ``fill_company_ids``
+        deliberately calls ``check()`` at every safe company boundary.  Keeping
+        that protocol here means the scheduled and Run-now paths exercise the
+        same cancellation contract instead of the scheduled path failing before
+        it can start a constituent.
+        """
+        if self.cancelled:
+            raise _Cancelled("benchmark fundamentals fill cancelled")
 
 
 def _fire_benchmark_fundamentals() -> None:
@@ -1702,6 +1721,7 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
     from deps import supabase  # noqa: PLC0415
     from ingest.api_usage import _region_for_exchange, remaining_budget  # noqa: PLC0415, PLC2701
     from routers._fundamental_fill import fill_company_ids  # noqa: PLC0415
+    from jobs import JobCancelled  # noqa: PLC0415
 
     budget = remaining_budget(supabase)
     room = {r: max(0, n - _FUNDAMENTALS_REGION_FLOOR) for r, n in budget.items()}
@@ -1745,6 +1765,13 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
             fill_company_ids(log_ctx, label, keep, feeds="smart")
             filled += len(keep)
             step(i, n, f"{label} — {len(keep)} filled")
+        except _Cancelled:
+            # Cancellation is control flow, not an index failure.  Let
+            # `_run_body` translate it to the registry's `JobCancelled` so
+            # the Run-now card cannot claim a partial fill completed.
+            raise
+        except JobCancelled as e:
+            raise _Cancelled(str(e)) from e
         except Exception as e:  # noqa: BLE001
             _log.warning("[benchmark_fundamentals] %s failed: %s: %s", label, type(e).__name__, e)
             failed.append(f"{label}: {type(e).__name__}")
@@ -2392,9 +2419,12 @@ def register_scheduler(app) -> None:
         sched = BackgroundScheduler(timezone="UTC", executors={
             "default": {"type": "threadpool", "max_workers": 2},
         })
-        executor_log = logging.getLogger("apscheduler.executors.default")
-        if not any(isinstance(f, _ExpectedQueueOverrunFilter) for f in executor_log.filters):
-            executor_log.addFilter(_ExpectedQueueOverrunFilter())
+        # Max-instance warnings originate on the scheduler logger. Logger
+        # filters do not propagate from parents to children.
+        for logger_name in ("apscheduler.scheduler", "apscheduler.executors.default"):
+            executor_log = logging.getLogger(logger_name)
+            if not any(isinstance(f, _ExpectedQueueOverrunFilter) for f in executor_log.filters):
+                executor_log.addFilter(_ExpectedQueueOverrunFilter())
         #  The observers go on before any job is added, and before `start()`. Until 2026-09-01
         # nothing listened to either event, which is half of why a production job could sit 20 days
         # stale with a healthy next-run beside it and no explanation anywhere: a dropped fire wrote

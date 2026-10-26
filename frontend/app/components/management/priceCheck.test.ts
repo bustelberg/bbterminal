@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AirsAccountIsins } from '../../../lib/types/api';
-import { newPriceDifferences, needsPriceReview, summarizePrices } from './priceCheck';
+import { isStalePriceGap, newPriceDifferences, needsPriceReview, summarizePrices } from './priceCheck';
 
 type Holding = NonNullable<AirsAccountIsins['rows']>[number];
 const holding = (changes: Partial<Holding> = {}): Holding => ({
@@ -89,7 +89,8 @@ describe('dashboard price checks', () => {
     expect(summary.checked).toBe(0);
     expect(summary.total).toBe(4);
     expect(summary.differences).toBe(0);
-    expect(needsPriceReview(summary)).toBe(true); // The stale 20% gap is still worth investigating.
+    expect(needsPriceReview(summary)).toBe(false);
+    expect(isStalePriceGap(summary.items[0])).toBe(true);
   });
 
   it('limits the exception list to listed equities and ETFs', () => {
@@ -130,16 +131,19 @@ describe('new-discrepancy alerts', () => {
     expect(newPriceDifferences(null, warning)).toBe(0);
   });
 
-  it('ignores small gaps and stale/missing noise but reports extreme stale gaps', () => {
+  it('requires refreshed comparable dates before alerting on a stale gap', () => {
     const quiet = summarize(holding({ airs_price_local: 103 }),
       holding({ holding_name: 'Stale', our_price_date: '2026-10-16', airs_price_local: 101 }),
       holding({ holding_name: 'Missing', our_price_local: null }));
     expect(needsPriceReview(quiet)).toBe(false);
     expect(newPriceDifferences(null, quiet)).toBe(0);
     const stale = summarize(holding({ our_price_date: '2026-10-16', airs_price_local: 90 }));
-    expect(needsPriceReview(stale)).toBe(true);
-    expect(newPriceDifferences(quiet, stale)).toBe(1);
+    expect(needsPriceReview(stale)).toBe(false);
+    expect(isStalePriceGap(stale.items[0])).toBe(true);
+    expect(newPriceDifferences(quiet, stale)).toBe(0);
     expect(newPriceDifferences(stale, stale)).toBe(0);
+    const refreshed = summarize(holding({ airs_price_local: 90 }));
+    expect(newPriceDifferences(stale, refreshed)).toBe(1);
     expect(needsPriceReview(summarize(holding({ served_by: 'OTHER', airs_price_local: 200 })))).toBe(false);
   });
 });
