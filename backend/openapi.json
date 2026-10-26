@@ -6122,6 +6122,51 @@
         "title": "BuildUniverseRequest",
         "type": "object"
       },
+      "CertificateResultAdjustment": {
+        "description": "Wrapper P&L formerly allocated to cash; not a cash return or an actual holding.",
+        "properties": {
+          "contribution_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution Pct"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "realised_result_eur": {
+            "title": "Realised Result Eur",
+            "type": "number"
+          },
+          "result_eur": {
+            "title": "Result Eur",
+            "type": "number"
+          },
+          "unrealised_eur": {
+            "title": "Unrealised Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "unrealised_eur",
+          "realised_result_eur",
+          "result_eur"
+        ],
+        "title": "CertificateResultAdjustment",
+        "type": "object"
+      },
       "CompanyIngestResult": {
         "description": "What one company's backfill did. `feeds` names the calls actually spent.",
         "properties": {
@@ -10620,6 +10665,24 @@
             ],
             "title": "Last Sale"
           },
+          "lookthrough_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookthrough Note"
+          },
+          "lookthrough_positions": {
+            "items": {
+              "$ref": "#/components/schemas/SoldCertificatePosition"
+            },
+            "title": "Lookthrough Positions",
+            "type": "array"
+          },
           "mom_12_1_from": {
             "anyOf": [
               {
@@ -11235,6 +11298,11 @@
             "default": 0.0,
             "title": "Covered Pct",
             "type": "number"
+          },
+          "details_pending": {
+            "default": false,
+            "title": "Details Pending",
+            "type": "boolean"
           },
           "foreign_listings": {
             "default": 0,
@@ -15092,6 +15160,13 @@
             ],
             "title": "Capital Coverage Ratio"
           },
+          "certificate_adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/CertificateResultAdjustment"
+            },
+            "title": "Certificate Adjustments",
+            "type": "array"
+          },
           "comparable": {
             "anyOf": [
               {
@@ -16891,6 +16966,95 @@
           "weight_pct"
         ],
         "title": "SleeveEtf",
+        "type": "object"
+      },
+      "SoldCertificatePosition": {
+        "properties": {
+          "composition_as_of": {
+            "title": "Composition As Of",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "since_close_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close As Of"
+          },
+          "since_close_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close Date"
+          },
+          "since_close_from": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close From"
+          },
+          "since_close_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close Pct"
+          },
+          "since_close_to": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close To"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "composition_as_of",
+          "weight_pct"
+        ],
+        "title": "SoldCertificatePosition",
         "type": "object"
       },
       "SplitAdjustment": {
@@ -21029,6 +21193,16 @@
             "schema": {
               "default": false,
               "title": "Include Axes",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overview_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Overview Only",
               "type": "boolean"
             }
           }

@@ -44,6 +44,7 @@ import logging
 import re
 import time
 from collections import defaultdict
+from contextvars import ContextVar
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -61,6 +62,8 @@ from routers._etf_sector_allocation import supported as etf_sector_allocation_su
 EQUITY_BUCKET = "Equity"
 CASH_BUCKET = "Cash"
 _log = logging.getLogger(__name__)
+_OVERVIEW_ONLY = ContextVar('analysis_overview_only', default=False)
+_ANALYSIS_PENDING: dict[tuple, asyncio.Task] = {}
 
 UNKNOWN_BUCKET = "Unclassified"
 # A fund is a black box on these axes — an ETF's listing tells you nothing about its holdings — so
@@ -892,6 +895,11 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
     # used to price all 56 models and keep one, which was 5.56s of a modal open. See
     # `only_portfolio_id`: the narrowing touches only the load WINDOWS, which are lower bounds,
     # so the row that comes back is identical.
+    if source == 'book' and _OVERVIEW_ONLY.get():
+        book = _book_return(portfolio_id, ytd_anchor_for(effective), None)
+        result = {**book, 'book_available': bool(book.get('book_portefeuille')), 'strategy_ytd_pct': None}
+        _apply_book_source(result, benchmark_label)
+        return result
     perf = next((x for x in compute_portfolio_performance(only_portfolio_id=portfolio_id)
                  if x["portfolio_id"] == portfolio_id), None)
     if not perf:
@@ -1036,7 +1044,7 @@ def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
     link = next((row for row in list_account_links().get("accounts", [])
                  if row.get("portefeuille") == account), {})
     model_id = link.get("model_portfolio_id")
-    rows = resolve_account_isins(account, freshen=False).get("rows") or []
+    rows = resolve_account_isins(account, freshen=False, price_checks=False).get("rows") or []
     valued = [(row, float(row.get("current_value_eur") or 0)) for row in rows]
     total = sum(value for _, value in valued if value > 0)
     if total <= 0:
@@ -2451,6 +2459,70 @@ def _variant_bands(name: str | None, omschrijving: str | None) -> dict:
             "risk_profile_policy": _weighted_benchmark_profiles().get(variant)}
 
 
+def _portfolio_overview(portfolio_id: int, p: dict, benchmark: str, weight_by: str) -> dict:
+    """Only the opening screen: current allocation and the AIRS/policy scorecard.
+
+    Expanding stored model weights is sufficient to classify wrappers. Child book valuations,
+    transaction ledgers, instrument prices and risk history belong to explicit detail requests.
+    Never fabricate class contributions from valuation changes: those await the ledger.
+    """
+    from routers._airs_account_links import list_account_links  # noqa: PLC0415
+    from routers._airs_holding_isin import resolve_account_isins  # noqa: PLC0415
+    from routers._airs_portfolio_variant import portfolio_variant  # noqa: PLC0415
+
+    started = time.perf_counter()
+    link = next((a for a in list_account_links()['accounts']
+                 if a.get('model_portfolio_id') == portfolio_id), None)
+    resolved = (resolve_account_isins(link['portefeuille'], freshen=False, price_checks=False)
+                if link else {})
+    rows = resolved.get('rows') or []
+    if weight_by == 'book' and rows:
+        categories = {r.get('isin'): _class_from_categorie(r.get('categorie'))
+                      for r in ref_positions_for(portfolio_id) if r.get('isin')}
+        expanded = _expand_book_rows(rows)
+        items = [(float(r.get('current_value_eur') or 0),
+                  categories.get(r.get('isin')) or r.get('bucket') or UNKNOWN_BUCKET)
+                 for r in expanded if float(r.get('current_value_eur') or 0) > 0]
+        basis = 'book'
+    else:
+        positions = ref_positions_for(portfolio_id)
+        if p.get('positions_datum'):
+            positions = [r for r in positions if r.get('datum') == p['positions_datum']]
+        model_rows = _reclassify_book_rows([
+            {'isin': r.get('isin'), 'holding_name': r.get('fonds'),
+             'asset_class': _class_from_categorie(r.get('categorie')),
+             'current_value_eur': r.get('percentage')}
+            for r in positions])
+        items = [(float(r.get('current_value_eur') or 0), r['bucket'])
+                 for r in model_rows if float(r.get('current_value_eur') or 0) > 0]
+        basis = 'model'
+    allocation = _weigh_alloc(items)
+    composition_ms = round((time.perf_counter() - started) * 1000)
+    score = _returns(portfolio_id, p.get('positions_datum'), benchmark, 'book')
+    block = _scorecard_block_returns(allocation, {}, score.get('ytd_from'),
+                                    portfolio_variant(p.get('name'), p.get('omschrijving')))
+    score['block_returns'] = block['block_returns']
+    if block['benchmark_ytd_pct'] is not None:
+        score['benchmark_ytd_pct'] = block['benchmark_ytd_pct']
+    own, bench = score.get('portfolio_ytd_pct'), score.get('benchmark_ytd_pct')
+    score['ytd_excess_pct'] = own - bench if own is not None and bench is not None else None
+    return {
+        'portfolio_id': portfolio_id, 'name': p.get('name'), 'as_of': p.get('positions_datum'),
+        'holdings_as_of': resolved.get('as_of'),
+        'holdings_fetched_at': _book_fetched_at(link['portefeuille']) if link else None,
+        'book_portefeuille': link['portefeuille'] if link else None,
+        'book_note': None if rows else book_unavailable_reason(portfolio_id),
+        'benchmark': benchmark, 'weight_basis': basis,
+        'weight_note': ('No priced book to weight by — showing the model\'s own weights.'
+                        if weight_by == 'book' and basis == 'model' else None),
+        'allocation': allocation, 'returns': score, 'holdings': len(items),
+        'axes': [], 'book_holdings': [], 'realised': None,
+        **_variant_bands(p.get('name'), p.get('omschrijving')),
+        'timings_ms': {'overview_composition': composition_ms,
+                       'overview_scorecard': round((time.perf_counter() - started) * 1000) - composition_ms},
+    }
+
+
 def compute_portfolio_analysis(portfolio_id: int,
                                benchmark_label: str = SP500_LABEL,
                                weight_by: str = "model",
@@ -2491,6 +2563,9 @@ def compute_portfolio_analysis(portfolio_id: int,
     p = ref_model(portfolio_id)
     if not p:
         return {"portfolio_id": portfolio_id, "name": None, "axes": [], "holdings": 0}
+
+    if _OVERVIEW_ONLY.get() and source == 'book' and not bucket_filter and not include_axes:
+        return _portfolio_overview(portfolio_id, p, benchmark_label, weight_by)
 
     pos = ref_positions_for(portfolio_id)
     if p.get("positions_datum"):
@@ -2745,7 +2820,10 @@ def compute_portfolio_analysis(portfolio_id: int,
     # because a closed-out position carries no ISIN — not because the figures are meaningless for
     # it. See `_sold_position_isins` for how the identity is recovered and what happens when it
     # cannot be. In place on `realised_block`, which is the same object the payload ships below.
-    _with_sold_risk(realised_block, benchmark_label)
+    if not _OVERVIEW_ONLY.get():
+        _with_sold_risk(realised_block, benchmark_label)
+        if look_through:
+            _with_sold_lookthrough(realised_block, portfolio_id)
     _agg: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0])   # [Σ start, Σ result]
     for _h in enriched_holdings:
         _start = _h.get("start_value_eur") or 0.0
@@ -2910,6 +2988,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         portfolio_ytd - benchmark_ytd
         if portfolio_ytd is not None and benchmark_ytd is not None else None
     )
+    _phase('final_assembly')
     return {
         "portfolio_id": portfolio_id,
         "name": p["name"],
@@ -3088,6 +3167,8 @@ def _with_results(holdings: list[dict], realised: dict,
     # answer rather than the certificate's flows split across its contents.
     # ONE ledger per child book, built before the loop — see `_child_book_ledgers`.
     child_ledgers = _child_book_ledgers(holdings)
+    cash_adjustments: dict[str, dict] = {}
+    realised['certificate_adjustments'] = []
     out = []
     for h in holdings:
         start, cur = h.get("start_value_eur"), h.get("current_value_eur")
@@ -3148,6 +3229,42 @@ def _with_results(holdings: list[dict], realised: dict,
         # certificate's realised/distributed result, allocated above by their exact route share.
         realised_eur = ((led.get("realised_result_eur") or 0.0)
                         + _lookthrough_realised(h))
+        # Expanding a certificate splits BOTH valuations by today's composition. A cash leg's
+        # resulting value change is therefore certificate P&L, not cash earnings. Keep genuine
+        # measured cash price/FX returns, but move the remaining allocated wrapper P&L into an
+        # explicit reconciliation line. Never erase it or silently hand it to another stock.
+        if is_cash:
+            for source in h.get('sources') or []:
+                if source.get('label') is None:
+                    continue
+                wrapper = source.get('wrapper_name') or dict(zip(
+                    h.get('via_names') or [], h.get('via_holding_names') or [])).get(source['label'])
+                if not wrapper:
+                    continue
+                source_start = float(source.get('start_value_eur') or 0)
+                source_now = float(source.get('value_eur') or 0)
+                synthetic_move = source_now - source_start if source_start else 0.0
+                rate = source.get('return_pct')
+                if rate is None:
+                    rate = h.get('own_return_pct') or 0.0
+                actual_move = source_start * float(rate) / 100.0
+                parent = by_name.get(wrapper) or {}
+                denominator = wrapper_values.get(wrapper, 0.0)
+                allocated_sale = (
+                    (float(parent.get('realised_result_eur') or 0)
+                     + float(parent.get('income_eur') or 0)) * source_now / denominator
+                    if denominator > 0 else 0.0)
+                removed_unreal = synthetic_move - actual_move
+                unreal = (unreal or 0.0) - removed_unreal
+                realised_eur -= allocated_sale
+                adjustment = cash_adjustments.setdefault(wrapper, {
+                    'name': wrapper, 'label': source['label'],
+                    'unrealised_eur': 0.0, 'realised_result_eur': 0.0})
+                adjustment['unrealised_eur'] += removed_unreal
+                adjustment['realised_result_eur'] += allocated_sale
+            if unreal is not None:
+                unreal = round(unreal, 2)
+            realised_eur = round(realised_eur, 2)
         total = (None if unreal is None and not realised_eur and not income
                  else round((unreal or 0.0) + realised_eur + income, 2))
         #  NOT `led["return_pct"]` BLINDLY — a looked-through leg never matches a ledger position
@@ -3204,8 +3321,19 @@ def _with_results(holdings: list[dict], realised: dict,
                     #  0%, NOT a dash — same reason as the price leg above, and same direction:
                     # a FALLBACK where nothing could be computed, never an override of a figure
                     # AIRS actually produced.
-                    **({"own_return_pct": 0.0}
-                       if is_cash and h.get("own_return_pct") is None else {})})
+                    **({'return_pct': h.get('own_return_pct') or 0.0,
+                        'own_return_pct': h.get('own_return_pct') or 0.0}
+                       if is_cash else {})})
+    for adjustment in cash_adjustments.values():
+        adjustment['unrealised_eur'] = round(adjustment['unrealised_eur'], 2)
+        adjustment['realised_result_eur'] = round(adjustment['realised_result_eur'], 2)
+        total = round(adjustment['unrealised_eur'] + adjustment['realised_result_eur'], 2)
+        if not adjustment['unrealised_eur'] and not adjustment['realised_result_eur']:
+            continue
+        adjustment['result_eur'] = total
+        adjustment['contribution_pct'] = (total / basis * 100.0 if basis else
+            total / ledger_result * flow_return if ledger_result and flow_return is not None else None)
+        realised['certificate_adjustments'].append(adjustment)
     #  One call for the whole table, after it is built — see `_holding_risk`. Asking per row
     # would turn one batched read into one per holding, and beta would reload the benchmark each
     # time.  `benchmark_label` is threaded in rather than read from a module global: beta is only
@@ -3365,7 +3493,7 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:scorecard-blocks:adjusted:v12"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:scorecard-blocks:cash-separated:v13"
 
 
 _INSTRUMENT_NAME_SUFFIXES = frozenset({
@@ -3530,6 +3658,67 @@ def _sold_position_isins(names: list[str]) -> dict[str, str]:
     return out
 
 
+def _with_sold_lookthrough(realised: dict, portfolio_id: int) -> None:
+    """Explain sold wrappers without inventing per-stock realised contributions.
+
+    Use only composition known by the exit date, never today's replacement holdings. This is
+    descriptive look-through; the parent's actual ledger result remains the accounting total.
+    All after-sale EUR price moves are loaded in one batch, only on an explicit detail request.
+    """
+    from ._airs_portfolio_links import link_key, resolve_links  # noqa: PLC0415
+
+    sold = [p for p in (realised or {}).get('positions', []) if p.get('closed_out')]
+    if not sold:
+        return
+    links = resolve_links(supabase, portfolio_id, [
+        {'isin': p.get('isin'), 'fonds': p.get('name')} for p in sold])
+    for p in sold:
+        link = links.get(link_key(p.get('isin'), p.get('name') or ''))
+        target = link.linked_portfolio_id if link else None
+        if not target or target == portfolio_id:
+            continue
+        exit_date = p.get('last_sale')
+        positions = ref_positions_for(target)
+        dates = [str(r['datum']) for r in positions
+                 if r.get('datum') and exit_date and str(r['datum']) <= exit_date]
+        if not dates:
+            p['lookthrough_note'] = 'No stored underlying composition on or before the sale date.'
+            continue
+        as_of = max(dates)
+        rows = [r for r in positions if str(r.get('datum')) == as_of
+                and float(r.get('percentage') or 0) > 0]
+        total = sum(float(r['percentage']) for r in rows)
+        grouped: dict[str, dict] = {}
+        for r in rows:
+            key = r.get('isin') or r.get('fonds') or 'Unknown'
+            if key not in grouped:
+                grouped[key] = {'name': r.get('fonds') or key, 'isin': r.get('isin'),
+                                'composition_as_of': as_of, 'weight_pct': 0.0}
+            grouped[key]['weight_pct'] += float(r['percentage']) / total * 100
+        p['lookthrough_positions'] = sorted(grouped.values(), key=lambda r: -r['weight_pct'])
+        p['lookthrough_note'] = (
+            'Latest stored strategy composition on or before exit, not trade confirmations. The realised result '
+            'and contribution belong to the certificate; they are not allocated to these positions.')
+    isins = sorted({r['isin'] for p in sold for r in p.get('lookthrough_positions', []) if r.get('isin')})
+    if not isins:
+        return
+    try:
+        series = _daily_eur(isins, years=2)
+    except Exception as e:  # noqa: BLE001 — composition stays useful without prices
+        _log.warning('[analysis] sold look-through prices unavailable (%s)', type(e).__name__)
+        series = {}
+    for p in sold:
+        for r in p.get('lookthrough_positions', []):
+            prices = [(day, value) for day, value in series.get(r.get('isin'), [])
+                      if p.get('last_sale') and day >= p['last_sale'] and value > 0]
+            if len(prices) < 2:
+                continue
+            first, last = prices[0], prices[-1]
+            r.update(since_close_pct=(last[1] / first[1] - 1) * 100,
+                     since_close_date=first[0], since_close_as_of=last[0],
+                     since_close_from=first[1], since_close_to=last[1])
+
+
 def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
     """Attach the instrument's momentum / vol / beta to every CLOSED-OUT position, in place.
 
@@ -3643,6 +3832,8 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     independently of the market", which is a strong claim about a stock we simply cannot measure.
     Too little history, or a benchmark with no tracker, leaves the key absent.
     """
+    if _OVERVIEW_ONLY.get():
+        return {}
     import numpy as np  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
 
@@ -3874,7 +4065,8 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
                                            source: str = "model",
                                            bucket_filter: str | None = None,
                                            look_through: bool = False,
-                                           include_axes: bool = True) -> dict:
+                                           include_axes: bool = True,
+                                           overview_only: bool = False) -> dict:
     """The Analyse modal's one request.
 
      THE READ MEMO IS OPENED **HERE**, AT THE REQUEST BOUNDARY, NOT INSIDE THE COMPUTATION.
@@ -3909,23 +4101,44 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
+    started = time.perf_counter()
     key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter, look_through, include_axes,
-           COMPOSITION_BASIS)
+           COMPOSITION_BASIS, overview_only)
     # The fingerprint is a database read, so it goes to a thread like everything else here.
     fp = await asyncio.to_thread(ac.fingerprint)
     hit = ac.get(key, fp)
     if hit is not None:
-        return hit
+        return {**hit, 'timings_ms': {'cache_lookup': round((time.perf_counter() - started) * 1000)}}
 
-    with read_cache(f"analysis:{portfolio_id}"):
-        out = await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
-                                      weight_by, source, bucket_filter, look_through, include_axes)
+    async def compute():
+        token = _OVERVIEW_ONLY.set(overview_only)
+        try:
+            with read_cache(f"analysis:{portfolio_id}"):
+                out = await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
+                                              weight_by, source, bucket_filter, look_through, include_axes)
+            out = {**out, 'details_pending': overview_only}
+            ac.put(key, fp, out)
+            return out
+        finally:
+            _OVERVIEW_ONLY.reset(token)
+
+    pending_key = (asyncio.get_running_loop(), fp, key)
+    task = _ANALYSIS_PENDING.get(pending_key)
+    if task is None:
+        task = asyncio.create_task(compute())
+        _ANALYSIS_PENDING[pending_key] = task
+        def finished(completed):
+            if _ANALYSIS_PENDING.get(pending_key) is completed:
+                _ANALYSIS_PENDING.pop(pending_key, None)
+            # Retrieve failures even if every HTTP waiter disconnected.
+            if not completed.cancelled():
+                completed.exception()
+        task.add_done_callback(finished)
+    return await asyncio.shield(task)
     #  Stored against the fingerprint read BEFORE the computation, deliberately. If a write lands
     # mid-computation the payload is a mix of both states — filing it under the OLD fingerprint
     # means the next request (which sees the new one) misses and recomputes. Filing it under a
     # fingerprint taken afterwards would publish that mixed payload as if it were the new state.
-    ac.put(key, fp, out)
-    return out
 
 
 def portfolio_basket_request(portfolio_id: int):

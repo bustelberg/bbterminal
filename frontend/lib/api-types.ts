@@ -10930,6 +10930,24 @@ export interface components {
             start_month: string;
         };
         /**
+         * CertificateResultAdjustment
+         * @description Wrapper P&L formerly allocated to cash; not a cash return or an actual holding.
+         */
+        CertificateResultAdjustment: {
+            /** Contribution Pct */
+            contribution_pct?: number | null;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /** Realised Result Eur */
+            realised_result_eur: number;
+            /** Result Eur */
+            result_eur: number;
+            /** Unrealised Eur */
+            unrealised_eur: number;
+        };
+        /**
          * CompanyIngestResult
          * @description What one company's backfill did. `feeds` names the calls actually spent.
          */
@@ -12655,6 +12673,10 @@ export interface components {
             isin?: string | null;
             /** Last Sale */
             last_sale?: string | null;
+            /** Lookthrough Note */
+            lookthrough_note?: string | null;
+            /** Lookthrough Positions */
+            lookthrough_positions?: components["schemas"]["SoldCertificatePosition"][];
             /** Mom 12 1 From */
             mom_12_1_from?: number | null;
             /** Mom 12 1 Pct */
@@ -12879,6 +12901,11 @@ export interface components {
              * @default 0
              */
             covered_pct?: number;
+            /**
+             * Details Pending
+             * @default false
+             */
+            details_pending?: boolean;
             /**
              * Foreign Listings
              * @default 0
@@ -14375,6 +14402,8 @@ export interface components {
             book_ytd_pct?: number | null;
             /** Capital Coverage Ratio */
             capital_coverage_ratio?: number | null;
+            /** Certificate Adjustments */
+            certificate_adjustments?: components["schemas"]["CertificateResultAdjustment"][];
             /** Comparable */
             comparable?: boolean | null;
             /** Dates Aligned */
@@ -14995,6 +15024,27 @@ export interface components {
             band_pct?: number;
             /** Benchmark Id */
             benchmark_id: number;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** SoldCertificatePosition */
+        SoldCertificatePosition: {
+            /** Composition As Of */
+            composition_as_of: string;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name: string;
+            /** Since Close As Of */
+            since_close_as_of?: string | null;
+            /** Since Close Date */
+            since_close_date?: string | null;
+            /** Since Close From */
+            since_close_from?: number | null;
+            /** Since Close Pct */
+            since_close_pct?: number | null;
+            /** Since Close To */
+            since_close_to?: number | null;
             /** Weight Pct */
             weight_pct: number;
         };
@@ -17181,6 +17231,7 @@ export interface operations {
                 bucket?: string | null;
                 look_through?: boolean;
                 include_axes?: boolean;
+                overview_only?: boolean;
             };
             header?: never;
             path: {

@@ -38,6 +38,8 @@ describe('Analyse primary-view copy', () => {
       // compare this against. `copyParity`'s `FINANCE_EN` already lists it beside `Sharpe` and
       // `Alpha` for the same reason; this module keeps its own list, so it needs the entry too.
       'holdings.beta',
+      'columnGroups.momentum.label',
+      'columnGroups.beta.label',
     ]);
     expect(Object.keys(en).filter((key) => en[key] === nl[key] && !sameByDesign.has(key))).toEqual([]);
   });

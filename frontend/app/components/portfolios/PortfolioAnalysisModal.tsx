@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { defaultLookThroughCertificates } from './portfolioDefaults';
+import { soldLookThroughRows } from './soldLookThroughRows';
 import { chartTheme } from '../../../lib/chartTheme';
 import { ValueBadge } from '../../../lib/dynamicValue';
 import { startJob } from '../../../lib/stores/jobs';
@@ -22,7 +23,7 @@ import {
   Provenance, ProvenanceFetchedAt, ProvenanceRefresh, type SourceKey,
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
-import { loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
+import { analysisRequestKey, loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import MonthlyReportPanel from './MonthlyReportPanel';
 import PanelDialog from './PanelDialog';
@@ -283,7 +284,9 @@ function Scorecard({ returns, benchmark, onReload, fillWidth = false }: {
     //  `self-center` LIVES ON THE WRAPPER NOW, not here. This is stacked above the book's return
     // chart in a column that takes ITS width from this row, so centring this row inside that
     // column would leave the equation and the chart under it on two different left edges.
-    <div className={`flex items-stretch gap-2 flex-wrap ${fillWidth ? 'w-full [&>div]:flex-1' : ''}`}>
+    <div className={fillWidth
+      ? 'grid w-full grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] [&>div]:min-w-0 [&>span]:hidden sm:[&>span]:block'
+      : 'flex flex-wrap items-stretch gap-2'}>
       {/*  THE € IS ON BOTH RETURN CHIPS, NOT JUST THE BENCHMARK'S. Marking one side of a
           subtraction with a currency implies the other side is in something else; the row is an
           equation and both legs are EUR (which is the return basis everywhere in this app —
@@ -401,11 +404,12 @@ function BandMark({ pct, target = false }: { pct: number; target?: boolean }) {
   );
 }
 
-function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution }: {
+function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, certificateContribution }: {
   slices: AllocSlice[];
   /**  The year's contribution from positions SOLD OUT during it. They have no asset class, so no
    *  bar can carry them — without this the slices are a set of parts that misses its own total. */
   soldContribution?: number | null;
+  certificateContribution?: number | null;
   selected?: string | null;
   onSelect?: (bucket: string | null) => void;
   /** The risk profile AIRS's own name says this model is offered at, or null for the products
@@ -632,6 +636,12 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             BUS_Offensief_Dyn they come to +8.211pp against a book that made +5.827%, and the
             missing -2.384pp is eight names it no longer holds. Printed only when there IS a
             remainder, so a book that sold nothing does not carry a permanent 0.00pp footnote. */}
+        {certificateContribution != null && Math.abs(certificateContribution) >= 0.005 && (
+          <div className="flex items-center gap-2 text-[11px] text-fg-muted">
+            <span>{copy.lang === 'nl' ? 'Certificaatresultaat — niet aan kas toegerekend' : 'Certificate result — not attributed to cash'}</span>
+            <span className={`ml-auto font-mono tabular-nums ${retTone(certificateContribution)}`}>{ppt(certificateContribution)}</span>
+          </div>
+        )}
         {soldContribution != null && Math.abs(soldContribution) >= 0.005 && (
           <div className="flex items-center gap-2 pt-1 mt-1 border-t border-neutral-800/40 text-[11px]">
             <span className="text-fg-faint">{copy.allocation.sold}</span>
@@ -658,8 +668,8 @@ function Chip({ label, value, valueClass, hint, prov }: {
   return (
     <div className="bg-elevated border border-neutral-800/40 rounded-lg px-3 py-1.5 min-w-[6rem]"
       title={prov ? undefined : hint}>
-      <div className="text-[10px] uppercase tracking-wide text-fg-faint">{label}</div>
-      <div className={`text-sm font-mono font-semibold ${valueClass} flex items-center gap-1`}>
+      <div className="text-[10px] uppercase tracking-wide text-fg-faint [overflow-wrap:anywhere]">{label}</div>
+      <div className={`text-sm font-mono font-semibold whitespace-nowrap ${valueClass} flex items-center gap-1`}>
         {value}{prov}
       </div>
     </div>
@@ -1125,22 +1135,18 @@ type HoldingSortKey = 'name' | 'sector' | 'weight' | 'return' | 'contribution' |
  * stored as groups and the visible columns are derived as their union, so overlapping inputs such
  * as `Result` are not accidentally hidden when one explanation remains enabled.
  *
- *  No group is on by default. The table opens at eight columns — Name, Via, Sector, Weight
- * (now), Money-weighted, Instrument return and Contribution, plus the row number — which fits a
- * screen and answers what most visits are asking: what you hold, what your money did with it, and
- * what that did to the book.
- *
- *  Three columns sit outside the groups and are always on: `Instrument return`, `Money-weighted`
- * and `Contribution`. They are the three ANSWERS; every group here is a DERIVATION, and a
- * derivation with its answer hidden explains nothing. Ticking a group puts the chain on screen
- * beside the figure it produces, which is the only arrangement in which a reader can check one
- * against the other.
+ * No group is on by default. The seven base columns are #, Name, Via, Sector, Weight (now),
+ * Instrument return and Contribution. Momentum, Volatility, Beta and Money-weighted return are
+ * optional; the last comes with its result and invested-capital inputs.
  *
  *  Contribution is last, to the right of `Instrument return`. The return columns describe the
  * AIRS instrument rate and the dated cash-flow rate; Contribution separately divides the
  * accounting Result by this book's opening capital.
  */
 const COLUMN_GROUPS = [
+  { key: 'momentum', cols: ['momentum'] },
+  { key: 'volatility', cols: ['volatility'] },
+  { key: 'beta', cols: ['beta'] },
   {
     key: 'return',
     //  `Return` itself is NOT here: it is always on. This group supplies the chain BEHIND it, so
@@ -1149,10 +1155,8 @@ const COLUMN_GROUPS = [
   },
   {
     key: 'onmoney',
-    //  `moneyweighted` itself is NOT here — like `Return`, that column is always on, and this
-    // group supplies the chain BEHIND it. Listing it would put a key in the union that nothing
-    // reads: harmless at runtime and a lie in the data, which is how the next reader gets misled.
-    cols: ['result', 'avgcapital'],
+    // The optional return and its supporting inputs are enabled together.
+    cols: ['moneyweighted', 'result', 'avgcapital'],
   },
   {
     key: 'fxsplit',
@@ -1176,7 +1180,7 @@ const COLUMN_GROUPS = [
   },
   {
     key: 'contribution',
-    //  `Contribution` ITSELF IS NOT HERE — like `Instrument return` and `Money-weighted` it is
+    //  `Contribution` ITSELF IS NOT HERE — like `Instrument return` it is
     // always on, and this group supplies only the chain BEHIND it. Listing it would put a key in
     // the union that nothing reads: harmless at runtime and a lie in the data.
     cols: ['result'],
@@ -1224,8 +1228,8 @@ function readSavedGroups(): Set<ColumnGroup> {
  * same hand-counting hazard `portfolioAnalysisColumns.test.ts` was written for, one row further
  * along — and a `colSpan` that is too small leaves a ragged gap rather than erroring.
  */
-const LEADING_COLS = 8;      // # · Name · Via · Sector · Momentum · 5y vol · Beta · Weight (now)
-const TRAILING_COLS = 3;     // Money-weighted · Instrument return · Contribution
+const LEADING_COLS = 5;      // # · Name · Via · Sector · Weight (now)
+const TRAILING_COLS = 2;     // Instrument return · Contribution
 
 /** Which groups are shown, and the columns that follow from them. */
 function useColumnGroups() {
@@ -2119,6 +2123,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
     mwr: soldCap ? (sum(sold.map((p) => p.result_eur)) ?? 0) / soldCap * 100 : null,
   };
   const heldSum = sumResults(holdings);
+  const certificateAdjustments = realised?.certificate_adjustments ?? [];
+  heldSum.unrealised = add2(heldSum.unrealised, sum(certificateAdjustments.map((a) => a.unrealised_eur)));
+  heldSum.realised = add2(heldSum.realised, sum(certificateAdjustments.map((a) => a.realised_result_eur)));
+  heldSum.result = add2(heldSum.result, sum(certificateAdjustments.map((a) => a.result_eur)));
+  heldSum.contribution = add2(heldSum.contribution, sum(certificateAdjustments.map((a) => a.contribution_pct)));
   const heldCap = holdings.reduce((s, h) => s + (h.avg_capital_eur ?? 0), 0);
   const grand = {
     //  The held side only, and not `add2(…, soldSum.…)` LIKE ITS NEIGHBOURS. AIRS's split lives
@@ -2340,9 +2349,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                    SORTING STAYS ON THE NUMBER, never on the state: seven buckets sort into seven
                   ties, which would scramble the order within each one on every click. The chip is
                   a reading of the number, so ordering by the number orders the chips too. */}
-              <th className={`text-right w-28 ${th}`} onClick={() => click('mom')}>
+              {show('momentum') && <th className={`text-right w-28 ${th}`} onClick={() => click('mom')}>
                 {copy.holdings.momentum}{caret('mom')}
-              </th>
+              </th>}
               {/*  `w-28`, ONE STEP WIDER THAN ITS TWO NEIGHBOURS, BECAUSE THE HEADER IS A WORD
                   NOW. It read `5y vol` — six characters, and "vol" in a table of holdings is read
                   as VOLUME at least as readily as volatility. Spelt out it is `Volatility` (10)
@@ -2353,12 +2362,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                    THE 1rem COMES OUT OF `Name`, which is the column an auto-layout table takes
                   slack from first — see its `min-w` note above. That floor is what stops this
                   being a trade against legibility. */}
-              <th className={`text-right w-28 ${th}`} onClick={() => click('vol')}>
+              {show('volatility') && <th className={`text-right w-28 ${th}`} onClick={() => click('vol')}>
                 {copy.holdings.vol}{caret('vol')}
-              </th>
-              <th className={`text-right w-20 ${th}`} onClick={() => click('beta')}>
+              </th>}
+              {show('beta') && <th className={`text-right w-20 ${th}`} onClick={() => click('beta')}>
                 {copy.holdings.beta}{caret('beta')}
-              </th>
+              </th>}
               <th className={`text-right w-[7.2rem] ${th}`} onClick={() => click('weight')}>
                 {copy.holdings.weightNow}{caret('weight')}
               </th>
@@ -2424,9 +2433,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {copy.holdings.rest}
               </th>
 )}
-              <th className="text-right w-[9.6rem] py-2 font-medium">
+              {show('moneyweighted') && <th className="text-right w-[9.6rem] py-2 font-medium">
                 {copy.holdings.moneyWeighted}
-              </th>
+              </th>}
               <th className={`text-right w-32 pr-4 ${th}`} onClick={() => click('return')}>
                 {copy.holdings.instrumentReturn}{caret('return')}
               </th>
@@ -2473,9 +2482,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     exactly the diversification between them), and while a class's BETA is a
                     weighted average, showing one and not the other would read as an oversight. Both
                     are per instrument here; the portfolio-level figures are in the Risk section. */}
-                <td />
-                <td />
-                <td />
+                {show('momentum') && <td />}
+                {show('volatility') && <td />}
+                {show('beta') && <td />}
                 <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
                   {num2(g.weightNowPct)}%
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -2495,13 +2504,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {show('koers') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.koers)}`}>{eur0n(g.sum.koers)}{g.sum.splitComplete ? g.sum.avgcapital : null != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(g.sum.koers, g.sum.splitComplete ? g.sum.avgcapital : null))}</span>}</td>}
                 {show('valuta') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.valuta)}`}>{eur0n(g.sum.valuta)}{g.sum.splitComplete ? g.sum.avgcapital : null != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(g.sum.valuta, g.sum.splitComplete ? g.sum.avgcapital : null))}</span>}</td>}
                 {show('unsplit') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap ${retTone(g.sum.unsplit)}`}>{eur0n(g.sum.unsplit)}{g.sum.splitComplete ? g.sum.avgcapital : null != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(g.sum.unsplit, g.sum.splitComplete ? g.sum.avgcapital : null))}</span>}</td>}
-                <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
+                {show('moneyweighted') && <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.mwr)}`}>
                   {fmtRet(g.sum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.classRow.moneyWhat(copy.bucket(bucketLabel(g.bucket)))}
                     note={copy.info.moneyAggregateNote}
                     how={copy.classRow.moneyHow(eur0n(g.sum.mwrResult), eur0n(g.sum.avgcapital), fmtRet(g.sum.mwr), g.sum.mwrRows, g.rows.length)} />
-                </td>
+                </td>}
                 {/*  THE COLUMN BELOW, AGGREGATED — NOT THE BOOK'S VALUE CHANGE, and not the
                     Weight (now) column times the returns. A dash where nothing in the class had
                     both an opening weight and a return; a 0.00% there would claim the class went
@@ -2710,7 +2719,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {/*  THE ONE COLOURED COLUMN OF THE THREE. Momentum has a SIGN — up or down is
                       the whole reading — while vol and beta are magnitudes where colour would turn
                       a description into a verdict. */}
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.mom_12_1_pct)}`}>
+                  {show('momentum') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.mom_12_1_pct)}`}>
                     {/*  THE CHIP IS A RANK AND THE NUMBER IS A RETURN, AND BOTH STAY. The chip
                         answers "strong compared to what could have been owned"; the number answers
                         "by how much". They are not interchangeable and they can disagree in SIGN —
@@ -2748,11 +2757,11 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       how={h.mom_12_1_pct == null
                         ? copy.row.momentumMissing
                         : copy.row.momentumHow(momSub(h.mom_12_1_to, h.mom_12_1_from, h.mom_12_1_pct))} />
-                  </td>
+                  </td>}
                   {/*  NO TONE. Volatility is not good or bad — 45% is what a growth stock does,
                       and colouring it red would make "risky" read as "losing". The signed columns
                       in this table are the return ones; this is a magnitude. */}
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
+                  {show('volatility') && <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {h.vol_5y_pct == null ? '—' : `${h.vol_5y_pct.toFixed(1)}%`}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={h.vol_5y_pct == null
@@ -2762,10 +2771,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       how={h.vol_5y_pct == null
                         ? copy.row.volMissing
                         : copy.row.volHow(`${h.vol_5y_pct.toFixed(1)}%`)} />
-                  </td>
+                  </td>}
                   {/*  NO TONE, same as the vol column beside it — a beta of 1.4 is not worse
                       than 0.7, it is a different exposure, and colour would make it a verdict. */}
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
+                  {show('beta') && <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {h.beta_5y == null ? '—' : h.beta_5y.toFixed(2)}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={h.beta_5y == null
@@ -2775,7 +2784,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       how={h.beta_5y == null
                         ? copy.row.betaMissing
                         : copy.row.betaHow(benchmark, h.beta_5y.toFixed(2))} />
-                  </td>
+                  </td>}
                   <td className="py-1.5 text-right font-mono text-fg tabular-nums whitespace-nowrap">
                     {num2(h.weight_now_pct ?? 0)}%
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -2811,7 +2820,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {show('koers') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.fund_result_eur)}`}>{eur0n(h.fund_result_eur)}{h.avg_capital_eur != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(h.fund_result_eur, h.avg_capital_eur))}</span>}</td>}
                   {show('valuta') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.fx_result_eur)}`}>{eur0n(h.fx_result_eur)}{h.avg_capital_eur != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(h.fx_result_eur, h.avg_capital_eur))}</span>}</td>}
                   {show('unsplit') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.unsplit_result_eur)}`}>{eur0n(h.unsplit_result_eur)}{h.avg_capital_eur != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(h.unsplit_result_eur, h.avg_capital_eur))}</span>}</td>}
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
+                  {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.money_weighted_return_pct)}`}>
                     {fmtRet(h.money_weighted_return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
                       what={h.capital_source === 'lookthrough'
@@ -2865,7 +2874,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                                  Effectenrekening line. */
                               : h.bucket === CASH_BUCKET
                                 ? copy.row.cashHow : copy.row.genericNoCapitalHow} />
-                  </td>
+                  </td>}
                   {/* An unpriced position shows a dash, never 0% — "we could not price this over
                       the window" and "it did not move" are different facts and a 0 states the
                       wrong one. An interpolated opening mark is flagged per value, because that
@@ -2946,9 +2955,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       {copy.holdings.sectorTotal(subtotalLabel)}
                     </td>
                     {/* Momentum, volatility and beta describe instruments, not an additive sector. */}
-                    <td />
-                    <td />
-                    <td />
+                    {show('momentum') && <td />}
+                    {show('volatility') && <td />}
+                    {show('beta') && <td />}
                     <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg">
                       {num2(sector.rows.reduce((total, h) => total + (h.weight_now_pct ?? 0), 0))}%
                     </td>
@@ -2962,9 +2971,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     {show('koers') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.koers)}`}>{eur0n(sectorSum.koers)}{sectorSum.splitComplete && sectorSum.avgcapital != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(sectorSum.koers, sectorSum.avgcapital))}</span>}</td>}
                     {show('valuta') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.valuta)}`}>{eur0n(sectorSum.valuta)}{sectorSum.splitComplete && sectorSum.avgcapital != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(sectorSum.valuta, sectorSum.avgcapital))}</span>}</td>}
                     {show('unsplit') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.unsplit)}`}>{eur0n(sectorSum.unsplit)}{sectorSum.splitComplete && sectorSum.avgcapital != null && <span className="block text-[10px] leading-tight text-fg-faint">{ppText(ppOf(sectorSum.unsplit, sectorSum.avgcapital))}</span>}</td>}
-                    <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.mwr)}`}>
+                    {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorSum.mwr)}`}>
                       {fmtRet(sectorSum.mwr)}
-                    </td>
+                    </td>}
                     <td className={`py-1.5 pr-4 text-right font-mono tabular-nums whitespace-nowrap ${retTone(sectorReturn.pct)}`}>
                       {fmtRet(sectorReturn.pct)}
                     </td>
@@ -3004,9 +3013,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     exactly the diversification between them), and while a class's BETA is a
                     weighted average, showing one and not the other would read as an oversight. Both
                     are per instrument here; the portfolio-level figures are in the Risk section. */}
-                <td />
-                <td />
-                <td />
+                {show('momentum') && <td />}
+                {show('volatility') && <td />}
+                {show('beta') && <td />}
                 <td className="py-2 text-right font-mono text-fg-faint">—</td>
                 {/*  THE UNREALISED PLACEHOLDER, AND IT MUST BE GATED LIKE THE COLUMN IT STANDS IN
                     FOR. A sold-out position has nothing unrealised, so the cell is empty — but an
@@ -3022,13 +3031,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {show('koers') && <td />}
                 {show('valuta') && <td />}
                 {show('unsplit') && <td />}
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
+                {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(soldSum.mwr)}`}>
                   {fmtRet(soldSum.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.info.soldMoneyWhat}
                     note={copy.info.moneyAggregateNote}
                     how={copy.info.moneyAggregateHow(eur0n(soldSum.mwrResult), eur0n(soldCap), fmtRet(soldSum.mwr))} />
-                </td>
+                </td>}
                 <td className="pr-4" />
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>
                   {ppt(soldSum.contribution)}
@@ -3038,10 +3047,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     how={copy.info.contributionHow(eur0n(soldSum.result), eur0n(realised?.basis_eur), ppt(soldSum.contribution))} />
                 </td>
               </tr>
-              {sold.map((p, i) => (
-                <tr key={p.name ?? i} className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
+              {soldLookThroughRows(sold, lookThrough).map((p, i) => (
+                <tr key={p.row_key} className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[11px] text-fg-faint tabular-nums">{i + 1}</td>
-                  <td className="py-1.5 pr-3 text-fg max-w-0" colSpan={3} title={p.name}>
+                  <td className="py-1.5 pr-3 text-fg max-w-0" title={p.name}>
                     <span className="truncate inline-block max-w-full align-bottom">{p.name}</span>
                     {p.since_close_pct != null && (
                       <span className="ml-2 inline-flex items-center gap-1 text-[10px] whitespace-nowrap"
@@ -3049,6 +3058,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         <span className={`font-mono tabular-nums ${retTone(p.since_close_pct)}`}>
                           {fmtRet(p.since_close_pct)}
                         </span>
+                        {p.via_certificate && <Provenance source="benchmark" asOf={p.since_close_as_of} kind="formula"
+                          what={copy.lang === 'nl' ? 'Koersrendement in EUR na verkoop; geen gerealiseerde bijdrage.' : 'EUR price return after sale; not a realised contribution.'}
+                          worked={p.since_close_from != null && p.since_close_to != null
+                            ? String.raw`\left(\frac{${p.since_close_to.toFixed(2)}}{${p.since_close_from.toFixed(2)}}-1\right)\times100=${p.since_close_pct.toFixed(2)}\%`
+                            : undefined}
+                          how={`${saleDateLabel(p.since_close_date)} to ${saleDateLabel(p.since_close_as_of)}`} />}
                         <span className="text-fg-faint">return after</span>
                         <span className="rounded border border-neutral-700/70 bg-overlay/5 px-1 py-px text-fg-muted">
                           {saleDateLabel(p.since_close_date ?? p.last_sale)}
@@ -3060,6 +3075,20 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       </span>
                     )}
                   </td>
+                  <td className="py-1.5 pr-3">
+                    <div className="max-w-[10rem]">
+                    <span className="flex flex-wrap items-center gap-1">
+                      <ViaChips names={p.via_certificate ? [p.via_certificate] : []} />
+                      {p.via_certificate && <Provenance source="airs_model" asOf={p.composition_as_of}
+                        what={copy.lang === 'nl' ? 'Opgeslagen samenstelling vóór verkoop; geen afzonderlijk gerealiseerde bijdrage.' : 'Stored composition before sale; not a separately realised contribution.'}
+                        how={`${num2(p.certificate_weight_pct ?? 0)}% · ${saleDateLabel(p.composition_as_of)}`} />}
+                    {lookThrough && !p.via_certificate && p.lookthrough_note && <Provenance source="airs_model" asOf={p.last_sale}
+                      what={copy.lang === 'nl' ? 'Het gerealiseerde resultaat blijft bij het certificaat.' : 'The realised result stays with the certificate.'}
+                      note={p.lookthrough_positions?.length ? undefined : (copy.lang === 'nl' ? 'Geen opgeslagen samenstelling vóór verkoop.' : 'No stored composition before sale.')} />}
+                    </span>
+                    </div>
+                  </td>
+                  <td />
                   {/*  MOMENTUM, 5Y VOL AND BETA — REAL FIGURES ON A ROW THE BOOK NO LONGER HOLDS,
                       and they are meaningful for exactly the reason the held rows' are: all three
                       are properties of the INSTRUMENT, computed from our own daily EUR close
@@ -3079,7 +3108,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       pinned by `portfolioAnalysisColumns.test.ts`, which reads this file and counts
                       them, because nothing else can: the table needs a DOM to render and this repo
                       tests no DOM. Filling these three must not change it — still three cells. */}
-                  <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
+                  {show('momentum') && <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${
                     retTone(p.mom_12_1_pct)}`}>
                     {isMomentumState(p.mom_state) && (
                       <span className={`mr-1.5 font-semibold ${stateTone(p.mom_state)}`}>
@@ -3097,8 +3126,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       how={p.mom_12_1_pct == null
                         ? copy.row.momentumMissing
                         : copy.row.momentumHow(momSub(p.mom_12_1_to, p.mom_12_1_from, p.mom_12_1_pct))} />
-                  </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
+                  </td>}
+                  {show('volatility') && <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {p.vol_5y_pct != null ? `${p.vol_5y_pct.toFixed(1)}%` : '—'}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={p.vol_5y_pct != null
@@ -3106,8 +3135,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
                       note={p.vol_5y_pct == null ? undefined : copy.row.volNote}
                       how={p.vol_5y_pct == null ? copy.row.volMissing : copy.row.volHow(`${p.vol_5y_pct.toFixed(1)}%`)} />
-                  </td>
-                  <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
+                  </td>}
+                  {show('beta') && <td className="py-1.5 text-right font-mono tabular-nums whitespace-nowrap text-fg-soft">
                     {p.beta_5y != null ? p.beta_5y.toFixed(2) : '—'}
                     <Provenance source="benchmark" asOf={null} kind="formula"
                       what={p.beta_5y != null
@@ -3115,7 +3144,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         : p.isin ? copy.row.soldRiskPrice(p.isin) : copy.row.soldRiskIdentity(p.name ?? copy.row.thisPosition)}
                       note={p.beta_5y == null ? undefined : copy.row.betaNote(benchmark)}
                       how={p.beta_5y == null ? copy.row.betaMissing : copy.row.betaHow(benchmark, p.beta_5y.toFixed(2))} />
-                  </td>
+                  </td>}
                   {/* Weight (now) — a dash, exactly as the group row above shows it: the position is
                       gone, so there IS no current weight, and a 0% would say the book holds none of
                       something it still holds none of for a different reason. */}
@@ -3131,7 +3160,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   {show('koers') && <td />}
                   {show('valuta') && <td />}
                   {show('unsplit') && <td />}
-                  <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
+                  {show('moneyweighted') && <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.return_pct)}`}>
                     {fmtRet(p.return_pct)}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
                       what={copy.sold.moneyWhat(p.name ?? copy.row.thisPosition)}
@@ -3140,7 +3169,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       calculation={<MoneyWeightedCashflowCalculation
                         flows={p.money_weighted_cashflows} lang={copy.lang === 'nl' ? 'nl' : 'en'} />}
                       how={copy.info.moneyHow(eur0n(p.result_eur), eur0n(p.avg_capital_eur), fmtRet(p.return_pct))} />
-                  </td>
+                  </td>}
                   {/* Instrument return is the book-period return. A post-sale price move is
                       deliberately kept beside the closed position's name above, rather than
                       relabelling this financial-result column. */}
@@ -3151,6 +3180,23 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       what={copy.sold.contributionWhat(p.name ?? copy.row.thisPosition)}
                       note={copy.info.contributionNote}
                       how={copy.info.contributionHow(eur0n(p.result_eur), eur0n(realised?.basis_eur), ppt(p.contribution_pct))} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          )}
+          {!!certificateAdjustments.length && (
+            <tbody aria-label={copy.lang === 'nl' ? 'Certificaatresultaten' : 'Certificate-level results'}>
+              {certificateAdjustments.map((adjustment) => (
+                <tr key={adjustment.name} className="border-y border-neutral-800/30 bg-overlay/[0.035]">
+                  <td colSpan={LEADING_COLS + cols.size + TRAILING_COLS - 1} className="px-4 py-2 text-xs text-fg-muted">
+                    {copy.lang === 'nl' ? 'Certificaatresultaat · ' : 'Certificate-level result · '}{adjustment.label}
+                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
+                      what={copy.lang === 'nl' ? 'Certificaatresultaat dat eerder aan kas was toegerekend; geen kasrendement.' : 'Certificate result previously allocated to cash; not a cash return.'}
+                      how={copy.info.contributionHow(eur0n(adjustment.result_eur), eur0n(realised?.basis_eur), ppt(adjustment.contribution_pct))} />
+                  </td>
+                  <td className={`py-2 text-right font-mono text-xs tabular-nums ${retTone(adjustment.contribution_pct)}`}>
+                    {ppt(adjustment.contribution_pct)}
                   </td>
                 </tr>
               ))}
@@ -3180,9 +3226,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     exactly the diversification between them), and while a class's BETA is a
                     weighted average, showing one and not the other would read as an oversight. Both
                     are per instrument here; the portfolio-level figures are in the Risk section. */}
-                <td />
-                <td />
-                <td />
+                {show('momentum') && <td />}
+                {show('volatility') && <td />}
+                {show('beta') && <td />}
                 <td />
                 {show('opening') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(grand.opening)}</td>}
                 {show('valuenow') && <td className={`py-2 text-right font-mono tabular-nums whitespace-nowrap text-fg-muted`}>{eur0n(grand.valuenow)}</td>}
@@ -3194,13 +3240,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {show('koers') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.koers)}`}>{eur0n(grand.koers)}</td>}
                 {show('valuta') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.valuta)}`}>{eur0n(grand.valuta)}</td>}
                 {show('unsplit') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.unsplit)}`}>{eur0n(grand.unsplit)}</td>}
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
+                {show('moneyweighted') && <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.mwr)}`}>
                   {fmtRet(grand.mwr)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
                     what={copy.info.bookMoneyWhat}
                     note={copy.info.moneyAggregateNote}
                     how={copy.info.moneyAggregateHow(eur0n(grand.mwrResult), eur0n(grand.avgcapital), fmtRet(grand.mwr))} />
-                </td>
+                </td>}
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
@@ -3324,10 +3370,9 @@ function SleeveTile({ bucket, slices, asOf }: {
   );
 }
 
-/** What to show for a bond / fund / cash / alternatives class, where sector-vs-SP500 says nothing:
- *  (1) a CONTRIBUTION breakdown — each holding's weight × its own return — and (2) a CURRENCY
- *  exposure chart (no benchmark). Both computed client-side from the book detail, so switching
- *  classes is instant. */
+/** A sleeve's current composition and measured accounting contributions to the whole book.
+ * Instrument returns are separate observations; multiplying them by current weights is not
+ * an accounting contribution and cannot reconcile to the allocation legend. */
 type SleeveSortKey = 'name' | 'weight' | 'return' | 'contrib';
 
 function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket: string }) {
@@ -3336,23 +3381,15 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
   const [sortKey, setSortKey] = useState<SleeveSortKey>('weight');
   const [dir, setDir] = useState<'asc' | 'desc'>('desc');
 
-  //  Priced positions only. `weight_pct` is null where we could not price the holding over the
-  // window, and a row with no return contributes nothing to the breakdown — so listing it at a
-  // `?? 0` weight would add a 0.0% line that reads as a tiny holding rather than an unpriced one.
-  const rows = holdings.filter((h) => h.bucket === bucket && h.weight_pct != null);
-  const totalW = rows.reduce((s, h) => s + (h.weight_pct ?? 0), 0) || 1;
-  // Renormalise each holding's (opening-value) weight WITHIN the class, then contribution =
-  // weight × return, in pp of the class return.
-  //
-  //  The return is the instrument's own (`own_return_pct`), NOT THE BOOK SPLIT. The book's
-  // per-leg return is the CERTIFICATE's return stamped on everything behind it — every stock in
-  // one strategy showing the same figure — which made Σ contribution land on the class number
-  // exactly while telling the reader nothing true about any single holding. Exact and
-  // uninformative is the worse trade: the sum is now approximate and each row is real.
+  // Current composition includes cash without an opening valuation and mid-year purchases.
+  const rows = holdings.filter((h) => h.bucket === bucket);
+  const totalW = rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0) || 1;
+  // Weights are within this class; contributions remain in points of the entire portfolio,
+  // read from the same accounting rows that produce the allocation legend.
   const items = rows.map((h) => {
-    const w = (h.weight_pct ?? 0) / totalW * 100;
-    return { name: h.name, weight: w, ret: h.own_return_pct,
-      contrib: h.own_return_pct != null ? (w / 100) * h.own_return_pct : null };
+    const w = (h.weight_now_pct ?? 0) / totalW * 100;
+    return { name: h.name, via_names: h.via_names ?? [], weight: w, ret: h.own_return_pct,
+      contrib: h.contribution_pct ?? null };
   });
   type Item = (typeof items)[number];
   const val = (it: Item): number | string | null =>
@@ -3382,7 +3419,7 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
   const ccyMap = new Map<string, number>();
   rows.forEach((h) => {
     const c = h.currency ?? 'Unknown';
-    ccyMap.set(c, (ccyMap.get(c) ?? 0) + (h.weight_pct ?? 0) / totalW * 100);
+    ccyMap.set(c, (ccyMap.get(c) ?? 0) + (h.weight_now_pct ?? 0) / totalW * 100);
   });
   const ccy = [...ccyMap.entries()].map(([c, p]) => ({ ccy: c, pct: p })).sort((a, b) => b.pct - a.pct);
 
@@ -3402,21 +3439,26 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
             <thead>
               <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>{copy.holdings.name}{caret('name')}</th>
-                <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.holdings.weightNow}{caret('weight')}</th>
+                <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.lang === 'nl' ? 'Gewicht binnen categorie' : 'Weight within class'}{caret('weight')}</th>
                 <th className={`${th} px-2 text-right`} onClick={() => click('return')}>{copy.holdings.instrumentReturn}{caret('return')}</th>
-                <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>{copy.holdings.contribution}{caret('contrib')}</th>
+                <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>{copy.holdings.contribution}{caret('contrib')}
+                  <Provenance source="airs_volk" kind="formula"
+                    what={copy.lang === 'nl' ? 'Bijdrage aan het gehele portefeuillerendement, in procentpunten.' : 'Contribution to the whole portfolio return, in percentage points.'} />
+                </th>
               </tr>
             </thead>
             <tbody>
               {sorted.map((it, i) => {
-                const c = it.contrib ?? 0;
+                const c = it.contrib;
                 return (
                   <tr key={i} className="border-t border-neutral-800/20">
-                    <td className="py-1 pr-2 text-fg-soft" title={it.name ?? ''}>{it.name ?? '—'}</td>
+                    <td className="py-1 pr-2 text-fg-soft" title={it.name ?? ''}>{it.name ?? '—'}
+                      {!!it.via_names.length && <span className="ml-2 inline-flex"><ViaChips names={it.via_names} /></span>}
+                    </td>
                     <td className="py-1 px-2 text-right font-mono text-fg">{it.weight.toFixed(2)}%</td>
                     <td className={`py-1 px-2 text-right font-mono ${retTone(it.ret)}`}>{fmtRet(it.ret)}</td>
-                    <td className={`py-1 pl-2 text-right font-mono ${c >= 0 ? 'text-pos-400' : 'text-neg-400'}`}>
-                      {c >= 0 ? '+' : ''}{c.toFixed(2)}pp
+                    <td className={`py-1 pl-2 text-right font-mono ${retTone(c)}`}>
+                      {ppt(c)}
                     </td>
                   </tr>
                 );
@@ -3709,12 +3751,14 @@ export default function PortfolioAnalysisModal({
     }
   };
   const assetRetryCount = useRef(new Map<string, number>());
-  const viewKey = `${reqKey}|${benchmark}|${source}|${assetFilter ?? ''}|${lookThrough ? 1 : 0}|${refreshSeq}|${reloadSeq}`;
+  const viewKey = analysisRequestKey(reqKey, benchmark, source, assetFilter ?? '', lookThrough, refreshSeq, reloadSeq);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const [detailsError, setDetailsError] = useState(false);
   const stale = data != null && loadedFor !== viewKey;
 
   useEffect(() => {
     let cancelled = false;
+    setDetailsError(false);
     const analysisKey = viewKey;
     void (async () => {
       try {
@@ -3727,6 +3771,7 @@ export default function PortfolioAnalysisModal({
               // Sector/region/currency require the full benchmark constituent grid. The opening
               // overview does not render those charts, so defer that work until Stocks is selected.
               + `&include_axes=${assetFilter === EQUITY_BUCKET}`
+              + `&overview_only=${!assetFilter}`
               + (assetFilter ? `&bucket=${encodeURIComponent(assetFilter)}` : ''));
           const body = await r.json().catch(() => null);
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
@@ -3764,6 +3809,38 @@ export default function PortfolioAnalysisModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq]);
 
+  // Paint the lightweight overview first, then automatically fill its holdings section.
+  // Performance has its own loader; ETF sector requests remain gated on the Stocks view.
+  const needsHoldingDetails = !reportOpen && (assetFilter == null || risk);
+  const detailsPending = data?.details_pending;
+  useEffect(() => {
+    if (isBasket || !needsHoldingDetails || !detailsPending || loadedFor !== viewKey) return;
+    let cancelled = false;
+    setDetailsError(false);
+    const loadDetails = () => { void loadPrefetchedAnalysis(`${viewKey}|details`, async () => {
+      const response = await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
+        + `?benchmark=${benchmark}&weight_by=${source}&source=${source}&look_through=${lookThrough}&include_axes=false&overview_only=false`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
+      return body as ModelPortfolioAnalysis;
+    }).then((detail) => {
+      if (!cancelled) setData(detail);
+    }).catch((detailError) => {
+      traceError('analyse', 'Requested holding detail failed; AIRS overview retained', detailError);
+      if (!cancelled) setDetailsError(true);
+    }); };
+    // A second animation frame runs after the browser has painted the overview and spinner.
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => { if (!cancelled) loadDetails(); });
+    });
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(firstFrame);
+      window.cancelAnimationFrame(secondFrame);
+    };
+  }, [isBasket, needsHoldingDetails, detailsPending, loadedFor, viewKey, id, benchmark, source, lookThrough]);
+
   // Receiving the payload and displaying it are different moments. Keep the sector job running
   // through the commit and the next paint, so its completed state cannot precede the changed row.
   useEffect(() => {
@@ -3779,7 +3856,7 @@ export default function PortfolioAnalysisModal({
   // Each endpoint has its own six-hour acquisition cache, and turning the checkbox off only changes
   // the visual — it does not discard the successfully loaded breakdowns or cause another request.
   useEffect(() => {
-    if (!includeEtfsInSector || !eligibleSectorEtfKey
+    if (assetFilter !== EQUITY_BUCKET || !includeEtfsInSector || !eligibleSectorEtfKey
       || etfSectorResult?.key === eligibleSectorEtfKey) return;
     const controller = new AbortController();
     void (async () => {
@@ -3810,7 +3887,7 @@ export default function PortfolioAnalysisModal({
       setEtfSectorResult({ key: eligibleSectorEtfKey, allocations, unavailable });
     })();
     return () => controller.abort();
-  }, [eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector]);
+  }, [assetFilter, eligibleSectorEtfKey, eligibleSectorEtfs, etfSectorResult?.key, includeEtfsInSector]);
 
   // A cold account can have valid AIRS ISINs but no asset_grid row yet. Queue those instruments
   // after the fast analysis response; resolving them inline would bring back the slow Analyse
@@ -3906,7 +3983,7 @@ export default function PortfolioAnalysisModal({
       <div className={`relative bg-page border border-neutral-800/40 rounded-xl shadow-xl w-[80vw] h-[80vh] p-5 ${risk || reportOpen ? 'overflow-hidden' : 'overflow-auto'}`}
         onClick={(e) => e.stopPropagation()}>
         <div hidden={risk || reportOpen}>
-        <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
           <div className="min-w-0">
             <h3 className="text-base font-mono font-semibold text-fg-strong">{name}</h3>
             {data?.weight_note && (
@@ -3917,7 +3994,7 @@ export default function PortfolioAnalysisModal({
               acts on the SUBJECT of the modal — it rebuilds this portfolio's inputs — while the
               benchmark picker only changes what those inputs are compared against. Close stays
               last, where a dialog's dismiss belongs. */}
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             {/*  THE ROW'S REFRESH, NOT A NEW ONE — same handler, same LABEL (2026-09-03: the
                 glyph came off every Refresh and every Cancel on the site, on request, so the word
                 is now the whole control) and the caller's own wording, so pressing it
@@ -3986,6 +4063,7 @@ export default function PortfolioAnalysisModal({
 
         {data && (
           <>
+            {detailsError && <p role="status" className="mb-3 text-xs text-warn-300">{copy.lang === 'nl' ? 'Risico- en strategiedetails konden niet worden geladen. Het AIRS-overzicht blijft beschikbaar; gebruik Verversen om opnieuw te proberen.' : 'Risk and strategy details could not be loaded. The AIRS overview remains available; use Refresh to retry.'}</p>}
             {/* Top: the allocation bars (the class selector) beside — when NOTHING is selected —
                 the whole-portfolio return / vs-benchmark / excess scorecard, or, when a class IS
                 selected, ONLY that class's own return. Empty for an
@@ -4005,6 +4083,7 @@ export default function PortfolioAnalysisModal({
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
+                  certificateContribution={sum((data.realised?.certificate_adjustments ?? []).map((a) => a.contribution_pct))}
                   /* Summed here rather than server-side: it is the same `closed_out` set the
                      Holdings table's own group already sums, and one source beats two. */
                   soldContribution={data.realised?.available
@@ -4015,49 +4094,15 @@ export default function PortfolioAnalysisModal({
                   onSelect={isBasket ? undefined : (b) => {
                     setReportOpen(false); setRisk(false); setAssetFilter(b); }} />
               )}
-              {/*  ONE SLOT, ONE WIDTH, IN BOTH STATES — this is what lets the row above be
-                  centred without the allocation bars moving. Both arms of the ternary occupy the
-                  SAME grid cell as a ghost copy of the scorecard, so the cell is never narrower
-                  than the equation and the row's total width does not depend on the selection.
-
-                   THE WIDTH-SETTER IS THE EQUATION ITSELF, NEVER A MEASUREMENT OF IT. A
-                  `w-[32rem]` here would be the exact trap this file already removed once: the
-                  chart used to sit at a hardcoded `w-[24rem]` that matched the chips beside it by
-                  coincidence and stopped matching the moment a benchmark's name changed the middle
-                  chip's width. `Scorecard` is pure presentation over `data.returns`, so rendering
-                  a second, inert copy costs nothing and CANNOT drift from the real one — a longer
-                  benchmark name widens both together.
-
-                   ONLY WHEN A CLASS IS SELECTED. In the unselected state the real scorecard is
-                  already in the cell and sets the width itself; a ghost there would render it
-                  twice for nothing.
-
-                   THE GHOST IS `invisible`, WHICH IS NOT THE SAME AS `opacity-0`.
-                  `visibility: hidden` takes its subtree out of the tab order and the
-                  accessibility tree — `Scorecard` can carry a button — so with `aria-hidden` it is
-                  fully inert. `h-0 overflow-hidden` then keeps it from contributing HEIGHT: it
-                  reserves a width and nothing else.
-
-                   THE GUARANTEE IS `max(equation, selected content)`, so it holds as long as the
-                  selected arm is no wider than the equation (it is ~21rem of buttons against ~32rem
-                  of chips). Should something wider ever land there, the cell grows and the bars
-                  move again — but it can never go NARROWER than the equation, which is the
-                  direction that used to cause the jump.
-
-                   `justify-items-center` so the narrower selected content sits centred in the
-                  reserved space rather than pinned to its left edge. */}
-              <div className={`grid items-center justify-items-center self-center ${!selected ? 'min-w-0 flex-1' : ''}`}>
-              {selected && (
-                <div aria-hidden
-                  className="col-start-1 row-start-1 invisible h-0 overflow-hidden pointer-events-none">
-                  <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark}
-                    onReload={() => setReloadSeq((n) => n + 1)} />
-                </div>
-              )}
-              <div className={`col-start-1 row-start-1 min-w-0 ${!selected ? 'w-full' : ''}`}>
+              {/* Inline-size containment cannot take its width from a hidden Scorecard child.
+                  Keep the same explicit flex basis whether a sleeve is selected or not. The
+                  outer wrapping row then reserves space or stacks the tile below allocation,
+                  including at increased browser zoom, without collapsing the slot to zero. */}
+              <div className="@container/overview grid w-full min-w-0 max-w-full basis-[36rem] flex-1 items-center justify-items-center self-center">
+              <div className="col-start-1 row-start-1 w-full min-w-0">
               {selected
                 ? (
-                  <div className="self-center flex items-stretch gap-3">
+                  <div className="flex w-full min-w-0 flex-wrap items-stretch justify-center gap-3 self-center">
                     {/*  NOT ON STOCKS (removed on request 2026-08-05), which also restores this
                         tile's own docstring: it exists for a NON-EQUITY sleeve, where
                         `SleeveBreakdown` renders instead of the holdings table and this is the only
@@ -4082,21 +4127,21 @@ export default function PortfolioAnalysisModal({
                 /* The scorecard and chart share the left grid column. Report and
                    Risk occupy the right column, aligned with the scorecard row. */
                 : (
-                  <div className="grid w-full grid-cols-1 items-start gap-x-6 gap-y-2 self-center min-w-0 lg:grid-cols-2">
+                  <div className="grid w-full grid-cols-1 items-start gap-x-4 gap-y-3 self-center min-w-0 @[44rem]/overview:grid-cols-[minmax(0,1fr)_auto]">
                     <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark}
                       onReload={() => setReloadSeq((n) => n + 1)} fillWidth />
                         <nav aria-label={copy.lang === 'nl' ? 'Verdieping' : 'Further analysis'}
-                          className="col-start-1 row-start-2 flex min-h-11 items-stretch justify-self-end self-stretch gap-2 lg:col-start-2 lg:row-start-1">
+                          className="col-start-1 row-start-2 flex w-max max-w-full min-h-11 items-stretch justify-self-end self-stretch gap-2 @[44rem]/overview:col-start-2 @[44rem]/overview:row-start-1">
                           {(reportAccount || (!isBasket && id != null)) && (
                             <button type="button" onClick={() => { setRisk(false); setReportOpen(true); }}
                               title={copy.score.attributionTitle}
-                              className="flex min-w-[6rem] items-center justify-center rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
+                              className="flex w-auto flex-none items-center justify-center whitespace-nowrap rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
                               {copy.actions.attribution}
                             </button>
                           )}
                           <button type="button" onClick={() => { setReportOpen(false); setRisk(true); }}
                             title={copy.score.riskTitle}
-                            className="flex min-w-[6rem] items-center justify-center rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
+                            className="flex w-auto flex-none items-center justify-center whitespace-nowrap rounded-lg border border-neutral-800/40 bg-elevated px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:text-accent-300">
                             {copy.actions.risk}
                           </button>
                         </nav>
@@ -4127,7 +4172,7 @@ export default function PortfolioAnalysisModal({
                         column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
                         child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
-                      <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] lg:row-start-2">
+                      <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] @[44rem]/overview:row-start-2">
                         {/* `BookReturnChart` fetches independently and initially renders one line.
                             Reserve the final chart card's plot/tooltip footprint here, before that
                             request completes, so its arrival cannot move the scorecard above it. */}
@@ -4174,7 +4219,14 @@ export default function PortfolioAnalysisModal({
                  between this table and a total, so the answer was to give them rows, not their own
                  card. `realised` carries them (and the book's own return to check against). */
               <>
-              <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+              {data.details_pending ? (
+                <div role="status" aria-live="polite" className="flex min-h-32 items-center justify-center gap-2 text-sm text-fg-muted">
+                  {!detailsError && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-700 border-t-accent-400 motion-reduce:animate-none" />}
+                  {detailsError
+                    ? (copy.lang === 'nl' ? 'Posities laden mislukt. Gebruik Verversen om opnieuw te proberen.' : 'Could not load holdings. Use Refresh to retry.')
+                    : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
+                </div>
+              ) : <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
                 lookThrough={lookThrough} onLookThroughChange={setLookThrough}
                 onSummary={setNotesFor}
                 onSectorAllocation={(holding) => {
@@ -4198,7 +4250,7 @@ export default function PortfolioAnalysisModal({
                    the model declares, and the wrong clock for figures the BOOK values, which are
                    as-of 2026-08-01. Stamped with it, the modal called the row's own +111.74%
                    216 days old while the row called it 2. */
-                asOf={data.holdings_as_of ?? data.as_of} />
+                asOf={data.holdings_as_of ?? data.as_of} />}
               </>
             ) : sleeve ? (
               /* NON-EQUITY class: its holdings' contribution + a currency chart, no benchmark. */
@@ -4284,7 +4336,9 @@ export default function PortfolioAnalysisModal({
               worse than none.
                `book_holdings`, NOT `holdings`: the latter is a COUNT on this payload
               (`holdings: int`), so the obvious name silently types as a number. */}
-          <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
+          {data.details_pending ? (
+            <p role="status" className="text-sm text-fg-muted">{detailsError ? 'Risk details could not be loaded. Close and reopen Risk to retry.' : 'Loading risk holdings…'}</p>
+          ) : <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
             portefeuille={data.book_portefeuille}
             holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
             riskProfilePolicy={data.risk_profile_policy}
@@ -4305,7 +4359,7 @@ export default function PortfolioAnalysisModal({
             // knows which one it opened — a model portfolio's composition or an account's own
             // Vermogensoverzicht. Same distinction `source` already draws for the return.
             portfolioSource={source === 'model' ? 'airs_model' : 'airs_volk'}
-            onClose={() => setRisk(false)} />
+            onClose={() => setRisk(false)} />}
           </div>
         </div>
       )}
