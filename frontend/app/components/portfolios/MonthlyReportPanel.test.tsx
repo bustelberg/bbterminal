@@ -65,6 +65,25 @@ describe('AIRS monthly report', () => {
     expect(vi.mocked(apiFetch).mock.calls[0][0]).toContain('/accounts/BOOK/monthly-report?month=2026-10');
   });
 
+  it('highlights only the toggled-on tile and clears the highlight when closed', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const month = new URL(String(url), 'http://localhost').searchParams.get('month');
+      return new Response(JSON.stringify({ ...completeResponse(), month }));
+    });
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+    const tiles = host.querySelectorAll<HTMLButtonElement>('nav button');
+    expect(host.querySelector('nav button[aria-pressed="true"]')).toBeNull();
+    await openOctober();
+    expect(tiles[9].getAttribute('aria-pressed')).toBe('true');
+    expect(tiles[9].className).toContain('bg-accent-500/10');
+    await act(async () => tiles[8].click());
+    expect(tiles[9].getAttribute('aria-pressed')).toBe('false');
+    expect(tiles[9].className).not.toContain('bg-accent-500/10');
+    expect(tiles[8].getAttribute('aria-pressed')).toBe('true');
+    await act(async () => tiles[8].click());
+    expect(host.querySelector('nav button[aria-pressed="true"]')).toBeNull();
+  });
+
   it('reserves the loaded detail height when toggling the selected month closed', async () => {
     const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 640));
     try {

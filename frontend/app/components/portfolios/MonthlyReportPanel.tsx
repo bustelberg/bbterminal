@@ -72,7 +72,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     saved.current.delete(`${portefeuille}|${month}`);
     setBusy(true); setJobError(null);
     try {
-      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report/job?month=${month}`, `${name} · Report ${month}`);
+      const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report/job?month=${month}`, `${name} · Performance ${month}`);
       const job = await done;
       if (mounted.current && job.status === 'failed') setJobError(job.summary ?? (nl ? 'Het rapport kon niet worden voltooid.' : 'Report could not be completed.'));
     } catch (err) {
@@ -183,7 +183,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
 
   return <section className="space-y-5 pb-6">
     <header className="flex flex-wrap items-start justify-between gap-4"><div>
-      <p className="mb-1 text-[10px] uppercase tracking-[0.2em] text-accent-400">AIRS · Report</p>
+      <p className="mb-1 text-[10px] uppercase tracking-[0.2em] text-accent-400">AIRS · Performance</p>
       <h2 className="text-xl font-semibold text-fg-strong">{name}</h2>
       <p className="mt-1 text-xs text-fg-subtle">{text('Choose a month to see its return and individual positions.', 'Kies een maand voor het rendement en de individuele posities.')}</p>
     </div></header>
@@ -208,13 +208,13 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
       </div>
       {useOverview && <p className="text-[11px] text-fg-faint">{text('Same YTD source and calculation as the Analyse overview: AIRS cumulative portfolio return and the full-period policy benchmark. Monthly figures below are separate period returns; compounding them can differ from these YTD figures.', 'Dezelfde YTD-bron en berekening als het Analyse-overzicht: cumulatief AIRS-portefeuillerendement en de beleidsbenchmark over de volledige periode. De maandcijfers hieronder zijn afzonderlijke perioderendementen; het samenstellen daarvan kan afwijken van deze YTD-cijfers.')}</p>}
       <nav className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5" aria-label={text('Months', 'Maanden')}>
-        {months.map((key) => { const row = monthPerformance(key);
-          return <button key={key} type="button" disabled={busy} onClick={() => openMonth(key)} aria-expanded={detailsOpen && key === month} aria-controls="monthly-report-details"
-            className={`${box} group p-4 text-left transition-colors ${detailsOpen && key === month ? 'border-accent-500/70 ring-1 ring-accent-500/20' : 'hover:border-accent-500/50'}`}>
-            <span className="block capitalize text-xs text-fg-subtle">{monthLabel(key, true)}</span>
+        {months.map((key) => { const row = monthPerformance(key); const active = detailsOpen && key === month;
+          return <button key={key} type="button" disabled={busy} onClick={() => openMonth(key)} aria-expanded={active} aria-pressed={active} aria-controls="monthly-report-details"
+            className={`group rounded-xl border p-4 text-left transition-colors ${active ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400/50' : 'border-neutral-800/40 bg-elevated hover:border-accent-500/50'}`}>
+            <span className={`block capitalize text-xs ${active ? 'font-medium text-accent-300' : 'text-fg-subtle'}`}>{monthLabel(key, true)}</span>
             <span className={`mt-2 block font-mono text-xl tabular-nums ${tone(row?.rendement)}`}>{pct(row?.rendement)}</span>
             <span className="mt-1 block text-xs text-fg-subtle" title={report.weighted_benchmark?.[key]?.source}>{text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')} <span className={`font-mono tabular-nums ${tone(report.weighted_benchmark?.[key]?.return_pct)}`}>{pct(report.weighted_benchmark?.[key]?.return_pct)}</span></span>
-            <span className="mt-3 block text-[11px] text-fg-faint group-hover:text-accent-300">{text('View positions', 'Bekijk posities')}</span>
+            <span className={`mt-3 block text-[11px] ${active ? 'text-accent-300' : 'text-fg-faint group-hover:text-accent-300'}`}>{text('View positions', 'Bekijk posities')}</span>
           </button>; })}
       </nav>
       <div data-month-detail-space style={detailsHeight ? { minHeight: detailsHeight } : undefined}>

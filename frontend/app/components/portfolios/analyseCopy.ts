@@ -7,7 +7,7 @@ const en = {
   lang: 'en',
   actions: {
     close: 'Close', refresh: 'Refresh', refreshing: 'Refreshing…', cancel: 'Cancel',
-    cancelling: 'Cancelling…', attribution: 'Report', risk: 'Risk', fundamental: 'Fundamental',
+    cancelling: 'Cancelling…', attribution: 'Performance', risk: 'Risk', fundamental: 'Fundamental',
     sectorAllocation: 'Sector mix',
     cancelRefresh: 'Cancel this refresh', refreshPortfolio: 'Refresh this portfolio',
     cancellingTitle: 'Cancelling — the account being downloaded finishes first.',
@@ -225,7 +225,7 @@ const nl: AnalyseCopy = {
   lang: 'nl',
   actions: {
     close: 'Sluiten', refresh: 'Vernieuwen', refreshing: 'Vernieuwen…', cancel: 'Annuleren',
-    cancelling: 'Annuleren…', attribution: 'Report', risk: 'Risico', fundamental: 'Fundamenteel',
+    cancelling: 'Annuleren…', attribution: 'Performance', risk: 'Risico', fundamental: 'Fundamenteel',
     sectorAllocation: 'Sectorverdeling',
     cancelRefresh: 'Deze vernieuwing annuleren', refreshPortfolio: 'Deze portefeuille vernieuwen',
     cancellingTitle: 'Annuleren — de rekening die nu wordt gedownload wordt eerst voltooid.',
