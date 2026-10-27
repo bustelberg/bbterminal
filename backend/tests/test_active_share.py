@@ -159,6 +159,41 @@ def test_risk_profile_reuses_the_acwi_asset_identity_bridge_for_direct_stocks(mo
     assert hermes["benchmark_pct"] == 60.0
 
 
+def test_linde_eu_matches_the_workbook_issuer_even_when_listings_have_different_asset_ids(monkeypatch):
+    monkeypatch.setattr(A, '_benchmark_weights', lambda *_args: {
+        'bench': {'linde': {'key': 'linde', 'name': 'LINDE PLC', 'weight_pct': .25},
+                  'other': {'key': 'other', 'name': 'Other', 'weight_pct': 99.75}},
+        'coverage': {}, 'issuer_by_asset': {100: 'linde'},
+    })
+    monkeypatch.setattr(A, '_grid_by_isin', lambda _ids: {
+        'IE000S9YS762': {'analysis_id': 200, 'name': 'Linde EU'},
+    })
+    monkeypatch.setattr(A, '_execution_by_isin', lambda _ids: {})
+    got = A.compute_active_share([_h('Linde', 'IE000S9YS762', .99)], 'ACWI',
+        benchmark_weights={'Stocks': 60, 'Bonds': 40, 'EquityOnly': 1}, held_only=True)
+    linde = got['rows'][0]
+    assert linde['in_benchmark']
+    assert abs(linde['portfolio_pct'] - .99) < 1e-9
+    assert abs(linde['benchmark_pct'] - .15) < 1e-9
+    assert abs(linde['active_pct'] - .84) < 1e-9
+
+
+def test_nonempty_stale_grid_identity_does_not_mask_a_current_execution_match(monkeypatch):
+    monkeypatch.setattr(A, '_benchmark_weights', lambda *_args: {
+        'bench': {'linde': {'key': 'linde', 'name': 'LINDE PLC', 'weight_pct': 100}},
+        'coverage': {}, 'issuer_by_asset': {200: 'linde'},
+    })
+    monkeypatch.setattr(A, '_grid_by_isin', lambda _ids: {
+        'IE000S9YS762': {'analysis_id': 100, 'name': 'Stale display name'},
+    })
+    monkeypatch.setattr(A, '_execution_by_isin', lambda _ids: {
+        'IE000S9YS762': {'analysis_id': 200, 'status': 'ok'},
+    })
+    got = A.compute_active_share([_h('Linde', 'IE000S9YS762', 100)], 'ACWI')
+    assert got['active_share_pct'] == 0
+    assert got['rows'][0]['in_benchmark']
+
+
 def test_execution_identity_keeps_an_acwi_member_matched_while_asset_grid_lags(monkeypatch):
     """The source-of-truth execution mapping must repair a stale grid identity."""
     monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {

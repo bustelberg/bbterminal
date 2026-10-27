@@ -116,7 +116,8 @@ def _issuer_key(name: str | None) -> str:
         if t == s or not t:
             break
         s = t
-    return s
+    # AIRS labels the European listing "Linde EU"; the workbook names the issuer "LINDE PLC".
+    return {"linde eu": "linde"}.get(s, s)
 
 
 def _grid_by_isin(isins: list[str]) -> dict[str, dict]:
@@ -239,23 +240,23 @@ def build_issuer_weights(holdings: list[dict], benchmark: str,
     bench, coverage = index["bench"], index["coverage"]
     # Join the two data vendors through our asset identity, never through display spelling.
     # ``asset_grid`` can temporarily lag the execution record after a resolver repair.  Fill
-    # just those missing identities from ``asset_execution`` — the same source ACWI membership
+    # missing or unmatched identities from ``asset_execution`` — the same source ACWI membership
     # uses — so a real ACWI name cannot turn into a dash during that refresh window.
     canonical = index["issuer_by_asset"]
     if canonical:
         missing_identity_isins = [
             (h.get("isin") or "").strip().upper() for h in stocks
             if (h.get("isin") or "").strip().upper()
-            and (grid.get((h.get("isin") or "").strip().upper()) or {}).get("analysis_id") is None
+            and (grid.get((h.get("isin") or "").strip().upper()) or {}).get("analysis_id") not in canonical
         ]
         executions = _execution_by_isin(sorted(set(missing_identity_isins)))
         bridged_entries: list[tuple[str, str, float]] = []
         for (key, name, weight), holding in zip(p_entries, stocks):
             isin = (holding.get("isin") or "").strip().upper()
-            # A grid row without an ID is still useful for its display name, but it must not mask
-            # a healthy execution row that does have the canonical company identity.
-            analysis_id = ((grid.get(isin) or {}).get("analysis_id")
-                           or (executions.get(isin) or {}).get("analysis_id"))
+            # A stale grid ID must not mask a healthy execution row with the canonical identity.
+            analysis_id = (grid.get(isin) or {}).get("analysis_id")
+            if analysis_id not in canonical:
+                analysis_id = (executions.get(isin) or {}).get("analysis_id", analysis_id)
             bridged_entries.append((canonical.get(int(analysis_id), key)
                                     if analysis_id is not None else key, name, weight))
         p_entries = bridged_entries
@@ -495,7 +496,7 @@ def _benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict:
         saved['issuer_by_asset'] = {int(key): value for key, value in saved['issuer_by_asset'].items()}
         return saved
 
-    cache_key = ("risk-workbook-identity-v6", benchmark.upper(), benchmark_start, date.today().isoformat(),
+    cache_key = ("risk-workbook-identity-v7", benchmark.upper(), benchmark_start, date.today().isoformat(),
                  revision, prepared.code_version() if revision is not None else None)
     with _benchmark_lock:
         return deepcopy(leg(cache_key, lambda: _load_benchmark_weights(benchmark, benchmark_start)))

@@ -67,7 +67,7 @@ SOURCE = "ishares_acwi"
 # Reviewed cross-listing identity: the workbook classifies Linde as United States,
 # while its ordinary shares have an Irish ISIN. Never relax the general country gate.
 _REVIEWED_INTERLISTINGS = {
-    ("LIN", "LINDE PLC", "NASDAQ", "United States"): "IE000S9YS762",
+    ("LIN", "LINDE PLC", "NASDAQ", "United States"): ("IE000S9YS762", "IE00BZ12WP82"),
 }
 
 
@@ -208,13 +208,15 @@ def resolve() -> tuple[list[dict], dict]:
             hit = _interlisted(by_base.get(_base(sym.upper()), []),
                                h.get("Location") or "", h.get("Name") or "", codes)
             if hit is None:
-                reviewed_isin = _REVIEWED_INTERLISTINGS.get((
-                    h.get("Ticker"), h.get("Name"), h.get("Exchange"), h.get("Location")))
-                reviewed = [row for row in by_base.get(_base(sym.upper()), [])
-                            if reviewed_isin and row.get("isin") == reviewed_isin
-                            and same_company(h.get("Name") or "", row.get("name") or "")]
-                if len(reviewed) == 1:
-                    hit = reviewed[0]
+                reviewed_isins = _REVIEWED_INTERLISTINGS.get((
+                    h.get("Ticker"), h.get("Name"), h.get("Exchange"), h.get("Location")), ())
+                for reviewed_isin in reviewed_isins:
+                    reviewed = [row for row in by_base.get(_base(sym.upper()), [])
+                                if row.get("isin") == reviewed_isin
+                                and same_company(h.get("Name") or "", row.get("name") or "")]
+                    if len(reviewed) == 1:
+                        hit = reviewed[0]
+                        break
             if hit is not None:
                 aid = hit["analysis_id"]
                 held_sym = (hit.get("yahoo_symbol") or "").strip().upper()

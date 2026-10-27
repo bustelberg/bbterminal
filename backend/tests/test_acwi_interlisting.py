@@ -50,6 +50,20 @@ def ex(isin: str, symbol: str, name: str, aid: int) -> dict:
     return {"isin": isin, "yahoo_symbol": symbol, "name": name, "analysis_id": aid}
 
 
+def test_linde_previous_reviewed_isin_is_supported_when_current_isin_is_not_stored(monkeypatch):
+    from index_universe.acwi import asset_membership as M
+    monkeypatch.setattr(M, 'load_acwi_holdings', lambda: ([{
+        'Ticker': 'LIN', 'Name': 'LINDE PLC', 'Exchange': 'NASDAQ',
+        'Location': 'United States', 'Asset Class': 'Equity', 'Weight (%)': '0.23761',
+    }], '2026-04-15'))
+    monkeypatch.setattr(M, '_executions', lambda: [ex('IE00BZ12WP82', 'LIN.DE', 'Linde plc', 2475)])
+    monkeypatch.setattr(M, '_country_by_code', lambda: {**CODES, 'IE': 'Ireland'})
+    rows, _ = M.resolve()
+    assert len(rows) == 1
+    assert rows[0]['analysis_id'] == 2475
+    assert rows[0]['weight_pct'] == .23761
+
+
 class TestTheShopifyCase:
     """The report this was written for."""
 
