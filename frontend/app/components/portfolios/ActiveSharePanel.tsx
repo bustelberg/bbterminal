@@ -87,7 +87,7 @@ export function holdingsOnRiskBasis(
 function isDirectEquityStock(holding: ActiveShareHolding): boolean {
   return !holding.is_fund
     && (holding.bucket == null || holding.bucket === '' || holding.bucket === 'Equity')
-    && !/\b(perp|bond|obligat|coupon|treasur|gilt|bund|govie|sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b|\d[.,]?\d*\s*%/i.test(holding.name ?? '');
+    && !/\b(etf|etp|etn|ucits|fund|fonds|certificate|certificaten|index|perp|bond|obligat|coupon|treasur|gilt|bund|govie|sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b|\d[.,]?\d*\s*%/i.test(holding.name ?? '');
 }
 
 /**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SIX VIEWS. One decimal read as false
@@ -204,13 +204,13 @@ export default function ActiveSharePanel({
   const weightedHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
-  const riskBenchmarkWeights = riskProfilePolicy ?? undefined;
+  const riskBenchmarkWeights: Record<string, number> | undefined = riskProfilePolicy ? { ...riskProfilePolicy, EquityOnly: 1 } : undefined;
   const profileLabel = benchmarkProfile ? ({
     Neutraal: 'Neutral', Offensief: 'Offensive',
     'Beperkt Offensief': 'Moderately offensive', Defensief: 'Defensive',
   }[benchmarkProfile] ?? benchmarkProfile) : null;
   const riskHoldings = useMemo(
-    () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
+    () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
   const selectedPortfolioAsOf = portfolioAsOf;
   const benchmarkStart = null;
@@ -219,7 +219,7 @@ export default function ActiveSharePanel({
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(benchmark)}&weight_method=workbook-identity-v5`
+  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(riskProfilePolicy ? 'ACWI' : benchmark)}&weight_method=workbook-identity-v5`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
   const activeBody = JSON.stringify({
     holdings: riskBenchmarkWeights ? riskHoldings : weightedHoldings,
@@ -235,13 +235,13 @@ export default function ActiveSharePanel({
     return b as ActiveShare;
   }, 'active-share', 'the active share could not be computed');
   const benchmarkLabel = riskBenchmarkWeights?.Stocks != null && riskBenchmarkWeights?.Bonds != null
-    ? `${riskBenchmarkWeights.Stocks}% ACWI + ${riskBenchmarkWeights.Bonds}% AGGH.AS`
+    ? `${riskBenchmarkWeights.Stocks}% ACWI`
     : (data?.benchmark ?? benchmark);
 
   // The active-share response names a policy benchmark for people ("60% ACWI + 40% AGGH.AS").
   // The four return endpoints and Concentration still need the canonical ACWI key to resolve
   // their benchmark constituents; their request body carries the policy separately.
-  const riskBenchmark = riskBenchmarkWeights ? benchmark : (data?.benchmark ?? benchmark);
+  const riskBenchmark = riskBenchmarkWeights ? 'ACWI' : (data?.benchmark ?? benchmark);
 
   //  `?? []` ON BOTH — every list on this payload is optional in the generated types (the
   // Pydantic default makes it so), and `.filter` on undefined is a blank panel with no error.
@@ -331,6 +331,7 @@ export default function ActiveSharePanel({
           {/*  `flex-wrap`, NOT `inline-flex` — at six positions the row was wider than a
               narrow dialog, and an overflowing segmented control silently hides its last option.
               Wrapping keeps every view reachable; the joined look survives via the shared border. */}
+          {riskBenchmarkWeights && <p className="mt-2 text-center text-xs text-fg-muted">Individual stocks at actual portfolio weights vs {riskBenchmarkWeights.Stocks}% ACWI. Bonds excluded; equity weights are not scaled to 100%.</p>}
           <div className="flex w-fit flex-wrap mx-auto mt-2 rounded-lg border border-neutral-800/40
             overflow-hidden max-w-full text-xs">
             {/*  FIVE RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SIXTH. Every one
@@ -421,8 +422,8 @@ export default function ActiveSharePanel({
                 would need a formatter per language for no gain; these are counts and a benchmark
                 name, which read the same in both. */}
             <Tile label={t.active.activeShare} value={pct2(data.active_share_pct)}
-              suffix={<span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>+</span>}
-              simpleInfo={`The percentage of ${portfolioName} invested differently from ${data.benchmark ?? benchmark}. 0% means the same holdings and weights; 100% means no overlap.`}
+              suffix={riskBenchmarkWeights ? undefined : <span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>+</span>}
+              simpleInfo={`Half the sum of absolute differences between actual stock weights and the profile-scaled ACWI weights. Bonds are excluded; neither equity allocation is scaled to 100%.`}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.activeShare.what}
                 where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
@@ -431,8 +432,8 @@ export default function ActiveSharePanel({
                 when={whenBoth}
                 worked={data.active_share_pct == null ? '' : withWorked(
                   String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
-                  String.raw`\text{overlap } ${subNum(data.overlap_pct ?? 0, 2)}\%`
-                  + String.raw` + \text{active } ${subNum(data.active_share_pct, 2)}\% = 100\%`)}
+                  riskBenchmarkWeights ? String.raw`= ${subNum(data.active_share_pct, 2)}\%` : String.raw`\text{overlap } ${subNum(data.overlap_pct ?? 0, 2)}\%`
+                  + (riskBenchmarkWeights ? '' : String.raw` + \text{active } ${subNum(data.active_share_pct, 2)}\% = 100\%`))}
                 legend={[
                   { sym: 'i', is: t.active.legend.issuer },
                   { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
@@ -440,7 +441,7 @@ export default function ActiveSharePanel({
                 ]}
                 />} />} />
             <Tile label={t.active.overlap} value={pct2(data.overlap_pct)}
-              suffix={<><span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>=</span><Tile label="Total" value="100.00%" /></>}
+              suffix={riskBenchmarkWeights ? undefined : <><span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>=</span><Tile label="Total" value="100.00%" /></>}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.overlap.what}
                 where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
@@ -449,7 +450,7 @@ export default function ActiveSharePanel({
                 when={whenBoth}
                 worked={data.overlap_pct == null ? '' : withWorked(
                   String.raw`\sum_i \min\!\left( w_i^{\,p},\; w_i^{\,b} \right)`,
-                  String.raw`${subNum(data.overlap_pct, 2)}\% = 100\%`
+                  riskBenchmarkWeights ? String.raw`= ${subNum(data.overlap_pct, 2)}\%` : String.raw`${subNum(data.overlap_pct, 2)}\% = 100\%`
                 + String.raw` - \text{active } ${subNum(data.active_share_pct ?? 0, 2)}\%`)}
                 legend={[
                   { sym: 'i', is: t.active.legend.issuer },
@@ -457,7 +458,7 @@ export default function ActiveSharePanel({
                   { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
                   { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
                 ]}
-                how={t.active.cards.overlap.how} />} />} />
+                how={riskBenchmarkWeights ? 'Sum the smaller actual weight for each company held on both sides. Different equity allocation totals mean overlap and active share need not add to 100%.' : t.active.cards.overlap.how} />} />} />
           </div>
 
           {/*  THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED

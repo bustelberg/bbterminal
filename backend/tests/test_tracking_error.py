@@ -128,6 +128,20 @@ class TestBenchmarkHistory:
 
 
 class TestTheDefinition:
+    def test_equity_only_policy_preserves_book_weights_without_bond_prices(self, wire):
+        dates = _weekdays(400)
+        T._risk_prices.cache_clear()
+        wire([.02] * 399, [.03] * 399, dates)
+        built = T.build_paired_series([
+            {"isin": ONE, "name": "Stock", "weight_pct": 45, "bucket": "Equity"},
+            {"isin": BOND, "name": "Bond", "weight_pct": 40, "bucket": "Bonds"},
+        ], "ACWI", "daily", 1, benchmark_weights={"Stocks": 60, "Bonds": 40, "EquityOnly": 1})
+        assert built["portfolio"][0] == pytest.approx(.45 * .02)
+        assert built["benchmark"][0] == pytest.approx(.6 * .03)
+        assert built["benchmark_label"] == "60% ACWI"
+        assert built["benchmark_component_isins"] == {"ACWI": BENCH}
+        assert built["total"] == 1
+
     def test_risk_profile_uses_bonds_in_the_portfolio_and_fixed_policy_benchmark(self, monkeypatch):
         """A Neutral profile is a 60/40 portfolio, never a stocks-only ACWI comparison."""
         dates = _weekdays(400)

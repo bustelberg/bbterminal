@@ -73,6 +73,8 @@ def _policy_benchmark(bench: dict, weights: dict[str, float] | None) -> tuple[di
         raise IssuerError("The risk-profile benchmark weights are invalid.")
     if stocks < 0 or bonds < 0 or abs(stocks + bonds - 100.0) > 0.01:
         raise IssuerError("The risk-profile benchmark must contain Stocks and Bonds totaling 100%.")
+    if weights.get("EquityOnly"):
+        bonds = 0
 
     scaled = {
         key: {**row, "weight_pct": row["weight_pct"] * stocks / 100.0}

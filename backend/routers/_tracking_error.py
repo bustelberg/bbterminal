@@ -231,6 +231,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     bench_isin = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
     policy_weights = (benchmark_weights or {})
     is_policy_benchmark = bool(policy_weights)
+    equity_only = bool(policy_weights.get("EquityOnly"))
     if is_policy_benchmark:
         try:
             stocks_weight = float(policy_weights.get("Stocks", 0))
@@ -240,12 +241,15 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         if (stocks_weight < 0 or bonds_weight < 0
                 or abs(stocks_weight + bonds_weight - 100.0) > 0.01):
             raise SeriesError("The risk-profile benchmark must contain Stocks and Bonds totaling 100%.")
+        if equity_only:
+            bonds_weight = 0
         benchmark_isins = {
             "ACWI": _BENCHMARK_RISK_ETF["ACWI"],
             "BONDS": _BENCHMARK_RISK_ETF["BONDS"],
         }
         active_benchmark_names = [name for name, weight in (("ACWI", stocks_weight), ("BONDS", bonds_weight))
                                   if weight > 0]
+        benchmark_isins = {name: benchmark_isins[name] for name in active_benchmark_names}
         if not active_benchmark_names:
             raise SeriesError("The risk-profile benchmark has no positive-weight sleeve.")
         benchmark_label = " + ".join(
@@ -266,7 +270,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     # to their fixed ACWI/AGGH policy benchmark.
     total_book_w = sum(max(0.0, float(h.get("weight_pct") or 0)) for h in holdings)
     stocks = [h for h in holdings
-              if (is_risk_profile_holding(h) if is_policy_benchmark else is_direct_equity_stock(h))
+              if (is_risk_profile_holding(h) if is_policy_benchmark and not equity_only else is_direct_equity_stock(h))
               and (h.get("isin") or "").strip()
               and float(h.get("weight_pct") or 0) > 0]
     stocks_w = sum(float(h["weight_pct"]) for h in stocks)
@@ -281,7 +285,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         k = (h["isin"] or "").strip().upper()
         # A profile comparison is a return on the investable Stocks/Bonds sleeve. Cash and
         # alternatives are intentionally outside that policy, so they are not a zero-return drag.
-        denominator = stocks_w if is_policy_benchmark else total_book_w
+        denominator = 100.0 if equity_only else (stocks_w if is_policy_benchmark else total_book_w)
         weight[k] = weight.get(k, 0.0) + float(h["weight_pct"]) / denominator
         if h.get("name"):
             names.setdefault(k, str(h["name"]))

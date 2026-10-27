@@ -137,6 +137,15 @@ class TestAgainstTheIndex:
         assert all(r["benchmark_pct"] == pytest.approx(2.0, abs=1e-9) for r in got["top"])
         assert got["top"][-1]["cumulative_pct"] == pytest.approx(100.0, abs=1e-9)
 
+    def test_equity_only_benchmark_retains_profile_weight_without_bonds(self):
+        bench, label = K._policy_benchmark({
+            "a": {"key": "a", "name": "A", "weight_pct": 80},
+            "b": {"key": "b", "name": "B", "weight_pct": 20},
+        }, {"Stocks": 60, "Bonds": 40, "EquityOnly": 1})
+        assert label == "60% ACWI"
+        assert sum(row["weight_pct"] for row in bench.values()) == 60
+        assert len(bench) == 2
+
     def test_risk_profile_uses_the_full_stock_and_bond_policy_benchmark(self, wire, monkeypatch):
         wire([], {"NVDA": "Nvidia"})
         monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {

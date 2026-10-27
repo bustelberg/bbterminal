@@ -289,6 +289,17 @@ def build_policy_issuer_weights(holdings: list[dict], benchmark: str,
     if stock_target < 0 or bond_target < 0 or abs(stock_target + bond_target - 100.0) > 0.01:
         raise IssuerError("The risk-profile benchmark must contain Stocks and Bonds totaling 100%.")
 
+    if policy_weights.get("EquityOnly"):
+        built = build_issuer_weights(holdings, benchmark, benchmark_start)
+        return {**built,
+                "port": {key: {**row, "weight_pct": row["weight_pct"] * built["stocks_w"] / 100,
+                               "bucket": "Stocks"} for key, row in built["port"].items()},
+                "bench": {key: {**row, "weight_pct": row["weight_pct"] * stock_target / 100,
+                                "bucket": "Stocks"} for key, row in built["bench"].items()},
+                "unresolved": [{**row, "weight_pct": row["weight_pct"] * built["stocks_w"] / 100}
+                               for row in built["unresolved"]],
+                "label": f"{stock_target:g}% ACWI", "whole_policy": True, "total_all": 100.0}
+
     selected = [h for h in holdings if _risk_profile_holding(h)]
     total = sum(float(h["weight_pct"]) for h in selected)
     if total <= 0:

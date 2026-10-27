@@ -2700,7 +2700,8 @@ async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchma
     # selected by the request; an unknown benchmark simply leaves validation to the calculation.
     if req.benchmark_weights:
         tracker_isins = {_BENCHMARK_RISK_ETF[name] for name, bucket in (("ACWI", "Stocks"), ("BONDS", "Bonds"))
-                         if float(req.benchmark_weights.get(bucket, 0)) > 0}
+                         if float(req.benchmark_weights.get(bucket, 0)) > 0
+                         and not (bucket == "Bonds" and req.benchmark_weights.get("EquityOnly"))}
     else:
         tracker = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
         tracker_isins = {tracker} if tracker else set()

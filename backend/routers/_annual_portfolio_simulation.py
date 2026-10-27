@@ -101,20 +101,23 @@ def simulate(inputs: dict, years: int = 5, today: date | None = None) -> dict:
             'preliminary': False, 'total_holdings': len(weights), 'priced_holdings': sum(bool(marks[key]) for key in weights)}
     if len(common) < 13:
         return {**base, 'reason': f'Only {max(0, len(common) - 1)} complete monthly returns cover every holding and benchmark. At least 12 are required; no daily fallback or holdings substitution is used.'}
-    target = {key: weight / sum(weights.values()) for key, weight in weights.items()}
-    benchmark_target = {f'benchmark:{name}': weight / sum(legs.values()) for name, weight in legs.items()}
+    preserve_weights = inputs.get('preserve_weights', False)
+    target = {key: weight / (1 if preserve_weights else sum(weights.values())) for key, weight in weights.items()}
+    benchmark_target = {f'benchmark:{name}': weight / (100 if preserve_weights else sum(legs.values())) for name, weight in legs.items()}
 
     def curve(allocation):
         values = dict(allocation)
+        remainder = max(0.0, 1 - sum(allocation.values()))
         wealth = 1.0
         returns, rebalances = [], []
         for index, (prev, cur) in enumerate(zip(common, common[1:]), 1):
             values = {key: value * marks[key][cur] / marks[key][prev] for key, value in values.items()}
-            new_wealth = sum(values.values())
+            new_wealth = sum(values.values()) + remainder
             returns.append(new_wealth / wealth - 1)
             wealth = new_wealth
             if index % 12 == 0 and cur != common[-1]:
                 values = {key: wealth * weight for key, weight in allocation.items()}
+                remainder = wealth * max(0.0, 1 - sum(allocation.values()))
                 rebalances.append(cur)
         return wealth, returns, rebalances
 
@@ -167,6 +170,9 @@ def compute_simulation(holdings: list[dict], benchmark: str, years: int = 5,
     stocks, bonds = float(policy.get('Stocks', 0)), float(policy.get('Bonds', 0))
     if not all(math.isfinite(w) for w in (stocks, bonds)) or min(stocks, bonds) < 0 or abs(stocks + bonds - 100) > .01:
         return {'available': False, 'benchmark': benchmark, 'reason': 'Benchmark weights must total 100%.'}
+    equity_only = bool(policy.get('EquityOnly'))
+    if equity_only:
+        bonds = 0
     legs = {'ACWI': stocks, 'BONDS': bonds} if benchmark_weights else {benchmark.upper(): 100}
     legs = {name: weight for name, weight in legs.items() if weight > 0}
     if any(name not in _BENCHMARK_RISK_ETF for name in legs):
@@ -251,12 +257,13 @@ def compute_simulation(holdings: list[dict], benchmark: str, years: int = 5,
         if not eligible:
             return {**base, 'reason': 'No direct equities have verified Yahoo prices throughout the requested period.'}
         included = sum(eligible.values())
-        result = simulate({'series': series, 'weight': {isin: weight / included for isin, weight in eligible.items()},
+        result = simulate({'series': series, 'weight': {isin: weight / (100 if equity_only else included) for isin, weight in eligible.items()},
+                           'preserve_weights': equity_only,
                            'names': names, 'benchmark_component_weights': legs,
                            'benchmark_component_isins': ids, 'benchmark_label': base['benchmark']}, years)
         return {**result, 'simulation_scope': base['simulation_scope'], 'excluded_holdings': excluded,
                 'benchmark_isin': ', '.join(f"{'AGGH.AS' if name == 'BONDS' else name}: {isin}" for name, isin in ids.items()),
-                'covered_portfolio_pct': included / total * 100 if total else 0,
+                'covered_portfolio_pct': included if equity_only else (included / total * 100 if total else 0),
                 'history_issues': [*issues, *result.get('history_issues', [])]}
     except Exception as exc:
         return {**base, 'reason': f'Yahoo equity history could not be loaded ({type(exc).__name__}).'}

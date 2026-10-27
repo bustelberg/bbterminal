@@ -120,6 +120,25 @@ def test_risk_profile_active_share_uses_the_stock_and_bond_policy(monkeypatch):
     assert next(row for row in got["rows"] if row["name"] == "Nvidia")["bucket"] == "Stocks"
 
 
+def test_equity_only_policy_keeps_actual_weights_and_omits_bonds(monkeypatch):
+    monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
+        "bench": {"nvidia": {"key": "nvidia", "name": "Nvidia", "weight_pct": 100.0}},
+        "coverage": {}, "issuer_by_asset": {},
+    })
+    monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
+        "NVDA": {"isin": "NVDA", "gf_company_name": "Nvidia"},
+    })
+    got = A.compute_active_share([
+        {**_h("Nvidia", "NVDA", 45.0), "bucket": "Equity"},
+        {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
+    ], "ACWI", benchmark_weights={"Stocks": 60, "Bonds": 40, "EquityOnly": 1})
+    assert got["benchmark"] == "60% ACWI"
+    assert sum(row["portfolio_pct"] for row in got["rows"]) == 45
+    assert sum(row["benchmark_pct"] for row in got["rows"]) == 60
+    assert got["stocks_pct"] == 45
+    assert not any(row["bucket"] == "Bonds" for row in got["rows"])
+
+
 def test_risk_profile_reuses_the_acwi_asset_identity_bridge_for_direct_stocks(monkeypatch):
     """Policy mode must not turn an ACWI member into an unmatched name."""
     monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {

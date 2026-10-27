@@ -30,6 +30,19 @@ def run(data, years=5):
     return S.simulate(data, years, date(2026, 10, 27))
 
 
+def test_equity_only_retains_actual_weights_on_both_sides():
+    growing = points(2024, 24, lambda month: 2 if month in (1, 13) else 1)
+    data = inputs(growing, points(2024, 24), growing)
+    data.update(weight={'A': .3, 'B': .15}, preserve_weights=True,
+                benchmark_component_weights={'ACWI': 60})
+    result = run(data, 2)
+    assert result['available']
+    assert result['monthly_returns'][0]['portfolio_return_pct'] == pytest.approx(30)
+    assert result['monthly_returns'][0]['benchmark_return_pct'] == pytest.approx(60)
+    assert result['portfolio_return_total_pct'] == pytest.approx(69)
+    assert result['benchmark_return_total_pct'] == pytest.approx(156)
+
+
 def test_weights_drift_then_reset_annually_not_monthly():
     a = points(2024, 24, lambda month: 2 if month in (1, 13) else 1)
     b = points(2024, 24)

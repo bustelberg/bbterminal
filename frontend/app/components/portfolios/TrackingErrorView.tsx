@@ -213,7 +213,7 @@ export default function TrackingErrorView({
       {data?.covered_portfolio_pct != null && <p className="text-center text-xs text-fg-muted">Direct equities only · Yahoo Finance · covers {pct2(data.covered_portfolio_pct)} of today’s portfolio</p>}
       {!!data?.excluded_holdings?.length && <details className="order-last rounded-lg border border-neutral-800/40 p-3 text-xs text-fg-muted">
         <summary className="cursor-pointer">Excluded holdings · {data.excluded_holdings.length}</summary>
-        <p className="mt-2">The included equities are scaled to 100% once and held as the same set throughout. ETFs, funds, bonds, certificates and cash are excluded; no proxy or NAV prices are used.</p>
+        <p className="mt-2">Included equities retain their actual portfolio weights when comparing the equity allocation. The remaining allocation contributes no return. ETFs, funds, bonds, certificates and cash are excluded; no proxy or NAV prices are used.</p>
         <ul className="mt-2 space-y-1">{data.excluded_holdings.map((holding, index) => <li key={`${holding.isin}:${index}`} className="flex justify-between gap-3">
           <span>{holding.name}<span className="block text-fg-faint">{holding.reason}</span></span><span className="shrink-0 font-mono">{pct2(holding.weight_pct)}</span>
         </li>)}</ul>
@@ -246,7 +246,7 @@ export default function TrackingErrorView({
                   where="Current equity weights and Yahoo Finance prices converted to EUR."
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
                   how={comparison?.available
-                    ? 'The fixed equity set is scaled to 100% at the start. Weights drift between annual resets.'
+                    ? 'The fixed equity set retains its actual portfolio weights for an equity-only policy comparison. Weights drift between annual resets; the remaining allocation contributes no return.'
                     : comparison?.reason ?? 'Five-year history is unavailable.'}
                   worked={annualisedReturnWorked(comparison?.total_return_pct,
                     comparison?.years_elapsed ? 1 / comparison.years_elapsed : null, portfolioCagr)}
@@ -335,18 +335,6 @@ export default function TrackingErrorView({
                   : '') + 'Measured from this simulation’s monthly return differences, with annual rebalances.'} />} />} />
             </div>
           </div>
-
-          {!!data.monthly_returns?.length && <details className="rounded-lg border border-neutral-800/40 p-3 text-xs text-fg-muted">
-            <summary className="cursor-pointer">Monthly simulation returns and annual rebalances</summary>
-            <p className="mt-2">Rebalances happen after the marked month-end return, restoring the equity set and benchmark to their original target weights. Yahoo prices include FX movements, excluding distributions and trading costs.</p>
-            <div className="mt-2 max-h-64 overflow-auto"><table className="w-full min-w-[28rem] text-right tabular-nums">
-              <thead className="sticky top-0 bg-page"><tr><th className="py-2 text-left">Month end</th><th>Portfolio</th><th>Benchmark</th><th>Active return</th></tr></thead>
-              <tbody>{data.monthly_returns.map(month => <tr key={month.date} className="border-t border-neutral-800/30">
-                <td className="py-2 text-left">{performanceDate(month.date)}{data.rebalance_dates?.includes(month.date) ? ' · rebalance' : ''}</td>
-                <td>{pct2(month.portfolio_return_pct)}</td><td>{pct2(month.benchmark_return_pct)}</td><td>{month.active_return_pp.toFixed(2)}pp</td>
-              </tr>)}</tbody>
-            </table></div>
-          </details>}
 
 
         </>
