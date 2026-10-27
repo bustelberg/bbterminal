@@ -1,6 +1,12 @@
 {
   "overrides": [
     {
+      "isin": "IE00B6R52259",
+      "symbol": "ISAC.L",
+      "name": "iShares MSCI ACWI UCITS ETF USD Acc",
+      "note": "Use the existing canonical Risk benchmark listing (ISAC.L), also documented in _tracking_error and _asset_financials. A different venue with a shorter Yahoo history must not truncate the benchmark simulation. Full-history repair applies this pin before downloading daily bars."
+    },
+    {
       "isin": "KYG5264Y1089",
       "symbol": "3888.HK",
       "name": "Kingsoft Corp Ltd",

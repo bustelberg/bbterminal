@@ -17,6 +17,7 @@ Meta's last close 2026-07-02). The mapping was never the problem.
 from __future__ import annotations
 
 import inspect
+import pytest
 
 from asset_pipeline import price_refresh
 
@@ -457,6 +458,26 @@ def test_interactive_risk_tracker_repair_uses_the_normal_backfill_and_stale_path
     assert calls[0] == ("backfill", expected)
     assert calls[1] == ("stale", {"isins": expected, "stale_days": 1})
     assert got["backfill"]["backfilled"] == 1
+
+
+def test_yahoo_only_repair_retries_an_existing_execution_without_a_symbol(monkeypatch):
+    from asset_pipeline import queue, symbol_override
+    calls = []
+    monkeypatch.setattr(price_refresh, '_executions', lambda _isins: [
+        {'isin': 'STOCK', 'analysis_id': 1, 'yahoo_symbol': None, 'currency': 'EUR'},
+    ])
+    monkeypatch.setattr(queue, 'enqueue', lambda isins, **kwargs:
+                        calls.append(('enqueue', isins, kwargs)) or {'queued': 1})
+    monkeypatch.setattr(queue, 'process_slice', lambda **kwargs:
+                        calls.append(('process', kwargs)) or {'processed': 1})
+    monkeypatch.setattr(symbol_override, 'apply_symbol_overrides', lambda **_kwargs: 0)
+    monkeypatch.setattr(price_refresh, 'backfill_missing', lambda _isins: {})
+    monkeypatch.setattr(price_refresh, 'refresh_stale', lambda **_kwargs: {})
+    monkeypatch.setattr(price_refresh, 'backfill_nav_fallbacks', lambda _isins:
+                        pytest.fail('Yahoo-only repair must not fetch NAV prices'))
+    price_refresh.repair_price_histories({'STOCK'}, yahoo_only=True)
+    assert calls == [('enqueue', ['STOCK'], {'skip_existing': False}),
+                     ('process', {'isins': ['STOCK']})]
 
 
 def test_interactive_risk_tracker_repair_bootstraps_a_missing_execution(monkeypatch):

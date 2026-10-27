@@ -125,7 +125,7 @@ export default function CorrelationView({
   const key = `${repairIdentity}\nrepair:${repairVersion}`;
   const { data, error } = useRiskResult<RiskCorrelation>(key, async () => {
     const r = await apiFetch(requestUrl, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody, noReadCache: true,
     });
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
@@ -197,7 +197,8 @@ export default function CorrelationView({
           <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
         </div>
       )}
-      {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
+      {data && !data.available && <p className="text-xs text-fg-muted" title={data.reason ?? undefined}>{/benchmark.*history/i.test(data.reason ?? '')
+        ? <>Waiting for Yahoo benchmark history; retrying automatically… <LoadingDots /></> : data.reason}</p>}
 
       {data?.available && (
         <>

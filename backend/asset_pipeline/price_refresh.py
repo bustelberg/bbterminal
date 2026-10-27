@@ -471,7 +471,8 @@ def repair_price_histories(isins: set[str], *, years: int = 5, full_history: boo
     # no analysis id or Yahoo symbol for ``backfill_missing`` to fetch. Bootstrap it through the
     # paced resolver first; then a reviewed symbol override can correct a fuzzy ISIN match.
     resolved = _executions(isins)
-    present = {(row.get("isin") or "").strip().upper() for row in resolved}
+    present = {(row.get("isin") or "").strip().upper() for row in resolved
+               if not yahoo_only or (row.get('analysis_id') and row.get('yahoo_symbol'))}
     missing_execution = sorted(isins - present)
     bootstrap = {"queued": 0, "processed": 0, "ok": 0, "failed": 0, "unmapped": 0}
     if missing_execution:

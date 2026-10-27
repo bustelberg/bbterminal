@@ -31,9 +31,22 @@ export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope
   traceMessage: string, enabled = true): { data: T | null; error: string | null } {
   const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
+  const [retry, setRetry] = useState(0);
   const hit = cached<T>(key);
   const data = hit ?? (loaded?.key === key ? loaded.value : null);
   const error = failure?.key === key ? failure.message : null;
+
+  useEffect(() => {
+    const answer = data as { available?: boolean; reason?: string; history_issues?: Array<{ kind?: string }> } | null;
+    const benchmarkMissing = /benchmark.*history|history.*benchmark/i.test(answer?.reason ?? '')
+      || answer?.history_issues?.some(issue => issue.kind === 'benchmark');
+    if (!enabled || answer?.available !== false || !benchmarkMissing) return;
+    const timer = setTimeout(() => {
+      results.delete(key);
+      setRetry(value => value + 1);
+    }, 60_000);
+    return () => clearTimeout(timer);
+  }, [data, enabled, key, retry]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -41,7 +54,8 @@ export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope
     let cancelled = false;
     void load().then((value) => {
       if (cancelled) return;
-      results.set(key, { generation: readGeneration(), value });
+      const answer = value as { available?: boolean };
+      if (answer?.available !== false) results.set(key, { generation: readGeneration(), value });
       setFailure(null);
       setLoaded({ key, value });
     }).catch((e: unknown) => {
@@ -54,7 +68,7 @@ export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope
     // `key` is the complete request identity, including URL and body. A new loader with the same
     // key is the same read; depending on its render-time function identity would refetch forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, enabled]);
+  }, [key, enabled, retry]);
 
   return { data, error };
 }

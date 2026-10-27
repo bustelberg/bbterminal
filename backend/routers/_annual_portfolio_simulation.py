@@ -45,11 +45,18 @@ def _equity_name_key(name: str | None) -> str:
     from routers._active_share import _issuer_key
     text = unicodedata.normalize('NFKD', name or '').encode('ascii', 'ignore').decode().lower()
     text = text.replace('`', "'")
+    text = re.sub(r'\s*\(publ\)\s*$', '', text)
     text = re.sub(r'\bsociete en commandite par actions\b', '', text)
     text = _issuer_key(text)
     text = _issuer_key(re.sub(r'[\s,.]+[abc]\.?$', '', text))
     text = {'adobe systems': 'adobe', 'hermes internationale': 'hermes international'}.get(text, text)
-    return ''.join(re.findall(r'[a-z0-9]+', text))
+    key = ''.join(re.findall(r'[a-z0-9]+', text))
+    return {
+        'lindeeu': 'linde',
+        'besemiconductorindustries': 'besemiconductor',
+        'gaztransportettechnigaz': 'gaztransportandtechnigaz',
+        'lvmhmoethennessylouisvuittonsocieteeuropeenne': 'lvmh',
+    }.get(key, key)
 
 
 def simulate(inputs: dict, years: int = 5, today: date | None = None,
@@ -225,6 +232,13 @@ def compute_simulation(holdings: list[dict], benchmark: str, years: int = 5,
             'covered_portfolio_pct': 0, 'excluded_holdings': excluded, 'history_issues': issues}
     try:
         mappings = _yahoo_mappings(sorted(set(candidates) | set(ids.values())))
+        missing_benchmarks = {isin for isin in ids.values()
+                              if not (mappings.get(isin) or {}).get('yahoo_symbol')
+                              or not (mappings.get(isin) or {}).get('analysis_id')}
+        if start_date and missing_benchmarks:
+            from routers._risk_benchmark_history import ensure_benchmark_history
+            ensure_benchmark_history({}, missing_benchmarks, start_date, years + 1, lambda: {})
+            mappings = _yahoo_mappings(sorted(set(candidates) | set(ids.values())))
         verified = {}
         for isin, weight in candidates.items():
             source = mappings.get(isin) or {}
@@ -255,6 +269,17 @@ def compute_simulation(holdings: list[dict], benchmark: str, years: int = 5,
         # No NAV fallback, synthetic cash or AIRS valuation prices enter this load.
         series = dict(_risk_prices(tuple(sorted(set(verified) | set(ids.values()))), years + 1,
                                    date.today().isoformat(), int(time.monotonic() // 300), _daily_eur))
+        if start_date:
+            from routers._risk_benchmark_history import ensure_benchmark_history
+
+            def reload_prices():
+                from routers._tracking_error import _risk_prices as shared_prices
+                shared_prices.cache_clear()
+                return dict(_risk_prices(tuple(sorted(set(verified) | set(ids.values()))), years + 1,
+                                         date.today().isoformat(), int(time.monotonic() // 300), _daily_eur))
+
+            series = ensure_benchmark_history(series, set(ids.values()), start_date, years + 1,
+                                              reload_prices)
         if start_date:
             latest = [day for isin in ids.values() for day, price in series.get(isin, [])
                       if day <= date.today().isoformat() and price is not None and price > 0]

@@ -206,6 +206,13 @@ def test_fixed_yahoo_cohort_excludes_funds_young_stocks_and_bad_mappings(monkeyp
     ('Berkshire Hathaway - B', 'Berkshire Hathaway Inc.'), ('MSCI Inc. A', 'MSCI Inc.'),
     ('Nestle', 'Nestlé S.A.'), ('L` Oreal', "L'Oréal S.A."),
     ('Hermes Internationale', 'Hermès International Société en commandite par actions'),
+    ('Linde EU', 'Linde plc'), ('Assa Abloy', 'ASSA ABLOY AB (publ)'),
+    ('3i Group', '3i Group plc'), ('Investor AB - B', 'Investor AB (publ)'),
+    ('Addtech AB', 'Addtech AB (publ)'), ('Lifco', 'Lifco AB (publ)'),
+    ('Atlas Copco AB', 'Atlas Copco AB (publ)'),
+    ('Gaztransport et Technigaz', 'Gaztransport & Technigaz'),
+    ('LVMH', 'LVMH Moët Hennessy - Louis Vuitton, Société Européenne'),
+    ('BE Semiconductor', 'BE Semiconductor Industries N.V.'),
 ])
 def test_equity_name_aliases_do_not_exclude_real_yahoo_shares(held, quoted):
     assert S._equity_name_key(held) == S._equity_name_key(quoted)

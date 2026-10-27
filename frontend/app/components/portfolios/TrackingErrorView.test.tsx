@@ -35,17 +35,17 @@ describe('shared hypothetical performance view', () => {
   afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
   const render = () => act(async () => { root.render(<TrackingErrorView holdings={[{ isin: 'FUND', name: 'New bond ETF', weight_pct: 12 }, { isin: 'OLD', name: 'Old holding', weight_pct: 88 }]} benchmark="ACWI" portfolioName="Portfolio" portfolioSource="airs_volk" />); });
 
-  it('shows the shortened period, both CAGRs, monthly TE and the holding causing missing history', async () => {
+  it('shows only the two CAGRs and their period, keeping data diagnostics out of the page', async () => {
     await render();
-    expect(host.textContent).toContain('Available-period equity simulation');
-    expect(host.textContent).toContain('covers 60.00% of today’s portfolio');
-    expect(host.textContent).toContain('Excluded ETF');
     expect(host.textContent).toContain('30 September 2024 to 30 September 2026');
-    expect(host.textContent).toContain('24 completed monthly returns');
+    expect(host.textContent).not.toContain('Excluded ETF');
+    expect(host.textContent).not.toContain('completed monthly returns');
     expect(host.textContent).toContain('4.00%');
     expect(host.textContent).toContain('5.00%');
-    expect(host.textContent).toContain('-1.00pp');
-    expect(host.textContent).toContain('New bond ETF');
+    expect(host.textContent).not.toContain('-1.00pp');
+    expect(host.textContent).not.toContain('New bond ETF');
+    expect(host.textContent).not.toContain('Hypothetical tracking error');
+    expect(host.querySelector('details')).toBeNull();
     expect(host.textContent).not.toContain('preliminary');
     expect(startJob).toHaveBeenCalledTimes(1);
     const [url, , request] = vi.mocked(startJob).mock.calls[0];
@@ -53,13 +53,13 @@ describe('shared hypothetical performance view', () => {
     expect(url).toContain('full_history=true');
     expect(JSON.parse(String(request?.body)).holdings.map((holding: { isin: string }) => holding.isin)).toEqual(['FUND']);
   });
-  it('still shows missing holdings when too little shared history prevents calculation', async () => {
+  it('shows loading instead of blank figures while genuine history is being repaired', async () => {
     state.response = { ...state.response, available: false, reason: 'At least 12 complete monthly returns are required.' };
     await render();
-    expect(host.textContent).toContain('At least 12 complete monthly returns');
-    expect(host.textContent).toContain('New bond ETF');
-    expect(host.textContent).toContain('Hypothetical tracking error');
+    expect(host.textContent).toContain('Loading Yahoo price history');
+    expect(host.textContent).not.toContain('New bond ETF');
+    expect(host.textContent).not.toContain('Hypothetical tracking error');
     expect(host.textContent).not.toContain('4.00%');
-    expect(host.querySelector('details')?.open).toBe(false);
+    expect(host.querySelector('details')).toBeNull();
   });
 });

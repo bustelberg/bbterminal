@@ -311,6 +311,17 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             raise SeriesError(
                 f"The price series could not be loaded ({type(e).__name__}).") from e
 
+    if start_date and preloaded is None and not _repair_attempted:
+        from routers._risk_benchmark_history import ensure_benchmark_history
+
+        def reload_prices():
+            _risk_prices.cache_clear()
+            return _risk_prices(tuple(sorted([*isins, *benchmark_isins.values()])), years,
+                                date.today().isoformat(), int(time.monotonic() // 300), _daily_eur)
+
+        series = ensure_benchmark_history(series, set(benchmark_isins.values()), start_date,
+                                          years, reload_prices)
+
     # All measures use identical endpoints, anchored to the latest benchmark close. Retain the
     # last observation at/before the five-year opening date as the return's starting price.
     benchmark_prices = sorted(row for row in (series.get(next(iter(benchmark_isins.values()))) or [])
