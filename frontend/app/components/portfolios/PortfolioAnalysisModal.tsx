@@ -27,7 +27,8 @@ import { analysisRequestKey, loadPrefetchedAnalysis } from '../../../lib/analysi
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import MonthlyReportPanel from './MonthlyReportPanel';
 import PanelDialog from './PanelDialog';
-import ActiveSharePanel, { type ActiveShareHolding } from './ActiveSharePanel';
+import type { ActiveShareHolding } from './ActiveSharePanel';
+import AirsRiskPanel from './AirsRiskPanel';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import EtfSectorAllocationModal from './EtfSectorAllocationModal';
@@ -3278,7 +3279,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
           <span className="text-warn-500">
             {copy.reconciliation.mismatch(ppt(grand.contribution), fmtRet(realised.book_ytd_pct),
               ppt(grand.contribution - realised.book_ytd_pct))}
-            {realised.residual_reason ? ` ${copy.serverText(realised.residual_reason)}` : ''}
           </span>
         </div>
       )}
@@ -4177,7 +4177,6 @@ export default function PortfolioAnalysisModal({
                             Reserve the final chart card's plot/tooltip footprint here, before that
                             request completes, so its arrival cannot move the scorecard above it. */}
                         <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
-                          portfolioName={name}
                           benchmark={benchmark}
                           policyWeights={data.risk_profile_policy}
                           benchmarkBlocks={(data.returns?.block_returns ?? []).filter(isScorecardBlock)} />
@@ -4338,7 +4337,8 @@ export default function PortfolioAnalysisModal({
               (`holdings: int`), so the obvious name silently types as a number. */}
           {data.details_pending ? (
             <p role="status" className="text-sm text-fg-muted">{detailsError ? 'Risk details could not be loaded. Close and reopen Risk to retry.' : 'Loading risk holdings…'}</p>
-          ) : <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
+          ) : <AirsRiskPanel benchmark={data.benchmark ?? benchmark}
+            airsHoldings={data.book_holdings ?? []} bands={data.bands}
             portefeuille={data.book_portefeuille}
             holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
             riskProfilePolicy={data.risk_profile_policy}
@@ -4346,7 +4346,7 @@ export default function PortfolioAnalysisModal({
             // of holdings carries no date — so without these its When line can only assume
             // "today", which is exactly what it used to do.
             portfolioName={name}
-            portfolioAsOf={data.returns?.portfolio_as_of}
+            portfolioAsOf={data.holdings_as_of ?? data.returns?.portfolio_as_of}
             portfolioStartAsOf={
               `${(data.returns?.portfolio_as_of ?? new Date().toISOString()).slice(0, 4)}-01-01`
             }

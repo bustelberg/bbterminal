@@ -288,6 +288,19 @@ export default function ActiveSharePanel({
     active: a.active + (r.active_pct ?? 0),
   }), { book: 0, bench: 0, active: 0 });
 
+  // Reserve space for the full labels, not just percentage values. Both tables share the same
+  // columns and horizontal scroll surface so the fixed totals cannot drift away from the rows.
+  const portfolioColumnWidth = `max(10rem, ${portfolioName.length + 6}ch)`;
+  const benchmarkColumnWidth = `max(12rem, ${(data?.benchmark ?? benchmark).length + 6}ch)`;
+  const tableMinWidth = `calc(14rem + ${portfolioColumnWidth} + ${benchmarkColumnWidth} + 6rem + 7rem)`;
+  const tableColumns = <colgroup>
+    <col />
+    <col style={{ width: portfolioColumnWidth }} />
+    <col style={{ width: benchmarkColumnWidth }} />
+    <col className="w-24" />
+    <col className="w-28" />
+  </colgroup>;
+
   return (
     <div className="relative h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
       bg-card p-4">
@@ -463,16 +476,11 @@ export default function ActiveSharePanel({
               docs already asks for ("keep dense tables inside their own overflow-auto container").
                `max-h`, NOT `h` — a short book must not get a half-empty box with a scrollbar. */}
           <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-neutral-800/40
-            overflow-hidden">
+            overflow-x-auto">
+            <div className="flex min-h-0 flex-1 flex-col text-xs" style={{ minWidth: tableMinWidth }}>
             <div className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable]">
               <table className="w-full table-fixed text-xs">
-              <colgroup>
-                <col />
-                <col className="w-40" />
-                <col className="w-20" />
-                <col className="w-20" />
-                <col className="w-28" />
-              </colgroup>
+              {tableColumns}
               {/*  STICKY AND THE BACKGROUND BOTH SIT ON THE `<th>` CELLS, NOT ON `<thead>`, AND
                   THAT IS THE WHOLE FIX. Two separate reasons, either of which alone produces the
                   reported symptom — rows travelling over a header that should absorb them:
@@ -491,7 +499,7 @@ export default function ActiveSharePanel({
                   paint in the positioned phase and would sit over a z-auto header. */}
               <thead>
                 <tr className="text-fg-faint [&>th]:px-2.5 [&>th]:py-1 [&>th]:font-medium
-                  [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:bg-inset">
+                  [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:bg-inset [&>th]:whitespace-nowrap">
                   <th className="text-left">{t.active.colCompany}</th>
                   <th className="text-right whitespace-nowrap">{portfolioName}</th>
                   <th className="text-right">{data.benchmark ?? benchmark}</th>
@@ -591,13 +599,7 @@ export default function ActiveSharePanel({
                   colgroup keeps all numeric columns aligned with the rows above. */}
             <div className="shrink-0 overflow-y-auto [scrollbar-gutter:stable]">
             <table className="w-full table-fixed text-xs" aria-label="Active share totals">
-              <colgroup>
-                <col />
-                <col className="w-40" />
-                <col className="w-20" />
-                <col className="w-20" />
-                <col className="w-28" />
-              </colgroup>
+              {tableColumns}
               <tfoot>
                 <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
                   [&>td]:border-neutral-700/60 [&>td]:bg-inset font-medium">
@@ -648,6 +650,7 @@ export default function ActiveSharePanel({
                 </tr>
               </tfoot>
             </table>
+            </div>
             </div>
           </div>
         </div>

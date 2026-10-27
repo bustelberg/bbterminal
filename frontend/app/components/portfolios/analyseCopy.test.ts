@@ -13,6 +13,14 @@ function leaves(node: unknown, path = '', out: Record<string, string> = {}): Rec
 }
 
 describe('Analyse primary-view copy', () => {
+  it('keeps reconciliation warnings brief without calling rounded-zero differences missing positions', () => {
+    expect(ANALYSE_COPY.en.reconciliation.mismatch('+4.03pp', '+4.03%', '-0.00pp')).toBe('Difference from AIRS: <0.01pp.');
+    expect(ANALYSE_COPY.nl.reconciliation.mismatch('+4.03pp', '+4.03%', '+0.00pp')).toBe('Verschil met AIRS: <0.01pp.');
+    expect(ANALYSE_COPY.en.reconciliation.mismatch('+4.03pp', '+4.33%', '-0.30pp')).toBe('Difference from AIRS: -0.30pp.');
+    const source = readFileSync(join('app', 'components', 'portfolios', 'PortfolioAnalysisModal.tsx'), 'utf8');
+    expect(source).not.toContain('copy.serverText(realised.residual_reason)');
+  });
+
   const en = leaves(ANALYSE_COPY.en);
   const nl = leaves(ANALYSE_COPY.nl);
 
@@ -67,33 +75,18 @@ describe('Analyse primary-view copy', () => {
     expect(forbidden.filter((phrase) => source.includes(phrase))).toEqual([]);
   });
 
-  it('localises the monthly-return dialog controls too', () => {
+  it('keeps the return chart without an Explain returns dialog or hidden chart-click opener', () => {
     const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
-    expect(source).toContain('useAnalyseCopy');
-    expect(source).toContain('copy.actions.lookThrough');
-    expect(source).toContain('copy.actions.close');
-    expect(source).not.toContain('>Look through certificates<');
-    expect(source).not.toContain('aria-label="Close"');
-  });
-
-  it('replaces the previous month with a loading state immediately', () => {
-    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
-    expect(source).toContain('<MonthlyPerformance key={selectedMonth}');
-    expect(source).toContain('role="status" aria-live="polite"');
-    expect(source).toContain('animate-spin');
-  });
-
-  it('also clears the old rows when certificate look-through changes', () => {
-    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
-    const toggle = source.slice(source.indexOf('checked={lookThrough}'), source.indexOf('className="h-3.5'));
-    expect(toggle).toContain('setData(null)');
-    expect(toggle).toContain('setLookThrough(event.target.checked)');
-  });
-
-  it('uses the shared Toppenberg-only certificate default in the monthly-return dialog', () => {
-    const source = readFileSync(join('app', 'components', 'portfolios', 'BookReturnChart.tsx'), 'utf8');
-    expect(source).toContain("import { defaultLookThroughCertificates } from './portfolioDefaults'");
-    expect(source).toContain('() => defaultLookThroughCertificates(portfolioName)');
+    expect(source).not.toContain('Explain returns');
+    expect(source).not.toContain('MonthlyPerformance');
+    expect(source).not.toContain('monthly-yahoo-performance');
+    expect(source).not.toContain('monthlyPerformanceCache');
+    expect(source).not.toContain('role="dialog"');
+    expect(source).not.toContain('Open monthly holding returns');
+    expect(source).not.toContain('onClickCapture');
+    expect(source).toContain('<AreaChart');
+    expect(source).toContain('<ReturnTooltip');
+    expect(source).toContain('/value-series');
   });
 
   it('localises benchmark provenance too', () => {

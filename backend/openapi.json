@@ -2965,6 +2965,200 @@
         "title": "AirsRealisedLeg",
         "type": "object"
       },
+      "AirsRiskHistory": {
+        "properties": {
+          "current_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Drawdown Pct"
+          },
+          "first_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Date"
+          },
+          "last_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Date"
+          },
+          "max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Pct"
+          },
+          "months": {
+            "items": {
+              "$ref": "#/components/schemas/AirsRiskMonth"
+            },
+            "title": "Months",
+            "type": "array"
+          },
+          "negative_months": {
+            "default": 0,
+            "title": "Negative Months",
+            "type": "integer"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "peak_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Date"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/AirsRiskObservation"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "portefeuille": {
+            "title": "Portefeuille",
+            "type": "string"
+          },
+          "recovery_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Date"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "trough_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trough Date"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "worst_month_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Month Pct"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "portefeuille",
+          "source"
+        ],
+        "title": "AirsRiskHistory",
+        "type": "object"
+      },
+      "AirsRiskMonth": {
+        "properties": {
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "return_pct": {
+            "title": "Return Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "month",
+          "return_pct"
+        ],
+        "title": "AirsRiskMonth",
+        "type": "object"
+      },
+      "AirsRiskObservation": {
+        "properties": {
+          "cumulative_pct": {
+            "title": "Cumulative Pct",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "drawdown_pct": {
+            "title": "Drawdown Pct",
+            "type": "number"
+          },
+          "reference": {
+            "default": false,
+            "title": "Reference",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "date",
+          "cumulative_pct",
+          "drawdown_pct"
+        ],
+        "title": "AirsRiskObservation",
+        "type": "object"
+      },
       "AllocationBand": {
         "description": "One cell of the allocation policy: what share this class may take in this risk profile.\n\n EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. \"No policy recorded\" and \"hold none of this\"\nare the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset\ncell comes back null rather than 0 \u2014 a zeroed grid would publish a policy nobody wrote.\n\n DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over\nthe allocation bars). Pydantic resolves the annotation when the class is built, so a definition\nfurther down the file is a NameError at import, not a forward reference.",
         "properties": {
@@ -20426,6 +20620,49 @@
           }
         },
         "summary": "Airs Account Return Reconciliation",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/accounts/{portefeuille}/risk-history": {
+      "get": {
+        "description": "Actual account observations. No vendor calls, holdings reconstruction or writes.",
+        "operationId": "airs_account_risk_history_api_airs_accounts__portefeuille__risk_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirsRiskHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Account Risk History",
         "tags": [
           "airs"
         ]

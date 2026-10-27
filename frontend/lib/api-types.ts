@@ -977,6 +977,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/risk-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Risk History
+         * @description Actual account observations. No vendor calls, holdings reconstruction or writes.
+         */
+        get: operations["airs_account_risk_history_api_airs_accounts__portefeuille__risk_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/transactions": {
         parameters: {
             query?: never;
@@ -9854,6 +9874,68 @@ export interface components {
              */
             sales?: number;
         };
+        /** AirsRiskHistory */
+        AirsRiskHistory: {
+            /** Current Drawdown Pct */
+            current_drawdown_pct?: number | null;
+            /** First Date */
+            first_date?: string | null;
+            /** Last Date */
+            last_date?: string | null;
+            /** Max Drawdown Pct */
+            max_drawdown_pct?: number | null;
+            /** Months */
+            months?: components["schemas"]["AirsRiskMonth"][];
+            /**
+             * Negative Months
+             * @default 0
+             */
+            negative_months?: number;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Peak Date */
+            peak_date?: string | null;
+            /** Points */
+            points?: components["schemas"]["AirsRiskObservation"][];
+            /** Portefeuille */
+            portefeuille: string;
+            /** Recovery Date */
+            recovery_date?: string | null;
+            /** Source */
+            source: string;
+            /** Trough Date */
+            trough_date?: string | null;
+            /** Warnings */
+            warnings?: string[];
+            /** Worst Month Pct */
+            worst_month_pct?: number | null;
+            /** Year */
+            year?: number | null;
+        };
+        /** AirsRiskMonth */
+        AirsRiskMonth: {
+            /** Month */
+            month: string;
+            /** Return Pct */
+            return_pct: number;
+        };
+        /** AirsRiskObservation */
+        AirsRiskObservation: {
+            /** Cumulative Pct */
+            cumulative_pct: number;
+            /** Date */
+            date: string;
+            /** Drawdown Pct */
+            drawdown_pct: number;
+            /**
+             * Reference
+             * @default false
+             */
+            reference?: boolean;
+        };
         /**
          * AllocationBand
          * @description One cell of the allocation policy: what share this class may take in this risk profile.
@@ -16743,6 +16825,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AirsAccountReconciliation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    airs_account_risk_history_api_airs_accounts__portefeuille__risk_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsRiskHistory"];
                 };
             };
             /** @description Validation Error */

@@ -1888,6 +1888,44 @@ class WeightedBenchmarkComponent(BaseModel):
     return_pct: float | None = None
 
 
+class AirsRiskObservation(BaseModel):
+    date: str
+    cumulative_pct: float
+    drawdown_pct: float
+    reference: bool = False
+
+
+class AirsRiskMonth(BaseModel):
+    month: str
+    return_pct: float
+
+
+class AirsRiskHistory(BaseModel):
+    portefeuille: str
+    source: str
+    year: int | None = None
+    observations: int = 0
+    first_date: str | None = None
+    last_date: str | None = None
+    max_drawdown_pct: float | None = None
+    current_drawdown_pct: float | None = None
+    worst_month_pct: float | None = None
+    negative_months: int = 0
+    peak_date: str | None = None
+    trough_date: str | None = None
+    recovery_date: str | None = None
+    points: list[AirsRiskObservation] = Field(default_factory=list)
+    months: list[AirsRiskMonth] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+@router.get('/api/airs/accounts/{portefeuille}/risk-history', response_model=AirsRiskHistory)
+async def airs_account_risk_history(portefeuille: str):
+    """Actual account observations. No vendor calls, holdings reconstruction or writes."""
+    from routers._airs_risk_history import account_risk_history  # noqa: PLC0415
+    return await asyncio.to_thread(account_risk_history, portefeuille)
+
+
 class BookValueSeries(BaseModel):
     """The book's value through time, and the return that value earned.
 

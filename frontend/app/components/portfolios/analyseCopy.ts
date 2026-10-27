@@ -2,6 +2,8 @@
 
 import { useLang, type Lang } from '../../../lib/i18n';
 
+const displayedResidual = (residual: string) => residual.replace(/^[+−-]?0[.,]00pp$/, '<0.01pp');
+
 /** Copy for the primary Analyse view. Child dialogs own their copy separately. */
 const en = {
   lang: 'en',
@@ -199,7 +201,7 @@ const en = {
   reconciliation: {
     compareHow: (contribution: string, book: string, agrees: boolean) => `AIRS's own cumulatief_rendement against the Contribution total\n\n${contribution} from these rows vs ${book} from AIRS — they ${agrees ? 'agree' : 'do NOT agree'}`,
     compareUnavailable: (contribution: string, book: string, holdingsDate: string, bookDate: string) => `Contribution total cannot be reconciled to AIRS yet\n\n${contribution} from positions valued ${holdingsDate} vs ${book} from AIRS through ${bookDate}. The dates differ, so this is not a missing-position check.`,
-    mismatch: (sum: string, book: string, residual: string) => ` Contribution adds to ${sum} against AIRS's ${book}; ${residual} of the year is not explained by these rows.`,
+    mismatch: (_sum: string, _book: string, residual: string) => `Difference from AIRS: ${displayedResidual(residual)}.`,
   },
   /*  IT NAMES THE COUNTRIES, AND THE OLD COPY NAMED THE WRONG CAUSE. It used to say "the rest
      have no price series yet" — measured on ACWI, exactly ONE of the members that reach the price
@@ -407,7 +409,7 @@ const nl: AnalyseCopy = {
   reconciliation: {
     compareHow: (contribution, book, agrees) => `AIRS' eigen cumulatief_rendement tegenover het totaal Bijdrage\n\n${contribution} uit deze rijen versus ${book} uit AIRS — ze ${agrees ? 'komen overeen' : 'komen NIET overeen'}`,
     compareUnavailable: (contribution, book, holdingsDate, bookDate) => `Het totaal Bijdrage kan nog niet met AIRS worden afgestemd\n\n${contribution} uit posities gewaardeerd op ${holdingsDate} versus ${book} uit AIRS tot ${bookDate}. De datums verschillen, dus dit is geen controle op ontbrekende posities.`,
-    mismatch: (sum, book, residual) => ` Bijdrage telt op tot ${sum} tegenover AIRS' ${book}; ${residual} van het jaar wordt niet door deze rijen verklaard.`,
+    mismatch: (_sum, _book, residual) => `Verschil met AIRS: ${displayedResidual(residual)}.`,
   },
   coverageWarning: (priced, total, pct, missing) => {
     const head = ` Deze index is herbouwd uit ${priced} van de ${total} constituenten (${pct}); de wegingen zijn over het resterende deel herwogen.`;

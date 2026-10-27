@@ -328,6 +328,7 @@ class TestExpandingAnAccountIsUserAccessible:
             ('GET', '/api/jobs'), ('GET', '/api/jobs/monthly-performance/stream'),
             ('POST', '/api/jobs/monthly-performance/cancel'),
             ('GET', '/api/airs/accounts/BUS_Offensief_Dyn/fundamental-weights'),
+            ('GET', '/api/airs/accounts/BUS_Offensief_Dyn/risk-history'),
         ):
             assert _run(monkeypatch, method, path, 'user') == (200, True), (method, path)
             assert _run(monkeypatch, method, path, None) == (401, False), (method, path)
