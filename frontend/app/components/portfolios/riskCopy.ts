@@ -289,8 +289,7 @@ const en: RiskCopy = {
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlation',
     vol: 'Volatility', dd: 'Max drawdown', conc: 'Concentration' },
   basis: { label: 'AIRS weights', now: 'Current', start: 'Start of year' },
-  subtitle: (portfolio, asOf) => `Current AIRS stock weights in ${portfolio}`
-    + `${riskLongDate(asOf) ? ` as of ${riskLongDate(asOf)}` : ''}, compared with the benchmark history — not realised account performance.`,
+  subtitle: () => 'Only stocks considered',
   close: 'close',
 
   common: {
@@ -312,9 +311,9 @@ const en: RiskCopy = {
     heldOnly: (n) => `What we hold (${n})`, everyName: (n) => `Every name (${n})`,
     colCompany: 'Company', colBook: 'Book', colActive: 'Active', notHeld: 'not held',
     otherPositions: 'Other portfolio positions',
-    currentWeight: 'current AIRS weight', startWeight: 'opening AIRS weight',
-    weightHow: 'The company value divided by the sum of all raw AIRS values in the complete book.',
-    weightWhat: (company, book) => `${v(company)}'s weight in the complete ${v(book)} AIRS book.`,
+    currentWeight: 'actual current AIRS portfolio weight', startWeight: 'opening AIRS weight',
+    weightHow: 'Normalised stock weight multiplied by the portfolio’s actual stock allocation. The table shows whole-portfolio weights; headline active share and overlap remain normalised.',
+    weightWhat: (company, book) => `${v(company)}'s actual weight in the complete ${v(book)} portfolio.`,
     heldVsIndex: (h, m, bookSrc, benchField, benchVendor) =>
       `${v(h)} companies and their weights from ${v(bookSrc)}, against ${v(m)} priced index `
       + `members weighted by ${v(benchField)} from ${v(benchVendor)}.`,
@@ -329,11 +328,9 @@ const en: RiskCopy = {
     },
     totalCardHeld: {
       what: 'The held names only, so the Active column does not sum to zero.',
-      where: 'The portfolio column uses actual complete-portfolio AIRS weights. The benchmark '
+      where: 'The portfolio column uses actual whole-portfolio stock weights. The profile-weighted ACWI '
         + 'column shows the index weights for those same names.',
-      how: 'The total is the portfolio\'s overall overweight among the held names. Matching '
-        + 'underweights sit in benchmark constituents not shown here. Switch to Every name to '
-        + 'see the Active total return to zero. Each figure below is simply the sum of its column.',
+      how: 'Each total sums the displayed held names. Benchmark-only names are omitted. The signed Active total is stock-basket weight minus ACWI weight for these names; it is neither overlap nor active share.',
     },
     coverage: (pct, b) => `Priced ${pct} of ${b}'s members. The missing weight is redistributed `
       + 'over the rest, so the active share reads slightly low.',
@@ -348,7 +345,7 @@ const en: RiskCopy = {
       heldSet: 'the set of companies held by the portfolio and shown in this table',
       allSet: 'the set of all companies shown in this table',
       wp: (bookName) =>
-        `${v(bookName)}'s actual weight in that company, over the complete AIRS book`,
+        `${v(bookName)}'s weight in that company within the stock basket normalised to 100%`,
       wb: (bench) => `${v(bench)}'s own weight in the same company, by market cap`,
       min: 'the smaller of the portfolio and benchmark weights for each company',
       notInBench: (bench) => `read as "over the companies ${v(bench)} does not hold at all" — the `
@@ -368,7 +365,7 @@ const en: RiskCopy = {
       + `${unstamped > 0 ? ` (${v(unstamped)} undated)` : ''}`,
     cards: {
       activeShare: {
-        what: 'How much of the complete AIRS book differs from the benchmark.',
+        what: 'How much of the stock basket differs from 100% ACWI, with both sides normalised to 100%.',
       },
       overlap: {
         what: 'The share of the portfolio that overlaps with the benchmark.',
@@ -628,8 +625,7 @@ const nl: RiskCopy = {
   titles: { active: 'Active share', te: 'Tracking error', corr: 'Correlatie',
     vol: 'Volatiliteit', dd: 'Maximale drawdown', conc: 'Concentratie' },
   basis: { label: 'AIRS-wegingen', now: 'Actueel', start: 'Begin van het jaar' },
-  subtitle: (portfolio, asOf) => `Huidige AIRS-wegingen van aandelen in ${portfolio}`
-    + `${riskLongDate(asOf) ? ` per ${riskLongDate(asOf)}` : ''}, vergeleken met de historische benchmark — geen gerealiseerd rendement van de rekening.`,
+  subtitle: () => 'Only stocks considered',
   close: 'sluiten',
 
   common: {
@@ -654,9 +650,9 @@ const nl: RiskCopy = {
     // op twee manieren.
     colCompany: 'Onderneming', colBook: 'Portfolio', colActive: 'Actief', notHeld: 'niet gehouden',
     otherPositions: 'Overige portefeuilleposities',
-    currentWeight: 'actuele AIRS-weging', startWeight: 'AIRS-weging aan het begin',
-    weightHow: 'De waarde van de onderneming gedeeld door de som van alle ruwe AIRS-waarden in het volledige boek.',
-    weightWhat: (company, book) => `Het gewicht van ${v(company)} in het volledige AIRS-boek ${v(book)}.`,
+    currentWeight: 'werkelijke actuele AIRS-portefeuilleweging', startWeight: 'AIRS-weging aan het begin',
+    weightHow: 'De genormaliseerde aandelenweging maal het werkelijke aandelenbelang. De tabel toont gewichten in de volledige portefeuille; active share en overlap blijven genormaliseerd.',
+    weightWhat: (company, book) => `Het werkelijke gewicht van ${v(company)} in de volledige portefeuille ${v(book)}.`,
     heldVsIndex: (h, m, bookSrc, benchField, benchVendor) =>
       `${v(h)} ondernemingen en hun gewichten uit ${v(bookSrc)}, tegenover ${v(m)} geprijsde `
       + `indexleden gewogen naar ${v(benchField)} van ${v(benchVendor)}.`,
@@ -671,12 +667,9 @@ const nl: RiskCopy = {
     },
     totalCardHeld: {
       what: 'Alleen de gehouden namen, dus de kolom Actief telt niet op tot nul.',
-      where: 'De portefeuille gebruikt de werkelijke AIRS-gewichten van het volledige boek; de '
+      where: 'De portefeuille toont werkelijke gewichten in de volledige portefeuille; de profielgewogen ACWI-'
         + 'benchmarkkolom toont wat de index in dezelfde namen houdt.',
-      how: 'Het totaal is de volledige overweging van de portefeuille binnen de gehouden namen. '
-        + 'De bijbehorende onderwegingen zitten in benchmarkposities die hier niet staan. Schakel '
-        + 'naar Alle namen om het totaal van Actief naar nul te zien gaan. Elk getal hieronder is '
-        + 'simpelweg de som van zijn kolom.',
+      how: 'Elk totaal is de som van de getoonde gehouden namen. Niet-gehouden ACWI-posities ontbreken hier. Actief is het aandelengewicht min het ACWI-gewicht voor deze namen; dit totaal is niet overlap of active share.',
     },
     coverage: (pct, b) => `${pct} van de leden van ${b} geprijsd. Het ontbrekende gewicht wordt over `
       + 'de rest herverdeeld, waardoor de active share iets te laag uitvalt.',
@@ -687,8 +680,7 @@ const nl: RiskCopy = {
         + 'onderneming samengevoegd',
       heldSet: 'de verzameling ondernemingen die de portefeuille houdt en die in deze tabel staan',
       allSet: 'de verzameling van alle ondernemingen die in deze tabel staan',
-      wp: (bookName) => `het werkelijke gewicht van ${v(bookName)} in die onderneming, over het `
-        + 'volledige AIRS-boek',
+      wp: (bookName) => `het gewicht van ${v(bookName)} in die onderneming binnen de aandelen, genormaliseerd naar 100%`,
       wb: (bench) => `het gewicht van ${v(bench)} zelf in diezelfde onderneming, naar marktkapitalisatie`,
       min: 'het kleinste van het portefeuille- en benchmarkgewicht voor elke onderneming',
       notInBench: (bench) => `te lezen als "over de ondernemingen die ${v(bench)} helemaal niet `
@@ -709,7 +701,7 @@ const nl: RiskCopy = {
       + `${unstamped > 0 ? ` (${v(unstamped)} zonder datum)` : ''}`,
     cards: {
       activeShare: {
-        what: 'Hoeveel van het volledige AIRS-boek afwijkt van de benchmark.',
+        what: 'Hoeveel de aandelen afwijken van 100% ACWI, met beide kanten genormaliseerd naar 100%.',
       },
       overlap: {
         what: 'Het deel van de portefeuille dat overlapt met de benchmark.',

@@ -120,7 +120,7 @@ def test_risk_profile_active_share_uses_the_stock_and_bond_policy(monkeypatch):
     assert next(row for row in got["rows"] if row["name"] == "Nvidia")["bucket"] == "Stocks"
 
 
-def test_equity_only_policy_keeps_actual_weights_and_omits_bonds(monkeypatch):
+def test_equity_only_policy_normalises_stocks_and_omits_bonds(monkeypatch):
     monkeypatch.setattr(A, "_benchmark_weights", lambda *_args: {
         "bench": {"nvidia": {"key": "nvidia", "name": "Nvidia", "weight_pct": 100.0}},
         "coverage": {}, "issuer_by_asset": {},
@@ -132,11 +132,35 @@ def test_equity_only_policy_keeps_actual_weights_and_omits_bonds(monkeypatch):
         {**_h("Nvidia", "NVDA", 45.0), "bucket": "Equity"},
         {**_h("Active bond", "BOND", 40.0), "bucket": "Bonds"},
     ], "ACWI", benchmark_weights={"Stocks": 60, "Bonds": 40, "EquityOnly": 1})
-    assert got["benchmark"] == "60% ACWI"
-    assert sum(row["portfolio_pct"] for row in got["rows"]) == 45
-    assert sum(row["benchmark_pct"] for row in got["rows"]) == 60
-    assert got["stocks_pct"] == 45
+    assert got["benchmark"] == "100% ACWI"
+    assert sum(row["portfolio_pct"] for row in got["rows"]) == 100
+    assert sum(row["benchmark_pct"] for row in got["rows"]) == 100
+    assert abs(got["stocks_pct"] - 45 / 85 * 100) < 1e-9
     assert not any(row["bucket"] == "Bonds" for row in got["rows"])
+
+
+def test_same_stock_basket_has_identical_active_share_across_profiles(monkeypatch):
+    monkeypatch.setattr(A, '_benchmark_weights', lambda *_args: {
+        'bench': {'apple': {'key': 'apple', 'name': 'Apple', 'weight_pct': 60},
+                  'microsoft': {'key': 'microsoft', 'name': 'Microsoft', 'weight_pct': 40}},
+        'coverage': {}, 'issuer_by_asset': {},
+    })
+    _grid(monkeypatch, {'APPLE': 'Apple', 'MSFT': 'Microsoft'})
+    results = []
+    for stocks, bonds in [(60, 40), (96, 4)]:
+        result = A.compute_active_share([
+            _h('Apple', 'APPLE', stocks * .8), _h('Microsoft', 'MSFT', stocks * .2),
+            {**_h('Bond', 'BOND', bonds), 'bucket': 'Bonds'},
+        ], 'ACWI', benchmark_weights={'Stocks': stocks, 'Bonds': bonds, 'EquityOnly': 1})
+        assert abs(result['active_share_pct'] + result['overlap_pct'] - 100) < 1e-9
+        assert abs(sum(row['portfolio_pct'] for row in result['rows']) - 100) < 1e-9
+        assert abs(sum(row['benchmark_pct'] for row in result['rows']) - 100) < 1e-9
+        results.append(result)
+    assert abs(results[0]['active_share_pct'] - results[1]['active_share_pct']) < 1e-9
+    assert abs(results[0]['overlap_pct'] - results[1]['overlap_pct']) < 1e-9
+    for left, right in zip(results[0]['rows'], results[1]['rows']):
+        assert left['name'] == right['name']
+        assert abs(left['portfolio_pct'] - right['portfolio_pct']) < 1e-9
 
 
 def test_risk_profile_reuses_the_acwi_asset_identity_bridge_for_direct_stocks(monkeypatch):
@@ -173,9 +197,9 @@ def test_linde_eu_matches_the_workbook_issuer_even_when_listings_have_different_
         benchmark_weights={'Stocks': 60, 'Bonds': 40, 'EquityOnly': 1}, held_only=True)
     linde = got['rows'][0]
     assert linde['in_benchmark']
-    assert abs(linde['portfolio_pct'] - .99) < 1e-9
-    assert abs(linde['benchmark_pct'] - .15) < 1e-9
-    assert abs(linde['active_pct'] - .84) < 1e-9
+    assert abs(linde['portfolio_pct'] - 100) < 1e-9
+    assert abs(linde['benchmark_pct'] - .25) < 1e-9
+    assert abs(linde['active_pct'] - 99.75) < 1e-9
 
 
 def test_nonempty_stale_grid_identity_does_not_mask_a_current_execution_match(monkeypatch):
@@ -381,7 +405,7 @@ class TestTheDenominator:
         ], "SP500")
         companies = [r for r in got["rows"] if r["held"] and not r["residual"]]
         residual = [r for r in got["rows"] if r["residual"]]
-        assert sum(r["portfolio_pct"] for r in companies) == 25.0
+        assert sum(r["portfolio_pct"] for r in companies) == 100.0
         assert not residual
         assert got["active_share_pct"] == 0.0
         #  And the renormalisation is reported, never silent — 25 of 100 is the sleeve compared.

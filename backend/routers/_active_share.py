@@ -293,13 +293,11 @@ def build_policy_issuer_weights(holdings: list[dict], benchmark: str,
     if policy_weights.get("EquityOnly"):
         built = build_issuer_weights(holdings, benchmark, benchmark_start)
         return {**built,
-                "port": {key: {**row, "weight_pct": row["weight_pct"] * built["stocks_w"] / 100,
+                "port": {key: {**row,
                                "bucket": "Stocks"} for key, row in built["port"].items()},
-                "bench": {key: {**row, "weight_pct": row["weight_pct"] * stock_target / 100,
+                "bench": {key: {**row,
                                 "bucket": "Stocks"} for key, row in built["bench"].items()},
-                "unresolved": [{**row, "weight_pct": row["weight_pct"] * built["stocks_w"] / 100}
-                               for row in built["unresolved"]],
-                "label": f"{stock_target:g}% ACWI", "whole_policy": True, "total_all": 100.0}
+                "label": "100% ACWI", "whole_policy": True}
 
     selected = [h for h in holdings if _risk_profile_holding(h)]
     total = sum(float(h["weight_pct"]) for h in selected)
@@ -429,12 +427,7 @@ def compute_active_share(holdings: list[dict], benchmark: str,
     active_share = sum(abs(r["active_pct"]) for r in rows) / 2.0
     overlap = sum(min(r["portfolio_pct"], r["benchmark_pct"]) for r in rows)
 
-    # Keep the stock-sleeve Active share identity above, but display the literal AIRS share of
-    # the complete book. The input weights retain that denominator even after non-stocks filter out.
-    if not built.get("whole_policy"):
-        for row in rows:
-            row["portfolio_pct"] *= stocks_w / 100.0
-            row["active_pct"] = row["portfolio_pct"] - row["benchmark_pct"]
+    # Table and headline metrics use the same normalised weights.
     rows.sort(key=lambda row: -abs(row["active_pct"]))
 
     held = [r for r in rows if r["held"] and not r["residual"]]

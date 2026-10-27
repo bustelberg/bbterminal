@@ -296,7 +296,7 @@ function Scorecard({ returns, benchmark, onReload, fillWidth = false }: {
     // chart in a column that takes ITS width from this row, so centring this row inside that
     // column would leave the equation and the chart under it on two different left edges.
     <div className={fillWidth
-      ? 'grid w-full grid-cols-1 items-stretch gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] [&>div]:min-w-0 [&>span]:hidden sm:[&>span]:block'
+      ? 'grid w-full grid-cols-1 items-stretch gap-2 sm:col-span-5 sm:grid-cols-subgrid [&>div]:min-w-0 [&>span]:hidden sm:[&>span]:block'
       : 'flex flex-wrap items-stretch gap-2'}>
       {/*  THE € IS ON BOTH RETURN CHIPS, NOT JUST THE BENCHMARK'S. Marking one side of a
           subtraction with a currency implies the other side is in something else; the row is an
@@ -4173,14 +4173,14 @@ export default function PortfolioAnalysisModal({
                    if the server ever omits the echo the label still names what was asked for. A
                    hardcoded 'SP500' here would print one index's name over another's numbers —
                    invisible, and it survived the default changing to ACWI at exactly four sites. */
-                /* The scorecard and chart share the left grid column. Report and
-                   Risk occupy the right column, aligned with the scorecard row. */
+                /* Shared tracks align the chart with the first two scorecard tiles.
+                   Performance and Risk stay to the right of the scorecard. */
                 : (
-                  <div className="grid w-full grid-cols-1 items-start gap-x-4 gap-y-3 self-center min-w-0 @[44rem]/overview:grid-cols-[minmax(0,1fr)_auto]">
+                  <div className="grid w-full grid-cols-1 items-start gap-x-2 gap-y-3 self-center min-w-0 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)] @[44rem]/overview:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)_auto_minmax(0,1fr)_auto]">
                     <Scorecard returns={data.returns} benchmark={data.benchmark ?? benchmark}
                       onReload={() => setReloadSeq((n) => n + 1)} fillWidth />
                         <nav aria-label={copy.lang === 'nl' ? 'Verdieping' : 'Further analysis'}
-                          className="col-start-1 row-start-2 flex w-max max-w-full min-h-11 items-stretch justify-self-end self-stretch gap-2 @[44rem]/overview:col-start-2 @[44rem]/overview:row-start-1">
+                          className="col-start-1 row-start-2 flex w-max max-w-full min-h-11 items-stretch justify-self-end self-stretch gap-2 sm:col-span-5 @[44rem]/overview:col-span-1 @[44rem]/overview:col-start-6 @[44rem]/overview:row-start-1">
                           {(reportAccount || (!isBasket && id != null)) && (
                             <button type="button" onClick={() => { setRisk(false); setReportOpen(true); }}
                               title={copy.score.attributionTitle}
@@ -4200,9 +4200,8 @@ export default function PortfolioAnalysisModal({
                         directly above it. A curve derived from our own value snapshots would not,
                         and two YTD figures disagreeing in one block is the failure this modal
                         already pays for once at the benchmark tile.
-                         BELOW THE WHOLE EQUATION, NEVER INSIDE IT. `Return − Benchmark = Excess`
-                        is written as an equation and reads as one; the chart follows all three
-                        chips rather than interrupting them.
+                         BELOW THE FIRST TWO TILES. Shared grid tracks keep the graph's right
+                        edge aligned with the benchmark tile; Excess remains above to the right.
                          ONLY FOR A REAL PORTFOLIO WITH A PAIRED BOOK — an ad-hoc basket has no
                         account, so AIRS has published no return for it and nothing to draw.
                          NOT WHILE **ANY** CLASS IS SELECTED, `Stocks` INCLUDED. That gate is now
@@ -4221,7 +4220,7 @@ export default function PortfolioAnalysisModal({
                         column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
                         child of this modal owes the same dependency. */}
                     {!isBasket && id != null && (
-                      <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] @[44rem]/overview:row-start-2">
+                      <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] sm:col-span-3 @[44rem]/overview:row-start-2">
                         {/* `BookReturnChart` fetches independently and initially renders one line.
                             Reserve the final chart card's plot/tooltip footprint here, before that
                             request completes, so its arrival cannot move the scorecard above it. */}

@@ -97,7 +97,7 @@ function Tile({ label, value, tone, info }: {
 }
 
 export default function CorrelationView({
-  holdings, benchmark, benchmarkWeights, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+  holdings, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
@@ -109,15 +109,19 @@ export default function CorrelationView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
-  const [onlyStocks, setOnlyStocks] = useState(true);
-  const correlationHoldings = onlyStocks ? holdings.filter((holding) =>
+  const benchmark = 'ACWI';
+  const stockHoldings = holdings.filter((holding) =>
     !holding.is_fund
     && (!holding.bucket || holding.bucket === 'Equity')
     && !/\b(etf|etp|etn|ucits|fund|fonds|certificate|certificaten|index|perp|bond|obligat|coupon|treasur|gilt|bund|govie|sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b|\d[.,]?\d*\s*%/i.test(holding.name ?? ''),
-  ) : holdings;
+  );
+  const totalStockWeight = stockHoldings.reduce((sum, holding) => sum + (holding.weight_pct ?? 0), 0);
+  const correlationHoldings = stockHoldings.map(holding => ({
+    ...holding, weight_pct: totalStockWeight > 0 ? (holding.weight_pct ?? 0) / totalStockWeight * 100 : 0,
+  }));
   const requestUrl = `${API_URL}/api/airs/portfolio/risk-correlation`
     + `?benchmark=${encodeURIComponent(benchmark)}&frequency=weekly&${riskHistoryQuery()}`;
-  const requestBody = JSON.stringify({ holdings: correlationHoldings, benchmark_weights: benchmarkWeights });
+  const requestBody = JSON.stringify({ holdings: correlationHoldings, benchmark_weights: { Stocks: 100, Bonds: 0 } });
   const repairIdentity = riskRequestKey(requestUrl, requestBody);
   const [repairVersion, setRepairVersion] = useState(0);
   // A completed repair invalidates the shared read cache and advances this key, causing this one
@@ -169,7 +173,7 @@ export default function CorrelationView({
   const where = data?.available
     ? `${v(data.observations)} ${v(data.frequency)} returns on one aligned calendar, prices from `
       + `${v(sourceField('yfinance'))} at ${v(sourceVendor('yfinance'))}, weights from `
-      + `${v(sourceLabel(portfolioSource))}, against ${v(data.benchmark)}'s tracker.`
+      + `${v(sourceLabel(portfolioSource))}, against ACWI's tracker.`
     : '';
 
   /**  TWO CLOCKS — a price window and a weights date. See the  in `TrackingErrorView`. */
@@ -183,11 +187,6 @@ export default function CorrelationView({
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
-      <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-fg-soft">
-        <input type="checkbox" checked={onlyStocks} onChange={(event) => setOnlyStocks(event.target.checked)}
-          className="h-4 w-4 accent-accent-500" />
-        Only stocks
-      </label>
       <p className="text-xs text-fg-muted">Since 1 January 2021 · weekly returns in EUR · through the latest available close</p>
       {!!data?.excluded_holdings?.length && <details className="text-xs text-fg-muted"><summary>Missing history · {data.excluded_holdings.length} excluded holdings</summary><p>{data.excluded_holdings.join(', ')}</p></details>}
 
@@ -203,25 +202,23 @@ export default function CorrelationView({
       {data?.available && (
         <>
           <div className="flex flex-wrap justify-center gap-3">
-            <Tile label={`${portfolioName} — ${t.corr.rhoVs(data.benchmark)}`} value={rho2(data.benchmark_corr)}
+            <Tile label={`${portfolioName} — ${t.corr.rhoVs('ACWI')}`} value={rho2(data.benchmark_corr)}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.corr.cards.rho.what}
                 where={where}
                 when={when}
+                how="Weekly EUR returns of today’s individual stock basket compared with ACWI. Profile allocation percentages are not applied; identical relative stock weights give the same correlation across profiles."
                 worked={data.benchmark_corr == null ? '' : withWorked(
                   String.raw`\rho = \dfrac{\mathrm{Cov}(p,\, b)}{\sigma_p \,\sigma_b}`,
                   String.raw`\sigma_p = ${subNum(data.portfolio_vol_pct ?? 0, 2)}\%`
                   + String.raw`\quad \sigma_b = ${subNum(data.benchmark_vol_pct ?? 0, 2)}\%`
                   + String.raw`\quad\Rightarrow\quad \rho = ${data.benchmark_corr.toFixed(4)}`)}
                 legend={[
-                  { sym: 'p,\\; b', is: LEGEND.pb(portfolioName, data.benchmark) },
+                  { sym: 'p,\\; b', is: LEGEND.pb(portfolioName, 'ACWI') },
                   { sym: String.raw`\mathrm{Cov}(p,\, b)`, is: LEGEND.cov },
                   { sym: String.raw`\sigma_p,\; \sigma_b`, is: LEGEND.sigmas },
                   { sym: String.raw`\rho`, is: LEGEND.rhoAnswer },
                 ]}
-                /*  NO `how`. It carried the σₐ identity written out in Unicode — which the
-                   Active-vol tile two along now sets properly in its own `worked`, from the same
-                   numbers. One formula, typeset once, on the card whose figure it produces. */
                 />} />} />
             <Tile label={t.corr.meanPair}
               value={rho2(data.mean_pair_corr)}

@@ -33,16 +33,17 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { withWorked, subNum, texWords } from './workedFormula';
+import { withWorked, subNum } from './workedFormula';
 import { dayOf, dayRange } from './asOfLine';
 import {
   Provenance, sourceField, sourceLabel, sourceVendor, type SourceKey,
 } from '../../../lib/provenance';
 import type { ActiveShare, ActiveShareRow } from '../../../lib/types/api';
+import { activeShareTableRows } from './activeShareTable';
 import { useRiskCopy } from './riskCopy';
 import LoadingDots from './LoadingDots';
 import dynamic from 'next/dynamic';
-import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
+import type { AirsWeightComponent } from './AirsWeightCalculation';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
 
 const riskLoading = () => <p role="status" className="text-sm text-fg-muted">Loading risk…</p>;
@@ -142,8 +143,8 @@ function Tile({ label, value, tone, info, simpleInfo, suffix }: {
 
 export default function ActiveSharePanel({
   holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
-  portfolioSource, weightComponentsNow, weightTotalNow, riskProfilePolicy,
-  portefeuille, benchmarkProfile,
+  portfolioSource, riskProfilePolicy,
+  portefeuille,
 }: {
   holdings: ActiveShareHolding[];
   portefeuille?: string | null;
@@ -208,25 +209,20 @@ export default function ActiveSharePanel({
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
   const riskBenchmarkWeights: Record<string, number> | undefined = riskProfilePolicy ? { ...riskProfilePolicy, EquityOnly: 1 } : undefined;
-  const profileLabel = benchmarkProfile ? ({
-    Neutraal: 'Neutral', Offensief: 'Offensive',
-    'Beperkt Offensief': 'Moderately offensive', Defensief: 'Defensive',
-  }[benchmarkProfile] ?? benchmarkProfile) : null;
   const riskHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
   const selectedPortfolioAsOf = portfolioAsOf;
   const benchmarkStart = null;
-  const selectedWeightComponents = weightComponentsNow;
-  const selectedWeightTotal = weightTotalNow;
+  const selectedStockWeight = weightedHoldings.reduce((total, holding) => total + (holding.weight_pct ?? 0), 0);
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(riskProfilePolicy ? 'ACWI' : benchmark)}&weight_method=workbook-identity-v7`
+  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=ACWI&weight_method=normalised-stocks-v8`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}&held_only=true`;
   const activeBody = JSON.stringify({
-    holdings: riskBenchmarkWeights ? riskHoldings : weightedHoldings,
-    benchmark_weights: riskBenchmarkWeights,
+    holdings: weightedHoldings,
+    benchmark_weights: { Stocks: 100, Bonds: 0, EquityOnly: 1 },
   });
   const key = riskRequestKey(activeUrl, activeBody);
   const { data, error } = useRiskResult<ActiveShare>(key, async () => {
@@ -237,9 +233,6 @@ export default function ActiveSharePanel({
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
     return b as ActiveShare;
   }, 'active-share', 'the active share could not be computed', view === 'active');
-  const benchmarkLabel = riskBenchmarkWeights?.Stocks != null && riskBenchmarkWeights?.Bonds != null
-    ? `${riskBenchmarkWeights.Stocks}% ACWI`
-    : (data?.benchmark ?? benchmark);
 
   // The active-share response names a policy benchmark for people ("60% ACWI + 40% AGGH.AS").
   // The four return endpoints and Concentration still need the canonical ACWI key to resolve
@@ -248,7 +241,9 @@ export default function ActiveSharePanel({
 
   //  `?? []` ON BOTH — every list on this payload is optional in the generated types (the
   // Pydantic default makes it so), and `.filter` on undefined is a blank panel with no error.
-  const all: ActiveShareRow[] = data?.rows ?? [];
+  const tableBenchmarkAllocation = riskProfilePolicy?.Stocks ?? 100;
+  const tableBenchmarkLabel = `${tableBenchmarkAllocation}% ACWI`;
+  const all: ActiveShareRow[] = activeShareTableRows(data?.rows ?? [], selectedStockWeight, tableBenchmarkAllocation);
   const rows = all.filter((r) => r.held && !r.residual);
   // A policy comparator has two real asset sleeves. Keeping its bond ETFs among the company rows
   // obscures the allocation decision the policy benchmark is meant to make visible.
@@ -292,16 +287,11 @@ export default function ActiveSharePanel({
     dayRange(data?.benchmark_caps_from, data?.benchmark_caps_to),
     data?.benchmark_caps_unstamped ?? 0);
 
-  const totals = rows.reduce((a, r) => ({
-    book: a.book + (r.portfolio_pct ?? 0),
-    bench: a.bench + (r.benchmark_pct ?? 0),
-    active: a.active + (r.active_pct ?? 0),
-  }), { book: 0, bench: 0, active: 0 });
 
   // Reserve space for the full labels, not just percentage values. Both tables share the same
   // columns and horizontal scroll surface so the fixed totals cannot drift away from the rows.
   const portfolioColumnWidth = `max(10rem, ${portfolioName.length + 6}ch)`;
-  const benchmarkColumnWidth = `max(12rem, ${(data?.benchmark ?? benchmark).length + 6}ch)`;
+  const benchmarkColumnWidth = `max(12rem, ${tableBenchmarkLabel.length + 6}ch)`;
   const tableMinWidth = `calc(14rem + ${portfolioColumnWidth} + ${benchmarkColumnWidth} + 6rem + 7rem)`;
   const tableColumns = <colgroup>
     <col />
@@ -322,11 +312,8 @@ export default function ActiveSharePanel({
       <div className="relative shrink-0 text-center">
         <div className="min-w-0">
           <h4 className="text-sm font-semibold text-fg-strong">
-            {`"${portfolioName}" vs ${profileLabel ? `the "${profileLabel}" benchmark (${benchmarkLabel})` : benchmarkLabel}`}
-          </h4>
-          <p className="text-xs text-fg-faint mt-0.5">
             {t.subtitle(portfolioName, selectedPortfolioAsOf)}
-          </p>
+          </h4>
           {/*  A TWO-POSITION SEGMENTED CONTROL, JOINED — which is the shape that means "exactly
               one of these". The filter chips elsewhere in this modal are separate pills because
               they mean "any of these"; borrowing that look here would promise both views at once.
@@ -334,7 +321,6 @@ export default function ActiveSharePanel({
           {/*  `flex-wrap`, NOT `inline-flex` — at six positions the row was wider than a
               narrow dialog, and an overflowing segmented control silently hides its last option.
               Wrapping keeps every view reachable; the joined look survives via the shared border. */}
-          {riskBenchmarkWeights && <p className="mt-2 text-center text-xs text-fg-muted">Individual stocks at actual portfolio weights vs {riskBenchmarkWeights.Stocks}% ACWI. Bonds excluded; equity weights are not scaled to 100%.</p>}
           <div className="flex w-fit flex-wrap mx-auto mt-2 rounded-lg border border-neutral-800/40
             overflow-hidden max-w-full text-xs">
             {/*  FIVE RISK MEASURES, AND ATTRIBUTION IS DELIBERATELY NOT THE SIXTH. Every one
@@ -347,7 +333,8 @@ export default function ActiveSharePanel({
             {/*  THE KEYS DRIVE THE ORDER, THE COPY TABLE DRIVES THE WORDS — a label typed
                 here in one language is exactly the drift `riskCopy`'s compile-time guarantee
                 exists to prevent. */}
-            {(['active', 'te', 'corr', 'vol', 'dd', 'conc'] as const).map((k) => (
+            {/* Tracking error is temporarily hidden; keep its implementation below. */}
+            {(['active', 'corr', 'vol', 'dd', 'conc'] as const).map((k) => (
               <button key={k} type="button" onClick={() => setView(k)}
                 aria-pressed={view === k}
                 className={`cursor-pointer px-3 py-1.5 font-medium whitespace-nowrap
@@ -426,7 +413,7 @@ export default function ActiveSharePanel({
                 name, which read the same in both. */}
             <Tile label={t.active.activeShare} value={pct2(data.active_share_pct)}
               suffix={riskBenchmarkWeights ? undefined : <span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>+</span>}
-              simpleInfo={`Half the sum of absolute differences between actual stock weights and the profile-scaled ACWI weights. Bonds are excluded; neither equity allocation is scaled to 100%.`}
+              simpleInfo="Half the sum of absolute weight differences, with both the stock basket and ACWI normalised to 100%. Comparable across profiles; active share plus overlap equals 100%."
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what={t.active.cards.activeShare.what}
                 where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
@@ -435,8 +422,8 @@ export default function ActiveSharePanel({
                 when={whenBoth}
                 worked={data.active_share_pct == null ? '' : withWorked(
                   String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
-                  riskBenchmarkWeights ? String.raw`= ${subNum(data.active_share_pct, 2)}\%` : String.raw`\text{overlap } ${subNum(data.overlap_pct ?? 0, 2)}\%`
-                  + (riskBenchmarkWeights ? '' : String.raw` + \text{active } ${subNum(data.active_share_pct, 2)}\% = 100\%`))}
+                  String.raw`\text{overlap } ${subNum(data.overlap_pct ?? 0, 2)}\%`
+                  + String.raw` + \text{active } ${subNum(data.active_share_pct, 2)}\% = 100\%`)}
                 legend={[
                   { sym: 'i', is: t.active.legend.issuer },
                   { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
@@ -453,7 +440,7 @@ export default function ActiveSharePanel({
                 when={whenBoth}
                 worked={data.overlap_pct == null ? '' : withWorked(
                   String.raw`\sum_i \min\!\left( w_i^{\,p},\; w_i^{\,b} \right)`,
-                  riskBenchmarkWeights ? String.raw`= ${subNum(data.overlap_pct, 2)}\%` : String.raw`${subNum(data.overlap_pct, 2)}\% = 100\%`
+                  String.raw`${subNum(data.overlap_pct, 2)}\% = 100\%`
                 + String.raw` - \text{active } ${subNum(data.active_share_pct ?? 0, 2)}\%`)}
                 legend={[
                   { sym: 'i', is: t.active.legend.issuer },
@@ -461,7 +448,7 @@ export default function ActiveSharePanel({
                   { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
                   { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
                 ]}
-                how={riskBenchmarkWeights ? 'Sum the smaller actual weight for each company held on both sides. Different equity allocation totals mean overlap and active share need not add to 100%.' : t.active.cards.overlap.how} />} />} />
+                how="Sum the smaller stock-basket or ACWI weight for every company. Both sides total 100%, so overlap equals 100% minus active share." />} />} />
           </div>
 
           {/*  THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED
@@ -503,8 +490,8 @@ export default function ActiveSharePanel({
                   [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:bg-inset [&>th]:whitespace-nowrap">
                   <th className="text-left">{t.active.colCompany}</th>
                   <th className="text-right whitespace-nowrap">{portfolioName}</th>
-                  <th className="text-right">{data.benchmark ?? benchmark}</th>
-                  <th className="text-right">{t.active.colActive}</th>
+                  <th className="text-right">{tableBenchmarkLabel}</th>
+                  <th className="text-right" title="Actual portfolio weight minus profile-weighted ACWI weight, in percentage points. Separate from the normalised headline metrics.">{t.active.colActive} (pp)</th>
                   <th className="w-28" />
                 </tr>
               </thead>
@@ -544,19 +531,12 @@ export default function ActiveSharePanel({
                             ? `${(r.portfolio_pct ?? 0).toFixed(2)}%` : '—'}
                         </span>
                         <span className="flex justify-end">
-                          {r.held && !r.residual && selectedWeightTotal != null
-                            && selectedWeightTotal > 0 && selectedWeightComponents?.length ? (
+                          {r.held && !r.residual && selectedStockWeight > 0 ? (
                             <Provenance source={portfolioSource} asOf={selectedPortfolioAsOf}
                               what={t.active.weightWhat(r.name, portfolioName)}
                               note={t.active.currentWeight}
                               how={t.active.weightHow}
-                              calculation={<AirsWeightCalculation
-                                components={selectedWeightComponents}
-                                numerator={(r.portfolio_pct ?? 0) / 100 * selectedWeightTotal}
-                                denominator={selectedWeightTotal}
-                                result={`${(r.portfolio_pct ?? 0).toFixed(2)}%`}
-                                holdingName={r.name}
-                                valueLabel="Huidige waarde" />} />
+                              calculation={<p className="font-mono text-xs">{((r.portfolio_pct ?? 0) / selectedStockWeight * 100).toFixed(4)}% × ({selectedStockWeight.toFixed(4)} / 100) = {(r.portfolio_pct ?? 0).toFixed(2)}%</p>} />
                             ) : null}
                         </span>
                       </span>
@@ -572,11 +552,9 @@ export default function ActiveSharePanel({
                           <p>Yfinance EUR return: {r.weight_calculation.return_eur_pct.toFixed(4)}%.</p>
                           <p className="font-mono">{r.weight_calculation.initial_weight_pct.toFixed(4)} × (1 + {r.weight_calculation.return_eur_pct.toFixed(4)} / 100) ÷ {r.weight_calculation.normalisation_total.toFixed(4)} × 100 = {r.weight_calculation.result_pct.toFixed(4)}%</p>
                           <p>The denominator sums the workbook weights grown by each constituent’s EUR return.</p>
-                          {riskBenchmarkWeights && <>
-                            <p>ACWI represents {riskBenchmarkWeights.Stocks ?? 0}% of the policy benchmark. Apply that allocation to get this position’s weight in the full benchmark:</p>
-                            <p className="font-mono">{r.weight_calculation.result_pct.toFixed(4)}% × ({riskBenchmarkWeights.Stocks ?? 0} / 100) = {(r.benchmark_pct ?? 0).toFixed(4)}% (displayed as {(r.benchmark_pct ?? 0).toFixed(2)}%).</p>
-                          </>}
-                        </div> : undefined} text={`${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
+                          <p>Profile allocation: {tableBenchmarkAllocation}% ACWI.</p>
+                          <p className="font-mono">{r.weight_calculation.result_pct.toFixed(4)}% × ({tableBenchmarkAllocation} / 100) = {(r.benchmark_pct ?? 0).toFixed(4)}% (displayed as {(r.benchmark_pct ?? 0).toFixed(2)}%).</p>
+                        </div> : undefined} text={`${tableBenchmarkLabel}'s weight in ${r.name}. The table uses profile weights; the headline metrics use 100% ACWI.`} />
                       </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%`
                         : r.in_benchmark ? <span title="Index member; price unavailable for the weight calculation">{data.benchmark ?? benchmark}</span>
@@ -598,64 +576,7 @@ export default function ActiveSharePanel({
               </tbody>
               </table>
             </div>
-              {/*  FIXED BELOW THE SCROLL BOX. A sticky footer cannot rise from row 1,575; it only
-                  sticks after its natural position reaches the bottom edge. Keeping this outside
-                  makes the portfolio and benchmark sums visible in both table views. The repeated
-                  colgroup keeps all numeric columns aligned with the rows above. */}
-            <div className="shrink-0 overflow-y-auto [scrollbar-gutter:stable]">
-            <table className="w-full table-fixed text-xs" aria-label="Active share totals">
-              {tableColumns}
-              <tfoot>
-                <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
-                  [&>td]:border-neutral-700/60 [&>td]:bg-inset font-medium">
-                  <td className="text-fg-soft">
-                    {t.active.totalHeld(rows.length)}
-                    <InfoTip className="ml-1" content={<AspectCard
-                      {...t.active.totalCardHeld}
-                      when={whenBoth}
-                      // This is a totals-row formula, not a second derivation of active share.
-                      // It mirrors the three numeric cells immediately to its right.
-                      worked={String.raw`\begin{aligned}`
-                        + `${texWords(portfolioName)} &= `
-                        + String.raw`\sum_{i\in S} w_i^{\,p}`
-                        + String.raw` = ${totals.book.toFixed(2)}\% \\ `
-                        + `${texWords(data.benchmark ?? benchmark)} &= `
-                        + String.raw`\sum_{i\in S} w_i^{\,b}`
-                        + String.raw` = ${totals.bench.toFixed(2)}\% \\ `
-                        + String.raw`\text{Active} &= \sum_{i\in S}`
-                        + String.raw`\left(w_i^{\,p}-w_i^{\,b}\right)`
-                        + String.raw` = ${totals.book.toFixed(2)}\% - ${totals.bench.toFixed(2)}\%`
-                        + String.raw` = ${totals.active.toFixed(2)}\%`
-                        + String.raw`\end{aligned}`}
-                      legend={[
-                        { sym: 'i', is: t.active.legend.issuer },
-                        { sym: 'S', is: t.active.legend.heldSet },
-                        { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
-                        { sym: String.raw`w_i^{\,b}`,
-                          is: t.active.legend.wb(data.benchmark ?? benchmark) },
-                      ]} />} />
-                  </td>
-                  <td className="text-right font-mono tabular-nums text-fg">
-                    <span className="inline-grid grid-cols-[auto_1.375rem] items-center
-                      whitespace-nowrap">
-                      <span>{`${totals.book.toFixed(2)}%`}</span>
-                      <span aria-hidden />
-                    </span>
-                  </td>
-                  <td className="text-right font-mono tabular-nums text-fg">
-                    {`${totals.bench.toFixed(2)}%`}
-                  </td>
-                  {/*  NO TONE ON THE TOTAL. Over every name it is zero and a colour would imply a
-                      direction; over the held subset it is always positive and a green would read
-                      as a verdict on a number that is positive by construction. */}
-                  <td className="text-right font-mono tabular-nums text-fg">
-                    {signed(totals.active)}
-                  </td>
-                  <td />
-                </tr>
-              </tfoot>
-            </table>
-            </div>
+
             </div>
           </div>
         </div>
