@@ -32,6 +32,7 @@ const navItems: NavEntry[] = [
   { href: '/' },
   // The AIRS books, their models and the analysis built on them.
   { href: '/management-dashboard' },
+  { href: '/market' },
   //  Beside the dashboard. It is a reading tool rather than a pipeline tool: two companies'
   // fundamentals side by side, off the same view the Fundamental button opens. Filed with the
   // one-off admin tools near the bottom it would read as one of them.

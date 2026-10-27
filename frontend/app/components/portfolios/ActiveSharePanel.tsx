@@ -33,7 +33,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { withWorked, subNum, workedRatio, texWords } from './workedFormula';
+import { withWorked, subNum, texWords } from './workedFormula';
 import { dayOf, dayRange } from './asOfLine';
 import {
   Provenance, sourceField, sourceLabel, sourceVendor, type SourceKey,
@@ -140,12 +140,12 @@ function Tile({ label, value, tone, info, simpleInfo, suffix }: {
 export default function ActiveSharePanel({
   holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
   portfolioSource, weightComponentsNow, weightTotalNow, riskProfilePolicy,
-  portefeuille,
-  onClose,
+  portefeuille, benchmarkProfile,
 }: {
   holdings: ActiveShareHolding[];
   portefeuille?: string | null;
   benchmark: string;
+  benchmarkProfile?: string | null;
   /** The book's own name, so its date line names the thing it dates rather than saying "the book".
    *   It is on screen anyway (the modal's heading), which is what makes it the shortest possible
    *  label here — the reader does not have to work out which of the two lines is theirs. */
@@ -205,6 +205,10 @@ export default function ActiveSharePanel({
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
   const riskBenchmarkWeights = riskProfilePolicy ?? undefined;
+  const profileLabel = benchmarkProfile ? ({
+    Neutraal: 'Neutral', Offensief: 'Offensive',
+    'Beperkt Offensief': 'Moderately offensive', Defensief: 'Defensive',
+  }[benchmarkProfile] ?? benchmarkProfile) : null;
   const riskHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
   );
@@ -230,6 +234,9 @@ export default function ActiveSharePanel({
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
     return b as ActiveShare;
   }, 'active-share', 'the active share could not be computed');
+  const benchmarkLabel = riskBenchmarkWeights?.Stocks != null && riskBenchmarkWeights?.Bonds != null
+    ? `${riskBenchmarkWeights.Stocks}% ACWI + ${riskBenchmarkWeights.Bonds}% AGGH.AS`
+    : (data?.benchmark ?? benchmark);
 
   // The active-share response names a policy benchmark for people ("60% ACWI + 40% AGGH.AS").
   // The four return endpoints and Concentration still need the canonical ACWI key to resolve
@@ -312,7 +319,7 @@ export default function ActiveSharePanel({
       <div className="relative shrink-0 text-center">
         <div className="min-w-0">
           <h4 className="text-sm font-semibold text-fg-strong">
-            {t.titles[view]} vs {data?.benchmark ?? benchmark}{view === 'dd' ? ' over the past 5 years' : ''}
+            {`"${portfolioName}" vs ${profileLabel ? `the "${profileLabel}" benchmark (${benchmarkLabel})` : benchmarkLabel}`}
           </h4>
           <p className="text-xs text-fg-faint mt-0.5">
             {t.subtitle(portfolioName, selectedPortfolioAsOf)}
@@ -571,6 +578,10 @@ export default function ActiveSharePanel({
                           <p>Yfinance EUR return: {r.weight_calculation.return_eur_pct.toFixed(4)}%.</p>
                           <p className="font-mono">{r.weight_calculation.initial_weight_pct.toFixed(4)} × (1 + {r.weight_calculation.return_eur_pct.toFixed(4)} / 100) ÷ {r.weight_calculation.normalisation_total.toFixed(4)} × 100 = {r.weight_calculation.result_pct.toFixed(4)}%</p>
                           <p>The denominator sums the workbook weights grown by each constituent’s EUR return.</p>
+                          {riskBenchmarkWeights && <>
+                            <p>ACWI represents {riskBenchmarkWeights.Stocks ?? 0}% of the policy benchmark. Apply that allocation to get this position’s weight in the full benchmark:</p>
+                            <p className="font-mono">{r.weight_calculation.result_pct.toFixed(4)}% × ({riskBenchmarkWeights.Stocks ?? 0} / 100) = {(r.benchmark_pct ?? 0).toFixed(4)}% (displayed as {(r.benchmark_pct ?? 0).toFixed(2)}%).</p>
+                          </>}
                         </div> : undefined} text={`${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
                       </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%`

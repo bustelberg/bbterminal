@@ -7232,6 +7232,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/acwi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Acwi */
+        get: operations["acwi_api_market_acwi_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/nasdaq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Nasdaq */
+        get: operations["nasdaq_api_market_nasdaq_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/backtest": {
         parameters: {
             query?: never;
@@ -12780,6 +12814,12 @@ export interface components {
             name: string;
             /** Opening Eur */
             opening_eur?: number | null;
+            /** Post Close Currency */
+            post_close_currency?: string | null;
+            /** Post Close Status */
+            post_close_status?: string | null;
+            /** Post Close Symbol */
+            post_close_symbol?: string | null;
             /**
              * Prior Year Eur
              * @default 0
@@ -12874,6 +12914,41 @@ export interface components {
             name?: string | null;
             /** Start Date */
             start_date?: string | null;
+        };
+        /** MarketPoint */
+        MarketPoint: {
+            /** Close */
+            close: number;
+            /** Date */
+            date: string;
+        };
+        /** MarketSnapshot */
+        MarketSnapshot: {
+            /** Fetched At */
+            fetched_at: string;
+            /** From Peak Pct */
+            from_peak_pct: number;
+            /** History Start */
+            history_start: string;
+            /** Latest */
+            latest: number;
+            /** Latest At */
+            latest_at: string;
+            /** Name */
+            name: string;
+            /** Peak */
+            peak: number;
+            /** Peak Date */
+            peak_date: string;
+            /** Points */
+            points: components["schemas"]["MarketPoint"][];
+            /**
+             * Source
+             * @default Yahoo Finance
+             */
+            source?: string;
+            /** Symbol */
+            symbol: string;
         };
         /** MemberRow */
         MemberRow: {
@@ -24558,6 +24633,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    acwi_api_market_acwi_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketSnapshot"];
+                };
+            };
+        };
+    };
+    nasdaq_api_market_nasdaq_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketSnapshot"];
                 };
             };
         };

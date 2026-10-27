@@ -10966,6 +10966,39 @@
             ],
             "title": "Opening Eur"
           },
+          "post_close_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Close Currency"
+          },
+          "post_close_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Close Status"
+          },
+          "post_close_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Close Symbol"
+          },
           "prior_year_eur": {
             "default": 0.0,
             "title": "Prior Year Eur",
@@ -11278,6 +11311,90 @@
           }
         },
         "title": "LongEquitySaveUniverseRequest",
+        "type": "object"
+      },
+      "MarketPoint": {
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "close"
+        ],
+        "title": "MarketPoint",
+        "type": "object"
+      },
+      "MarketSnapshot": {
+        "properties": {
+          "fetched_at": {
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "from_peak_pct": {
+            "title": "From Peak Pct",
+            "type": "number"
+          },
+          "history_start": {
+            "title": "History Start",
+            "type": "string"
+          },
+          "latest": {
+            "title": "Latest",
+            "type": "number"
+          },
+          "latest_at": {
+            "title": "Latest At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "peak": {
+            "title": "Peak",
+            "type": "number"
+          },
+          "peak_date": {
+            "title": "Peak Date",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MarketPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source": {
+            "default": "Yahoo Finance",
+            "title": "Source",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "name",
+          "latest",
+          "latest_at",
+          "peak",
+          "peak_date",
+          "from_peak_pct",
+          "history_start",
+          "fetched_at",
+          "points"
+        ],
+        "title": "MarketSnapshot",
         "type": "object"
       },
       "MemberRow": {
@@ -32397,6 +32514,48 @@
         "summary": "Get Longequity Snapshots",
         "tags": [
           "longequity"
+        ]
+      }
+    },
+    "/api/market/acwi": {
+      "get": {
+        "operationId": "acwi_api_market_acwi_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Acwi",
+        "tags": [
+          "market"
+        ]
+      }
+    },
+    "/api/market/nasdaq": {
+      "get": {
+        "operationId": "nasdaq_api_market_nasdaq_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Nasdaq",
+        "tags": [
+          "market"
         ]
       }
     },

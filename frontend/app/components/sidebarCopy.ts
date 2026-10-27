@@ -20,6 +20,7 @@ import { useLang, type Lang } from '../../lib/i18n';
 export type NavKey =
   | '/'
   | '/management-dashboard'
+  | '/market'
   | '/research-dashboard'
   | '/research'
   | '/log-dashboard'
@@ -70,6 +71,7 @@ const EN: SidebarCopy = {
   nav: {
     '/': 'Welcome',
     '/management-dashboard': 'Management Dashboard',
+    '/market': 'Market',
     '/research-dashboard': 'Research Dashboard',
     '/research': 'GuruFocus Research',
     '/log-dashboard': 'BC Logbook',
@@ -120,6 +122,7 @@ const NL: SidebarCopy = {
   nav: {
     '/': 'Welkom',
     '/management-dashboard': 'Managementdashboard',
+    '/market': 'Markt',
     '/research-dashboard': 'Researchdashboard',
     '/research': 'GuruFocus-onderzoek',
     '/log-dashboard': 'BC-logboek',

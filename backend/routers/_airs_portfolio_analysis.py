@@ -3493,7 +3493,7 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:scorecard-blocks:cash-separated:v13"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:sourced:scorecard-blocks:cash-separated:v14"
 
 
 _INSTRUMENT_NAME_SUFFIXES = frozenset({
@@ -3531,7 +3531,9 @@ def _instrument_names_match(holding_name: str, asset_name: str) -> bool:
         return False
     if len(left) == 1:
         return left == right
-    return all(a.startswith(b) or b.startswith(a) for a, b in zip(left, right))
+    # A truncated maturity year, coupon or numbered share class cannot identify a bond fund.
+    return all(a == b if any(c.isdigit() for c in a + b) else a.startswith(b) or b.startswith(a)
+               for a, b in zip(left, right))
 
 
 def _asset_execution_isins_by_name(names: list[str]) -> dict[str, str]:
@@ -3737,7 +3739,17 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
     sold = [p for p in positions if p.get("closed_out")]
     if not sold:
         return
-    isin_of = _sold_position_isins([p.get("name") for p in sold])
+    # A ledger can already carry an exact ISIN, including for bond funds. Prefer that identity
+    # over a historical-name search; never replace it with an equity or a similar ETF proxy.
+    isin_of = {p['name']: p['isin'] for p in sold if p.get('name') and p.get('isin')}
+    isin_of.update(_sold_position_isins([p.get('name') for p in sold
+                                       if p.get('name') not in isin_of]))
+    from ._airs_portfolio_perf import _executions  # noqa: PLC0415
+    try:
+        executions = _executions(sorted(set(isin_of.values()))) if isin_of else {}
+    except Exception as e:  # noqa: BLE001 — a missing listing is not permission to guess
+        _log.warning('[analysis] sold listing metadata unavailable (%s)', type(e).__name__)
+        executions = {}
     # Persist the small set of known sold ISINs. They no longer appear in AIRS's
     # current-holdings tables, but their counterfactual post-sale return remains
     # visible here and therefore needs the same daily price maintenance.
@@ -3766,12 +3778,20 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
         _log.warning("[analysis] post-close return failed (%s: %s)", type(e).__name__, e)
         close_series = {}
     for p in sold:
+        for field in ('since_close_pct', 'since_close_date', 'since_close_as_of',
+                      'since_close_from', 'since_close_to'):
+            p.pop(field, None)
         isin = isin_of.get((p.get("name") or "").strip())
         got = risk.get(isin or "") or {}
         #  The ISIN goes out even when the risk read found nothing. "We know what this is and have
         # no price series for it" and "we could not tell what this is" are different answers, and
         # the drill-down needs the first one to be able to offer an ingest.
         p["isin"] = isin
+        execution = executions.get(isin or '') or {}
+        p['post_close_symbol'] = execution.get('yahoo_symbol')
+        p['post_close_currency'] = execution.get('currency')
+        p['post_close_status'] = ('unknown_instrument' if not isin else
+                                  'unmapped_listing' if not p['post_close_symbol'] else 'missing_history')
         for k in RISK_KEYS:                      #  the same list as the held rows — see `RISK_KEYS`
             p[k] = got.get(k)
         sale_date = p.get("last_sale")
@@ -3779,10 +3799,18 @@ def _with_sold_risk(realised: dict, benchmark_label: str) -> None:
         # The transaction may settle on a non-trading day. Use the first EUR close on or after the
         # sale, then the latest close we actually hold — never invent a price for either endpoint.
         after_sale = [(day, value) for day, value in series if sale_date and day >= sale_date and value > 0]
-        if after_sale:
+        if p['post_close_symbol'] and len(after_sale) >= 2:
             first_day, first_price = after_sale[0]
             last_day, last_price = after_sale[-1]
+            if last_day <= first_day:
+                continue
+            # If history begins weeks after the sale, its first quote is not a sale-date mark.
+            # Leave the counterfactual unknown until the background price worker fills that gap.
+            if (date.fromisoformat(first_day) - date.fromisoformat(sale_date)).days > 7:
+                p['post_close_status'] = 'missing_sale_close'
+                continue
             if first_price > 0 and last_price > 0:
+                p['post_close_status'] = 'ready'
                 p["since_close_pct"] = round((last_price / first_price - 1.0) * 100.0, 4)
                 p["since_close_date"] = first_day
                 p["since_close_as_of"] = last_day

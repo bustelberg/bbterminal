@@ -1488,6 +1488,9 @@ class LedgerPosition(BaseModel):
     mom_state: int | None = None
     mom_pct_rank: float | None = None
     mom_rank_n: int | None = None
+    post_close_symbol: str | None = None
+    post_close_currency: str | None = None
+    post_close_status: str | None = None
     # What the instrument did AFTER this book fully exited it. This is deliberately a price
     # return, not a hypothetical book return: the book no longer owned it after `last_sale`.
     since_close_pct: float | None = None

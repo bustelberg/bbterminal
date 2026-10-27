@@ -1,27 +1,17 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
-const panel = readFileSync(new URL('./AirsRiskPanel.tsx', import.meta.url), 'utf8');
+const panel = readFileSync(new URL('./ActiveSharePanel.tsx', import.meta.url), 'utf8');
 const modal = readFileSync(new URL('./PortfolioAnalysisModal.tsx', import.meta.url), 'utf8');
 
-describe('AIRS risk / simulation separation', () => {
-  it('opens actual risk first and mounts legacy calculations only inside the simulation section', () => {
-    expect(panel).toContain("useState<View>('overview')");
-    expect(panel).toContain("dynamic(() => import('./ActiveSharePanel')");
-    expect(panel).toContain("view === 'simulation' ?");
-    expect(panel).toContain('Current portfolio simulation');
-    expect(panel).toContain('Actual losses');
-    expect(panel).not.toContain('/portfolio/tracking-error');
-    expect(modal).toContain('<AirsRiskPanel');
-    expect(modal).toContain('airsHoldings={data.book_holdings ?? []} bands={data.bands}');
-  });
-
-  it('requests only actual account history and does not silently substitute a model', () => {
-    expect(panel).toContain('/risk-history');
-    expect(panel).not.toContain('/value-series');
-    expect(panel).toContain('A simulation has not been substituted');
-    expect(panel).toContain('No paired AIRS account');
-    expect(panel).toContain('not a daily return series');
-    expect(panel).toContain('No volatility estimate');
+describe('Risk navigation', () => {
+  it('opens the six risk measures directly without an AIRS overview wrapper', () => {
+    expect(modal).toContain('<ActiveSharePanel benchmark=');
+    expect(modal).toContain("dynamic(() => import('./ActiveSharePanel')");
+    expect(modal).not.toContain('<AirsRiskPanel');
+    expect(panel).toContain("['active', 'te', 'corr', 'vol', 'dd', 'conc']");
+    expect(panel).toContain("'conc'>('active')");
+    expect(panel).not.toContain('Current portfolio simulation');
+    expect(panel).not.toContain('Detailed analysis');
   });
 });

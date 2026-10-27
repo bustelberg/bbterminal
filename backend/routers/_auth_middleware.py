@@ -95,6 +95,7 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # `POST /api/jobs`) — the owning endpoint starts it — and the one job write, Cancel, is in
 # `_USER_REFRESH_PATTERNS`.
 _USER_READ_PREFIXES: tuple[str, ...] = (
+    "/api/market/",
     "/api/log-dashboard/",
     "/api/companies",
     "/api/earnings",

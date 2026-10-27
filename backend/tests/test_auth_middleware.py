@@ -108,6 +108,12 @@ class TestM1_ReadsRequireAuth:
     def test_authenticated_user_read_allowed(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/companies", "user") == (200, True)
 
+    def test_market_is_authenticated_read_only(self, monkeypatch):
+        assert _run(monkeypatch, "GET", "/api/market/nasdaq", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/market/acwi", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/market/nasdaq", None) == (401, False)
+        assert _run(monkeypatch, "POST", "/api/market/nasdaq", "user") == (403, False)
+
     def test_non_admin_read_of_admin_path_is_403(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/admin/health", "user") == (403, False)
 

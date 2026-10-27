@@ -98,6 +98,14 @@ describe('the Analyse modal holdings table', () => {
 });
 
 describe('sold-position risk cells', () => {
+  it('links identified sold bonds and stocks to the actual Yahoo listing and states the return basis', () => {
+    const s = source();
+    const sold = s.slice(s.indexOf('{soldLookThroughRows(sold, lookThrough).map((p, i) => ('));
+    expect(sold).toContain('encodeURIComponent(p.post_close_symbol)');
+    expect(sold).toContain('Coupons and distributions excluded');
+    expect(sold).toContain('p.since_close_from.toFixed(2)');
+  });
+
   it('uses the same Via chips as held rows rather than a separate badge style', () => {
     const s = source();
     expect(s).toContain('<ViaChips names={h.via_names ?? []} sources={h.sources} />');

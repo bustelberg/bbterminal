@@ -1261,17 +1261,24 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
   };
   return (
     <PanelDialog onClose={onClose} labelledBy="portfolio-fundamental-title">
-      <div className="flex h-full min-h-0 flex-col rounded-xl border border-neutral-800/40 bg-card shadow-xl">
-        <div className="flex shrink-0 items-center gap-4 border-b border-neutral-800/40 px-5 py-4">
+      <div className="@container flex h-full min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800/40 bg-card shadow-xl">
+        <div className="flex max-h-[45%] shrink-0 flex-col gap-3 overflow-y-auto border-b border-neutral-800/40 px-3 py-3 @min-[48rem]:px-5 @min-[48rem]:py-4">
+          <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 id="portfolio-fundamental-title" className="text-lg font-semibold text-fg-strong">
               Fundamental
             </h3>
-            <p className="truncate text-sm text-fg-muted">
+            <p className="break-words text-sm text-fg-muted">
               {name} · {data ? `${rows.length} ${rows.length === 1 ? 'company' : 'companies'}` : 'companies'}
             </p>
           </div>
-          <div className="ml-auto inline-flex shrink-0 gap-1"
+          <button type="button" onClick={onClose}
+            className={`${headerControlClass} ${supportingControlClass}`}>
+            Close
+          </button>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="grid w-full grid-cols-2 gap-1.5 [&>button]:h-auto [&>button]:min-h-9 [&>button]:min-w-0 [&>button]:whitespace-normal [&>button]:px-3 [&>button]:py-2 @min-[42rem]:flex @min-[42rem]:w-auto @min-[42rem]:flex-wrap"
             role="group" aria-label="Valuation model">
             <button type="button" onClick={() => setModel('dcf')} aria-pressed={model === 'dcf'}
               className={`${headerControlClass} ${model === 'dcf'
@@ -1294,6 +1301,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
               OCF Estimates
             </button>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
           {bookPortfolio && (
             <label
               title="Replace linked certificates with the companies held by their underlying strategies."
@@ -1340,10 +1348,8 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
               Refresh all companies
             </button>
           )}
-          <button type="button" onClick={onClose}
-            className={`${headerControlClass} ${activeControlClass}`}>
-            Close
-          </button>
+          </div>
+          </div>
         </div>
         {model === 'egm' && egmSaveError && (
           <p role="alert" className="border-b border-neg-500/30 bg-neg-500/10 px-5 py-2 text-xs text-neg-300">
@@ -1351,7 +1357,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
           </p>
         )}
 
-        <div className="min-h-0 flex-1 overflow-hidden px-6">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden px-2 @min-[48rem]:px-5">
           <div className="h-full overflow-hidden">
           {!data && !error && (
             <div className="flex min-h-64 items-center justify-center">
@@ -1369,7 +1375,17 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
             // border therefore never travels away from the sticky header: frame, header and body
             // remain one object while only the rows/columns inside it move.
             <div className="my-4 h-[calc(100%-2rem)] overflow-auto border border-neutral-800/50">
-            <table className="isolate min-w-max w-full border-separate border-spacing-0 text-xs">
+            <table className="isolate table-fixed border-separate border-spacing-0 text-xs [--company-width:13rem] @min-[64rem]:[--company-width:20rem]"
+              style={{ width: `calc(var(--company-width) + 18rem + ${model === 'dcf' ? RATES.length * 6.5 : (model === 'egm' ? 10 : 8) * 14}rem)` }}>
+              <colgroup>
+                <col style={{ width: '3rem' }} />
+                <col style={{ width: 'var(--company-width)' }} />
+                <col style={{ width: '6rem' }} />
+                <col style={{ width: '9rem' }} />
+                {Array.from({ length: model === 'dcf' ? RATES.length : model === 'egm' ? 10 : 8 }, (_, index) => (
+                  <col key={index} style={{ width: model === 'dcf' ? '6.5rem' : '14rem' }} />
+                ))}
+              </colgroup>
               {/* The model-colour cells use translucent tints. Give the sticky header group its
                   own opaque surface so scrolled body rows cannot show through those tints. */}
               <thead className="sticky top-0 z-30 bg-page text-xs uppercase tracking-wide text-fg-faint">
@@ -1377,19 +1393,19 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                   {/* These identifying columns are the subject, not the selected valuation model. They
                       stay pinned and unchanged while the switch replaces only the coloured block
                       to their right. Fixed widths make the sticky offsets exact. */}
-                  <th className="sticky left-0 z-40 w-12 min-w-12 max-w-12 bg-page px-2 py-2 text-right font-medium"
+                  <th className="left-0 z-40 w-12 min-w-12 max-w-12 bg-page px-2 py-2 text-right font-medium @min-[32rem]:sticky"
                     aria-label="Row number">
                     #
                   </th>
-                  <th className="sticky left-12 z-40 w-80 min-w-80 max-w-80 bg-page px-3 py-2 text-left font-medium">
+                  <th className="left-12 z-40 w-[var(--company-width)] bg-page px-3 py-2 text-left font-medium @min-[32rem]:sticky">
                     Company
                   </th>
                   <NumericHeader sortKey="weight" label="Weight"
                     info="Each row's current share of the paired AIRS book, calculated from VOLK Huidige waarde."
-                    className="sticky left-[23rem] z-40 w-24 min-w-24 max-w-24 bg-page" />
+                    className="w-24 min-w-24 max-w-24 bg-page @min-[64rem]:sticky @min-[64rem]:left-[23rem] @min-[64rem]:z-40" />
                   <NumericHeader sortKey="price" label="Stock price"
                     info="The share price used by the valuation models, in the same currency as their financial inputs. The info tooltip shows the original Yahoo quote and applied currency conversion."
-                    className="sticky left-[29rem] z-40 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page shadow-[6px_0_8px_-6px_var(--color-neutral-700)]" />
+                    className="w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page @min-[64rem]:sticky @min-[64rem]:left-[29rem] @min-[64rem]:z-40 @min-[64rem]:shadow-[6px_0_8px_-6px_var(--color-neutral-700)]" />
                   {model === 'dcf' ? RATES.map((rate) => (
                     <NumericHeader key={rate} sortKey={`rate:${rate}`}
                       label={`${(rate * 100).toFixed(0)}%`} className="bg-accent-500/10" />
@@ -1444,12 +1460,12 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
               <tbody className="divide-y divide-neutral-800/20">
                 {sortedRows.map((row, rowIndex) => (
                   <tr key={row.company_id} className="hover:bg-overlay/[0.03]">
-                    <td className="sticky left-0 z-20 w-12 min-w-12 max-w-12 border-l border-neutral-800/50 bg-page px-2 py-2 text-right font-mono tabular-nums text-fg-faint">
+                    <td className="left-0 z-20 w-12 min-w-12 max-w-12 border-l border-neutral-800/50 bg-page px-2 py-2 text-right font-mono tabular-nums text-fg-faint @min-[32rem]:sticky">
                       {rowIndex + 1}
                     </td>
-                    <td className="sticky left-12 z-20 w-80 min-w-80 max-w-80 bg-page px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <div className="min-w-0 flex-1">
+                    <td className="left-12 z-20 w-[var(--company-width)] bg-page px-3 py-2 @min-[32rem]:sticky">
+                      <div className="flex min-w-0 flex-col items-start gap-2">
+                        <div className="w-full min-w-0">
                           {row.yahoo_symbol ? <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(row.yahoo_symbol)}/`}
                             target="_blank" rel="noopener noreferrer"
                             className="block truncate font-medium text-fg-strong hover:text-accent-400 hover:underline"
@@ -1457,7 +1473,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             : <div className="truncate font-medium text-fg-strong" title={row.name}>{row.name}</div>}
                           <div className="font-mono text-[10px] text-fg-faint">{row.isin}</div>
                         </div>
-                        <span className="flex shrink-0 items-center gap-1.5">
+                        <span className="flex max-w-full flex-wrap items-center gap-1.5">
                           <button type="button" onClick={() => setCompanyFundamental(row)}
                             title={`Open the full Fundamental view for ${row.name}`}
                             className="shrink-0 rounded-md border border-neutral-700 px-2 py-1 text-[10px] font-medium text-fg-muted transition-colors hover:border-accent-500/50 hover:bg-overlay/5 hover:text-accent-300">
@@ -1476,7 +1492,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                         </span>
                       </div>
                     </td>
-                    <td className="sticky left-[23rem] z-20 w-24 min-w-24 max-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums">
+                    <td className="w-24 min-w-24 max-w-24 bg-page px-3 py-2 text-right font-mono tabular-nums @min-[64rem]:sticky @min-[64rem]:left-[23rem] @min-[64rem]:z-20">
                       <span className="flex items-center justify-end gap-1.5 whitespace-nowrap">
                         <span>{row.book_weight ? `${bookWeightPct(row.book_weight).toFixed(2)}%`
                           : bookPortfolio != null ? bookWeights === undefined ? '…' : '—'
@@ -1503,7 +1519,7 @@ export default function PortfolioFundamentalModal({ name, portfolioId, basket, b
                             how={`This company's portfolio weight is ${row.weight_pct.toFixed(2)}%; funds, cash, bonds and uncovered companies are not redistributed over the visible company rows.`} />} />}
                       </span>
                     </td>
-                    <td className="sticky left-[29rem] z-20 w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums shadow-[6px_0_8px_-6px_var(--color-neutral-700)]">
+                    <td className="w-36 min-w-36 max-w-36 border-r-2 border-neutral-700 bg-page px-3 py-2 font-mono tabular-nums @min-[64rem]:sticky @min-[64rem]:left-[29rem] @min-[64rem]:z-20 @min-[64rem]:shadow-[6px_0_8px_-6px_var(--color-neutral-700)]">
                       <span className="grid grid-cols-[2.25rem_1fr_auto] items-baseline gap-1.5">
                         <span className="text-left text-[10px] text-fg-faint">{row.currency ?? ''}</span>
                         <span className="text-right">{row.src.price == null ? '—' : inputNumber.format(row.src.price)}</span>

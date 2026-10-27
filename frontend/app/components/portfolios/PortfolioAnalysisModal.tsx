@@ -27,8 +27,8 @@ import { analysisRequestKey, loadPrefetchedAnalysis } from '../../../lib/analysi
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import MonthlyReportPanel from './MonthlyReportPanel';
 import PanelDialog from './PanelDialog';
+import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
-import AirsRiskPanel from './AirsRiskPanel';
 import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
 import EtfSectorAllocationModal from './EtfSectorAllocationModal';
@@ -42,6 +42,10 @@ import { useAnalyseCopy } from './analyseCopy';
 import {
   MoneyWeightedCashflowCalculation, moneyWeightedWorked,
 } from './MoneyWeightedCalculation';
+
+const ActiveSharePanel = dynamic(() => import('./ActiveSharePanel'), {
+  loading: () => <p role="status" className="text-sm text-fg-muted">Loading risk…</p>,
+});
 
 const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
 
@@ -3052,19 +3056,23 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 <tr key={p.row_key} className="border-b border-neutral-800/[0.15] last:border-0 hover:bg-overlay/[0.03] transition-colors">
                   <td className="py-1.5 pl-4 pr-2 text-right font-mono text-[11px] text-fg-faint tabular-nums">{i + 1}</td>
                   <td className="py-1.5 pr-3 text-fg max-w-0" title={p.name}>
-                    <span className="truncate inline-block max-w-full align-bottom">{p.name}</span>
+                    {p.post_close_symbol ? <a href={'https://finance.yahoo.com/quote/' + encodeURIComponent(p.post_close_symbol) + '/'} target="_blank" rel="noreferrer"
+                      className="truncate inline-block max-w-full align-bottom hover:text-accent-300 hover:underline underline-offset-2"
+                      title={'Yahoo Finance · ' + p.post_close_symbol}>{p.name}</a>
+                      : <span className="truncate inline-block max-w-full align-bottom">{p.name}</span>}
                     {p.since_close_pct != null && (
                       <span className="ml-2 inline-flex items-center gap-1 text-[10px] whitespace-nowrap"
                         title={`Price return from ${p.since_close_date} to ${p.since_close_as_of}.`}>
                         <span className={`font-mono tabular-nums ${retTone(p.since_close_pct)}`}>
                           {fmtRet(p.since_close_pct)}
                         </span>
-                        {p.via_certificate && <Provenance source="benchmark" asOf={p.since_close_as_of} kind="formula"
+                        <Provenance source="benchmark" asOf={p.since_close_as_of} kind="formula"
                           what={copy.lang === 'nl' ? 'Koersrendement in EUR na verkoop; geen gerealiseerde bijdrage.' : 'EUR price return after sale; not a realised contribution.'}
+                          note={copy.lang === 'nl' ? 'Slotkoersen inclusief valuta-effect. Coupons en uitkeringen niet meegerekend; geen werkelijk rekeningresultaat.' : 'Closing prices including FX. Coupons and distributions excluded; not an actual account result.'}
                           worked={p.since_close_from != null && p.since_close_to != null
                             ? String.raw`\left(\frac{${p.since_close_to.toFixed(2)}}{${p.since_close_from.toFixed(2)}}-1\right)\times100=${p.since_close_pct.toFixed(2)}\%`
                             : undefined}
-                          how={`${saleDateLabel(p.since_close_date)} to ${saleDateLabel(p.since_close_as_of)}`} />}
+                          how={`${saleDateLabel(p.since_close_date)} to ${saleDateLabel(p.since_close_as_of)}`} />
                         <span className="text-fg-faint">return after</span>
                         <span className="rounded border border-neutral-700/70 bg-overlay/5 px-1 py-px text-fg-muted">
                           {saleDateLabel(p.since_close_date ?? p.last_sale)}
@@ -4337,8 +4345,8 @@ export default function PortfolioAnalysisModal({
               (`holdings: int`), so the obvious name silently types as a number. */}
           {data.details_pending ? (
             <p role="status" className="text-sm text-fg-muted">{detailsError ? 'Risk details could not be loaded. Close and reopen Risk to retry.' : 'Loading risk holdings…'}</p>
-          ) : <AirsRiskPanel benchmark={data.benchmark ?? benchmark}
-            airsHoldings={data.book_holdings ?? []} bands={data.bands}
+          ) : <ActiveSharePanel benchmark={data.benchmark ?? benchmark}
+            benchmarkProfile={data.variant}
             portefeuille={data.book_portefeuille}
             holdings={airsRiskHoldings(data.book_holdings ?? [], lookThrough)}
             riskProfilePolicy={data.risk_profile_policy}
