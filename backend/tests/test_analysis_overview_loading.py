@@ -97,18 +97,29 @@ def test_overview_skips_risk_history_without_filling_cache_with_missing_risk():
         analysis._OVERVIEW_ONLY.reset(token)
 
 
-def test_book_overview_does_not_calculate_yahoo_strategy(monkeypatch):
+@pytest.mark.parametrize('overview_only', [True, False])
+def test_book_overview_does_not_calculate_yahoo_strategy(monkeypatch, overview_only):
     import routers._airs_portfolio_perf as perf
     monkeypatch.setattr(perf, 'compute_portfolio_performance', lambda **_: pytest.fail('strategy load on overview'))
     monkeypatch.setattr(analysis, '_book_return', lambda *_: {'book_portefeuille': 'BOOK', 'book_ytd_pct': 3.75})
     monkeypatch.setattr(analysis, '_apply_book_source', lambda value, _: value.update(portfolio_ytd_pct=3.75))
-    token = analysis._OVERVIEW_ONLY.set(True)
+    token = analysis._OVERVIEW_ONLY.set(overview_only)
     try:
         result = analysis._returns(1, '2025-12-30', 'ACWI', 'book')
     finally:
         analysis._OVERVIEW_ONLY.reset(token)
     assert result['portfolio_ytd_pct'] == 3.75
     assert result['strategy_ytd_pct'] is None
+
+
+def test_optional_risk_history_is_skipped_without_caching_empty_results(monkeypatch):
+    monkeypatch.setattr(analysis, '_leg', lambda *_: pytest.fail('risk cache accessed for disabled columns'))
+    token = analysis._INCLUDE_HOLDING_RISK.set(False)
+    try:
+        assert analysis._holding_risk(['TEST'], 'ACWI') == {}
+    finally:
+        analysis._INCLUDE_HOLDING_RISK.reset(token)
+    assert analysis._INCLUDE_HOLDING_RISK.get() is True
 
 
 def test_first_page_never_loads_child_ledgers_prices_or_risk(monkeypatch):
@@ -143,6 +154,34 @@ def test_first_page_never_loads_child_ledgers_prices_or_risk(monkeypatch):
     assert result['returns']['benchmark_ytd_pct'] == 9.61
     assert result['returns']['ytd_excess_pct'] == pytest.approx(-5.86)
     assert next(r['pct'] for r in result['allocation'] if r['bucket'] == 'Equity') == 80
+
+
+def test_stocks_charts_skip_returns_ledgers_and_holding_enrichment(monkeypatch):
+    monkeypatch.setattr(analysis, 'ref_model', lambda _: {'name': 'Test', 'positions_datum': '2025-12-31'})
+    monkeypatch.setattr(analysis, 'ref_positions_for', lambda _: [])
+    monkeypatch.setattr(analysis, '_country_by_code', lambda: {})
+    monkeypatch.setattr(analysis, '_grid', lambda _: {})
+    monkeypatch.setattr(analysis, '_bench_members', lambda _: ([], {}))
+    from routers import _airs_holding_isin as resolver
+    monkeypatch.setattr(resolver, '_load_bucket_overrides', lambda _: {})
+    items = [(45, ('Technology', 'United States', 'USD'))]
+    labels = [{'isin': 'TEST', 'name': 'Test stock', 'asset_class': 'Equity'}]
+    monkeypatch.setattr(analysis, '_book_port_items', lambda *_: {
+        'items': items, 'direct_items': items, 'labels': labels, 'direct_labels': labels,
+        'alloc_items': [(45, 'Equity')], 'direct_alloc_items': [(45, 'Equity')],
+        'classified_w': 45, 'total_w': 100, 'current_book_total': 100,
+        'foreign': 0, 'holdings': 1, 'holdings_detail': [], 'portefeuille': 'BOOK',
+    })
+    for name in ('_with_results', '_realised_block', '_returns_timed', '_with_sold_risk'):
+        monkeypatch.setattr(analysis, name, lambda *_: pytest.fail('unrelated detail work in chart request'))
+    token = analysis._OVERVIEW_ONLY.set(True)
+    try:
+        result = analysis.compute_portfolio_analysis(1, 'ACWI', 'book', 'book', 'Equity', False, True)
+    finally:
+        analysis._OVERVIEW_ONLY.reset(token)
+    assert len(result['axes']) == 3
+    assert result['axes'][0]['rows'][0]['portfolio_pct'] == 45
+    assert 'returns' not in result
 
 
 def test_resolver_is_reused_per_request_without_sharing_mutable_rows(monkeypatch):

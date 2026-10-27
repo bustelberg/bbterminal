@@ -1,7 +1,26 @@
 import { describe, expect, it, vi } from 'vitest';
-import { analysisRequestKey, loadPrefetchedAnalysis, prefetchAnalysis } from './analysisPrefetch';
+import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, prefetchAnalysis } from './analysisPrefetch';
 
 describe('Analyse request sharing', () => {
+  it('shares in-flight holdings between sleeves and separates every data-changing input', async () => {
+    const base = analysisDetailsKey('id:4242', 'ACWI', 'book', false, 0, 0, false);
+    let finish!: (value: object) => void;
+    const load = vi.fn(() => new Promise<object>((resolve) => { finish = resolve; }));
+    const overview = loadPrefetchedAnalysis(`${base}|holdings`, load);
+    const bonds = loadPrefetchedAnalysis(`${base}|holdings`, load);
+    finish({ book_holdings: ['same positions'] });
+    expect(await overview).toBe(await bonds);
+    expect(load).toHaveBeenCalledOnce();
+    expect(new Set([
+      base,
+      analysisDetailsKey('id:4242', 'AEX', 'book', false, 0, 0, false),
+      analysisDetailsKey('id:4242', 'ACWI', 'model', false, 0, 0, false),
+      analysisDetailsKey('id:4242', 'ACWI', 'book', true, 0, 0, false),
+      analysisDetailsKey('id:4242', 'ACWI', 'book', false, 1, 0, false),
+      analysisDetailsKey('id:4242', 'ACWI', 'book', false, 0, 1, false),
+      analysisDetailsKey('id:4242', 'ACWI', 'book', false, 0, 0, true),
+    ]).size).toBe(7);
+  });
   it('uses exactly the modal key for the default hover prefetch', async () => {
     const key = analysisRequestKey('id:98765');
     expect(key).toBe(analysisRequestKey('id:98765', 'ACWI', 'book', '', false, 0, 0));

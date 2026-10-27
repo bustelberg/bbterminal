@@ -131,7 +131,8 @@ def _mdd(returns: list[float]) -> float | None:
 def compute_drawdown(holdings: list[dict], benchmark: str,
                      frequency: str = "daily", years: int = 5,
                      benchmark_weights: dict[str, float] | None = None,
-                     require_complete_history: bool = False) -> dict:
+                     require_complete_history: bool = False,
+                     start_date: str | None = None) -> dict:
     """MDD of the reconstructed sleeve, its episodes with dates, and the cadence comparison."""
     freq = frequency if frequency in PERIODS else "daily"
 
@@ -142,13 +143,13 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
             # first, then calculate drawdown at daily cadence from that loaded price snapshot.
             quality = build_paired_series(holdings, benchmark, "monthly", years,
                                           require_complete_holdings=True,
-                                          benchmark_weights=benchmark_weights)
+                                          benchmark_weights=benchmark_weights, start_date=start_date)
             built = build_paired_series(holdings, benchmark, freq, years,
                                         preloaded=quality.get("series"),
-                                        benchmark_weights=benchmark_weights)
+                                        benchmark_weights=benchmark_weights, start_date=start_date)
         else:
             built = build_paired_series(holdings, benchmark, freq, years,
-                                        benchmark_weights=benchmark_weights)
+                                        benchmark_weights=benchmark_weights, start_date=start_date)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 
@@ -166,7 +167,7 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
         try:
             other = build_paired_series(holdings, benchmark, f, years,
                                         preloaded=built.get("series"),
-                                        benchmark_weights=benchmark_weights)
+                                        benchmark_weights=benchmark_weights, start_date=start_date)
             by_freq[f] = _mdd(other["portfolio"])
         except SeriesError:
             by_freq[f] = None
@@ -181,7 +182,8 @@ def compute_drawdown(holdings: list[dict], benchmark: str,
         #  The window the paired grid reached — the same two dates the tracking-error,
         # correlation and volatility responses carry. Four views, one `build_paired_series`,
         # one window; four different answers to "over what period" would be four bugs waiting.
-        "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
+        "window_from": (start_date or dates[0]) if (dates := sorted(d for d in built["obs_dates"] if d)) else start_date,
+        "excluded_holdings": built.get("excluded_holdings", []),
         "window_to": (dates[-1] if dates else None),
 
         "max_drawdown_pct": _mdd(built["portfolio"]),

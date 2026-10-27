@@ -137,7 +137,7 @@ def _weighted_months(portefeuille: str, months: list[dict]) -> dict:
     return result
 
 
-def read_report(portefeuille: str, month: str) -> dict:
+def read_report(portefeuille: str, month: str, *, include_details: bool = True) -> dict:
     start, end, opening = month_window(month)
     _account(portefeuille)
     months = _monthly_rows(portefeuille, int(month[:4]))
@@ -152,7 +152,7 @@ def read_report(portefeuille: str, month: str) -> dict:
                   .execute().data or [])
         selected = (supabase.table("airs_monthly_report").select("report,fetched_at,datum_tot")
                     .eq("portefeuille", portefeuille).eq("month", start).limit(1)
-                    .execute().data or [])
+                    .execute().data or []) if include_details else []
     except Exception:
         cached = []
         selected = []

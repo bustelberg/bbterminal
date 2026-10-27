@@ -30,6 +30,18 @@ def run(data, years=5):
     return S.simulate(data, years, date(2026, 10, 27))
 
 
+def test_fixed_2021_window_includes_latest_close_but_te_uses_complete_months():
+    from tests.test_risk_fixed_window import prices
+    rows = [row for row in prices() if row[0] <= '2026-10-26']
+    result = S.simulate(inputs(rows, rows, rows), 1, date(2026, 10, 27), start_date='2021-01-01')
+    assert result['available']
+    assert result['window_from'] == result['requested_window_from'] == '2021-01-01'
+    assert result['window_to'] == '2026-10-26'
+    assert result['tracking_window_to'] == '2026-09-30'
+    assert result['observations'] == 69
+    assert result['historical_comparison']['start_date'] == '2021-01-01'
+
+
 def test_equity_only_retains_actual_weights_on_both_sides():
     growing = points(2024, 24, lambda month: 2 if month in (1, 13) else 1)
     data = inputs(growing, points(2024, 24), growing)

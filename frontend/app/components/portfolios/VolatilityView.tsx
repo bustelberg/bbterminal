@@ -37,6 +37,7 @@ import { withWorked, subNum } from './workedFormula';
 import type { PortfolioVolatility } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
+import { riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
 
@@ -86,7 +87,7 @@ export default function VolatilityView({
   const freq = 'monthly';
 
   const requestUrl = `${API_URL}/api/airs/portfolio/volatility`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=shared-v1`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&${riskHistoryQuery()}`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
   const repairIdentity = riskRequestKey(requestUrl, requestBody);
   const [repairVersion, setRepairVersion] = useState(0);
@@ -101,10 +102,11 @@ export default function VolatilityView({
   }, 'volatility', 'the volatility could not be computed');
 
   useEffect(() => {
-    if (!data?.available || !data.preliminary || startedPreliminaryRepairs.has(repairIdentity)) return;
+    if (!data?.available || (!data.preliminary && !data.excluded_holdings?.length)
+      || startedPreliminaryRepairs.has(repairIdentity)) return;
     startedPreliminaryRepairs.add(repairIdentity);
     void startJob(
-      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=5`,
+      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=${riskHistoryYears()}&full_history=true&yahoo_only=true`,
       'Repairing risk price history',
       { headers: { 'Content-Type': 'application/json' }, body: requestBody },
     ).then(async ({ done }) => {
@@ -116,7 +118,7 @@ export default function VolatilityView({
     }).catch(() => {
       // The standard job popup reports failures; retain the real preliminary sample either way.
     });
-  }, [benchmark, data?.available, data?.preliminary, repairIdentity, requestBody]);
+  }, [benchmark, data?.available, data?.preliminary, data?.excluded_holdings?.length, repairIdentity, requestBody]);
 
   const period = 'month';
 
@@ -285,6 +287,7 @@ export default function VolatilityView({
     <div className="space-y-3">
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
+      {!!data?.excluded_holdings?.length && <details className="text-xs text-fg-muted"><summary>Missing history · {data.excluded_holdings.length} excluded holdings</summary><p>{data.excluded_holdings.join(', ')}</p></details>}
       {!data && !error && (
         <div className="absolute inset-0 grid place-items-center text-center px-6" role="status">
           <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>

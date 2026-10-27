@@ -32,6 +32,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const [detailsHeight, setDetailsHeight] = useState(0);
   const detailsElement = useRef<HTMLDivElement>(null);
   const saved = useRef(new Map<string, MonthlyReport>());
+  const detailsRead = useRef(new Set<string>());
   const automaticAttempts = useRef(new Set<string>());
   const fetching = useRef(false);
   const mounted = useRef(true);
@@ -43,21 +44,24 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     setReport((previous) => previous?.portefeuille === portefeuille ? previous : null);
     const key = `${portefeuille}|${month}`;
     const cached = saved.current.get(key);
-    // Recheck the current month against the database's valuation cutoff. A
-    // completed historical month can be reopened from this view's memory cache.
-    if (month !== today && cached && !cached.needs_refresh && !cached.warning && cached.snapshot?.positions
-      && cached.snapshot.positions.every((position) => Object.hasOwn(position, 'contribution_calculation'))) {
+    // The month strip needs only returns. Load positions when a month opens, and keep
+    // completed detail while this panel is mounted. Refresh explicitly clears this cache.
+    if (cached && (!detailsOpen || (!cached.needs_refresh && !cached.warning && cached.snapshot?.positions
+      && cached.snapshot.positions.every((position) => Object.hasOwn(position, 'contribution_calculation'))))) {
       setReport(cached); setPending(false); return;
     }
-    void apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report?month=${month}`,
+    void apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report?month=${month}&include_details=${detailsOpen}`,
       { noReadCache: true, cache: 'no-store' }).then(async (res) => {
       if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.detail ?? `HTTP ${res.status}`); }
       return res.json() as Promise<MonthlyReport>;
-    }).then((data) => { if (active) { saved.current.set(key, data); setReport(data); } })
+    }).then((data) => { if (active) {
+      if (detailsOpen) detailsRead.current.add(key);
+      saved.current.set(key, data); setReport(data);
+    } })
       .catch((err) => { if (active) setError(String(err.message ?? err)); })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
-  }, [portefeuille, month, reload, today]);
+  }, [portefeuille, month, reload, today, detailsOpen]);
 
   const openMonth = (key: string) => {
     if (key === month && detailsOpen) { setDetailsOpen(false); return; }
@@ -87,6 +91,9 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
       || report.month !== month || report.portefeuille !== portefeuille) return;
     if (!report.needs_refresh && report.snapshot?.positions) return;
     const key = `${portefeuille}|${month}`;
+    // Opening a compact month strip must first read the saved detailed report;
+    // its absent snapshot does not mean AIRS needs to be scanned again.
+    if (!detailsRead.current.has(key)) return;
     // One automatic attempt per selected month. A partial/failed download must
     // not trigger a retry loop when its saved result is read back afterwards.
     if (automaticAttempts.current.has(key)) return;

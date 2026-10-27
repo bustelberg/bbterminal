@@ -105,7 +105,7 @@ describe('AIRS monthly report', () => {
   it('keeps the month tiles mounted while another month loads without showing the previous positions', async () => {
     let resolveReport!: (response: Response) => void;
     vi.mocked(apiFetch).mockResolvedValueOnce(new Response(JSON.stringify({ ...completeResponse(), snapshot: {
-      ...completeResponse().snapshot, positions: [{ name: 'October only', return_pct: 1, status: 'held' }],
+      ...completeResponse().snapshot, positions: [{ name: 'October only', return_pct: 1, status: 'held', contribution_calculation: null }],
     } }))).mockImplementationOnce(() => new Promise((resolve) => { resolveReport = resolve; }));
     await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
     await openOctober();
@@ -172,7 +172,7 @@ describe('AIRS monthly report', () => {
     await openOctober();
     expect(startJob).toHaveBeenCalledOnce();
     expect(host.textContent).toContain('Closing valuation could not be downloaded');
-    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(apiFetch).toHaveBeenCalledTimes(3); // strip, saved detail, post-job result
   });
 
   it('refreshes a stale saved report automatically, then displays the saved replacement', async () => {
@@ -184,7 +184,7 @@ describe('AIRS monthly report', () => {
     expect(startJob).not.toHaveBeenCalled();
     await openOctober();
     expect(startJob).toHaveBeenCalledOnce();
-    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(apiFetch).toHaveBeenCalledTimes(3); // strip, saved detail, post-job result
     expect(host.textContent).toContain('No positions were found');
     await openOctober();
     await openOctober();
@@ -211,10 +211,24 @@ describe('AIRS monthly report', () => {
     await selectSeptember();
     expect(apiFetch).toHaveBeenCalledTimes(2);
     await openOctober();
-    expect(apiFetch).toHaveBeenCalledTimes(3);
+    expect(apiFetch).toHaveBeenCalledTimes(2);
     await selectSeptember();
-    expect(apiFetch).toHaveBeenCalledTimes(3);
+    expect(apiFetch).toHaveBeenCalledTimes(2);
     expect(startJob).not.toHaveBeenCalled();
+  });
+
+  it('loads only the month strip first, then reads saved positions before considering AIRS', async () => {
+    vi.mocked(apiFetch).mockImplementation(async (url) => new Response(JSON.stringify(
+      String(url).includes('include_details=false') ? response() : completeResponse())));
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+    expect(String(vi.mocked(apiFetch).mock.calls[0][0])).toContain('include_details=false');
+    expect(startJob).not.toHaveBeenCalled();
+    await openOctober();
+    expect(String(vi.mocked(apiFetch).mock.calls[1][0])).toContain('include_details=true');
+    expect(startJob).not.toHaveBeenCalled();
+    await openOctober();
+    await openOctober();
+    expect(apiFetch).toHaveBeenCalledTimes(2);
   });
 
   it('shows the actual contribution calculation and dated trades in its info popover', async () => {

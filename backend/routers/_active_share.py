@@ -381,7 +381,8 @@ def build_policy_issuer_weights(holdings: list[dict], benchmark: str,
 
 def compute_active_share(holdings: list[dict], benchmark: str,
                          benchmark_start: str | None = None,
-                         benchmark_weights: dict[str, float] | None = None) -> dict:
+                         benchmark_weights: dict[str, float] | None = None,
+                         *, held_only: bool = False) -> dict:
     """Active share of the book's individual stocks against `benchmark`.
 
     `holdings` are the rows the Analyse modal is already showing — `{isin, weight_pct, name,
@@ -470,7 +471,7 @@ def compute_active_share(holdings: list[dict], benchmark: str,
         "unresolved": sorted(unresolved, key=lambda r: -r["weight_pct"]),
         # Everything the book holds, plus the index names it is most under-weight in. Sorted by the
         # size of the bet either way, which is the order a risk report is read in.
-        "rows": sorted(rows, key=lambda r: -abs(r["active_pct"])),
+        "rows": sorted(held if held_only else rows, key=lambda r: -abs(r["active_pct"])),
     }
 
 
@@ -486,8 +487,16 @@ def _benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict:
     writes from other workers. Deployment starts a fresh cache from the bundled file.
     """
     from routers._analysis_cache import leg
+    from routers import _prepared_analyse as prepared
 
-    cache_key = ("risk-workbook-identity-v6", benchmark.upper(), benchmark_start, date.today().isoformat())
+    revision, saved = (prepared.read('acwi', 'acwi:ACWI')
+                       if benchmark.upper() == 'ACWI' and benchmark_start is None else (None, None))
+    if saved is not None:
+        saved['issuer_by_asset'] = {int(key): value for key, value in saved['issuer_by_asset'].items()}
+        return saved
+
+    cache_key = ("risk-workbook-identity-v6", benchmark.upper(), benchmark_start, date.today().isoformat(),
+                 revision, prepared.code_version() if revision is not None else None)
     with _benchmark_lock:
         return deepcopy(leg(cache_key, lambda: _load_benchmark_weights(benchmark, benchmark_start)))
 

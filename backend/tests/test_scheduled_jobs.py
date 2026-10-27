@@ -121,6 +121,17 @@ class TestOptInJobs:
         assert spec.cadence == "Every day, 12:00 Amsterdam"
         assert "Full AIRS re-scan every day at 12:00 Amsterdam" in spec.note
 
+    def test_price_checks_run_after_close_and_next_morning(self):
+        spec = {s.id: s for s in SCHEDULED_JOBS}["airs_price_checks"]
+        assert spec.trigger == {"day_of_week": "mon-sun", "hour": "7,22", "minute": 30, "timezone": "UTC"}
+        assert spec.options["max_instances"] == 1
+
+    def test_analyse_preparation_is_one_bounded_periodic_worker(self):
+        spec = {s.id: s for s in SCHEDULED_JOBS}['analyse_prepare']
+        assert spec.interval_seconds == 300
+        assert spec.options['max_instances'] == 1
+        assert spec.options['coalesce']
+
 
 
 class TestTheThreeWayDisagreement:

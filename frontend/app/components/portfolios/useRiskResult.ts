@@ -28,7 +28,7 @@ function cached<T>(key: string): T | null {
  * The cache follows `readCache`'s generation, so any ingest/refresh invalidates both layers.
  */
 export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope: string,
-  traceMessage: string): { data: T | null; error: string | null } {
+  traceMessage: string, enabled = true): { data: T | null; error: string | null } {
   const [loaded, setLoaded] = useState<Loaded<T> | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
   const hit = cached<T>(key);
@@ -36,6 +36,7 @@ export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope
   const error = failure?.key === key ? failure.message : null;
 
   useEffect(() => {
+    if (!enabled) return;
     if (cached<T>(key) != null) return;
     let cancelled = false;
     void load().then((value) => {
@@ -53,7 +54,7 @@ export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope
     // `key` is the complete request identity, including URL and body. A new loader with the same
     // key is the same read; depending on its render-time function identity would refetch forever.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, enabled]);
 
   return { data, error };
 }

@@ -14029,16 +14029,7 @@ export interface components {
             /** Name */
             name: string;
         };
-        /**
-         * PortfolioDrawdown
-         * @description Max drawdown of the RECONSTRUCTED sleeve — see `routers/_portfolio_drawdown.py`.
-         *
-         *      NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
-         *     series from the holdings as they stand TODAY: look-ahead bias (those weights were chosen with
-         *     hindsight) and survivorship bias (names since sold are absent, and the sold ones skew towards
-         *     the fallers). The client's own figure comes from the AIRS returns, with real trades, real costs
-         *     and real timing. Every label here says which one it is.
-         */
+        /** PortfolioDrawdown */
         PortfolioDrawdown: {
             /**
              * Available
@@ -14075,6 +14066,8 @@ export interface components {
              * @default 0
              */
             episodes_total?: number;
+            /** Excluded Holdings */
+            excluded_holdings?: string[];
             /**
              * Frequency
              * @default daily
@@ -14332,19 +14325,7 @@ export interface components {
             /** Name */
             name?: string | null;
         };
-        /**
-         * PortfolioVolatility
-         * @description σ of the selected risk sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
-         *
-         *      SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
-         *     correlation view puts inside `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ`. Two σₚ one click apart that
-         *     disagreed would tell the reader one of them is wrong and nothing about which.
-         *
-         *      NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an
-         *     account-value series — it is a weighted basket of instrument price returns — so a deposit or a
-         *     withdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost
-         *     is the other caveat: the weights are TODAY'S, carried backwards.
-         */
+        /** PortfolioVolatility */
         PortfolioVolatility: {
             /**
              * Available
@@ -14375,6 +14356,8 @@ export interface components {
             cadence_note?: string | null;
             /** Downside Dev Pct */
             downside_dev_pct?: number | null;
+            /** Excluded Holdings */
+            excluded_holdings?: string[];
             /**
              * Frequency
              * @default weekly
@@ -14825,16 +14808,7 @@ export interface components {
             /** Ticker */
             ticker: string;
         };
-        /**
-         * RiskCorrelation
-         * @description ρ as a RISK measure — see `routers/_portfolio_correlation_risk.py`.
-         *
-         *      NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
-         *     return into allocation + selection + interaction, terms that SUM to it exactly. Correlation
-         *     appears nowhere in that decomposition and sums to nothing: it says how far the book CAN diverge,
-         *     where attribution says where the divergence came from. A combined view would imply they
-         *     reconcile, and they are not that kind of number.
-         */
+        /** RiskCorrelation */
         RiskCorrelation: {
             /** Active Vol Pct */
             active_vol_pct?: number | null;
@@ -14851,6 +14825,8 @@ export interface components {
             benchmark_vol_pct?: number | null;
             /** Cadence Note */
             cadence_note?: string | null;
+            /** Excluded Holdings */
+            excluded_holdings?: string[];
             /**
              * Frequency
              * @default weekly
@@ -15368,19 +15344,7 @@ export interface components {
             /** Variant Key */
             variant_key?: string | null;
         };
-        /**
-         * TrackingError
-         * @description Hypothetical tracking error from the annually rebalanced current portfolio simulation.
-         *
-         *      `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
-         *     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
-         *     picks one and routes it through `annualized_stats`, the same function every other volatility on
-         *     the screen goes through.
-         *
-         *     A fixed cohort of direct equities with complete Yahoo history is reweighted to 100%.
-         *     Monthly portfolio and benchmark returns share one period; exclusions and coverage are explicit.
-         *     This is a historical simulation, not realised AIRS account performance or an ex-ante forecast.
-         */
+        /** TrackingError */
         TrackingError: {
             /** Active Return Ann Pct */
             active_return_ann_pct?: number | null;
@@ -15486,6 +15450,8 @@ export interface components {
             total_holdings?: number;
             /** Tracking Error Pct */
             tracking_error_pct?: number | null;
+            /** Tracking Window To */
+            tracking_window_to?: string | null;
             /** Window From */
             window_from?: string | null;
             /** Window To */
@@ -16916,6 +16882,7 @@ export interface operations {
         parameters: {
             query: {
                 month: string;
+                include_details?: boolean;
             };
             header?: never;
             path: {
@@ -17516,6 +17483,7 @@ export interface operations {
                 look_through?: boolean;
                 include_axes?: boolean;
                 overview_only?: boolean;
+                include_holding_risk?: boolean;
             };
             header?: never;
             path: {
@@ -18057,6 +18025,7 @@ export interface operations {
             query?: {
                 benchmark?: string;
                 benchmark_start?: string | null;
+                held_only?: boolean;
             };
             header?: never;
             path?: never;
@@ -18130,6 +18099,7 @@ export interface operations {
                 benchmark?: string;
                 frequency?: string;
                 years?: number;
+                start_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -18202,6 +18172,7 @@ export interface operations {
                 benchmark?: string;
                 frequency?: string;
                 years?: number;
+                start_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -18313,6 +18284,7 @@ export interface operations {
                 benchmark?: string;
                 frequency?: string;
                 years?: number;
+                start_date?: string | null;
             };
             header?: never;
             path?: never;
@@ -18388,6 +18360,7 @@ export interface operations {
                 benchmark?: string;
                 frequency?: string;
                 years?: number;
+                start_date?: string | null;
             };
             header?: never;
             path?: never;

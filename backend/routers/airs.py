@@ -1694,7 +1694,8 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
                                         bucket: str | None = None,
                                         look_through: bool = False,
                                         include_axes: bool = False,
-                                        overview_only: bool = False):
+                                        overview_only: bool = False,
+                                        include_holding_risk: bool = True):
     """Sector / region / currency split of one model portfolio, beside the benchmark's.
 
     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
@@ -1720,7 +1721,7 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     bucket_filter = bucket if bucket in BUCKET_ORDER else None
     return await compute_portfolio_analysis_async(
         portfolio_id, benchmark, basis, src, bucket_filter, look_through, include_axes,
-        overview_only=overview_only)
+        overview_only=overview_only, include_holding_risk=include_holding_risk)
 
 
 class HoldingTradeEffect(BaseModel):
@@ -2383,7 +2384,8 @@ async def airs_portfolio_risk_data_quality(req: ActiveShareRequest, benchmark: s
 
 @router.post("/api/airs/portfolio/active-share", response_model=ActiveShare)
 async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                      benchmark_start: str | None = None):
+                                      benchmark_start: str | None = None,
+                                      held_only: bool = False):
     """How much of the book's stock sleeve is NOT the benchmark.
 
      ON DEMAND, NOT PART OF THE ANALYSE PAYLOAD. Answering it needs the index's constituents
@@ -2400,7 +2402,7 @@ async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = 
 
     return await asyncio.to_thread(
         compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
-        req.benchmark_weights)
+        req.benchmark_weights, held_only=held_only)
 
 
 class TrackingErrorBenchmarkComponent(BaseModel):
@@ -2477,6 +2479,7 @@ class SimulationMonth(BaseModel):
 
 
 class TrackingError(BaseModel):
+    tracking_window_to: str | None = None
     """Hypothetical tracking error from the annually rebalanced current portfolio simulation.
 
      `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
@@ -2554,7 +2557,8 @@ class TrackingError(BaseModel):
 
 @router.post("/api/airs/portfolio/tracking-error", response_model=TrackingError)
 async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                        frequency: str = "monthly", years: int = 5):
+                                        frequency: str = "monthly", years: int = 5,
+                                        start_date: str | None = None):
     """Annually rebalance today's portfolio and benchmark; measure monthly active-return volatility.
 
     Only direct equities with matching Yahoo listings and complete price histories enter the fixed
@@ -2568,7 +2572,8 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
 
     return await asyncio.to_thread(
         compute_simulation, [h.model_dump() for h in req.holdings], benchmark,
-        years, benchmark_weights=req.benchmark_weights)
+        years, benchmark_weights=req.benchmark_weights,
+        **({"start_date": start_date} if start_date else {}))
 
 
 class CorrelationPair(BaseModel):
@@ -2578,6 +2583,7 @@ class CorrelationPair(BaseModel):
 
 
 class RiskCorrelation(BaseModel):
+    excluded_holdings: list[str] = Field(default_factory=list)
     """ρ as a RISK measure — see `routers/_portfolio_correlation_risk.py`.
 
      NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active
@@ -2644,7 +2650,8 @@ class RiskCorrelation(BaseModel):
 
 @router.post("/api/airs/portfolio/risk-correlation", response_model=RiskCorrelation)
 async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                          frequency: str = "monthly", years: int = 5):
+                                          frequency: str = "monthly", years: int = 5,
+                                          start_date: str | None = None):
     """Correlation to the benchmark, and between the positions — the Risk panel's third view.
 
      THE SAME BODY AND THE SAME SERIES AS `tracking-error`, so `σₐ² = σₚ² + σᵇ² − 2ρσₚσᵇ` holds
@@ -2660,7 +2667,7 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
     monthly = await asyncio.to_thread(
         compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
         frequency, years, benchmark_weights=req.benchmark_weights,
-        require_complete_history=True)
+        require_complete_history=True, **({"start_date": start_date} if start_date else {}))
     if monthly.get("available") or frequency != "monthly":
         return monthly
 
@@ -2671,7 +2678,7 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
         "daily", years, benchmark_weights=req.benchmark_weights,
         require_complete_history=True,
         minimum_observations=MIN_PRELIMINARY_DAILY_OBS,
-        preliminary=True)
+        preliminary=True, **({"start_date": start_date} if start_date else {}))
     return daily if daily.get("available") else monthly
 
 
@@ -2728,6 +2735,7 @@ async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchma
 
 
 class PortfolioVolatility(BaseModel):
+    excluded_holdings: list[str] = Field(default_factory=list)
     """σ of the selected risk sleeve's OWN returns — see `routers/_portfolio_volatility.py`.
 
      SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the
@@ -2792,7 +2800,8 @@ class PortfolioVolatility(BaseModel):
 
 @router.post("/api/airs/portfolio/volatility", response_model=PortfolioVolatility)
 async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                    frequency: str = "weekly", years: int = 5):
+                                    frequency: str = "weekly", years: int = 5,
+                                    start_date: str | None = None):
     """Standard deviation of the sleeve's own returns, and its downside half.
 
      `benchmark` IS NOT WHAT IS MEASURED HERE — volatility is a single-series statistic. It is
@@ -2804,7 +2813,8 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
 
     monthly = await asyncio.to_thread(
         compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
-        benchmark_weights=req.benchmark_weights, require_complete_history=True)
+        benchmark_weights=req.benchmark_weights, require_complete_history=True,
+        **({"start_date": start_date} if start_date else {}))
     if monthly.get("available") or frequency != "monthly":
         return monthly
 
@@ -2813,7 +2823,8 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
     daily = await asyncio.to_thread(
         compute_volatility, [h.model_dump() for h in req.holdings], benchmark, "daily", years,
         benchmark_weights=req.benchmark_weights, require_complete_history=True,
-        minimum_observations=MIN_PRELIMINARY_DAILY_OBS, preliminary=True)
+        minimum_observations=MIN_PRELIMINARY_DAILY_OBS, preliminary=True,
+        **({"start_date": start_date} if start_date else {}))
     return daily if daily.get("available") else monthly
 
 
@@ -2839,6 +2850,7 @@ class DrawdownEpisode(BaseModel):
 
 
 class PortfolioDrawdown(BaseModel):
+    excluded_holdings: list[str] = Field(default_factory=list)
     """Max drawdown of the RECONSTRUCTED sleeve — see `routers/_portfolio_drawdown.py`.
 
      NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a
@@ -2892,7 +2904,8 @@ class PortfolioDrawdown(BaseModel):
 
 @router.post("/api/airs/portfolio/drawdown", response_model=PortfolioDrawdown)
 async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                  frequency: str = "daily", years: int = 5):
+                                  frequency: str = "daily", years: int = 5,
+                                  start_date: str | None = None):
     """Peak-to-trough falls of the reconstructed risk sleeve, with their dates.
 
      ONE PRICE LOAD SERVES ALL THREE CADENCES — the load is the expensive part and re-bucketing
@@ -2902,7 +2915,8 @@ async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACW
 
     return await asyncio.to_thread(
         compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
-        benchmark_weights=req.benchmark_weights, require_complete_history=True)
+        benchmark_weights=req.benchmark_weights, require_complete_history=True,
+        **({"start_date": start_date} if start_date else {}))
 
 
 class ConcentrationRow(BaseModel):
@@ -3970,10 +3984,10 @@ class ForcePriceChecksRequest(BaseModel):
 
 
 @router.get('/api/airs/accounts/{portefeuille}/monthly-report')
-async def airs_monthly_report(portefeuille: str, month: str):
+async def airs_monthly_report(portefeuille: str, month: str, include_details: bool = True):
     """Stored AIRS reports for a calendar month; opening never starts a scrape."""
     from routers._airs_monthly_report import read_report
-    return await asyncio.to_thread(read_report, portefeuille, month)
+    return await asyncio.to_thread(read_report, portefeuille, month, include_details=include_details)
 
 
 @router.post('/api/airs/accounts/{portefeuille}/monthly-report/job')

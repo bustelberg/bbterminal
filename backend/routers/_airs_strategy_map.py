@@ -6,6 +6,10 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
+# Resolve the module path once, rather than following every parent directory for each
+# nickname/classification lookup (thousands of calls in a certificate-heavy portfolio).
+_MAP_PATH = Path(__file__).resolve().parent.parent / "config" / "airs_strategy_map.json"
+
 
 def _key(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
@@ -26,7 +30,7 @@ def strategies() -> tuple[dict, ...]:
     saved correction invisible until a restart.  ``st_mtime_ns`` keeps unchanged requests cheap
     while making the very next request see a saved edit.
     """
-    path = Path(__file__).resolve().parent.parent / "config" / "airs_strategy_map.json"
+    path = _MAP_PATH
     return _load(str(path), path.stat().st_mtime_ns)
 
 

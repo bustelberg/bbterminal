@@ -14094,7 +14094,6 @@
         "type": "object"
       },
       "PortfolioDrawdown": {
-        "description": "Max drawdown of the RECONSTRUCTED sleeve \u2014 see `routers/_portfolio_drawdown.py`.\n\n NOT THE CLIENT'S REALISED DRAWDOWN, and the two are not interchangeable. This rebuilds a\nseries from the holdings as they stand TODAY: look-ahead bias (those weights were chosen with\nhindsight) and survivorship bias (names since sold are absent, and the sold ones skew towards\nthe fallers). The client's own figure comes from the AIRS returns, with real trades, real costs\nand real timing. Every label here says which one it is.",
         "properties": {
           "available": {
             "default": true,
@@ -14170,6 +14169,13 @@
             "default": 0,
             "title": "Episodes Total",
             "type": "integer"
+          },
+          "excluded_holdings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Holdings",
+            "type": "array"
           },
           "frequency": {
             "default": "daily",
@@ -14866,7 +14872,6 @@
         "type": "object"
       },
       "PortfolioVolatility": {
-        "description": "\u03c3 of the selected risk sleeve's OWN returns \u2014 see `routers/_portfolio_volatility.py`.\n\n SAME SERIES AS THE OTHER THREE RISK VIEWS, so `volatility_pct` here is the SAME NUMBER the\ncorrelation view puts inside `\u03c3\u2090\u00b2 = \u03c3\u209a\u00b2 + \u03c3\u1d47\u00b2 \u2212 2\u03c1\u03c3\u209a\u03c3\u1d47`. Two \u03c3\u209a one click apart that\ndisagreed would tell the reader one of them is wrong and nothing about which.\n\n NO CASH-FLOW CONTAMINATION, BY CONSTRUCTION RATHER THAN BY CHAIN-LINKING. This is not an\naccount-value series \u2014 it is a weighted basket of instrument price returns \u2014 so a deposit or a\nwithdrawal is simply not in it. That is what a time-weighted return exists to achieve. The cost\nis the other caveat: the weights are TODAY'S, carried backwards.",
         "properties": {
           "available": {
             "default": true,
@@ -14997,6 +15002,13 @@
               }
             ],
             "title": "Downside Dev Pct"
+          },
+          "excluded_holdings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Holdings",
+            "type": "array"
           },
           "frequency": {
             "default": "weekly",
@@ -16257,7 +16269,6 @@
         "type": "object"
       },
       "RiskCorrelation": {
-        "description": "\u03c1 as a RISK measure \u2014 see `routers/_portfolio_correlation_risk.py`.\n\n NOT ATTRIBUTION, AND THE TWO MUST STAY SEPARATE PANELS. Attribution decomposes the active\nreturn into allocation + selection + interaction, terms that SUM to it exactly. Correlation\nappears nowhere in that decomposition and sums to nothing: it says how far the book CAN diverge,\nwhere attribution says where the divergence came from. A combined view would imply they\nreconcile, and they are not that kind of number.",
         "properties": {
           "active_vol_pct": {
             "anyOf": [
@@ -16311,6 +16322,13 @@
               }
             ],
             "title": "Cadence Note"
+          },
+          "excluded_holdings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Excluded Holdings",
+            "type": "array"
           },
           "frequency": {
             "default": "weekly",
@@ -17782,7 +17800,6 @@
         "type": "object"
       },
       "TrackingError": {
-        "description": "Hypothetical tracking error from the annually rebalanced current portfolio simulation.\n\n `TE = \u221a(1/(T\u22121) \u03a3 (a\u209c \u2212 \u0101)\u00b2) \u00b7 \u221af`, WITH \u0101 SUBTRACTED and Bessel applied. The other\nconvention (\u221a(\u03a3a\u209c\u00b2/T)) is also called tracking error and is a different number; this codebase\npicks one and routes it through `annualized_stats`, the same function every other volatility on\nthe screen goes through.\n\nA fixed cohort of direct equities with complete Yahoo history is reweighted to 100%.\nMonthly portfolio and benchmark returns share one period; exclusions and coverage are explicit.\nThis is a historical simulation, not realised AIRS account performance or an ex-ante forecast.",
         "properties": {
           "active_return_ann_pct": {
             "anyOf": [
@@ -18102,6 +18119,17 @@
               }
             ],
             "title": "Tracking Error Pct"
+          },
+          "tracking_window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Window To"
           },
           "window_from": {
             "anyOf": [
@@ -20830,6 +20858,16 @@
               "title": "Month",
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "include_details",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Details",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -21766,6 +21804,16 @@
             "schema": {
               "default": false,
               "title": "Overview Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_holding_risk",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Holding Risk",
               "type": "boolean"
             }
           }
@@ -22777,6 +22825,16 @@
               ],
               "title": "Benchmark Start"
             }
+          },
+          {
+            "in": "query",
+            "name": "held_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Held Only",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -22921,6 +22979,22 @@
               "title": "Years",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
           }
         ],
         "requestBody": {
@@ -23048,6 +23122,22 @@
               "default": 5,
               "title": "Years",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
             }
           }
         ],
@@ -23269,6 +23359,22 @@
               "title": "Years",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
           }
         ],
         "requestBody": {
@@ -23424,6 +23530,22 @@
               "default": 5,
               "title": "Years",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
             }
           }
         ],

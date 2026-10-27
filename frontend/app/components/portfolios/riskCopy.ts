@@ -394,7 +394,7 @@ const en: RiskCopy = {
     trackingError: 'Tracking error (realised)', activeReturn: 'Active return (ann.)',
     benchmarkReturn: (benchmark) => `${benchmark} return (ann.)`,
     portfolioReturn: (portfolio) => `${portfolio} return (ann.)`,
-    activeReturnQuestion: (portfolio, benchmark) => `How would ${portfolio} have performed versus ${benchmark} over the past five years if it had held this exact portfolio throughout?`,
+    activeReturnQuestion: (portfolio, benchmark) => `How would ${portfolio} have performed versus ${benchmark} since 1 January 2021 if it had held this exact portfolio throughout?`,
     trackingErrorQuestion: (average) => `How much would the active return have varied around its average of ${average} a year?`,
     infoRatio: 'Information ratio', observations: 'Observations',
     bandReading: (lo, hi, centre, bench) =>
@@ -735,7 +735,7 @@ const nl: RiskCopy = {
     trackingError: 'Tracking error (gerealiseerd)', activeReturn: 'Actief rendement (geann.)',
     benchmarkReturn: (benchmark) => `${benchmark}-rendement (geann.)`,
     portfolioReturn: (portfolio) => `${portfolio}-rendement (geann.)`,
-    activeReturnQuestion: (portfolio, benchmark) => `Hoe zou ${portfolio} het de afgelopen vijf jaar hebben gedaan ten opzichte van ${benchmark} als het deze exacte portefeuille de hele periode had aangehouden?`,
+    activeReturnQuestion: (portfolio, benchmark) => `Hoe zou ${portfolio} het sinds 1 januari 2021 hebben gedaan ten opzichte van ${benchmark} als het deze exacte portefeuille de hele periode had aangehouden?`,
     trackingErrorQuestion: (average) => `Hoe sterk zou het actieve rendement rond het gemiddelde van ${average} per jaar hebben geschommeld?`,
     infoRatio: 'Information ratio', observations: 'Waarnemingen',
     bandReading: (lo, hi, centre, bench) =>

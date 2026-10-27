@@ -1912,6 +1912,68 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
     return msg, summary
 
 
+def _analyse_sources_busy() -> bool:
+    from asset_pipeline import queue as ingest_queue  # noqa: PLC0415
+    from deps import supabase  # noqa: PLC0415
+    import jobs  # noqa: PLC0415
+    sources = {'airs_vermogen_refresh', 'benchmark_price_slice', 'asset_price_refresh', 'fx_sync', 'airs_price_checks'}
+    with _scheduled_futures_lock:
+        if any(name in sources and not future.done() for name, future in _scheduled_futures.items()):
+            return True
+    if ingest_queue.is_worker_active() or _pipeline_already_running():
+        return True
+    if any(row.get('status') == 'running' and str(row.get('kind', '')).startswith(('airs.', 'asset.', 'benchmark.'))
+           for row in jobs.listing()):
+        return True
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        return bool(supabase.table('scheduled_job_run').select('job_id').eq('status', 'running')
+                    .in_('job_id', sorted(sources)).gte('started_at', cutoff).limit(1).execute().data)
+    except Exception:
+        return True  # no visibility into writers: defer instead of competing with them
+
+
+def _body_analyse_prepare(ctx=None) -> tuple[str, dict]:
+    from routers._prepared_analyse import run_controlled  # noqa: PLC0415
+    result = run_controlled(busy=_analyse_sources_busy,
+                            should_stop=lambda: _cancel_requested(ctx), on_step=_reporter(ctx))
+    if result.get('unavailable') or result.get('errors'):
+        raise RuntimeError(f'Analyse preparation unavailable; live fallback remains enabled: {result}')
+    return (result.get('skipped') or f"Prepared {result.get('holdings', 0)} holdings views and {result.get('benchmarks', 0)} benchmark(s)", result)
+
+
+def _fire_analyse_prepare() -> None:
+    _spawn_body('analyse_prepare')
+
+
+def _fire_airs_price_checks() -> None:
+    _spawn_body("airs_price_checks")
+
+
+def _body_airs_price_checks(ctx=None) -> tuple[str, dict]:
+    from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
+    from asset_pipeline import price_refresh, queue as ingest_queue  # noqa: PLC0415
+    step = _reporter(ctx)
+    step(0, 0, "Refreshing Yahoo closes and saved AIRS price checks")
+    stop = (lambda: bool(getattr(ctx, "cancelled", False))) if ctx is not None else None
+    if stop and stop():
+        raise _Cancelled("stopped before automatic price checks")
+    if ingest_queue.is_worker_active():
+        raise RuntimeError("Automatic price checks deferred: the Yahoo ingest queue is active")
+    # Do not rely on _freshen's per-process daily memo: noon may already have checked these
+    # instruments before today's close existed. One batch also avoids the per-account fetch cap.
+    prices = price_refresh.refresh_stale(isins=price_refresh.watched_isins(), stale_days=1)
+    result = refresh_price_checks(should_stop=stop)
+    result["prices"] = prices
+    if stop and stop():
+        raise _Cancelled("stopped automatic price checks; saved checks are kept")
+    if result.get("errors"):
+        raise RuntimeError(f"Automatic price checks failed: {result['errors']}")
+    if prices.get("failed"):
+        raise RuntimeError(f"Automatic price checks: {prices['failed']} Yahoo price refreshes failed")
+    return f"{result['saved']} account price checks refreshed", result
+
+
 def _fire_airs_vermogen() -> None:
     """APScheduler callable for the daily AIRS Vermogensoverzicht refresh. Runs
     on its own daemon thread so the long Playwright scrape doesn't block the
@@ -2144,6 +2206,8 @@ def _register_bodies() -> None:
     JOB_BODIES.update({
         "fx_sync": _body_fx_sync,
         "airs_vermogen_refresh": _body_airs_vermogen,
+        "analyse_prepare": _body_analyse_prepare,
+        "airs_price_checks": _body_airs_price_checks,
         "job_watchdog": _body_job_watchdog,
         "history_drift_check": _body_history_drift,
         "benchmark_price_slice": _body_benchmark_price_slice,
@@ -2484,6 +2548,8 @@ def register_scheduler(app) -> None:
         # guessed from, so on a deployment where nobody pressed "Scan AIRS" by hand every book
         # was unpaired and Analyse fell back to a basket. See `_fire_airs_vermogen`.
         _register("airs_vermogen_refresh", _fire_airs_vermogen)
+        _register("analyse_prepare", _fire_analyse_prepare)
+        _register("airs_price_checks", _fire_airs_price_checks)
         #  The one job whose subject is the other jobs — see `_body_job_watchdog`.
         _register("job_watchdog", _fire_job_watchdog)
         # Nightly database-size snapshot — one row per public table, so "how fast is this growing

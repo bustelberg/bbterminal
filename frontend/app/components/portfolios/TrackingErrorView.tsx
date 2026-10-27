@@ -34,6 +34,7 @@ import { withWorked, subNum, subPct2, workedBand } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 import type { TrackingError } from '../../../lib/types/api';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
+import { riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
 const historyRepairs = new Map<string, { expires: number; done: Promise<boolean> }>();
@@ -104,7 +105,7 @@ export default function TrackingErrorView({
   // its identity would refetch for ever.
   const requestUrl = `${API_URL}/api/airs/portfolio/tracking-error`
     // Version the cache: CAGR, active return and TE now share one annual-rebalance simulation.
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=yahoo-equity-cohort-v1`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&${riskHistoryQuery()}`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
   const repairIdentity = riskRequestKey(requestUrl, requestBody);
   const [repairVersion, setRepairVersion] = useState(0);
@@ -127,7 +128,7 @@ export default function TrackingErrorView({
     const repairHoldings = holdings.filter(holding => holding.isin && missing.has(holding.isin));
     const existing = historyRepairs.get(repairIdentity);
     const done = existing && existing.expires > Date.now() ? existing.done : startJob(
-      `${API_URL}/api/airs/portfolio/tracking-error/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=6&full_history=true&yahoo_only=true`,
+      `${API_URL}/api/airs/portfolio/tracking-error/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=${riskHistoryYears() + 1}&full_history=true&yahoo_only=true`,
       'Updating simulation price history',
       { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ holdings: repairHoldings, benchmark_weights: benchmarkWeights }) },
     ).then(job => job.done).then(job => job.status === 'done').catch(() => false);
@@ -238,7 +239,7 @@ export default function TrackingErrorView({
         <>
           <div className="flex flex-col items-center gap-3">
             <div className="flex flex-col items-center gap-1">
-              <p className="text-xs text-fg-faint">{data.history_limited ? 'Available-period equity simulation' : 'Five-year hypothetical performance of today’s included equities'}{data.available ? ` · ${performanceDate(data.window_from)} to ${performanceDate(data.window_to)}` : ''}</p>
+              <p className="text-xs text-fg-faint">{data.history_limited ? 'Available-period equity simulation' : 'Hypothetical performance since 1 January 2021'}{data.available ? ` · ${performanceDate(data.window_from)} to ${performanceDate(data.window_to)}` : ''}</p>
               <div className="flex flex-wrap items-center justify-center gap-2">
               <Tile label={`${portfolioName} · equity CAGR`} value={pct2(portfolioCagr)}
                 info={<InfoTip wide content={<AspectCard
@@ -247,7 +248,7 @@ export default function TrackingErrorView({
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
                   how={comparison?.available
                     ? 'The fixed equity set retains its actual portfolio weights for an equity-only policy comparison. Weights drift between annual resets; the remaining allocation contributes no return.'
-                    : comparison?.reason ?? 'Five-year history is unavailable.'}
+                    : comparison?.reason ?? 'History since 1 January 2021 is unavailable.'}
                   worked={annualisedReturnWorked(comparison?.total_return_pct,
                     comparison?.years_elapsed ? 1 / comparison.years_elapsed : null, portfolioCagr)}
                   calculation={<div className="border-t border-neutral-800/40 pt-2">
@@ -272,13 +273,13 @@ export default function TrackingErrorView({
               <span aria-hidden="true" className="text-xl text-fg-faint">−</span>
               <Tile label={`${data.benchmark} CAGR`} value={pct2(benchmarkHistory?.cagr_pct)}
                 info={<InfoTip wide className="ml-0.5" content={<AspectCard
-                  what={`CAGR of ${data.benchmark} over its ${data.benchmark_history?.complete ? 'five-year' : 'available'} history.`}
+                  what={`CAGR of ${data.benchmark} since 1 January 2021 through the latest available close.`}
                   where="EUR-converted benchmark price histories at the configured policy weights."
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
                   how="Let benchmark component weights drift between annual rebalances to the policy weights. Use the exact same opening and closing month ends as the portfolio and annualise by actual calendar years elapsed."
                   calculation={benchmarkHistory?.components?.length ? (
                     <div className="border-t border-neutral-800/40 pt-2 text-[11px]">
-                      <div className="mb-1 font-medium text-fg-subtle">Benchmark legs — {benchmarkHistory.complete ? 'last five years' : 'available benchmark history'} ({benchmarkHistory.start_date} to {benchmarkHistory.end_date})</div>
+                      <div className="mb-1 font-medium text-fg-subtle">Benchmark legs ({benchmarkHistory.start_date} to {benchmarkHistory.end_date})</div>
                       <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto] gap-x-2 gap-y-1 tabular-nums">
                         <span className="text-fg-faint">Leg</span><span className="text-right text-fg-faint">Weight</span><span className="text-right text-fg-faint">Start EUR</span><span className="text-right text-fg-faint">End EUR</span><span className="text-right text-fg-faint">Window</span><span className="text-right text-fg-faint">CAGR</span>
                         {benchmarkHistory.components.map((component) => <div key={component.name} className="contents">
@@ -299,14 +300,14 @@ export default function TrackingErrorView({
                 info={<InfoTip content={<AspectCard
                   what="Hypothetical portfolio CAGR minus benchmark CAGR from the same annually rebalanced simulation and period."
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
-                  how={activeReturn == null ? 'Requires usable holding histories throughout the five-year window.'
+                  how={activeReturn == null ? 'Requires usable holding histories since 1 January 2021.'
                     : `${pct2(portfolioCagr)} − ${pct2(benchmarkHistory?.cagr_pct)} = ${activeReturn.toFixed(2)}pp`}
                 />} />} />
               </div>
               {!comparison?.available && <p className="max-w-2xl text-center text-xs text-fg-faint">{comparison?.reason}</p>}
             </div>
             <div className="flex flex-col items-center">
-              {data.available && <p className="mb-1 text-xs text-fg-faint">Shared simulation window: {performanceDate(data.window_from)} to {performanceDate(data.window_to)} · {data.observations} completed monthly returns</p>}
+              {data.available && <p className="mb-1 text-xs text-fg-faint">Simulation prices: {performanceDate(data.window_from)} to {performanceDate(data.window_to)} · {data.observations} completed monthly returns{data.tracking_window_to ? ` through ${performanceDate(data.tracking_window_to)}` : ''}</p>}
               <Tile label="Hypothetical tracking error" value={pct2(data.available ? data.tracking_error_pct : null).replace('%', 'pp')}
               info={<InfoTip className="ml-0.5" content={<AspectCard
                 what="Variation in hypothetical monthly returns versus the benchmark."

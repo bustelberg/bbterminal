@@ -19,7 +19,7 @@ const en = {
   delta: 'Difference', dates: 'AIRS / Yahoo dates', status: 'Status', recheck: 'Recheck', rechecking: 'Rechecking…',
   matched: 'No extreme differences found in the available prices.',
   clear: 'No extreme gaps',
-  refreshNeeded: 'Refresh needed', staleHint: 'The quote dates differ. Refresh prices before treating this gap as a discrepancy.',
+  refreshNeeded: 'Awaiting comparable close', staleHint: 'Quote dates differ. Prices are checked automatically after market close and the next morning; no action is needed.',
   range: '5-day close range', within: 'Possible timing difference', outside: 'Outside range · investigate', insufficient: 'Not enough recent history', notComparable: 'Not comparable', staleRange: 'Price range is stale',
   note: 'Only listed stocks and ETFs are shown. Native prices are compared only in the same currency and quote unit, without FX conversion. Only gaps of 5% or more are shown and trigger alerts. Different dates are flagged as stale.',
   end: 'The range uses five stored trading-session closes before the AIRS report date, not intraday highs/lows or a statistical confidence interval. Being inside suggests timing, not proof. Checks use stored prices; Refresh updates the source data.',
@@ -38,7 +38,7 @@ const nl: Copy = {
   methodology: 'Hoe deze controle werkt', subtitle: 'Beursgenoteerde aandelen en ETF’s · alleen verschillen ≥5%', dateDifference: 'Koersdatums verschillen',
   delta: 'Verschil', dates: 'Datums AIRS / Yahoo', status: 'Status', recheck: 'Opnieuw controleren', rechecking: 'Controleren…', matched: 'Geen extreme verschillen gevonden in de beschikbare koersen.',
   clear: 'Geen extreme verschillen',
-  refreshNeeded: 'Verversen nodig', staleHint: 'De koersdatums verschillen. Ververs de koersen voordat dit verschil als afwijking wordt beoordeeld.',
+  refreshNeeded: 'Wacht op vergelijkbare slotkoers', staleHint: 'De koersdatums verschillen. Koersen worden automatisch na beurs en de volgende ochtend gecontroleerd; je hoeft niets te doen.',
   range: '5-daags slotkoersbereik', within: 'Mogelijk tijdsverschil', outside: 'Buiten bereik · onderzoeken', insufficient: 'Onvoldoende recente historie', notComparable: 'Niet vergelijkbaar', staleRange: 'Koersbereik is verouderd',
   note: 'Alleen beursgenoteerde aandelen en ETF’s worden getoond. Lokale koersen worden alleen vergeleken bij dezelfde valuta en koerseenheid, zonder valutaomrekening. Alleen verschillen vanaf 5% worden getoond en geven een melding. Andere datums gelden als verouderd.',
   end: 'Het bereik gebruikt vijf opgeslagen slotkoersen vóór de AIRS-rapportdatum, geen intradagbereik of statistisch betrouwbaarheidsinterval. Binnen het bereik suggereert timing, maar bewijst niets. Verversen werkt de brongegevens bij.',
@@ -57,14 +57,13 @@ export function PriceCheckBadge({ state, onClick }: { state?: PriceCheckState; o
   const t = usePriceCheckCopy();
   const summary = state?.summary;
   const extremes = summary?.items.filter(isExtremeDifference).length ?? 0;
-  const staleGaps = summary?.items.filter(isStalePriceGap).length ?? 0;
   if (!state) return null;
-  if (state && !state.pending && !state.error && !extremes && !staleGaps) return null;
+  if (state && !state.pending && !state.error && !extremes) return null;
   const label = !state || state.pending ? t.checking : state.error ? t.failed : !summary?.total ? t.empty
-    : extremes ? t.differences(extremes) : staleGaps ? t.refreshNeeded : t.clear;
+    : extremes ? t.differences(extremes) : t.clear;
   return <button type="button" aria-haspopup="dialog" onClick={(event) => { event.stopPropagation(); onClick(); }}
     className={`rounded-md border px-2 py-1 text-xs whitespace-nowrap hover:bg-overlay/5 ${state?.error ? 'text-warn-400 border-warn-500/30' : state?.pending || !summary?.total ? 'text-fg-subtle border-neutral-700' : tone(summary)}`}
-    title={`${staleGaps && !extremes ? t.staleHint : t.title}${summary ? ` · ${t.checked(summary.checked, summary.total)}` : ''}`}>
+    title={`${t.title}${summary ? ` · ${t.checked(summary.checked, summary.total)}` : ''}`}>
     {label}
   </button>;
 }
@@ -95,7 +94,7 @@ export function PriceCheckDetails({ state, onRetry, onRecheckRow, recheckingIsin
 }) {
   const t = usePriceCheckCopy();
   const summary = state?.summary;
-  const affected = summary?.items.filter((row) => isExtremeDifference(row) || isStalePriceGap(row)) ?? [];
+  const affected = summary?.items.filter(isExtremeDifference) ?? [];
   const staleGaps = summary?.items.some(isStalePriceGap) ?? false;
   const displayed = showAll ? summary?.items ?? [] : affected;
   // “View prices” must still explain a bond-only account rather than opening a modal whose body
@@ -110,7 +109,7 @@ export function PriceCheckDetails({ state, onRetry, onRecheckRow, recheckingIsin
     </div>
     {state?.checkedAt && <p className="text-xs text-fg-subtle">{t.checkedOn}: {new Date(state.checkedAt).toLocaleString()}</p>}
     {state?.error && <p role="alert" className="text-xs text-warn-400">{t.failed}</p>}
-    {staleGaps && <p className="text-xs text-warn-400">{t.staleHint}</p>}
+    {showAll && staleGaps && <p className="text-xs text-fg-subtle">{t.staleHint}</p>}
     {/* Keep the existing table mounted while its replacement snapshot is loading. Replacing it
         with a short “Checking…” line collapses the scroll container and sends the reader to top. */}
     {!state || (state.pending && !summary) ? <p className="text-xs text-fg-subtle">{t.checking}</p> : displayed.length > 0 ?

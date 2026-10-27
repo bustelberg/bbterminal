@@ -28,8 +28,8 @@ it('defaults to individual stocks and restores all holdings when unchecked', asy
       portfolioName="Portfolio" portfolioSource="airs_volk" />));
     const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     expect(checkbox.checked).toBe(true);
-    expect(state.url).toContain('frequency=weekly&years=1&');
-    expect(host.textContent).toContain('Past year · weekly returns in EUR');
+    expect(state.url).toContain('frequency=weekly&start_date=2021-01-01&');
+    expect(host.textContent).toContain('Since 1 January 2021 · weekly returns in EUR');
     expect(JSON.parse(state.body).holdings).toEqual([holdings[0]]);
     await act(async () => checkbox.click());
     expect(checkbox.checked).toBe(false);

@@ -249,6 +249,29 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
              "handles DST.",
     ),
     JobSpec(
+        id="airs_price_checks",
+        label="Automatic AIRS / Yahoo price checks",
+        fills="asset_price · airs_price_check",
+        cadence="Every day, 07:30 and 22:30 UTC",
+        trigger={"day_of_week": "mon-sun", "hour": "7,22", "minute": 30, "timezone": "UTC"},
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
+        max_age_hours=26,
+        note="Refresh Yahoo closes and save comparisons against stored AIRS valuations after market close "
+             "and the next morning. No additional AIRS browser session is opened.",
+    ),
+    JobSpec(
+        id="analyse_prepare",
+        label="Prepare Analyse views",
+        fills="analyse_prepared_snapshot — versioned holdings and adjusted ACWI weights",
+        cadence="Every 5 minutes, while source refreshes are idle",
+        interval_seconds=300,
+        options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 60},
+        max_age_hours=2,
+        note="One sequential preparation job, at most two portfolios per batch and a 20-second "
+             "budget between calculations. Defers during source refreshes; a database advisory "
+             "lock prevents overlapping preparation across replicas. Missing snapshots use live reads.",
+    ),
+    JobSpec(
         id="table_size_sample",
         label="Database size snapshot",
         fills="table_size_sample — one row per public table",

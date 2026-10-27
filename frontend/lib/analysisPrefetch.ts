@@ -15,6 +15,13 @@ export function analysisRequestKey(subject: string, benchmark = 'ACWI', source =
   return `${subject}|${benchmark}|${source}|${bucket}|${lookThrough ? 1 : 0}|${refresh}|${reload}`;
 }
 
+/** Full holdings are shared by the overview and every non-stock sleeve. */
+export function analysisDetailsKey(subject: string, benchmark: string, source: string,
+  lookThrough: boolean, refresh: number, reload: number, includeHoldingRisk: boolean): string {
+  return analysisRequestKey(subject, benchmark, source, '', lookThrough, refresh, reload)
+    + `|holding-risk:${includeHoldingRisk}`;
+}
+
 function shared<T>(key: string, load: Loader<T>): Promise<T> {
   const cached = completed.get(key);
   if (cached && cached.expiresAt > Date.now()) return Promise.resolve(cached.value as T);

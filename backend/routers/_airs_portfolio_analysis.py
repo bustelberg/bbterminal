@@ -63,6 +63,7 @@ EQUITY_BUCKET = "Equity"
 CASH_BUCKET = "Cash"
 _log = logging.getLogger(__name__)
 _OVERVIEW_ONLY = ContextVar('analysis_overview_only', default=False)
+_INCLUDE_HOLDING_RISK = ContextVar('analysis_include_holding_risk', default=True)
 _ANALYSIS_PENDING: dict[tuple, asyncio.Task] = {}
 
 UNKNOWN_BUCKET = "Unclassified"
@@ -895,7 +896,7 @@ def _returns(portfolio_id: int, effective: str | None, benchmark_label: str,
     # used to price all 56 models and keep one, which was 5.56s of a modal open. See
     # `only_portfolio_id`: the narrowing touches only the load WINDOWS, which are lower bounds,
     # so the row that comes back is identical.
-    if source == 'book' and _OVERVIEW_ONLY.get():
+    if source == 'book':
         book = _book_return(portfolio_id, ytd_anchor_for(effective), None)
         result = {**book, 'book_available': bool(book.get('book_portefeuille')), 'strategy_ytd_pct': None}
         _apply_book_source(result, benchmark_label)
@@ -1850,7 +1851,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     from ._airs_portfolio_perf import compute_holding_marks, ytd_anchor_for  # noqa: PLC0415
 
     anchor = ytd_anchor_for(_datum_of(portfolio_id))
-    marks = compute_holding_marks(
+    marks = {} if _OVERVIEW_ONLY.get() else compute_holding_marks(
         sorted({r["isin"] for r, _w, _b in raw_positions if r.get("isin")}), anchor)
 
     #  AIRS'S own return for a directly-held row; the yfinance series only where the book cannot
@@ -2593,6 +2594,8 @@ def compute_portfolio_analysis(portfolio_id: int,
     if not p:
         return {"portfolio_id": portfolio_id, "name": None, "axes": [], "holdings": 0}
 
+    charts_only = _OVERVIEW_ONLY.get() and include_axes and bucket_filter == EQUITY_BUCKET
+
     if _OVERVIEW_ONLY.get() and source == 'book' and not bucket_filter and not include_axes:
         return _portfolio_overview(portfolio_id, p, benchmark_label, weight_by)
 
@@ -2694,7 +2697,7 @@ def compute_portfolio_analysis(portfolio_id: int,
     # reported ("No positions to show" beside a portfolios list that plainly has rows).
     #  Computed before the payload, because `book_holdings` now needs it: the result columns are
     # grafted onto the holdings rows so the Holdings table is ONE table that adds up.
-    realised_block = _realised_block(portfolio_id)
+    realised_block = {} if charts_only else _realised_block(portfolio_id)
     book_note = None if book else book_unavailable_reason(portfolio_id)
     if book_note:
         _log.warning("[analysis] portfolio %s has no book view: %s", portfolio_id, book_note)
@@ -2843,8 +2846,9 @@ def compute_portfolio_analysis(portfolio_id: int,
     # is correct rather than missing: it has no sector, no ISIN and no current weight either, which
     # is why the table gives it its own group outside the classes. The figure that accounts for it
     # is `Contribution`, on the book's own capital.
-    enriched_holdings = _with_results(book["holdings_detail"] if book else [], realised_block,
-                                      benchmark_label)
+    enriched_holdings = ([] if charts_only else
+                         _with_results(book["holdings_detail"] if book else [], realised_block,
+                                       benchmark_label))
     #  The sold rows get the same three instrument columns as the held ones. They had blanks
     # because a closed-out position carries no ISIN — not because the figures are meaningless for
     # it. See `_sold_position_isins` for how the identity is recovered and what happens when it
@@ -2950,6 +2954,19 @@ def compute_portfolio_analysis(portfolio_id: int,
                           "asset_class": e.get("asset_class"),
                           "reason": e["reason"]} for e in excluded],
         })
+
+    if charts_only:
+        _phase('chart_assembly')
+        return {
+            'portfolio_id': portfolio_id, 'name': p['name'], 'benchmark': benchmark_label,
+            'axes': axes, 'timings_ms': _t, 'weight_basis': weight_basis,
+            'weight_note': weight_note, 'book_note': book_note,
+            'holdings_as_of': (book or {}).get('book_as_of'),
+            'book_holdings': (book or {}).get('holdings_detail', []),
+            'benchmark_caps_from': bench_coverage.get('caps_from'),
+            'benchmark_caps_to': bench_coverage.get('caps_to'),
+            'benchmark_caps_unstamped': bench_coverage.get('caps_unstamped') or 0,
+        }
 
     # The modal must not resolve instruments synchronously: that was the source of the long cold
     # Analyse load. Tell the client which held operating equities still have no resolver/price
@@ -3889,7 +3906,7 @@ def _holding_risk(isins: list[str], benchmark_label: str,
     independently of the market", which is a strong claim about a stock we simply cannot measure.
     Too little history, or a benchmark with no tracker, leaves the key absent.
     """
-    if _OVERVIEW_ONLY.get():
+    if _OVERVIEW_ONLY.get() or not _INCLUDE_HOLDING_RISK.get():
         return {}
     import numpy as np  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
@@ -4123,7 +4140,8 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
                                            bucket_filter: str | None = None,
                                            look_through: bool = False,
                                            include_axes: bool = True,
-                                           overview_only: bool = False) -> dict:
+                                           overview_only: bool = False,
+                                           include_holding_risk: bool = True) -> dict:
     """The Analyse modal's one request.
 
      THE READ MEMO IS OPENED **HERE**, AT THE REQUEST BOUNDARY, NOT INSIDE THE COMPUTATION.
@@ -4159,8 +4177,19 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
     from routers import _analysis_cache as ac  # noqa: PLC0415
 
     started = time.perf_counter()
+    prepared_revision = None
+    prepared_code = None
+    if source == 'book' and weight_by == 'book' and not bucket_filter and not include_axes and (overview_only or not include_holding_risk):
+        from routers import _prepared_analyse as prepared
+        prepared_revision, saved = await asyncio.to_thread(
+            prepared.read, 'holdings', prepared.holdings_key(portfolio_id, benchmark_label, look_through))
+        if prepared_revision is not None:
+            prepared_code = prepared.code_version()
+        if saved is not None:
+            return {**(prepared.overview(saved) if overview_only else saved),
+                    'timings_ms': {'prepared_lookup': round((time.perf_counter() - started) * 1000)}}
     key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter, look_through, include_axes,
-           COMPOSITION_BASIS, overview_only)
+           COMPOSITION_BASIS, overview_only, include_holding_risk, prepared_revision, prepared_code)
     # The fingerprint is a database read, so it goes to a thread like everything else here.
     fp = await asyncio.to_thread(ac.fingerprint)
     hit = ac.get(key, fp)
@@ -4169,6 +4198,7 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
 
     async def compute():
         token = _OVERVIEW_ONLY.set(overview_only)
+        risk_token = _INCLUDE_HOLDING_RISK.set(include_holding_risk)
         try:
             with read_cache(f"analysis:{portfolio_id}"):
                 out = await asyncio.to_thread(compute_portfolio_analysis, portfolio_id, benchmark_label,
@@ -4178,6 +4208,7 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
             return out
         finally:
             _OVERVIEW_ONLY.reset(token)
+            _INCLUDE_HOLDING_RISK.reset(risk_token)
 
     pending_key = (asyncio.get_running_loop(), fp, key)
     task = _ANALYSIS_PENDING.get(pending_key)

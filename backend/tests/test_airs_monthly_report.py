@@ -75,6 +75,19 @@ def test_read_uses_latest_monthly_observation_and_does_not_download(monkeypatch)
     assert db.writes == []
 
 
+def test_month_strip_does_not_load_or_reconcile_position_details(monkeypatch):
+    db = FakeSupabase({'airs_performance': [{'portefeuille': 'BOOK', 'periode': '2026-10-23', 'rendement': 1}],
+        'airs_monthly_report': [{'portefeuille': 'BOOK', 'month': '2026-10-01', 'datum_tot': '2026-10-23',
+                                'report': {'positions': [{'name': 'Not needed yet'}]}}]})
+    monkeypatch.setattr(report, 'supabase', db)
+    from routers import _airs_monthly_positions as positions
+    monkeypatch.setattr(positions, 'position_performance', lambda *_: pytest.fail('positions on month strip'))
+    result = report.read_report('BOOK', '2026-10', include_details=False)
+    assert result['snapshot'] is None
+    assert result['months'][0]['rendement'] == 1
+    assert db.writes == []
+
+
 def test_custom_month_report_cannot_replace_the_standard_airs_month_return(monkeypatch):
     canonical = {'portefeuille': 'BOOK', 'periode': '2026-10-23', 'rendement': 1.014177,
                  'cumulatief_rendement': 3.752587}

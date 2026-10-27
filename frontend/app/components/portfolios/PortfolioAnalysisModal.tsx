@@ -23,15 +23,12 @@ import {
   Provenance, ProvenanceFetchedAt, ProvenanceRefresh, type SourceKey,
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
-import { analysisRequestKey, loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
+import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
-import MonthlyReportPanel from './MonthlyReportPanel';
 import PanelDialog from './PanelDialog';
 import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
-import BookReturnChart from './BookReturnChart';
 import AnalyseLoading from './AnalyseLoading';
-import EtfSectorAllocationModal from './EtfSectorAllocationModal';
 import {
   addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
   portfolioSectorBucket, PORTFOLIO_SECTORS,
@@ -45,6 +42,15 @@ import {
 
 const ActiveSharePanel = dynamic(() => import('./ActiveSharePanel'), {
   loading: () => <p role="status" className="text-sm text-fg-muted">Loading risk…</p>,
+});
+const MonthlyReportPanel = dynamic(() => import('./MonthlyReportPanel'), {
+  loading: () => <p role="status" className="text-sm text-fg-muted">Loading performance…</p>,
+});
+const EtfSectorAllocationModal = dynamic(() => import('./EtfSectorAllocationModal'), {
+  loading: () => <p role="status" className="text-sm text-fg-muted">Loading allocation…</p>,
+});
+const BookReturnChart = dynamic(() => import('./BookReturnChart'), {
+  loading: () => <div role="status" className="grid min-h-40 place-items-center text-sm text-fg-muted">Loading chart…</div>,
 });
 
 const DUTCH_SHORT_MONTHS = ['jan', 'feb', 'mrt', 'apr', 'mei', 'jun', 'jul', 'aug', 'sept', 'okt', 'nov', 'dec'];
@@ -1993,7 +1999,8 @@ export function airsRiskWeightContext(rows: BookHolding[], lookThrough: boolean)
 
 function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, realised,
   lookThrough, onLookThroughChange, onSectorOverride,
-  onSectorAllocation, onSummary }: {
+  onSectorAllocation, onSummary, onRiskColumnsChange }: {
+  onRiskColumnsChange: (enabled: boolean) => void;
   holdings: BookHolding[]; slices?: AllocSlice[]; asOf?: string | null;
   /** One modal-wide choice: the same membership is used by Holdings, Attribution and Risk. */
   lookThrough: boolean;
@@ -2053,6 +2060,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   //   * every key gated below is reachable from at least one entry in `COLUMN_GROUPS`, or the
   //     column exists and nothing can ever switch it on.
   const { groups: pickedGroups, toggle, cols } = useColumnGroups();
+  const riskColumnsVisible = cols.has('momentum') || cols.has('volatility') || cols.has('beta');
+  useEffect(() => { onRiskColumnsChange(riskColumnsVisible); }, [riskColumnsVisible, onRiskColumnsChange]);
   const show = (k: MoneyCol) => cols.has(k);
 
   //  An empty table must name its own cause. "No positions to show for this portfolio" was
@@ -3657,6 +3666,8 @@ export default function PortfolioAnalysisModal({
     allocation?: EtfSectorAllocationResponse;
   } | null>(null);
   const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
+  const [includeHoldingRisk, setIncludeHoldingRisk] = useState(() =>
+    [...readSavedGroups()].some((key) => key === 'momentum' || key === 'volatility' || key === 'beta'));
   const [error, setError] = useState<string | null>(null);
   const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
   const [includeEtfsInSector, setIncludeEtfsInSector] = useState(true);
@@ -3761,8 +3772,12 @@ export default function PortfolioAnalysisModal({
     }
   };
   const assetRetryCount = useRef(new Map<string, number>());
-  const viewKey = analysisRequestKey(reqKey, benchmark, source, assetFilter ?? '', lookThrough, refreshSeq, reloadSeq);
+  const viewKey = analysisRequestKey(reqKey, benchmark, source, assetFilter ?? '', lookThrough, refreshSeq, reloadSeq)
+    + (includeHoldingRisk ? '|risk-columns' : '');
+  const detailsRevision = analysisDetailsKey(reqKey, benchmark, source, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk);
+  const holdingDetails = useRef<{ revision: string; value: ModelPortfolioAnalysis } | null>(null);
   const [loadedFor, setLoadedFor] = useState<string | null>(null);
+  const loadedRevision = useRef<string | null>(null);
   const [detailsError, setDetailsError] = useState(false);
   const stale = data != null && loadedFor !== viewKey;
 
@@ -3770,19 +3785,28 @@ export default function PortfolioAnalysisModal({
     let cancelled = false;
     setDetailsError(false);
     const analysisKey = viewKey;
+    const revision = detailsRevision;
+    const chartsOnly = assetFilter === EQUITY_BUCKET && data?.benchmark === benchmark
+      && loadedRevision.current === revision;
+    const overviewOnly = !assetFilter && !data;
+    const cachedDetails = assetFilter !== EQUITY_BUCKET && holdingDetails.current?.revision === revision
+      ? holdingDetails.current.value : null;
+    const requestKey = chartsOnly ? `${analysisKey}|charts` : overviewOnly ? analysisKey
+      : `${revision}|holdings${assetFilter === EQUITY_BUCKET ? '|axes' : ''}`;
     void (async () => {
       try {
-        const analysis = loadPrefetchedAnalysis(analysisKey, async () => {
+        const analysis = cachedDetails ? Promise.resolve(cachedDetails) : loadPrefetchedAnalysis(requestKey, async () => {
           const r = isBasket
             ? await apiFetch(`${API_URL}/api/airs/basket/analysis?benchmark=${benchmark}`, basketBody)
             : await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
               + `?benchmark=${benchmark}&weight_by=${source}&source=${source}`
               + `&look_through=${lookThrough}`
+              + `&include_holding_risk=${includeHoldingRisk}`
               // Sector/region/currency require the full benchmark constituent grid. The opening
               // overview does not render those charts, so defer that work until Stocks is selected.
               + `&include_axes=${assetFilter === EQUITY_BUCKET}`
-              + `&overview_only=${!assetFilter}`
-              + (assetFilter ? `&bucket=${encodeURIComponent(assetFilter)}` : ''));
+              + `&overview_only=${overviewOnly || chartsOnly}`
+              + (assetFilter === EQUITY_BUCKET ? `&bucket=${EQUITY_BUCKET}` : ''));
           const body = await r.json().catch(() => null);
           if (!r.ok) throw new Error(body?.detail ?? `HTTP ${r.status}`);
           return body as ModelPortfolioAnalysis;
@@ -3792,6 +3816,7 @@ export default function PortfolioAnalysisModal({
         // maintenance from the reader's perspective; a popup per superseded selection made normal
         // chart updates look like unrelated work and could stack during quick changes.
         const b = await analysis;
+        if (!isBasket && !b.details_pending) holdingDetails.current = { revision, value: b };
         if (cancelled) return;
         //  Where the wait went. `apiFetch` already logs the round-trip total, but this endpoint
         // is one request covering eight different loads — so a 5-second "Loading overview…"
@@ -3803,7 +3828,20 @@ export default function PortfolioAnalysisModal({
           trace('analyse', `server phases (ms) — ${total} total`, t);
         }
         setLoadedFor(viewKey);
-        setData(b);
+        loadedRevision.current = revision;
+        setData((current) => chartsOnly && current && !isBasket ? {
+          ...current,
+          axes: b.axes,
+          timings_ms: b.timings_ms,
+          weight_basis: b.weight_basis,
+          weight_note: b.weight_note,
+          book_note: b.book_note,
+          holdings_as_of: b.holdings_as_of,
+          book_holdings: current.details_pending ? b.book_holdings : current.book_holdings,
+          benchmark_caps_from: b.benchmark_caps_from,
+          benchmark_caps_to: b.benchmark_caps_to,
+          benchmark_caps_unstamped: b.benchmark_caps_unstamped,
+        } : b);
       } catch (e) {
         traceError('analyse', 'the composition could not be loaded', e);
         if (!cancelled) {
@@ -3817,7 +3855,7 @@ export default function PortfolioAnalysisModal({
     // rebuilds the composition, prices and FX this payload is derived from, so without it the
     // modal keeps showing the figures it loaded before the button was pressed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq]);
+  }, [reqKey, benchmark, source, assetFilter, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk]);
 
   // Paint the lightweight overview first, then automatically fill its holdings section.
   // Performance has its own loader; ETF sector requests remain gated on the Stocks view.
@@ -3827,14 +3865,15 @@ export default function PortfolioAnalysisModal({
     if (isBasket || !needsHoldingDetails || !detailsPending || loadedFor !== viewKey) return;
     let cancelled = false;
     setDetailsError(false);
-    const loadDetails = () => { void loadPrefetchedAnalysis(`${viewKey}|details`, async () => {
+    const loadDetails = () => { void loadPrefetchedAnalysis(`${detailsRevision}|holdings`, async () => {
       const response = await apiFetch(`${API_URL}/api/airs/model-portfolios/${id}/analysis`
-        + `?benchmark=${benchmark}&weight_by=${source}&source=${source}&look_through=${lookThrough}&include_axes=false&overview_only=false`);
+        + `?benchmark=${benchmark}&weight_by=${source}&source=${source}&look_through=${lookThrough}&include_axes=false&overview_only=false&include_holding_risk=${includeHoldingRisk}`);
       const body = await response.json();
       if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
       return body as ModelPortfolioAnalysis;
     }).then((detail) => {
-      if (!cancelled) setData(detail);
+      holdingDetails.current = { revision: detailsRevision, value: detail };
+      if (!cancelled) setData((current) => current?.axes?.length ? { ...detail, axes: current.axes } : detail);
     }).catch((detailError) => {
       traceError('analyse', 'Requested holding detail failed; AIRS overview retained', detailError);
       if (!cancelled) setDetailsError(true);
@@ -3849,7 +3888,7 @@ export default function PortfolioAnalysisModal({
       window.cancelAnimationFrame(firstFrame);
       window.cancelAnimationFrame(secondFrame);
     };
-  }, [isBasket, needsHoldingDetails, detailsPending, loadedFor, viewKey, id, benchmark, source, lookThrough]);
+  }, [isBasket, needsHoldingDetails, detailsPending, loadedFor, viewKey, detailsRevision, id, benchmark, source, lookThrough, includeHoldingRisk]);
 
   // Receiving the payload and displaying it are different moments. Keep the sector job running
   // through the commit and the next paint, so its completed state cannot precede the changed row.
@@ -4241,6 +4280,7 @@ export default function PortfolioAnalysisModal({
                     : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
                 </div>
               ) : <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
+                onRiskColumnsChange={setIncludeHoldingRisk}
                 lookThrough={lookThrough} onLookThroughChange={setLookThrough}
                 onSummary={setNotesFor}
                 onSectorAllocation={(holding) => {

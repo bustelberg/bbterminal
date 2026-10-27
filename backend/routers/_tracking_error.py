@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import re
 from functools import lru_cache
-from datetime import date
+from datetime import date, timedelta
 import time
 
 
@@ -202,7 +202,8 @@ def build_paired_series(holdings: list[dict], benchmark: str,
                         require_complete_holdings: bool = False,
                         benchmark_weights: dict[str, float] | None = None,
                         minimum_observations: int | None = None,
-                        _repair_attempted: bool = False) -> dict:
+                        _repair_attempted: bool = False,
+                        start_date: str | None = None) -> dict:
     """The portfolio and benchmark return series, on ONE aligned period grid.
 
      SHARED BY TRACKING ERROR AND CORRELATION SO THE IDENTITY BETWEEN THEM HOLDS ON SCREEN.
@@ -225,6 +226,11 @@ def build_paired_series(holdings: list[dict], benchmark: str,
     """
     from routers._airs_portfolio_analysis import _daily_eur  # noqa: PLC0415
     from routers._asset_financials import _BENCHMARK_RISK_ETF  # noqa: PLC0415
+    from routers._risk_history_window import history_years, history_marks, covers_history  # noqa: PLC0415
+    try:
+        years = history_years(start_date, years)
+    except ValueError as exc:
+        raise SeriesError(str(exc)) from exc
 
     freq = frequency if frequency in PERIODS else "weekly"
 
@@ -307,7 +313,9 @@ def build_paired_series(holdings: list[dict], benchmark: str,
 
     # All measures use identical endpoints, anchored to the latest benchmark close. Retain the
     # last observation at/before the five-year opening date as the return's starting price.
-    benchmark_prices = series.get(next(iter(benchmark_isins.values()))) or []
+    benchmark_prices = sorted(row for row in (series.get(next(iter(benchmark_isins.values()))) or [])
+                              if row[0] <= date.today().isoformat())
+    excluded_holdings = []
     opening_marks: dict[str, bool] = {}
     if benchmark_prices:
         end = benchmark_prices[-1][0]
@@ -316,6 +324,18 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             start = end_date.replace(year=end_date.year - years).isoformat()
         except ValueError:
             start = end_date.replace(year=end_date.year - years, day=28).isoformat()
+        if start_date:
+            start = (date.fromisoformat(start_date) - timedelta(days=1)).isoformat()
+            marks = history_marks(start_date, end)
+            excluded_holdings = [names.get(isin, isin) for isin in isins
+                                 if not covers_history(series.get(isin) or [], marks)]
+            isins = [isin for isin in isins if covers_history(series.get(isin) or [], marks)]
+            if not isins:
+                raise SeriesError(f'No holdings have complete genuine price history from {start_date}.')
+            weight = {isin: value for isin, value in weight.items() if isin in isins}
+            for isin in benchmark_isins.values():
+                if not covers_history(series.get(isin) or [], marks):
+                    raise SeriesError(f'The benchmark does not have complete price history from {start_date}.')
         # Keep this fact before clipping. A series that begins two years into the requested
         # window can still provide the 24 monthly observations needed for risk statistics, but it
         # cannot support a number labelled "five-year annualised return".
@@ -325,6 +345,8 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         }
         clipped = {}
         for isin, prices in series.items():
+            if start_date and isin not in {*isins, *benchmark_isins.values()}:
+                continue
             anchor = [row for row in prices if row[0] <= start]
             clipped[isin] = (anchor[-1:] if anchor else []) + [row for row in prices if start < row[0] <= end]
         series = clipped
@@ -366,6 +388,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
                     benchmark_weights=benchmark_weights,
                     minimum_observations=minimum_observations,
                     _repair_attempted=True,
+                    start_date=start_date,
                 )
             unavailable = [names.get(isin, isin) for isin in isins if not p_buckets[isin]]
             if unavailable:
@@ -488,6 +511,8 @@ def build_paired_series(holdings: list[dict], benchmark: str,
         for name, isin in benchmark_isins.items()
     }
     return {"frequency": freq, "periods_per_year": PERIODS[freq], "keys": keys,
+            "requested_start": start_date, "price_end": benchmark_prices[-1][0] if benchmark_prices else None,
+            "excluded_holdings": excluded_holdings,
             "active": active, "portfolio": port, "benchmark": bench_r,
             "obs_keys": obs_keys, "obs_dates": [ends.get(k) for k in obs_keys],
             "per_holding": per_holding, "weight_used": weight_used,

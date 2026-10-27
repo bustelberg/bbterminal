@@ -9,6 +9,21 @@ from datetime import date
 import scheduler as S
 
 
+def test_automatic_price_checks_refresh_and_persist_without_a_browser(monkeypatch):
+    from routers import _airs_price_check as checks
+    from asset_pipeline import price_refresh, queue
+    calls = []
+    monkeypatch.setattr(queue, "is_worker_active", lambda: False)
+    monkeypatch.setattr(price_refresh, "watched_isins", lambda: {"STOCK"})
+    monkeypatch.setattr(price_refresh, "refresh_stale", lambda **kwargs: calls.append(kwargs) or {"failed": 0})
+    monkeypatch.setattr(checks, "refresh_price_checks", lambda **kwargs: {"saved": 3, "errors": {}})
+    message, result = S._body_airs_price_checks()
+    assert result["saved"] == 3
+    assert "3 account" in message
+    assert calls == [{"isins": {"STOCK"}, "stale_days": 1}]
+
+
+
 class _Executor:
     def __init__(self):
         self.submitted: list[Future] = []

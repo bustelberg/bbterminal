@@ -269,6 +269,18 @@ class TestTheIdentities:
         assert got["overlap_pct"] < 1e-9
         assert abs(got["off_benchmark_pct"] - 100.0) < 1e-9
 
+    def test_held_only_payload_preserves_full_benchmark_arithmetic(self, monkeypatch):
+        _bench(monkeypatch, [("Apple Inc", 60), ("Microsoft Corp", 40)])
+        _grid(monkeypatch, {"US1": "Apple Inc"})
+        holdings = [_h("Apple", "US1", 100)]
+        full = A.compute_active_share(holdings, 'SP500')
+        compact = A.compute_active_share(holdings, 'SP500', held_only=True)
+        assert len(full['rows']) == 2
+        assert len(compact['rows']) == 1
+        assert all(row['held'] for row in compact['rows'])
+        for key in ('active_share_pct', 'overlap_pct', 'off_benchmark_pct', 'benchmark_members'):
+            assert compact[key] == full[key]
+
     def test_active_share_and_overlap_always_sum_to_100(self, monkeypatch):
         """ THE DEFINING IDENTITY, and the reason the ½ is there. Both vectors sum to 1, so every
         overweight has a matching underweight; without the half everything is counted twice and

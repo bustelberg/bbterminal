@@ -91,7 +91,8 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
                              benchmark_weights: dict[str, float] | None = None,
                              require_complete_history: bool = False,
                              minimum_observations: int | None = None,
-                             preliminary: bool = False) -> dict:
+                             preliminary: bool = False,
+                             start_date: str | None = None) -> dict:
     """ρ to the benchmark, the variance identity behind it, and the position-by-position matrix."""
     import numpy as np  # noqa: PLC0415
     import pandas as pd  # noqa: PLC0415
@@ -105,7 +106,8 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         built = build_paired_series(holdings, benchmark, freq, years,
                                     require_complete_holdings=require_complete_history,
                                     benchmark_weights=benchmark_weights,
-                                    minimum_observations=minimum_observations)
+                                    minimum_observations=minimum_observations,
+                                    start_date=start_date)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 
@@ -186,7 +188,8 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
         # reasoning to `_tracking_error`, and it must be the SAME two dates because both views read
         # one `build_paired_series`. Two panels quoting different windows for one series is the
         # discrepancy the shared builder exists to make impossible.
-        "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
+        "window_from": (start_date or dates[0]) if (dates := sorted(d for d in built["obs_dates"] if d)) else start_date,
+        "excluded_holdings": built.get("excluded_holdings", []),
         "window_to": (dates[-1] if dates else None),
 
         # ── portfolio vs benchmark ──

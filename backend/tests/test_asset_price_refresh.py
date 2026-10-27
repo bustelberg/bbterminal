@@ -96,6 +96,22 @@ class TestReviewedNavFallbacks:
         assert calls == [(10, 'KNOWN', None)]
         assert result['backfilled'] == 1
 
+    def test_full_history_repair_stops_cleanly_when_yahoo_throttles(self, monkeypatch):
+        from asset_pipeline import store
+        from asset_pipeline.yahoo import YahooThrottled
+        monkeypatch.setattr(price_refresh, '_executions', lambda _isins: [
+            {'isin': 'ONE', 'analysis_id': 10, 'yahoo_symbol': 'ONE'},
+            {'isin': 'TWO', 'analysis_id': 20, 'yahoo_symbol': 'TWO'},
+        ])
+        calls = []
+        def throttled(*args):
+            calls.append(args)
+            raise YahooThrottled('back off')
+        monkeypatch.setattr(store, 'store_series', throttled)
+        result = price_refresh.backfill_full_histories({'ONE', 'TWO'})
+        assert calls == [(10, 'ONE', None)]
+        assert result == {'requested': 2, 'backfilled': 0, 'failed': 0, 'skipped': 2}
+
     def test_fresh_fund_has_an_explicit_non_yahoo_nav_source(self):
         source = price_refresh._NAV_FALLBACKS["NL0012171417"]
         assert source["provider"] == "IEX"

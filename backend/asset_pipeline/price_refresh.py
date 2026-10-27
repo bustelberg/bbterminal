@@ -362,6 +362,7 @@ def backfill_missing(isins: set[str]) -> dict:
 def backfill_full_histories(isins: set[str]) -> dict:
     """Refresh complete histories only for the explicitly requested missing-history instruments."""
     from asset_pipeline import store  # noqa: PLC0415
+    from asset_pipeline.yahoo import YahooThrottled  # noqa: PLC0415
     done = failed = 0
     rows = [row for row in _executions(isins) if row.get('analysis_id') and row.get('yahoo_symbol')]
     for row in rows:

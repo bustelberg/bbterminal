@@ -31,6 +31,7 @@ import { withWorked, subNum } from './workedFormula';
 import type { PortfolioDrawdown } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
+import { riskHistoryQuery } from './riskHistoryWindow';
 
 const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed(2)}%`);
 const day = (d: string | null | undefined) =>
@@ -78,7 +79,7 @@ export default function DrawdownView({
 }) {
   const t = useRiskCopy();
   const requestUrl = `${API_URL}/api/airs/portfolio/drawdown`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=daily&years=5&data_window=shared-v1`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=daily&${riskHistoryQuery()}`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
   const key = riskRequestKey(requestUrl, requestBody);
   const { data, error } = useRiskResult<PortfolioDrawdown>(key, async () => {
@@ -118,6 +119,7 @@ export default function DrawdownView({
   return (
     <div className="space-y-3">
       {error && <p className="text-xs text-neg-300">{error}</p>}
+      {!!data?.excluded_holdings?.length && <details className="text-xs text-fg-muted"><summary>Missing history · {data.excluded_holdings.length} excluded holdings</summary><p>{data.excluded_holdings.join(', ')}</p></details>}
       {!data && !error && (
         <div className="absolute inset-0 grid place-items-center text-center px-6" role="status">
           <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
@@ -129,7 +131,7 @@ export default function DrawdownView({
         <>
           <div className="flex flex-col items-center gap-2">
             <p className="text-sm font-medium text-fg-subtle text-center">
-              What would have been the worst drawdown of {portfolioName} over the past five years?
+              What would have been the worst drawdown of {portfolioName} since 1 January 2021?
             </p>
             <Tile label={t.dd.maxDrawdown(data.frequency)} value={pct2(data.max_drawdown_pct)}
               tone="text-neg-300"

@@ -15,7 +15,7 @@ separate mechanisms then kept it alive forever:
 The reaper writes such a job off after `STALE_SECONDS` of silence. It cannot kill the thread —
 nothing can, from outside — and the summary says so.
 
-Unit-only: real threads, a one-second staleness window, no I/O.
+Unit-only: real threads, explicit heartbeat aging, no I/O or silence sleeps.
 """
 from __future__ import annotations
 
@@ -29,10 +29,28 @@ import jobs as J
 
 @pytest.fixture
 def fast(monkeypatch):
-    """A one-second silence window, and an empty registry either side."""
+    """Wait for the worker's first heartbeat before explicitly aging it.
+
+    Sleeping 1.1 seconds after submitting a thread raced its first emit on busy CI
+    runners: that late heartbeat made the supposedly stale worker fresh again.
+    """
     monkeypatch.setattr(J, "STALE_SECONDS", 1)
+    started = threading.Event()
+    emit = J.JobCtx.emit
+    def observed_emit(ctx, kind, message=None, **fields):
+        result = emit(ctx, kind, message, **fields)
+        if message == 'starting…':
+            started.set()
+        return result
+    monkeypatch.setattr(J.JobCtx, 'emit', observed_emit)
+    def silence(wait_for_emit=True):
+        if wait_for_emit:
+            assert started.wait(5), 'worker did not emit its initial heartbeat'
+        with J._REGISTRY_LOCK:
+            for job in J._JOBS.values():
+                job.last_event_at = time.time() - J.STALE_SECONDS - 1
     J._JOBS.clear()  # noqa: SLF001
-    yield
+    yield silence
     for job in list(J._JOBS.values()):  # noqa: SLF001
         job._cancel.set()  # noqa: SLF001
     J._JOBS.clear()  # noqa: SLF001
@@ -50,7 +68,7 @@ class TestSilenceIsWrittenOff:
     def test_a_running_job_that_says_nothing_becomes_failed(self, fast):
         J.start("k", "hangs", _hang)
         assert J.listing()[0]["status"] == "running"
-        time.sleep(1.1)
+        fast()
         row = J.listing()[0]
         assert row["status"] == "failed"
         assert "No progress" in (row["summary"] or "")
@@ -59,7 +77,7 @@ class TestSilenceIsWrittenOff:
         """ NOBODY ASKED FOR THIS TO STOP; it stopped answering. Filing it as a cancellation would
         put a worker's crash in the same column as a reader's decision."""
         J.start("k", "hangs", _hang)
-        time.sleep(1.1)
+        fast()
         assert J.listing()[0]["status"] == "failed"
 
     def test_the_summary_does_not_pretend_the_thread_was_killed(self, fast):
@@ -67,12 +85,12 @@ class TestSilenceIsWrittenOff:
         interrupted from outside, and a summary claiming otherwise is the kind of thing a reader
         acts on."""
         J.start("k", "hangs", _hang)
-        time.sleep(1.1)
+        fast()
         assert "may still be running" in (J.listing()[0]["summary"] or "")
 
     def test_it_sets_cancel_so_a_waking_worker_unwinds(self, fast):
         job, _ = J.start("k", "hangs", _hang)
-        time.sleep(1.1)
+        fast()
         J.listing()
         assert job.cancel_requested
 
@@ -80,7 +98,7 @@ class TestSilenceIsWrittenOff:
         """ A CARD THAT FLIPS TO `failed` WITH NOTHING TO READ is the same dead end from the other
         side. The reaper emits, so an open stream ends with an explanation."""
         job, _ = J.start("k", "hangs", _hang)
-        time.sleep(1.1)
+        fast()
         J.listing()
         assert [e for e in job.since(0) if e["kind"] == "error"]
 
@@ -94,7 +112,7 @@ class TestTheNextPressStartsARealRun:
         _job2, reused_while_hung = J.start("k", "same label", _hang)
         assert reused_while_hung is True                     # the bug, while it is still 'running'
 
-        time.sleep(1.1)
+        fast()
         ran = threading.Event()
         _job3, reused_after = J.start("k", "same label", lambda _c: ran.set() or "clean")
         assert reused_after is False
@@ -133,5 +151,5 @@ class TestTheClockIsSilenceNotAge:
         than never, or it lives forever."""
         job, _ = J.start("k", "silent", lambda _c: time.sleep(5) or "done")
         assert job.last_event_at >= job.created_at
-        time.sleep(1.1)
+        fast(wait_for_emit=False)
         assert J.listing()[0]["status"] == "failed"

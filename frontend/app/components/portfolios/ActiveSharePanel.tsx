@@ -41,13 +41,16 @@ import {
 import type { ActiveShare, ActiveShareRow } from '../../../lib/types/api';
 import { useRiskCopy } from './riskCopy';
 import LoadingDots from './LoadingDots';
-import TrackingErrorView from './TrackingErrorView';
-import CorrelationView from './CorrelationView';
-import VolatilityView from './VolatilityView';
-import DrawdownView from './DrawdownView';
-import ConcentrationView from './ConcentrationView';
+import dynamic from 'next/dynamic';
 import AirsWeightCalculation, { type AirsWeightComponent } from './AirsWeightCalculation';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
+
+const riskLoading = () => <p role="status" className="text-sm text-fg-muted">Loading risk…</p>;
+const TrackingErrorView = dynamic(() => import('./TrackingErrorView'), { loading: riskLoading });
+const CorrelationView = dynamic(() => import('./CorrelationView'), { loading: riskLoading });
+const VolatilityView = dynamic(() => import('./VolatilityView'), { loading: riskLoading });
+const DrawdownView = dynamic(() => import('./DrawdownView'), { loading: riskLoading });
+const ConcentrationView = dynamic(() => import('./ConcentrationView'), { loading: riskLoading });
 
 /**
  * One body for all six risk views.
@@ -220,7 +223,7 @@ export default function ActiveSharePanel({
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
   const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(riskProfilePolicy ? 'ACWI' : benchmark)}&weight_method=workbook-identity-v6`
-    + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
+    + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}&held_only=true`;
   const activeBody = JSON.stringify({
     holdings: riskBenchmarkWeights ? riskHoldings : weightedHoldings,
     benchmark_weights: riskBenchmarkWeights,
@@ -233,7 +236,7 @@ export default function ActiveSharePanel({
     const b = await r.json().catch(() => null);
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
     return b as ActiveShare;
-  }, 'active-share', 'the active share could not be computed');
+  }, 'active-share', 'the active share could not be computed', view === 'active');
   const benchmarkLabel = riskBenchmarkWeights?.Stocks != null && riskBenchmarkWeights?.Bonds != null
     ? `${riskBenchmarkWeights.Stocks}% ACWI`
     : (data?.benchmark ?? benchmark);

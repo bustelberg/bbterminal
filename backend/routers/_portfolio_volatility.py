@@ -39,7 +39,8 @@ def compute_volatility(holdings: list[dict], benchmark: str,
                        benchmark_weights: dict[str, float] | None = None,
                        require_complete_history: bool = False,
                        minimum_observations: int | None = None,
-                       preliminary: bool = False) -> dict:
+                       preliminary: bool = False,
+                       start_date: str | None = None) -> dict:
     """σ of the risk sleeve's own returns, its downside half, and the benchmark's for scale."""
     import numpy as np  # noqa: PLC0415
 
@@ -50,7 +51,8 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         built = build_paired_series(holdings, benchmark, freq, years,
                                     require_complete_holdings=require_complete_history,
                                     benchmark_weights=benchmark_weights,
-                                    minimum_observations=minimum_observations)
+                                    minimum_observations=minimum_observations,
+                                    start_date=start_date)
     except SeriesError as e:
         return {"available": False, "benchmark": benchmark, "frequency": freq, "reason": e.reason}
 
@@ -94,7 +96,8 @@ def compute_volatility(holdings: list[dict], benchmark: str,
         #  The window the paired grid reached — the SAME two dates the tracking-error and
         # correlation responses carry, because all three read one `build_paired_series`. Three
         # panels quoting three windows for one series is exactly what sharing it prevents.
-        "window_from": (dates[0] if (dates := sorted(d for d in built["obs_dates"] if d)) else None),
+        "window_from": (start_date or dates[0]) if (dates := sorted(d for d in built["obs_dates"] if d)) else start_date,
+        "excluded_holdings": built.get("excluded_holdings", []),
         "window_to": (dates[-1] if dates else None),
 
         "volatility_pct": None if sp.ann_vol is None else sp.ann_vol * 100.0,

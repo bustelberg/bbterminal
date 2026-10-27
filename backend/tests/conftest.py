@@ -33,6 +33,15 @@ from __future__ import annotations
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def prepared_analyse_requires_an_explicit_store(monkeypatch):
+    """Prepared data is optional; unit tests must explicitly seed their own fake snapshots."""
+    from routers import _prepared_analyse
+    from tests._fake_supabase import FakeSupabase
+    monkeypatch.setattr(_prepared_analyse, 'supabase', FakeSupabase({}))
+    monkeypatch.setattr(_prepared_analyse, '_unavailable_until', 0.0)
+
+
 def pytest_collection_modifyitems(items):
     """Give every unmarked test the `fast` tier.
 

@@ -303,7 +303,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
   // One cache refresh per account per mounted dashboard. The server also de-duplicates jobs, but
   // this avoids attaching a second toast every time somebody collapses and re-expands the row.
-  const [hideSmall, setHideSmall] = useState(true);
   // The allocation-policy editor. Mounted only while open — it fetches its own grid, and a policy
   // nobody asked to see is not worth a request on every page load.
   const [showBands, setShowBands] = useState(false);
@@ -1023,7 +1022,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    */
   const collectionRows = (rows ?? []).filter((r) => r.management_group === collection);
   const substantial = collectionRows.filter(canAnalyse).length;
-  const effectiveHideSmall = hideSmall && substantial > 0;
+  const effectiveHideSmall = substantial > 0;
 
   const view = (() => {
     const base = collectionRows.filter((r) => (effectiveHideSmall ? canAnalyse(r) : true));
@@ -1135,19 +1134,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               control — which put an implementation rule (keep the two scans' error verdicts apart)
               in front of the operator as a chore. They are phases of one action now; only the
               reporting stays separate. */}
-          {rows && (
-            <label className={`flex items-center gap-1.5 text-[13px] cursor-pointer whitespace-nowrap ${
-              substantial === 0 ? 'text-fg-faint' : 'text-fg-subtle'}`}
-              title={substantial === 0
-                ? 'No account is paired with a model portfolio yet, so this filter would hide every row — it is inactive until a model-portfolio scan has run.'
-                : 'Keeps only the books that can actually be opened: Analyse describes the paired model portfolio, so a book with no model has no button and nothing this page can do with it. Hides the AIRS benchmarks and the test shells for the same reason.'}>
-              <input type="checkbox" checked={hideSmall} disabled={substantial === 0}
-                onChange={(e) => setHideSmall(e.target.checked)} />
-              {/*  Disabled at zero — see `effectiveHideSmall`. A checkbox that silently does
-                  nothing is worse than one that says it cannot. */}
-              Analysable only ({substantial} of {rows.length})
-            </label>
-          )}
         </div>
       </div>
 

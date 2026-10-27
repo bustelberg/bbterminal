@@ -40,6 +40,7 @@ import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
+import { riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
 
 // A repair may conclude that an instrument genuinely only began trading recently.  Start one
 // repair per exact sleeve during this browser session, rather than spending vendor calls again
@@ -115,7 +116,7 @@ export default function CorrelationView({
     && !/\b(etf|etp|etn|ucits|fund|fonds|certificate|certificaten|index|perp|bond|obligat|coupon|treasur|gilt|bund|govie|sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b|\d[.,]?\d*\s*%/i.test(holding.name ?? ''),
   ) : holdings;
   const requestUrl = `${API_URL}/api/airs/portfolio/risk-correlation`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=weekly&years=1&data_window=shared-one-year-weekly-clustered-v1`;
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=weekly&${riskHistoryQuery()}`;
   const requestBody = JSON.stringify({ holdings: correlationHoldings, benchmark_weights: benchmarkWeights });
   const repairIdentity = riskRequestKey(requestUrl, requestBody);
   const [repairVersion, setRepairVersion] = useState(0);
@@ -132,10 +133,11 @@ export default function CorrelationView({
   }, 'risk-correlation', 'the correlations could not be computed');
 
   useEffect(() => {
-    if (!data?.available || !data.preliminary || startedPreliminaryRepairs.has(repairIdentity)) return;
+    if (!data?.available || (!data.preliminary && !data.excluded_holdings?.length)
+      || startedPreliminaryRepairs.has(repairIdentity)) return;
     startedPreliminaryRepairs.add(repairIdentity);
     void startJob(
-      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=1`,
+      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=${riskHistoryYears()}&full_history=true&yahoo_only=true`,
       'Repairing risk price history',
       { headers: { 'Content-Type': 'application/json' }, body: requestBody },
     ).then(async ({ done }) => {
@@ -148,7 +150,7 @@ export default function CorrelationView({
       // `startJob` reports the failure through the standard job popup.  The preliminary numbers
       // remain visible; a failed repair must not replace actual observed data with an error state.
     });
-  }, [benchmark, data?.available, data?.preliminary, repairIdentity, requestBody]);
+  }, [benchmark, data?.available, data?.preliminary, data?.excluded_holdings?.length, repairIdentity, requestBody]);
 
   const labels = data?.labels ?? [];
   /** Every pair the matrix COULD have — n(n−1)/2.  Printed beside the measured count so a
@@ -186,7 +188,8 @@ export default function CorrelationView({
           className="h-4 w-4 accent-accent-500" />
         Only stocks
       </label>
-      <p className="text-xs text-fg-muted">Past year · weekly returns in EUR · reduces differences in market closing times</p>
+      <p className="text-xs text-fg-muted">Since 1 January 2021 · weekly returns in EUR · through the latest available close</p>
+      {!!data?.excluded_holdings?.length && <details className="text-xs text-fg-muted"><summary>Missing history · {data.excluded_holdings.length} excluded holdings</summary><p>{data.excluded_holdings.join(', ')}</p></details>}
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
       {!data && !error && (
