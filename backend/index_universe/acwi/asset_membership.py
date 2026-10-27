@@ -64,6 +64,12 @@ ACWI_LABEL = "ACWI"
 
 SOURCE = "ishares_acwi"
 
+# Reviewed cross-listing identity: the workbook classifies Linde as United States,
+# while its ordinary shares have an Irish ISIN. Never relax the general country gate.
+_REVIEWED_INTERLISTINGS = {
+    ("LIN", "LINDE PLC", "NASDAQ", "United States"): "IE000S9YS762",
+}
+
 
 def _universe_id(label: str) -> int | None:
     rows = (deps.supabase.table("universe").select("universe_id")
@@ -201,6 +207,14 @@ def resolve() -> tuple[list[dict], dict]:
             # another listing by the looser rule below.
             hit = _interlisted(by_base.get(_base(sym.upper()), []),
                                h.get("Location") or "", h.get("Name") or "", codes)
+            if hit is None:
+                reviewed_isin = _REVIEWED_INTERLISTINGS.get((
+                    h.get("Ticker"), h.get("Name"), h.get("Exchange"), h.get("Location")))
+                reviewed = [row for row in by_base.get(_base(sym.upper()), [])
+                            if reviewed_isin and row.get("isin") == reviewed_isin
+                            and same_company(h.get("Name") or "", row.get("name") or "")]
+                if len(reviewed) == 1:
+                    hit = reviewed[0]
             if hit is not None:
                 aid = hit["analysis_id"]
                 held_sym = (hit.get("yahoo_symbol") or "").strip().upper()

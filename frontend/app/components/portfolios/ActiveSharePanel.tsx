@@ -219,7 +219,7 @@ export default function ActiveSharePanel({
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(riskProfilePolicy ? 'ACWI' : benchmark)}&weight_method=workbook-identity-v5`
+  const activeUrl = `${API_URL}/api/airs/portfolio/active-share?benchmark=${encodeURIComponent(riskProfilePolicy ? 'ACWI' : benchmark)}&weight_method=workbook-identity-v6`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
   const activeBody = JSON.stringify({
     holdings: riskBenchmarkWeights ? riskHoldings : weightedHoldings,

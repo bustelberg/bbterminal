@@ -487,7 +487,7 @@ def _benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict:
     """
     from routers._analysis_cache import leg
 
-    cache_key = ("risk-workbook-identity-v5", benchmark.upper(), benchmark_start, date.today().isoformat())
+    cache_key = ("risk-workbook-identity-v6", benchmark.upper(), benchmark_start, date.today().isoformat())
     with _benchmark_lock:
         return deepcopy(leg(cache_key, lambda: _load_benchmark_weights(benchmark, benchmark_start)))
 

@@ -27,6 +27,25 @@ CODES = {
 }
 
 
+def test_linde_reviewed_irish_isin_matches_the_us_workbook_listing(monkeypatch):
+    from index_universe.acwi import asset_membership as M
+    holding = {"Ticker": "LIN", "Name": "LINDE PLC", "Exchange": "NASDAQ",
+               "Location": "United States", "Asset Class": "Equity", "Weight (%)": "0.23761"}
+    monkeypatch.setattr(M, "load_acwi_holdings", lambda: ([holding], "2026-04-15"))
+    monkeypatch.setattr(M, "_executions", lambda: [
+        ex("IE000S9YS762", "LIN.DE", "Linde plc", 2475),
+    ])
+    monkeypatch.setattr(M, "_country_by_code", lambda: {**CODES, "IE": "Ireland"})
+    rows, stats = M.resolve()
+    assert len(rows) == 1
+    assert rows[0]["analysis_id"] == 2475
+    assert rows[0]["weight_pct"] == .23761
+    assert stats["interlisted"] == 1
+    # A reused LIN ticker with a different instrument identity must remain unmatched.
+    monkeypatch.setattr(M, "_executions", lambda: [ex("IE000OTHER00", "LIN.DE", "Linde plc", 1)])
+    assert M.resolve()[0] == []
+
+
 def ex(isin: str, symbol: str, name: str, aid: int) -> dict:
     return {"isin": isin, "yahoo_symbol": symbol, "name": name, "analysis_id": aid}
 
