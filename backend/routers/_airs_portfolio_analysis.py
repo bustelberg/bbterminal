@@ -1202,7 +1202,7 @@ def _expand_book_rows(rows: list[dict], aligned_income: dict[str, float | None] 
 
 def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
     """Give every expanded leg its own Class, from the same classifier the rest of the app uses."""
-    from routers._airs_holding_isin import classify_bucket  # noqa: PLC0415
+    from routers._airs_holding_isin import classify_bucket, forced_bucket  # noqa: PLC0415
 
     #  A leg with no ISIN must be classified too — skipping it disabled the one rule written for
     # IT. This used to `continue` on `not r.get("isin")`, leaving `bucket` as None (rendered
@@ -1232,6 +1232,9 @@ def _reclassify_book_rows(rows: list[dict]) -> list[dict]:
     for r in rows:
         g = grid.get(r["isin"]) if r.get("isin") else None
         r["is_fund"] = _is_fund(g, r.get("holding_name") or "")
+        if forced := forced_bucket(r.get('holding_name'), g):
+            r['bucket'] = forced
+            continue
         if r.get("bucket"):
             continue
         # An ISIN-less, non-cash row still lands on "Unclassified" — an honest unsure, reached by
@@ -1658,7 +1661,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
     Returns None when the model has no paired book, or the book resolves to nothing priceable.
     """
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
-    from routers._airs_holding_isin import (classify_bucket, resolve_account_isins)  # noqa: PLC0415
+    from routers._airs_holding_isin import (classify_bucket, forced_bucket, resolve_account_isins)  # noqa: PLC0415
 
     account_links = list_account_links()["accounts"]
     link = next((a for a in account_links
@@ -1752,7 +1755,7 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         # `resolve_account_isins` normally supplies this, but older/cached rows and test/import
         # callers may only carry the raw instrument fields. Never let a missing persisted bucket
         # turn a plainly identifiable stock into Unclassified in the allocation bar.
-        bucket = model_categories.get(isin) or r.get("bucket")
+        bucket = forced_bucket(r.get('holding_name'), grow) or model_categories.get(isin) or r.get("bucket")
         if not bucket:
             bucket = classify_bucket(None, _is_fund(grow, r.get("holding_name") or ""),
                                     isin, r.get("holding_name") or "", grow)
@@ -2617,7 +2620,7 @@ def compute_portfolio_analysis(portfolio_id: int,
 
     # --- the portfolio side -------------------------------------------------------------
     from routers._airs_holding_isin import (  # noqa: PLC0415  (avoid a module-level cycle)
-        _load_bucket_overrides, classify_bucket)
+        _load_bucket_overrides, classify_bucket, forced_bucket)
     codes = _country_by_code()
     held = sorted({r["isin"] for r in pos if r.get("isin")})
     overrides = _load_bucket_overrides(held)   # manual Class pins win, so the bar matches the column
@@ -2645,7 +2648,7 @@ def compute_portfolio_analysis(portfolio_id: int,
         # model position and the same holding in the book table land in the identical bucket.
         ac = "Cash" if not isin else _class_from_categorie(r.get("categorie"))
         is_etf = bool(row) and (row.get("asset_class") or "").lower() in _FUND_CLASSES
-        bucket = overrides.get(isin or "") or classify_bucket(ac, is_etf, isin, r.get("fonds"), row)
+        bucket = forced_bucket(r.get('fonds'), row) or overrides.get(isin or "") or classify_bucket(ac, is_etf, isin, r.get("fonds"), row)
         alloc_items.append((w, bucket))
         port_labels.append({"name": r.get("fonds"), "isin": isin, "asset_class": bucket,
                             "via_names": r.get("via_names") or []})
@@ -3539,7 +3542,7 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:sourced:scorecard-blocks:cash-separated:cash-currency:v16"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:sourced:scorecard-blocks:cash-separated:cash-currency:forced-alternatives:v17"
 
 
 _INSTRUMENT_NAME_SUFFIXES = frozenset({

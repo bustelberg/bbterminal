@@ -793,6 +793,12 @@ class TestTheDrillDownSumsToItsBar:
 
 
 class TestBookWeighting:
+    def test_reviewed_alternatieven_classification_replaces_an_existing_equity_bucket(self, monkeypatch):
+        monkeypatch.setattr(pa, '_grid', lambda _: {'TEST': {'name': 'Certificate', 'asset_class': 'equity'}})
+        rows = pa._reclassify_book_rows([{'isin': 'TEST', 'holding_name': 'AlternatievenTopSelectie',
+                                         'asset_class': 'Equity', 'bucket': 'Equity'}])
+        assert rows[0]['bucket'] == 'Alternatives'
+
     """`weight_by="book"` reweights the portfolio bars by the paired AIRS book's actual EUR
     holdings. The invariant that makes it honest: ONLY the weights come from AIRS — the
     classification stays yfinance, because the benchmark is classified that way and two

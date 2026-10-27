@@ -26,7 +26,7 @@ describe('isUserAllowedPath', () => {
     //  And the removal half is pinned by the cases below. Taking a page away leaves any API path
     // it alone needed open — a permission nobody can see, because it grants no reachable screen.
     expect([...USER_ALLOWED_PATHS].sort()).toEqual([
-      '/', '/account', '/debet-calculation', '/forbidden', '/log-dashboard', '/management-dashboard', '/market', '/mfa', '/momentum', '/research-dashboard', '/schedule',
+      '/', '/account', '/debet-calculation', '/etf-comparison', '/forbidden', '/log-dashboard', '/management-dashboard', '/market', '/mfa', '/momentum', '/research-dashboard', '/schedule',
     ])
   })
 

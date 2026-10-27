@@ -127,6 +127,7 @@ class TestM1_ReadsRequireAuth:
         # conversion + ETF benchmark identity).
         assert _run(monkeypatch, "GET", "/api/fx/latest", "user") == (200, True)
         assert _run(monkeypatch, "GET", "/api/benchmarks", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/benchmarks/etf-comparison", "user") == (200, True)
 
 
 class TestScheduleDetailResourceReads:

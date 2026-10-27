@@ -216,7 +216,16 @@ _BOND_WORDS = re.compile(
 # and without it every REIT silently becomes an ordinary equity.
 _REAL_ESTATE_SECTOR = "real estate"
 
-_ALTERNATIVE_FUND_NAMES = {"high income quality fund"}
+_ALTERNATIVE_FUND_NAMES = {
+    "high income quality fund", "alternatieventopselectie", "alternatieventopselectie index",
+}
+
+
+def forced_bucket(name: str | None, grid: dict | None = None) -> str | None:
+    """Reviewed portfolio classifications take precedence over generic wrapper metadata."""
+    g = grid or {}
+    return BUCKET_ALTS if any((candidate or '').strip().casefold() in _ALTERNATIVE_FUND_NAMES
+                             for candidate in (name, g.get('name'), g.get('leonteq_name'))) else None
 
 
 def _looks_like_bond(*names: str | None) -> bool:
@@ -243,10 +252,8 @@ def classify_bucket(asset_class: str | None, is_etf: bool, isin: str | None,
     difference between Equity and Unclassified.
     """
     g = grid or {}
-    names = (name, g.get("name"), g.get("leonteq_name"))
-    if any((candidate or "").strip().casefold() in _ALTERNATIVE_FUND_NAMES
-           for candidate in names):
-        return BUCKET_ALTS
+    if forced := forced_bucket(name, g):
+        return forced
     # 1a. Cash — no instrument at all, or an explicit cash line.
     if asset_class == BUCKET_CASH or (not isin and (name or "").strip().lower() in _CASH_NAMES):
         return BUCKET_CASH
@@ -826,7 +833,7 @@ def _resolve_account_isins(portefeuille: str, *, freshen: bool, price_checks: bo
         override = overrides.get(isin or "")
         company_id = g.get("company_id")
         sector_override = company_sector_overrides.get(int(company_id)) if company_id is not None else None
-        bucket = override or classify_bucket(None, is_etf, isin, h["holding_name"], g)
+        bucket = forced_bucket(h["holding_name"], g) or override or classify_bucket(None, is_etf, isin, h["holding_name"], g)
         rows.append({
             "holding_name": h["holding_name"],
             "lines": h.get("lines", 1),

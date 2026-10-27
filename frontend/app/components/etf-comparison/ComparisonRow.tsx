@@ -9,8 +9,8 @@ import type { EtfComparisonResult } from '../../../lib/types/api';
 
 const pct = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
 
-export default function ComparisonRow({ etf, benchmark, revision }: {
-  etf: { name: string; ticker: string; isin: string }; benchmark: string; revision: number;
+export default function ComparisonRow({ etf, benchmark, revision, onRemove }: {
+  etf: { name: string; ticker: string; isin: string }; benchmark: string; revision: number; onRemove?: () => void;
 }) {
   const [start, setStart] = useState(() => `${new Date().getFullYear()}-01-01`);
   const [answer, setAnswer] = useState<{ key: string; data?: EtfComparisonResult; error?: string } | null>(null);
@@ -39,6 +39,7 @@ export default function ComparisonRow({ etf, benchmark, revision }: {
     <div className="space-y-4 border-b border-neutral-800/20 p-5 lg:border-b-0 lg:border-r">
       <div>
         <h2 className="text-sm font-semibold leading-relaxed text-fg-strong">{etf.name}</h2>
+        {onRemove && <button type="button" onClick={onRemove} aria-label={`Remove ${etf.name}`} className="mt-2 text-xs text-fg-muted hover:text-fg-strong">Remove ETF</button>}
         <a href={`https://finance.yahoo.com/quote/${encodeURIComponent(etf.ticker)}/`} target="_blank" rel="noreferrer" className="mt-1 inline-block font-mono text-xs text-accent-400 hover:underline">{etf.ticker} ↗</a>
         <p className="mt-1 text-[10px] text-fg-faint">{etf.isin}</p>
       </div>

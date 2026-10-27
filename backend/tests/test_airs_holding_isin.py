@@ -192,6 +192,12 @@ class TestTheClassComesFromTheGridAndTheName:
                        name="High Income Quality fund")
         assert classify_bucket(None, True, "XX0000000000", "High Income Quality fund", g) == BUCKET_ALTS
 
+    @pytest.mark.parametrize('asset_class', [None, 'Equity', 'Bonds'])
+    @pytest.mark.parametrize('name', ['AlternatievenTopSelectie', ' alternatieventopselectie ', 'AlternatievenTopSelectie Index'])
+    def test_alternatieven_topselectie_is_always_alternatives(self, asset_class, name):
+        assert classify_bucket(asset_class, True, 'TEST', name,
+                               {'name': 'Certificate', 'asset_class': 'equity'}) == BUCKET_ALTS
+
     def test_the_etf_wrapper_never_changes_the_bucket(self):
         """ THE INVARIANT THE MERGE CREATED, AND THE ONE A REVERT WOULD BREAK FIRST. `is_etf` may
         still decide Equity-vs-Unclassified in the fallback, but it may never move a holding
