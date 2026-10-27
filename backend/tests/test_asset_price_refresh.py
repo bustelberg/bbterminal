@@ -73,6 +73,29 @@ class TestItFetchesTheGapNotTheHistory:
 
 
 class TestReviewedNavFallbacks:
+    def test_rabobank_history_preserves_the_exact_bond_identity(self):
+        source = price_refresh._NAV_FALLBACKS['XS1002121454']
+        assert source['issue_id'] == '600015811'
+        assert source['asset_class'] == 'bond'
+        assert source['currency'] == 'EUR'
+
+    def test_mint_tower_has_its_own_reviewed_nav_source(self):
+        source = price_refresh._NAV_FALLBACKS['NL0010776951']
+        assert source['issue_id'] == '60045725'
+        assert source['currency'] == 'EUR'
+        assert source['cadence'] == 'monthly'
+
+    def test_full_history_repair_does_not_skip_a_nonempty_existing_series(self, monkeypatch):
+        from asset_pipeline import store
+        calls = []
+        monkeypatch.setattr(price_refresh, '_executions', lambda _isins: [
+            {'isin': 'KNOWN', 'analysis_id': 10, 'yahoo_symbol': 'KNOWN'}])
+        monkeypatch.setattr(store, 'store_series', lambda *args: calls.append(args) or 100)
+        monkeypatch.setattr(price_refresh.time, 'sleep', lambda _: None)
+        result = price_refresh.backfill_full_histories({'KNOWN'})
+        assert calls == [(10, 'KNOWN', None)]
+        assert result['backfilled'] == 1
+
     def test_fresh_fund_has_an_explicit_non_yahoo_nav_source(self):
         source = price_refresh._NAV_FALLBACKS["NL0012171417"]
         assert source["provider"] == "IEX"

@@ -253,6 +253,7 @@ _USER_REFRESH_PATHS: frozenset[str] = frozenset({
     "/api/airs/vermogen/price-checks/job",
     # Risk → Correlation automatically repairs the held Yahoo/FX inputs behind a preliminary view.
     "/api/airs/portfolio/risk-correlation/repair/job",
+    "/api/airs/portfolio/tracking-error/repair/job",
     "/api/airs/model-portfolios/scan/job",
     "/api/airs/model-portfolios/refresh/job",
     # Analyse modal → the fundamentals fill over a basket of ISINs (an unpaired book).

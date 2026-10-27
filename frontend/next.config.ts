@@ -38,6 +38,9 @@ const nextConfig: NextConfig = {
   // quota and noisy in-flight-request panel.
   reactStrictMode: false,
   devIndicators: false,
+  // These are client-rendered dashboard shells; their API reads still run on mount. Reuse a
+  // recently visited shell rather than paying another route/auth round trip on every tab switch.
+  experimental: { staleTimes: { dynamic: 60 } },
   allowedDevOrigins: ['127.0.0.1'],
   outputFileTracingRoot: workspaceRoot,
   turbopack: {

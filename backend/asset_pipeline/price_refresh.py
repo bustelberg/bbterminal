@@ -53,6 +53,14 @@ DEFAULT_STALE_DAYS = 3
 # A very small, reviewed escape hatch for funds that publish an official NAV but are not carried
 # by Yahoo. The source ID is the provider's own instrument identifier, never a guessed proxy.
 _NAV_FALLBACKS: dict[str, dict[str, str]] = {
+    "XS1002121454": {
+        "provider": "IEX", "issue_id": "600015811",
+        "name": "Rabobank Certificaat", "currency": "EUR", "asset_class": "bond",
+    },
+    "NL0010776951": {
+        "provider": "IEX", "issue_id": "60045725",
+        "name": "Mint Tower Arbitrage Fund I-EUR", "currency": "EUR", "cadence": "monthly",
+    },
     "NL0012171417": {
         "provider": "IEX",
         "issue_id": "60051939",
@@ -351,6 +359,28 @@ def backfill_missing(isins: set[str]) -> dict:
     return {"missing": len(missing), "backfilled": done, "failed": failed, "skipped": skipped}
 
 
+def backfill_full_histories(isins: set[str]) -> dict:
+    """Refresh complete histories only for the explicitly requested missing-history instruments."""
+    from asset_pipeline import store  # noqa: PLC0415
+    done = failed = 0
+    rows = [row for row in _executions(isins) if row.get('analysis_id') and row.get('yahoo_symbol')]
+    for row in rows:
+        try:
+            stored = store.store_series(row['analysis_id'], row['yahoo_symbol'], None)
+            if stored:
+                done += 1
+            else:
+                failed += 1
+        except YahooThrottled:
+            return {'requested': len(rows), 'backfilled': done, 'failed': failed,
+                    'skipped': len(rows) - done - failed}
+        except Exception as exc:  # one missing listing must not prevent the other repairs
+            failed += 1
+            log.warning('[price_refresh] full history %s failed: %s', row['isin'], exc)
+        time.sleep(DEFAULT_SLEEP_S)
+    return {'requested': len(rows), 'backfilled': done, 'failed': failed, 'skipped': 0}
+
+
 def _iex_nav_rows(issue_id: str) -> list[tuple[str, float]]:
     """Read IEX's published interday NAV chart into closed `{date, close}` marks."""
     url = f"https://beursspel.iex.nl/Ajax/ChartData/interday.ashx?Id={issue_id}"
@@ -383,7 +413,7 @@ def backfill_nav_fallbacks(isins: set[str]) -> dict:
             if not marks:
                 raise ValueError("source returned no usable NAV marks")
             supabase.table("asset_analysis").upsert({
-                "symbol": symbol, "asset_class": "fund", "label": source["name"],
+                "symbol": symbol, "asset_class": source.get("asset_class", "fund"), "label": source["name"],
                 "currency": source["currency"], "first_date": marks[0][0],
                 "years": round((datetime.now().date() - datetime.fromisoformat(marks[0][0]).date()).days / 365.25, 1),
                 "updated_at": datetime.now().astimezone().isoformat(),
@@ -396,7 +426,7 @@ def backfill_nav_fallbacks(isins: set[str]) -> dict:
             supabase.table("asset_execution").upsert({
                 "isin": isin, "analysis_id": analysis_id, "yahoo_symbol": None,
                 "name": source["name"], "currency": source["currency"], "status": "ok",
-                "asset_class": "fund",
+                "asset_class": source.get("asset_class", "fund"),
                 "reason": f"reviewed NAV fallback: {source['provider']} issue {source['issue_id']}",
                 "updated_at": datetime.now().astimezone().isoformat(),
             }, on_conflict="isin").execute()
@@ -427,7 +457,8 @@ def backfill_nav_fallbacks(isins: set[str]) -> dict:
     return {"eligible": len(wanted), "stored": stored, "failed": failed}
 
 
-def repair_price_histories(isins: set[str], *, years: int = 5) -> dict:
+def repair_price_histories(isins: set[str], *, years: int = 5, full_history: bool = False,
+                           yahoo_only: bool = False) -> dict:
     """Repair the narrowly scoped Yahoo and FX inputs needed for one risk calculation.
 
     Called only after the paired-series builder cannot find one common monthly mark.  It resolves
@@ -452,8 +483,16 @@ def repair_price_histories(isins: set[str], *, years: int = 5) -> dict:
         # an override must repair a real row, never invent one from a ticker alone.
         repointed = sum(apply_symbol_overrides(only_isin=isin) for isin in missing_execution)
         bootstrap = {**bootstrap, **queued, **processed, "repointed": repointed}
-    backfill = backfill_missing(isins)
-    nav_fallback = backfill_nav_fallbacks(isins)
+    # A short but non-empty series can still be missing years or interior months. Explicit
+    # simulation repairs must reread its own complete history, not only extend the latest date.
+    if full_history:
+        from asset_pipeline.symbol_override import apply_symbol_overrides  # noqa: PLC0415
+        for isin in sorted(isins):
+            apply_symbol_overrides(only_isin=isin)
+        backfill = backfill_full_histories(isins)
+    else:
+        backfill = backfill_missing(isins)
+    nav_fallback = {'eligible': 0, 'stored': 0, 'failed': 0} if yahoo_only else backfill_nav_fallbacks(isins)
     stale = refresh_stale(isins=isins, stale_days=1)
 
     # `_daily_eur` converts each close before bucketing it. A complete Yahoo series can therefore

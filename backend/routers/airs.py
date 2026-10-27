@@ -2425,7 +2425,7 @@ class TrackingErrorBenchmarkHistory(BaseModel):
 
 
 class HistoricalPortfolioHolding(BaseModel):
-    """One holding used in the available-history CAGR reconstruction."""
+    """One current holding included throughout the shared simulation period."""
 
     isin: str
     name: str
@@ -2451,22 +2451,48 @@ class HistoricalPortfolioComparison(BaseModel):
     benchmark_components: list[TrackingErrorBenchmarkComponent] = []
 
 
+class SimulationExcludedHolding(BaseModel):
+    isin: str | None = None
+    name: str
+    weight_pct: float
+    reason: str
+
+
+class SimulationHistoryIssue(BaseModel):
+    isin: str
+    name: str
+    kind: str
+    weight_pct: float
+    first_price_date: str | None = None
+    last_price_date: str | None = None
+    missing_months: int
+    reason: str
+
+
+class SimulationMonth(BaseModel):
+    date: str
+    portfolio_return_pct: float
+    benchmark_return_pct: float
+    active_return_pp: float
+
+
 class TrackingError(BaseModel):
-    """Realised (ex-post) tracking error of the selected risk sleeve — see `routers/_tracking_error.py`.
+    """Hypothetical tracking error from the annually rebalanced current portfolio simulation.
 
      `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
     picks one and routes it through `annualized_stats`, the same function every other volatility on
     the screen goes through.
 
-     EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
-    disagree — so every label says "realised" rather than leaving the reader to assume.
+    A fixed cohort of direct equities with complete Yahoo history is reweighted to 100%.
+    Monthly portfolio and benchmark returns share one period; exclusions and coverage are explicit.
+    This is a historical simulation, not realised AIRS account performance or an ex-ante forecast.
     """
 
     available: bool = True
     reason: str | None = None
     benchmark: str
-    #: daily | weekly | monthly.  Weekly is the DEFAULT and the honest one — see `cadence_note`.
+    #: The simulation uses completed monthly returns.
     frequency: str = "monthly"
     #: The `f` in the formula: 252 / 52 / 12.
     periods_per_year: float | None = None
@@ -2480,16 +2506,24 @@ class TrackingError(BaseModel):
     window_to: str | None = None
     #: True when newer holdings shorten the calculation to their exact common price window.
     history_limited: bool = False
-    #: A newly launched holding left too few monthly returns, so the exact common daily sample is
-    #: shown instead. It is real data, but intentionally labelled as preliminary.
+    #: Legacy field; the annual-rebalance simulation never falls back to daily observations.
     preliminary: bool = False
+    simulation_method: str | None = None
+    simulation_scope: str | None = None
+    covered_portfolio_pct: float | None = None
+    excluded_holdings: list[SimulationExcludedHolding] = []
+    requested_window_from: str | None = None
+    requested_window_to: str | None = None
+    history_issues: list[SimulationHistoryIssue] = []
+    monthly_returns: list[SimulationMonth] = []
+    rebalance_dates: list[str] = []
     #: The geometric return over the exact paired window, before annualisation.
     portfolio_return_total_pct: float | None = None
     benchmark_return_total_pct: float | None = None
     benchmark_components: list[TrackingErrorBenchmarkComponent] = []
     benchmark_history: TrackingErrorBenchmarkHistory | None = None
     historical_comparison: HistoricalPortfolioComparison | None = None
-    #: Annualised return uses `(1 + total return) ** annualization_factor - 1`.
+    #: Reciprocal of actual calendar years elapsed over the shared simulation window.
     annualization_factor: float | None = None
     #: Sample standard deviation of active returns at the displayed cadence, before `√f` scaling.
     active_return_std_per_period_pct: float | None = None
@@ -2520,22 +2554,21 @@ class TrackingError(BaseModel):
 
 @router.post("/api/airs/portfolio/tracking-error", response_model=TrackingError)
 async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                        frequency: str = "weekly", years: int = 5):
-    """Volatility of the active return, annualised — the Risk panel's second view.
+                                        frequency: str = "monthly", years: int = 5):
+    """Annually rebalance today's portfolio and benchmark; measure monthly active-return volatility.
 
-     The request shares the holdings body with `active-share`, while its optional policy weights
-    select the whole Stocks/Bonds risk sleeve.  Active Share remains a stock-sleeve structural
-    metric; return-based risk metrics use the portfolio's fixed policy comparator.
+    Only direct equities with matching Yahoo listings and complete price histories enter the fixed
+    cohort. ETFs, funds, bonds, certificates and cash are excluded. No NAV or proxy prices are used.
+    CAGR, active return and tracking error are derived from the same monthly simulation.
 
      SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
     every holding plus the tracker, and most opens of the Risk panel never switch to it.
     """
-    from routers._tracking_error import compute_tracking_error  # noqa: PLC0415
+    from routers._annual_portfolio_simulation import compute_simulation  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_tracking_error, [h.model_dump() for h in req.holdings], benchmark,
-        frequency, years, require_complete_return=True,
-        benchmark_weights=req.benchmark_weights, portefeuille=req.portefeuille)
+        compute_simulation, [h.model_dump() for h in req.holdings], benchmark,
+        years, benchmark_weights=req.benchmark_weights)
 
 
 class CorrelationPair(BaseModel):
@@ -2643,8 +2676,10 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
 
 
 @router.post("/api/airs/portfolio/risk-correlation/repair/job")
+@router.post("/api/airs/portfolio/tracking-error/repair/job")
 async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchmark: str = "ACWI",
-                                                years: int = 5):
+                                                years: int = 5, full_history: bool = False,
+                                                yahoo_only: bool = False):
     """Repair the exact market-data inputs a preliminary risk view is waiting for.
 
     Correlation and Volatility start this only after showing their honest short daily sample.  It
@@ -2664,7 +2699,8 @@ async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchma
     # A policy benchmark is a blend of these two real trackers.  Otherwise use the one tracker
     # selected by the request; an unknown benchmark simply leaves validation to the calculation.
     if req.benchmark_weights:
-        tracker_isins = {value for value in _BENCHMARK_RISK_ETF.values() if value}
+        tracker_isins = {_BENCHMARK_RISK_ETF[name] for name, bucket in (("ACWI", "Stocks"), ("BONDS", "Bonds"))
+                         if float(req.benchmark_weights.get(bucket, 0)) > 0}
     else:
         tracker = _BENCHMARK_RISK_ETF.get((benchmark or "").upper())
         tracker_isins = {tracker} if tracker else set()
@@ -2675,12 +2711,12 @@ async def repair_portfolio_risk_correlation_job(req: ActiveShareRequest, benchma
     # The input fingerprint is the job identity.  Reopening the same preliminary view attaches to
     # its existing toast instead of issuing a second set of vendor refreshes.
     fingerprint = hashlib.sha256("|".join(sorted(isins)).encode()).hexdigest()[:12]
-    label = f"correlation:{fingerprint}"
+    label = f"risk-history:{fingerprint}:{years}:{int(full_history)}:{int(yahoo_only)}"
 
     def _work(ctx) -> str:
         ctx.progress(0, len(isins), "Checking price and FX history for the risk views…")
         ctx.check()
-        repaired = repair_price_histories(isins, years=years)
+        repaired = repair_price_histories(isins, years=years, full_history=full_history, yahoo_only=yahoo_only)
         ctx.check()
         ctx.progress(len(isins), len(isins), "Risk price history checked")
         return (f"Risk price history checked for {len(isins)} instruments "

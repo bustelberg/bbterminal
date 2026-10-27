@@ -3392,11 +3392,11 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
   // Current composition includes cash without an opening valuation and mid-year purchases.
   const rows = holdings.filter((h) => h.bucket === bucket);
   const totalW = rows.reduce((s, h) => s + (h.weight_now_pct ?? 0), 0) || 1;
-  // Weights are within this class; contributions remain in points of the entire portfolio,
-  // read from the same accounting rows that produce the allocation legend.
+  // Preserve actual portfolio weights; only the currency split below is normalised within class.
+  // Contributions remain in points of the entire portfolio.
   const items = rows.map((h) => {
-    const w = (h.weight_now_pct ?? 0) / totalW * 100;
-    return { name: h.name, via_names: h.via_names ?? [], weight: w, ret: h.own_return_pct,
+    const w = h.weight_now_pct ?? null;
+    return { name: h.name, currency: h.currency, via_names: h.via_names ?? [], weight: w, ret: h.own_return_pct,
       contrib: h.contribution_pct ?? null };
   });
   type Item = (typeof items)[number];
@@ -3447,7 +3447,8 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
             <thead>
               <tr className="text-fg-faint text-[11px] uppercase tracking-wide border-b border-neutral-800/40">
                 <th className={`${th} pr-2 text-left`} onClick={() => click('name')}>{copy.holdings.name}{caret('name')}</th>
-                <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.lang === 'nl' ? 'Gewicht binnen categorie' : 'Weight within class'}{caret('weight')}</th>
+                <th className="py-1 px-2 text-left font-medium whitespace-nowrap">{copy.sleeve.currency}</th>
+                <th className={`${th} px-2 text-right`} onClick={() => click('weight')}>{copy.holdings.weightNow}{caret('weight')}</th>
                 <th className={`${th} px-2 text-right`} onClick={() => click('return')}>{copy.holdings.instrumentReturn}{caret('return')}</th>
                 <th className={`${th} pl-2 text-right`} onClick={() => click('contrib')}>{copy.holdings.contribution}{caret('contrib')}
                   <Provenance source="airs_volk" kind="formula"
@@ -3463,7 +3464,8 @@ function SleeveBreakdown({ holdings, bucket }: { holdings: BookHolding[]; bucket
                     <td className="py-1 pr-2 text-fg-soft" title={it.name ?? ''}>{it.name ?? '—'}
                       {!!it.via_names.length && <span className="ml-2 inline-flex"><ViaChips names={it.via_names} /></span>}
                     </td>
-                    <td className="py-1 px-2 text-right font-mono text-fg">{it.weight.toFixed(2)}%</td>
+                    <td className="py-1 px-2 text-left font-mono text-fg-muted whitespace-nowrap">{it.currency || '—'}</td>
+                    <td className="py-1 px-2 text-right font-mono text-fg">{it.weight == null ? '—' : `${it.weight.toFixed(2)}%`}</td>
                     <td className={`py-1 px-2 text-right font-mono ${retTone(it.ret)}`}>{fmtRet(it.ret)}</td>
                     <td className={`py-1 pl-2 text-right font-mono ${retTone(c)}`}>
                       {ppt(c)}
@@ -4116,7 +4118,7 @@ export default function PortfolioAnalysisModal({
                         `SleeveBreakdown` renders instead of the holdings table and this is the only
                         place that class's return appears. On Stocks it sat above the sector charts
                         duplicating a figure the Holdings view already carries on its class row. */}
-                    {selected !== EQUITY_BUCKET && (
+                    {selected !== EQUITY_BUCKET && selected !== CASH_BUCKET && selected !== 'Alternatives' && selected !== 'Bonds' && (
                       /*  THE BOOK SNAPSHOT, NOT `data.as_of` — the same distinction the holdings
                          table's own `asOf` carries, and for the same reason: this tile shows a
                          figure the BOOK values, and `data.as_of` is the model COMPOSITION's
@@ -4216,7 +4218,12 @@ export default function PortfolioAnalysisModal({
                  The producer still exists — `_asset_benchmark._missing_by_country` and the
                 `benchmark_missing_countries` field — and is now computed with nothing reading it.
                 Move the warning or strip the backend; do not leave it as it stands. */}
-            {selected == null ? (
+            {selected != null && stale ? (
+              <div role="status" aria-live="polite" className="flex min-h-32 items-center justify-center gap-2 text-sm text-fg-muted">
+                <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-700 border-t-accent-400 motion-reduce:animate-none" />
+                {copy.lang === 'nl' ? 'Gegevens laden…' : 'Loading data…'}
+              </div>
+            ) : selected == null ? (
               /* NOTHING selected → the whole portfolio, one row per instrument, grouped by class.
                  A prompt to click something used to sit here; it told the reader what to do next
                  and nothing about what they hold. Picking a class still narrows this to that
@@ -4261,7 +4268,14 @@ export default function PortfolioAnalysisModal({
               </>
             ) : sleeve ? (
               /* NON-EQUITY class: its holdings' contribution + a currency chart, no benchmark. */
-              <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />
+              data.details_pending ? (
+                <div role="status" aria-live="polite" className="flex min-h-32 items-center justify-center gap-2 text-sm text-fg-muted">
+                  {!detailsError && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-700 border-t-accent-400 motion-reduce:animate-none" />}
+                  {detailsError
+                    ? (copy.lang === 'nl' ? 'Posities laden mislukt. Gebruik Verversen om opnieuw te proberen.' : 'Could not load holdings. Use Refresh to retry.')
+                    : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
+                </div>
+              ) : <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />
             ) : (
               /* STOCKS: read-only sector / region / currency exposure versus the benchmark.
                  Brinson Attribution is the sole drill-down surface. */

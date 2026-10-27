@@ -255,8 +255,8 @@ export default function CorrelationView({
                   the LAST column extends up and to the RIGHT of the table box; without room for it
                   the scroll container clips the final holding's name, which is the one a reader is
                   most likely to be hunting for. 7.5rem of text at 45° projects ~5.3rem across. */}
-              <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(17rem,22rem)]">
-              <div className="min-w-0">
+              <div className="flex min-w-0 flex-col gap-5">
+              <div className="order-2 min-w-0">
               <div className="mx-auto w-fit max-w-full overflow-auto pr-[5.5rem]">
                 <table className="border-separate" style={{ borderSpacing: 0 }}>
                   {/*  THE COLUMN NAMES, ROTATED — added on request 2026-08-31. A cell is 16px
@@ -339,7 +339,7 @@ export default function CorrelationView({
               </div>
               </div>
 
-              <div className="grid w-full min-w-0 grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-4 pt-1 [&>div]:min-w-0 [&>div]:rounded-lg [&>div]:border [&>div]:border-neutral-800/40 [&>div]:bg-elevated [&>div]:p-4">
+              <div className="order-1 grid w-full min-w-0 grid-cols-1 gap-4 pt-1 sm:grid-cols-2 [&>div]:min-w-0 [&>div]:rounded-lg [&>div]:border [&>div]:border-neutral-800/40 [&>div]:bg-elevated [&>div]:p-4">
                 <div>
                   <h6 className="text-center text-base font-medium text-fg-muted mb-3">
                     Least correlated — what actually diversifies

@@ -2,6 +2,7 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
+import NavigationLink from './NavigationLink';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { createClient } from '../../lib/supabase/client';
@@ -211,7 +212,9 @@ export default function Sidebar({ initialUser }: Props) {
       setChecked(true);
     }
 
-    refresh();
+    // The proxy has already verified a server-provided identity. Avoid two more mount-time
+    // network reads (this call and INITIAL_SESSION) before any dashboard API can settle.
+    if (initialUser == null) void refresh();
 
     // The Sidebar lives in the root layout and stays mounted across
     // /login ↔ /. Without this subscription, role/email would be frozen
@@ -219,7 +222,8 @@ export default function Sidebar({ initialUser }: Props) {
     // sidebar showing the previous user's nav items (or nothing if the
     // new account's role hasn't been picked up yet).
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      refresh(event);
+      if (event === 'INITIAL_SESSION' && initialUser != null) return;
+      void refresh(event);
     });
 
     setViewAsUser(readViewAsCookie());
@@ -383,9 +387,10 @@ export default function Sidebar({ initialUser }: Props) {
         {visibleNav.map((entry) => {
           if (!isSection(entry)) {
             return (
-              <Link
+              <NavigationLink
                 key={entry.href}
                 href={entry.href}
+                onNavigate={() => setDrawerOpen(false)}
                 className={`block px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
                   isActive(entry.href)
                     ? 'bg-accent-600/15 text-accent-400'
@@ -393,7 +398,7 @@ export default function Sidebar({ initialUser }: Props) {
                 }`}
               >
                 {t.nav[entry.href]}
-              </Link>
+              </NavigationLink>
             );
           }
           const headerActive = entry.href ? isActive(entry.href) : false;
@@ -408,14 +413,15 @@ export default function Sidebar({ initialUser }: Props) {
             <div key={entry.href}>
               <div className={`flex items-center rounded-lg ${headerActive ? 'bg-accent-600/15' : 'hover:bg-overlay/5'}`}>
                 {entry.href ? (
-                  <Link
+                  <NavigationLink
                     href={entry.href}
+                    onNavigate={() => setDrawerOpen(false)}
                     className={`flex-1 px-3 py-2.5 rounded-l-lg text-sm font-medium transition-colors ${
                       headerActive ? 'text-accent-400' : 'text-fg-muted hover:text-fg-strong'
                     }`}
                   >
                     {t.nav[entry.href]}
-                  </Link>
+                  </NavigationLink>
                 ) : (
                   <span className="flex-1 px-3 py-2.5 text-sm font-medium text-fg-muted">{t.nav[entry.href]}</span>
                 )}
@@ -433,9 +439,10 @@ export default function Sidebar({ initialUser }: Props) {
               {open && (
                 <div className="mt-1 ml-4 pl-2 border-l border-neutral-800/60 space-y-1">
                   {entry.children.map((c) => (
-                    <Link
+                    <NavigationLink
                       key={c.href}
                       href={c.href}
+                      onNavigate={() => setDrawerOpen(false)}
                       className={`block px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                         isActive(c.href)
                           ? 'bg-accent-600/15 text-accent-400'
@@ -443,7 +450,7 @@ export default function Sidebar({ initialUser }: Props) {
                       }`}
                     >
                       {t.nav[c.href]}
-                    </Link>
+                    </NavigationLink>
                   ))}
                 </div>
               )}
@@ -451,8 +458,9 @@ export default function Sidebar({ initialUser }: Props) {
           );
         })}
         {effectiveRole === 'admin' && (
-          <Link
+          <NavigationLink
             href="/users"
+            onNavigate={() => setDrawerOpen(false)}
             className={`block px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
               pathname === '/users'
                 ? 'bg-accent-600/15 text-accent-400'
@@ -460,7 +468,7 @@ export default function Sidebar({ initialUser }: Props) {
             }`}
           >
             Users
-          </Link>
+          </NavigationLink>
         )}
       </nav>
       {isAdmin && (

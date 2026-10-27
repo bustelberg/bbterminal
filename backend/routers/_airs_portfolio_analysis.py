@@ -1054,6 +1054,7 @@ def _dynamic_account_positions(holding_name: str | None) -> list[dict]:
         "fonds": row.get("holding_name"),
         "percentage": value / total * 100.0,
         "categorie": row.get("bucket"),
+        "currency": row.get("currency"),
         # The account's reviewed Fixed-model link is needed later to load this child book's own
         # transaction ledger for Money-weighted return. Europa's certificate link is absent only
         # because its legacy target model is empty; its Dynamic account still has this real link.
@@ -1136,9 +1137,12 @@ def _expand_book_rows(rows: list[dict], aligned_income: dict[str, float | None] 
             out.append({
                 **{k: v for k, v in r.items() if k not in
                    ("isin", "holding_name", "current_value_eur", "start_value_eur", "bucket",
-                    "categorie", "asset_class")},
+                    "categorie", "asset_class", "currency")},
                 "isin": c.get("isin"),
                 "holding_name": c.get("fonds"),
+                # A certificate's quote currency is not its underlying cash currency. A model
+                # composition without that field must stay unknown; account fallbacks carry it.
+                "currency": c.get("currency"),
                 "current_value_eur": cur * share,
                 "start_value_eur": start * share,
                 #  The parent's Class is NOT inherited: a certificate classified "Equity" would
@@ -1591,6 +1595,17 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
         child_rows = res.get("rows") or []
         aligned_income = _book_aligned_dividend_income(pf, child_rows)
         marks: dict[str, dict] = {}
+        # Model compositions omit cash currencies. The paired AIRS account has its own Valuta
+        # field, so retain it alongside the already-loaded valuation marks, without another read.
+        cash_rows = [r for r in child_rows if float(r.get("current_value_eur") or 0) > 0 and (
+            r.get("bucket") == CASH_BUCKET or (not r.get("isin") and
+            str(r.get("holding_name") or "").strip().casefold() in {"effectenrekening", "liquiditeiten"}))]
+        cash_currencies = {(r.get("currency") or "").strip().upper() or None for r in cash_rows}
+        if cash_rows:
+            marks["__cash_currency__"] = {
+                "currency": next(iter(cash_currencies)) if len(cash_currencies) == 1 else None,
+                "as_of": res.get("as_of"), "portefeuille": pf,
+            }
         for r in child_rows:
             isin = r.get("isin")
             if not isin:
@@ -1609,6 +1624,19 @@ def _wrapped_book_marks(model_ids: set[int]) -> dict[int, dict[str, dict]]:
         _log.debug("[analysis] wrapped book %s (model %s): %d of %d position(s) carry an AIRS "
                      "return", pf, mid, len(marks), len(child_rows))
     return out
+
+
+def _cash_currency(row: dict, wrapped_marks: dict[int, dict[str, dict]]) -> str | None:
+    """Use the holding's AIRS Valuta, or unambiguous cash currency in every wrapped account."""
+    explicit = (row.get("currency") or "").strip().upper()
+    if explicit:
+        return explicit
+    sources = row.get("sources") or []
+    if not sources:
+        return None
+    currencies = {(wrapped_marks.get(source.get("model_id"), {}).get("__cash_currency__") or {}).get("currency")
+                  for source in sources if float(source.get("value_eur") or 0) > 0}
+    return next(iter(currencies)) if len(currencies) == 1 and None not in currencies else None
 
 
 def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
@@ -1865,7 +1893,8 @@ def _book_port_items(portfolio_id: int, codes: dict[str, str]) -> dict | None:
         # The holding's own quote currency — NOT folded to Unclassified the way the fund axes are.
         # For a bond/ETF class the quote currency is a fair first-order FX signal (a EUR-quoted line
         # vs a USD one), which is exactly what the currency chart is for.
-        cur = (grow.get("market_cap_currency") or grow.get("currency")) if grow else None
+        cur = _cash_currency(r, wrapped_marks) if b_alloc == CASH_BUCKET else (
+            (grow.get("market_cap_currency") or grow.get("currency")) if grow else None)
         #  The sector is the chart's bucket, taken from the same `_buckets` — not the raw
         # `asset_grid.sector`. The holdings table sits directly under the sector bars, so a row
         # reading "Financial Services" beside a bar reading "Financials" is a reader's problem to
@@ -3493,7 +3522,7 @@ RISK_BASIS = "mom:d/beta:w/vol:m/relstate:v2-available-history"
 #: into a database read would make the second one look like the first.
 #: v2 (2026-09-03): funds out of all three sleeves, and the benchmark narrowed to the
 #: constituents priced at both ends — the list its own drill-down uses.
-COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:sourced:scorecard-blocks:cash-separated:v14"
+COMPOSITION_BASIS = "axes:now/bench:now/nofunds/no-drilldown-history/postclose:sourced:scorecard-blocks:cash-separated:cash-currency:v16"
 
 
 _INSTRUMENT_NAME_SUFFIXES = frozenset({

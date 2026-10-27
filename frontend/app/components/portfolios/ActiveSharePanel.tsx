@@ -460,16 +460,6 @@ export default function ActiveSharePanel({
                 how={t.active.cards.overlap.how} />} />} />
           </div>
 
-          {(data.unresolved ?? []).length > 0 && (
-            <p className="shrink-0 text-[11px] text-warn-300">
-              {t.active.unmatched(
-                (data.unresolved ?? []).length,
-                pct2((data.unresolved ?? []).reduce((acc, u) => acc + (u.weight_pct ?? 0), 0)),
-                (data.unresolved ?? []).slice(0, 4).map((u) => u.name ?? u.isin).join(', ')
-                  + ((data.unresolved ?? []).length > 4 ? '…' : ''))}
-            </p>
-          )}
-
           {/*  THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED
               TO SIT HERE. That note said a cap would "nest one scrollbar inside another — and the
               outer one would have nothing to scroll". The first half is true and the second is

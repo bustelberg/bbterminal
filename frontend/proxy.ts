@@ -1,9 +1,10 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
-import { isUserAllowedPath } from '@/lib/userAllowedPaths'
+import { isUserAllowedPath } from './lib/userAllowedPaths'
+import { verifiedUserHeaders } from './lib/verifiedUser'
 import {
   ENROL_PATH, MFA_PATH, mfaEnforced, requiresEnrolment, requiresMfa, type AalLevel,
-} from '@/lib/mfaGate'
+} from './lib/mfaGate'
 
 // Paths that are accessible to anyone — including not-yet-logged-in users
 // (auth flow) and the home page (which any authenticated user can see).
@@ -19,6 +20,7 @@ function isPublicPath(pathname: string): boolean {
 // env-var-controlled way to switch authentication off. Anything that needs to test around auth
 // should test a pure function, not disable the gate.
 export async function proxy(request: NextRequest) {
+  const started = performance.now()
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -44,6 +46,7 @@ export async function proxy(request: NextRequest) {
 
   // Refresh session — must call getUser() not getSession()
   const { data: { user } } = await supabase.auth.getUser()
+  const authDuration = performance.now() - started
 
   const { pathname } = request.nextUrl
   const publicPath = isPublicPath(pathname)
@@ -136,7 +139,12 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  return supabaseResponse
+  // The layout needs only display identity. Forward the already validated result instead of
+  // making a second remote getUser call. Always overwrite caller-supplied identity headers.
+  const response = NextResponse.next({ request: { headers: verifiedUserHeaders(request.headers, user) } })
+  for (const cookie of supabaseResponse.cookies.getAll()) response.cookies.set(cookie)
+  response.headers.set('Server-Timing', `auth;dur=${authDuration.toFixed(1)}, proxy;dur=${(performance.now() - started).toFixed(1)}`)
+  return response
 }
 
 export const config = {

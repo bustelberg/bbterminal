@@ -31,6 +31,8 @@ through `tests/_fake_supabase.py`. Do not reach for the live database again.
 """
 from __future__ import annotations
 
+import pytest
+
 from routers import _airs_lookthrough as LT
 from tests._fake_supabase import FakeSupabase
 
@@ -239,6 +241,19 @@ class TestTheBookSideIsExpandedToo:
         assert len(out) == 1
         assert out[0]["current_value_eur"] == 100.0
         assert out[0]["start_value_eur"] == 80.0, "the start value must be split too"
+
+    @pytest.mark.parametrize('child_currency', ['EUR', None])
+    def test_cash_does_not_inherit_the_certificate_quote_currency(self, monkeypatch, child_currency):
+        from routers import _airs_portfolio_analysis as A
+        monkeypatch.setattr(A, '_grid', lambda _isins: {})
+        monkeypatch.setattr('routers._airs_lookthrough._datum_of', lambda _id: None)
+        monkeypatch.setattr('routers._airs_lookthrough._positions_of', lambda *_args: [{
+            'isin': None, 'fonds': 'Liquiditeiten', 'percentage': 100, 'currency': child_currency,
+        }])
+        out = A._expand_book_rows([{'isin': 'CERT', 'holding_name': 'Certificate',
+            'current_value_eur': 100, 'start_value_eur': 100, 'linked_portfolio_id': 7,
+            'bucket': 'Equity', 'currency': 'USD'}])
+        assert out[0]['currency'] == child_currency
 
     def test_the_parents_class_is_not_stamped_on_the_children(self, monkeypatch):
         """A certificate classified 'Equity' must not label a bond the child holds as equity."""

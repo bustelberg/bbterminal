@@ -9640,7 +9640,7 @@
         "type": "object"
       },
       "HistoricalPortfolioHolding": {
-        "description": "One holding used in the available-history CAGR reconstruction.",
+        "description": "One current holding included throughout the shared simulation period.",
         "properties": {
           "first_used": {
             "anyOf": [
@@ -17256,6 +17256,128 @@
         "title": "SimulateRequest",
         "type": "object"
       },
+      "SimulationExcludedHolding": {
+        "properties": {
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "weight_pct",
+          "reason"
+        ],
+        "title": "SimulationExcludedHolding",
+        "type": "object"
+      },
+      "SimulationHistoryIssue": {
+        "properties": {
+          "first_price_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Price Date"
+          },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_price_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Price Date"
+          },
+          "missing_months": {
+            "title": "Missing Months",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "isin",
+          "name",
+          "kind",
+          "weight_pct",
+          "missing_months",
+          "reason"
+        ],
+        "title": "SimulationHistoryIssue",
+        "type": "object"
+      },
+      "SimulationMonth": {
+        "properties": {
+          "active_return_pp": {
+            "title": "Active Return Pp",
+            "type": "number"
+          },
+          "benchmark_return_pct": {
+            "title": "Benchmark Return Pct",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "portfolio_return_pct": {
+            "title": "Portfolio Return Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "date",
+          "portfolio_return_pct",
+          "benchmark_return_pct",
+          "active_return_pp"
+        ],
+        "title": "SimulationMonth",
+        "type": "object"
+      },
       "SleeveEtf": {
         "properties": {
           "band_pct": {
@@ -17660,7 +17782,7 @@
         "type": "object"
       },
       "TrackingError": {
-        "description": "Realised (ex-post) tracking error of the selected risk sleeve \u2014 see `routers/_tracking_error.py`.\n\n `TE = \u221a(1/(T\u22121) \u03a3 (a\u209c \u2212 \u0101)\u00b2) \u00b7 \u221af`, WITH \u0101 SUBTRACTED and Bessel applied. The other\nconvention (\u221a(\u03a3a\u209c\u00b2/T)) is also called tracking error and is a different number; this codebase\npicks one and routes it through `annualized_stats`, the same function every other volatility on\nthe screen goes through.\n\n EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely\ndisagree \u2014 so every label says \"realised\" rather than leaving the reader to assume.",
+        "description": "Hypothetical tracking error from the annually rebalanced current portfolio simulation.\n\n `TE = \u221a(1/(T\u22121) \u03a3 (a\u209c \u2212 \u0101)\u00b2) \u00b7 \u221af`, WITH \u0101 SUBTRACTED and Bessel applied. The other\nconvention (\u221a(\u03a3a\u209c\u00b2/T)) is also called tracking error and is a different number; this codebase\npicks one and routes it through `annualized_stats`, the same function every other volatility on\nthe screen goes through.\n\nA fixed cohort of direct equities with complete Yahoo history is reweighted to 100%.\nMonthly portfolio and benchmark returns share one period; exclusions and coverage are explicit.\nThis is a historical simulation, not realised AIRS account performance or an ex-ante forecast.",
         "properties": {
           "active_return_ann_pct": {
             "anyOf": [
@@ -17777,6 +17899,25 @@
             ],
             "title": "Cadence Note"
           },
+          "covered_portfolio_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Covered Portfolio Pct"
+          },
+          "excluded_holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SimulationExcludedHolding"
+            },
+            "title": "Excluded Holdings",
+            "type": "array"
+          },
           "frequency": {
             "default": "monthly",
             "title": "Frequency",
@@ -17791,6 +17932,14 @@
                 "type": "null"
               }
             ]
+          },
+          "history_issues": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SimulationHistoryIssue"
+            },
+            "title": "History Issues",
+            "type": "array"
           },
           "history_limited": {
             "default": false,
@@ -17818,6 +17967,14 @@
               }
             ],
             "title": "Mean Active Per Period Pct"
+          },
+          "monthly_returns": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/SimulationMonth"
+            },
+            "title": "Monthly Returns",
+            "type": "array"
           },
           "observations": {
             "default": 0,
@@ -17877,6 +18034,58 @@
               }
             ],
             "title": "Reason"
+          },
+          "rebalance_dates": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Rebalance Dates",
+            "type": "array"
+          },
+          "requested_window_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Window From"
+          },
+          "requested_window_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Window To"
+          },
+          "simulation_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulation Method"
+          },
+          "simulation_scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulation Scope"
           },
           "total_holdings": {
             "default": 0,
@@ -22904,6 +23113,26 @@
               "title": "Years",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "full_history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Full History",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "yahoo_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Yahoo Only",
+              "type": "boolean"
+            }
           }
         ],
         "requestBody": {
@@ -23008,7 +23237,7 @@
     },
     "/api/airs/portfolio/tracking-error": {
       "post": {
-        "description": "Volatility of the active return, annualised \u2014 the Risk panel's second view.\n\n The request shares the holdings body with `active-share`, while its optional policy weights\nselect the whole Stocks/Bonds risk sleeve.  Active Share remains a stock-sleeve structural\nmetric; return-based risk metrics use the portfolio's fixed policy comparator.\n\n SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for\nevery holding plus the tracker, and most opens of the Risk panel never switch to it.",
+        "description": "Annually rebalance today's portfolio and benchmark; measure monthly active-return volatility.\n\nOnly direct equities with matching Yahoo listings and complete price histories enter the fixed\ncohort. ETFs, funds, bonds, certificates and cash are excluded. No NAV or proxy prices are used.\nCAGR, active return and tracking error are derived from the same monthly simulation.\n\n SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for\nevery holding plus the tracker, and most opens of the Risk panel never switch to it.",
         "operationId": "airs_portfolio_tracking_error_api_airs_portfolio_tracking_error_post",
         "parameters": [
           {
@@ -23026,7 +23255,7 @@
             "name": "frequency",
             "required": false,
             "schema": {
-              "default": "weekly",
+              "default": "monthly",
               "title": "Frequency",
               "type": "string"
             }
@@ -23075,6 +23304,88 @@
           }
         },
         "summary": "Airs Portfolio Tracking Error",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
+    "/api/airs/portfolio/tracking-error/repair/job": {
+      "post": {
+        "description": "Repair the exact market-data inputs a preliminary risk view is waiting for.\n\nCorrelation and Volatility start this only after showing their honest short daily sample.  It\nis deliberately an owned job endpoint, rather than a generic job runner: this route alone\nknows which held instruments and benchmark trackers its calculation may refresh.",
+        "operationId": "repair_portfolio_risk_correlation_job_api_airs_portfolio_tracking_error_repair_job_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "ACWI",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "years",
+            "required": false,
+            "schema": {
+              "default": 5,
+              "title": "Years",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "full_history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Full History",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "yahoo_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Yahoo Only",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveShareRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Repair Portfolio Risk Correlation Job",
         "tags": [
           "airs"
         ]

@@ -127,11 +127,6 @@ function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'
             </LineChart>
           </ResponsiveContainer>
         </div>
-        <p className="mt-3 text-xs leading-relaxed text-fg-faint">
-          {nl ? 'De lijn toont dagslotstanden; het laatste punt kan de lopende sessie zijn. De top is de hoogste daghoogte in de Yahoo-historie vanaf ' : 'The line shows daily closes; the last point may be the current session. The peak is the highest daily high in Yahoo history since '}{day(data.history_start)}.
-          {' '}{nl ? 'De top verandert niet bij het wisselen van grafiekperiode. Yahoo-data kan vertraagd zijn; momentopnamen worden vijf minuten gecachet.' : 'The peak stays the same when changing the chart period. Yahoo data may be delayed; snapshots are cached for five minutes.'}
-          {' '}{nl ? 'Lange grafiekperiodes tonen een selectie van slotstanden; de top gebruikt alle dagelijkse hoogtes.' : 'Long chart periods sample the closing prices for display; the peak uses every daily high.'}
-        </p>
         <a className="mt-2 inline-block text-xs text-accent-500 hover:underline" href={`https://finance.yahoo.com/quote/${encodeURIComponent(symbol)}/`} target="_blank" rel="noopener noreferrer">Yahoo Finance · {symbol}</a>
       </section>
     </>}

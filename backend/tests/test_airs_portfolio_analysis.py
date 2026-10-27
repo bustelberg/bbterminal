@@ -798,6 +798,33 @@ class TestBookWeighting:
     classification stays yfinance, because the benchmark is classified that way and two
     taxonomies in one chart invent a tilt."""
 
+    @pytest.mark.parametrize('currency', ['EUR', 'USD', None])
+    def test_cash_currency_comes_from_airs_without_a_security_record(self, monkeypatch, currency):
+        self._wire(monkeypatch, rows=[{
+            'isin': None, 'holding_name': 'Effectenrekening', 'current_value_eur': 100,
+            'asset_class': 'Cash', 'currency': currency,
+        }])
+        holding = pa._book_port_items(7, {})['holdings_detail'][0]
+        assert holding['bucket'] == 'Cash'
+        assert holding['currency'] == currency
+
+    def test_wrapped_cash_reads_the_underlying_account_currency(self, monkeypatch):
+        self._wire(monkeypatch, rows=[{
+            'isin': None, 'holding_name': 'Liquiditeiten', 'current_value_eur': 100,
+            'bucket': 'Cash', 'currency': None,
+            'sources': [{'label': 'Certificate', 'model_id': 99, 'value_eur': 100}],
+        }])
+        monkeypatch.setattr(pa, '_wrapped_book_marks', lambda _ids: {
+            99: {'__cash_currency__': {'currency': 'EUR'}}})
+        holding = pa._book_port_items(7, {})['holdings_detail'][0]
+        assert holding['currency'] == 'EUR'
+
+    def test_mixed_or_missing_wrapped_cash_currency_is_not_guessed(self):
+        row = {'sources': [{'model_id': 1, 'value_eur': 40}, {'model_id': 2, 'value_eur': 60}]}
+        assert pa._cash_currency(row, {1: {'__cash_currency__': {'currency': 'EUR'}},
+                                       2: {'__cash_currency__': {'currency': 'USD'}}}) is None
+        assert pa._cash_currency(row, {1: {'__cash_currency__': {'currency': 'EUR'}}}) is None
+
     def _wire(self, monkeypatch, *, rows, link=True):
         import routers._airs_account_links as links
         import routers._airs_holding_isin as hisin

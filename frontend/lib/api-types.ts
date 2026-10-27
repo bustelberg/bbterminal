@@ -2019,16 +2019,40 @@ export interface paths {
         put?: never;
         /**
          * Airs Portfolio Tracking Error
-         * @description Volatility of the active return, annualised — the Risk panel's second view.
+         * @description Annually rebalance today's portfolio and benchmark; measure monthly active-return volatility.
          *
-         *      The request shares the holdings body with `active-share`, while its optional policy weights
-         *     select the whole Stocks/Bonds risk sleeve.  Active Share remains a stock-sleeve structural
-         *     metric; return-based risk metrics use the portfolio's fixed policy comparator.
+         *     Only direct equities with matching Yahoo listings and complete price histories enter the fixed
+         *     cohort. ETFs, funds, bonds, certificates and cash are excluded. No NAV or proxy prices are used.
+         *     CAGR, active return and tracking error are derived from the same monthly simulation.
          *
          *      SEPARATE FROM `active-share` AS A CALL, because it costs a five-year daily price load for
          *     every holding plus the tracker, and most opens of the Risk panel never switch to it.
          */
         post: operations["airs_portfolio_tracking_error_api_airs_portfolio_tracking_error_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/airs/portfolio/tracking-error/repair/job": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Repair Portfolio Risk Correlation Job
+         * @description Repair the exact market-data inputs a preliminary risk view is waiting for.
+         *
+         *     Correlation and Volatility start this only after showing their honest short daily sample.  It
+         *     is deliberately an owned job endpoint, rather than a generic job runner: this route alone
+         *     knows which held instruments and benchmark trackers its calculation may refresh.
+         */
+        post: operations["repair_portfolio_risk_correlation_job_api_airs_portfolio_tracking_error_repair_job_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12334,7 +12358,7 @@ export interface components {
         };
         /**
          * HistoricalPortfolioHolding
-         * @description One holding used in the available-history CAGR reconstruction.
+         * @description One current holding included throughout the shared simulation period.
          */
         HistoricalPortfolioHolding: {
             /** First Used */
@@ -15172,6 +15196,47 @@ export interface components {
             /** Variant Key */
             variant_key?: string | null;
         };
+        /** SimulationExcludedHolding */
+        SimulationExcludedHolding: {
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** SimulationHistoryIssue */
+        SimulationHistoryIssue: {
+            /** First Price Date */
+            first_price_date?: string | null;
+            /** Isin */
+            isin: string;
+            /** Kind */
+            kind: string;
+            /** Last Price Date */
+            last_price_date?: string | null;
+            /** Missing Months */
+            missing_months: number;
+            /** Name */
+            name: string;
+            /** Reason */
+            reason: string;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** SimulationMonth */
+        SimulationMonth: {
+            /** Active Return Pp */
+            active_return_pp: number;
+            /** Benchmark Return Pct */
+            benchmark_return_pct: number;
+            /** Date */
+            date: string;
+            /** Portfolio Return Pct */
+            portfolio_return_pct: number;
+        };
         /** SleeveEtf */
         SleeveEtf: {
             /**
@@ -15305,15 +15370,16 @@ export interface components {
         };
         /**
          * TrackingError
-         * @description Realised (ex-post) tracking error of the selected risk sleeve — see `routers/_tracking_error.py`.
+         * @description Hypothetical tracking error from the annually rebalanced current portfolio simulation.
          *
          *      `TE = √(1/(T−1) Σ (aₜ − ā)²) · √f`, WITH ā SUBTRACTED and Bessel applied. The other
          *     convention (√(Σaₜ²/T)) is also called tracking error and is a different number; this codebase
          *     picks one and routes it through `annualized_stats`, the same function every other volatility on
          *     the screen goes through.
          *
-         *      EX-POST, NOT EX-ANTE. There is no covariance-matrix forecast here, and the two routinely
-         *     disagree — so every label says "realised" rather than leaving the reader to assume.
+         *     A fixed cohort of direct equities with complete Yahoo history is reweighted to 100%.
+         *     Monthly portfolio and benchmark returns share one period; exclusions and coverage are explicit.
+         *     This is a historical simulation, not realised AIRS account performance or an ex-ante forecast.
          */
         TrackingError: {
             /** Active Return Ann Pct */
@@ -15345,12 +15411,24 @@ export interface components {
             benchmark_return_total_pct?: number | null;
             /** Cadence Note */
             cadence_note?: string | null;
+            /** Covered Portfolio Pct */
+            covered_portfolio_pct?: number | null;
+            /**
+             * Excluded Holdings
+             * @default []
+             */
+            excluded_holdings?: components["schemas"]["SimulationExcludedHolding"][];
             /**
              * Frequency
              * @default monthly
              */
             frequency?: string;
             historical_comparison?: components["schemas"]["HistoricalPortfolioComparison"] | null;
+            /**
+             * History Issues
+             * @default []
+             */
+            history_issues?: components["schemas"]["SimulationHistoryIssue"][];
             /**
              * History Limited
              * @default false
@@ -15360,6 +15438,11 @@ export interface components {
             information_ratio?: number | null;
             /** Mean Active Per Period Pct */
             mean_active_per_period_pct?: number | null;
+            /**
+             * Monthly Returns
+             * @default []
+             */
+            monthly_returns?: components["schemas"]["SimulationMonth"][];
             /**
              * Observations
              * @default 0
@@ -15383,6 +15466,19 @@ export interface components {
             priced_holdings?: number;
             /** Reason */
             reason?: string | null;
+            /**
+             * Rebalance Dates
+             * @default []
+             */
+            rebalance_dates?: string[];
+            /** Requested Window From */
+            requested_window_from?: string | null;
+            /** Requested Window To */
+            requested_window_to?: string | null;
+            /** Simulation Method */
+            simulation_method?: string | null;
+            /** Simulation Scope */
+            simulation_scope?: string | null;
             /**
              * Total Holdings
              * @default 0
@@ -18142,6 +18238,8 @@ export interface operations {
             query?: {
                 benchmark?: string;
                 years?: number;
+                full_history?: boolean;
+                yahoo_only?: boolean;
             };
             header?: never;
             path?: never;
@@ -18233,6 +18331,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrackingError"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    repair_portfolio_risk_correlation_job_api_airs_portfolio_tracking_error_repair_job_post: {
+        parameters: {
+            query?: {
+                benchmark?: string;
+                years?: number;
+                full_history?: boolean;
+                yahoo_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveShareRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

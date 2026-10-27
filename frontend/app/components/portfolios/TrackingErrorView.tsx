@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Realised tracking error — the Risk panel's second view.
+ * Hypothetical tracking error — one annually rebalanced simulation with monthly observations.
  *
  *     aₜ = Rₜᵖ − Rₜᵇ      TE = √( 1/(T−1) · Σ (aₜ − ā)² ) · √f
  *
@@ -12,14 +12,16 @@
  * active and wander (its few bets are enormous). Neither number is complete alone, and reading one
  * as a proxy for the other is the standard mistake.
  *
- *  Every label says "REALISED". The other definition — ex-ante, `√(wₐᵀΣwₐ)` from a covariance
- * matrix — is a FORECAST, needs a risk model we do not have, and routinely disagrees with this one.
- * A tile reading just "Tracking error" would be read as whichever the reader is used to.
+ *  This is a hypothetical current-portfolio simulation, not realised account performance or an
+ * ex-ante covariance forecast. CAGR and TE share the identical period and return path.
  *
  *  The active return is shown beside it, always. TE is the SPREAD of that quantity, and the two
  * are constantly confused — so the panel prints both rather than letting one stand for the other.
  */
 import { apiFetch } from '../../../lib/apiFetch';
+import { useEffect, useRef, useState } from 'react';
+import { startJob } from '../../../lib/stores/jobs';
+import { invalidateReadCache } from '../../../lib/readCache';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
@@ -27,12 +29,14 @@ import { useRiskCopy } from './riskCopy';
 import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf } from './asOfLine';
-import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
+import { sourceLabel, type SourceKey } from '../../../lib/provenance';
 import { withWorked, subNum, subPct2, workedBand } from './workedFormula';
 import { oneSigmaBand } from './activeBand';
 import type { TrackingError } from '../../../lib/types/api';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
 import type { ActiveShareHolding } from './ActiveSharePanel';
+
+const historyRepairs = new Map<string, { expires: number; done: Promise<boolean> }>();
 
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
 const performanceDate = (date?: string | null) => date
@@ -99,11 +103,14 @@ export default function TrackingErrorView({
   //  A string key, not the array — `holdings` is rebuilt on every parent render, so depending on
   // its identity would refetch for ever.
   const requestUrl = `${API_URL}/api/airs/portfolio/tracking-error`
-    // v4 adds the component start/end marks used by the audit table. This must be a new cache
-    // identity: an earlier response is mathematically valid but cannot explain every displayed row.
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=available-history-v1`;
+    // Version the cache: CAGR, active return and TE now share one annual-rebalance simulation.
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=${freq}&years=5&data_window=yahoo-equity-cohort-v1`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
-  const key = riskRequestKey(requestUrl, requestBody);
+  const repairIdentity = riskRequestKey(requestUrl, requestBody);
+  const [repairVersion, setRepairVersion] = useState(0);
+  const [repairStatus, setRepairStatus] = useState<'idle' | 'repairing' | 'done' | 'failed'>('idle');
+  const attemptedRepairs = useRef(new Set<string>());
+  const key = `${repairIdentity}\nrepair:${repairVersion}`;
   const { data, error } = useRiskResult<TrackingError>(key, async () => {
     const r = await apiFetch(requestUrl, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: requestBody,
@@ -113,10 +120,44 @@ export default function TrackingErrorView({
     return b as TrackingError;
   }, 'tracking-error', 'the tracking error could not be computed');
 
-  const comparison = data?.historical_comparison;
+  useEffect(() => {
+    if (!data?.history_issues?.length || attemptedRepairs.current.has(repairIdentity)) return;
+    attemptedRepairs.current.add(repairIdentity);
+    const missing = new Set((data.history_issues ?? []).filter(issue => issue.kind === 'holding').map(issue => issue.isin));
+    const repairHoldings = holdings.filter(holding => holding.isin && missing.has(holding.isin));
+    const existing = historyRepairs.get(repairIdentity);
+    const done = existing && existing.expires > Date.now() ? existing.done : startJob(
+      `${API_URL}/api/airs/portfolio/tracking-error/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=6&full_history=true&yahoo_only=true`,
+      'Updating simulation price history',
+      { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ holdings: repairHoldings, benchmark_weights: benchmarkWeights }) },
+    ).then(job => job.done).then(job => job.status === 'done').catch(() => false);
+    historyRepairs.set(repairIdentity, { expires: Date.now() + 5 * 60_000, done });
+    let active = true;
+    setRepairStatus('repairing');
+    void done.then(ok => {
+      // A completed full-history check must not hammer vendors for pre-inception months
+      // every time the tab opens. Scheduled quote refreshes still update normal prices.
+      if (ok) {
+        const repair = historyRepairs.get(repairIdentity);
+        if (repair?.done === done) repair.expires = Date.now() + 24 * 60 * 60_000;
+      }
+      if (!active) return;
+      setRepairStatus(ok ? 'done' : 'failed');
+      if (ok) {
+        invalidateReadCache('simulation history repaired');
+        setRepairVersion(version => version + 1);
+      }
+    });
+    return () => { active = false; };
+    // repairIdentity contains the complete scope. Changes caused by the repair must not cancel
+    // its completion subscription before it can invalidate and reload this exact simulation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repairIdentity, !!data]);
+
+  const comparison = data?.available ? data.historical_comparison : undefined;
   const portfolioCagr = comparison?.available ? comparison.portfolio_cagr_pct : null;
   const activeReturn = comparison?.available ? comparison.active_return_pp : null;
-  const benchmarkHistory = data?.benchmark_history;
+  const benchmarkHistory = data?.available ? data.benchmark_history : undefined;
 
   /**
    *  The reading the number does not give anyone on its own — see `activeBand`. A tracking error
@@ -139,8 +180,7 @@ export default function TrackingErrorView({
    * naming different vendors for one number is unreconcilable from the outside.
    */
   const where = data?.available
-    ? `${v(data.observations)} ${v(data.frequency)} return comparisons. Portfolio prices use `
-      + `${v(sourceField('yfinance'))} from ${v(sourceVendor('yfinance'))}, with weights from `
+    ? `${v(data.observations)} ${v(data.frequency)} return comparisons. Yahoo Finance equity prices in EUR, with weights from `
       + `${v(sourceLabel(portfolioSource))}. The benchmark is ${v(data.benchmark)} tracker `
       + `${v(data.benchmark_isin ?? 'not resolved')}.`
     : '';
@@ -161,7 +201,7 @@ export default function TrackingErrorView({
     : '';
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col gap-3">
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
       {!data && !error && (
@@ -169,21 +209,44 @@ export default function TrackingErrorView({
           <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
         </div>
       )}
-      {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
+      {repairStatus === 'repairing' && <p role="status" className="text-center text-xs text-fg-muted">Updating missing price history… <LoadingDots /></p>}
+      {data?.covered_portfolio_pct != null && <p className="text-center text-xs text-fg-muted">Direct equities only · Yahoo Finance · covers {pct2(data.covered_portfolio_pct)} of today’s portfolio</p>}
+      {!!data?.excluded_holdings?.length && <details className="order-last rounded-lg border border-neutral-800/40 p-3 text-xs text-fg-muted">
+        <summary className="cursor-pointer">Excluded holdings · {data.excluded_holdings.length}</summary>
+        <p className="mt-2">The included equities are scaled to 100% once and held as the same set throughout. ETFs, funds, bonds, certificates and cash are excluded; no proxy or NAV prices are used.</p>
+        <ul className="mt-2 space-y-1">{data.excluded_holdings.map((holding, index) => <li key={`${holding.isin}:${index}`} className="flex justify-between gap-3">
+          <span>{holding.name}<span className="block text-fg-faint">{holding.reason}</span></span><span className="shrink-0 font-mono">{pct2(holding.weight_pct)}</span>
+        </li>)}</ul>
+      </details>}
+      {data && !data.available && repairStatus !== 'repairing' && <p className="text-center text-xs text-fg-muted">Not enough genuine shared history yet. See data details below.</p>}
+      {!!data?.history_issues?.length && <details className="order-last rounded-lg border border-neutral-800/40 p-3 text-xs">
+        <summary className="cursor-pointer text-fg-muted">Data details · {data.history_issues.length} holdings or benchmark legs with incomplete history</summary>
+        {data.reason && <p className="mt-2 text-fg-muted">{data.reason}</p>}
+        <p className="mt-1 text-fg-muted">Requested: {performanceDate(data.requested_window_from)} to {performanceDate(data.requested_window_to)}. Equities without verified, complete Yahoo history are excluded from the fixed set and checked automatically for repair.</p>
+        <div className="mt-2 overflow-x-auto"><table className="w-full min-w-[36rem] text-left">
+          <thead className="text-fg-faint"><tr><th className="py-2">Holding / benchmark</th><th className="py-2 text-right">Target weight</th><th className="px-3 py-2">First stored EUR price</th><th className="px-3 py-2">Last stored EUR price</th><th className="py-2 text-right">Missing month ends</th></tr></thead>
+          <tbody>{data.history_issues.map(issue => <tr key={`${issue.kind}:${issue.isin}`} className="border-t border-neutral-800/40 text-fg-muted">
+            <td className="py-2">{issue.name}{issue.kind === 'benchmark' ? ' · benchmark' : ''}<span className="block text-[10px] text-fg-faint">{issue.reason}</span></td>
+            <td className="py-2 text-right font-mono">{pct2(issue.weight_pct)}</td>
+            <td className="whitespace-nowrap px-3 py-2">{performanceDate(issue.first_price_date)}</td><td className="whitespace-nowrap px-3 py-2">{performanceDate(issue.last_price_date)}</td>
+            <td className="py-2 text-right font-mono">{issue.missing_months}</td>
+          </tr>)}</tbody>
+        </table></div>
+      </details>}
 
-      {data?.available && (
+      {data && (
         <>
           <div className="flex flex-col items-center gap-3">
             <div className="flex flex-col items-center gap-1">
-              <p className="text-xs text-fg-faint">Five-year hypothetical performance if we held today’s portfolio 5 years ago · {performanceDate(benchmarkHistory?.start_date)} to {performanceDate(benchmarkHistory?.end_date)}</p>
+              <p className="text-xs text-fg-faint">{data.history_limited ? 'Available-period equity simulation' : 'Five-year hypothetical performance of today’s included equities'}{data.available ? ` · ${performanceDate(data.window_from)} to ${performanceDate(data.window_to)}` : ''}</p>
               <div className="flex flex-wrap items-center justify-center gap-2">
-              <Tile label={`${portfolioName} CAGR (5 years, today's weights)`} value={pct2(portfolioCagr)}
+              <Tile label={`${portfolioName} · equity CAGR`} value={pct2(portfolioCagr)}
                 info={<InfoTip wide content={<AspectCard
-                  what="Five-year reconstruction using today's weights among holdings with available history."
-                  where="AIRS weights and EUR-converted historical holding prices."
+                  what="Hypothetical performance of the included direct equities, rebalanced annually."
+                  where="Current equity weights and Yahoo Finance prices converted to EUR."
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
                   how={comparison?.available
-                    ? `Eligible current holdings are rescaled to 100% each period. Coverage: minimum ${pct2(comparison.min_weight_covered_pct)}; average ${pct2(comparison.avg_weight_covered_pct)}.`
+                    ? 'The fixed equity set is scaled to 100% at the start. Weights drift between annual resets.'
                     : comparison?.reason ?? 'Five-year history is unavailable.'}
                   worked={annualisedReturnWorked(comparison?.total_return_pct,
                     comparison?.years_elapsed ? 1 / comparison.years_elapsed : null, portfolioCagr)}
@@ -207,12 +270,12 @@ export default function TrackingErrorView({
                   </div>}
                 />} />} />
               <span aria-hidden="true" className="text-xl text-fg-faint">−</span>
-              <Tile label={`${data.benchmark} CAGR (${data.benchmark_history?.complete ? '5 years' : 'available history'})`} value={pct2(benchmarkHistory?.complete ? benchmarkHistory.cagr_pct : null)}
+              <Tile label={`${data.benchmark} CAGR`} value={pct2(benchmarkHistory?.cagr_pct)}
                 info={<InfoTip wide className="ml-0.5" content={<AspectCard
                   what={`CAGR of ${data.benchmark} over its ${data.benchmark_history?.complete ? 'five-year' : 'available'} history.`}
                   where="EUR-converted benchmark price histories at the configured policy weights."
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
-                  how="Compound the policy-weighted returns on shared trading dates, then annualise the resulting growth using the actual calendar years elapsed."
+                  how="Let benchmark component weights drift between annual rebalances to the policy weights. Use the exact same opening and closing month ends as the portfolio and annualise by actual calendar years elapsed."
                   calculation={benchmarkHistory?.components?.length ? (
                     <div className="border-t border-neutral-800/40 pt-2 text-[11px]">
                       <div className="mb-1 font-medium text-fg-subtle">Benchmark legs — {benchmarkHistory.complete ? 'last five years' : 'available benchmark history'} ({benchmarkHistory.start_date} to {benchmarkHistory.end_date})</div>
@@ -228,13 +291,13 @@ export default function TrackingErrorView({
                         </div>)}
                       </div>
                       <p className="mt-2 font-medium">Policy benchmark CAGR over this period: {pct2(benchmarkHistory.cagr_pct)}</p>
-                      <p className="mt-1 text-fg-muted">EUR-adjusted closes. Policy weights are rebalanced on shared trading dates. The five-year comparison uses these dates; the tracking-error window is stated separately.</p>
+                      <p className="mt-1 text-fg-muted">EUR prices, with annual rebalancing. Portfolio CAGR, benchmark CAGR, active return and monthly tracking error all use this same period.</p>
                     </div>
                   ) : null} />} />} />
               <span aria-hidden="true" className="text-xl text-fg-faint">=</span>
-              <Tile label="Active return (5 years)" value={activeReturn == null ? '—' : `${activeReturn.toFixed(2)}pp`}
+              <Tile label="Active return · annualised" value={activeReturn == null ? '—' : `${activeReturn.toFixed(2)}pp`}
                 info={<InfoTip content={<AspectCard
-                  what="Today's portfolio five-year CAGR minus the policy benchmark five-year CAGR."
+                  what="Hypothetical portfolio CAGR minus benchmark CAGR from the same annually rebalanced simulation and period."
                   when={`${benchmarkHistory?.start_date ?? '—'} to ${benchmarkHistory?.end_date ?? '—'}`}
                   how={activeReturn == null ? 'Requires usable holding histories throughout the five-year window.'
                     : `${pct2(portfolioCagr)} − ${pct2(benchmarkHistory?.cagr_pct)} = ${activeReturn.toFixed(2)}pp`}
@@ -243,10 +306,10 @@ export default function TrackingErrorView({
               {!comparison?.available && <p className="max-w-2xl text-center text-xs text-fg-faint">{comparison?.reason}</p>}
             </div>
             <div className="flex flex-col items-center">
-              <p className="mb-1 text-xs text-fg-faint">Tracking error window: {data.window_from} to {data.window_to} · {data.observations} {data.frequency} returns{data.preliminary ? ' · preliminary' : ''}</p>
-              <Tile label={t.te.trackingError} value={pct2(data.tracking_error_pct).replace('%', 'pp')}
+              {data.available && <p className="mb-1 text-xs text-fg-faint">Shared simulation window: {performanceDate(data.window_from)} to {performanceDate(data.window_to)} · {data.observations} completed monthly returns</p>}
+              <Tile label="Hypothetical tracking error" value={pct2(data.available ? data.tracking_error_pct : null).replace('%', 'pp')}
               info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.te.cards.te.what}
+                what="Variation in hypothetical monthly returns versus the benchmark."
                 where={where}
                 when={when}
                 worked={data.tracking_error_pct == null ? '' : withWorked(
@@ -269,9 +332,21 @@ export default function TrackingErrorView({
                 how={(band
                   ? `${t.te.bandReading(subPct2(band.lo), subPct2(band.hi),
                     subPct2(band.centre), data.benchmark)} `
-                  : '') + t.te.cards.te.how} />} />} />
+                  : '') + 'Measured from this simulation’s monthly return differences, with annual rebalances.'} />} />} />
             </div>
           </div>
+
+          {!!data.monthly_returns?.length && <details className="rounded-lg border border-neutral-800/40 p-3 text-xs text-fg-muted">
+            <summary className="cursor-pointer">Monthly simulation returns and annual rebalances</summary>
+            <p className="mt-2">Rebalances happen after the marked month-end return, restoring the equity set and benchmark to their original target weights. Yahoo prices include FX movements, excluding distributions and trading costs.</p>
+            <div className="mt-2 max-h-64 overflow-auto"><table className="w-full min-w-[28rem] text-right tabular-nums">
+              <thead className="sticky top-0 bg-page"><tr><th className="py-2 text-left">Month end</th><th>Portfolio</th><th>Benchmark</th><th>Active return</th></tr></thead>
+              <tbody>{data.monthly_returns.map(month => <tr key={month.date} className="border-t border-neutral-800/30">
+                <td className="py-2 text-left">{performanceDate(month.date)}{data.rebalance_dates?.includes(month.date) ? ' · rebalance' : ''}</td>
+                <td>{pct2(month.portfolio_return_pct)}</td><td>{pct2(month.benchmark_return_pct)}</td><td>{month.active_return_pp.toFixed(2)}pp</td>
+              </tr>)}</tbody>
+            </table></div>
+          </details>}
 
 
         </>
