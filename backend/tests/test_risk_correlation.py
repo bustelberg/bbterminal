@@ -23,6 +23,26 @@ import routers._tracking_error as T
 BENCH = "IE00B6R52259"
 
 
+def test_hierarchical_order_groups_signed_correlations_and_keeps_unknown_last():
+    import pandas as pd
+    # Alphabetical order interleaves two strongly correlated groups.
+    corr = pd.DataFrame([
+        [1, -.5, .95, -.5, np.nan],
+        [-.5, 1, -.5, .9, np.nan],
+        [.95, -.5, 1, -.5, np.nan],
+        [-.5, .9, -.5, 1, np.nan],
+        [np.nan, np.nan, np.nan, np.nan, np.nan],
+    ], index=list('ABCDE'), columns=list('ABCDE'))
+    order = C.clustered_order(corr)
+    assert abs(order.index('A') - order.index('C')) == 1
+    assert abs(order.index('B') - order.index('D')) == 1
+    assert order[-1] == 'E'
+    assert len(set(order)) == 5
+    assert C.clustered_order(corr.iloc[::-1, ::-1]) == order
+    assert C.clustered_order(corr.iloc[:0, :0]) == []
+
+
+
 def _weekdays(n: int) -> list[str]:
     out, d = [], date.today()
     while len(out) < n:
@@ -62,6 +82,14 @@ def book(monkeypatch):
 
 
 class TestTheIdentityThatLinksItToTrackingError:
+    def test_one_year_weekly_uses_consistent_observation_floor(self, book):
+        got = C.compute_risk_correlation(book, "ACWI", frequency="weekly", years=1)
+        assert got["available"], got.get("reason")
+        assert got["frequency"] == "weekly"
+        assert got["min_observations"] == got["min_pair_observations"] == 30
+        assert got["pairs_measured"] > 0
+        assert got["cadence_note"] is None
+
     @pytest.mark.parametrize("freq", ["daily", "weekly", "monthly"])
     def test_the_variance_identity_closes(self, book, freq):
         got = C.compute_risk_correlation(book, "ACWI", frequency=freq)
@@ -160,11 +188,9 @@ class TestTheMatrix:
             for j in range(3):
                 assert m[i][j] == pytest.approx(m[j][i], abs=1e-9)
 
-    def test_it_is_ordered_by_weight_not_by_isin(self, book):
-        """ A MATRIX ORDERED BY IDENTIFIER PUTS THE TWO POSITIONS THAT MATTER AT OPPOSITE CORNERS.
-        The reader is looking for concentration, so the largest holdings lead."""
+    def test_cluster_order_does_not_depend_on_portfolio_weights(self, book):
         heavy = [dict(h, weight_pct=w) for h, w in zip(book, [10.0, 70.0, 20.0])]
-        assert C.compute_risk_correlation(heavy, "ACWI")["labels"] == ["N1", "N2", "N0"]
+        assert C.compute_risk_correlation(heavy, "ACWI")["labels"] == C.compute_risk_correlation(book, "ACWI")["labels"]
 
     def test_the_mean_pair_correlation_is_the_off_diagonal_mean(self, book):
         got = C.compute_risk_correlation(book, "ACWI")

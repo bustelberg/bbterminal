@@ -47,6 +47,45 @@ MIN_PAIR_OBS = 30
 _TOP_PAIRS = 8
 
 
+def clustered_order(corr) -> list[str]:
+    """Average-linkage clustering on signed correlation distance sqrt(2(1-rho)).
+
+    Missing comparisons get maximum distance; entirely unmeasured holdings stay last.
+    Leaf orientations minimise the boundary distance at each merge, deterministically.
+    """
+    import math  # noqa: PLC0415
+
+    columns = sorted(corr.columns)
+    def distance(a, b):
+        value = float(corr.at[a, b])
+        return 2.0 if not math.isfinite(value) else math.sqrt(2 * (1 - max(-1, min(1, value))))
+
+    measured = [a for a in columns if any(a != b and math.isfinite(float(corr.at[a, b])) for b in columns)]
+    missing = [a for a in columns if a not in measured]
+    clusters = {i: [a] for i, a in enumerate(measured)}
+    distances = {(i, j): distance(measured[i], measured[j])
+                 for i in clusters for j in clusters if i < j}
+    next_id = len(clusters)
+    while len(clusters) > 1:
+        a, b = min(distances, key=lambda pair: (distances[pair], pair))
+        left, right = clusters[a], clusters[b]
+        orientations = [(x, y) for x in (left, left[::-1]) for y in (right, right[::-1])]
+        x, y = min(orientations, key=lambda parts: (distance(parts[0][-1], parts[1][0]), parts[0] + parts[1]))
+        updates = {}
+        for k in clusters:
+            if k in (a, b):
+                continue
+            da = distances[tuple(sorted((a, k)))]
+            db = distances[tuple(sorted((b, k)))]
+            updates[tuple(sorted((next_id, k)))] = (len(left) * da + len(right) * db) / (len(left) + len(right))
+        distances = {pair: value for pair, value in distances.items() if a not in pair and b not in pair}
+        distances.update(updates)
+        del clusters[a], clusters[b]
+        clusters[next_id] = x + y
+        next_id += 1
+    return next(iter(clusters.values()), []) + missing
+
+
 def compute_risk_correlation(holdings: list[dict], benchmark: str,
                              frequency: str = "monthly", years: int = 5,
                              benchmark_weights: dict[str, float] | None = None,
@@ -58,6 +97,10 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
     import pandas as pd  # noqa: PLC0415
 
     freq = frequency if frequency in PERIODS else "monthly"
+    # A trailing year has about 52 weekly returns; holiday alignment can leave fewer.
+    # Keep the matrix's 30-observation floor without requiring a full 52 weeks.
+    if freq == "weekly" and years == 1 and minimum_observations is None:
+        minimum_observations = MIN_PAIR_OBS
     try:
         built = build_paired_series(holdings, benchmark, freq, years,
                                     require_complete_holdings=require_complete_history,
@@ -89,7 +132,6 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
     # ── the position matrix ────────────────────────────────────────────────────────────────────
     per = built["per_holding"]
     names = built["names"]
-    weight = built["weight"]
     #  Pairwise-complete, not listwise. A single holding that listed two years ago would, under
     # listwise deletion, truncate EVERY pair in the book to its own short history — one late
     # arrival silently rewriting the whole matrix. `DataFrame.corr` pairs each column pair on the
@@ -107,9 +149,8 @@ def compute_risk_correlation(holdings: list[dict], benchmark: str,
     )
     corr = frame.corr(min_periods=pair_min_observations)
 
-    #  Ordered by weight, descending — a matrix ordered alphabetically or by ISIN puts the two
-    # positions that actually matter at opposite corners. The reader is looking for concentration.
-    order = sorted(corr.columns, key=lambda i: -weight.get(i, 0.0))
+    # Identical clustered order on both axes reveals groups of related return patterns.
+    order = clustered_order(corr)
     labels = [names.get(i) or i for i in order]
     grid: list[list[float | None]] = []
     for i in order:

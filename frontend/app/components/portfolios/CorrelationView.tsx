@@ -108,9 +108,15 @@ export default function CorrelationView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
+  const [onlyStocks, setOnlyStocks] = useState(true);
+  const correlationHoldings = onlyStocks ? holdings.filter((holding) =>
+    !holding.is_fund
+    && (!holding.bucket || holding.bucket === 'Equity')
+    && !/\b(etf|etp|etn|ucits|fund|fonds|certificate|certificaten|index|perp|bond|obligat|coupon|treasur|gilt|bund|govie|sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b|\d[.,]?\d*\s*%/i.test(holding.name ?? ''),
+  ) : holdings;
   const requestUrl = `${API_URL}/api/airs/portfolio/risk-correlation`
-    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=monthly&years=5&data_window=shared-v1`;
-  const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
+    + `?benchmark=${encodeURIComponent(benchmark)}&frequency=weekly&years=1&data_window=shared-one-year-weekly-clustered-v1`;
+  const requestBody = JSON.stringify({ holdings: correlationHoldings, benchmark_weights: benchmarkWeights });
   const repairIdentity = riskRequestKey(requestUrl, requestBody);
   const [repairVersion, setRepairVersion] = useState(0);
   // A completed repair invalidates the shared read cache and advances this key, causing this one
@@ -129,7 +135,7 @@ export default function CorrelationView({
     if (!data?.available || !data.preliminary || startedPreliminaryRepairs.has(repairIdentity)) return;
     startedPreliminaryRepairs.add(repairIdentity);
     void startJob(
-      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=5`,
+      `${API_URL}/api/airs/portfolio/risk-correlation/repair/job?benchmark=${encodeURIComponent(benchmark)}&years=1`,
       'Repairing risk price history',
       { headers: { 'Content-Type': 'application/json' }, body: requestBody },
     ).then(async ({ done }) => {
@@ -175,10 +181,16 @@ export default function CorrelationView({
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
+      <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-fg-soft">
+        <input type="checkbox" checked={onlyStocks} onChange={(event) => setOnlyStocks(event.target.checked)}
+          className="h-4 w-4 accent-accent-500" />
+        Only stocks
+      </label>
+      <p className="text-xs text-fg-muted">Past year · weekly returns in EUR · reduces differences in market closing times</p>
 
       {error && <p className="text-xs text-neg-300">{error}</p>}
       {!data && !error && (
-        <div className="absolute inset-0 grid place-items-center text-center px-6" role="status">
+        <div className="grid min-h-40 place-items-center text-center px-6" role="status">
           <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
         </div>
       )}
@@ -257,6 +269,7 @@ export default function CorrelationView({
                   most likely to be hunting for. 7.5rem of text at 45° projects ~5.3rem across. */}
               <div className="flex min-w-0 flex-col gap-5">
               <div className="order-2 min-w-0">
+              <p className="mb-3 text-xs text-fg-muted">Grouped by similar returns · hierarchical clustering</p>
               <div className="mx-auto w-fit max-w-full overflow-auto pr-[5.5rem]">
                 <table className="border-separate" style={{ borderSpacing: 0 }}>
                   {/*  THE COLUMN NAMES, ROTATED — added on request 2026-08-31. A cell is 16px

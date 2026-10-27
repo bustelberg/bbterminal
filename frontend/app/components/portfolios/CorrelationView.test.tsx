@@ -1,0 +1,41 @@
+// @vitest-environment happy-dom
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { expect, it, vi } from 'vitest';
+import CorrelationView from './CorrelationView';
+
+const state = vi.hoisted(() => ({ body: '', url: '' }));
+vi.mock('../../../lib/i18n', () => ({ useLang: () => ['en'] }));
+vi.mock('./useRiskResult', () => ({
+  riskRequestKey: (url: string, body: string) => { state.url = url; state.body = body; return body; },
+  useRiskResult: () => ({ data: null, error: null }),
+}));
+
+it('defaults to individual stocks and restores all holdings when unchecked', async () => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+  const host = document.createElement('div');
+  document.body.append(host);
+  const root = createRoot(host);
+  const holdings = [
+    { name: 'Microsoft', bucket: 'Equity', weight_pct: 30 },
+    { name: 'World ETF', bucket: 'Equity', is_fund: true, weight_pct: 30 },
+    { name: 'Corporate bond', bucket: 'Bonds', weight_pct: 20 },
+    { name: 'Cash', bucket: 'Cash', weight_pct: 10 },
+    { name: 'Selection Index', bucket: 'Equity', weight_pct: 10 },
+  ];
+  try {
+    await act(async () => root.render(<CorrelationView holdings={holdings} benchmark="ACWI"
+      portfolioName="Portfolio" portfolioSource="airs_volk" />));
+    const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    expect(checkbox.checked).toBe(true);
+    expect(state.url).toContain('frequency=weekly&years=1&');
+    expect(host.textContent).toContain('Past year · weekly returns in EUR');
+    expect(JSON.parse(state.body).holdings).toEqual([holdings[0]]);
+    await act(async () => checkbox.click());
+    expect(checkbox.checked).toBe(false);
+    expect(JSON.parse(state.body).holdings).toEqual(holdings);
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+  }
+});
