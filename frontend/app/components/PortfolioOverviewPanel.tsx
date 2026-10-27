@@ -10,7 +10,8 @@ import { useIsAdmin } from '../../lib/hooks/useEffectiveRole';
 import { Provenance, ProvenanceFetchedAt } from '../../lib/provenance';
 import { trimStop } from '../../lib/provenanceText';
 import { LinkCell, type LinkCtx } from './PortfoliosPanel';
-import { prefetchAnalysis } from '../../lib/analysisPrefetch';
+import { analysisRequestKey, prefetchAnalysis } from '../../lib/analysisPrefetch';
+import { defaultLookThroughCertificates } from './portfolios/portfolioDefaults';
 import { cancelJob, isAirsBusy, startJob } from '../../lib/stores/jobs';
 import { startSectorOverride } from '../../lib/sectorOverride';
 import { PORTFOLIO_SECTORS } from './portfolios/etfSectorLookThrough';
@@ -47,11 +48,12 @@ const PortfolioEarningsModal = dynamic(() => import('./portfolios/PortfolioEarni
   ssr: false,
 });
 
-function prefetchModelAnalysis(id: number) {
-  const key = `id:${id}|ACWI|book||0|0`;
+function prefetchModelAnalysis(id: number, name: string) {
+  const lookThrough = defaultLookThroughCertificates(name);
+  const key = analysisRequestKey(`id:${id}`, 'ACWI', 'book', '', lookThrough);
   prefetchAnalysis(key, async () => {
     const response = await apiFetch(
-      `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=ACWI&weight_by=book&source=book`,
+      `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=ACWI&weight_by=book&source=book&look_through=${lookThrough}&include_axes=false&overview_only=true`,
     );
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);
@@ -981,20 +983,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   };
 
   /**
-   *  Admin only (2026-08-06). The expanded row is the ACCOUNT's own book — its positions and
-   * their EUR values, its mutations for the year, and the reconciliation against AIRS. The table
-   * above it is a summary; this is the money.
-   *
-   *  The guard is here as well as on the row, and neither is the access rule. Making the `<tr>`
-   * inert covers the click, but `expand` is a plain function on a component a non-admin renders —
-   * anything that reaches it later (a keyboard handler, a deep link, an "expand all") would walk
-   * straight past a `cursor-default`. The rule that actually holds is on the server: the four
-   * sub-resources this opens are admin-only in `_auth_middleware.py`, so the worst a bypassed UI
-   * can do is render an empty panel. `/isins` is NOT among them — the Analyse button shares it and
-   * non-admins keep Analyse.
+   * Every authenticated dashboard user can inspect the account's holdings,
+   * transactions and reconciliation. Shared mapping edits remain admin-only.
    */
   const expand = async (p: string) => {
-    if (!isAdmin) return;
     setOpen(open === p ? null : p);
     if (detail[p] || open === p) return;
     await loadDetail(p);
@@ -1227,15 +1219,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 const isOpen = open === r.dynamic_portefeuille;
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
-                    {/*  THE ROW IS ONLY A CONTROL FOR AN ADMIN. For everyone else it carries no
-                        handler and no pointer — the accent hover is what says "this opens", so
-                        leaving it on a row that cannot open reads as a broken table rather than a
-                        restricted one. `group` stays either way: the action cells inside still
-                        reveal on hover. */}
-                    <tr onClick={isAdmin ? () => void expand(r.dynamic_portefeuille) : undefined}
-                      className={`group transition-colors ${isAdmin
-                        ? 'hover:bg-accent-500/10 cursor-pointer'
-                        : 'hover:bg-overlay/[0.02]'}`}>
+                    {/* Account details are available to every authenticated dashboard user. */}
+                    <tr onClick={() => void expand(r.dynamic_portefeuille)}
+                      className="group transition-colors hover:bg-accent-500/10 cursor-pointer">
                       <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">
                         {rowNo + 1}
                       </td>
@@ -1266,15 +1252,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               // backend computation.
                               onPointerDown={() => {
                                 const id = r.fixed_portfolio_id;
-                                if (id != null) prefetchModelAnalysis(id);
+                                if (id != null) prefetchModelAnalysis(id, r.name);
                               }}
                               onMouseEnter={() => {
                                 const id = r.fixed_portfolio_id;
-                                if (id != null) prefetchModelAnalysis(id);
+                                if (id != null) prefetchModelAnalysis(id, r.name);
                               }}
                               onFocus={() => {
                                 const id = r.fixed_portfolio_id;
-                                if (id != null) prefetchModelAnalysis(id);
+                                if (id != null) prefetchModelAnalysis(id, r.name);
                               }}
                               onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}

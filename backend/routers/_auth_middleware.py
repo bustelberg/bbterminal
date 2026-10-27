@@ -95,6 +95,7 @@ _SELF_AUTH_PREFIXES: tuple[str, ...] = ("/api/auth/",)
 # `POST /api/jobs`) — the owning endpoint starts it — and the one job write, Cancel, is in
 # `_USER_REFRESH_PATTERNS`.
 _USER_READ_PREFIXES: tuple[str, ...] = (
+    "/api/market/",
     "/api/log-dashboard/",
     "/api/companies",
     "/api/earnings",
@@ -126,29 +127,14 @@ _ADMIN_ONLY_PREFIXES: tuple[str, ...] = (
 #  The same deny, by pattern, because the id sits in the middle of the path. A prefix here can
 # only be `/api/airs/accounts/`, which is every sub-resource of every account at once.
 #
-# These four ARE the /management-dashboard Overview EXPANDED ROW (admin-only from 2026-08-06): an
-# account's own positions and their EUR values, its mutations for the year, the reconciliation
-# against AIRS's figure, and the link picker. The summary table above them stays user-readable —
-# what is restricted is opening a book, not seeing that it exists.
-#
-#  Hiding the row is not the rule, this is. The frontend makes the `<tr>` inert for a non-admin,
-# which stops the click and nothing else: the URLs are three lines of a component every user
-# downloads. Without this tier the restriction would last exactly as long as nobody opened the
-# network tab.
-#
-#  `/isins` IS DELIBERATELY ABSENT AND MUST STAY ABSENT. It is the one account sub-resource the
-# expand SHARES with the Analyse button, which non-admins keep — it is how an unpaired book gets a
-# basket to analyse (`openModal`). Folding these into the `/api/airs/accounts/` prefix would take
-# Analyse away as collateral, silently, for the rows that need it most.
+# Account holdings, transactions, reconciliation, link candidates and monthly Performance
+# reports are management-dashboard reads, available to every authenticated user. Editing
+# shared mappings and destructive operations remain protected by the write tier.
 _ADMIN_ONLY_PATTERNS: tuple[re.Pattern[str], ...] = (
     #  Exact, not a prefix — `/api/airs/model-portfolios/scan/job` is the same work as a
     # cancellable background job and every authenticated user may start it (see
     # `_USER_REFRESH_PATTERNS`). Only the request-held SSE form is admin-only.
     re.compile(r"^/api/airs/model-portfolios/scan$"),
-    re.compile(r"^/api/airs/accounts/[^/]+/holdings$"),
-    re.compile(r"^/api/airs/accounts/[^/]+/transactions$"),
-    re.compile(r"^/api/airs/accounts/[^/]+/return-reconciliation$"),
-    re.compile(r"^/api/airs/accounts/[^/]+/linkable$"),
 )
 
 

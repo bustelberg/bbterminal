@@ -24,13 +24,6 @@ import { useEffect, useState } from 'react';
 /** How long each state of the ellipsis holds. Slow enough to read as breathing, not flicker. */
 const TICK_MS = 400;
 
-const STAGES = [
-  'stored model and linked certificates',
-  'underlying certificate holdings',
-  'portfolio allocation and benchmark',
-  'AIRS book holdings and returns',
-] as const;
-
 export default function AnalyseLoading({ label }: {
   /** "Loading overview…", translated by the caller. Its trailing ellipsis is dropped. */
   label: string;
@@ -49,7 +42,6 @@ export default function AnalyseLoading({ label }: {
   // seconds are easier to scan and avoid a stopwatch that appears to make false
   // precision claims while the request itself reports no live progress.
   const elapsed = Math.floor(ticks * TICK_MS / 1000);
-  const stage = STAGES[Math.min(STAGES.length - 1, Math.floor(ticks / 5))];
 
   return (
     <div className="py-20 text-center">
@@ -62,7 +54,7 @@ export default function AnalyseLoading({ label }: {
       <span className="inline-block w-[1.5em] text-left">{'.'.repeat(n)}</span>
       </p>
       <p className="mt-3 text-sm text-fg-faint">
-        Working through {stage} <span className="font-mono">· {elapsed}s</span>
+        {label.startsWith('Overzicht') ? 'Wachten op het overzicht' : 'Waiting for the overview'} <span className="font-mono">· {elapsed}s</span>
       </p>
     </div>
   );

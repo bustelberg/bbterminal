@@ -977,6 +977,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/airs/accounts/{portefeuille}/risk-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Airs Account Risk History
+         * @description Actual account observations. No vendor calls, holdings reconstruction or writes.
+         */
+        get: operations["airs_account_risk_history_api_airs_accounts__portefeuille__risk_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/airs/accounts/{portefeuille}/transactions": {
         parameters: {
             query?: never;
@@ -7212,6 +7232,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/market/acwi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Acwi */
+        get: operations["acwi_api_market_acwi_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/market/nasdaq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Nasdaq */
+        get: operations["nasdaq_api_market_nasdaq_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/momentum/backtest": {
         parameters: {
             query?: never;
@@ -9854,6 +9908,68 @@ export interface components {
              */
             sales?: number;
         };
+        /** AirsRiskHistory */
+        AirsRiskHistory: {
+            /** Current Drawdown Pct */
+            current_drawdown_pct?: number | null;
+            /** First Date */
+            first_date?: string | null;
+            /** Last Date */
+            last_date?: string | null;
+            /** Max Drawdown Pct */
+            max_drawdown_pct?: number | null;
+            /** Months */
+            months?: components["schemas"]["AirsRiskMonth"][];
+            /**
+             * Negative Months
+             * @default 0
+             */
+            negative_months?: number;
+            /**
+             * Observations
+             * @default 0
+             */
+            observations?: number;
+            /** Peak Date */
+            peak_date?: string | null;
+            /** Points */
+            points?: components["schemas"]["AirsRiskObservation"][];
+            /** Portefeuille */
+            portefeuille: string;
+            /** Recovery Date */
+            recovery_date?: string | null;
+            /** Source */
+            source: string;
+            /** Trough Date */
+            trough_date?: string | null;
+            /** Warnings */
+            warnings?: string[];
+            /** Worst Month Pct */
+            worst_month_pct?: number | null;
+            /** Year */
+            year?: number | null;
+        };
+        /** AirsRiskMonth */
+        AirsRiskMonth: {
+            /** Month */
+            month: string;
+            /** Return Pct */
+            return_pct: number;
+        };
+        /** AirsRiskObservation */
+        AirsRiskObservation: {
+            /** Cumulative Pct */
+            cumulative_pct: number;
+            /** Date */
+            date: string;
+            /** Drawdown Pct */
+            drawdown_pct: number;
+            /**
+             * Reference
+             * @default false
+             */
+            reference?: boolean;
+        };
         /**
          * AllocationBand
          * @description One cell of the allocation policy: what share this class may take in this risk profile.
@@ -10928,6 +11044,24 @@ export interface components {
             max_companies?: number;
             /** Start Month */
             start_month: string;
+        };
+        /**
+         * CertificateResultAdjustment
+         * @description Wrapper P&L formerly allocated to cash; not a cash return or an actual holding.
+         */
+        CertificateResultAdjustment: {
+            /** Contribution Pct */
+            contribution_pct?: number | null;
+            /** Label */
+            label: string;
+            /** Name */
+            name: string;
+            /** Realised Result Eur */
+            realised_result_eur: number;
+            /** Result Eur */
+            result_eur: number;
+            /** Unrealised Eur */
+            unrealised_eur: number;
         };
         /**
          * CompanyIngestResult
@@ -12655,6 +12789,10 @@ export interface components {
             isin?: string | null;
             /** Last Sale */
             last_sale?: string | null;
+            /** Lookthrough Note */
+            lookthrough_note?: string | null;
+            /** Lookthrough Positions */
+            lookthrough_positions?: components["schemas"]["SoldCertificatePosition"][];
             /** Mom 12 1 From */
             mom_12_1_from?: number | null;
             /** Mom 12 1 Pct */
@@ -12676,6 +12814,12 @@ export interface components {
             name: string;
             /** Opening Eur */
             opening_eur?: number | null;
+            /** Post Close Currency */
+            post_close_currency?: string | null;
+            /** Post Close Status */
+            post_close_status?: string | null;
+            /** Post Close Symbol */
+            post_close_symbol?: string | null;
             /**
              * Prior Year Eur
              * @default 0
@@ -12770,6 +12914,41 @@ export interface components {
             name?: string | null;
             /** Start Date */
             start_date?: string | null;
+        };
+        /** MarketPoint */
+        MarketPoint: {
+            /** Close */
+            close: number;
+            /** Date */
+            date: string;
+        };
+        /** MarketSnapshot */
+        MarketSnapshot: {
+            /** Fetched At */
+            fetched_at: string;
+            /** From Peak Pct */
+            from_peak_pct: number;
+            /** History Start */
+            history_start: string;
+            /** Latest */
+            latest: number;
+            /** Latest At */
+            latest_at: string;
+            /** Name */
+            name: string;
+            /** Peak */
+            peak: number;
+            /** Peak Date */
+            peak_date: string;
+            /** Points */
+            points: components["schemas"]["MarketPoint"][];
+            /**
+             * Source
+             * @default Yahoo Finance
+             */
+            source?: string;
+            /** Symbol */
+            symbol: string;
         };
         /** MemberRow */
         MemberRow: {
@@ -12879,6 +13058,11 @@ export interface components {
              * @default 0
              */
             covered_pct?: number;
+            /**
+             * Details Pending
+             * @default false
+             */
+            details_pending?: boolean;
             /**
              * Foreign Listings
              * @default 0
@@ -14375,6 +14559,8 @@ export interface components {
             book_ytd_pct?: number | null;
             /** Capital Coverage Ratio */
             capital_coverage_ratio?: number | null;
+            /** Certificate Adjustments */
+            certificate_adjustments?: components["schemas"]["CertificateResultAdjustment"][];
             /** Comparable */
             comparable?: boolean | null;
             /** Dates Aligned */
@@ -14995,6 +15181,27 @@ export interface components {
             band_pct?: number;
             /** Benchmark Id */
             benchmark_id: number;
+            /** Weight Pct */
+            weight_pct: number;
+        };
+        /** SoldCertificatePosition */
+        SoldCertificatePosition: {
+            /** Composition As Of */
+            composition_as_of: string;
+            /** Isin */
+            isin?: string | null;
+            /** Name */
+            name: string;
+            /** Since Close As Of */
+            since_close_as_of?: string | null;
+            /** Since Close Date */
+            since_close_date?: string | null;
+            /** Since Close From */
+            since_close_from?: number | null;
+            /** Since Close Pct */
+            since_close_pct?: number | null;
+            /** Since Close To */
+            since_close_to?: number | null;
             /** Weight Pct */
             weight_pct: number;
         };
@@ -16706,6 +16913,37 @@ export interface operations {
             };
         };
     };
+    airs_account_risk_history_api_airs_accounts__portefeuille__risk_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                portefeuille: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirsRiskHistory"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     airs_account_transactions_api_airs_accounts__portefeuille__transactions_get: {
         parameters: {
             query?: {
@@ -17181,6 +17419,7 @@ export interface operations {
                 bucket?: string | null;
                 look_through?: boolean;
                 include_axes?: boolean;
+                overview_only?: boolean;
             };
             header?: never;
             path: {
@@ -24394,6 +24633,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    acwi_api_market_acwi_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketSnapshot"];
+                };
+            };
+        };
+    };
+    nasdaq_api_market_nasdaq_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketSnapshot"];
                 };
             };
         };

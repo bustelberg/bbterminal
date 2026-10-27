@@ -98,9 +98,38 @@ describe('the Analyse modal holdings table', () => {
 });
 
 describe('sold-position risk cells', () => {
+  it('links identified sold bonds and stocks to the actual Yahoo listing and states the return basis', () => {
+    const s = source();
+    const sold = s.slice(s.indexOf('{soldLookThroughRows(sold, lookThrough).map((p, i) => ('));
+    expect(sold).toContain('encodeURIComponent(p.post_close_symbol)');
+    expect(sold).toContain('Coupons and distributions excluded');
+    expect(sold).toContain('p.since_close_from.toFixed(2)');
+  });
+
+  it('uses the same Via chips as held rows rather than a separate badge style', () => {
+    const s = source();
+    expect(s).toContain('<ViaChips names={h.via_names ?? []} sources={h.sources} />');
+    expect(s).toContain('<ViaChips names={p.via_certificate ? [p.via_certificate] : []} />');
+    const sold = s.slice(s.indexOf('{soldLookThroughRows(sold, lookThrough).map((p, i) => ('));
+    expect(sold).not.toContain('inline-flex items-center rounded border border-neutral-700/70 bg-overlay/5 px-1.5 py-0.5');
+    expect(sold).toContain('how={`${num2(p.certificate_weight_pct ?? 0)}%');
+  });
+
+  it('shows sold certificate constituents only with look-through, outside the ledger totals', () => {
+    const s = source();
+    expect(s).toContain('soldLookThroughRows(sold, lookThrough).map((p, i) => (');
+    expect(s).toContain('p.via_certificate');
+    expect(s).toContain('p.composition_as_of');
+    expect(s).not.toContain('Stored underlying positions before sale');
+    expect(s).not.toContain('p.lookthrough_positions.map((position)');
+    // The accounting sum still uses only the actual parent-book sales, not explanatory children.
+    expect(s).toContain('sum(sold.map((p) => p.contribution_pct))');
+    expect(s).not.toContain('position.contribution_pct');
+  });
+
   it('use the same explanatory info affordance as held positions', () => {
     const s = source();
-    const sold = s.slice(s.indexOf('{sold.map((p, i) => ('));
+    const sold = s.slice(s.indexOf('{soldLookThroughRows(sold, lookThrough).map((p, i) => ('));
     // `Provenance` explains both the formula and why a dash is shown, unlike
     // the old native title attribute on the cell.
     expect((sold.match(/<Provenance source="benchmark"/g) ?? []).length).toBeGreaterThanOrEqual(3);
@@ -130,6 +159,20 @@ describe('sold-position risk cells', () => {
  * Pure — reads a file, no DOM.
  */
 describe('every money column is rendered in every row', () => {
+  it('keeps risk and money-weighted return optional, with no groups enabled by default', () => {
+    const s = source();
+    for (const key of ['momentum', 'volatility', 'beta', 'moneyweighted']) {
+      expect([...s.matchAll(new RegExp(String.raw`show\('${key}'\)`, 'g'))]).toHaveLength(7);
+    }
+    expect(s).toContain("{ key: 'momentum', cols: ['momentum'] }");
+    expect(s).toContain("{ key: 'volatility', cols: ['volatility'] }");
+    expect(s).toContain("{ key: 'beta', cols: ['beta'] }");
+    expect(s).toContain("cols: ['moneyweighted', 'result', 'avgcapital']");
+    expect(s).toContain('if (!raw) return new Set();');
+    expect(s).toContain('const LEADING_COLS = 5;');
+    expect(s).toContain('const TRAILING_COLS = 2;');
+  });
+
   it('seven renders each, from the header to the grand total', () => {
     const s = source();
     const keys = [...new Set([...s.matchAll(/show\('([a-z]+)'\)/g)].map((m) => m[1]))];

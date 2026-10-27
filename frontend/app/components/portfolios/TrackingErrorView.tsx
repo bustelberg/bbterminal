@@ -35,6 +35,10 @@ import { riskRequestKey, useRiskResult } from './useRiskResult';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
 const pct2 = (n: number | null | undefined) => (n == null ? '—' : `${n.toFixed(2)}%`);
+const performanceDate = (date?: string | null) => date
+  ? new Date(`${date}T12:00:00Z`).toLocaleDateString('en-GB', {
+    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+  }) : '—';
 
 /** The full CAGR substitution behind a return tile, using this response's paired-close window. */
 function annualisedReturnWorked(totalPct: number | null | undefined,
@@ -171,7 +175,7 @@ export default function TrackingErrorView({
         <>
           <div className="flex flex-col items-center gap-3">
             <div className="flex flex-col items-center gap-1">
-              <p className="text-xs text-fg-faint">Five-year performance · {benchmarkHistory?.start_date ?? '—'} to {benchmarkHistory?.end_date ?? '—'}</p>
+              <p className="text-xs text-fg-faint">Five-year hypothetical performance if we held today’s portfolio 5 years ago · {performanceDate(benchmarkHistory?.start_date)} to {performanceDate(benchmarkHistory?.end_date)}</p>
               <div className="flex flex-wrap items-center justify-center gap-2">
               <Tile label={`${portfolioName} CAGR (5 years, today's weights)`} value={pct2(portfolioCagr)}
                 info={<InfoTip wide content={<AspectCard
@@ -236,9 +240,6 @@ export default function TrackingErrorView({
                     : `${pct2(portfolioCagr)} − ${pct2(benchmarkHistory?.cagr_pct)} = ${activeReturn.toFixed(2)}pp`}
                 />} />} />
               </div>
-              {comparison?.coverage_adjusted && <p className="max-w-2xl text-center text-xs text-fg-faint">
-                Available-history reconstruction · current weights scaled to 100% among priced holdings each period · minimum coverage {pct2(comparison.min_weight_covered_pct)}, average {pct2(comparison.avg_weight_covered_pct)}.
-              </p>}
               {!comparison?.available && <p className="max-w-2xl text-center text-xs text-fg-faint">{comparison?.reason}</p>}
             </div>
             <div className="flex flex-col items-center">

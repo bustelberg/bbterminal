@@ -641,7 +641,22 @@ def _segments(rows: list[dict]) -> list[dict]:
     return out
 
 
-def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
+def resolve_account_isins(portefeuille: str, *, freshen: bool = True, price_checks: bool = True) -> dict:
+    """Resolve once per request; return isolated rows to callers that enrich them in place."""
+    from copy import deepcopy  # noqa: PLC0415
+    from common import read_cache  # noqa: PLC0415
+
+    key = ('resolved_account', portefeuille, freshen, price_checks)
+    cached = read_cache.lookup(key)
+    if cached is not None:
+        return deepcopy(cached)
+    started = time.perf_counter()
+    result = _resolve_account_isins(portefeuille, freshen=freshen, price_checks=price_checks)
+    read_cache.store(key, deepcopy(result), (time.perf_counter() - started) * 1000)
+    return result
+
+
+def _resolve_account_isins(portefeuille: str, *, freshen: bool, price_checks: bool) -> dict:
     """One account's holdings, each with its own ISIN and what we know about that instrument.
 
      NO PAIRING, NO SCORING, NO ASSIGNMENT — all three were deleted 2026-07-23. Everything they
@@ -730,10 +745,10 @@ def resolve_account_isins(portefeuille: str, *, freshen: bool = True) -> dict:
     # (`price_refresh.held_isins` unions `airs_holding`), and any /portfolios expand runs the full
     # path. This only declines to do the vendor's work on a read that will not show the result.
     with _phase(t, "freshen_prices"):
-        if freshen:
+        if freshen and price_checks:
             _freshen(isins)
     with _phase(t, "closes"):
-        closes = _last_closes(isins, as_of)
+        closes = _last_closes(isins, as_of) if price_checks else {}
     with _phase(t, "fx"):
         ccys = {c["currency"] for c in closes.values() if c.get("currency")}
         fx = _fx_to_eur(ccys, (date.fromisoformat(as_of) - timedelta(days=21)).isoformat(), as_of) if ccys else {}

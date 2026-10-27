@@ -2965,6 +2965,200 @@
         "title": "AirsRealisedLeg",
         "type": "object"
       },
+      "AirsRiskHistory": {
+        "properties": {
+          "current_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Drawdown Pct"
+          },
+          "first_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Date"
+          },
+          "last_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Date"
+          },
+          "max_drawdown_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Drawdown Pct"
+          },
+          "months": {
+            "items": {
+              "$ref": "#/components/schemas/AirsRiskMonth"
+            },
+            "title": "Months",
+            "type": "array"
+          },
+          "negative_months": {
+            "default": 0,
+            "title": "Negative Months",
+            "type": "integer"
+          },
+          "observations": {
+            "default": 0,
+            "title": "Observations",
+            "type": "integer"
+          },
+          "peak_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peak Date"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/AirsRiskObservation"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "portefeuille": {
+            "title": "Portefeuille",
+            "type": "string"
+          },
+          "recovery_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Date"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "trough_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trough Date"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
+          "worst_month_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Month Pct"
+          },
+          "year": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Year"
+          }
+        },
+        "required": [
+          "portefeuille",
+          "source"
+        ],
+        "title": "AirsRiskHistory",
+        "type": "object"
+      },
+      "AirsRiskMonth": {
+        "properties": {
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "return_pct": {
+            "title": "Return Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "month",
+          "return_pct"
+        ],
+        "title": "AirsRiskMonth",
+        "type": "object"
+      },
+      "AirsRiskObservation": {
+        "properties": {
+          "cumulative_pct": {
+            "title": "Cumulative Pct",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          },
+          "drawdown_pct": {
+            "title": "Drawdown Pct",
+            "type": "number"
+          },
+          "reference": {
+            "default": false,
+            "title": "Reference",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "date",
+          "cumulative_pct",
+          "drawdown_pct"
+        ],
+        "title": "AirsRiskObservation",
+        "type": "object"
+      },
       "AllocationBand": {
         "description": "One cell of the allocation policy: what share this class may take in this risk profile.\n\n EVERY PERCENT IS OPTIONAL, AND NULL IS NOT ZERO. \"No policy recorded\" and \"hold none of this\"\nare the same claim for a minimum and OPPOSITE claims for a default and a maximum, so an unset\ncell comes back null rather than 0 \u2014 a zeroed grid would publish a policy nobody wrote.\n\n DECLARED ABOVE `ModelPortfolioAnalysis` BECAUSE THAT MODEL EMBEDS IT (the bands drawn over\nthe allocation bars). Pydantic resolves the annotation when the class is built, so a definition\nfurther down the file is a NameError at import, not a forward reference.",
         "properties": {
@@ -6120,6 +6314,51 @@
           "end_month"
         ],
         "title": "BuildUniverseRequest",
+        "type": "object"
+      },
+      "CertificateResultAdjustment": {
+        "description": "Wrapper P&L formerly allocated to cash; not a cash return or an actual holding.",
+        "properties": {
+          "contribution_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Contribution Pct"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "realised_result_eur": {
+            "title": "Realised Result Eur",
+            "type": "number"
+          },
+          "result_eur": {
+            "title": "Result Eur",
+            "type": "number"
+          },
+          "unrealised_eur": {
+            "title": "Unrealised Eur",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "label",
+          "unrealised_eur",
+          "realised_result_eur",
+          "result_eur"
+        ],
+        "title": "CertificateResultAdjustment",
         "type": "object"
       },
       "CompanyIngestResult": {
@@ -10620,6 +10859,24 @@
             ],
             "title": "Last Sale"
           },
+          "lookthrough_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookthrough Note"
+          },
+          "lookthrough_positions": {
+            "items": {
+              "$ref": "#/components/schemas/SoldCertificatePosition"
+            },
+            "title": "Lookthrough Positions",
+            "type": "array"
+          },
           "mom_12_1_from": {
             "anyOf": [
               {
@@ -10708,6 +10965,39 @@
               }
             ],
             "title": "Opening Eur"
+          },
+          "post_close_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Close Currency"
+          },
+          "post_close_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Close Status"
+          },
+          "post_close_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Post Close Symbol"
           },
           "prior_year_eur": {
             "default": 0.0,
@@ -11023,6 +11313,90 @@
         "title": "LongEquitySaveUniverseRequest",
         "type": "object"
       },
+      "MarketPoint": {
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "number"
+          },
+          "date": {
+            "title": "Date",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "close"
+        ],
+        "title": "MarketPoint",
+        "type": "object"
+      },
+      "MarketSnapshot": {
+        "properties": {
+          "fetched_at": {
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "from_peak_pct": {
+            "title": "From Peak Pct",
+            "type": "number"
+          },
+          "history_start": {
+            "title": "History Start",
+            "type": "string"
+          },
+          "latest": {
+            "title": "Latest",
+            "type": "number"
+          },
+          "latest_at": {
+            "title": "Latest At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "peak": {
+            "title": "Peak",
+            "type": "number"
+          },
+          "peak_date": {
+            "title": "Peak Date",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/MarketPoint"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "source": {
+            "default": "Yahoo Finance",
+            "title": "Source",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "name",
+          "latest",
+          "latest_at",
+          "peak",
+          "peak_date",
+          "from_peak_pct",
+          "history_start",
+          "fetched_at",
+          "points"
+        ],
+        "title": "MarketSnapshot",
+        "type": "object"
+      },
       "MemberRow": {
         "properties": {
           "company_id": {
@@ -11235,6 +11609,11 @@
             "default": 0.0,
             "title": "Covered Pct",
             "type": "number"
+          },
+          "details_pending": {
+            "default": false,
+            "title": "Details Pending",
+            "type": "boolean"
           },
           "foreign_listings": {
             "default": 0,
@@ -15092,6 +15471,13 @@
             ],
             "title": "Capital Coverage Ratio"
           },
+          "certificate_adjustments": {
+            "items": {
+              "$ref": "#/components/schemas/CertificateResultAdjustment"
+            },
+            "title": "Certificate Adjustments",
+            "type": "array"
+          },
           "comparable": {
             "anyOf": [
               {
@@ -16891,6 +17277,95 @@
           "weight_pct"
         ],
         "title": "SleeveEtf",
+        "type": "object"
+      },
+      "SoldCertificatePosition": {
+        "properties": {
+          "composition_as_of": {
+            "title": "Composition As Of",
+            "type": "string"
+          },
+          "isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Isin"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "since_close_as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close As Of"
+          },
+          "since_close_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close Date"
+          },
+          "since_close_from": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close From"
+          },
+          "since_close_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close Pct"
+          },
+          "since_close_to": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since Close To"
+          },
+          "weight_pct": {
+            "title": "Weight Pct",
+            "type": "number"
+          }
+        },
+        "required": [
+          "name",
+          "composition_as_of",
+          "weight_pct"
+        ],
+        "title": "SoldCertificatePosition",
         "type": "object"
       },
       "SplitAdjustment": {
@@ -20267,6 +20742,49 @@
         ]
       }
     },
+    "/api/airs/accounts/{portefeuille}/risk-history": {
+      "get": {
+        "description": "Actual account observations. No vendor calls, holdings reconstruction or writes.",
+        "operationId": "airs_account_risk_history_api_airs_accounts__portefeuille__risk_history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "portefeuille",
+            "required": true,
+            "schema": {
+              "title": "Portefeuille",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AirsRiskHistory"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Airs Account Risk History",
+        "tags": [
+          "airs"
+        ]
+      }
+    },
     "/api/airs/accounts/{portefeuille}/transactions": {
       "get": {
         "description": "What this book BOUGHT and SOLD this year \u2014 the AIRS Transacties report.\n\nThe three reports already stored say what a book holds (VOLK), what it earned (MUT) and what\nits strategy asks for (MODEL). None says what it DID, so a position that appeared mid-year, one\nsold out entirely, and a weight that drifted purely on price all look the same from outside.\n\nServed from the stored snapshot; `refresh=true` (or a stale window, or nothing stored) goes out\nto AIRS. A live fetch is seconds behind a headless session, which is why the panel is behind a\nclick and the answer says whether it was cached.",
@@ -21029,6 +21547,16 @@
             "schema": {
               "default": false,
               "title": "Include Axes",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "overview_only",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Overview Only",
               "type": "boolean"
             }
           }
@@ -31986,6 +32514,48 @@
         "summary": "Get Longequity Snapshots",
         "tags": [
           "longequity"
+        ]
+      }
+    },
+    "/api/market/acwi": {
+      "get": {
+        "operationId": "acwi_api_market_acwi_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Acwi",
+        "tags": [
+          "market"
+        ]
+      }
+    },
+    "/api/market/nasdaq": {
+      "get": {
+        "operationId": "nasdaq_api_market_nasdaq_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Nasdaq",
+        "tags": [
+          "market"
         ]
       }
     },

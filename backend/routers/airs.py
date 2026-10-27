@@ -1393,6 +1393,18 @@ class RealisedContributionLeg(BaseModel):
     last: str | None = None
 
 
+class SoldCertificatePosition(BaseModel):
+    name: str
+    isin: str | None = None
+    composition_as_of: str
+    weight_pct: float
+    since_close_pct: float | None = None
+    since_close_date: str | None = None
+    since_close_as_of: str | None = None
+    since_close_from: float | None = None
+    since_close_to: float | None = None
+
+
 class LedgerPosition(BaseModel):
     """One instrument's whole year — whether the book still holds it or not.
 
@@ -1408,6 +1420,8 @@ class LedgerPosition(BaseModel):
     """
 
     name: str
+    lookthrough_positions: list[SoldCertificatePosition] = Field(default_factory=list)
+    lookthrough_note: str | None = None
     held: bool = False
     #  Decided by ABSENCE from the holdings, not by having sold — most sold names are trims.
     closed_out: bool = False
@@ -1474,6 +1488,9 @@ class LedgerPosition(BaseModel):
     mom_state: int | None = None
     mom_pct_rank: float | None = None
     mom_rank_n: int | None = None
+    post_close_symbol: str | None = None
+    post_close_currency: str | None = None
+    post_close_status: str | None = None
     # What the instrument did AFTER this book fully exited it. This is deliberately a price
     # return, not a hypothetical book return: the book no longer owned it after `last_sale`.
     since_close_pct: float | None = None
@@ -1481,6 +1498,16 @@ class LedgerPosition(BaseModel):
     since_close_as_of: str | None = None
     since_close_from: float | None = None
     since_close_to: float | None = None
+
+
+class CertificateResultAdjustment(BaseModel):
+    """Wrapper P&L formerly allocated to cash; not a cash return or an actual holding."""
+    name: str
+    label: str
+    unrealised_eur: float
+    realised_result_eur: float
+    result_eur: float
+    contribution_pct: float | None = None
 
 
 class RealisedBlock(BaseModel):
@@ -1535,6 +1562,7 @@ class RealisedBlock(BaseModel):
     # EUR 1,000,000 opening capital (it began the year in cash and deployed on 5 January), so a
     # start-weighted table would have called it 96% cash.
     positions: list[LedgerPosition] = []
+    certificate_adjustments: list[CertificateResultAdjustment] = Field(default_factory=list)
     avg_capital_eur: float | None = None
     #  Σ average capital ÷ `beginvermogen`. REPORTED, never assumed to be 1: Modified Dietz
     # ignores the price path within a position and the de-restatement is its own approximation.
@@ -1656,6 +1684,7 @@ class ModelPortfolioAnalysis(BaseModel):
     # only ever see the total — "Loading composition…" with nothing saying which of its eight
     # loads was responsible. Logged to the console on every open.
     timings_ms: dict[str, int] = {}
+    details_pending: bool = False
 
 
 @router.get("/api/airs/model-portfolios/{portfolio_id}/analysis",
@@ -1664,7 +1693,8 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
                                         weight_by: str = "model", source: str = "model",
                                         bucket: str | None = None,
                                         look_through: bool = False,
-                                        include_axes: bool = False):
+                                        include_axes: bool = False,
+                                        overview_only: bool = False):
     """Sector / region / currency split of one model portfolio, beside the benchmark's.
 
     `weight_by=book` weights the portfolio bars by the paired AIRS book's actual EUR holdings
@@ -1689,7 +1719,8 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     src = source if source in ("model", "book") else "book"
     bucket_filter = bucket if bucket in BUCKET_ORDER else None
     return await compute_portfolio_analysis_async(
-        portfolio_id, benchmark, basis, src, bucket_filter, look_through, include_axes)
+        portfolio_id, benchmark, basis, src, bucket_filter, look_through, include_axes,
+        overview_only=overview_only)
 
 
 class HoldingTradeEffect(BaseModel):
@@ -1858,6 +1889,44 @@ class WeightedBenchmarkComponent(BaseModel):
     end_price: float | None = None
     currency: str | None = None
     return_pct: float | None = None
+
+
+class AirsRiskObservation(BaseModel):
+    date: str
+    cumulative_pct: float
+    drawdown_pct: float
+    reference: bool = False
+
+
+class AirsRiskMonth(BaseModel):
+    month: str
+    return_pct: float
+
+
+class AirsRiskHistory(BaseModel):
+    portefeuille: str
+    source: str
+    year: int | None = None
+    observations: int = 0
+    first_date: str | None = None
+    last_date: str | None = None
+    max_drawdown_pct: float | None = None
+    current_drawdown_pct: float | None = None
+    worst_month_pct: float | None = None
+    negative_months: int = 0
+    peak_date: str | None = None
+    trough_date: str | None = None
+    recovery_date: str | None = None
+    points: list[AirsRiskObservation] = Field(default_factory=list)
+    months: list[AirsRiskMonth] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+@router.get('/api/airs/accounts/{portefeuille}/risk-history', response_model=AirsRiskHistory)
+async def airs_account_risk_history(portefeuille: str):
+    """Actual account observations. No vendor calls, holdings reconstruction or writes."""
+    from routers._airs_risk_history import account_risk_history  # noqa: PLC0415
+    return await asyncio.to_thread(account_risk_history, portefeuille)
 
 
 class BookValueSeries(BaseModel):

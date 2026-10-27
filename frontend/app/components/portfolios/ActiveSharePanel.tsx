@@ -33,7 +33,7 @@ import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { withWorked, subNum, workedRatio, texWords } from './workedFormula';
+import { withWorked, subNum, texWords } from './workedFormula';
 import { dayOf, dayRange } from './asOfLine';
 import {
   Provenance, sourceField, sourceLabel, sourceVendor, type SourceKey,
@@ -140,12 +140,12 @@ function Tile({ label, value, tone, info, simpleInfo, suffix }: {
 export default function ActiveSharePanel({
   holdings, benchmark, portfolioName, portfolioAsOf, portfolioFetchedAt,
   portfolioSource, weightComponentsNow, weightTotalNow, riskProfilePolicy,
-  portefeuille,
-  onClose,
+  portefeuille, benchmarkProfile,
 }: {
   holdings: ActiveShareHolding[];
   portefeuille?: string | null;
   benchmark: string;
+  benchmarkProfile?: string | null;
   /** The book's own name, so its date line names the thing it dates rather than saying "the book".
    *   It is on screen anyway (the modal's heading), which is what makes it the shortest possible
    *  label here — the reader does not have to work out which of the two lines is theirs. */
@@ -205,6 +205,10 @@ export default function ActiveSharePanel({
     () => holdingsOnRiskBasis(holdings, 'now').filter(isDirectEquityStock), [holdings],
   );
   const riskBenchmarkWeights = riskProfilePolicy ?? undefined;
+  const profileLabel = benchmarkProfile ? ({
+    Neutraal: 'Neutral', Offensief: 'Offensive',
+    'Beperkt Offensief': 'Moderately offensive', Defensief: 'Defensive',
+  }[benchmarkProfile] ?? benchmarkProfile) : null;
   const riskHoldings = useMemo(
     () => holdingsOnRiskBasis(holdings, 'now'), [holdings],
   );
@@ -230,6 +234,9 @@ export default function ActiveSharePanel({
     if (!r.ok) throw new Error(b?.detail ?? `HTTP ${r.status}`);
     return b as ActiveShare;
   }, 'active-share', 'the active share could not be computed');
+  const benchmarkLabel = riskBenchmarkWeights?.Stocks != null && riskBenchmarkWeights?.Bonds != null
+    ? `${riskBenchmarkWeights.Stocks}% ACWI + ${riskBenchmarkWeights.Bonds}% AGGH.AS`
+    : (data?.benchmark ?? benchmark);
 
   // The active-share response names a policy benchmark for people ("60% ACWI + 40% AGGH.AS").
   // The four return endpoints and Concentration still need the canonical ACWI key to resolve
@@ -288,6 +295,19 @@ export default function ActiveSharePanel({
     active: a.active + (r.active_pct ?? 0),
   }), { book: 0, bench: 0, active: 0 });
 
+  // Reserve space for the full labels, not just percentage values. Both tables share the same
+  // columns and horizontal scroll surface so the fixed totals cannot drift away from the rows.
+  const portfolioColumnWidth = `max(10rem, ${portfolioName.length + 6}ch)`;
+  const benchmarkColumnWidth = `max(12rem, ${(data?.benchmark ?? benchmark).length + 6}ch)`;
+  const tableMinWidth = `calc(14rem + ${portfolioColumnWidth} + ${benchmarkColumnWidth} + 6rem + 7rem)`;
+  const tableColumns = <colgroup>
+    <col />
+    <col style={{ width: portfolioColumnWidth }} />
+    <col style={{ width: benchmarkColumnWidth }} />
+    <col className="w-24" />
+    <col className="w-28" />
+  </colgroup>;
+
   return (
     <div className="relative h-full min-h-0 flex flex-col rounded-xl border border-neutral-800/40
       bg-card p-4">
@@ -299,7 +319,7 @@ export default function ActiveSharePanel({
       <div className="relative shrink-0 text-center">
         <div className="min-w-0">
           <h4 className="text-sm font-semibold text-fg-strong">
-            {t.titles[view]} vs {data?.benchmark ?? benchmark}{view === 'dd' ? ' over the past 5 years' : ''}
+            {`"${portfolioName}" vs ${profileLabel ? `the "${profileLabel}" benchmark (${benchmarkLabel})` : benchmarkLabel}`}
           </h4>
           <p className="text-xs text-fg-faint mt-0.5">
             {t.subtitle(portfolioName, selectedPortfolioAsOf)}
@@ -463,16 +483,11 @@ export default function ActiveSharePanel({
               docs already asks for ("keep dense tables inside their own overflow-auto container").
                `max-h`, NOT `h` — a short book must not get a half-empty box with a scrollbar. */}
           <div className="flex-1 min-h-0 flex flex-col rounded-lg border border-neutral-800/40
-            overflow-hidden">
+            overflow-x-auto">
+            <div className="flex min-h-0 flex-1 flex-col text-xs" style={{ minWidth: tableMinWidth }}>
             <div className="flex-1 min-h-0 overflow-auto [scrollbar-gutter:stable]">
               <table className="w-full table-fixed text-xs">
-              <colgroup>
-                <col />
-                <col className="w-40" />
-                <col className="w-20" />
-                <col className="w-20" />
-                <col className="w-28" />
-              </colgroup>
+              {tableColumns}
               {/*  STICKY AND THE BACKGROUND BOTH SIT ON THE `<th>` CELLS, NOT ON `<thead>`, AND
                   THAT IS THE WHOLE FIX. Two separate reasons, either of which alone produces the
                   reported symptom — rows travelling over a header that should absorb them:
@@ -491,7 +506,7 @@ export default function ActiveSharePanel({
                   paint in the positioned phase and would sit over a z-auto header. */}
               <thead>
                 <tr className="text-fg-faint [&>th]:px-2.5 [&>th]:py-1 [&>th]:font-medium
-                  [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:bg-inset">
+                  [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:bg-inset [&>th]:whitespace-nowrap">
                   <th className="text-left">{t.active.colCompany}</th>
                   <th className="text-right whitespace-nowrap">{portfolioName}</th>
                   <th className="text-right">{data.benchmark ?? benchmark}</th>
@@ -563,6 +578,10 @@ export default function ActiveSharePanel({
                           <p>Yfinance EUR return: {r.weight_calculation.return_eur_pct.toFixed(4)}%.</p>
                           <p className="font-mono">{r.weight_calculation.initial_weight_pct.toFixed(4)} × (1 + {r.weight_calculation.return_eur_pct.toFixed(4)} / 100) ÷ {r.weight_calculation.normalisation_total.toFixed(4)} × 100 = {r.weight_calculation.result_pct.toFixed(4)}%</p>
                           <p>The denominator sums the workbook weights grown by each constituent’s EUR return.</p>
+                          {riskBenchmarkWeights && <>
+                            <p>ACWI represents {riskBenchmarkWeights.Stocks ?? 0}% of the policy benchmark. Apply that allocation to get this position’s weight in the full benchmark:</p>
+                            <p className="font-mono">{r.weight_calculation.result_pct.toFixed(4)}% × ({riskBenchmarkWeights.Stocks ?? 0} / 100) = {(r.benchmark_pct ?? 0).toFixed(4)}% (displayed as {(r.benchmark_pct ?? 0).toFixed(2)}%).</p>
+                          </>}
                         </div> : undefined} text={`${data.benchmark ?? benchmark}'s benchmark weight in ${r.name}.`} />
                       </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%`
@@ -591,13 +610,7 @@ export default function ActiveSharePanel({
                   colgroup keeps all numeric columns aligned with the rows above. */}
             <div className="shrink-0 overflow-y-auto [scrollbar-gutter:stable]">
             <table className="w-full table-fixed text-xs" aria-label="Active share totals">
-              <colgroup>
-                <col />
-                <col className="w-40" />
-                <col className="w-20" />
-                <col className="w-20" />
-                <col className="w-28" />
-              </colgroup>
+              {tableColumns}
               <tfoot>
                 <tr className="[&>td]:px-2.5 [&>td]:py-1.5 [&>td]:border-t
                   [&>td]:border-neutral-700/60 [&>td]:bg-inset font-medium">
@@ -648,6 +661,7 @@ export default function ActiveSharePanel({
                 </tr>
               </tfoot>
             </table>
+            </div>
             </div>
           </div>
         </div>

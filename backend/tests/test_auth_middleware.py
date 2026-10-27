@@ -108,6 +108,12 @@ class TestM1_ReadsRequireAuth:
     def test_authenticated_user_read_allowed(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/companies", "user") == (200, True)
 
+    def test_market_is_authenticated_read_only(self, monkeypatch):
+        assert _run(monkeypatch, "GET", "/api/market/nasdaq", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/market/acwi", "user") == (200, True)
+        assert _run(monkeypatch, "GET", "/api/market/nasdaq", None) == (401, False)
+        assert _run(monkeypatch, "POST", "/api/market/nasdaq", "user") == (403, False)
+
     def test_non_admin_read_of_admin_path_is_403(self, monkeypatch):
         assert _run(monkeypatch, "GET", "/api/admin/health", "user") == (403, False)
 
@@ -167,9 +173,7 @@ class TestManagementDashboardForUsers:
 
     def test_the_page_s_reads_are_allowed(self, monkeypatch):
         for path in ("/api/airs/portfolios/overview",
-                     #  `/accounts/{p}/isins`, NOT `/holdings` — see
-                     # TestExpandingAnAccountIsAdminOnly. This list said `/holdings` until
-                     # 2026-08-06, which is exactly the access the Overview row now withholds.
+                     "/api/airs/accounts/BUS_X/holdings",
                      "/api/airs/accounts/BUS_X/isins",
                      "/api/airs/model-portfolios/correlations",
                      "/api/airs/model-portfolios/7/analysis",
@@ -309,25 +313,41 @@ class TestManagementDashboardRefreshesAreOpen:
             assert _run(monkeypatch, method, path, "user") == (403, False), path
 
 
-class TestExpandingAnAccountIsAdminOnly:
-    """Opening a row in the /management-dashboard Overview is admin-only (2026-08-06).
-
-    The summary table stays user-readable — what is withheld is the book behind a row: its
-    positions and their EUR values, its mutations, the reconciliation, the link picker.
-
-     THESE ARE THE RULE, NOT THE HIDDEN `<tr>`. The frontend drops the row's click handler for a
-    non-admin, which is presentation; every one of these URLs is still sitting in a bundle that
-    user downloads. If this class goes green while the panel is restricted, the restriction is
-    real; if only the panel changes, it is a suggestion."""
+class TestExpandingAnAccountIsUserAccessible:
+    """Every authenticated dashboard user can inspect a book, not just its summary."""
 
     EXPANDED = ("/api/airs/accounts/BUS_X/holdings",
                 "/api/airs/accounts/BUS_X/transactions",
                 "/api/airs/accounts/BUS_X/return-reconciliation",
                 "/api/airs/accounts/BUS_X/linkable")
 
-    def test_every_sub_resource_the_expanded_row_opens_is_denied(self, monkeypatch):
+    def test_every_sub_resource_the_expanded_row_opens_is_allowed(self, monkeypatch):
         for path in self.EXPANDED:
-            assert _run(monkeypatch, "GET", path, "user") == (403, False), path
+            assert _run(monkeypatch, "GET", path, "user") == (200, True), path
+
+    def test_performance_month_and_background_job_lifecycle_are_open_to_users(self, monkeypatch):
+        for method, path in (
+            ('GET', '/api/airs/accounts/BUS_Offensief_Dyn/monthly-report?month=2026-07'),
+            ('POST', '/api/airs/accounts/BUS_Offensief_Dyn/monthly-report/job?month=2026-07'),
+            ('GET', '/api/airs/model-portfolios/1935/analysis?overview_only=true'),
+            ('GET', '/api/airs/model-portfolios/1935/analysis?overview_only=false'),
+            ('GET', '/api/jobs'), ('GET', '/api/jobs/monthly-performance/stream'),
+            ('POST', '/api/jobs/monthly-performance/cancel'),
+            ('GET', '/api/airs/accounts/BUS_Offensief_Dyn/fundamental-weights'),
+            ('GET', '/api/airs/accounts/BUS_Offensief_Dyn/risk-history'),
+        ):
+            assert _run(monkeypatch, method, path, 'user') == (200, True), (method, path)
+            assert _run(monkeypatch, method, path, None) == (401, False), (method, path)
+
+    def test_read_access_does_not_grant_generic_writes_or_destructive_month_actions(self, monkeypatch):
+        for method, path in (
+            ('DELETE', '/api/airs/accounts/BUS_X/monthly-report'),
+            ('POST', '/api/airs/accounts/BUS_X/monthly-report/delete'),
+            ('PUT', '/api/airs/accounts/BUS_X/holdings'),
+            ('POST', '/api/airs/accounts/BUS_X/linkable'),
+            ('DELETE', '/api/airs/portfolios/BUS_X'),
+        ):
+            assert _run(monkeypatch, method, path, 'user') == (403, False), (method, path)
 
     def test_an_admin_still_gets_all_of_them(self, monkeypatch):
         for path in self.EXPANDED:
@@ -355,7 +375,7 @@ class TestExpandingAnAccountIsAdminOnly:
         tidy test id and miss the real ones — i.e. pass here and allow in production."""
         for pid in ("BUS_WTS_StMerken_Dyn", "BUS_BM_AAN_kw_USD_2026_d", "MoTopSelectie_FX", "7"):
             assert _run(monkeypatch, "GET", f"/api/airs/accounts/{pid}/holdings",
-                        "user") == (403, False), pid
+                        "user") == (200, True), pid
 
     def test_the_deny_does_not_leak_onto_neighbouring_paths(self, monkeypatch):
         """The patterns are anchored at both ends: they must not catch the accounts LIST, nor a
