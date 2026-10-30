@@ -118,6 +118,11 @@ def prepare_month(account: str, today=None) -> dict:
     # On the first weekend/New Year, the newest completed month can still be the previous one.
     month = latest_completed_market_date(today)[:7]
     start, end, opening = month_window(month, today)
+    if int(month[:4]) < today.year:
+        closed = (supabase.table("airs_year_archive").select("payload").eq("portefeuille", account)
+                  .eq("year", int(month[:4])).eq("kind", "year_end").limit(1).execute().data or [])
+        if closed and closed[0]["payload"].get("complete"):
+            return {"account": account, "end": end, "errors": {}, "archived": True}
     performance = next((r for r in _monthly_rows(account, int(month[:4])) if r["month"] == month), None)
     sections: dict = {}
     sections["performance"] = ({"status": "ok", "data": performance}
@@ -148,6 +153,11 @@ def prepare_month(account: str, today=None) -> dict:
                 "status": "error", "data": None, "message": f"No stored AIRS valuation for {boundary}"}
     cached = rows("airs_transactie_snapshot", portefeuille=account)
     snapshot = cached[0] if cached else None
+    if not snapshot or str(snapshot.get("datum_van", ""))[:10] > start or str(snapshot.get("datum_tot", ""))[:10] < end:
+        archived = (supabase.table("airs_year_archive").select("*").eq("portefeuille", account)
+                    .eq("year", int(start[:4])).eq("kind", "transactions").limit(1).execute().data or [])
+        if archived:
+            snapshot = {**archived[0]["payload"], "datum_van": archived[0]["datum_van"], "datum_tot": archived[0]["datum_tot"]}
     if (snapshot and str(snapshot.get("datum_van", ""))[:10] <= start
             and str(snapshot.get("datum_tot", ""))[:10] >= end):
         sheet = ParsedSheet(columns=snapshot.get("columns") or [], kinds=snapshot.get("kinds") or {}, rows=snapshot.get("rows") or [])
@@ -171,7 +181,7 @@ def prepare_month(account: str, today=None) -> dict:
                "reconciliation": reconcile_positions(sections, performance, positions)}
     supabase.table("airs_monthly_report").upsert({
         "portefeuille": account, "month": start, "datum_tot": end, "fetched_at": fetched,
-        "report": payload, "performance": performance,
+        "report": payload, "performance": performance, "performance_basis": "year_start",
     }, on_conflict="portefeuille,month").execute()
     return {"account": account, "end": end,
             "errors": {key: value.get("message") for key, value in sections.items() if value["status"] == "error"}}
@@ -205,6 +215,10 @@ def freshness(today=None) -> dict:
         if rate:
             fx_dates[code] = str(rate[0]["rate_date"])[:10]
     sources, global_issues = {}, []
+    pending_years = rows("airs_year_archive", kind="year_end")
+    for receipt in pending_years:
+        if not is_excluded_portfolio(receipt["portefeuille"]) and not (receipt.get("payload") or {}).get("complete"):
+            global_issues.append(f"{receipt['portefeuille']}: {receipt['year']} year-end archive incomplete")
     for job in ("asset_price_refresh", "benchmark_price_slice", "benchmark_fundamentals_fill", "fx_sync"):
         latest = (supabase.table("scheduled_job_run").select("status,started_at,detail,summary")
                   .eq("job_id", job).order("started_at", desc=True).limit(1).execute().data or [])

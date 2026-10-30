@@ -77,7 +77,7 @@ def _acwi_months(months: list[dict], ticker: str = "ACWI", currency: str = "USD"
                       .eq("ticker", ticker).limit(1).execute().data or [])
         if not benchmarks:
             return {}
-        anchors = {r["month"]: (date.fromisoformat(r["month"] + "-01") - timedelta(days=1)).isoformat() for r in months}
+        anchors = {r["month"]: r.get("anchor") or (date.fromisoformat(r["month"] + "-01") - timedelta(days=1)).isoformat() for r in months}
         cutoffs = {r["month"]: str(r.get("periode") or "")[:10] for r in months}
         cutoffs = {m: d for m, d in cutoffs.items() if d.startswith(m + "-")}
         if not cutoffs:
@@ -138,15 +138,29 @@ def _weighted_months(portefeuille: str, months: list[dict]) -> dict:
 
 
 def read_report(portefeuille: str, month: str, *, include_details: bool = True) -> dict:
-    start, end, opening = month_window(month)
+    try:
+        start, end, opening = month_window(month)
+    except HTTPException as exc:
+        current = datetime.now(ZoneInfo("Europe/Amsterdam")).date()
+        if exc.status_code != 422 or month != current.strftime("%Y-%m"):
+            raise
+        from airs_vermogen import latest_completed_market_date
+        if latest_completed_market_date(current) >= month + "-01":
+            raise
+        # January 1 has no valuation in the new reporting year yet. History
+        # must remain selectable without presenting last year's YTD as this year's.
+        start = month + "-01"
+        opening = (date.fromisoformat(start) - timedelta(days=1)).isoformat()
+        end = opening
     _account(portefeuille)
     months = _monthly_rows(portefeuille, int(month[:4]))
     standard_months = {row['month']: row for row in months}
-    warning = None
+    annual_months = dict(standard_months)
+    warning = "This month has no completed valuation date yet." if end < start else None
     try:
         # The year strip reads only small performance observations, not twelve
         # complete holdings/journal/transaction bundles on every month click.
-        cached = (supabase.table("airs_monthly_report").select("month,performance")
+        cached = (supabase.table("airs_monthly_report").select("month,performance,performance_basis")
                   .eq("portefeuille", portefeuille).gte("month", f"{month[:4]}-01-01")
                   .lte("month", f"{month[:4]}-12-31").order("month")
                   .execute().data or [])
@@ -164,9 +178,14 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
         if stored.get("performance"):
             existing = by_month.get(key)
             data = stored["performance"]
+            annual_previous = annual_months.get(key)
+            if stored.get("performance_basis") == "year_start" and (not annual_previous
+                    or str(data.get("periode", "")) > str(annual_previous.get("periode", ""))):
+                annual_months[key] = {"month": key, **data}
             # Custom-start ATT reports reset opening capital; do not let their
             # returns replace months from the canonical year-start AIRS report.
-            if not existing:
+            if not existing or (stored.get("performance_basis") == "year_start"
+                                and str(data.get("periode", "")) > str(existing.get("periode", ""))):
                 by_month[key] = {"month": key, **data}
     months = [by_month[key] for key in sorted(by_month)]
     bundle = selected[0] if selected else None
@@ -184,13 +203,39 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
             canonical = section.get('data') if section.get('status') == 'ok' else None
             if canonical:
                 by_month[month] = {'month': month, **canonical}
+                annual_months[month] = {'month': month, **canonical}
                 months = [by_month[key] for key in sorted(by_month)]
         else:
             canonical = None
         snapshot['reconciliation'] = reconcile_positions(snapshot.get('sections', {}), canonical, snapshot['positions'])
     has_errors = bool(bundle and ("positions" not in bundle.get("report", {}) or any(s.get("status") == "error" for s in
                       bundle.get("report", {}).get("sections", {}).values())))
+    years = {int(month[:4]), datetime.now(ZoneInfo("Europe/Amsterdam")).year}
+    for table, column in (("airs_performance", "periode"), ("airs_monthly_report", "month"), ("airs_year_archive", "year")):
+        offset = 0
+        while True:
+            page = (supabase.table(table).select(column).eq("portefeuille", portefeuille)
+                    .order(column).range(offset, offset + 999).execute().data or [])
+            years.update(int(str(row[column])[:4]) for row in page if row.get(column))
+            if len(page) < 1000:
+                break
+            offset += 1000
+    from routers._airs_value_series import _return_series
+    points, anchor = _return_series([annual_months[key] for key in sorted(annual_months)], {}, {})
+    closed = (supabase.table("airs_year_archive").select("payload").eq("portefeuille", portefeuille)
+              .eq("year", int(month[:4])).eq("kind", "year_end").limit(1).execute().data or [])
+    finalised = bool(closed and closed[0]["payload"].get("complete"))
+    summary = {"return_pct": None, "benchmark_pct": None, "start": None, "end": None}
+    if points and anchor:
+        last = points[-1]
+        # Use the custodian's cumulative figure, not compounded rounded months.
+        annual = [{"month": last["date"][:7], "periode": last["date"],
+                   "anchor": (date.fromisoformat(anchor) - timedelta(days=1)).isoformat()}]
+        benchmark = _weighted_months(portefeuille, annual).get(last["date"][:7], {})
+        summary = {"return_pct": last["cum_pct"], "benchmark_pct": benchmark.get("return_pct"),
+                   "start": anchor, "end": last["date"]}
     return {
+        "available_years": sorted(years, reverse=True), "year_summary": {**summary, "complete": finalised},
         "portefeuille": portefeuille, "month": month, "start": start,
         "end": end, "opening_date": opening, "months": months, "weighted_benchmark": _weighted_months(portefeuille, months),
         "snapshot": bundle.get("report") if bundle else None,
@@ -295,7 +340,7 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
     supabase.table("airs_monthly_report").upsert({
         "portefeuille": portefeuille, "month": start, "datum_tot": end,
         "fetched_at": fetched, "report": payload,
-        "performance": sections["performance"].get("data"),
+        "performance": sections["performance"].get("data"), "performance_basis": "year_start",
     }, on_conflict="portefeuille,month").execute()
     ctx.progress(4, 4, f"{portefeuille} · {month}: saved {successes}/4 reports")
     failures = sum(s["status"] == "error" for s in sections.values())

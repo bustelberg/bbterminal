@@ -180,7 +180,7 @@ export default function CagrTable({
       <div className="text-[11px] text-fg-faint leading-relaxed">
         Measured on the weighted line, from the latest <strong>reported</strong> period back — never
         from an estimate or from <code>LTM</code>, so the span really is 5 or 10 years (
-        <InfoTip text="An estimate endpoint would make this a forecast wearing the clothes of a track record. LTM is real and current, but it ends at the newest quarterly filing, so a span from FY2020 to LTM is five years AND SOME MONTHS — dividing by 5 there overstates the rate and nothing on screen would show the span was not 5.0.">
+        <InfoTip text="Uses complete reported financial years. Estimates are forecasts; the latest twelve months can end partway through a financial year, so neither is used as an annual endpoint.">
           why
         </InfoTip>
         ). A dash means the line has no point exactly that many years back — hover it for which.

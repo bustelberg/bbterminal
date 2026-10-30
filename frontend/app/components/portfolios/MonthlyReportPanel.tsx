@@ -184,15 +184,18 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   };
   const months = Array.from({ length: month.slice(0, 4) === today.slice(0, 4) ? Number(today.slice(5, 7)) : 12 }, (_, i) => `${month.slice(0, 4)}-${String(i + 1).padStart(2, '0')}`);
   const monthPerformance = (key: string) => key === month && perf ? perf : report?.months.find((row) => row.month === key);
-  const compound = (values: (number | null | undefined)[]) => values.some((value) => value == null || !Number.isFinite(value))
-    ? null : (values.reduce<number>((growth, value) => growth * (1 + value! / 100), 1) - 1) * 100;
   // The Analyse headline is AIRS's published cumulative return, not a chain of
   // monthly observations. Its policy benchmark is buy-and-hold over the full
   // window; chaining monthly policy returns would imply monthly rebalancing.
-  const useOverview = !!overviewReturns && (!overviewReturns.asOf || overviewReturns.asOf.slice(0, 4) === month.slice(0, 4));
+  const useOverview = !!overviewReturns && month.slice(0, 4) === today.slice(0, 4) && (overviewReturns.asOf
+    ? overviewReturns.asOf.slice(0, 4) === month.slice(0, 4)
+    : month.slice(0, 4) === today.slice(0, 4));
+  const summary = selectedReport?.year_summary;
+  const historical = month.slice(0, 4) < today.slice(0, 4);
+  const years = [...new Set([Number(today.slice(0, 4)), Number(month.slice(0, 4)), ...(report?.available_years ?? [])])].sort((a, b) => b - a);
   const rounded = (value: number | null | undefined) => value == null ? null : Math.round(value * 100) / 100;
-  const portfolioCompounded = useOverview ? rounded(overviewReturns.portfolio) : compound(months.map((key) => monthPerformance(key)?.rendement));
-  const benchmarkCompounded = useOverview ? rounded(overviewReturns.benchmark) : compound(months.map((key) => report?.weighted_benchmark?.[key]?.return_pct));
+  const portfolioCompounded = useOverview ? rounded(overviewReturns.portfolio) : rounded(summary?.return_pct);
+  const benchmarkCompounded = useOverview ? rounded(overviewReturns.benchmark) : rounded(summary?.benchmark_pct);
   const compoundedExcess = portfolioCompounded != null && benchmarkCompounded != null ? portfolioCompounded - benchmarkCompounded : null;
   // YTD is also a monthly period only when BOTH boundaries fall in that month.
   // This preserves a newly funded book's partial-month benchmark without putting a
@@ -202,8 +205,8 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     ? overviewReturns.asOf.slice(0, 7) : null;
   const benchmarkForMonth = (key: string) => key === overviewBenchmarkMonth
     ? overviewReturns?.benchmark : report?.weighted_benchmark?.[key]?.return_pct;
-  const compoundedThrough = useOverview ? overviewReturns.asOf : monthPerformance(months[months.length - 1])?.periode;
-  const compoundedFrom = useOverview ? overviewReturns.from : report?.start;
+  const compoundedThrough = useOverview ? overviewReturns.asOf : summary?.end;
+  const compoundedFrom = useOverview ? overviewReturns.from : summary?.start;
   const unavailable = (reason?: string) => reason === 'unclassified_activity' || reason === 'quantity_not_reconciled'
     ? text('Position movement needs review', 'Positiemutatie controleren')
     : reason === 'identity_changed' || reason === 'ambiguous_position'
@@ -215,16 +218,24 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
       <p className="mb-1 text-[10px] uppercase tracking-[0.2em] text-accent-400">AIRS · Performance</p>
       <h2 className="text-xl font-semibold text-fg-strong">{name}</h2>
       <p className="mt-1 text-xs text-fg-subtle">{text('Choose a month to see its return and individual positions.', 'Kies een maand voor het rendement en de individuele posities.')}</p>
-    </div></header>
+    </div><label className="flex items-center gap-2 text-xs text-fg-muted">{text('Year', 'Jaar')}
+      <select aria-label={text('Reporting year', 'Rapportagejaar')} value={month.slice(0, 4)} className={ctl}
+        onChange={(event) => {
+          const year = event.target.value;
+          setMonth(year === today.slice(0, 4) ? today : `${year}-12`);
+          setDetailsOpen(false); setJobError(null); setSelection((n) => n + 1);
+        }}>{years.map((year) => <option key={year} value={year}>{year}</option>)}</select>
+    </label></header>
     {!portefeuille && <p className="text-sm text-warn-400">{text('Link an AIRS account to view monthly positions.', 'Koppel een AIRS-rekening om de maandposities te bekijken.')}</p>}
     {error && <p role="alert" className="rounded-lg bg-neg-500/10 p-3 text-xs text-neg-300">{error}</p>}
     {jobError && <p role="alert" className="rounded-lg bg-neg-500/10 p-3 text-xs text-neg-300">{jobError}</p>}
     {pending && !report && <p className="text-sm text-fg-subtle">{text('Loading…', 'Laden…')}</p>}
+    {historical && selectedReport && !summary?.complete && <p className="text-xs text-warn-300">{text('Year-end report incomplete. Figures below run through the dates shown; finalisation will retry during the daily refresh.', 'Jaareindrapport onvolledig. De cijfers lopen tot de getoonde datums; afronding wordt bij de dagelijkse verversing opnieuw geprobeerd.')}</p>}
     {report && <>
       <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-3" aria-label={text('Compounded returns', 'Samengestelde rendementen')}>
         {[
-          { label: useOverview ? text('Return (YTD) · EUR', 'Rendement (YTD) · EUR') : text('Compounded portfolio return · EUR', 'Samengesteld portefeuillerendement · EUR'), value: portfolioCompounded },
-          { label: useOverview ? text('Weighted benchmark return (YTD) · EUR', 'Gewogen benchmarkrendement (YTD) · EUR') : text('Compounded weighted benchmark · EUR', 'Samengestelde gewogen benchmark · EUR'), value: benchmarkCompounded },
+          { label: historical ? text('Annual return · EUR', 'Jaarrendement · EUR') : text('Return (YTD) · EUR', 'Rendement (YTD) · EUR'), value: portfolioCompounded },
+          { label: historical ? text('Annual weighted benchmark return · EUR', 'Gewogen benchmarkjaarrendement · EUR') : text('Weighted benchmark return (YTD) · EUR', 'Gewogen benchmarkrendement (YTD) · EUR'), value: benchmarkCompounded },
         ].map(({ label, value }) => <div key={label} className={`${box} flex items-center justify-between gap-4 px-5 py-4`}>
           <div><p className="text-sm text-fg-muted">{label}</p><p className="mt-1 text-xs text-fg-subtle">{compoundedFrom && compoundedThrough ? `${holdingDate(compoundedFrom)} ${text('to', 't/m')} ${holdingDate(compoundedThrough)}` : month.slice(0, 4)}</p>
             {value == null && <p className="mt-1 text-xs text-fg-faint">{text('Monthly data incomplete', 'Maandgegevens onvolledig')}</p>}</div>

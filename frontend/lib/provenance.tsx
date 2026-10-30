@@ -16,6 +16,8 @@
 import * as React from 'react';
 import { createContext, useContext } from 'react';
 import InfoTip from '../app/components/InfoTip';
+import { CompactHelp, useCompactHelp } from './compactHelp';
+import { useLang } from './i18n';
 import { INFO_ICON, INFO_ICON_WARN } from './infoIcon';
 import { Field, Legend, TipCard, Worked, type FormulaSymbol } from './tipCard';
 import { ValueBadge } from './dynamicValue';
@@ -288,6 +290,8 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
   //  The composed label, not the parts — this card names the source once and in full, which is
   // what `sourceLabel` builds. The halves exist for prose that needs them apart; see `sourceField`.
   const s = { label: sourceLabel(source) };
+  const compact = useCompactHelp();
+  const [lang] = useLang();
   //  The card's own action beats the surface's. A tile that knows a targeted door (the benchmark
   // proxy) should use it rather than the whole-book refresh its panel offers everything else.
   const surface = useContext(RefreshContext);
@@ -309,6 +313,16 @@ function ProvenanceCard({ source, asOf, fetchedAt, note, where, how, kind, colum
   // the "this is simply the newest valuation AIRS has" prose — which is exactly the source-lag
   // explanation this card no longer trades in. A row read today is current; there is nothing to
   // explain and nothing to act on.
+  if (compact) return <CompactHelp summary={what ?? note ?? s.label} method={how}
+    worked={worked} notation={legend?.length ? <Legend items={legend} /> : null} calculation={calculation}
+    facts={<>
+      <div>{where ?? s.label}{what && note && <span> · {note}</span>}</div>
+      <div>{when ?? (column ? (lang === 'nl' ? 'Datums staan bij de individuele waarden.' : 'Dates are shown with individual values.')
+        : asOf ? asOf : (lang === 'nl' ? 'Bron heeft geen vastgelegde datum.' : 'Source date unavailable.'))}</div>
+      {!column && fetchedAt && fetchedAt.slice(0, 10) !== asOf?.slice(0, 10) && <div>{lang === 'nl' ? 'Opgehaald' : 'Read'} · {fetchedAt.slice(0, 10)}</div>}
+      {f.stale && <FreshnessPill stale label={f.label} />}
+      {refreshAction && fresh.stale && <RefreshField action={refreshAction} />}
+    </>} />;
   return (
     // The shared shell — identical chrome to every other tooltip; only the FIELDS differ.
     <TipCard label={what ? 'What' : 'Where'} title={what ?? s.label}

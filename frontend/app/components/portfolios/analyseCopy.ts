@@ -174,6 +174,9 @@ const en = {
     routeTitle: (label: string, bookPct: string, value: string, rowPct?: string) => `${label}: ${bookPct}% of the book · ${value}${rowPct ? ` · ${rowPct}% of this position` : ''}`,
   },
   classRow: {
+    cashReturnExplanation: 'Cash has a 0% price return. Any interest is shown separately as income.',
+    returnExplanation: 'The average AIRS return this year for this asset class. Positions with a larger starting value in AIRS count more.',
+    weightExplanation: 'The share of the total portfolio value held in this asset class. The total includes cash.',
     fundamentalTitle: (count: number, bucket: string) => `Blended owner earnings and price steadiness across the ${count} priced name${count === 1 ? '' : 's'} in ${bucket}, weighted by what the book holds today.`,
     weightWhat: (bucket: string) => `${bucket}'s share of the book TODAY.`,
     chartWeightNote: 'the allocation chart’s own figure — cash included', rowsWeightNote: 'summed from the rows below',
@@ -383,6 +386,9 @@ const nl: AnalyseCopy = {
     routeTitle: (label, bookPct, value, rowPct) => `${label}: ${bookPct}% van het boek · ${value}${rowPct ? ` · ${rowPct}% van deze positie` : ''}`,
   },
   classRow: {
+    cashReturnExplanation: 'Cash heeft een koersrendement van 0%. Eventuele rente staat afzonderlijk bij de inkomsten.',
+    returnExplanation: 'Het gemiddelde AIRS-rendement dit jaar voor deze beleggingscategorie. Posities met een grotere beginwaarde in AIRS tellen zwaarder mee.',
+    weightExplanation: 'Het aandeel van deze beleggingscategorie in de totale portefeuillewaarde. De totale waarde is inclusief cash.',
     fundamentalTitle: (count, bucket) => `Samengevoegde owner earnings en koersstabiliteit over de ${count} geprijsde positie${count === 1 ? '' : 's'} in ${bucket}, gewogen naar het huidige boekbelang.`,
     weightWhat: (bucket) => `Het HUIDIGE aandeel van ${bucket} in het boek.`,
     chartWeightNote: 'het eigen cijfer uit de allocatiegrafiek — inclusief liquiditeiten', rowsWeightNote: 'opgeteld uit de rijen hieronder',

@@ -350,7 +350,8 @@ def _rate(fx: dict[str, dict[str, float]], ccy: str | None, when: str) -> float 
 def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]],
                  fx: dict[str, dict[str, float]],
                  start_anchor: str,
-                 marks: dict[int, dict] | None = None) -> tuple[list[dict], list[dict]]:
+                 marks: dict[int, dict] | None = None, *,
+                 allow_single_mark: bool = False) -> tuple[list[dict], list[dict]]:
     """Per-member return + start-of-window cap, for ONE window. Returns (rows, split_adjusted).
 
     Extracted so a caller can price SEVERAL windows off ONE price load — and, more importantly,
@@ -370,6 +371,9 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
     """
     rows: list[dict] = []
     adjusted: list[dict] = []
+    # Published constituent weights already exist at their snapshot date. With no
+    # newer close, their price drift is zero; a return-window calculation still
+    # requires distinct endpoints. Only the workbook rollforward opts into this.
     for m in members:
         if marks is not None:
             mk = marks.get(m["company_id"])
@@ -395,7 +399,9 @@ def _window_rows(members: list[dict], closes: dict[int, list[tuple[str, float]]]
                 continue                    # no opening mark -> it was not in the basket
             last_d, last_p = s[-1]
             first_d, first_p = first
-        if first_p <= 0 or last_d <= first_d:
+        if first_p <= 0 or last_p <= 0 or last_d < first_d:
+            continue
+        if last_d == first_d and (not allow_single_mark or first_p != last_p):
             continue
 
         ccy = m.get("currency") or "USD"

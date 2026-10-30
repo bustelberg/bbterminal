@@ -204,21 +204,60 @@ describe('AIRS monthly report', () => {
       .toContain('Weighted benchmark · EUR +1.55%');
   });
 
-  it('compounds monthly portfolio and benchmark returns rather than adding them', async () => {
+  it('uses the reported annual source instead of compounding monthly returns', async () => {
     const months = Array.from({ length: 10 }, (_, i) => ({ ...observation,
       month: `2026-${String(i + 1).padStart(2, '0')}`, rendement: i === 0 ? 10 : i === 1 ? -10 : 0,
     }));
     const weighted_benchmark = Object.fromEntries(months.map((row, i) => [row.month, {
       return_pct: i < 2 ? 5 : 0, start_date: '2026-01-01', end_date: '2026-10-23', source: 'Policy',
     }]));
-    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...response(), months, weighted_benchmark })));
+    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...response(), months, weighted_benchmark, year_summary: { return_pct: 7.59, benchmark_pct: 5.12, start: '2026-06-01', end: '2026-10-23' } })));
     await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
     const summary = host.querySelector('[aria-label="Compounded returns"]');
-    expect(summary?.textContent).toContain('-1.00%');
-    expect(summary?.textContent).toContain('+10.25%');
+    expect(summary?.textContent).toContain('+7.59%');
+    expect(summary?.textContent).toContain('+5.12%');
     expect(summary?.children).toHaveLength(3);
-    expect(summary?.lastElementChild?.textContent).toContain('Excess-11.25pp');
+    expect(summary?.lastElementChild?.textContent).toContain('Excess+2.47pp');
     expect(summary?.compareDocumentPosition(host.querySelector('nav')!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+
+  it('selects a historical year with twelve months and its own annual headline', async () => {
+    vi.setSystemTime(new Date('2027-01-04T12:00:00Z'));
+    vi.mocked(apiFetch).mockImplementation(async (url) => {
+      const month = new URL(String(url), 'http://localhost').searchParams.get('month')!;
+      return new Response(JSON.stringify({ ...response(), month, available_years: [2027, 2026],
+        months: month.startsWith('2026') ? [{ ...observation, month: '2026-12', periode: '2026-12-31' }] : [],
+        year_summary: month.startsWith('2026')
+          ? { return_pct: 7.59, benchmark_pct: 5.12, start: '2026-06-01', end: '2026-12-31', complete: true }
+          : { return_pct: null, benchmark_pct: null, start: null, end: null, complete: false },
+      }));
+    });
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Portfolio"
+      overviewReturns={{ portfolio: 99, benchmark: 98, from: '2026-01-01', asOf: '2026-12-31' }} />));
+    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).not.toContain('+99.00%');
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Reporting year"]')!;
+    await act(async () => { select.value = '2026'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(host.querySelectorAll('nav[aria-label="Months"] button')).toHaveLength(12);
+    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).toContain('+7.59%');
+    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).toContain('Annual return');
+    expect(apiFetch).toHaveBeenLastCalledWith(expect.stringContaining('month=2026-12&include_details=false'), expect.anything());
+    expect(startJob).not.toHaveBeenCalled();
+    await act(async () => { select.value = '2027'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(host.querySelectorAll('nav[aria-label="Months"] button')).toHaveLength(1);
+    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).not.toContain('+99.00%');
+  });
+
+  it('keeps last year selectable on January 1 without showing its return as new YTD', async () => {
+    vi.setSystemTime(new Date('2027-01-01T12:00:00Z'));
+    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...response(), month: '2027-01',
+      months: [], available_years: [2027, 2026], year_summary: { return_pct: null, benchmark_pct: null, start: null, end: null },
+    })));
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Portfolio"
+      overviewReturns={{ portfolio: 7.59, benchmark: 5.12, asOf: '2026-12-31', from: '2026-06-01' }} />));
+    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).not.toContain('+7.59%');
+    expect(host.querySelector('select')?.textContent).toContain('2026');
+    expect(startJob).not.toHaveBeenCalled();
   });
 
   it('automatically loads missing results on selection without fabricating zero returns', async () => {

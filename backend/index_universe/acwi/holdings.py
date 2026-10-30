@@ -1,13 +1,15 @@
-"""iShares MSCI ACWI ETF fund XML parser.
+"""Read the newest committed official iShares export (CSV or legacy XML XLS).
 
-The fund publishes its holdings as an XML Spreadsheet 2003 file —
-`iShares-MSCI-ACWI-ETF_fund.xls` next to this module. This file is the
-sole source of "what's currently in ACWI"; historical reconstruction
-combines it with MSCI announcement events.
+CSV source: https://www.ishares.com/us/products/239600/ishares-msci-acwi-etf/latest-holdings.csv
+Membership includes every source equity, independently of local listing/price coverage.
+Historical reconstruction combines the current snapshot with MSCI announcement events.
 """
 from __future__ import annotations
 
 import os
+import csv
+import math
+from datetime import datetime
 
 from lxml import etree
 
@@ -17,6 +19,7 @@ from lxml import etree
 # stays intact.
 _DATA_DIR = os.path.dirname(os.path.dirname(__file__))
 _FILE = os.path.join(_DATA_DIR, "iShares-MSCI-ACWI-ETF_fund.xls")
+_CSV_FILE = os.path.join(_DATA_DIR, "iShares-MSCI-ACWI-ETF_holdings.csv")
 _NS = {"ss": "urn:schemas-microsoft-com:office:spreadsheet"}
 
 
@@ -52,6 +55,11 @@ def load_acwi_holdings() -> tuple[list[dict], str]:
 
     # Row 0 contains the as-of date (e.g. "15-Apr-2026")
     as_of = rows[0][0] if rows and rows[0] else ""
+    if os.path.isfile(_CSV_FILE):
+        current, current_date = _parse_holdings_csv(_CSV_FILE)
+        original_date = datetime.strptime(as_of, '%d-%b-%Y').date().isoformat()
+        if current_date >= original_date:
+            return current, current_date
 
     # Find the header row (starts with "Ticker")
     header_idx = None
@@ -74,3 +82,23 @@ def load_acwi_holdings() -> tuple[list[dict], str]:
         holdings.append(record)
 
     return holdings, as_of
+
+
+def _parse_holdings_csv(path: str) -> tuple[list[dict], str]:
+    """Keep the original issuer snapshot; derive precision from values, not rounded weights."""
+    with open(path, encoding='utf-8-sig', newline='') as stream:
+        rows = list(csv.reader(stream))
+    stamp = next((row[1].strip() for row in rows if row and row[0] == 'Fund Holdings as of' and len(row) > 1), '')
+    as_of = datetime.strptime(stamp, '%b %d, %Y').date().isoformat()
+    index = next(i for i, row in enumerate(rows) if row[:2] == ['Ticker', 'Name'])
+    records = [dict(zip(rows[index], row)) for row in rows[index + 1:] if row]
+    equities = [row for row in records if row.get('Asset Class') == 'Equity' and row.get('Name')]
+    values = [float(row['Market Value'].replace(',', '')) for row in equities]
+    if len(equities) < 1000 or any(not math.isfinite(value) or value < 0 for value in values) or sum(values) <= 0:
+        raise ValueError('Invalid/incomplete official ACWI holdings snapshot')
+    total = sum(values)
+    for row, value in zip(equities, values):
+        # Small constituents round to 0.00% in the CSV but have real, nonzero weights.
+        row['Weight (%)'] = str(value / total * 100)
+        row['Currency'] = row.get('Market Currency') or row.get('Currency') or ''
+    return equities, as_of

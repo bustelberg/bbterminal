@@ -27,14 +27,11 @@ import { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
-import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
 import { useRiskCopy } from './riskCopy';
 import LoadingDots from './LoadingDots';
-import { v } from '../../../lib/dynamicValue';
-import { dayOf } from './asOfLine';
-import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { withWorked, subNum } from './workedFormula';
+import type { SourceKey } from '../../../lib/provenance';
 import type { RiskCorrelation } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
@@ -61,28 +58,6 @@ function cellStyle(v: number | null, isDiag: boolean): CSSProperties {
   return { ...base, background: `color-mix(in srgb, ${hue} ${pct}%, transparent)` };
 }
 
-/**
- * Every symbol this view uses, defined once — same rule as `TrackingErrorView`'s own table.
- *
- *  `rho` APPEARS ON THREE OF THE FOUR CARDS (ρ itself, R² which squares it, and σₐ which is
- * built from it). Three hand-written definitions of one symbol inside one view is how a reader
- * learns the legend is decorative.
- */
-const LEGEND = {
-  pb: (bookName: string, bench: string | null | undefined) =>
-    `${v(bookName)}'s and ${v(bench)}'s return series over the window`,
-  cov: 'how far the two move together — positive when they rise and fall in the same periods',
-  sigmas: 'the standard deviation of each series on its own',
-  rho: (bench: string | null | undefined) =>
-    `the correlation between the sleeve and ${v(bench)} — the first tile`,
-  rhoAnswer: 'the answer: the covariance stripped of both scales, so it lands in −1…+1',
-  r2: (bookName: string) =>
-    `the share of ${v(bookName)}'s movement explained by the index`,
-  rhoIJ: 'correlation for one pair of holdings',
-  m: 'number of pairs included',
-  rhoBar: 'average correlation across all included pairs',
-};
-
 function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
 }) {
@@ -97,7 +72,7 @@ function Tile({ label, value, tone, info }: {
 }
 
 export default function CorrelationView({
-  holdings, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+  holdings, portfolioName, portfolioAsOf,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
@@ -109,6 +84,7 @@ export default function CorrelationView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
+  const facts = useInfoFacts();
   const benchmark = 'ACWI';
   const stockHoldings = holdings.filter((holding) =>
     !holding.is_fund
@@ -159,31 +135,8 @@ export default function CorrelationView({
   const labels = data?.labels ?? [];
   /** Every pair the matrix COULD have — n(n−1)/2.  Printed beside the measured count so a
    *  book whose thin pairs were dropped shows the gap instead of hiding it in the divisor. */
-  const pairsPossible = (labels.length * (labels.length - 1)) / 2;
   const matrix = data?.matrix ?? [];
 
-  /**
-   * What every card here is measured from, and over what window — built once.
-   *
-   *  The same two strings the tracking-error view builds, from the same fields of the same
-   * `build_paired_series` payload. These two panels claim an identity between their headline
-   * figures (σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ); quoting different windows or different sources for it
-   * would undermine the one claim they exist to let a reader check.
-   */
-  const where = data?.available
-    ? `${v(data.observations)} ${v(data.frequency)} returns on one aligned calendar, prices from `
-      + `${v(sourceField('yfinance'))} at ${v(sourceVendor('yfinance'))}, weights from `
-      + `${v(sourceLabel(portfolioSource))}, against ACWI's tracker.`
-    : '';
-
-  /**  TWO CLOCKS — a price window and a weights date. See the  in `TrackingErrorView`. */
-  const when = data?.available
-    ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
-      + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
-      + `${v(portfolioName)} weights: ${v(dayOf(portfolioAsOf) ?? 'no recorded date')}`
-      + `${dayOf(portfolioFetchedAt) && dayOf(portfolioFetchedAt) !== dayOf(portfolioAsOf)
-        ? ` (read ${v(dayOf(portfolioFetchedAt))})` : ''}`
-    : '';
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
@@ -202,51 +155,16 @@ export default function CorrelationView({
         <>
           <div className="flex flex-wrap justify-center gap-3">
             <Tile label={`${portfolioName} — ${t.corr.rhoVs('ACWI')}`} value={rho2(data.benchmark_corr)}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.corr.cards.rho.what}
-                where={where}
-                when={when}
-                how="Weekly EUR returns of today’s individual stock basket compared with ACWI. Profile allocation percentages are not applied; identical relative stock weights give the same correlation across profiles."
-                worked={data.benchmark_corr == null ? '' : withWorked(
-                  String.raw`\rho = \dfrac{\mathrm{Cov}(p,\, b)}{\sigma_p \,\sigma_b}`,
-                  String.raw`\sigma_p = ${subNum(data.portfolio_vol_pct ?? 0, 2)}\%`
-                  + String.raw`\quad \sigma_b = ${subNum(data.benchmark_vol_pct ?? 0, 2)}\%`
-                  + String.raw`\quad\Rightarrow\quad \rho = ${data.benchmark_corr.toFixed(4)}`)}
-                legend={[
-                  { sym: 'p,\\; b', is: LEGEND.pb(portfolioName, 'ACWI') },
-                  { sym: String.raw`\mathrm{Cov}(p,\, b)`, is: LEGEND.cov },
-                  { sym: String.raw`\sigma_p,\; \sigma_b`, is: LEGEND.sigmas },
-                  { sym: String.raw`\rho`, is: LEGEND.rhoAnswer },
-                ]}
-                />} />} />
+              info={<InfoTip className="ml-0.5" content={<SimpleExplanation details={<>
+                <p>{facts.sample(data.window_from, data.window_to, data.observations, data.frequency)}</p>
+                <p>{facts.weights(portfolioAsOf)}</p>
+              </>}>{t.corr.cards.rho.how}</SimpleExplanation>} />} />
             <Tile label={t.corr.meanPair}
               value={rho2(data.mean_pair_corr)}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.corr.cards.meanPair.what}
-                where={`${t.corr.pairsMeasured(String(data.pairs_measured), String(pairsPossible), String(data.min_pair_observations), String(labels.length))} ${t.common.pricedFrom(sourceField('yfinance'), sourceVendor('yfinance'))}`}
-                when={when}
-                /*  THE SUM IS THE NUMERATOR IN BOTH HALVES. Written as `(1/m) Σ` the symbolic
-                   line has a coefficient beside a sum while the substituted line is one
-                   fraction — the same arithmetic, but a reader matching them finds 255.53
-                   where the 1 should be and no Σ anywhere. Reported as not making sense, and
-                   it did not: a worked line has to sit position-for-position under its
-                   formula or it is two expressions, not one checked twice.
-                    AND `m` PRINTS AS AN INTEGER. `workedRatio` gives both operands two
-                   decimals, which is right for money and wrong for a count — "946.00 pairs"
-                   reads as a measurement, so the division is built here instead. */
-                worked={data.pair_rho_sum == null || !data.pairs_measured ? '' : withWorked(
-                  String.raw`\bar{\rho} = \dfrac{\sum_{\text{pairs}} \rho_{ij}}{m}`,
-                  String.raw`\dfrac{${subNum(data.pair_rho_sum, 2)}}{${data.pairs_measured}}`
-                  + ` = ${rho2(data.mean_pair_corr)}`)}
-                legend={[
-                  { sym: String.raw`\rho_{ij}`, is: LEGEND.rhoIJ },
-                  { sym: 'm', is: LEGEND.m },
-                  { sym: String.raw`\bar{\rho}`, is: LEGEND.rhoBar },
-                ]}
-                /*  NO `how`. The one fact it carried — that the mean is UNWEIGHTED, so this is a
-                   question about the names rather than the sizes — is already the `rhoBar` legend
-                   row, attached to the symbol it qualifies. */
-                />} />} />
+              info={<InfoTip className="ml-0.5" content={<SimpleExplanation details={<>
+                <p>{facts.sample(data.window_from, data.window_to, data.observations, data.frequency)}</p>
+                <p>{facts.pairs(data.pairs_measured, labels.length * (labels.length - 1) / 2, data.min_pair_observations)}</p>
+              </>}>{t.corr.cards.meanPair.how}</SimpleExplanation>} />} />
           </div>
 
           {data.cadence_note && <p className="text-[11px] text-warn-300">{data.cadence_note}</p>}

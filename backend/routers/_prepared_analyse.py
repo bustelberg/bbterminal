@@ -25,6 +25,7 @@ _FILES = tuple(sorted({
     _ROOT / 'routers' / '_benchmark_index.py', _ROOT / 'routers' / '_weighted_benchmark.py',
     _ROOT / 'config' / 'airs_strategy_map.json',
     _ROOT / 'index_universe' / 'iShares-MSCI-ACWI-ETF_fund.xls',
+    _ROOT / 'index_universe' / 'iShares-MSCI-ACWI-ETF_holdings.csv',
 }))
 _unavailable_until = 0.0
 

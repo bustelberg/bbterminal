@@ -20,14 +20,11 @@
  */
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
-import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
 import { useRiskCopy } from './riskCopy';
 import LoadingDots from './LoadingDots';
-import { v } from '../../../lib/dynamicValue';
-import { dayOf } from './asOfLine';
-import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
-import { withWorked, subNum } from './workedFormula';
+import type { SourceKey } from '../../../lib/provenance';
 import type { PortfolioDrawdown } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
@@ -37,20 +34,6 @@ const pct2 = (v: number | null | undefined) => (v == null ? '—' : `${v.toFixed
 const day = (d: string | null | undefined) =>
   (!d ? '—' : new Date(`${d}T00:00:00`).toLocaleDateString(undefined,
     { day: 'numeric', month: 'short', year: 'numeric' }));
-
-/**
- * Every symbol this view uses, defined once — same rule as the other three risk views.
- *
- *  A drawdown is three quantities, not one, and the reader has to hold all three at once: the
- * wealth curve, its running maximum, and the gap between them. Defining them per card would be
- * three chances to describe the high-water mark differently.
- */
-const LEGEND = {
-  Rs: (bookName: string) => `${v(bookName)}'s return in period s, in EUR`,
-  W: 'the value at period t of one euro compounded from the start',
-  M: 'the highest value reached up to period t',
-  MDD: 'the deepest fall below a previous peak',
-};
 
 function Tile({ label, value, tone, info }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
@@ -66,7 +49,7 @@ function Tile({ label, value, tone, info }: {
 }
 
 export default function DrawdownView({
-  holdings, benchmark, benchmarkWeights, portfolioName, portfolioAsOf, portfolioFetchedAt, portfolioSource,
+  holdings, benchmark, benchmarkWeights, portfolioName, portfolioAsOf,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
@@ -78,6 +61,7 @@ export default function DrawdownView({
   portfolioSource: SourceKey;
 }) {
   const t = useRiskCopy();
+  const facts = useInfoFacts();
   const requestUrl = `${API_URL}/api/airs/portfolio/drawdown`
     + `?benchmark=${encodeURIComponent(benchmark)}&frequency=daily&${riskHistoryQuery()}`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
@@ -91,30 +75,10 @@ export default function DrawdownView({
     return b as PortfolioDrawdown;
   }, 'drawdown', 'the drawdown could not be computed');
 
-  const worst = data?.worst;
   const topEpisodes = [...(data?.episodes ?? [])]
     .sort((a, b) => a.depth_pct - b.depth_pct)
     .slice(0, 10);
 
-  /**
-   * What every card here is measured from, and over what window — built once.
-   *
-   *  The same two strings the other three risk views build, from one `build_paired_series`.
-   */
-  const where = data?.available
-    ? `${v(data.observations)} ${v(data.frequency)} returns, prices from ${v(sourceField('yfinance'))} `
-      + `at ${v(sourceVendor('yfinance'))}, weights from ${v(sourceLabel(portfolioSource))}, `
-      + `against ${v(data.benchmark)}'s tracker.`
-    : '';
-
-  /**  TWO CLOCKS — a price window and a weights date. See the  in `TrackingErrorView`. */
-  const when = data?.available
-    ? `Returns: ${v(data.window_from ?? 'no recorded start')} to `
-      + `${v(data.window_to ?? 'no recorded end')} (${v(data.observations)} periods)\n`
-      + `${v(portfolioName)} weights: ${v(dayOf(portfolioAsOf) ?? 'no recorded date')}`
-      + `${dayOf(portfolioFetchedAt) && dayOf(portfolioFetchedAt) !== dayOf(portfolioAsOf)
-        ? ` (read ${v(dayOf(portfolioFetchedAt))})` : ''}`
-    : '';
 
   return (
     <div className="space-y-3">
@@ -136,22 +100,11 @@ export default function DrawdownView({
             </p>
             <Tile label={t.dd.maxDrawdown(data.frequency)} value={pct2(data.max_drawdown_pct)}
               tone="text-neg-300"
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.dd.cards.maxDrawdown.what}
-                where={where}
-                when={when}
-                worked={data.max_drawdown_pct == null ? '' : withWorked(
-                  String.raw`W_t = \prod_s (1 + R_s)\qquad M_t = \max_{s \le t} W_s\qquad MDD = \min_t \left( \dfrac{W_t}{M_t} - 1 \right)`,
-                  String.raw`\text{${day(worst?.peak_date)}} \;\rightarrow\; \text{${day(worst?.trough_date)}}`
-                  + String.raw` \;=\; ${subNum(data.max_drawdown_pct, 2)}\%`)}
-                legend={[
-                  { sym: 'R_s', is: LEGEND.Rs(portfolioName) },
-                  { sym: 'W_t', is: LEGEND.W },
-                  { sym: 'M_t', is: LEGEND.M },
-                  { sym: String.raw`MDD`, is: LEGEND.MDD },
-                ]}
-                how={t.dd.cards.maxDrawdown.how}
-                />} />} />
+              info={<InfoTip className="ml-0.5" content={<SimpleExplanation details={<>
+                {data.worst && <p>{facts.worst(data.worst.peak_date, data.worst.trough_date, data.max_drawdown_pct)}</p>}
+                <p>{facts.sample(data.window_from, data.window_to, data.observations, data.frequency)}</p>
+                <p>{facts.weights(portfolioAsOf)}</p>
+              </>}>{t.dd.cards.maxDrawdown.how}</SimpleExplanation>} />} />
           </div>
 
           {topEpisodes.length > 0 && (

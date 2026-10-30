@@ -2105,6 +2105,7 @@ def _body_dashboard_freshness(ctx=None) -> tuple[str, dict]:
 
 def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
     from dashboard_daily import prepare_month
+    from airs_history import finalise_previous_year
     from routers._airs_accounts import list_accounts
     from routers._airs_price_check import refresh_price_checks
     from routers._prepared_analyse import run_controlled
@@ -2112,6 +2113,12 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
     def stop():
         return _cancel_requested(ctx)
     accounts = [row["portefeuille"] for row in list_accounts() if row.get("holdings")]
+    try:
+        summary["year_end"] = finalise_previous_year(ctx)
+        if any(row["errors"] for row in summary["year_end"]):
+            failures["year_end"] = summary["year_end"]
+    except Exception as exc:
+        failures["year_end"] = str(exc)
     try:
         summary["checks"] = refresh_price_checks(accounts, should_stop=stop)
         if summary["checks"].get("errors"):

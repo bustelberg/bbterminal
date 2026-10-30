@@ -55,6 +55,7 @@ from asset_pipeline.geo import normalize_country
 from asset_pipeline.resolve import same_company
 from index_universe.acwi.holdings import load_acwi_holdings
 from index_universe.acwi.yahoo_map import yahoo_symbol
+from index_universe.acwi.identity import issuer_key, share_class
 
 log = logging.getLogger(__name__)
 
@@ -69,6 +70,9 @@ SOURCE = "ishares_acwi"
 _REVIEWED_INTERLISTINGS = {
     ("LIN", "LINDE PLC", "NASDAQ", "United States"): ("IE000S9YS762", "IE00BZ12WP82"),
 }
+# Everpure's NYSE ticker changed on 2026-04-17; its Class A security/ISIN did not.
+# https://www.everpuredata.com/company/newsroom/press-releases/everpure-to-change-ticker-symbol.html
+_REVIEWED_RENAMES = {('NYSE', 'P', 'everpure'): 'US74624M1027'}
 
 
 def _universe_id(label: str) -> int | None:
@@ -176,6 +180,9 @@ def _interlisted(cands: list[dict], location: str, name: str,
         return None
     same = [c for c in cands
             if normalize_country(codes.get((c.get("isin") or "  ")[:2].upper())) == want]
+    wanted_class = share_class(name)
+    if wanted_class:
+        same = [candidate for candidate in same if share_class(candidate.get('name')) == wanted_class]
     if len(same) > 1:
         same = [c for c in same if same_company(name, c.get("name") or "")]
     return same[0] if len(same) == 1 else None
@@ -188,6 +195,10 @@ def resolve() -> tuple[list[dict], dict]:
     executions = _executions()
     by_symbol = _assets_by_symbol_from(executions)
     by_base = _by_base_ticker(executions)
+    by_name: dict[str, list[dict]] = {}
+    for execution in executions:
+        if execution.get('analysis_id') is not None:
+            by_name.setdefault(issuer_key(execution.get('name')), []).append(execution)
     codes = _country_by_code()
 
     rows: dict[int, dict] = {}
@@ -199,9 +210,17 @@ def resolve() -> tuple[list[dict], dict]:
         if not sym:
             unplaced.append(h.get("Exchange") or "?")
             continue
-        aid = by_symbol.get(sym.upper())
+        reviewed_isin = _REVIEWED_RENAMES.get((h.get('Exchange'), h.get('Ticker'), issuer_key(h.get('Name'))))
+        if reviewed_isin:
+            renamed = [row for row in executions if row.get('isin') == reviewed_isin
+                       and row.get('analysis_id') is not None and issuer_key(row.get('name')) == issuer_key(h.get('Name'))]
+            aid = renamed[0]['analysis_id'] if len(renamed) == 1 else None
+        else:
+            aid = by_symbol.get(sym.upper())
         held_sym = sym.upper() if aid is not None else None
-        if aid is None:
+        if reviewed_isin and aid is not None:
+            held_sym = renamed[0].get('yahoo_symbol')
+        if aid is None and not reviewed_isin:
             #  The exact symbol first, always. This runs only when the file's own venue yields
             # nothing, so a constituent we hold where iShares says it is can never be diverted to
             # another listing by the looser rule below.
@@ -210,9 +229,9 @@ def resolve() -> tuple[list[dict], dict]:
             if hit is None:
                 reviewed_isins = _REVIEWED_INTERLISTINGS.get((
                     h.get("Ticker"), h.get("Name"), h.get("Exchange"), h.get("Location")), ())
-                for reviewed_isin in reviewed_isins:
+                for candidate_isin in reviewed_isins:
                     reviewed = [row for row in by_base.get(_base(sym.upper()), [])
-                                if row.get("isin") == reviewed_isin
+                                if row.get("isin") == candidate_isin
                                 and same_company(h.get("Name") or "", row.get("name") or "")]
                     if len(reviewed) == 1:
                         hit = reviewed[0]
@@ -220,6 +239,15 @@ def resolve() -> tuple[list[dict], dict]:
             if hit is not None:
                 aid = hit["analysis_id"]
                 held_sym = (hit.get("yahoo_symbol") or "").strip().upper()
+                interlisted += 1
+        if aid is None and not reviewed_isin:
+            # Different listing tickers (SHEL.L / SHELL.AS, REL.L / REN.AS): exact issuer
+            # spelling plus country and class, never fuzzy name or a merger successor.
+            candidates = [row for row in by_name.get(issuer_key(h.get('Name')), [])
+                          if share_class(row.get('name')) == share_class(h.get('Name'))]
+            hit = _interlisted(candidates, h.get('Location') or '', h.get('Name') or '', codes)
+            if hit is not None:
+                aid, held_sym = hit['analysis_id'], (hit.get('yahoo_symbol') or '').strip().upper()
                 interlisted += 1
         if aid is None:
             unheld += 1

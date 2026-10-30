@@ -82,6 +82,10 @@ def _store(portefeuille: str, van: str, tot: str, sheet) -> str | None:
     the worst of both. Returns the reason instead, for the caller to surface.
     """
     try:
+        from airs_history import archive_source
+        archive_source(supabase, portefeuille, van, tot, "transactions", {
+            "columns": sheet.columns, "kinds": sheet.kinds, "rows": sheet.rows,
+        })
         supabase.table("airs_transactie_snapshot").delete().eq(
             "portefeuille", portefeuille).execute()
         supabase.table("airs_transactie_snapshot").insert({

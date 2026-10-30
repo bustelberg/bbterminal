@@ -27,6 +27,9 @@ def test_workbook_identity_bridges_amazon_and_sp_global_spellings(monkeypatch):
     file_rows = [{"analysis_id": aid, "name": names[ticker], "weight_pct": 50, "currency": "EUR"}
                  for aid, ticker in [(1, "AMZN"), (2, "SPGI")]]
     monkeypatch.setattr(membership, "resolve", lambda: (file_rows, {"as_of": as_of}))
+    import index_universe.acwi.holdings as source
+    monkeypatch.setattr(source, 'load_acwi_holdings', lambda: (
+        [row for row in workbook if row['Ticker'] in ('AMZN', 'SPGI')], as_of))
     monkeypatch.setattr(A, "load_rows_via_copy", lambda *_args: [])
     monkeypatch.setattr(A, "_grid_by_isin", lambda _ids: {
         "US0231351067": {"analysis_id": 1, "gf_company_name": "Amazon.com Inc"},

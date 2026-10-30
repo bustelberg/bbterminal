@@ -851,11 +851,7 @@ export default function MetricGrowthCard({
                     figure, not a fiscal year — and "Latest" over a number nobody filed is the kind
                     of quiet mislabel this tab keeps removing. */}
                 <Stat label={ltm ? 'LTM' : 'Latest'} value={fmt(latest)} color={chartTheme.accent}
-                  info={ltm ? <InfoTip text={'The trailing twelve months to the newest quarterly '
-                    + 'filing — past the last full fiscal year, so it is drawn as an extra point at '
-                    + 'its real position on the axis. It is NOT in the trend fit or the CAGR: the '
-                    + 'interval into it is a quarter or two, and regressing it as a full year would '
-                    + 'overstate the growth rate.'} /> : undefined} />
+                  info={ltm ? <InfoTip text={'Reported results for the latest twelve months. Shown separately because the trend and growth rate use complete financial years.'} /> : undefined} />
                 {ratioStats.bench && (
                   <Stat label={benchTileLabel(ltm ? 'LTM' : 'Latest', benchLabel)}
                     value={fmt(ratioStats.bench.latest)} color={chartTheme.pos} />

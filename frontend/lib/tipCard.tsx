@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import Formula from './formula';
+import { CompactHelp, useCompactHelp } from './compactHelp';
 import DynamicText from './dynamicValue';
 import { useLang, type Lang } from './i18n';
 
@@ -45,6 +46,12 @@ export function TipCard({ label, labelSuffix, title, subtitle, children }: {
   subtitle?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const compact = useCompactHelp();
+  if (compact) return <span className="block min-w-[13rem] space-y-2 text-xs leading-relaxed">
+    {title && <span className="block font-medium text-fg-strong">{title}</span>}
+    {labelSuffix}{subtitle && <span className="block text-fg-muted">{subtitle}</span>}
+    {children}
+  </span>;
   return (
     <span className="block space-y-2 min-w-[13rem]">
       <span className="block">
@@ -161,11 +168,15 @@ export function AspectCard({ what, where, when, how, worked, legend, calculation
 }) {
   // The body comes from the caller's translated copy.  These four structural labels used to be
   // hard-coded English, producing a Dutch Deep Valuation explanation under English headings.
+  const compact = useCompactHelp();
   const [globalLang] = useLang();
   const lang = useContext(TipCardLanguage) ?? globalLang;
   const label = lang === 'nl'
     ? { what: 'Wat', where: 'Waar', when: 'Wanneer', how: 'Hoe' }
     : { what: 'What', where: 'Where', when: 'When', how: 'How' };
+  if (compact) return <CompactHelp lang={lang} summary={what} method={how} worked={worked}
+    facts={<>{where && <div>{prose(where)}</div>}{when && <div>{prose(when)}</div>}</>}
+    notation={legend?.length ? <Legend items={legend} /> : null} calculation={calculation} />;
   return (
     <TipCard label={label.what} title={prose(what)}>
       {where != null && where !== '' && <Field label={label.where}>{prose(where)}</Field>}
@@ -212,7 +223,12 @@ export function splitTipTitle(text: string): { title?: string; body: string } {
 
 /** A plain explanatory tooltip, in the same shell the provenance card uses. */
 export function AboutCard({ text }: { text: string }) {
+  const compact = useCompactHelp();
   const { title, body } = splitTipTitle(text);
+  if (compact) return <div className="space-y-1 text-xs leading-relaxed">
+    {title && <p className="font-medium text-fg-strong">{title}</p>}
+    <p className="whitespace-pre-line">{prose(body)}</p>
+  </div>;
   return (
     <TipCard label="About" title={title}>
       {/* `whitespace-pre-line` is load-bearing: call sites use \n\n for paragraph breaks and the

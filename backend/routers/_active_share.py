@@ -41,6 +41,7 @@ from threading import RLock
 
 from common.pg import load_rows_via_copy
 from deps import IN_CHUNK_SIZE, supabase
+from index_universe.acwi.identity import issuer_key, membership_key
 
 
 def is_direct_equity_stock(holding: dict) -> bool:
@@ -56,18 +57,6 @@ def is_direct_equity_stock(holding: dict) -> bool:
 #  `currency` IS THE LISTING'S, and the exposure view needs it — see `_portfolio_exposure`.
 _GRID_COLS = "isin,gf_company_name,name,currency,status,analysis_id,yahoo_symbol"
 _EXECUTION_COLS = "isin,analysis_id,yahoo_symbol,name,status"
-
-# Trailing corporate forms, stripped before two names are called the same issuer. Deliberately
-# SHORT and suffix-only — see `_issuer_key`.
-_SUFFIX = re.compile(
-    r"[\s,.]+(inc|inc\.|corp|corporation|co|company|plc|ltd|limited|nv|n\.v\.|sa|s\.a\.|ag|se|ab|"
-    r"as|a/s|oyj|spa|s\.p\.a\.|holding|holdings|group|the)\.?$", re.I)
-
-# A SHARE-CLASS or depositary marker — the part of a name that identifies a LINE, not a company.
-#  Anchored at the end and applied in the same loop as `_SUFFIX`; see `_issuer_key`.
-_CLASS = re.compile(
-    r"[\s,.]+(class\s+[a-c]|cl\s+[a-c]|series\s+[a-c]|[ab]\s+shares|shares\s+[ab]|"
-    r"sponsored\s+adr|unsponsored\s+adr|adr|ads|reg\s*s|registered)\.?$", re.I)
 
 _ETF_NAME = re.compile(r"\b(etf|ucits|ishares|vanguard|invesco)\b", re.I)
 
@@ -106,18 +95,7 @@ def _issuer_key(name: str | None) -> str:
     prevent. Neither strip can be "the last one". Bounded: each pass makes the string strictly
     shorter or the loop stops.
     """
-    s = (name or "").strip().lower()
-    if not s:
-        return ""
-    s = re.sub(r"\s+", " ", s.replace("&", " and ").replace("-", " "))
-    for _ in range(6):
-        # A share-class marker is a LINE, not an issuer — the whole point of the exercise.
-        t = _CLASS.sub("", _SUFFIX.sub("", s)).strip(" ,.")
-        if t == s or not t:
-            break
-        s = t
-    # AIRS labels the European listing "Linde EU"; the workbook names the issuer "LINDE PLC".
-    return {"linde eu": "linde"}.get(s, s)
+    return issuer_key(name)
 
 
 def _grid_by_isin(isins: list[str]) -> dict[str, dict]:
@@ -262,8 +240,18 @@ def build_issuer_weights(holdings: list[dict], benchmark: str,
         p_entries = bridged_entries
         port = _fold(p_entries)
 
+    membership_date = coverage.get('workbook_as_of') if benchmark.upper() == 'ACWI' and not benchmark_start else None
+    if membership_date:
+        # Membership is an issuer fact even if the execution/grid bridge is absent or stale.
+        # These exact keys also handle the dated EQR/AVB successor without borrowing old prices.
+        p_entries = [(next((candidate for candidate in (
+            membership_key(key, membership_date), membership_key(name, membership_date)) if candidate in bench),
+            membership_key(key, membership_date)), name, weight) for key, name, weight in p_entries]
+        port = _fold(p_entries)
     return {"port": port, "bench": bench, "stocks_w": stocks_w, "total_all": total_all,
-            "unresolved": unresolved, "coverage": coverage}
+            "unresolved": unresolved, "coverage": coverage,
+            "issuer_by_isin": {(holding.get('isin') or '').strip().upper(): entry[0]
+                               for holding, entry in zip(stocks, p_entries)}}
 
 
 def _risk_profile_holding(holding: dict) -> bool:
@@ -489,7 +477,7 @@ def _benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict:
         saved['issuer_by_asset'] = {int(key): value for key, value in saved['issuer_by_asset'].items()}
         return saved
 
-    cache_key = ("risk-workbook-identity-v7", benchmark.upper(), benchmark_start, date.today().isoformat(),
+    cache_key = ("risk-workbook-identity-v9", benchmark.upper(), benchmark_start, date.today().isoformat(),
                  revision, prepared.code_version() if revision is not None else None)
     with _benchmark_lock:
         return deepcopy(leg(cache_key, lambda: _load_benchmark_weights(benchmark, benchmark_start)))
@@ -523,6 +511,8 @@ def _load_benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict
         # yfinance EUR return, then normalise: this is today's composition implied by that file,
         # not a substitute full-market-cap index.
         from index_universe.acwi.asset_membership import resolve  # noqa: PLC0415
+        from index_universe.acwi.holdings import load_acwi_holdings
+        raw_members, _ = load_acwi_holdings()
         file_rows, file_stats = resolve()
         file_weights = {int(r["analysis_id"]): float(r.get("weight_pct") or 0) for r in file_rows}
         issuer_by_asset = {int(r["analysis_id"]): _issuer_key(r.get("name")) for r in file_rows}
@@ -558,13 +548,14 @@ def _load_benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict
         marks = window_marks(ids, lookback, start, end)
         fx = _fx_to_eur({m.get("currency") or "USD" for m in price_members}, lookback, end)
         priced, _ = _window_rows(price_members, {} if marks else _asset_closes(ids, lookback, end),
-                                 fx, start, marks=marks or None)
+                                 fx, start, marks=marks or None, allow_single_mark=True)
         coverage = {"workbook_as_of": start}
         grown = [(r, file_weights.get(int(r["company_id"]), 0.0) * (1 + float(r.get("return_eur_pct") or 0) / 100))
                  for r in priced if file_weights.get(int(r["company_id"]), 0) > 0 and r.get("return_eur_pct") is not None]
         total = sum(weight for _r, weight in grown)
         if total <= 0:
-            raise IssuerError("ACWI workbook weights could not be rolled forward to today.")
+            raise IssuerError(f"ACWI weights dated {start} have no usable stored opening prices and FX. "
+                              "The daily market-data refresh needs to prepare these inputs.")
         bench = _fold([
             (_issuer_key(r.get("company_name")) or f"isin:{(r.get('isin') or '').upper()}",
              r.get("company_name") or "", weight / total * 100.0)
@@ -601,7 +592,17 @@ def _load_benchmark_weights(benchmark: str, benchmark_start: str | None) -> dict
             key = _issuer_key(name)
             if key:
                 bench.setdefault(key, {"key": key, "name": name, "weight_pct": 0.0})
-        coverage = {**coverage, "workbook_as_of": start}
+        # Asset resolution and price coverage must never decide membership. A raw source
+        # member remains visible even if it has no stored listing at all.
+        for source_row in raw_members:
+            key = membership_key(source_row.get('Name'), start)
+            if key:
+                bench.setdefault(key, {'key': key, 'name': source_row['Name'], 'weight_pct': 0.0})
+        priced_ids = {int(row['company_id']) for row, _ in grown}
+        source_weight = sum(float(str(row.get('Weight (%)') or 0).replace(',', '.')) for row in raw_members)
+        coverage = {**coverage, "workbook_as_of": start,
+                    'covered_pct': (sum(weight for aid, weight in file_weights.items() if aid in priced_ids)
+                                    / source_weight * 100) if source_weight > 0 else None}
     else:
         mem, coverage = members(benchmark)
         cap_total = sum(float(m.get("market_cap_eur") or 0) for m in mem)

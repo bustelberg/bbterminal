@@ -70,8 +70,8 @@ def compute_exposure(holdings: list[dict], benchmark: str) -> dict:
     for h in stocks:
         isin = (h["isin"] or "").strip().upper()
         g = grid.get(isin) or {}
-        key = _as._issuer_key(g.get("gf_company_name") or g.get("name") or h.get("name")) \
-            or f"isin:{isin}"
+        key = (built.get('issuer_by_isin') or {}).get(isin) or _as._issuer_key(
+            g.get("gf_company_name") or g.get("name") or h.get("name")) or f"isin:{isin}"
         w = float(h["weight_pct"]) / stocks_w * 100.0
         val = h.get("value_eur")
         val = float(val) if val is not None else None

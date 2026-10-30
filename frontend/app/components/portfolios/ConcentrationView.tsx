@@ -25,11 +25,12 @@ import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
 import { useRiskCopy } from './riskCopy';
 import LoadingDots from './LoadingDots';
 import { v } from '../../../lib/dynamicValue';
 import { dayOf, dayRange } from './asOfLine';
-import { sourceField, sourceLabel, sourceVendor, type SourceKey } from '../../../lib/provenance';
+import type { SourceKey } from '../../../lib/provenance';
 import type { PortfolioConcentration } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
@@ -57,7 +58,7 @@ function Tile({ label, value, sub, tone, info }: {
 
 export default function ConcentrationView({
   holdings, benchmark, benchmarkStart, portfolioName, portfolioAsOf, portfolioFetchedAt,
-  portfolioSource, benchmarkWeights,
+  benchmarkWeights,
 }: {
   holdings: ActiveShareHolding[];
   benchmark: string;
@@ -71,6 +72,7 @@ export default function ConcentrationView({
   benchmarkWeights?: Record<string, number>;
 }) {
   const t = useRiskCopy();
+  const facts = useInfoFacts();
   const requestUrl = `${API_URL}/api/airs/portfolio/concentration?benchmark=${encodeURIComponent(benchmark)}&view=whole-portfolio-weights-v6`
     + `${benchmarkStart ? `&benchmark_start=${encodeURIComponent(benchmarkStart)}` : ''}`;
   const requestBody = JSON.stringify({ holdings, benchmark_weights: benchmarkWeights });
@@ -86,19 +88,6 @@ export default function ConcentrationView({
 
   const rows = data?.top ?? [];
   const benchmarkRows = data?.benchmark_top ?? [];
-
-  /**
-   * What these cards are measured from — built once.
-   *
-   *  No price series is involved, which is why this view's `where` IS NOT THE OTHER FOUR'S.
-   * Concentration reads WEIGHTS, through the same `build_issuer_weights` active share uses — so
-   * the vendors to name are the AIRS scan and the yfinance market caps, not a daily close.
-   */
-  const where = data?.available
-    ? `${v(data.issuers)} companies and their weights from ${v(sourceLabel(portfolioSource))}, `
-      + `against ${v(data.benchmark_issuers)} priced index members weighted by `
-      + `${v(sourceField('benchmark_caps'))} from ${v(sourceVendor('benchmark_caps'))}.`
-    : '';
 
   /**
    *  The book's date alone for its own three cards — no index appears in them, so dating the
@@ -130,32 +119,26 @@ export default function ConcentrationView({
       {data?.available && (
         <>
           <div className="flex flex-col items-center gap-2">
-            <p className="text-sm font-medium text-fg-subtle text-center">{t.conc.question(portfolioName, data.benchmark)}</p>
+            <p className="text-sm font-medium text-fg-subtle text-center">{t.conc.question(portfolioName, benchmark)}</p>
             <div className="flex flex-wrap justify-center gap-2">
             <Tile label={t.conc.effective}
               value={data.effective_positions == null ? '—' : data.effective_positions.toFixed(2)}
               sub={`of ${data.issuers} companies held`}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what="How many equally sized companies would have the same concentration as this portfolio."
-                where={where}
-                when={whenBook}
-                how={data.effective_positions == null
-                  ? 'It uses every current company weight in the stock sleeve.'
-                  : `It uses every current company weight in the stock sleeve. ${data.effective_positions.toFixed(2)} means the portfolio is as concentrated as ${data.effective_positions.toFixed(2)} equally sized companies.`}
-                />} />} />
-            <Tile label={`${data.benchmark} effective`}
+              info={<InfoTip className="ml-0.5" content={<div className="space-y-2 text-xs">
+                <p>{t.conc.effectiveCalculation}</p>
+                {data.effective_positions != null && <p>{t.conc.effectiveMeaning(data.effective_positions.toFixed(2))}</p>}
+                <p>{facts.weights(portfolioAsOf)}</p>
+              </div>} />} />
+            <Tile label={benchmark}
               value={data.benchmark_effective_positions == null ? '—'
                 : data.benchmark_effective_positions.toFixed(2)}
               tone="text-fg-muted"
-              sub={`of ${data.benchmark_issuers} · top 10 ${pct2(data.benchmark_top10_pct)}`}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={`The same 1 ÷ HHI run over ${data.benchmark}'s own constituents instead of `
-                  + `${portfolioName} — same measure, so the two counts are directly comparable.`}
-                where={where}
-                when={whenBoth}
-                how={'For scale.  A cap-weighted index is far more concentrated than its member '
-                  + 'count suggests, so this is usually a small fraction of it — which is the '
-                  + 'honest comparison, not the raw count.'} />} />} />
+              sub={`of ${data.benchmark_issuers}`}
+              info={<InfoTip className="ml-0.5" content={<div className="space-y-2 text-xs">
+                <p>{t.conc.effectiveCalculation}</p>
+                {data.benchmark_effective_positions != null && <p>{t.conc.effectiveMeaning(data.benchmark_effective_positions.toFixed(2))}</p>}
+                {data.benchmark_covered_pct != null && <p>{facts.coverage(data.benchmark_covered_pct, benchmark)}</p>}
+              </div>} />} />
             </div>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -168,12 +151,7 @@ export default function ConcentrationView({
                   <td className="text-right font-mono tabular-nums">
                     <span className="inline-flex items-center gap-1 whitespace-nowrap">
                       {pct2(row.weight_pct)}
-                      <InfoTip content={<AspectCard
-                        what={`${row.name}: ${pct2(row.weight_pct)} of the entire ${portfolioName} portfolio, not just its stock sleeve.`}
-                        where={sourceLabel(portfolioSource)}
-                        when={whenBook}
-                        how="Current AIRS company value divided by the whole portfolio value × 100. Share classes of the same company are combined. Uses the same whole-portfolio weights as Active Share; cash, funds and bonds are not removed from the denominator."
-                      />} />
+                      <InfoTip content={<SimpleExplanation details={<p>{pct2(row.weight_pct)} · {facts.dated('AIRS', portfolioAsOf)}</p>}>{t.conc.companyWeightExplanation}</SimpleExplanation>} />
                     </span>
                   </td>
                 </tr>)}</tbody>

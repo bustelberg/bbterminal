@@ -239,8 +239,7 @@ export type RiskCopy = {
   };
 
   dd: {
-    /**  BOTH OPERANDS ARE NULLABLE, matching the payload — `v()` renders the absence, where a
-     *  `?? ''` at the call site would print "Max drawdown ()" and read as a rendering fault. */
+    /** Frequency is accepted for existing callers but omitted from the label. */
     maxDrawdown: (freq: string | null | undefined) => string;
     benchMax: (bench: string | null | undefined) => string;
     today: string;
@@ -258,6 +257,10 @@ export type RiskCopy = {
   };
 
   conc: {
+    companyWeightExplanation: string;
+    effectiveCalculation: string;
+    effectiveMeaning: (count: string) => string;
+    benchmarkScaleNote: string;
     effective: string; ofIssuers: (n: number) => string;
     question: (portfolio: string, benchmark: string) => string;
     top10: string; ofBook: (pct: string) => string;
@@ -368,12 +371,12 @@ const en: RiskCopy = {
       + `${unstamped > 0 ? ` (${v(unstamped)} undated)` : ''}`,
     cards: {
       activeShare: {
-        what: 'How much of the stock basket differs from 100% ACWI, with both sides normalised to 100%.',
+        what: 'How different your stock holdings are from ACWI. 0% means identical company weights; 100% means no overlap.',
       },
       overlap: {
         what: 'The share of the portfolio that overlaps with the benchmark.',
-        how: 'Overlap and active share add up to 100%. Both are shown because overlap describes '
-          + 'what matches the benchmark, while active share describes what differs.',
+        how: 'Compares your stock holdings with ACWI. We add up the smaller weight for each company. '
+          + 'A higher percentage means more overlap; overlap and active share total 100%.',
       },
       offBenchmark: {
         what: 'Weight in companies the index does not hold at all.',
@@ -466,8 +469,9 @@ const en: RiskCopy = {
     cards: {
       rho: {
         what: 'How closely the stock sleeve has moved with the benchmark.',
-        how: ' THIS IS THE OTHER SIDE OF THE TRACKING ERROR, not a separate fact: '
-          + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ. The lower this is, the more the book can diverge.',
+        how: 'We compare weekly returns in euros of today’s stock holdings with ACWI. '
+          + 'Near +1 means they move together, near 0 means little relationship, and near −1 means opposite movements. '
+          + 'Bonds and cash are excluded.',
       },
       rSquared: {
         what: "The share of the book's movement the index explains.",
@@ -476,7 +480,7 @@ const en: RiskCopy = {
       },
       meanPair: {
         what: 'The average correlation between holdings.',
-        how: 'Each pair has the same weight.',
+        how: 'We compare the weekly returns of every pair of stocks and take the average. Each pair counts equally. Higher values mean the stocks move together more; lower values suggest more diversification.',
       },
       activeVol: {
         what: 'The same tracking error the view beside this one reports.',
@@ -541,7 +545,7 @@ const en: RiskCopy = {
   },
 
   dd: {
-    maxDrawdown: (f) => `Max drawdown (${f})`, benchMax: (b) => `${b} max drawdown`,
+    maxDrawdown: () => 'Max drawdown', benchMax: (b) => `${b} max drawdown`,
     today: 'Today', episodes: (pct) => `Falls over ${pct}%`,
     provenance: "Reconstructed using today's holdings. For the portfolio's actual historical "
       + 'drawdown, use the AIRS returns.',
@@ -559,7 +563,8 @@ const en: RiskCopy = {
     cards: {
       maxDrawdown: {
         what: 'The deepest peak-to-trough fall in the window.',
-        how: 'This is calculated from daily returns, so a fall that recovers within a week remains visible.',
+        how: 'The biggest fall from a previous high in a historical simulation of today’s portfolio. '
+          + 'We use daily returns and today’s holdings and weights.',
       },
       benchMax: {
         what: "The benchmark's deepest fall over the same dates.",
@@ -582,6 +587,10 @@ const en: RiskCopy = {
   },
 
   conc: {
+    companyWeightExplanation: 'This company’s value as a percentage of the entire portfolio. Share classes of the same company are combined.',
+    effectiveCalculation: 'Convert each company’s share of the stock basket to a decimal (10% = 0.10). Square these numbers, add them up, then divide 1 by the total. Ten equally weighted stocks give 10 effective positions.',
+    effectiveMeaning: (count) => `This result means the stock basket is as concentrated as ${count} equally weighted stocks.`,
+    benchmarkScaleNote: 'Using 60% instead of 100% of the same stock index does not change this count: the relative company weights stay the same. Bonds and cash are excluded.',
     effective: 'Effective positions', ofIssuers: (n) => `of ${n} companies held`,
     question: (portfolio, benchmark) => `How concentrated are ${portfolio} and ${benchmark}?`,
     top10: 'Top 10', ofBook: (p) => `${p} of the whole book`,
@@ -707,12 +716,12 @@ const nl: RiskCopy = {
       + `${unstamped > 0 ? ` (${v(unstamped)} zonder datum)` : ''}`,
     cards: {
       activeShare: {
-        what: 'Hoeveel de aandelen afwijken van 100% ACWI, met beide kanten genormaliseerd naar 100%.',
+        what: 'Hoeveel uw aandelen afwijken van ACWI. 0% betekent dezelfde ondernemingsgewichten; 100% betekent geen overlap.',
       },
       overlap: {
         what: 'Het deel van de portefeuille dat overlapt met de benchmark.',
-        how: 'Overlap en active share tellen op tot 100%. Beide worden getoond omdat overlap '
-          + 'beschrijft wat overeenkomt met de benchmark en active share wat afwijkt.',
+        how: 'Vergelijkt uw aandelen met ACWI. Per onderneming tellen we het kleinste gewicht mee. '
+          + 'Een hoger percentage betekent meer overlap; overlap en active share tellen op tot 100%.',
       },
       offBenchmark: {
         what: 'Gewicht in ondernemingen die de index helemaal niet houdt.',
@@ -815,8 +824,9 @@ const nl: RiskCopy = {
     cards: {
       rho: {
         what: 'Hoe nauw de aandelenselectie met de benchmark is meebewogen.',
-        how: ' DIT IS DE ANDERE KANT VAN DE TRACKING ERROR, geen los feit: '
-          + 'σₐ² = σₚ² + σᵦ² − 2ρσₚσᵦ. Hoe lager dit is, hoe verder het boek kan afwijken.',
+        how: 'We vergelijken de wekelijkse rendementen in euro’s van de huidige aandelenposities met ACWI. '
+          + 'Dicht bij +1 betekent samen bewegen, rond 0 weinig verband en dicht bij −1 tegengesteld bewegen. '
+          + 'Obligaties en cash tellen niet mee.',
       },
       rSquared: {
         what: 'Het deel van de beweging van het boek dat de index verklaart.',
@@ -825,7 +835,7 @@ const nl: RiskCopy = {
       },
       meanPair: {
         what: 'De gemiddelde correlatie tussen posities.',
-        how: 'Elk paar weegt even zwaar.',
+        how: 'We vergelijken de wekelijkse rendementen van elk paar aandelen en nemen het gemiddelde. Elk paar telt even zwaar. Een hogere waarde betekent meer samen bewegen; een lagere waarde wijst op meer spreiding.',
       },
       activeVol: {
         what: 'Dezelfde tracking error die de weergave hiernaast rapporteert.',
@@ -895,7 +905,7 @@ const nl: RiskCopy = {
   },
 
   dd: {
-    maxDrawdown: (f) => `Maximale drawdown (${f})`, benchMax: (b) => `Maximale drawdown ${b}`,
+    maxDrawdown: () => 'Maximale drawdown', benchMax: (b) => `Maximale drawdown ${b}`,
     today: 'Vandaag', episodes: (pct) => `Dalingen boven ${pct}%`,
     provenance: 'Gereconstrueerd met de huidige posities. Gebruik de AIRS-rendementen voor de '
       + 'werkelijke historische drawdown van de portefeuille.',
@@ -912,7 +922,8 @@ const nl: RiskCopy = {
     cards: {
       maxDrawdown: {
         what: 'De diepste daling van piek naar dal binnen de periode.',
-        how: 'Dit wordt berekend met dagrendementen, zodat een daling die binnen een week herstelt zichtbaar blijft.',
+        how: 'De grootste daling vanaf een eerdere piek in een historische simulatie van de huidige portefeuille. '
+          + 'We gebruiken dagrendementen en de huidige posities en gewichten.',
       },
       benchMax: {
         what: 'De diepste daling van de benchmark over dezelfde datums.',
@@ -935,6 +946,10 @@ const nl: RiskCopy = {
   },
 
   conc: {
+    companyWeightExplanation: 'De waarde van deze onderneming als percentage van de totale portefeuille. Aandelenklassen van dezelfde onderneming worden samengevoegd.',
+    effectiveCalculation: 'Zet het aandeel van elke onderneming in het aandelenmandje om naar een decimaal (10% = 0,10). Kwadrateer deze getallen, tel ze op en deel 1 door het totaal. Tien gelijkgewogen aandelen geven 10 effectieve posities.',
+    effectiveMeaning: (count) => `Dit betekent dat het aandelenmandje even geconcentreerd is als ${count} gelijkgewogen aandelen.`,
+    benchmarkScaleNote: '60% in plaats van 100% van dezelfde aandelenindex verandert dit aantal niet: de onderlinge bedrijfswegingen blijven gelijk. Obligaties en kasgeld tellen niet mee.',
     effective: 'Effectieve posities', ofIssuers: (n) => `van ${n} gehouden ondernemingen`,
     question: (portfolio, benchmark) => `Hoe geconcentreerd zijn ${portfolio} en ${benchmark}?`,
     top10: 'Top 10', ofBook: (p) => `${p} van het hele boek`,

@@ -19,6 +19,8 @@ export type MonthlyPosition = { name: string; isin: string | null; return_pct: n
   start_date: string | null; end_date: string | null; status: 'held' | 'bought' | 'sold' | 'unavailable'; reason?: string };
 type Section<T> = { status: 'ok' | 'no_data' | 'error'; data: T | null; message?: string };
 export type MonthlyReport = { portefeuille: string; month: string; start: string; end: string; opening_date: string;
+  available_years?: number[];
+  year_summary?: { complete?: boolean; return_pct: number | null; benchmark_pct: number | null; start: string | null; end: string | null };
   weighted_benchmark?: Record<string, { return_pct: number; start_date: string; end_date: string; source: string;
     components?: { ticker: string; weight_pct: number; return_pct: number; start_date: string; end_date: string;
       start_price_eur?: number; end_price_eur?: number }[] }>;

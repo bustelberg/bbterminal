@@ -5,6 +5,7 @@ import { API_URL } from '../../lib/apiUrl';
 import { trace } from '../../lib/debugTrace';
 import { useMgmtCopy } from '../components/management/managementCopy';
 import PortfolioOverviewPanel from '../components/PortfolioOverviewPanel';
+import { CompactHelpProvider } from '../../lib/compactHelp';
 
 /**
  * The AIRS portfolios — a sibling of Execution instruments in the asset-pipeline nav, not a tab
@@ -85,7 +86,7 @@ export default function Page() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-page text-fg">
+    <CompactHelpProvider><div className="min-h-screen bg-page text-fg">
       <div className="px-8 py-5 border-b border-neutral-800/40">
         <h1 className="text-xl font-semibold text-fg-strong">{t.page.title}</h1>
       </div>
@@ -114,6 +115,6 @@ export default function Page() {
             and come back. */}
         <PortfolioOverviewPanel collection={tab} />
       </div>
-    </div>
+    </div></CompactHelpProvider>
   );
 }

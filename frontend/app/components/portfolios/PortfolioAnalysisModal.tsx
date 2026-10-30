@@ -11,6 +11,9 @@ import { startJob } from '../../../lib/stores/jobs';
 import { startSectorOverride } from '../../../lib/sectorOverride';
 import { Field, TipCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
+import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
+import HoldingReturnExplanation from './HoldingReturnExplanation';
+import HoldingsColumnExplanation from './HoldingsColumnExplanation';
 import { formatPct, visibleBuckets } from './composition';
 import {
   allocColor, ALWAYS_SHOWN_BUCKETS, bucketLabel, CASH_BUCKET, EQUITY_BUCKET,
@@ -1273,7 +1276,7 @@ function useColumnGroups() {
  *
  *  Split into shape and tone because the picker needs its OPEN state to replace the tone while
  * keeping the shape. Appending an override instead would leave two utilities setting the same
- * property and let source order decide — the trap `HEADER_CTL_STOP` is a separate string for.
+ * property and let source order decide. Keep colour variants separate.
  *
  *  It deliberately does not cover Attribution / Risk or the allocation chips. Those are a size
  * up (`px-3 py-1.5 text-xs`) or light on `group-hover` from the row that contains them, and
@@ -1421,34 +1424,6 @@ const num2 = (v: number) => v.toFixed(2);
  *  under U among the real ones. Rendered as an em dash, sorted last. Cash keeps its name: it is a
  *  bucket the charts actually draw. */
 const sectorLabel = (s?: string | null) => (!s || s === 'Unclassified' ? '' : s);
-
-/** A euro amount for a provenance card — whole euros. The dividend inside a return is context for
- *  the number above it, not a figure anyone reconciles to the cent. */
-const eur0 = (v: number) =>
-  `€${v.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-
-/** The routes that actually spoke for a holding's Return — those with both a return and an opening
- *  value. Fewer than two means the figure is one book's and needs no arithmetic shown. */
-const blendLegs = (h: BookHolding) =>
-  (h.sources ?? []).filter((s) => s.blend_weight_pct != null && s.return_pct != null);
-
-/** The arithmetic behind a blended Return, in the reader's own numbers — each leg carrying its
- *  opening euros and the book that valued it, so the whole derivation is ONE line:
- *
- *    held directly 95.90% × +2.14% (€49,557 at the open, BUS_Offensief_Dyn)
- *      + StarTopSelectie Offensief 4.10% × +17.62% (€2,119, StarTopSelectie OFF DYN) = +2.77%
- *
- *   The weights are shares of the position's opening value, not of the book — those are in the
- *  Via column and add to the Weight. Two denominators for two questions, and the card says which
- *  it is using rather than leaving a reader to assume they match. */
-function blendHow(h: BookHolding, heldDirectly = 'held directly', atOpen = 'at the open'): string | null {
-  const legs = blendLegs(h);
-  if (legs.length < 2) return null;
-  const parts = legs.map((s, i) =>
-    `${s.label ?? heldDirectly} ${num2(s.blend_weight_pct!)}% × ${fmtRet(s.return_pct)}`
-    + ` (${eur0(s.start_value_eur ?? 0)}${i === 0 ? ` ${atOpen}` : ''}, ${s.book})`);
-  return `${parts.join(' + ')} = ${fmtRet(h.own_return_pct)}`;
-}
 
 function SectorAllocationButton({ onOpen, title, className = '' }: {
   onOpen: () => void; title: string; className?: string;
@@ -2050,6 +2025,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
    * switch on look-through to inspect the underlying positions of held certificates.
    */
   const copy = useAnalyseCopy();
+  const facts = useInfoFacts();
   /** Number of certificates with available underlying routes. Count routes rather than the net
    *  row reduction: a certificate with one underlying is still a meaningful look-through. */
   const lookThroughCertificates = useMemo(() => new Set(
@@ -2182,7 +2158,6 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   // and AIRS's return report cover the same date. A local numerical comparison here used to turn
   // that explicitly unknown state into a warning about an unexplained position.
   const reconciliationKnown = realised?.reconciles === true || realised?.reconciles === false;
-  const reconciled = realised?.reconciles === true;
   const displayedReconciliation = contributionReconciliation(
     [...holdingsForCertificateScope(holdings, lookThrough).map((holding) => holding.contribution_pct),
       ...sold.map((position) => position.contribution_pct)], realised?.book_ytd_pct, reconciliationKnown);
@@ -2510,10 +2485,10 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 {show('beta') && <td />}
                 <td className="py-2 text-right font-mono font-semibold text-fg-strong whitespace-nowrap">
                   {num2(g.weightNowPct)}%
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={copy.classRow.weightWhat(copy.bucket(bucketLabel(g.bucket)))}
-                    note={copy.classRow.rowsWeightNote}
-                    how={copy.classRow.weightHow(`${num2(g.weightNowPct)}%`)} />
+                  <InfoTip className="ml-1" content={<SimpleExplanation details={<>
+                    <p>{eur0n(g.sum.valuenow)} / {eur0n(grand.valuenow)} · {num2(g.weightNowPct)}%</p>
+                    <p>{facts.dated('AIRS', asOf)}</p>
+                  </>}>{copy.classRow.weightExplanation}</SimpleExplanation>} />
                 </td>
                 {/* The class's own four euro columns, summed — so a reader can see which CLASS
                     made the money, not only which position. */}
@@ -2548,38 +2523,24 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                     <span className="ml-1 text-warn-400"
                       title={copy.classRow.coverageTitle(num2(g.ret.coveredPct), copy.bucket(bucketLabel(g.bucket)), g.ret.missing)}></span>
                   )}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={g.ret.pct == null
-                      ? copy.classRow.noReturn(copy.bucket(bucketLabel(g.bucket)))
-                      : copy.classRow.returnWhat(copy.bucket(bucketLabel(g.bucket)))}
-                    note={g.ret.pct == null
-                      ? copy.classRow.dashNote
-                      : copy.classRow.returnNote(eur0n(g.ret.returnEur), eur0n(g.ret.startEur),
-                        g.ret.coveredPct < 99.5 ? num2(g.ret.coveredPct) : undefined)}
-                    /*  THE DIFFERENCE FROM THE BOOK'S OWN RETURN IS NAMED HERE, because a reader
-                       who spots a class at 99.9% of the book returning a point less than the book
-                       will otherwise go looking for it in the cash line — where it is not. */
-                    /*  THE LONG VERSION IS IN THE CODE, NOT ON THE CARD (shortened 2026-08-05,
-                       on request). What a reader needs at the cell is: what it divides, that it
-                       does not tie to the book, and which column does. The reasoning behind that
-                       — measured on AITopSelectie — is that three percentages on this row sit on
-                       three different bases: Weight is the class's share TODAY (99.91%), this
-                       Return divides by the RESTATED opening value (100.69% of the book), and the
-                       class's TRUE share on 1 January was 4.03%, because the book held 96% cash
-                       and deployed it on 5 January. On those true weights it composes exactly:
-                       4.03% × 1102.77% + 95.97% × 0% = 44.4624%, AIRS's own figure. Which is
-                       precisely why none of the three may be multiplied by another. */
-                    how={copy.classRow.returnHow(eur0n(g.ret.returnEur), eur0n(g.ret.startEur), fmtRet(g.ret.pct))} />
+                  <InfoTip className="ml-1" content={<SimpleExplanation details={<>
+                    {g.ret.pct != null && <p>{g.ret.startEur != null && g.ret.startEur > 0 && g.ret.returnEur != null
+                      ? <>{eur0n(g.ret.returnEur)} / {eur0n(g.ret.startEur)} = {fmtRet(g.ret.pct)}</>
+                      : fmtRet(g.ret.pct)}</p>}
+                    <p>{facts.dated('AIRS', asOf)}</p>
+                    {g.ret.pct != null && g.ret.coveredPct < 99.5 && <p>{copy.classRow.coverageTitle(
+                      num2(g.ret.coveredPct), copy.bucket(bucketLabel(g.bucket)), g.ret.missing)}</p>}
+                  </>}>{g.ret.pct == null
+                    ? copy.classRow.noReturn(copy.bucket(bucketLabel(g.bucket)))
+                    : g.bucket === CASH_BUCKET && g.ret.startEur == null ? copy.classRow.cashReturnExplanation
+                      : copy.classRow.returnExplanation}</SimpleExplanation>} />
                 </td>
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${retTone(g.sum.contribution)}`}>
                   {ppt(g.sum.contribution)}
                   {/* Contribution deliberately remains the accounting Result over book opening
                       capital. It is independent of the AIRS-return subtotal beside it. */}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={copy.classRow.contributionWhat(copy.bucket(bucketLabel(g.bucket)))}
-                    note={copy.classRow.contributionNote(eur0n(g.sum.result))}
-                    how={copy.classRow.contributionHow(
-                      eur0n(g.sum.result), eur0n(realised?.basis_eur), ppt(g.sum.contribution))} />
+                  <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="contribution"
+                      amount={g.sum.result} total={realised?.basis_eur} value={g.sum.contribution} asOf={asOf} />} />
                 </td>
               </tr>
               {/*  THE ROUTE IS PART OF THE ROW KEY BELOW, AND THE BACKEND'S `merge_by_isin`
@@ -2810,10 +2771,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   </td>}
                   <td className="py-1.5 text-right font-mono text-fg tabular-nums whitespace-nowrap">
                     {num2(h.weight_now_pct ?? 0)}%
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={copy.row.weightWhat(h.name ?? copy.row.thisHolding)}
-                      note={copy.row.weightNote}
-                      how={copy.row.weightHow(eur0n(h.current_value_eur), eur0n(grand.valuenow), `${num2(h.weight_now_pct ?? 0)}%`)} />
+                    <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="weight"
+                      amount={h.current_value_eur} total={grand.valuenow} value={h.weight_now_pct} asOf={asOf} />} />
                   </td>
                   {/*  EVERY ONE A DASH WHERE THERE IS NOTHING, NEVER A €0. "Nothing was sold" and
                       "the sale broke even" are different facts, and on a money column the second
@@ -2932,42 +2891,12 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         (or bought mid-window) has no AIRS return of its own and is priced off our
                         yfinance series instead. Same column, same font, two vendors — a header
                         card could only state one of them, and would be wrong for the other. */}
-                    <Provenance
-                      source={h.own_return_source === 'yfinance' ? 'yfinance' : 'airs_volk'}
-                      /*  THE ROW'S OWN DATE, NOT THE TABLE'S. An AIRS row is as-of the book
-                         snapshot; a look-through row is as-of that instrument's last close,
-                         which is a different date and can trail it by weeks. One clock for both
-                         would be wrong for one of them, every time. */
-                      asOf={h.own_return_as_of ?? (h.own_return_source === 'yfinance' ? undefined : asOf)}
-                      kind="formula"
-                      what={h.own_return_pct == null
-                        ? copy.row.returnMissingWhat(h.name ?? copy.row.thisHolding)
-                        : copy.row.returnWhat(h.name ?? copy.row.thisHolding, h.own_return_from ?? copy.info.yearOpened)}
-                      note={h.own_return_pct == null
-                        ? copy.row.noEndValue
-                        : h.own_return_source === 'yfinance'
-                          ? copy.row.yfReturnNote
-                          : blendHow(h, copy.row.heldDirectly, copy.row.atOpen)
-                            ? copy.row.blendNote(blendLegs(h).length)
-                            : copy.row.airsReturnNote(
-                              h.own_return_book && h.own_return_book !== bookName
-                                ? h.own_return_book : undefined)}
-                      how={blendHow(h, copy.row.heldDirectly, copy.row.atOpen)
-                        ? copy.row.blendHow(blendHow(h, copy.row.heldDirectly, copy.row.atOpen)!)
-                        : h.own_return_source === 'yfinance'
-                          ? copy.row.yfReturnHow(fmtRet(h.own_return_pct), h.own_return_from ?? copy.info.yearOpened)
-                          : copy.row.airsReturnHow} />
+                    <InfoTip className="ml-1" content={<HoldingReturnExplanation holding={h} asOf={asOf} parentBook={bookName} />} />
                   </td>
                   <td className={`py-1.5 text-right font-mono tabular-nums whitespace-nowrap ${retTone(h.contribution_pct)}`}>
                     {ppt(h.contribution_pct)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={h.contribution_pct == null
-                        ? copy.row.contributionMissingWhat(h.name ?? copy.row.thisPosition)
-                        : copy.row.contributionWhat(h.name ?? copy.row.thisPosition)}
-                      note={h.contribution_pct == null ? undefined : copy.info.contributionNote}
-                      how={h.contribution_pct != null
-                        ? copy.info.contributionHow(eur0n(h.result_eur), eur0n(realised?.basis_eur), ppt(h.contribution_pct))
-                        : copy.row.noContributionHow} />
+                    <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="contribution"
+                      amount={h.result_eur} total={realised?.basis_eur} value={h.contribution_pct} asOf={asOf} />} />
                   </td>
                 </tr>
                 ); })}
@@ -3064,10 +2993,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 <td className="pr-4" />
                 <td className={`py-2 text-right font-mono font-semibold tabular-nums ${retTone(soldSum.contribution)}`}>
                   {ppt(soldSum.contribution)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={copy.info.soldContributionWhat}
-                    note={copy.info.contributionNote}
-                    how={copy.info.contributionHow(eur0n(soldSum.result), eur0n(realised?.basis_eur), ppt(soldSum.contribution))} />
+                  <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="contribution"
+                      amount={soldSum.result} total={realised?.basis_eur} value={soldSum.contribution} asOf={asOf} />} />
                 </td>
               </tr>
               {soldLookThroughRows(sold, lookThrough).map((p, i) => (
@@ -3203,10 +3130,8 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                   <td className="pr-4" />
                   <td className={`py-1.5 text-right font-mono tabular-nums ${retTone(p.contribution_pct)}`}>
                     {ppt(p.contribution_pct)}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={copy.sold.contributionWhat(p.name ?? copy.row.thisPosition)}
-                      note={copy.info.contributionNote}
-                      how={copy.info.contributionHow(eur0n(p.result_eur), eur0n(realised?.basis_eur), ppt(p.contribution_pct))} />
+                    <InfoTip className="ml-1" content={<HoldingsColumnExplanation kind="contribution"
+                        amount={p.result_eur} total={realised?.basis_eur} value={p.contribution_pct} asOf={asOf} />} />
                   </td>
                 </tr>
               ))}
@@ -3272,26 +3197,25 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 </td>}
                 <td className={`py-2 pr-4 text-right font-mono tabular-nums ${retTone(realised?.book_ytd_pct)}`}>
                   {fmtRet(realised?.book_ytd_pct)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={copy.info.bookReturnWhat}
-                    note={copy.info.bookReturnNote}
-                    how={reconciliationKnown
-                      ? copy.reconciliation.compareHow(ppt(grand.contribution), fmtRet(realised?.book_ytd_pct), reconciled)
-                      : copy.reconciliation.compareUnavailable(
-                        ppt(grand.contribution), fmtRet(realised?.book_ytd_pct),
-                        realised?.holdings_as_of ?? 'an unknown date',
-                        realised?.book_as_of ?? 'an unknown date')} />
+                  <InfoTip className="ml-1" content={<SimpleExplanation details={<>
+                    <p>{fmtRet(realised?.book_ytd_pct)} · {facts.dated('AIRS', realised?.book_as_of)}</p>
+                    {!reconciliationKnown && <p>{copy.lang === 'nl'
+                      ? 'De aansluiting met de berekende bijdragen is nog niet gecontroleerd.'
+                      : 'The match with calculated contributions has not yet been verified.'}</p>}
+                  </>}>{copy.lang === 'nl' ? 'Het totale portefeuillerendement zoals gerapporteerd door AIRS.'
+                    : 'The total portfolio return reported by AIRS.'}</SimpleExplanation>} />
                 </td>
                 <td className={`py-2 text-right font-mono tabular-nums ${retTone(displayedReconciliation?.reported ?? grand.contribution)}`}>
                   {ppt(displayedReconciliation?.reported ?? grand.contribution)}
-                  <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={displayedReconciliation
-                      ? (copy.lang === 'nl' ? 'Berekende bijdragen plus het apart getoonde, nog niet verklaarde verschil met AIRS.' : 'Calculated contributions plus the separately disclosed unexplained difference from AIRS.')
-                      : copy.info.bookContributionWhat}
-                    note={copy.info.contributionNote}
-                    how={displayedReconciliation
-                      ? `${ppt(displayedReconciliation.calculated)} + (${ppt(displayedReconciliation.missing)}) = ${ppt(displayedReconciliation.reported)}`
-                      : copy.info.contributionHow(eur0n(grand.result), eur0n(realised?.basis_eur), ppt(grand.contribution))} />
+                  <InfoTip className="ml-1" content={displayedReconciliation
+                    ? <SimpleExplanation details={<>
+                        <p>{ppt(displayedReconciliation.calculated)} + ({ppt(displayedReconciliation.missing)}) = {ppt(displayedReconciliation.reported)}</p>
+                        <p>{facts.dated('AIRS', realised?.book_as_of)}</p>
+                      </>}>{copy.lang === 'nl'
+                        ? 'Berekende bijdragen plus het apart getoonde, nog niet verklaarde verschil met AIRS.'
+                        : 'Calculated contributions plus the separately shown unexplained difference from AIRS.'}</SimpleExplanation>
+                    : <HoldingsColumnExplanation kind="contribution" amount={grand.result}
+                        total={realised?.basis_eur} value={grand.contribution} asOf={asOf} />} />
                 </td>
               </tr>
             </tfoot>
@@ -3552,22 +3476,9 @@ const HEADER_CTL_BASE = 'cursor-pointer text-xs px-3 py-1.5 rounded-lg border bg
   + 'transition-colors';
 const HEADER_CTL = `${HEADER_CTL_BASE} border-neutral-700 text-fg-soft `
   + 'hover:text-accent-300 hover:border-accent-500/50';
-/**
- * The same control wearing the STOP ink — Refresh becomes Cancel while its job is in flight.
- *
- *  A separate string, not `${HEADER_CTL} text-warn-400 …` APPENDED. Two utilities setting the same
- * property (`text-fg-soft` and `text-warn-400`) are the same specificity, so which one wins is
- * decided by their order in the generated stylesheet, NOT by their order in this attribute — the
- * button would take whichever Tailwind happened to emit last and silently flip back the next time
- * the class set changes. Splitting the shared geometry into `HEADER_CTL_BASE` and giving each state
- * its own colours means the two never both apply.
- */
-const HEADER_CTL_STOP = `${HEADER_CTL_BASE} border-warn-500/40 text-warn-400 `
-  + 'hover:bg-warn-500/10 hover:border-warn-500/60';
-
 export default function PortfolioAnalysisModal({
-  id, name, basket, reportAccount, onRefresh, refreshing = false, refreshTitle, refreshTick = null,
-  onCancelRefresh, cancelRequested = false, cancelTitle, refreshSeq = 0, onClose,
+  id, name, basket, reportAccount, onRefresh, refreshing = false, refreshTick = null,
+  refreshSeq = 0, onClose,
 }: {
   id?: number; name: string; basket?: Basket; onClose: () => void;
   /** Exact dashboard account, including accounts without a linked model. */
@@ -3584,41 +3495,13 @@ export default function PortfolioAnalysisModal({
    */
   onRefresh?: () => void;
   refreshing?: boolean;
-  /**  THE CALLER'S OWN WORDING, because the two panels run DIFFERENT refreshes behind the same
-   *  glyph: the overview's re-scans this portfolio's AIRS reports, the other re-acquires AIRS +
-   *  prices + FX. A tooltip hardcoded here would describe one of them on both. */
+  /** Legacy caller props; the header no longer renders a refresh/cancel control. */
   refreshTitle?: string;
-  /** The latest line from the running refresh — the same tail the expanded row shows. */
-  refreshTick?: string | null;
-  /**
-   * Stop the refresh this modal started — the SAME cancel the row's button offers, passed in for
-   * the same reason `onRefresh` is.
-   *
-   *  Its presence is the signal, and it must not be gated on a job id. The caller records the
-   * press synchronously and defers the actual cancel until it has a handle; gating this on "the
-   * job id has arrived" reintroduces a round-trip during which the button reads "Refresh" over work
-   * already running — which is how a second press started a second job and put a second progress
-   * toast beside the first.
-   *
-   *  Without it the button stays disabled while running, which is the old behaviour and still the
-   * right one for a caller whose refresh is a bare SSE with nothing to call off. It is not a
-   * degraded mode — it is the honest one.
-   */
   onCancelRefresh?: () => void;
-  /**
-   * The cancel has been asked for and the job has not stopped yet.
-   *
-   *  It is a third state, not the absence of the second. Cancellation is cooperative — the account
-   * being downloaded finishes first — so between the press and the stop there is a real interval
-   * where neither "Cancel" (already asked; pressing again does nothing) nor "Refresh" (the work is
-   * still running, and starting a second job is the bug) is true. The button says `Cancelling…` and
-   * is inert, which is the only reading that matches what the server is doing.
-   */
   cancelRequested?: boolean;
-  /**  THE CALLER'S OWN WORDING AGAIN, and here it carries the nuance that decides whether to
-   *  press: the scan stops at an account boundary, so the download in flight finishes first and
-   *  everything already stored is kept. That is worth reading BEFORE the click, not after. */
   cancelTitle?: string;
+  /** The latest line from an externally running refresh. */
+  refreshTick?: string | null;
   /**
    * Bumped by the caller when a refresh finishes.
    *
@@ -3976,19 +3859,6 @@ export default function PortfolioAnalysisModal({
   // 'Equity' (Stocks) keeps the sector / benchmark composition view.
   const sleeve = selected && selected !== 'Equity' ? selected : null;
 
-  /**
-   * One button, three states — and which one it is right now.
-   *
-   *  It keys on `refreshing`, WHICH THE CALLER SETS ON THE PRESS. That is the whole point: the
-   * reader sees their own click, so the control must change on the click and not a round-trip
-   * later. `stopping` is the interval after Cancel while the scan finishes the account in flight.
-   */
-  const canStop = !!onCancelRefresh;
-  const stopping = refreshing && canStop && cancelRequested;
-  const cancellable = refreshing && canStop && !stopping;
-  /**  A CALLER WITH NOTHING TO CANCEL KEEPS THE OLD BUTTON — spinner, "Refreshing…", disabled.
-   *  Painting a  it cannot honour would be the same broken control in the opposite direction. */
-  const inert = stopping || (refreshing && !canStop);
   const riskWeightContext = airsRiskWeightContext(data?.book_holdings ?? [], lookThrough);
 
   return (
@@ -4038,44 +3908,7 @@ export default function PortfolioAnalysisModal({
               <p className="text-[12px] text-warn-300 mt-0.5"> {copy.serverText(data.weight_note)}</p>
             )}
           </div>
-          {/*  ORDER IS REFRESH · BENCHMARK · CLOSE. Refresh sits leftmost of the three because it
-              acts on the SUBJECT of the modal — it rebuilds this portfolio's inputs — while the
-              benchmark picker only changes what those inputs are compared against. Close stays
-              last, where a dialog's dismiss belongs. */}
           <div className="flex max-w-full flex-wrap items-center gap-2">
-            {/*  THE ROW'S REFRESH, NOT A NEW ONE — same handler, same LABEL (2026-09-03: the
-                glyph came off every Refresh and every Cancel on the site, on request, so the word
-                is now the whole control) and the caller's own wording, so pressing it
-                here and pressing it on the row cannot come to mean different things. Absent when
-                the caller passes no handler: a basket has no AIRS portfolio behind it to re-scan,
-                and the panels gate the row's button on `isAdmin` for the same reason they gate
-                everything that writes. */}
-            {/*  AND IT BECOMES CANCEL WHILE IT RUNS, when the caller can offer one — the same flip
-                the row's button makes, so the two are still one control. A disabled spinner with no
-                way out is the state this refresh kept being reported as "stuck": the work is
-                minutes (five downloads per account over a chain reaching nine), it survives closing
-                this modal, and pressing it by accident used to mean waiting it out. */}
-            {onRefresh && (
-              <button type="button" onClick={cancellable ? onCancelRefresh : onRefresh}
-                //  Inert only once the cancel is in. While it runs there is always something to
-                // press — a disabled spinner with no way out is the state this action kept being
-                // reported as "stuck" — and once the stop has been asked for there is nothing left
-                // to ask for. It is never a live "Refresh" over work already running: that window
-                // is exactly how a second job and a second progress toast used to appear.
-                disabled={inert}
-                title={stopping ? copy.actions.cancellingTitle
-                  : cancellable ? cancelTitle : refreshTitle}
-                aria-label={stopping ? copy.actions.cancelling
-                  : cancellable ? copy.actions.cancelRefresh : copy.actions.refreshPortfolio}
-                className={`${refreshing && canStop ? HEADER_CTL_STOP : HEADER_CTL} inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-wait`}>
-                {stopping ? copy.actions.cancelling : cancellable ? copy.actions.cancel
-                  : refreshing ? copy.actions.refreshing : copy.actions.refresh}
-              </button>
-            )}
-            {/*  THE CAPTION SITS OUTSIDE THE CONTROL, which is what lets the select match the two
-                buttons exactly. Put inside — as a bare `Benchmark SP500` pill — it would make this
-                control wider and taller than its neighbours for no gain, and the select still has
-                its `aria-label` for anyone not reading the caption. */}
             <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
               {copy.chrome.benchmark}
               <select value={benchmark} aria-label={copy.chrome.benchmark}
@@ -4111,7 +3944,7 @@ export default function PortfolioAnalysisModal({
 
         {data && (
           <>
-            {detailsError && <p role="status" className="mb-3 text-xs text-warn-300">{copy.lang === 'nl' ? 'Risico- en strategiedetails konden niet worden geladen. Het AIRS-overzicht blijft beschikbaar; gebruik Verversen om opnieuw te proberen.' : 'Risk and strategy details could not be loaded. The AIRS overview remains available; use Refresh to retry.'}</p>}
+            {detailsError && <p role="status" className="mb-3 text-xs text-warn-300">{copy.lang === 'nl' ? 'Risico- en strategiedetails konden niet worden geladen. Het AIRS-overzicht blijft beschikbaar.' : 'Risk and strategy details could not be loaded. The AIRS overview remains available.'}</p>}
             {/* Top: the allocation bars (the class selector) beside — when NOTHING is selected —
                 the whole-portfolio return / vs-benchmark / excess scorecard, or, when a class IS
                 selected, ONLY that class's own return. Empty for an
@@ -4275,7 +4108,7 @@ export default function PortfolioAnalysisModal({
                 <div role="status" aria-live="polite" className="flex min-h-32 items-center justify-center gap-2 text-sm text-fg-muted">
                   {!detailsError && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-700 border-t-accent-400 motion-reduce:animate-none" />}
                   {detailsError
-                    ? (copy.lang === 'nl' ? 'Posities laden mislukt. Gebruik Verversen om opnieuw te proberen.' : 'Could not load holdings. Use Refresh to retry.')
+                    ? (copy.lang === 'nl' ? 'Posities laden mislukt.' : 'Could not load holdings.')
                     : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
                 </div>
               ) : <PortfolioHoldings holdings={data.book_holdings ?? []} slices={data.allocation}
@@ -4311,7 +4144,7 @@ export default function PortfolioAnalysisModal({
                 <div role="status" aria-live="polite" className="flex min-h-32 items-center justify-center gap-2 text-sm text-fg-muted">
                   {!detailsError && <span aria-hidden="true" className="h-4 w-4 animate-spin rounded-full border-2 border-neutral-700 border-t-accent-400 motion-reduce:animate-none" />}
                   {detailsError
-                    ? (copy.lang === 'nl' ? 'Posities laden mislukt. Gebruik Verversen om opnieuw te proberen.' : 'Could not load holdings. Use Refresh to retry.')
+                    ? (copy.lang === 'nl' ? 'Posities laden mislukt.' : 'Could not load holdings.')
                     : (copy.lang === 'nl' ? 'Posities laden…' : 'Loading holdings…')}
                 </div>
               ) : <SleeveBreakdown holdings={data.book_holdings ?? []} bucket={sleeve} />

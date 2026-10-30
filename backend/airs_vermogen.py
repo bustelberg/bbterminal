@@ -938,7 +938,7 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
 
     def _att() -> None:
         _save_performance_to_db(
-            name, _parse_att_excel(download_portfolio_sync(name, van, att_tot)),
+            name, _parse_att_excel(download_portfolio_sync(name, van if van <= att_tot else att_tot[:4] + "-01-01", att_tot)),
             prune_after=att_tot)
 
     def _volk() -> None:
@@ -970,9 +970,13 @@ def scan_one(name: str, van: str, tot: str, on_report=None) -> dict:
             # while holding nothing, so the panel would re-download on every single open. Same
             # bargain `account_transactions` already strikes — one behaviour, two entry points.
             from airs_transacties import ParsedSheet  # noqa: PLC0415
-            _store(name, tvan, ttot, ParsedSheet())
+            warning = _store(name, tvan, ttot, ParsedSheet())
+            if warning:
+                raise RuntimeError(warning)
             raise
-        _store(name, tvan, ttot, sheet)
+        warning = _store(name, tvan, ttot, sheet)
+        if warning:
+            raise RuntimeError(warning)
         transacties = len(sheet.rows)
 
     def _model() -> None:
@@ -1063,6 +1067,8 @@ def _save_mutaties(portefeuille: str, van: str, tot: str) -> int:
         "currency": m.currency,
         "fx_rate": m.fx_rate,
     } for m in parse_mutaties(raw) if m.fonds and m.grootboek]
+    from airs_history import archive_source
+    archive_source(supabase, portefeuille, van, tot, "journal", {"rows": rows})
     supabase.table("airs_mutatie").delete().eq("portefeuille", portefeuille).execute()
     for i in range(0, len(rows), 200):
         supabase.table("airs_mutatie").insert(rows[i:i + 200]).execute()
@@ -1543,7 +1549,7 @@ def _vermogen_most_recent(name: str, van: str) -> tuple[str, bytes]:
             continue
         try:
             tried += 1
-            blob = download_vermogensoverzicht_sync(name, van, tot)
+            blob = download_vermogensoverzicht_sync(name, van if van <= tot else tot[:4] + "-01-01", tot)
         except RuntimeError as e:
             # Unvalued FOR THIS BOOK → empty body / error page. Try the day before, and record which
             # account it was: the quorum above is what stops this one failure speaking for the

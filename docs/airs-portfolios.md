@@ -30,6 +30,31 @@ workflow waits at most 15 minutes for the previous queue activity to settle.
 
 ## Saved dashboard price checks
 
+### ACWI membership source
+
+The newer official iShares CSV snapshot (29 October 2026) takes precedence over the legacy
+April XML workbook. Both original exports remain committed. `load_acwi_holdings` selects by
+the source date and derives precise equity weights from market values, since the CSV rounds
+many genuine small members to 0.00%. Refreshing this committed source requires replacing the
+CSV with a newer official export; opening Risk never downloads it.
+
+Active Share and concentration retain every source issuer even when its listing or prices
+are unresolved. Such rows are members with unavailable calculated weights, not non-members.
+Pricing resolution uses exact symbols first, then exact issuer identity with country/class
+checks. Reviewed identity handles the unchanged Everpure security across PSTG/P. The EQR/AVB
+successor mapping applies to membership only after 18 August 2026; it never splices old
+predecessor prices into Vivmark history. Prepared results include the CSV and identity code
+in their version so deployment cannot reuse the old membership answers.
+
+The weight rollforward accepts a single unchanged price mark. A snapshot dated
+29 October remains usable when 29 October is also the newest stored close: zero
+subsequent price drift preserves its published weight. This exception is specific
+to rolling existing weights; ordinary return windows still require two distinct
+dates. Mixed baskets retain unchanged names alongside names with newer prices,
+then normalise once across both. Price/FX history that is genuinely missing stays
+unavailable, rather than being fabricated. Calculation-code versions invalidate
+both per-portfolio risk results and the shared ACWI benchmark on deployment.
+
 Risk reads use versioned results in the existing prepared-snapshot table, shared across
 workers. The controlled Analyse preparation batch prepares the six default risk views
 for each book and certificate scope. Keys include exact equity weights, benchmark policy,
@@ -295,3 +320,33 @@ Five buckets, each naming what a holding **invests in**: `Equity` (shown as **St
 - The policy grid (`_airs_allocation_bands.POLICY_BUCKETS`) is **4x4** — four risk profiles x Stocks/Bonds/Alternatives/**Cash**, in the same order the allocation bar uses, so a band and the bar it is drawn over cannot be read in two sequences. ⚠ **Cash was added 2026-08-18**, having been excluded on the grounds that it is the REMAINDER of the invested classes. True of the *default* and false of the *bounds*: "hold at most 10% cash" is a real mandate, it is the one most likely to be breached by drift rather than by decision, and with no band there was no line for the bar to breach — a fully-liquidated book showed 100% cash against no policy at all. Consequence: the defaults may now legitimately reach 100 where a total of 95 used to be ordinary, so the editor's sum note changed. Still shown, never enforced — an unset cell is null, and enforcing the total would make filling in the first cell an error until the last was typed. `Unclassified` stays out for a different reason than cash ever was: it is not a holding decision, it is our inability to see inside an instrument.
 - Retiring `Equity ETF` also shrank the grid (it was 4x4 with an ETF column). Stored `Equity ETF` bands were folded by migration `20260818120000`: minima and defaults **summed**, maxima summed then **capped at 100** — a real edit, not arithmetic (Offensief was 80 + 25 = 105), raised as a `NOTICE` naming the profiles to review.
 - Both `asset_bucket_override` and `airs_allocation_band` carry a CHECK constraint rejecting the retired key, so a stale deploy fails loudly instead of reintroducing a bucket nothing renders.
+
+
+## Calendar-year history and finalisation
+
+Performance has a reporting-year selector. The current year opens by default;
+previous years retain all twelve month tiles. Annual headlines read AIRS's exact
+`cumulatief_rendement` and a policy benchmark over the same funded-book window,
+not a compound of rounded monthly observations. January does not reuse December's
+return as the new YTD figure. Incomplete historical years show their actual end date
+and an explicit year-end warning.
+
+Apply `supabase/migrations/20261030040000_airs_year_archive.sql` **before deploying
+this code**. It adds service-role-only annual transaction/journal archives and
+backfills the existing caches. Old journals lack requested-window metadata, so
+backfilled journal coverage remains explicitly unknown. New exports are archived
+before the live cache is replaced; an archive failure leaves the old live cache
+intact and fails the scheduled source step. Narrower exports cannot regress a
+more complete archived window.
+
+The existing post-AIRS job finalises the previous year: it saves a complete December
+bundle and full January–December transaction and dividend exports after year end.
+Historical exports do not write to the live YTD caches. It requires the final
+weekday valuation, an AIRS cumulative return and successful report sections before
+marking the year complete. Missing/late exports remain incomplete in the durable
+receipt and freshness audit, and retry on the next daily run, including after a
+subsequent year rollover. Complete receipts are skipped, and finalised December
+bundles are protected against overwrite by daily preparation. This uses the existing
+AIRS session lock within the daily workflow; it adds no second account/model scan
+or independent cron job. The weekday cutoff does not infer a market holiday calendar;
+missing final valuations remain explicitly pending.

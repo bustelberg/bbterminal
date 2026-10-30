@@ -31,16 +31,15 @@ import { Fragment, useMemo, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { chartTheme } from '../../../lib/chartTheme';
-import { AspectCard } from '../../../lib/tipCard';
 import InfoTip from '../InfoTip';
-import { withWorked, subNum } from './workedFormula';
-import { dayOf, dayRange } from './asOfLine';
+import SimpleExplanation, { useInfoFacts } from './SimpleExplanation';
 import {
-  Provenance, sourceField, sourceLabel, sourceVendor, type SourceKey,
+  Provenance, type SourceKey,
 } from '../../../lib/provenance';
 import type { ActiveShare, ActiveShareRow } from '../../../lib/types/api';
 import { activeShareTableRows } from './activeShareTable';
 import { useRiskCopy } from './riskCopy';
+import { useLang } from '../../../lib/i18n';
 import LoadingDots from './LoadingDots';
 import dynamic from 'next/dynamic';
 import type { AirsWeightComponent } from './AirsWeightCalculation';
@@ -122,9 +121,8 @@ function Bar({ v, max }: { v: number; max: number }) {
   );
 }
 
-function Tile({ label, value, tone, info, simpleInfo, suffix }: {
+function Tile({ label, value, tone, info, suffix }: {
   label: string; value: string; tone?: string; info?: React.ReactNode;
-  simpleInfo?: string;
   /** Equation operator/result immediately following this tile. */
   suffix?: React.ReactNode;
 }) {
@@ -132,7 +130,7 @@ function Tile({ label, value, tone, info, simpleInfo, suffix }: {
     <>
       <div className="rounded-lg border border-neutral-800/40 bg-elevated px-4 py-2.5 min-w-[8.5rem]">
         <div className="text-sm text-fg-faint flex items-center gap-1">
-          {label}{simpleInfo ? <InfoTip className="ml-0.5" text={simpleInfo} /> : info}
+          {label}{info}
         </div>
         <div className={`font-mono text-2xl tabular-nums ${tone ?? 'text-fg-strong'}`}>{value}</div>
       </div>
@@ -186,6 +184,9 @@ export default function ActiveSharePanel({
   onClose: () => void;
 }) {
   const t = useRiskCopy();
+  const [lang] = useLang();
+  const text = (en: string, nl: string) => lang === 'nl' ? nl : en;
+  const facts = useInfoFacts();
   /**  ALL ROWS, OR ONLY WHAT WE HOLD. The underweights are the other half of the measure — a book
    *  can be 70% active almost entirely by NOT owning things — but there are ~1,700 of them on ACWI,
    *  so the default is the book and the index's biggest gaps are one click away. */
@@ -272,21 +273,7 @@ export default function ActiveSharePanel({
    *  AND ½ Σ|Active| RECONCILES TO THE TILE ABOVE **ONLY OVER EVERY NAME**. On the held subset
    * half the sum is missing, so it is not shown there rather than shown and quietly wrong.
    */
-  /**
-   * The two-sided date line, built once and shared by every tile that compares the book WITH the
-   * index — active share, overlap, off-benchmark.
-   *
-   *  One string for the three, because they are three readings of ONE pair of inputs. Three
-   * separate calls would be three places for the operands to drift apart, and a panel where two
-   * tiles date the same weights differently is a panel nobody can reconcile.  The Stocks tile is
-   * deliberately NOT here — no index appears in it, so it takes `whenBook`.
-   */
-  const whenBoth = t.active.whenWeights(
-    portfolioName, dayOf(selectedPortfolioAsOf), dayOf(portfolioFetchedAt),
-    data?.benchmark ?? benchmark,
-    dayRange(data?.benchmark_caps_from, data?.benchmark_caps_to),
-    data?.benchmark_caps_unstamped ?? 0);
-
+  const benchmarkSnapshot = data?.rows?.map((row) => row.weight_calculation?.as_of).filter(Boolean).sort()[0];
 
   // Reserve space for the full labels, not just percentage values. Both tables share the same
   // columns and horizontal scroll surface so the fixed totals cannot drift away from the rows.
@@ -413,42 +400,20 @@ export default function ActiveSharePanel({
                 name, which read the same in both. */}
             <Tile label={t.active.activeShare} value={pct2(data.active_share_pct)}
               suffix={riskBenchmarkWeights ? undefined : <span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>+</span>}
-              simpleInfo="Half the sum of absolute weight differences, with both the stock basket and ACWI normalised to 100%. Comparable across profiles; active share plus overlap equals 100%."
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.active.cards.activeShare.what}
-                where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
-                  sourceLabel(portfolioSource),
-                  sourceField('benchmark_caps'), sourceVendor('benchmark_caps'))}
-                when={whenBoth}
-                worked={data.active_share_pct == null ? '' : withWorked(
-                  String.raw`\tfrac{1}{2}\sum_i \left| w_i^{\,p} - w_i^{\,b} \right|`,
-                  String.raw`\text{overlap } ${subNum(data.overlap_pct ?? 0, 2)}\%`
-                  + String.raw` + \text{active } ${subNum(data.active_share_pct, 2)}\% = 100\%`)}
-                legend={[
-                  { sym: 'i', is: t.active.legend.issuer },
-                  { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
-                  { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
-                ]}
-                />} />} />
+              info={<InfoTip className="ml-0.5" content={<SimpleExplanation details={<>
+                <p>{facts.overlap(data.overlap_pct, data.active_share_pct)}</p>
+                <p>{facts.weights(selectedPortfolioAsOf)}</p>
+                {benchmarkSnapshot && <p>{facts.snapshot(benchmark, benchmarkSnapshot)}</p>}
+                {data.benchmark_covered_pct != null && <p>{facts.coverage(data.benchmark_covered_pct, benchmark)}</p>}
+              </>}>{t.active.cards.activeShare.what}</SimpleExplanation>} />} />
             <Tile label={t.active.overlap} value={pct2(data.overlap_pct)}
               suffix={riskBenchmarkWeights ? undefined : <><span className="self-center text-base leading-none font-mono text-fg-faint shrink-0" aria-hidden>=</span><Tile label="Total" value="100.00%" /></>}
-              info={<InfoTip className="ml-0.5" content={<AspectCard
-                what={t.active.cards.overlap.what}
-                where={t.active.heldVsIndex(data.n_holdings ?? 0, data.benchmark_members ?? 0,
-                  sourceLabel(portfolioSource),
-                  sourceField('benchmark_caps'), sourceVendor('benchmark_caps'))}
-                when={whenBoth}
-                worked={data.overlap_pct == null ? '' : withWorked(
-                  String.raw`\sum_i \min\!\left( w_i^{\,p},\; w_i^{\,b} \right)`,
-                  String.raw`${subNum(data.overlap_pct, 2)}\% = 100\%`
-                + String.raw` - \text{active } ${subNum(data.active_share_pct ?? 0, 2)}\%`)}
-                legend={[
-                  { sym: 'i', is: t.active.legend.issuer },
-                  { sym: String.raw`\min`, is: t.active.legend.min },
-                  { sym: String.raw`w_i^{\,p}`, is: t.active.legend.wp(portfolioName) },
-                  { sym: String.raw`w_i^{\,b}`, is: t.active.legend.wb(data.benchmark ?? benchmark) },
-                ]}
-                how="Sum the smaller stock-basket or ACWI weight for every company. Both sides total 100%, so overlap equals 100% minus active share." />} />} />
+              info={<InfoTip className="ml-0.5" content={<SimpleExplanation details={<>
+                <p>{facts.overlap(data.overlap_pct, data.active_share_pct)}</p>
+                <p>{facts.weights(selectedPortfolioAsOf)}</p>
+                {benchmarkSnapshot && <p>{facts.snapshot(benchmark, benchmarkSnapshot)}</p>}
+                {data.benchmark_covered_pct != null && <p>{facts.coverage(data.benchmark_covered_pct, benchmark)}</p>}
+              </>}>{t.active.cards.overlap.how}</SimpleExplanation>} />} />
           </div>
 
           {/*  THE TABLE SCROLLS IN ITS OWN BOX AGAIN (2026-08-25), REVERSING THE NOTE THAT USED
@@ -545,15 +510,18 @@ export default function ActiveSharePanel({
                       <span className="inline-flex flex-row-reverse items-center gap-1 whitespace-nowrap">
                       {!r.residual && <span className="font-sans">
                         <InfoTip content={r.weight_calculation ? <div className="space-y-2 text-xs">
-                          <p>{r.name}: iShares ACWI workbook weight on {r.weight_calculation.as_of}: {r.weight_calculation.initial_weight_pct.toFixed(4)}%.</p>
-                          {(r.weight_calculation.prices ?? []).map((price, index) => <p key={index}>
-                            {price.ticker}: €{price.start_price_eur?.toFixed(4)} ({price.start_date}) → €{price.end_price_eur?.toFixed(4)} ({price.end_date}).
-                          </p>)}
-                          <p>Yfinance EUR return: {r.weight_calculation.return_eur_pct.toFixed(4)}%.</p>
+                          <p className="font-medium text-fg-strong">{r.name} · ACWI</p>
+                          <p>{facts.snapshot('iShares ACWI', r.weight_calculation.as_of)} · {r.weight_calculation.initial_weight_pct.toFixed(4)}%</p>
+                          {!!r.weight_calculation.prices?.length && <table className="w-full text-left"><thead><tr className="text-fg-muted">
+                            <th className="py-1 pr-3">{text('Instrument', 'Instrument')}</th><th className="py-1 pr-3">{text('Opening · EUR', 'Begin · EUR')}</th><th className="py-1">{text('Closing · EUR', 'Eind · EUR')}</th>
+                          </tr></thead><tbody>{r.weight_calculation.prices.map((price, index) => <tr key={index} className="border-t border-neutral-800/40">
+                            <td className="py-2 pr-3 font-medium">{price.ticker}</td>
+                            <td className="py-2 pr-3 tabular-nums">{price.start_price_eur != null ? `€${price.start_price_eur.toFixed(4)}` : '—'}<span className="block text-fg-muted">{facts.date(price.start_date)}</span></td>
+                            <td className="py-2 tabular-nums">{price.end_price_eur != null ? `€${price.end_price_eur.toFixed(4)}` : '—'}<span className="block text-fg-muted">{facts.date(price.end_date)}</span></td>
+                          </tr>)}</tbody></table>}
+                          <p>{text('The snapshot weight grows with the EUR price return. Dividing by all grown weights brings the index back to 100%.', 'Het oorspronkelijke gewicht groeit mee met het EUR-koersrendement. Delen door alle gegroeide gewichten brengt de index terug naar 100%.')}</p>
                           <p className="font-mono">{r.weight_calculation.initial_weight_pct.toFixed(4)} × (1 + {r.weight_calculation.return_eur_pct.toFixed(4)} / 100) ÷ {r.weight_calculation.normalisation_total.toFixed(4)} × 100 = {r.weight_calculation.result_pct.toFixed(4)}%</p>
-                          <p>The denominator sums the workbook weights grown by each constituent’s EUR return.</p>
-                          <p>Profile allocation: {tableBenchmarkAllocation}% ACWI.</p>
-                          <p className="font-mono">{r.weight_calculation.result_pct.toFixed(4)}% × ({tableBenchmarkAllocation} / 100) = {(r.benchmark_pct ?? 0).toFixed(4)}% (displayed as {(r.benchmark_pct ?? 0).toFixed(2)}%).</p>
+                          {tableBenchmarkAllocation !== 100 && <p className="font-mono">{r.weight_calculation.result_pct.toFixed(4)}% × ({tableBenchmarkAllocation} / 100) = {(r.benchmark_pct ?? 0).toFixed(4)}%</p>}
                         </div> : undefined} text={`${tableBenchmarkLabel}'s weight in ${r.name}. The table uses profile weights; the headline metrics use 100% ACWI.`} />
                       </span>}
                       {(r.benchmark_pct ?? 0) > 0 ? `${(r.benchmark_pct ?? 0).toFixed(2)}%`
