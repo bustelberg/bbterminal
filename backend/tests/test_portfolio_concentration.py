@@ -92,7 +92,7 @@ class TestIssuersNotLines:
 
 class TestBothDenominators:
     @pytest.mark.parametrize("include_non_stocks", [False, True])
-    def test_top_positions_preserve_whole_book_weights_matching_active_share(self, wire, include_non_stocks):
+    def test_top_positions_preserve_whole_book_weights_after_active_share_normalises(self, wire, include_non_stocks):
         wire([("NVIDIA Corp", 60.0), ("Apple Inc", 40.0)],
              {"NVDA": "NVIDIA Corp", "AAPL": "Apple Inc"})
         holdings = [_h("Nvidia", "NVDA", 3.49), _h("Apple", "AAPL", 42.13)]
@@ -103,7 +103,10 @@ class TestBothDenominators:
         active = A.compute_active_share(holdings, "SP500")
         active_weights = {r["name"]: r["portfolio_pct"] for r in active["rows"] if r["held"]}
         for row in concentration["top"]:
-            assert row["weight_pct"] == pytest.approx(active_weights[row["name"]])
+            # Active Share compares a 100%-normalised stock sleeve to the index. Concentration
+            # keeps the literal book percentage, so convert the shared issuer weight back.
+            assert row["weight_pct"] == pytest.approx(
+                active_weights[row["name"]] * active["stocks_weight"] / 100.0)
         nvidia = next(r for r in concentration["top"] if r["name"] == "Nvidia")
         assert nvidia["weight_pct"] == pytest.approx(3.49)
         assert concentration["top"][-1]["cumulative_pct"] == pytest.approx(45.62)

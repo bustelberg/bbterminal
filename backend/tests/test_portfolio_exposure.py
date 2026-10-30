@@ -73,7 +73,7 @@ class TestTheEurosFoldPerIssuer:
         assert exp["positions"][0]["weight_pct"] == pytest.approx(24.0)
 
     @pytest.mark.parametrize("include_non_stocks", [False, True])
-    def test_company_weights_match_active_share_with_a_partial_stock_sleeve(self, wire, include_non_stocks):
+    def test_company_weights_match_active_share_after_sleeve_normalisation(self, wire, include_non_stocks):
         wire([("NVIDIA Corp", 100.0)], {"NVDA": {"name": "NVIDIA Corp", "ccy": "USD"}})
         holdings = [_h("Nvidia", "NVDA", 3.49, 349.0, "USD")]
         if include_non_stocks:
@@ -84,7 +84,10 @@ class TestTheEurosFoldPerIssuer:
         active = A.compute_active_share(holdings, "SP500")
         held = next(r for r in active["rows"] if r["held"])
         assert exposure["positions"][0]["weight_pct"] == pytest.approx(3.49)
-        assert exposure["positions"][0]["weight_pct"] == pytest.approx(held["portfolio_pct"])
+        # Exposure keeps the literal whole-book percentage. Active Share intentionally scales
+        # the stock sleeve to 100% before comparing it to the benchmark.
+        assert exposure["positions"][0]["weight_pct"] == pytest.approx(
+            held["portfolio_pct"] * active["stocks_weight"] / 100.0)
         assert exposure["positions"][0]["weight_pct"] == pytest.approx(concentration["top1_pct"])
         assert exposure["stocks_pct"] == pytest.approx(3.49)
         # The currency distribution is intentionally a separate stock-sleeve percentage.
