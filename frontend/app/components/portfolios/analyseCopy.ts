@@ -199,6 +199,7 @@ const en = {
     betaTitle: (name: string, benchmark: string) => `Beta of ${name} against ${benchmark}, using weekly available history up to five years.`,
   },
   reconciliation: {
+    missing: (reported: string, calculated: string) => `AIRS: ${reported}. Calculated: ${calculated}. The difference is unexplained, not a separate investment return.`,
     compareHow: (contribution: string, book: string, agrees: boolean) => `AIRS's own cumulatief_rendement against the Contribution total\n\n${contribution} from these rows vs ${book} from AIRS — they ${agrees ? 'agree' : 'do NOT agree'}`,
     compareUnavailable: (contribution: string, book: string, holdingsDate: string, bookDate: string) => `Contribution total cannot be reconciled to AIRS yet\n\n${contribution} from positions valued ${holdingsDate} vs ${book} from AIRS through ${bookDate}. The dates differ, so this is not a missing-position check.`,
     mismatch: (_sum: string, _book: string, residual: string) => `Difference from AIRS: ${displayedResidual(residual)}.`,
@@ -407,6 +408,7 @@ const nl: AnalyseCopy = {
     betaTitle: (name, benchmark) => `Beta van ${name} tegenover ${benchmark}, op wekelijkse beschikbare historie tot maximaal vijf jaar.`,
   },
   reconciliation: {
+    missing: (reported, calculated) => `AIRS: ${reported}. Berekend: ${calculated}. Het verschil is onverklaard, geen apart beleggingsrendement.`,
     compareHow: (contribution, book, agrees) => `AIRS' eigen cumulatief_rendement tegenover het totaal Bijdrage\n\n${contribution} uit deze rijen versus ${book} uit AIRS — ze ${agrees ? 'komen overeen' : 'komen NIET overeen'}`,
     compareUnavailable: (contribution, book, holdingsDate, bookDate) => `Het totaal Bijdrage kan nog niet met AIRS worden afgestemd\n\n${contribution} uit posities gewaardeerd op ${holdingsDate} versus ${book} uit AIRS tot ${bookDate}. De datums verschillen, dus dit is geen controle op ontbrekende posities.`,
     mismatch: (_sum, _book, residual) => `Verschil met AIRS: ${displayedResidual(residual)}.`,

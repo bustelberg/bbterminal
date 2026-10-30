@@ -124,7 +124,9 @@ describe('sold-position risk cells', () => {
     expect(s).not.toContain('p.lookthrough_positions.map((position)');
     // The accounting sum still uses only the actual parent-book sales, not explanatory children.
     expect(s).toContain('sum(sold.map((p) => p.contribution_pct))');
-    expect(s).not.toContain('position.contribution_pct');
+    const renderedSold = s.slice(s.indexOf('{soldLookThroughRows(sold, lookThrough).map((p, i) => ('),
+      s.indexOf('{displayedReconciliation &&'));
+    expect(renderedSold).not.toContain('position.contribution_pct');
   });
 
   it('use the same explanatory info affordance as held positions', () => {

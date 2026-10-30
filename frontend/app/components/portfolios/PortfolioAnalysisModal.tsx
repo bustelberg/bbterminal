@@ -662,9 +662,7 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
         {reconciliation && reconciliation.missing !== 0 && (
           <div className="flex items-center gap-2 text-[11px] text-warn-300">
             <span>{copy.lang === 'nl' ? 'Ontbreekt in de berekening' : 'Missing from calculation'}
-              <InfoTip className="ml-1" text={copy.lang === 'nl'
-                ? `AIRS rapporteert ${fmtRet(reconciliation.reported)}. De berekende bijdragen tellen op tot ${ppt(reconciliation.calculated)}. Dit is het nog niet verklaarde verschil; geen apart beleggingsrendement.`
-                : `AIRS reports ${fmtRet(reconciliation.reported)}. Calculated contributions add up to ${ppt(reconciliation.calculated)}. This is the unexplained difference, not a separate investment return.`} />
+              <InfoTip className="ml-1" text={copy.reconciliation.missing(fmtRet(reconciliation.reported), ppt(reconciliation.calculated))} />
             </span>
             <span className="ml-auto font-mono tabular-nums">{ppt(reconciliation.missing)}</span>
           </div>
@@ -3219,9 +3217,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                 <tr className="border-y border-neutral-800/30 bg-overlay/[0.035] text-warn-300">
                   <td colSpan={LEADING_COLS + cols.size + TRAILING_COLS - 1} className="px-4 py-2 text-xs text-fg-muted">
                     {copy.lang === 'nl' ? 'Ontbreekt in de berekening' : 'Missing from calculation'}
-                    <InfoTip className="ml-2" text={copy.lang === 'nl'
-                      ? `AIRS rapporteert ${fmtRet(displayedReconciliation.reported)}. De getoonde posities dragen samen ${ppt(displayedReconciliation.calculated)} bij. Het verschil is nog niet verklaard en is geen apart beleggingsrendement.`
-                      : `AIRS reports ${fmtRet(displayedReconciliation.reported)}. The shown positions contribute ${ppt(displayedReconciliation.calculated)}. The difference is not yet explained and is not a separate investment return.`} />
+                    <InfoTip className="ml-2" text={copy.reconciliation.missing(fmtRet(displayedReconciliation.reported), ppt(displayedReconciliation.calculated))} />
                   </td>
                   <td className="py-2 text-right font-mono text-xs tabular-nums">
                     {ppt(displayedReconciliation.missing)}

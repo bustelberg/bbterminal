@@ -11,7 +11,7 @@ describe('cash and certificate accounting', () => {
     expect(source).not.toContain('certificateAdjustments.map((adjustment)');
     expect(source).not.toContain('Return shown separately');
     expect(source).toContain('Missing from calculation');
-    expect(source).toContain('The difference is not yet explained and is not a separate investment return.');
+    expect(source).toContain('copy.reconciliation.missing(');
   });
 
   it('uses accounting contributions in the sleeve, not current weight times an unrelated return', () => {

@@ -14,6 +14,10 @@ function leaves(node: unknown, path = '', out: Record<string, string> = {}): Rec
 
 describe('Analyse primary-view copy', () => {
   it('keeps reconciliation warnings brief without calling rounded-zero differences missing positions', () => {
+    expect(ANALYSE_COPY.en.reconciliation.missing('+5.80%', '+4.50pp'))
+      .toBe('AIRS: +5.80%. Calculated: +4.50pp. The difference is unexplained, not a separate investment return.');
+    expect(ANALYSE_COPY.nl.reconciliation.missing('+5.80%', '+4.50pp'))
+      .toContain('Het verschil is onverklaard');
     expect(ANALYSE_COPY.en.reconciliation.mismatch('+4.03pp', '+4.03%', '-0.00pp')).toBe('Difference from AIRS: <0.01pp.');
     expect(ANALYSE_COPY.nl.reconciliation.mismatch('+4.03pp', '+4.03%', '+0.00pp')).toBe('Verschil met AIRS: <0.01pp.');
     expect(ANALYSE_COPY.en.reconciliation.mismatch('+4.03pp', '+4.33%', '-0.30pp')).toBe('Difference from AIRS: -0.30pp.');
