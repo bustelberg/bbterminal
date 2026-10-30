@@ -15,6 +15,7 @@ import { riskRequestKey, useRiskResult } from './useRiskResult';
 import { AUTOMATIC_RISK_REPAIRS, riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
+import InfoTip from '../InfoTip';
 
 // One automatic repair per exact sleeve is enough: a genuinely new instrument cannot acquire
 // pre-launch history, and reopening the preliminary view must not repeat vendor work.
@@ -86,9 +87,16 @@ export default function VolatilityView({
       {data?.available && (
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {[{ name: portfolioName, value: latest?.portfolio_pct }, { name: data.benchmark, value: latest?.benchmark_pct }].map(item => (
+            {[{ name: portfolioName, value: latest?.portfolio_pct, benchmark: false }, { name: data.benchmark, value: latest?.benchmark_pct, benchmark: true }].map(item => (
               <div key={item.name} className="rounded-lg border border-neutral-800/40 bg-elevated p-4">
-                <p className="text-sm text-fg-muted">{item.name} · rolling 12-month volatility</p>
+                <p className="text-sm text-fg-muted">{item.name} · rolling 12-month volatility
+                  <InfoTip className="ml-2" wide content={<div className="space-y-2 text-xs">
+                    <p className="font-medium text-fg-strong">{item.name} · rolling 12-month volatility</p>
+                    <p>{t.vol.rollingCalculation}</p>
+                    <p>{item.benchmark ? t.vol.rollingBenchmark : t.vol.rollingPortfolio}</p>
+                    {typeof latest?.date === 'string' && <p>{latest.date}</p>}
+                  </div>} />
+                </p>
                 <p className="mt-1 font-mono text-2xl tabular-nums text-fg-strong">{pct2(typeof item.value === 'number' ? item.value : null)}</p>
               </div>
             ))}

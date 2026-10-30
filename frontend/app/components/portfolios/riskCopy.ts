@@ -223,6 +223,9 @@ export type RiskCopy = {
      *  buttons beside it choose the sampling, not the unit — which is the confusion it exists to
      *  head off. */
     shownAnnualised: string;
+    rollingCalculation: string;
+    rollingPortfolio: string;
+    rollingBenchmark: string;
     volatility: string; downside: string; benchVol: (bench: string) => string;
     question: (portfolio: string, benchmark: string) => string;
     worst: (period: string) => string;
@@ -487,6 +490,9 @@ const en: RiskCopy = {
 
   vol: {
     shownAnnualised: '· shown annualised',
+    rollingCalculation: 'Take the latest 12 monthly returns in EUR, calculate their sample standard deviation (using n − 1 = 11), then multiply by √12 to annualise. Multiply by 100 to display a percentage. Each point on the chart repeats this calculation for its preceding 12 months.',
+    rollingPortfolio: 'The portfolio series combines historical instrument returns at the current holding weights. It reconstructs today’s holdings; it is not the client’s realised AIRS return history. Deposits and withdrawals are excluded.',
+    rollingBenchmark: 'The benchmark uses historical EUR returns over the same monthly observations, with the benchmark weights shown in the label.',
     volatility: 'Volatility (ann.)', downside: 'Downside deviation',
     benchVol: (b) => `${b} volatility`, worst: (p) => `Worst ${p}`,
     question: (portfolio, benchmark) => `How much would ${portfolio}'s returns have varied compared with ${benchmark}?`,
@@ -835,6 +841,9 @@ const nl: RiskCopy = {
 
   vol: {
     shownAnnualised: '· geannualiseerd weergegeven',
+    rollingCalculation: 'Neem de laatste 12 maandrendementen in EUR, bereken de steekproefstandaardafwijking (met n − 1 = 11) en vermenigvuldig deze met √12 om te annualiseren. Vermenigvuldig met 100 voor de weergave als percentage. Elk punt in de grafiek herhaalt deze berekening voor de voorgaande 12 maanden.',
+    rollingPortfolio: 'De portefeuillereeks combineert historische instrumentrendementen met de huidige positiewegingen. Dit is een reconstructie van de huidige posities, niet de werkelijk behaalde AIRS-rendementsreeks van de cliënt. Stortingen en onttrekkingen zijn uitgesloten.',
+    rollingBenchmark: 'De benchmark gebruikt historische EUR-rendementen over dezelfde maandelijkse waarnemingen, met de benchmarkwegingen die in het label staan.',
     volatility: 'Volatiliteit (geann.)', downside: 'Neerwaartse deviatie',
     benchVol: (b) => `Volatiliteit ${b}`, worst: (p) => `Slechtste ${p}`,
     question: (portfolio, benchmark) => `Hoe sterk zouden de rendementen van ${portfolio} hebben geschommeld vergeleken met ${benchmark}?`,

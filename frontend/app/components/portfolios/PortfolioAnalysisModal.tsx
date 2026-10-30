@@ -415,12 +415,12 @@ function BandMark({ pct, target = false }: { pct: number; target?: boolean }) {
   );
 }
 
-function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, certificateContribution }: {
+function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, certificateAdjustments = [] }: {
   slices: AllocSlice[];
   /**  The year's contribution from positions SOLD OUT during it. They have no asset class, so no
    *  bar can carry them — without this the slices are a set of parts that misses its own total. */
   soldContribution?: number | null;
-  certificateContribution?: number | null;
+  certificateAdjustments?: { name?: string | null; label?: string | null; contribution_pct?: number | null }[];
   selected?: string | null;
   onSelect?: (bucket: string | null) => void;
   /** The risk profile AIRS's own name says this model is offered at, or null for the products
@@ -647,12 +647,17 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             BUS_Offensief_Dyn they come to +8.211pp against a book that made +5.827%, and the
             missing -2.384pp is eight names it no longer holds. Printed only when there IS a
             remainder, so a book that sold nothing does not carry a permanent 0.00pp footnote. */}
-        {certificateContribution != null && Math.abs(certificateContribution) >= 0.005 && (
-          <div className="flex items-center gap-2 text-[11px] text-fg-muted">
-            <span>{copy.lang === 'nl' ? 'Certificaatresultaat — niet aan kas toegerekend' : 'Certificate result — not attributed to cash'}</span>
-            <span className={`ml-auto font-mono tabular-nums ${retTone(certificateContribution)}`}>{ppt(certificateContribution)}</span>
+        {certificateAdjustments.filter((adjustment) => adjustment.contribution_pct != null && Math.abs(adjustment.contribution_pct) >= 0.005).map((adjustment, index) => (
+          <div key={adjustment.name ?? index} className="space-y-1 text-[11px] text-fg-muted">
+            <div className="flex items-start gap-2">
+              <span>{adjustment.label || adjustment.name} · {copy.lang === 'nl' ? 'Rendement apart weergegeven' : 'Return shown separately'}</span>
+              <span className={`ml-auto shrink-0 font-mono tabular-nums ${retTone(adjustment.contribution_pct)}`}>{ppt(adjustment.contribution_pct)}</span>
+            </div>
+            <p className="text-fg-faint">{copy.lang === 'nl'
+              ? 'Dit deel van het beleggingsresultaat staat apart, zodat het niet als winst of verlies op kasgeld wordt geteld. Het zit al in uw totale rendement.'
+              : 'This part of the investment’s return is shown separately so it is not counted as a gain or loss on cash. It is already included in your total return.'}</p>
           </div>
-        )}
+        ))}
         {soldContribution != null && Math.abs(soldContribution) >= 0.005 && (
           <div className="flex items-center gap-2 pt-1 mt-1 border-t border-neutral-800/40 text-[11px]">
             <span className="text-fg-faint">{copy.allocation.sold}</span>
@@ -3204,13 +3209,13 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
             </tbody>
           )}
           {!!certificateAdjustments.length && (
-            <tbody aria-label={copy.lang === 'nl' ? 'Certificaatresultaten' : 'Certificate-level results'}>
+            <tbody aria-label={copy.lang === 'nl' ? 'Apart weergegeven beleggingsresultaten' : 'Investment returns shown separately'}>
               {certificateAdjustments.map((adjustment) => (
                 <tr key={adjustment.name} className="border-y border-neutral-800/30 bg-overlay/[0.035]">
                   <td colSpan={LEADING_COLS + cols.size + TRAILING_COLS - 1} className="px-4 py-2 text-xs text-fg-muted">
-                    {copy.lang === 'nl' ? 'Certificaatresultaat · ' : 'Certificate-level result · '}{adjustment.label}
+                    {adjustment.label || adjustment.name} · {copy.lang === 'nl' ? 'Rendement apart weergegeven' : 'Return shown separately'}
                     <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={copy.lang === 'nl' ? 'Certificaatresultaat dat eerder aan kas was toegerekend; geen kasrendement.' : 'Certificate result previously allocated to cash; not a cash return.'}
+                      what={copy.lang === 'nl' ? 'Dit deel van het beleggingsresultaat staat apart, zodat het niet als winst of verlies op kasgeld wordt geteld. Het zit al in uw totale rendement.' : 'This part of the investment’s return is shown separately so it is not counted as a gain or loss on cash. It is already included in your total return.'}
                       how={copy.info.contributionHow(eur0n(adjustment.result_eur), eur0n(realised?.basis_eur), ppt(adjustment.contribution_pct))} />
                   </td>
                   <td className={`py-2 text-right font-mono text-xs tabular-nums ${retTone(adjustment.contribution_pct)}`}>
@@ -4132,7 +4137,7 @@ export default function PortfolioAnalysisModal({
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
-                  certificateContribution={sum((data.realised?.certificate_adjustments ?? []).map((a) => a.contribution_pct))}
+                  certificateAdjustments={data.realised?.certificate_adjustments ?? []}
                   /* Summed here rather than server-side: it is the same `closed_out` set the
                      Holdings table's own group already sums, and one source beats two. */
                   soldContribution={data.realised?.available
