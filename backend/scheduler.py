@@ -43,7 +43,6 @@ import threading
 import time
 from concurrent.futures import Future
 from datetime import date, datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
 
 from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_MAX_INSTANCES, EVENT_JOB_MISSED
 from apscheduler.schedulers.background import BackgroundScheduler
