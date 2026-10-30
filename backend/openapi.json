@@ -32971,6 +32971,27 @@
         ]
       }
     },
+    "/api/market/iwqu": {
+      "get": {
+        "operationId": "iwqu_api_market_iwqu_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Iwqu",
+        "tags": [
+          "market"
+        ]
+      }
+    },
     "/api/market/nasdaq": {
       "get": {
         "operationId": "nasdaq_api_market_nasdaq_get",

@@ -146,7 +146,9 @@ class TestTheSchedulerJob:
         # slip past it.
         src = inspect.getsource(scheduler._run_asset_price_refresh)
         assert "if _q.is_worker_active():" in src
-        assert "return" in src.split("if _q.is_worker_active():", 1)[1][:500]
+        guard = src.split("if _q.is_worker_active():", 1)[1].split("watched =", 1)[0]
+        assert "return" in guard
+        assert "raise RuntimeError" in guard  # Daily chain records a blocked source as incomplete.
 
     def test_it_yields_to_the_WORKER_not_to_the_BACKLOG(self):
         """The bug the first version shipped with. `pending > 0` is a count of what is LEFT, and
@@ -176,8 +178,9 @@ class TestTheSchedulerJob:
         from scheduled_jobs import BY_ID
 
         spec = BY_ID["asset_price_refresh"]
-        assert spec.trigger["hour"] == 6          # after the 05:00 sequence, not racing it
-        assert spec.trigger["day_of_week"] == "mon-sun"
+        assert spec.after_job == "dashboard_market"
+        assert BY_ID[spec.after_job].trigger["hour"] == 6
+        assert BY_ID[spec.after_job].trigger["timezone"] == "Europe/Amsterdam"
         # ~220 gap fetches at ~1.5s each; a slow run must never overlap the next day's tick.
         assert spec.options["max_instances"] == 1
         # ...and it must actually be wired to the tick.
@@ -406,7 +409,9 @@ class TestTheBootRace:
         assert gate < src.index("find_stale(isins=watched, stale_days=1)")
         # ...and a database that never answers ends the job, rather than falling through into
         # queries that are all guaranteed to fail.
-        assert "return" in src.split("_await_db_ready(", 1)[1][:200]
+        gate = src.split("_await_db_ready(", 1)[1].split("if _q.is_worker_active():", 1)[0]
+        assert "return" in gate
+        assert "raise RuntimeError" in gate
 
     def test_the_gate_is_a_GATE_not_a_retry_around_the_work(self):
         """Retrying the JOB would re-spend what it had already done — ~1.5s of Yahoo per

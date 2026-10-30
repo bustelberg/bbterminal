@@ -129,6 +129,7 @@ _WATCHED = (
     # bucket out. Exactly the class of miss this list exists to prevent.
     "relative_momentum",
     "fx_rate", "universe", "universe_membership", "universe_asset_membership", "country",
+    "company", "index_file_membership",
 )
 
 # 137KB per payload, so 48 entries is ~6.5MB — a portfolio has a handful of (benchmark, weight_by,

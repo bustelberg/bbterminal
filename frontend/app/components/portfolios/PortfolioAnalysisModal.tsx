@@ -4385,10 +4385,16 @@ export default function PortfolioAnalysisModal({
       )}
       {risk && data && (
         <div className="absolute inset-0 z-20 flex min-h-0 flex-col bg-page p-5">
+          <div className="mb-4 flex shrink-0 flex-wrap items-center gap-x-6 gap-y-3">
           <button type="button" onClick={() => setRisk(false)}
-            className="mb-4 w-fit cursor-pointer rounded-lg border border-neutral-800/40 bg-elevated px-5 py-2.5 text-sm font-semibold text-fg-strong transition-colors hover:border-accent-500/50 hover:text-accent-300">
+            className="w-fit cursor-pointer rounded-lg border border-neutral-800/40 bg-elevated px-5 py-2.5 text-sm font-semibold text-fg-strong transition-colors hover:border-accent-500/50 hover:text-accent-300">
             ← Back to analysis
           </button>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-medium text-fg-muted">{copy.actions.risk}</p>
+            <h2 className="break-words text-xl font-semibold text-fg-strong">{name}</h2>
+          </div>
+          </div>
           <div className="min-h-0 flex-1">
           {/*  THE HOLDINGS THE TABLE IS SHOWING, PASSED STRAIGHT THROUGH. The panel does not
               re-derive a weight or re-decide what is a fund — both were settled server-side when

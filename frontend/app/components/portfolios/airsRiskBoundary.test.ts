@@ -5,12 +5,12 @@ const panel = readFileSync(new URL('./ActiveSharePanel.tsx', import.meta.url), '
 const modal = readFileSync(new URL('./PortfolioAnalysisModal.tsx', import.meta.url), 'utf8');
 
 describe('Risk navigation', () => {
-  it('opens the six risk measures directly without an AIRS overview wrapper', () => {
+  it('opens the five visible risk measures directly without an AIRS overview wrapper', () => {
     expect(modal).toContain('<ActiveSharePanel benchmark=');
     expect(modal).toContain("dynamic(() => import('./ActiveSharePanel')");
     expect(modal).not.toContain('<AirsRiskPanel');
-    expect(panel).toContain("['active', 'te', 'corr', 'vol', 'dd', 'conc']");
-    expect(panel).toContain("'conc'>('active')");
+    expect(panel).toContain("(['active', 'corr', 'vol', 'dd', 'conc'] as const)");
+    expect(panel).toContain("useState<'active' | 'te' | 'corr' | 'vol' | 'dd' | 'conc'>('active')");
     expect(panel).not.toContain('Current portfolio simulation');
     expect(panel).not.toContain('Detailed analysis');
   });

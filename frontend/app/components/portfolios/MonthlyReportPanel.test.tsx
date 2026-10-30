@@ -134,6 +134,38 @@ describe('AIRS monthly report', () => {
     expect(summary?.textContent).not.toContain('Compounded portfolio');
   });
 
+  it('keeps January monthly returns separate from a January-to-October YTD headline', async () => {
+    const data = { ...completeResponse(), months: [
+      { ...observation, month: '2026-01', periode: '2026-01-30', rendement: -0.05 },
+      { ...observation, month: '2026-10', periode: '2026-10-29' },
+    ], weighted_benchmark: {
+      '2026-01': { return_pct: 1.38, start_date: '2025-12-31', end_date: '2026-01-30', source: 'Policy' },
+    } };
+    vi.mocked(apiFetch).mockImplementation(async (url) => new Response(JSON.stringify({
+      ...data, month: new URL(String(url), 'http://localhost').searchParams.get('month'),
+    })));
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Bustelberg Offensief"
+      overviewReturns={{ portfolio: 6.64, benchmark: 19.26, asOf: '2026-10-29', from: '2026-01-01' }} />));
+    expect(host.querySelector('[aria-label="Compounded returns"]')?.textContent).toContain('+19.26%');
+    const january = host.querySelector<HTMLButtonElement>('nav[aria-label="Months"] button')!;
+    expect(january.textContent).toContain('Weighted benchmark · EUR +1.38%');
+    expect(january.textContent).not.toContain('+19.26%');
+    await act(async () => january.click());
+    const details = host.querySelector('#monthly-report-details');
+    expect(details?.textContent).toContain('+1.38%');
+    expect(details?.textContent).not.toContain('+19.26%');
+  });
+
+  it('does not substitute YTD when its end date is unknown', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
+      '2026-10': { return_pct: 2.05, source: 'Policy' },
+    } })));
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio"
+      overviewReturns={{ portfolio: -1.7, benchmark: 1.55, from: '2026-10-15' }} />));
+    expect(host.querySelectorAll('nav[aria-label="Months"] button')[9].textContent)
+      .toContain('Weighted benchmark · EUR +2.05%');
+  });
+
   it('uses the AIRS funding window for a portfolio that starts during the selected month', async () => {
     vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
       '2026-10': { return_pct: 2.05, start_date: '2026-09-30', end_date: '2026-10-29', source: 'Policy' },

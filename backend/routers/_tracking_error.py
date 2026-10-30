@@ -41,6 +41,7 @@ import re
 from functools import lru_cache
 from datetime import date, timedelta
 import time
+from routers._risk_read import ALLOW_REPAIR, shared_series
 
 
 @lru_cache(maxsize=16)
@@ -196,6 +197,7 @@ def assess_risk_data_quality(holdings: list[dict], benchmark: str,
     }
 
 
+@shared_series
 def build_paired_series(holdings: list[dict], benchmark: str,
                         frequency: str = "weekly", years: int = 5,
                         preloaded: dict | None = None,
@@ -391,7 +393,7 @@ def build_paired_series(holdings: list[dict], benchmark: str,
             # mapped Yahoo and FX histories and retry once, rather than making the reader find a
             # separate admin refresh. `preloaded` is deliberately excluded: callers supplying a
             # snapshot own that data and a repair could not alter it.
-            if preloaded is None and not _repair_attempted:
+            if preloaded is None and not _repair_attempted and ALLOW_REPAIR.get():
                 _repair_risk_inputs({*isins, *benchmark_isins.values()}, years)
                 return build_paired_series(
                     holdings, benchmark, frequency, years,

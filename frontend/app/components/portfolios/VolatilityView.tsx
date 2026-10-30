@@ -12,7 +12,7 @@ import type { SourceKey } from '../../../lib/provenance';
 import type { PortfolioVolatility } from '../../../lib/types/api';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
-import { riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
+import { AUTOMATIC_RISK_REPAIRS, riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
 
@@ -52,7 +52,7 @@ export default function VolatilityView({
   }, 'volatility', 'the volatility could not be computed');
 
   useEffect(() => {
-    if (!data?.available || (!data.preliminary && !data.excluded_holdings?.length)
+    if (!AUTOMATIC_RISK_REPAIRS || !data?.available || (!data.preliminary && !data.excluded_holdings?.length)
       || startedPreliminaryRepairs.has(repairIdentity)) return;
     startedPreliminaryRepairs.add(repairIdentity);
     void startJob(
@@ -81,8 +81,7 @@ export default function VolatilityView({
           <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
         </div>
       )}
-      {data && !data.available && <p className="text-xs text-fg-muted" title={data.reason ?? undefined}>{/benchmark.*history/i.test(data.reason ?? '')
-        ? <>Waiting for Yahoo benchmark history; retrying automatically… <LoadingDots /></> : data.reason}</p>}
+      {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
         <>

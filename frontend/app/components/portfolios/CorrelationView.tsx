@@ -40,7 +40,7 @@ import type { ActiveShareHolding } from './ActiveSharePanel';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
 import { invalidateReadCache } from '../../../lib/readCache';
 import { startJob } from '../../../lib/stores/jobs';
-import { riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
+import { AUTOMATIC_RISK_REPAIRS, riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
 
 // A repair may conclude that an instrument genuinely only began trading recently.  Start one
 // repair per exact sleeve during this browser session, rather than spending vendor calls again
@@ -137,7 +137,7 @@ export default function CorrelationView({
   }, 'risk-correlation', 'the correlations could not be computed');
 
   useEffect(() => {
-    if (!data?.available || (!data.preliminary && !data.excluded_holdings?.length)
+    if (!AUTOMATIC_RISK_REPAIRS || !data?.available || (!data.preliminary && !data.excluded_holdings?.length)
       || startedPreliminaryRepairs.has(repairIdentity)) return;
     startedPreliminaryRepairs.add(repairIdentity);
     void startJob(
@@ -196,8 +196,7 @@ export default function CorrelationView({
           <p className="text-2xl font-medium text-fg-strong">{t.common.computing} <LoadingDots /></p>
         </div>
       )}
-      {data && !data.available && <p className="text-xs text-fg-muted" title={data.reason ?? undefined}>{/benchmark.*history/i.test(data.reason ?? '')
-        ? <>Waiting for Yahoo benchmark history; retrying automatically… <LoadingDots /></> : data.reason}</p>}
+      {data && !data.available && <p className="text-xs text-fg-muted">{data.reason}</p>}
 
       {data?.available && (
         <>

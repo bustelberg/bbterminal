@@ -98,7 +98,7 @@ def should_scan(spec) -> bool:
      AND SO IS AN OPT-IN JOB THAT IS NOT OPTED IN. `optional_env` means "this deployment may
     legitimately not run this at all"; a gap there is the configuration working.
     """
-    return spec.interval_seconds is None and not spec.optional_env
+    return spec.interval_seconds is None and not spec.optional_env and not getattr(spec, "after_job", None)
 
 
 def missed_windows(

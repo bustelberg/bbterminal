@@ -258,6 +258,12 @@ function Row({ j, panel, ctx }: {
               <p className="text-[12px] text-fg-soft font-mono">{j.last_detail}</p>
             )}
             {summary && <p className="text-[12px] text-fg-muted font-mono">{summary}</p>}
+            {j.last_summary && ['dashboard_market', 'dashboard_post_airs', 'dashboard_freshness', 'airs_vermogen_refresh'].includes(j.id) && (
+              <details className="text-xs text-fg-muted">
+                <summary className="cursor-pointer py-1">Source dates, coverage and per-portfolio results</summary>
+                <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-lg bg-page p-3 text-[11px]">{JSON.stringify(j.last_summary, null, 2)}</pre>
+              </details>
+            )}
             {/*  SAID ON THE ROW, NOT ONLY IN THE HEADER COUNT. "Unknown" is the one state a reader
                 will assume they misread, so the row itself explains that the silence is ours. */}
             {!j.observable && (

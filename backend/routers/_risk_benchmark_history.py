@@ -13,6 +13,9 @@ _attempts: dict[tuple, float] = {}
 def ensure_benchmark_history(series: dict, benchmark_isins: set[str], start: str,
                              years: int, reload) -> dict:
     """Single-flight missing benchmark repairs; always reread after another caller repairs."""
+    from routers._risk_read import ALLOW_REPAIR
+    if not ALLOW_REPAIR.get():
+        return series
     marks = history_marks(start, date.today().isoformat())
     # The latest completed trading close may precede today (weekends and holidays).
     latest = [day for isin in benchmark_isins for day, price in series.get(isin, [])

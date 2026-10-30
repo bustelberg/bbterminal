@@ -43,7 +43,9 @@ def _run(name: str, hours_ago: float, status: str = "ok", err: str | None = None
 class TestTheDeclarationIsTheFixedPoint:
     def test_every_spec_declares_exactly_one_kind_of_trigger(self):
         for s in SCHEDULED_JOBS:
-            assert (s.trigger is None) != (s.interval_seconds is None), s.id
+            assert sum((s.trigger is not None, s.interval_seconds is not None, s.after_job is not None)) == 1, s.id
+            if s.after_job:
+                assert s.after_job in {parent.id for parent in SCHEDULED_JOBS}
 
     def test_ids_are_unique(self):
         ids = [s.id for s in SCHEDULED_JOBS]
@@ -98,16 +100,15 @@ class TestOptInJobs:
     def test_asset_queue_is_registered_by_default(self):
         assert "asset_ingest_queue" in {s.id for s in registrable({})}
 
-    def test_benchmark_jobs_are_one_chained_daily_refresh_and_one_weekly_due_fill(self):
+    def test_dashboard_market_stages_are_chained_and_fundamentals_checked_daily(self):
         by_id = {s.id: s for s in SCHEDULED_JOBS}
         assert "benchmark_index_refresh" not in by_id
         assert "relative_momentum_refresh" not in by_id
-        assert by_id["benchmark_price_slice"].trigger == {
-            "day_of_week": "mon-sun", "hour": 6, "minute": 30, "timezone": "UTC",
-        }
-        assert by_id["benchmark_fundamentals_fill"].trigger == {
-            "day_of_week": "mon", "hour": 8, "minute": 0, "timezone": "UTC",
-        }
+        for stage in ("asset_price_refresh", "benchmark_price_slice", "benchmark_fundamentals_fill"):
+            assert by_id[stage].after_job == "dashboard_market"
+            assert by_id[stage].trigger is None
+        assert by_id["benchmark_fundamentals_fill"].max_age_hours == 30
+        assert by_id["dashboard_market"].trigger == {"hour": 6, "minute": 0, "timezone": "Europe/Amsterdam"}
         assert by_id["history_drift_check"].trigger == {
             "day_of_week": "mon", "hour": 7, "minute": 0, "timezone": "UTC",
         }

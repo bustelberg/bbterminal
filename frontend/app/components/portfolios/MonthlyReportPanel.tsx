@@ -181,12 +181,15 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const portfolioCompounded = useOverview ? rounded(overviewReturns.portfolio) : compound(months.map((key) => monthPerformance(key)?.rendement));
   const benchmarkCompounded = useOverview ? rounded(overviewReturns.benchmark) : compound(months.map((key) => report?.weighted_benchmark?.[key]?.return_pct));
   const compoundedExcess = portfolioCompounded != null && benchmarkCompounded != null ? portfolioCompounded - benchmarkCompounded : null;
-  // A book first funded during this month has no AIRS return before `from`. Its monthly
-  // benchmark must use the same window as the YTD scorecard, rather than the calendar-month
-  // benchmark which would include days in which the book did not yet exist.
-  const benchmarkForMonth = (key: string) => useOverview && overviewReturns.from?.slice(0, 7) === key
-    ? overviewReturns.benchmark : report?.weighted_benchmark?.[key]?.return_pct;
-  const selectedMonthUsesOverviewBenchmark = useOverview && overviewReturns.from?.slice(0, 7) === month;
+  // YTD is also a monthly period only when BOTH boundaries fall in that month.
+  // This preserves a newly funded book's partial-month benchmark without putting a
+  // January–October YTD return into the January tile.
+  const overviewBenchmarkMonth = useOverview && overviewReturns.from && overviewReturns.asOf
+    && overviewReturns.from.slice(0, 7) === overviewReturns.asOf.slice(0, 7)
+    ? overviewReturns.asOf.slice(0, 7) : null;
+  const benchmarkForMonth = (key: string) => key === overviewBenchmarkMonth
+    ? overviewReturns?.benchmark : report?.weighted_benchmark?.[key]?.return_pct;
+  const selectedMonthUsesOverviewBenchmark = month === overviewBenchmarkMonth;
   const compoundedThrough = useOverview ? overviewReturns.asOf : monthPerformance(months[months.length - 1])?.periode;
   const compoundedFrom = useOverview ? overviewReturns.from : report?.start;
   const unavailable = (reason?: string) => reason === 'unclassified_activity' || reason === 'quantity_not_reconciled'

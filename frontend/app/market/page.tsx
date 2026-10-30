@@ -20,12 +20,14 @@ export default function MarketPage() {
     <h1 className="text-2xl font-semibold text-fg-strong">{lang === 'nl' ? 'Markt' : 'Market'}</h1>
     <MarketSection endpoint="nasdaq" name="Nasdaq Composite" symbol="^IXIC" />
     <MarketSection endpoint="acwi" name="iShares MSCI ACWI ETF" symbol="ACWI" />
+    <MarketSection endpoint="iwqu" name="iShares Edge MSCI World Quality Factor UCITS ETF" symbol="IWQU.L" />
   </main>;
 }
 
-function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'; name: string; symbol: string }) {
+function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi' | 'iwqu'; name: string; symbol: string }) {
   const [lang] = useLang();
   const nl = lang === 'nl';
+  const currency = endpoint === 'iwqu' ? 'EUR' : 'USD';
   const [data, setData] = useState<Snapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -73,7 +75,8 @@ function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'
         <h2 className="text-xl font-semibold text-fg-strong">{name}</h2>
         <p className="mt-1 text-sm text-fg-muted">{symbol} · {endpoint === 'nasdaq'
           ? (nl ? 'Indexpunten, USD-basis' : 'Index points, USD basis')
-          : (nl ? 'ETF-koers in USD · exclusief uitkeringen' : 'ETF price in USD · excluding distributions')}</p>
+          : endpoint === 'iwqu' ? (nl ? 'ETF-koers in EUR · omgerekend met historische USD/EUR-koersen' : 'ETF price in EUR · converted using historical USD/EUR rates')
+            : (nl ? 'ETF-koers in USD · exclusief uitkeringen' : 'ETF price in USD · excluding distributions')}</p>
       </div>
       <button type="button" className={button} disabled={loading} onClick={() => void load()}>
         {loading ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Vernieuwen' : 'Refresh')}
@@ -88,7 +91,7 @@ function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'
       <div className="grid gap-3 sm:grid-cols-3">
         <section className="rounded-xl border border-neutral-800/40 bg-card p-4">
           <h2 className="text-xs text-fg-muted">{endpoint === 'nasdaq'
-            ? (nl ? 'Laatste indexstand' : 'Latest index level') : (nl ? 'Laatste ETF-koers · USD' : 'Latest ETF price · USD')}</h2>
+            ? (nl ? 'Laatste indexstand' : 'Latest index level') : `${nl ? 'Laatste ETF-koers' : 'Latest ETF price'} · ${currency}`}</h2>
           <p className="mt-2 font-mono text-2xl text-fg-strong">{number(data.latest)}</p>
           <p className="mt-2 text-xs text-fg-faint">{new Date(data.latest_at).toLocaleString(locale, { timeZone: 'Europe/Amsterdam', dateStyle: 'medium', timeStyle: 'short' })} · Amsterdam</p>
         </section>
@@ -119,7 +122,7 @@ function MarketSection({ endpoint, name, symbol }: { endpoint: 'nasdaq' | 'acwi'
               <CartesianGrid stroke={chartTheme.grid} vertical={false} />
               <XAxis dataKey="date" minTickGap={65} tick={{ fill: chartTheme.axisTick, fontSize: 11 }} tickFormatter={value => day(String(value))} />
               <YAxis width={65} domain={[0, Math.ceil(data.peak * 1.08)]} tick={{ fill: chartTheme.axisTick, fontSize: 11 }} tickFormatter={value => Number(value).toLocaleString(locale)} />
-              <Tooltip {...chartTheme.tooltip} labelFormatter={value => day(String(value))} formatter={value => [number(Number(value)), endpoint === 'nasdaq' ? (nl ? 'Indexstand' : 'Index level') : (nl ? 'ETF-koers · USD' : 'ETF price · USD')]} />
+              <Tooltip {...chartTheme.tooltip} labelFormatter={value => day(String(value))} formatter={value => [number(Number(value)), endpoint === 'nasdaq' ? (nl ? 'Indexstand' : 'Index level') : `${nl ? 'ETF-koers' : 'ETF price'} · ${currency}`]} />
               <ReferenceLine y={data.peak} stroke={chartTheme.warn} strokeDasharray="5 4"
                 label={{ value: `${nl ? 'Top' : 'Peak'} ${number(data.peak)} · ${day(data.peak_date)}`, position: 'insideTopLeft', fill: chartTheme.warn, fontSize: 11 }} />
               <Line type="linear" dataKey="close" stroke={chartTheme.accent} strokeWidth={1.8} dot={false} isAnimationActive={false} />

@@ -234,7 +234,7 @@ def _refresh(ticker: str, bid: int, have_max: str | None, *, full_history: bool 
 
 
 def ensure_fresh(label: str, *, force: bool = False, bypass_daily_guard: bool = False,
-                 full_history: bool = False) -> tuple[int, tuple[str, float]] | None:
+                 full_history: bool = False, strict: bool = False) -> tuple[int, tuple[str, float]] | None:
     """`(benchmark_id, newest bar)` for this label's proxy ETF, refreshed if it has gone stale.
 
     None when there is no proxy, or when nothing can be had at all. Self-healing: the scheduled
@@ -302,10 +302,14 @@ def ensure_fresh(label: str, *, force: bool = False, bypass_daily_guard: bool = 
             # state this column was added to end.
             _stamp_fetched(bid)
         except Exception as exc:                                # noqa: BLE001
+            if strict:
+                raise
             #  A vendor failure costs freshness, never the number. What we already hold is still
             # a real price series; refusing to answer would blank a tile over a transient 500.
             _log.warning("[bench-etf] %s: refresh failed, serving what is stored: %s: %s",
                          ticker, type(exc).__name__, exc)
+    if strict and _behind_the_market(last):
+        raise RuntimeError(f"{ticker}: stored benchmark close still trails the market")
     return (bid, last) if last else None
 
 
@@ -341,7 +345,7 @@ def _stamp_fetched(benchmark_id: int) -> None:
 
 
 def refresh_index_proxies(*, force: bool = True, bypass_daily_guard: bool = False,
-                          full_history: bool = False) -> int:
+                          full_history: bool = False, strict: bool = False) -> int:
     """Bring every proxy ETF up to date. For the scheduled price phase. Returns tickers refreshed.
 
      SO THE 1.35s VENDOR CALL DOES NOT LAND ON A READER. `ensure_fresh` will do it lazily, but
@@ -361,14 +365,20 @@ def refresh_index_proxies(*, force: bool = True, bypass_daily_guard: bool = Fals
     migration only; ordinary daily calls fetch just the recent gap and overlap.
     """
     n = 0
+    failures = []
     for label in PROXY:
         try:
             if ensure_fresh(label, force=force, bypass_daily_guard=bypass_daily_guard,
-                            full_history=full_history):
+                            full_history=full_history, **({"strict": True} if strict else {})):
                 n += 1
+            elif strict:
+                failures.append(f"{label}: no priced proxy series")
         except Exception as exc:                                # noqa: BLE001
             _log.warning("[bench-etf] %s: proxy refresh failed: %s: %s",
                          label, type(exc).__name__, exc)
+            failures.append(f"{label}: {exc}")
+    if strict and failures:
+        raise RuntimeError("Benchmark proxy refresh incomplete: " + "; ".join(failures))
     return n
 
 

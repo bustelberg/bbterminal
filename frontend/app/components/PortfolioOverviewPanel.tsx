@@ -78,6 +78,8 @@ function prefetchModelAnalysis(id: number, name: string) {
  *   name and NOTHING else on the row looks wrong. Confirm them in Dynamic → Fixed.
  */
 
+const SHOW_SECONDARY_ROW_ACTIONS = false;
+
 const pct = (v: number | null | undefined) =>
   v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`;
 const eur = (v: number | null | undefined) =>
@@ -298,7 +300,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     });
   };
   const [err, setErr] = useState<string | null>(null);
-  const [open, setOpen] = useState<string | null>(null);
+  const [open] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, AirsAccountDetail>>({});
   const [isins, setIsins] = useState<Record<string, AirsAccountIsins>>({});
   // One cache refresh per account per mounted dashboard. The server also de-duplicates jobs, but
@@ -701,7 +703,26 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     if (cached) setRows(cached);
   }, []);
 
-  useEffect(() => { void loadOverview(); }, [loadOverview]);
+  useEffect(() => {
+    let pending = false;
+    let lastStarted = -Infinity;
+    // Read stored overview data only; this never starts an AIRS refresh.
+    const reload = () => {
+      if (document.hidden || pending || Date.now() - lastStarted < 5000) return;
+      pending = true;
+      lastStarted = Date.now();
+      void loadOverview().finally(() => { pending = false; });
+    };
+    reload();
+    const timer = window.setInterval(reload, 60_000);
+    document.addEventListener('visibilitychange', reload);
+    window.addEventListener('focus', reload);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', reload);
+      window.removeEventListener('focus', reload);
+    };
+  }, [loadOverview]);
 
   /**
    * Re-scan ONE portfolio's AIRS reports (Rendement + Vermogensoverzicht) and reload its figures.
@@ -981,16 +1002,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     await cancelJob(fleetJob);
   };
 
-  /**
-   * Every authenticated dashboard user can inspect the account's holdings,
-   * transactions and reconciliation. Shared mapping edits remain admin-only.
-   */
-  const expand = async (p: string) => {
-    setOpen(open === p ? null : p);
-    if (detail[p] || open === p) return;
-    await loadDetail(p);
-  };
-
   // Re-fetch just one account's ISIN resolution (after a manual Class override), so the row
   // re-groups under its new bucket without collapsing/re-opening the whole holdings table.
   const refreshIsins = useCallback(async (p: string) => {
@@ -1205,9 +1216,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 const isOpen = open === r.dynamic_portefeuille;
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
-                    {/* Account details are available to every authenticated dashboard user. */}
-                    <tr onClick={() => void expand(r.dynamic_portefeuille)}
-                      className="group transition-colors hover:bg-accent-500/10 cursor-pointer">
+                    <tr className="group transition-colors hover:bg-accent-500/10">
                       <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">
                         {rowNo + 1}
                       </td>
@@ -1255,7 +1264,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
                           )}
-                          {canAnalyse(r) && (
+                          {SHOW_SECONDARY_ROW_ACTIONS && canAnalyse(r) && (
                             <button type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -1267,7 +1276,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               {opening === r.dynamic_portefeuille ? '…' : 'Fundamental'}
                             </button>
                           )}
-                          {canAnalyse(r) && (
+                          {SHOW_SECONDARY_ROW_ACTIONS && canAnalyse(r) && (
                             <button type="button"
                               onClick={(e) => { e.stopPropagation(); void openModal(r, 'earnings'); }}
                               disabled={opening === r.dynamic_portefeuille}
@@ -1279,7 +1288,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           {/* Re-scan just this portfolio (a few seconds). stopPropagation so it does
                               not also toggle the row's holdings. `items-stretch` on the wrapper keeps
                               this exactly the height of the Analyse button beside it. */}
-                          {(() => {
+                          {SHOW_SECONDARY_ROW_ACTIONS && (() => {
                             const pf = r.dynamic_portefeuille;
                             const busy = refreshingRows.has(pf);
                             const stopping = cancelWanted.has(pf);
@@ -1335,7 +1344,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           beside its own small badge is the hierarchy; scaling the badge with it
                           would be the same flat row one step louder. */}
                       <td className="px-3 py-1.5 text-[15px] text-fg whitespace-nowrap">
-                        <span className="text-fg-faint mr-1.5">{isOpen ? '\u25BE' : '\u25B8'}</span>
                         {/*  AIRS NAMES ONE PORTFOLIO THREE WAYS — our readable name, the Fixed
                             code and the Dynamic code — and printing all three ran them together
                             ("ToppenbergBeheer DefensiefTOPS_DEF_BEH_DYN · TOPS_DEF_BEH"), so the

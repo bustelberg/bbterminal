@@ -10,7 +10,7 @@ import type { TrackingError } from '../../../lib/types/api';
 import InfoTip from '../InfoTip';
 import LoadingDots from './LoadingDots';
 import { riskRequestKey, useRiskResult } from './useRiskResult';
-import { riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
+import { AUTOMATIC_RISK_REPAIRS, riskHistoryQuery, riskHistoryYears } from './riskHistoryWindow';
 import type { ActiveShareHolding } from './ActiveSharePanel';
 
 const historyRepairs = new Map<string, { expires: number; done: Promise<boolean> }>();
@@ -45,7 +45,7 @@ export default function TrackingErrorView({ holdings, portfolioName }: {
   }, 'stock-cagr', 'Stock performance could not be loaded');
 
   useEffect(() => {
-    if (!data?.history_issues?.length || attempts.current.has(identity)) return;
+    if (!AUTOMATIC_RISK_REPAIRS || !data?.history_issues?.length || attempts.current.has(identity)) return;
     attempts.current.add(identity);
     const missing = new Set(data.history_issues.filter(issue => issue.kind === 'holding').map(issue => issue.isin));
     const existing = historyRepairs.get(identity);

@@ -47,16 +47,12 @@ describe('shared hypothetical performance view', () => {
     expect(host.textContent).not.toContain('Hypothetical tracking error');
     expect(host.querySelector('details')).toBeNull();
     expect(host.textContent).not.toContain('preliminary');
-    expect(startJob).toHaveBeenCalledTimes(1);
-    const [url, , request] = vi.mocked(startJob).mock.calls[0];
-    expect(url).toContain('/tracking-error/repair/job');
-    expect(url).toContain('full_history=true');
-    expect(JSON.parse(String(request?.body)).holdings.map((holding: { isin: string }) => holding.isin)).toEqual(['FUND']);
+    expect(startJob).not.toHaveBeenCalled();
   });
-  it('shows loading instead of blank figures while genuine history is being repaired', async () => {
+  it('reports unavailable history without starting a repair on opening the view', async () => {
     state.response = { ...state.response, available: false, reason: 'At least 12 complete monthly returns are required.' };
     await render();
-    expect(host.textContent).toContain('Loading Yahoo price history');
+    expect(startJob).not.toHaveBeenCalled();
     expect(host.textContent).not.toContain('New bond ETF');
     expect(host.textContent).not.toContain('Hypothetical tracking error');
     expect(host.textContent).not.toContain('4.00%');

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from asset_pipeline.yahoo import chart_window, utc_dt
 
 router = APIRouter(prefix="/api/market", tags=["market"])
-_locks = {symbol: threading.Lock() for symbol in ("^IXIC", "ACWI")}
+_locks = {symbol: threading.Lock() for symbol in ("^IXIC", "ACWI", "IWQU.L")}
 _cached: dict[str, tuple[float, MarketSnapshot]] = {}
 
 
@@ -42,12 +42,22 @@ def _positive(value: object) -> float | None:
 
 
 def build_snapshot(raw: dict, now: float, symbol: str = "^IXIC",
-                   name: str = "Nasdaq Composite") -> MarketSnapshot:
+                   name: str = "Nasdaq Composite", *, fx: dict | None = None) -> MarketSnapshot:
     """Daily highs define the peak; daily closes define the chart. No adjusted prices."""
     meta = raw.get("meta") or {}
     quotes = ((raw.get("indicators") or {}).get("quote") or [{}])[0]
     closes, highs = quotes.get("close") or [], quotes.get("high") or []
-    exchange = ZoneInfo("America/New_York")
+    exchange = ZoneInfo("Europe/London" if symbol == "IWQU.L" else "America/New_York")
+
+    def converted(value, day):
+        price = _positive(value)
+        if price is None or fx is None:
+            return price
+        from routers._benchmark_index import _rate
+        rate = _rate(fx, "USD", day)
+        if not rate:
+            raise ValueError(f"Missing USD/EUR conversion for {day}")
+        return price / rate
     points: dict[str, MarketPoint] = {}
     peak, peak_date = 0.0, ""
     last_stamp = 0
@@ -55,8 +65,8 @@ def build_snapshot(raw: dict, now: float, symbol: str = "^IXIC",
         if not isinstance(stamp, (int, float)) or stamp > now:
             continue
         day = utc_dt(stamp).astimezone(exchange).date().isoformat()
-        close = _positive(closes[index]) if index < len(closes) else None
-        high = _positive(highs[index]) if index < len(highs) else None
+        close = converted(closes[index], day) if index < len(closes) else None
+        high = converted(highs[index], day) if index < len(highs) else None
         if high is not None and high > peak:
             peak, peak_date = high, day
         if close is not None:
@@ -72,6 +82,7 @@ def build_snapshot(raw: dict, now: float, symbol: str = "^IXIC",
             and last_stamp <= quote_stamp <= now):
         latest, latest_stamp = quote_price, int(quote_stamp)
         day = utc_dt(latest_stamp).astimezone(exchange).date().isoformat()
+        latest = converted(latest, day)
         points[day] = MarketPoint(date=day, close=latest)
         ordered = sorted(points.values(), key=lambda point: point.date)
     if latest > peak:
@@ -95,7 +106,18 @@ def _snapshot(symbol: str, name: str) -> MarketSnapshot:
             raw = chart_window(symbol, 0, int(now), "1d")
             if not raw:
                 raise ValueError("No Yahoo Finance response")
-            snapshot = build_snapshot(raw, now, symbol, name)
+            fx = None
+            if symbol == "IWQU.L":
+                from routers._benchmark_index import _fx_to_eur
+                if (raw.get("meta") or {}).get("currency") != "USD":
+                    raise ValueError("IWQU.L must be quoted in USD")
+                stamps = [s for s in raw.get("timestamp") or [] if isinstance(s, (int, float)) and s <= now]
+                if not stamps:
+                    raise ValueError("No IWQU.L history")
+                from datetime import timedelta
+                start = (utc_dt(min(stamps)).date() - timedelta(days=7)).isoformat()
+                fx = _fx_to_eur({"USD"}, start, utc_dt(now).date().isoformat())
+            snapshot = build_snapshot(raw, now, symbol, name, fx=fx)
         except Exception as exc:
             raise HTTPException(503, f"{name} data is temporarily unavailable from Yahoo Finance.") from exc
         _cached[symbol] = (time.monotonic(), snapshot)
@@ -110,3 +132,8 @@ def nasdaq() -> MarketSnapshot:
 @router.get("/acwi", response_model=MarketSnapshot)
 def acwi() -> MarketSnapshot:
     return _snapshot("ACWI", "iShares MSCI ACWI ETF")
+
+
+@router.get("/iwqu", response_model=MarketSnapshot)
+def iwqu() -> MarketSnapshot:
+    return _snapshot("IWQU.L", "iShares Edge MSCI World Quality Factor UCITS ETF · EUR")

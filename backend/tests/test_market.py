@@ -68,3 +68,18 @@ def test_acwi_has_its_own_symbol_and_cache(monkeypatch):
     assert acwi.name == "iShares MSCI ACWI ETF"
     assert market.acwi() is acwi
     assert [args[0] for args in calls] == ["^IXIC", "ACWI"]
+
+
+def test_iwqu_prices_and_peak_use_each_days_eur_rate():
+    result = market.build_snapshot(history(), stamp("2026-01-06"), "IWQU.L", "Quality · EUR",
+                                   fx={"USD": {"2026-01-02": 2, "2026-01-05": 1}})
+    assert result.points[0].close == 47.5
+    assert result.points[-1].close == 92
+    assert result.peak == 96
+    assert result.peak_date == "2026-01-05"
+    assert result.from_peak_pct == pytest.approx((92 / 96 - 1) * 100)
+
+
+def test_iwqu_missing_fx_cannot_appear_as_euros():
+    with pytest.raises(ValueError, match="Missing USD/EUR"):
+        market.build_snapshot(history(), stamp("2026-01-06"), "IWQU.L", fx={})

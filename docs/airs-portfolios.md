@@ -1,6 +1,42 @@
 # AIRS model portfolios (/management-dashboard)
 
+## Daily dashboard refresh
+
+`scheduled_jobs.py` declares the clocks and dependency stages. At 06:00 Amsterdam,
+`dashboard_market` runs FX, watched-instrument/benchmark-proxy prices, constituent
+prices/caps plus momentum, then the daily smart fundamentals check. Fundamentals
+prioritise dashboard holdings, deduplicate overlapping indices and fetch only due
+feeds within the regional budget. Child stages retain separate durable run records;
+they have no independent cron timer.
+
+At 11:00 Amsterdam, `airs_vermogen_refresh` performs one forced account/model scan.
+Model repricing uses today's stored compositions rather than reading AIRS again.
+`dashboard_post_airs` then saves price checks, assembles current-month reports from
+stored dated valuations and transactions, prepares Analyse views, and records a
+per-portfolio freshness audit. Missing historical month-opening valuations remain
+explicitly incomplete; this workflow never backfills them with extra AIRS downloads.
+
+`dashboard_freshness` also runs independently at 15:00 Amsterdam. Its structured
+receipt includes actual holding/return/price/FX dates, unmapped instruments, report
+completeness, monthly results, preparation availability and upstream job outcomes.
+Expand the job on `/schedule` to read these receipts. Partial failures are errors,
+not successful zero-row updates. The watchdog cannot initiate extra AIRS passes.
+
+Production daily writers require `SUPABASE_DB_URL` or `DATABASE_URL` for a shared
+Postgres advisory lock. A durable run-history check limits automatic AIRS attempts
+to one per Amsterdam day across replicas. Explicit manual retries remain available.
+New in-process queue slices pause while a daily source workflow runs; the morning
+workflow waits at most 15 minutes for the previous queue activity to settle.
+
 ## Saved dashboard price checks
+
+Risk reads use versioned results in the existing prepared-snapshot table, shared across
+workers. The controlled Analyse preparation batch prepares the six default risk views
+for each book and certificate scope. Keys include exact equity weights, benchmark policy,
+history window, calculation day and deployed calculation code; source changes invalidate
+saved results. Aligned histories are reused across views in a bounded memory cache.
+Opening Risk never downloads or repairs price history. Missing history stays explicitly
+unavailable until source jobs or an explicit repair update the stored inputs.
 
 The dashboard reads persisted native-currency price checks from `airs_price_check` through the
 existing `airs_overview_payload` RPC. Loading the page or expanding holdings never refreshes Yahoo.

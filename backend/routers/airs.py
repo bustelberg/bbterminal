@@ -20,6 +20,7 @@ import logging
 import re
 from io import StringIO
 from routers import _airs_portfolio_store as store
+from routers._risk_read import read as read_risk
 from routers._asset_financials import BasketRequest, PerformanceResponse, PriceSeriesResponse
 from routers._etf_sector_allocation import (
     EtfSectorAllocationResponse,
@@ -2401,7 +2402,7 @@ async def airs_portfolio_active_share(req: ActiveShareRequest, benchmark: str = 
     from routers._active_share import compute_active_share  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
+        read_risk, compute_active_share, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
         req.benchmark_weights, held_only=held_only)
 
 
@@ -2571,7 +2572,7 @@ async def airs_portfolio_tracking_error(req: ActiveShareRequest, benchmark: str 
     from routers._annual_portfolio_simulation import compute_simulation  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_simulation, [h.model_dump() for h in req.holdings], benchmark,
+        read_risk, compute_simulation, [h.model_dump() for h in req.holdings], benchmark,
         years, benchmark_weights=req.benchmark_weights,
         **({"start_date": start_date} if start_date else {}))
 
@@ -2665,7 +2666,7 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
     from routers._tracking_error import MIN_PRELIMINARY_DAILY_OBS  # noqa: PLC0415
 
     monthly = await asyncio.to_thread(
-        compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
+        read_risk, compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
         frequency, years, benchmark_weights=req.benchmark_weights,
         require_complete_history=True, **({"start_date": start_date} if start_date else {}))
     if monthly.get("available") or frequency != "monthly":
@@ -2674,7 +2675,7 @@ async def airs_portfolio_risk_correlation(req: ActiveShareRequest, benchmark: st
     # Preserve the precise current sleeve. A newly added holding can leave just one monthly
     # return while still having enough daily closes for a useful, explicitly preliminary ρ.
     daily = await asyncio.to_thread(
-        compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
+        read_risk, compute_risk_correlation, [h.model_dump() for h in req.holdings], benchmark,
         "daily", years, benchmark_weights=req.benchmark_weights,
         require_complete_history=True,
         minimum_observations=MIN_PRELIMINARY_DAILY_OBS,
@@ -2812,7 +2813,7 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
     from routers._tracking_error import MIN_PRELIMINARY_DAILY_OBS  # noqa: PLC0415
 
     monthly = await asyncio.to_thread(
-        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
+        read_risk, compute_volatility, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
         benchmark_weights=req.benchmark_weights, require_complete_history=True,
         **({"start_date": start_date} if start_date else {}))
     if monthly.get("available") or frequency != "monthly":
@@ -2821,7 +2822,7 @@ async def airs_portfolio_volatility(req: ActiveShareRequest, benchmark: str = "A
     # The exact sleeve may only have one completed monthly return but still enough real daily
     # closes for a useful, explicitly provisional volatility estimate.
     daily = await asyncio.to_thread(
-        compute_volatility, [h.model_dump() for h in req.holdings], benchmark, "daily", years,
+        read_risk, compute_volatility, [h.model_dump() for h in req.holdings], benchmark, "daily", years,
         benchmark_weights=req.benchmark_weights, require_complete_history=True,
         minimum_observations=MIN_PRELIMINARY_DAILY_OBS, preliminary=True,
         **({"start_date": start_date} if start_date else {}))
@@ -2914,7 +2915,7 @@ async def airs_portfolio_drawdown(req: ActiveShareRequest, benchmark: str = "ACW
     from routers._portfolio_drawdown import compute_drawdown  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
+        read_risk, compute_drawdown, [h.model_dump() for h in req.holdings], benchmark, frequency, years,
         benchmark_weights=req.benchmark_weights, require_complete_history=True,
         **({"start_date": start_date} if start_date else {}))
 
@@ -2999,7 +3000,7 @@ async def airs_portfolio_concentration(req: ActiveShareRequest, benchmark: str =
     from routers._portfolio_concentration import compute_concentration  # noqa: PLC0415
 
     return await asyncio.to_thread(
-        compute_concentration, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
+        read_risk, compute_concentration, [h.model_dump() for h in req.holdings], benchmark, benchmark_start,
         req.benchmark_weights)
 
 

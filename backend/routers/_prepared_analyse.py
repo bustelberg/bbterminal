@@ -17,6 +17,10 @@ _FILES = tuple(sorted({
     *(_ROOT / 'routers').glob('_airs*.py'),
     *(_ROOT / 'index_universe' / 'acwi').glob('*.py'),
     _ROOT / 'routers' / '_active_share.py', _ROOT / 'routers' / '_asset_benchmark.py',
+    *(_ROOT / 'routers').glob('_portfolio_*.py'),
+    _ROOT / 'routers' / '_risk_read.py', _ROOT / 'routers' / '_tracking_error.py',
+    _ROOT / 'routers' / '_annual_portfolio_simulation.py',
+    _ROOT / 'routers' / '_risk_history_window.py', _ROOT / 'routers' / '_risk_benchmark_history.py',
     Path(__file__).resolve(),
     _ROOT / 'routers' / '_benchmark_index.py', _ROOT / 'routers' / '_weighted_benchmark.py',
     _ROOT / 'config' / 'airs_strategy_map.json',
@@ -110,13 +114,15 @@ def overview(payload: dict) -> dict:
 
 def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
             holdings: bool = True, should_stop=None, on_step=None,
-            max_portfolios: int = 2, max_seconds: float = 20) -> dict:
+            max_portfolios: int = 2, max_seconds: float = 20, risk: bool = False) -> dict:
     from common.read_cache import read_cache
     from routers import _airs_portfolio_analysis as analysis
     from routers._active_share import _load_benchmark_weights
     from routers._airs_account_links import list_account_links
 
     result = {'holdings': 0, 'benchmarks': 0, 'already_current': 0, 'changed_during_run': 0, 'errors': {}}
+    if risk:
+        result['risk_views'] = 0
     deadline = time.monotonic() + max_seconds
     selected_portfolios: set[int] = set()
     if source_version('holdings') is None:
@@ -148,6 +154,20 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                        .eq('calculation_day', date.today().isoformat()).limit(1).execute().data or [])
             if current:
                 result['already_current'] += 1
+                if risk and pid is not None:
+                    _, risk_ready = read(scope, f'risk-views:{key}')
+                    if risk_ready is not None:
+                        continue
+                    if pid not in selected_portfolios and len(selected_portfolios) >= max_portfolios:
+                        result['batch_exhausted'] = True
+                        break
+                    selected_portfolios.add(pid)
+                    from routers._risk_read import prepare_views
+                    _, saved = read(scope, key)
+                    if saved is not None:
+                        result['risk_views'] += prepare_views(saved, look)
+                        if not save(scope, f'risk-views:{key}', {'prepared': True}, version, code):
+                            result['changed_during_run'] += 1
                 continue
             if pid is not None:
                 if pid not in selected_portfolios and len(selected_portfolios) >= max_portfolios:
@@ -169,6 +189,11 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
                     analysis._OVERVIEW_ONLY.reset(overview_token)
             if save(scope, key, payload, version, code):
                 result['benchmarks' if pid is None else 'holdings'] += 1
+                if risk and pid is not None:
+                    from routers._risk_read import prepare_views
+                    result['risk_views'] += prepare_views(payload, look)
+                    if not save(scope, f'risk-views:{key}', {'prepared': True}, version, code):
+                        result['changed_during_run'] += 1
             else:
                 result['changed_during_run'] += 1
         except Exception as exc:
@@ -179,7 +204,8 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
     return result
 
 
-def run_controlled(*, busy, should_stop=None, on_step=None) -> dict:
+def run_controlled(*, busy, should_stop=None, on_step=None,
+                   max_portfolios: int = 2, max_seconds: float = 20) -> dict:
     """One bounded serial batch, with a cross-process lock and source-refresh priority."""
     from common.pg import _db_url
     import psycopg
@@ -194,7 +220,7 @@ def run_controlled(*, busy, should_stop=None, on_step=None) -> dict:
         if not locked:
             return {'skipped': 'another preparation worker holds the lock'}
         try:
-            return prepare(max_portfolios=2, max_seconds=20,
+            return prepare(max_portfolios=max_portfolios, max_seconds=max_seconds, risk=True,
                            should_stop=lambda: bool((should_stop and should_stop()) or busy()), on_step=on_step)
         finally:
             conn.execute("SELECT pg_advisory_unlock(hashtext('bbterminal.analyse_prepare'))")

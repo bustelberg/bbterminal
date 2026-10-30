@@ -63,6 +63,8 @@ class JobSpec:
     trigger: dict | None = None
     #: `IntervalTrigger(seconds=…)` instead, for the queue worker.
     interval_seconds: int | None = None
+    #: Executed synchronously by this parent instead of an independent timer.
+    after_job: str | None = None
     #: Extra `add_job` kwargs (coalesce / misfire_grace_time / max_instances).
     options: dict = field(default_factory=dict)
     #: How long may pass between successful runs before this is OVERDUE.
@@ -97,6 +99,14 @@ class JobSpec:
 
 
 SCHEDULED_JOBS: tuple[JobSpec, ...] = (
+    JobSpec(
+        id="dashboard_market", label="Dashboard daily market data",
+        fills="held prices · benchmark trackers · FX · constituent prices/caps · momentum",
+        cadence="Every day, 06:00 Amsterdam",
+        trigger={"hour": 6, "minute": 0, "timezone": "Europe/Amsterdam"},
+        options={"coalesce": True, "misfire_grace_time": 3600}, max_age_hours=30,
+        note="Sequential market-data stages followed by the daily due-fundamentals check. Each stage records its own result.",
+    ),
     JobSpec(
         id="daily_pipeline",
         label="Daily pipeline (price update → rebalance)",
@@ -180,8 +190,8 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         id="asset_price_refresh",
         label="Yahoo price refresh (watched instruments)",
         fills="asset_price for holdings, post-sale watchlists and BC logbook instruments with Yahoo mappings",
-        cadence="Every day, 06:00 UTC (+ on startup)",
-        trigger={"day_of_week": "mon-sun", "hour": 6, "minute": 0, "timezone": "UTC"},
+        cadence="After dashboard daily market-data start (+ on startup)",
+        after_job="dashboard_market",
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
         max_age_hours=30,
         note="Stands down while the ingest-queue worker is live — Yahoo answers an overloaded "
@@ -191,8 +201,8 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         id="benchmark_price_slice",
         label="Benchmark data refresh",
         fills="asset_price + market caps for ACWI / SP500 / AEX · relative_momentum ranks",
-        cadence="Every day, 06:30 UTC",
-        trigger={"day_of_week": "mon-sun", "hour": 6, "minute": 30, "timezone": "UTC"},
+        cadence="After held prices and FX in dashboard daily market data",
+        after_job="dashboard_market",
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
         max_age_hours=30,
         note="Refreshes each benchmark before calculating its relative-momentum ranks. "
@@ -200,13 +210,13 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
     ),
     JobSpec(
         id="benchmark_fundamentals_fill",
-        label="Benchmark fundamentals",
-        fills="due metric_data financials, analyst estimates, and indicators for ACWI · SP500 · AEX",
-        cadence="Every Monday, 08:00 UTC",
-        trigger={"day_of_week": "mon", "hour": 8, "minute": 0, "timezone": "UTC"},
+        label="Daily due fundamentals — dashboard holdings + benchmarks",
+        fills="due financials, estimates and indicators for held companies · ACWI · SP500 · AEX",
+        cadence="After dashboard daily market data",
+        after_job="dashboard_market",
         options={"coalesce": True, "max_instances": 1, "misfire_grace_time": 21600},
-        max_age_hours=24 * 10,
-        note="Checks every constituent weekly. Filings refresh when due; analyst estimates and "
+        max_age_hours=30,
+        note="Checks held companies first and every constituent daily. Filings refresh when due; analyst estimates and "
              "indicators refresh on their own staleness schedule. The regional quota reserve still applies.",
     ),
     JobSpec(
@@ -243,10 +253,24 @@ SCHEDULED_JOBS: tuple[JobSpec, ...] = (
         trigger={"day_of_week": "mon-sun", "hour": 11, "minute": 0,
                  "timezone": "Europe/Amsterdam"},
         options={"coalesce": True, "misfire_grace_time": 3600},
-        max_age_hours=80,
+        max_age_hours=30,
         note="Full AIRS re-scan every day at 11:00 Amsterdam: every account, all model compositions, and "
              "paired-model prices, then saved price checks; APScheduler "
              "handles DST.",
+    ),
+    JobSpec(
+        id="dashboard_post_airs", label="Dashboard post-AIRS preparation",
+        fills="airs_price_check · current AIRS monthly reports · prepared Analyse views",
+        cadence="After the 11:00 Amsterdam AIRS scan", after_job="airs_vermogen_refresh",
+        max_age_hours=30, note="Uses stored AIRS sources; never opens another AIRS browser session.",
+    ),
+    JobSpec(
+        id="dashboard_freshness", label="Dashboard freshness audit",
+        fills="per-portfolio source dates, report completeness, price coverage and preparation verdicts",
+        cadence="Every day, 15:00 Amsterdam (+ after AIRS preparation)",
+        trigger={"hour": 15, "minute": 0, "timezone": "Europe/Amsterdam"},
+        options={"coalesce": True, "misfire_grace_time": 3600}, max_age_hours=30,
+        note="Read-only source audit. Incomplete portfolios fail visibly in the durable job summary. Never fetches AIRS.",
     ),
     JobSpec(
         id="airs_price_checks",

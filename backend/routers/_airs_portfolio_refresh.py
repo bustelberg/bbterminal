@@ -371,7 +371,8 @@ def _recompute(portfolio_id: int, emit) -> dict:
     return t
 
 
-def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None) -> dict:
+def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None,
+                      *, stored_composition: bool = False) -> dict:
     """All five inputs, re-acquired in dependency order, then the number rebuilt.
 
     Order matters and is not cosmetic: the composition decides which ISINs and which window, the
@@ -390,7 +391,20 @@ def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None) -> dic
     """
     started = time.time()
     emit("progress", message=f"[portfolio {portfolio_id}] refresh started")
-    comp = _composition(portfolio_id, emit, wait)
+    if stored_composition:
+        model = (supabase.table("airs_model_portfolio").select("positions_datum,positions_error,positions_scanned_at")
+                 .eq("id", portfolio_id).limit(1).execute().data or [])
+        if not model or not model[0].get("positions_datum") or model[0].get("positions_error"):
+            raise RuntimeError(f"Model {portfolio_id} has no usable stored composition")
+        if str(model[0].get("positions_scanned_at") or "")[:10] < date.today().isoformat():
+            raise RuntimeError(f"Model {portfolio_id} was not successfully scanned today")
+        positions = (supabase.table("airs_model_portfolio_position").select("isin,fonds,percentage")
+                     .eq("portfolio_id", portfolio_id).execute().data or [])
+        datum = model[0]["positions_datum"]
+        comp = {"datum": datum, "previous_datum": datum, "rows": positions}
+        emit("phase", phase="composition", message="1/5 Composition — using the completed daily AIRS scan")
+    else:
+        comp = _composition(portfolio_id, emit, wait)
     rows = comp["rows"]
     isins = sorted({r["isin"] for r in rows if r.get("isin")})
     if not isins:
@@ -401,6 +415,8 @@ def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None) -> dic
     ex = _instruments(isins, emit)
     fx = _fx({(e.get("currency") or "") for e in ex.values()}, anchor, emit)
     px = _prices(ex, isins, anchor, emit)
+    if fx["failed"] or px["failed"]:
+        raise RuntimeError(f"Model {portfolio_id}: {fx['failed']} FX and {px['failed']} price refresh failures")
     trace = _recompute(portfolio_id, emit)
 
     p = trace.get("portfolio") or {}
