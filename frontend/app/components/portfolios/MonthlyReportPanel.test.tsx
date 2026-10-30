@@ -134,6 +134,19 @@ describe('AIRS monthly report', () => {
     expect(summary?.textContent).not.toContain('Compounded portfolio');
   });
 
+  it('uses the AIRS funding window for a portfolio that starts during the selected month', async () => {
+    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
+      '2026-10': { return_pct: 2.05, start_date: '2026-09-30', end_date: '2026-10-29', source: 'Policy' },
+    } })));
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio"
+      overviewReturns={{ portfolio: -1.7, benchmark: 1.55, asOf: '2026-10-29', from: '2026-10-15' }} />));
+    const summary = host.querySelector('[aria-label="Compounded returns"]');
+    expect(summary?.textContent).toContain('+1.55%');
+    expect(summary?.textContent).toContain('15 okt 2026 to Thursday 29 okt 2026');
+    expect(host.querySelectorAll<HTMLButtonElement>('nav[aria-label="Months"] button')[9].textContent)
+      .toContain('Weighted benchmark · EUR +1.55%');
+  });
+
   it('compounds monthly portfolio and benchmark returns rather than adding them', async () => {
     const months = Array.from({ length: 10 }, (_, i) => ({ ...observation,
       month: `2026-${String(i + 1).padStart(2, '0')}`, rendement: i === 0 ? 10 : i === 1 ? -10 : 0,

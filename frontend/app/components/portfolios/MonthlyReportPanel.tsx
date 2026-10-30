@@ -181,7 +181,14 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const portfolioCompounded = useOverview ? rounded(overviewReturns.portfolio) : compound(months.map((key) => monthPerformance(key)?.rendement));
   const benchmarkCompounded = useOverview ? rounded(overviewReturns.benchmark) : compound(months.map((key) => report?.weighted_benchmark?.[key]?.return_pct));
   const compoundedExcess = portfolioCompounded != null && benchmarkCompounded != null ? portfolioCompounded - benchmarkCompounded : null;
+  // A book first funded during this month has no AIRS return before `from`. Its monthly
+  // benchmark must use the same window as the YTD scorecard, rather than the calendar-month
+  // benchmark which would include days in which the book did not yet exist.
+  const benchmarkForMonth = (key: string) => useOverview && overviewReturns.from?.slice(0, 7) === key
+    ? overviewReturns.benchmark : report?.weighted_benchmark?.[key]?.return_pct;
+  const selectedMonthUsesOverviewBenchmark = useOverview && overviewReturns.from?.slice(0, 7) === month;
   const compoundedThrough = useOverview ? overviewReturns.asOf : monthPerformance(months[months.length - 1])?.periode;
+  const compoundedFrom = useOverview ? overviewReturns.from : report?.start;
   const unavailable = (reason?: string) => reason === 'unclassified_activity' || reason === 'quantity_not_reconciled'
     ? text('Position movement needs review', 'Positiemutatie controleren')
     : reason === 'identity_changed' || reason === 'ambiguous_position'
@@ -204,7 +211,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
           { label: useOverview ? text('Return (YTD) · EUR', 'Rendement (YTD) · EUR') : text('Compounded portfolio return · EUR', 'Samengesteld portefeuillerendement · EUR'), value: portfolioCompounded },
           { label: useOverview ? text('Weighted benchmark return (YTD) · EUR', 'Gewogen benchmarkrendement (YTD) · EUR') : text('Compounded weighted benchmark · EUR', 'Samengestelde gewogen benchmark · EUR'), value: benchmarkCompounded },
         ].map(({ label, value }) => <div key={label} className={`${box} flex items-center justify-between gap-4 px-5 py-4`}>
-          <div><p className="text-sm text-fg-muted">{label}</p><p className="mt-1 text-xs text-fg-subtle">{month.slice(0, 4)}{compoundedThrough ? ` · ${text('Through', 'T/m')} ${holdingDate(compoundedThrough)}` : ''}</p>
+          <div><p className="text-sm text-fg-muted">{label}</p><p className="mt-1 text-xs text-fg-subtle">{compoundedFrom && compoundedThrough ? `${holdingDate(compoundedFrom)} ${text('to', 't/m')} ${holdingDate(compoundedThrough)}` : month.slice(0, 4)}</p>
             {value == null && <p className="mt-1 text-xs text-fg-faint">{text('Monthly data incomplete', 'Maandgegevens onvolledig')}</p>}</div>
           <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(value)}`}>{pct(value)}</span>
         </div>)}
@@ -220,7 +227,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
             className={`group rounded-xl border p-4 text-left transition-colors ${active ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400/50' : 'border-neutral-800/40 bg-elevated hover:border-accent-500/50'}`}>
             <span className={`block capitalize text-xs ${active ? 'font-medium text-accent-300' : 'text-fg-subtle'}`}>{monthLabel(key, true)}</span>
             <span className={`mt-2 block font-mono text-xl tabular-nums ${tone(row?.rendement)}`}>{pct(row?.rendement)}</span>
-            <span className="mt-1 block text-xs text-fg-subtle" title={report.weighted_benchmark?.[key]?.source}>{text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')} <span className={`font-mono tabular-nums ${tone(report.weighted_benchmark?.[key]?.return_pct)}`}>{pct(report.weighted_benchmark?.[key]?.return_pct)}</span></span>
+            <span className="mt-1 block text-xs text-fg-subtle" title={report.weighted_benchmark?.[key]?.source}>{text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')} <span className={`font-mono tabular-nums ${tone(benchmarkForMonth(key))}`}>{pct(benchmarkForMonth(key))}</span></span>
             <span className={`mt-3 block text-[11px] ${active ? 'text-accent-300' : 'text-fg-faint group-hover:text-accent-300'}`}>{text('View positions', 'Bekijk posities')}</span>
           </button>; })}
       </nav>
@@ -236,8 +243,8 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Monthly return · AIRS', 'Maandrendement · AIRS')}</span>
             <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(perf?.rendement)}`}>{pct(perf?.rendement)}</span></div>
-          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Weighted benchmark return · EUR', 'Gewogen benchmarkrendement · EUR')}{benchmark && <InfoTip className="ml-2" wide content={benchmarkDetails} />}</span>
-            <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(selectedReport.weighted_benchmark?.[month]?.return_pct)}`}>{pct(selectedReport.weighted_benchmark?.[month]?.return_pct)}</span></div>
+          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Weighted benchmark return · EUR', 'Gewogen benchmarkrendement · EUR')}{benchmark && !selectedMonthUsesOverviewBenchmark && <InfoTip className="ml-2" wide content={benchmarkDetails} />}</span>
+            <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(benchmarkForMonth(month))}`}>{pct(benchmarkForMonth(month))}</span></div>
         </div>
         {report.warning && <p className="text-xs text-warn-300">{report.warning}</p>}
         {report.needs_refresh && !report.warning && <p className="text-xs text-warn-300">{busy ? text('Loading this month’s position results from AIRS…', 'De positieresultaten van deze maand worden uit AIRS opgehaald…') : text('Some position results are incomplete. Refresh this month to try again.', 'Sommige positieresultaten zijn onvolledig. Ververs deze maand om het opnieuw te proberen.')}</p>}
