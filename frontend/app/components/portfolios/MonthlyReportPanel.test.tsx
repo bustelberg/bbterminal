@@ -166,6 +166,31 @@ describe('AIRS monthly report', () => {
       .toContain('Weighted benchmark · EUR +2.05%');
   });
 
+  it('explains each tile using that month’s source prices without opening positions or fetching AIRS', async () => {
+    const weighted_benchmark = Object.fromEntries([
+      ['2026-01', 100, 101.38, 1.38, '2025-12-31', '2026-01-30'],
+      ['2026-10', 200, 204.1, 2.05, '2026-09-30', '2026-10-23'],
+    ].map(([key, opening, closing, value, start, end]) => [key, {
+      return_pct: value, components: [{ ticker: 'ACWI', weight_pct: 100,
+        start_price_eur: opening, end_price_eur: closing, return_pct: value, start_date: start, end_date: end }],
+    }]));
+    vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark })));
+    await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+    const icon = (key: string) => host.querySelector<HTMLElement>(`[data-month-benchmark="${key}"] span[class*="cursor-help"] > span`)!;
+    await act(async () => icon('2026-01').click());
+    expect(document.body.textContent).toContain('101.38');
+    expect(document.body.textContent).toContain('closing price in EUR ÷ opening price in EUR');
+    expect(document.body.textContent).toContain('(+1.38% × 100 / 100) = +1.38%');
+    expect(host.querySelector('#monthly-report-details')).toBeNull();
+    await act(async () => icon('2026-01').click());
+    await act(async () => icon('2026-10').click());
+    expect(document.body.textContent).toContain('204.10');
+    expect(document.body.textContent).toContain('(+2.05% × 100 / 100) = +2.05%');
+    expect(host.querySelector('#monthly-report-details')).toBeNull();
+    expect(startJob).not.toHaveBeenCalled();
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the AIRS funding window for a portfolio that starts during the selected month', async () => {
     vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify({ ...completeResponse(), weighted_benchmark: {
       '2026-10': { return_pct: 2.05, start_date: '2026-09-30', end_date: '2026-10-29', source: 'Policy' },

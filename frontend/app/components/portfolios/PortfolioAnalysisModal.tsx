@@ -36,6 +36,7 @@ import {
 import { type Basket } from './types';
 import { isMomentumState, ordinalPercentile, stateFromPercentile, stateLabel, stateTone } from './momentumState';
 import { useAnalyseCopy } from './analyseCopy';
+import { contributionReconciliation } from './contributionReconciliation';
 import {
   MoneyWeightedCashflowCalculation, moneyWeightedWorked,
 } from './MoneyWeightedCalculation';
@@ -415,12 +416,13 @@ function BandMark({ pct, target = false }: { pct: number; target?: boolean }) {
   );
 }
 
-function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, certificateAdjustments = [] }: {
+function AllocationBars({ slices, selected, onSelect, variant, bands, soldContribution, reportedReturn, comparable = false }: {
   slices: AllocSlice[];
   /**  The year's contribution from positions SOLD OUT during it. They have no asset class, so no
    *  bar can carry them — without this the slices are a set of parts that misses its own total. */
   soldContribution?: number | null;
-  certificateAdjustments?: { name?: string | null; label?: string | null; contribution_pct?: number | null }[];
+  reportedReturn?: number | null;
+  comparable?: boolean;
   selected?: string | null;
   onSelect?: (bucket: string | null) => void;
   /** The risk profile AIRS's own name says this model is offered at, or null for the products
@@ -445,6 +447,8 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
   // the holdings table below already follows it; this now does too, so the bar and the table
   // cannot present the same classes in two sequences.
   const ordered = slices;
+  const reconciliation = contributionReconciliation(
+    [...slices.map((slice) => slice.contribution_pct), soldContribution], reportedReturn, comparable);
   const toggle = onSelect ? (b: string) => onSelect(selected === b ? null : b) : undefined;
   const bandOf = new Map((bands ?? []).map((b) => [b.bucket, b]));
   /** Held outside the permitted range — the finding this whole overlay exists to surface. Only a
@@ -647,23 +651,22 @@ function AllocationBars({ slices, selected, onSelect, variant, bands, soldContri
             BUS_Offensief_Dyn they come to +8.211pp against a book that made +5.827%, and the
             missing -2.384pp is eight names it no longer holds. Printed only when there IS a
             remainder, so a book that sold nothing does not carry a permanent 0.00pp footnote. */}
-        {certificateAdjustments.filter((adjustment) => adjustment.contribution_pct != null && Math.abs(adjustment.contribution_pct) >= 0.005).map((adjustment, index) => (
-          <div key={adjustment.name ?? index} className="space-y-1 text-[11px] text-fg-muted">
-            <div className="flex items-start gap-2">
-              <span>{adjustment.label || adjustment.name} · {copy.lang === 'nl' ? 'Rendement apart weergegeven' : 'Return shown separately'}</span>
-              <span className={`ml-auto shrink-0 font-mono tabular-nums ${retTone(adjustment.contribution_pct)}`}>{ppt(adjustment.contribution_pct)}</span>
-            </div>
-            <p className="text-fg-faint">{copy.lang === 'nl'
-              ? 'Dit deel van het beleggingsresultaat staat apart, zodat het niet als winst of verlies op kasgeld wordt geteld. Het zit al in uw totale rendement.'
-              : 'This part of the investment’s return is shown separately so it is not counted as a gain or loss on cash. It is already included in your total return.'}</p>
-          </div>
-        ))}
         {soldContribution != null && Math.abs(soldContribution) >= 0.005 && (
           <div className="flex items-center gap-2 pt-1 mt-1 border-t border-neutral-800/40 text-[11px]">
             <span className="text-fg-faint">{copy.allocation.sold}</span>
             <span className={`ml-auto font-mono tabular-nums ${retTone(soldContribution)}`}>
               {ppt(soldContribution)}
             </span>
+          </div>
+        )}
+        {reconciliation && reconciliation.missing !== 0 && (
+          <div className="flex items-center gap-2 text-[11px] text-warn-300">
+            <span>{copy.lang === 'nl' ? 'Ontbreekt in de berekening' : 'Missing from calculation'}
+              <InfoTip className="ml-1" text={copy.lang === 'nl'
+                ? `AIRS rapporteert ${fmtRet(reconciliation.reported)}. De berekende bijdragen tellen op tot ${ppt(reconciliation.calculated)}. Dit is het nog niet verklaarde verschil; geen apart beleggingsrendement.`
+                : `AIRS reports ${fmtRet(reconciliation.reported)}. Calculated contributions add up to ${ppt(reconciliation.calculated)}. This is the unexplained difference, not a separate investment return.`} />
+            </span>
+            <span className="ml-auto font-mono tabular-nums">{ppt(reconciliation.missing)}</span>
           </div>
         )}
       </div>
@@ -2182,6 +2185,9 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
   // that explicitly unknown state into a warning about an unexplained position.
   const reconciliationKnown = realised?.reconciles === true || realised?.reconciles === false;
   const reconciled = realised?.reconciles === true;
+  const displayedReconciliation = contributionReconciliation(
+    [...holdingsForCertificateScope(holdings, lookThrough).map((holding) => holding.contribution_pct),
+      ...sold.map((position) => position.contribution_pct)], realised?.book_ytd_pct, reconciliationKnown);
 
   const cmp = (a: BookHolding, b: BookHolding) => {
     // The two text columns sort as text.  An unclassified row sorts LAST either way, like an
@@ -3208,21 +3214,19 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
               ))}
             </tbody>
           )}
-          {!!certificateAdjustments.length && (
-            <tbody aria-label={copy.lang === 'nl' ? 'Apart weergegeven beleggingsresultaten' : 'Investment returns shown separately'}>
-              {certificateAdjustments.map((adjustment) => (
-                <tr key={adjustment.name} className="border-y border-neutral-800/30 bg-overlay/[0.035]">
+          {displayedReconciliation && displayedReconciliation.missing !== 0 && (
+            <tbody aria-label={copy.lang === 'nl' ? 'Verschil met AIRS' : 'AIRS reconciliation'}>
+                <tr className="border-y border-neutral-800/30 bg-overlay/[0.035] text-warn-300">
                   <td colSpan={LEADING_COLS + cols.size + TRAILING_COLS - 1} className="px-4 py-2 text-xs text-fg-muted">
-                    {adjustment.label || adjustment.name} · {copy.lang === 'nl' ? 'Rendement apart weergegeven' : 'Return shown separately'}
-                    <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                      what={copy.lang === 'nl' ? 'Dit deel van het beleggingsresultaat staat apart, zodat het niet als winst of verlies op kasgeld wordt geteld. Het zit al in uw totale rendement.' : 'This part of the investment’s return is shown separately so it is not counted as a gain or loss on cash. It is already included in your total return.'}
-                      how={copy.info.contributionHow(eur0n(adjustment.result_eur), eur0n(realised?.basis_eur), ppt(adjustment.contribution_pct))} />
+                    {copy.lang === 'nl' ? 'Ontbreekt in de berekening' : 'Missing from calculation'}
+                    <InfoTip className="ml-2" text={copy.lang === 'nl'
+                      ? `AIRS rapporteert ${fmtRet(displayedReconciliation.reported)}. De getoonde posities dragen samen ${ppt(displayedReconciliation.calculated)} bij. Het verschil is nog niet verklaard en is geen apart beleggingsrendement.`
+                      : `AIRS reports ${fmtRet(displayedReconciliation.reported)}. The shown positions contribute ${ppt(displayedReconciliation.calculated)}. The difference is not yet explained and is not a separate investment return.`} />
                   </td>
-                  <td className={`py-2 text-right font-mono text-xs tabular-nums ${retTone(adjustment.contribution_pct)}`}>
-                    {ppt(adjustment.contribution_pct)}
+                  <td className="py-2 text-right font-mono text-xs tabular-nums">
+                    {ppt(displayedReconciliation.missing)}
                   </td>
                 </tr>
-              ))}
             </tbody>
           )}
           {/*  THE CHECK, AT THE FOOT OF THE TABLE IT CHECKS. Σ Contribution over every row above
@@ -3282,28 +3286,22 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                         realised?.holdings_as_of ?? 'an unknown date',
                         realised?.book_as_of ?? 'an unknown date')} />
                 </td>
-                <td className={`py-2 text-right font-mono tabular-nums ${retTone(grand.contribution)}`}>
-                  {ppt(grand.contribution)}
+                <td className={`py-2 text-right font-mono tabular-nums ${retTone(displayedReconciliation?.reported ?? grand.contribution)}`}>
+                  {ppt(displayedReconciliation?.reported ?? grand.contribution)}
                   <Provenance source="airs_volk" asOf={asOf} kind="formula"
-                    what={copy.info.bookContributionWhat}
+                    what={displayedReconciliation
+                      ? (copy.lang === 'nl' ? 'Berekende bijdragen plus het apart getoonde, nog niet verklaarde verschil met AIRS.' : 'Calculated contributions plus the separately disclosed unexplained difference from AIRS.')
+                      : copy.info.bookContributionWhat}
                     note={copy.info.contributionNote}
-                    how={copy.info.contributionHow(eur0n(grand.result), eur0n(realised?.basis_eur), ppt(grand.contribution))} />
+                    how={displayedReconciliation
+                      ? `${ppt(displayedReconciliation.calculated)} + (${ppt(displayedReconciliation.missing)}) = ${ppt(displayedReconciliation.reported)}`
+                      : copy.info.contributionHow(eur0n(grand.result), eur0n(realised?.basis_eur), ppt(grand.contribution))} />
                 </td>
               </tr>
             </tfoot>
           )}
         </table>
       </div>
-      {/* Silence is success; only show this line when the position contributions genuinely fail
-          to reconcile to AIRS. Both figures must exist before we can claim a mismatch. */}
-      {grand.contribution != null && realised?.book_ytd_pct != null && realised?.reconciles === false && (
-        <div className="px-4 py-2 border-t border-neutral-800/40 text-[11px]">
-          <span className="text-warn-500">
-            {copy.reconciliation.mismatch(ppt(grand.contribution), fmtRet(realised.book_ytd_pct),
-              ppt(grand.contribution - realised.book_ytd_pct))}
-          </span>
-        </div>
-      )}
     </div>
   );
 }
@@ -4137,7 +4135,8 @@ export default function PortfolioAnalysisModal({
               {data.allocation && data.allocation.length > 0 && (
                 <AllocationBars slices={data.allocation} selected={assetFilter}
                   variant={data.variant} bands={data.bands}
-                  certificateAdjustments={data.realised?.certificate_adjustments ?? []}
+                  reportedReturn={data.realised?.book_ytd_pct}
+                  comparable={data.realised?.reconciles === true || data.realised?.reconciles === false}
                   /* Summed here rather than server-side: it is the same `closed_out` set the
                      Holdings table's own group already sums, and one source beats two. */
                   soldContribution={data.realised?.available

@@ -8,9 +8,10 @@ describe('cash and certificate accounting', () => {
     expect(source).toContain('const certificateAdjustments = realised?.certificate_adjustments ?? []');
     expect(source).toContain('heldSum.contribution = add2(heldSum.contribution, sum(certificateAdjustments.map((a) => a.contribution_pct)))');
     expect(source).toContain('heldSum.result = add2(heldSum.result, sum(certificateAdjustments.map((a) => a.result_eur)))');
-    expect(source).toContain('certificateAdjustments.map((adjustment)');
-    expect(source).toContain('Return shown separately');
-    expect(source).toContain('It is already included in your total return.');
+    expect(source).not.toContain('certificateAdjustments.map((adjustment)');
+    expect(source).not.toContain('Return shown separately');
+    expect(source).toContain('Missing from calculation');
+    expect(source).toContain('The difference is not yet explained and is not a separate investment return.');
   });
 
   it('uses accounting contributions in the sleeve, not current weight times an unrelated return', () => {

@@ -155,9 +155,17 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
       {reconciliation?.status !== 'reconciled' && <p className="text-warn-300">{text('The month as a whole is not yet reconciled with AIRS.', 'De maand als geheel sluit nog niet aan op AIRS.')}</p>}
     </div>;
   };
-  const benchmark = selectedReport?.weighted_benchmark?.[month];
-  const benchmarkDetails = <div className="space-y-3 text-xs">
-    <p className="font-medium text-fg-strong">{text('Monthly weighted benchmark · EUR', 'Gewogen maandbenchmark · EUR')}</p>
+  const benchmarkDetails = (key: string) => {
+    const benchmark = (selectedReport?.month === key ? selectedReport.weighted_benchmark?.[key] : null)
+      ?? report?.weighted_benchmark?.[key];
+    if (key === overviewBenchmarkMonth) return <div className="space-y-2 text-xs">
+      <p className="font-medium text-fg-strong">{monthLabel(key)} · {text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')}</p>
+      <p>{overviewReturns?.from ? holdingDate(overviewReturns.from) : '—'} — {overviewReturns?.asOf ? holdingDate(overviewReturns.asOf) : '—'}</p>
+      <p>{text('This portfolio started during this month. We use the same policy benchmark and exact investment period as the YTD headline, excluding days before the portfolio started.', 'Deze portefeuille startte in deze maand. We gebruiken dezelfde beleidsbenchmark en exacte beleggingsperiode als de YTD-tegel, zonder de dagen vóór de start van de portefeuille.')}</p>
+      <p className="font-mono">{pct(overviewReturns?.benchmark)}</p>
+    </div>;
+    return <div className="space-y-3 text-xs">
+    <p className="font-medium text-fg-strong">{monthLabel(key)} · {text('Monthly weighted benchmark · EUR', 'Gewogen maandbenchmark · EUR')}</p>
     <div className="overflow-x-auto"><table className="w-full text-left"><thead><tr>
       {[text('ETF', 'ETF'), text('Weight', 'Gewicht'), text('Opening · EUR', 'Begin · EUR'), text('Closing · EUR', 'Eind · EUR'), text('Return', 'Rendement')].map((label) => <th key={label} className="px-2 py-2 font-medium text-fg-subtle">{label}</th>)}
     </tr></thead><tbody>{benchmark?.components?.map((component) => <tr key={component.ticker} className="border-t border-neutral-800/40">
@@ -167,8 +175,13 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
       <td className="px-2 py-2"><span className="block tabular-nums">{component.end_price_eur != null ? eurPrice(component.end_price_eur) : '—'}</span><span className="text-fg-subtle">{holdingDate(component.end_date)}</span></td>
       <td className={`px-2 py-2 tabular-nums ${tone(component.return_pct)}`}>{pct(component.return_pct)}</td>
     </tr>)}</tbody></table></div>
-    <p className="text-fg-subtle">{text('Weighted return = sum of each ETF return × its policy weight. Prices per unit in EUR, including currency movements. Source: stored Yahoo Finance ETF prices.', 'Gewogen rendement = som van elk ETF-rendement × het beleidsgewicht. Prijzen per stuk in EUR, inclusief valuta-effecten. Bron: opgeslagen Yahoo Finance ETF-prijzen.')}</p>
+    <p>{text('Each ETF return = (closing price in EUR ÷ opening price in EUR − 1) × 100. The opening price is the last available close on or before the previous month-end; the closing price matches the AIRS observation date for this month.', 'Elk ETF-rendement = (eindkoers in EUR ÷ beginkoers in EUR − 1) × 100. De beginkoers is de laatst beschikbare slotkoers op of vóór het vorige maandeinde; de eindkoers sluit aan op de AIRS-waarnemingsdatum van deze maand.')}</p>
+    <p className="text-fg-subtle">{text('Weighted return = sum of each ETF return × its policy weight ÷ 100. Prices per unit in EUR, including currency movements. Source: stored Yahoo Finance ETF prices.', 'Gewogen rendement = som van elk ETF-rendement × het beleidsgewicht ÷ 100. Prijzen per stuk in EUR, inclusief valuta-effecten. Bron: opgeslagen Yahoo Finance ETF-prijzen.')}</p>
+    <p className="text-fg-subtle">{text('Foreign-currency prices are converted using stored exchange rates at each endpoint. Calculations use full precision; the displayed prices and returns are rounded.', 'Koersen in vreemde valuta worden omgerekend met opgeslagen wisselkoersen aan het begin en einde van de periode. De berekening gebruikt volledige precisie; getoonde koersen en rendementen zijn afgerond.')}</p>
+    {!!benchmark?.components?.length && <p className="font-mono">{benchmark.components.map((component) => `(${pct(component.return_pct)} × ${component.weight_pct} / 100)`).join(' + ')} = {pct(benchmark.return_pct)}</p>}
+    {!benchmark?.components?.length && <p className="text-fg-subtle">{text('The underlying price and weight details are not available for this month.', 'De onderliggende koers- en wegingsdetails zijn voor deze maand niet beschikbaar.')}</p>}
   </div>;
+  };
   const months = Array.from({ length: month.slice(0, 4) === today.slice(0, 4) ? Number(today.slice(5, 7)) : 12 }, (_, i) => `${month.slice(0, 4)}-${String(i + 1).padStart(2, '0')}`);
   const monthPerformance = (key: string) => key === month && perf ? perf : report?.months.find((row) => row.month === key);
   const compound = (values: (number | null | undefined)[]) => values.some((value) => value == null || !Number.isFinite(value))
@@ -189,7 +202,6 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     ? overviewReturns.asOf.slice(0, 7) : null;
   const benchmarkForMonth = (key: string) => key === overviewBenchmarkMonth
     ? overviewReturns?.benchmark : report?.weighted_benchmark?.[key]?.return_pct;
-  const selectedMonthUsesOverviewBenchmark = month === overviewBenchmarkMonth;
   const compoundedThrough = useOverview ? overviewReturns.asOf : monthPerformance(months[months.length - 1])?.periode;
   const compoundedFrom = useOverview ? overviewReturns.from : report?.start;
   const unavailable = (reason?: string) => reason === 'unclassified_activity' || reason === 'quantity_not_reconciled'
@@ -230,7 +242,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
             className={`group rounded-xl border p-4 text-left transition-colors ${active ? 'border-accent-400 bg-accent-500/10 ring-1 ring-accent-400/50' : 'border-neutral-800/40 bg-elevated hover:border-accent-500/50'}`}>
             <span className={`block capitalize text-xs ${active ? 'font-medium text-accent-300' : 'text-fg-subtle'}`}>{monthLabel(key, true)}</span>
             <span className={`mt-2 block font-mono text-xl tabular-nums ${tone(row?.rendement)}`}>{pct(row?.rendement)}</span>
-            <span className="mt-1 block text-xs text-fg-subtle" title={report.weighted_benchmark?.[key]?.source}>{text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')} <span className={`font-mono tabular-nums ${tone(benchmarkForMonth(key))}`}>{pct(benchmarkForMonth(key))}</span></span>
+            <span data-month-benchmark={key} className="mt-1 block text-xs text-fg-subtle">{text('Weighted benchmark · EUR', 'Gewogen benchmark · EUR')} <span className={`font-mono tabular-nums ${tone(benchmarkForMonth(key))}`}>{pct(benchmarkForMonth(key))}</span><InfoTip className="ml-1" wide content={benchmarkDetails(key)} /></span>
             <span className={`mt-3 block text-[11px] ${active ? 'text-accent-300' : 'text-fg-faint group-hover:text-accent-300'}`}>{text('View positions', 'Bekijk posities')}</span>
           </button>; })}
       </nav>
@@ -246,7 +258,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Monthly return · AIRS', 'Maandrendement · AIRS')}</span>
             <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(perf?.rendement)}`}>{pct(perf?.rendement)}</span></div>
-          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Weighted benchmark return · EUR', 'Gewogen benchmarkrendement · EUR')}{benchmark && !selectedMonthUsesOverviewBenchmark && <InfoTip className="ml-2" wide content={benchmarkDetails} />}</span>
+          <div className={`${box} flex items-center justify-between gap-4 px-5 py-4`}><span className="text-sm text-fg-muted">{text('Weighted benchmark return · EUR', 'Gewogen benchmarkrendement · EUR')}<InfoTip className="ml-2" wide content={benchmarkDetails(month)} /></span>
             <span className={`font-mono text-2xl font-semibold tabular-nums ${tone(benchmarkForMonth(month))}`}>{pct(benchmarkForMonth(month))}</span></div>
         </div>
         {report.warning && <p className="text-xs text-warn-300">{report.warning}</p>}
