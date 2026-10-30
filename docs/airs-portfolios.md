@@ -63,6 +63,13 @@ saved results. Aligned histories are reused across views in a bounded memory cac
 Opening Risk never downloads or repairs price history. Missing history stays explicitly
 unavailable until source jobs or an explicit repair update the stored inputs.
 
+Analyse opening requests disable optional holding-risk history and return the complete current
+prepared holdings payload when available, avoiding a second serial detail request. Cold misses
+still use the lightweight overview and deferred details. Hover/focus warms both modal code and
+data; reopening can paint a completed client result within its existing 30-second lifetime.
+Saved risk-column preferences request their extra history after the holdings mount. Refresh and
+selection revisions remain separate cache keys; expired client results are never painted.
+
 `/airs-check` reads persisted native-currency price checks from `airs_price_check` through the
 existing `airs_overview_payload` RPC. It has the same user access as `/management-dashboard`
 and its own sidebar link. The dashboard no longer displays the price-check column or controls.

@@ -115,6 +115,23 @@ def test_benchmark_restores_numeric_asset_identity_keys(store, monkeypatch):
     assert A._benchmark_weights('ACWI', None)['issuer_by_asset'] == {42: 'issuer'}
 
 
+def test_opening_serves_complete_prepared_holdings_without_another_detail_request(store, monkeypatch):
+    from routers import _airs_portfolio_analysis as A, _analysis_cache as cache
+    payload = {'portfolio_id': 1, 'benchmark': 'ACWI', 'returns': {'portfolio_ytd_pct': 3},
+               'book_holdings': [{'name': 'Stock', 'weight_now_pct': 70}],
+               'realised': {'total': 2}, 'details_pending': False}
+    assert P.save('holdings', P.holdings_key(1, 'ACWI', False), payload, 10, 'code-v1')
+    monkeypatch.setattr(A, 'compute_portfolio_analysis', Mock(side_effect=AssertionError('recomputed')))
+    monkeypatch.setattr(cache, 'fingerprint', Mock(side_effect=AssertionError('unnecessary fingerprint')))
+    result = asyncio.run(A.compute_portfolio_analysis_async(
+        1, 'ACWI', 'book', 'book', include_axes=False,
+        overview_only=True, include_holding_risk=False))
+    assert result['book_holdings'] == payload['book_holdings']
+    assert result['realised'] == payload['realised']
+    assert result['details_pending'] is False
+    assert 'prepared_lookup' in result['timings_ms']
+
+
 def test_process_code_is_frozen_but_live_config_changes_invalidate(monkeypatch, tmp_path):
     code = tmp_path / 'calculation.py'
     config = tmp_path / 'aliases.json'

@@ -11,6 +11,14 @@ const TTL_MS = 30_000;
 const pending = new Map<string, Promise<unknown>>();
 const completed = new Map<string, { value: unknown; expiresAt: number }>();
 
+/** Read only a still-valid completed result so reopening need not paint a loading screen. */
+export function readPrefetchedAnalysis<T>(key: string): T | undefined {
+  const cached = completed.get(key);
+  if (!cached) return undefined;
+  if (cached.expiresAt <= Date.now()) { completed.delete(key); return undefined; }
+  return cached.value as T;
+}
+
 export function analysisRequestKey(subject: string, benchmark = 'ACWI', source = 'book', bucket = '', lookThrough = false, refresh = 0, reload = 0): string {
   return `${subject}|${benchmark}|${source}|${bucket}|${lookThrough ? 1 : 0}|${refresh}|${reload}`;
 }

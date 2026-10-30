@@ -1,7 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, prefetchAnalysis } from './analysisPrefetch';
+import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, prefetchAnalysis, readPrefetchedAnalysis } from './analysisPrefetch';
 
 describe('Analyse request sharing', () => {
+  it('paints completed results on reopen but never exposes expired or pending data', async () => {
+    vi.useFakeTimers();
+    try {
+      const key = analysisRequestKey('id:reopen');
+      let finish!: (value: object) => void;
+      const pending = loadPrefetchedAnalysis(key, () => new Promise<object>((resolve) => { finish = resolve; }));
+      expect(readPrefetchedAnalysis(key)).toBeUndefined();
+      const result = { book_holdings: ['Stock'], details_pending: false };
+      finish(result);
+      await pending;
+      expect(readPrefetchedAnalysis(key)).toBe(result);
+      expect(readPrefetchedAnalysis(analysisRequestKey('id:reopen', 'ACWI', 'book', '', false, 1))).toBeUndefined();
+      vi.advanceTimersByTime(30_001);
+      expect(readPrefetchedAnalysis(key)).toBeUndefined();
+    } finally { vi.useRealTimers(); }
+  });
   it('shares in-flight holdings between sleeves and separates every data-changing input', async () => {
     const base = analysisDetailsKey('id:4242', 'ACWI', 'book', false, 0, 0, false);
     let finish!: (value: object) => void;

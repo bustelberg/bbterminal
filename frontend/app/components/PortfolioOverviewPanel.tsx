@@ -47,11 +47,13 @@ const PortfolioEarningsModal = dynamic(() => import('./portfolios/PortfolioEarni
 });
 
 function prefetchModelAnalysis(id: number, name: string) {
+  // Load the modal's code alongside its data, rather than starting another download on click.
+  void import('./portfolios/PortfolioAnalysisModal').catch(() => undefined);
   const lookThrough = defaultLookThroughCertificates(name);
   const key = analysisRequestKey(`id:${id}`, 'ACWI', 'book', '', lookThrough);
   prefetchAnalysis(key, async () => {
     const response = await apiFetch(
-      `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=ACWI&weight_by=book&source=book&look_through=${lookThrough}&include_axes=false&overview_only=true`,
+      `${API_URL}/api/airs/model-portfolios/${id}/analysis?benchmark=ACWI&weight_by=book&source=book&look_through=${lookThrough}&include_axes=false&overview_only=true&include_holding_risk=false`,
     );
     const body = await response.json().catch(() => null);
     if (!response.ok) throw new Error(body?.detail ?? `HTTP ${response.status}`);

@@ -26,7 +26,7 @@ import {
   Provenance, ProvenanceFetchedAt, ProvenanceRefresh, type SourceKey,
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
-import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
+import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, readPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
 import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import PanelDialog from './PanelDialog';
 import dynamic from 'next/dynamic';
@@ -3539,9 +3539,12 @@ export default function PortfolioAnalysisModal({
     isin?: string; name: string; portfolioWeightPct: number;
     allocation?: EtfSectorAllocationResponse;
   } | null>(null);
-  const [data, setData] = useState<ModelPortfolioAnalysis | null>(null);
-  const [includeHoldingRisk, setIncludeHoldingRisk] = useState(() =>
-    [...readSavedGroups()].some((key) => key === 'momentum' || key === 'volatility' || key === 'beta'));
+  const initialAnalysisKey = analysisRequestKey(reqKey, benchmark, source, '', lookThrough, refreshSeq);
+  const [data, setData] = useState<ModelPortfolioAnalysis | null>(() =>
+    readPrefetchedAnalysis<ModelPortfolioAnalysis>(initialAnalysisKey) ?? null);
+  // Paint prepared holdings first. Holdings requests optional history after mounting if the
+  // reader has risk columns enabled; saved preferences must not block the opening screen.
+  const [includeHoldingRisk, setIncludeHoldingRisk] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshingBenchmarkData, setRefreshingBenchmarkData] = useState(false);
   const [includeEtfsInSector, setIncludeEtfsInSector] = useState(true);
@@ -3649,9 +3652,10 @@ export default function PortfolioAnalysisModal({
   const viewKey = analysisRequestKey(reqKey, benchmark, source, assetFilter ?? '', lookThrough, refreshSeq, reloadSeq)
     + (includeHoldingRisk ? '|risk-columns' : '');
   const detailsRevision = analysisDetailsKey(reqKey, benchmark, source, lookThrough, refreshSeq, reloadSeq, includeHoldingRisk);
-  const holdingDetails = useRef<{ revision: string; value: ModelPortfolioAnalysis } | null>(null);
-  const [loadedFor, setLoadedFor] = useState<string | null>(null);
-  const loadedRevision = useRef<string | null>(null);
+  const holdingDetails = useRef<{ revision: string; value: ModelPortfolioAnalysis } | null>(
+    data && !data.details_pending ? { revision: detailsRevision, value: data } : null);
+  const [loadedFor, setLoadedFor] = useState<string | null>(data ? viewKey : null);
+  const loadedRevision = useRef<string | null>(data ? detailsRevision : null);
   const [detailsError, setDetailsError] = useState(false);
   const stale = data != null && loadedFor !== viewKey;
 
