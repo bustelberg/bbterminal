@@ -31,9 +31,7 @@ import type {
   AirsPortfolioOverview,
 } from '../../lib/types/api';
 import { useMgmtCopy } from './management/managementCopy';
-import { usePriceChecks } from './management/usePriceChecks';
-import { useForcePriceChecks } from './management/useForcePriceChecks';
-import { PriceCheckBadge, PriceCheckModal, usePriceCheckCopy } from './management/PriceCheckPanel';
+import { canAnalyseAccount as canAnalyse, MIN_REAL_HOLDINGS } from './management/portfolioAccounts';
 
 // These are substantial, self-contained workspaces that only exist after a row action. Keeping
 // them out of the overview chunk makes opening /management-dashboard about the table, rather than
@@ -194,31 +192,6 @@ function logSteps(log: ScanStep[], from: number): number {
   return high;
 }
 
-/**
- * Can this row be ANALYSED — i.e. is there a composition for the modals to open?
- *
- *  This is the predicate the analyse and fundamental buttons render on, defined once so the list
- * and the buttons cannot disagree.
- *
- *  And it asks for holdings, not for a model portfolio. It used to require `fixed_portfolio_id`,
- * which made both buttons depend on the Stamgegevens model scan — a SECOND workflow the account
- * scan never touches. Measured in production 2026-07-30: 46 books, every report fetched, and not
- * one button anywhere, because that scan had never run. Neither modal ever needed it; both take a
- * plain basket of `{isin, weight}`, and the Vermogensoverzicht's `ISIN-code` column is exactly
- * that. The pairing is preferred where it exists (attribution and the bucket drill-downs are
- * id-only) but it is an upgrade, not a prerequisite — see `openModal`.
- *
- *  And under `MIN_REAL_HOLDINGS` IS NOT A PORTFOLIO. The AIRS benchmarks carry exactly 1 holding
- * and the `_MV` / `WTS test` shells carry none, against 10-29 for every real book — so the same
- * threshold the backend now uses to skip them in the SCAN (`airs_vermogen.MIN_REAL_HOLDINGS`)
- * decides whether they are worth a row here. One rule, both ends: a book the scan stops fetching
- * must not keep a seat in the table.
- */
-const MIN_REAL_HOLDINGS = 5;
-
-const canAnalyse = (r: AirsPortfolioOverview) =>
-  r.fixed_portfolio_id != null || (r.holdings ?? 0) >= MIN_REAL_HOLDINGS;
-
 //  Keep in step with `airs_vermogen.REPORTS` — a code with no label here renders as a bare
 // mnemonic in the "missing reports" gap list, which reads as a bug rather than as a named report.
 const REPORT_LABELS: Record<string, string> = {
@@ -272,16 +245,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // and `_auth_middleware.py::_USER_REFRESH_PATHS` is the same split on the server.
   const isAdmin = useIsAdmin();
   const [rows, setRows] = useState<AirsPortfolioOverview[] | null>(null);
-  const priceCheckAccounts = (rows ?? []).filter((row) => row.management_group === collection && canAnalyse(row));
-  const priceChecks = usePriceChecks(priceCheckAccounts);
-  const forcedPriceChecks = useForcePriceChecks();
-  const priceCopy = usePriceCheckCopy();
-  const [openPriceCheck, setOpenPriceCheck] = useState<{ account: string; showAll: boolean } | null>(null);
-  // A row recheck is independent: only its own button is busy while the shared job toast reports
-  // progress. A single global boolean would incorrectly grey out the whole comparison table.
-  const [recheckingPriceIsins, setRecheckingPriceIsins] = useState<ReadonlySet<string>>(() => new Set());
-  const priceCheckPortfolio = openPriceCheck == null ? null
-    : priceCheckAccounts.find((row) => row.dynamic_portefeuille === openPriceCheck.account) ?? null;
   // Bustelberg and Toppenberg open from Offensief down to Defensief; TopSelecties open A–Z.
   // The name comparator still uses the explicit profile order.
   const [storedSort, setStoredSort] = useState<TableSort>(() => defaultTableSort(collection));
@@ -383,7 +346,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   };
   /** Bumped when a row refresh finishes, so an open Analyse modal re-reads what it rebuilt. */
   const [refreshSeq, setRefreshSeq] = useState(0);
-  const [deletingRows, setDeletingRows] = useState<Set<string>>(new Set());
   const [scanningModels, setScanningModels] = useState(false);
   /** Phase two's job id — the same shape as `fleetJob`, so the one button can offer Cancel for
    *  whichever half of "Refresh all" is currently running. */
@@ -583,52 +545,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     }
   };
 
-  /**
-   * Delete one account's scraped rows — the way to prove Refresh all actually refills a gap.
-   *
-   *  It asks first, and the question names what does not come back. A scan fetches `1 Jan →
-   * today`, so any performance month before January is gone permanently; "the refresh will
-   * restore it" is true only for this year. `dialog.confirm`, never the native one.
-   */
-  const deleteOne = async (portefeuille: string) => {
-    const ok = await dialog.confirm(
-      `Delete every scraped row for ${portefeuille}?\n\n`
-      + 'Removes its returns, holdings, mutations, model weights, roster entry and model pairing. '
-      + 'A refresh rebuilds them — but only from 1 January, so any earlier month is lost for good.\n\n'
-      + 'The hidden-account decision is not touched.',
-    );
-    if (!ok) return;
-    setDeletingRows((s) => new Set(s).add(portefeuille));
-    try {
-      const r = await apiFetch(`${API_URL}/api/airs/portfolios/${encodeURIComponent(portefeuille)}`,
-        { method: 'DELETE' });
-      const b = (await r.json().catch(() => null)) as
-        { total_rows?: number; deleted?: Record<string, number> } | null;
-      if (!r.ok) {
-        logDetail(`delete ${portefeuille} failed`, { status: r.status, body: b });
-        setRefreshMsg({ text: `${portefeuille}: delete failed — HTTP ${r.status}`, kind: 'error' });
-      } else {
-        // The row count and its per-table breakdown are what tell "it deleted nothing" from "it
-        // deleted 400 rows" — a diagnostic. A number of rows is not something the operator asked
-        // for or can act on: they deleted an account, and the only thing left to say is how to get
-        // it back. So the counts go to the console and the line says what happened and what next.
-        logDetail(`deleted ${portefeuille}`,
-          { total_rows: b?.total_rows ?? 0, per_table: b?.deleted ?? {} });
-        setRefreshMsg({
-          text: `${portefeuille}: deleted. Run Refresh all to rebuild it.`,
-          kind: 'warn',
-        });
-        invalidateOverviewCache();
-      }
-      await loadOverview();
-    } catch (e) {
-      logDetail(`delete ${portefeuille} threw`, e);
-      setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
-    } finally {
-      setDeletingRows((s) => { const n = new Set(s); n.delete(portefeuille); return n; });
-    }
-  };
-
   // Fetch ONE account's holdings + ISIN resolution into the caches. Split out of `expand` because
   // a refresh has to be able to re-fetch a row that is ALREADY open: clearing the caches without
   // re-fetching left the open row on "Loading holdings…" for ever, since nothing re-requests until
@@ -746,7 +662,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     // and therefore a second toast, which is the duplicate card this guard exists to prevent. The
     // ref, not `refreshingRows`: React batches, so two clicks in one tick see the same stale Set.
     if (refreshingRef.current.has(portefeuille)) return;
-    priceChecks.beginRefresh([portefeuille]);
     // Do not let a route return during this manual refresh paint a snapshot that it is replacing.
     invalidateOverviewCache();
     refreshingRef.current = new Set(refreshingRef.current).add(portefeuille);
@@ -765,14 +680,12 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       // wrote every account it got through, so leaving the pre-refresh figures on screen would
       // hide real work that was really done — the same rule the bulk fundamentals fill follows.
       if (job.status === 'failed') logDetail(`refresh ${portefeuille} failed`, job.summary);
-      const validation = priceChecks.refresh(portefeuille);
       setDetail((d) => { const n = { ...d }; delete n[portefeuille]; return n; });
       setIsins((m) => { const n = { ...m }; delete n[portefeuille]; return n; });
       await loadOverview();
       //  Dropping the cache is only half of it. An OPEN row re-renders straight into
       // "Loading holdings…" and stays there, because only a click re-requests — so re-fetch here.
       if (open === portefeuille) await loadDetail(portefeuille);
-      await validation;
     } catch (e) {
       logDetail(`refresh ${portefeuille} threw`, e);
       setRefreshMsg({ text: `${portefeuille}: ${e instanceof Error ? e.message : String(e)}`, kind: 'error' });
@@ -789,28 +702,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       // would sit showing pre-scan figures while the row behind it updated, which reads as the
       // button having done nothing. A counter, not a boolean: two scans in a row must both land.
       setRefreshSeq((s) => s + 1);
-    }
-  };
-
-  /** Re-fetch one listed holding's Yahoo series; the rest of the saved check is left untouched. */
-  const recheckPriceRow = async (portefeuille: string, isin: string, holdingName: string) => {
-    if (recheckingPriceIsins.has(isin) || refreshingRows.has(portefeuille) || forcedPriceChecks.progress) return;
-    setRecheckingPriceIsins((current) => new Set(current).add(isin));
-    try {
-      const { done } = await startJob(
-        `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/isins/${encodeURIComponent(isin)}/refresh-price/job`,
-        `${holdingName} — Yahoo price`, undefined, undefined, { label: holdingName });
-      const job = await done;
-      if (job.status === 'failed') logDetail(`price recheck ${portefeuille}:${isin} failed`, job.summary);
-      await priceChecks.refresh(portefeuille);
-    } catch (e) {
-      logDetail(`price recheck ${portefeuille}:${isin} threw`, e);
-    } finally {
-      setRecheckingPriceIsins((current) => {
-        const next = new Set(current);
-        next.delete(isin);
-        return next;
-      });
     }
   };
 
@@ -882,8 +773,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
   // on each press turns a quick check into 48 account downloads plus ~61 model XLS downloads.
   const refreshAll = async (force = false) => {
     if (refreshingAll) return;
-    const priceAccounts = priceCheckAccounts.map((row) => row.dynamic_portefeuille);
-    priceChecks.beginRefresh(priceAccounts);
     // See refreshOne: this run changes the source of every overview row.
     invalidateOverviewCache();
     setRefreshingAll(true);
@@ -938,7 +827,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         await loadOverview();
       }
       if (open) await loadDetail(open);   // same trap as refreshOne — an open row must re-fetch
-      await priceChecks.refreshMany(priceAccounts);
     } catch (e) {
       logDetail('fleet refresh threw', e);
       setRefreshMsg({ text: e instanceof Error ? e.message : String(e), kind: 'error' });
@@ -1085,20 +973,25 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
         SHARED COMPONENTS KEPT THEIR SIZES ON PURPOSE — the provenance ⓘ cards, the state badges,
        `LinkCell` and the Analyse modal all render on other screens too, so bumping them here
        would silently resize those. What grew is what this file owns. */
-    <section className="bg-card border border-neutral-800/40 rounded-xl p-5 space-y-3">
-      <div className="flex items-baseline justify-between gap-4 flex-wrap">
-        <div>
+    <section className="mx-auto w-full max-w-[54rem] rounded-2xl border border-neutral-800/40 bg-card p-3 shadow-sm sm:p-5 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <h3 className="text-[15px] font-semibold text-fg-strong">
             {collectionTitle[collection]}{rows ? ` · ${view.length}` : ''}
           </h3>
+          <button type="button" onClick={() => setShowBands(true)}
+            title={t.overview.allocationBandsHint}
+            className="inline-flex items-center gap-1.5 text-[12px] px-2.5 py-1.5 rounded-lg border border-neutral-800/50 text-fg-muted hover:text-accent-300 hover:border-accent-500/50 transition-colors">
+            {t.overview.allocationBands}
+          </button>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
           {/* A normal press checks every visible account and re-reads only data that is missing or
               stale. That keeps Refresh all quick while the daily scan maintains full coverage. */}
           <button type="button"
             onClick={() => { if (allJob) { void cancelRefreshAll(); } else { void refreshAll(); } }}
             // Inert only in the gap between the press and the job id arriving — see the row button.
-            disabled={!!forcedPriceChecks.progress || (refreshingAll && !allJob)}
+            disabled={refreshingAll && !allJob}
             title={allJob
               ? (modelsJob
                 ? 'Stop the model-portfolio scan. The portfolio being counted finishes first (seconds), then it stops — every count already stored is kept.'
@@ -1117,29 +1010,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
               : refreshingAll ? (scanningModels ? t.overview.scanningModels
                                                 : t.overview.refreshing)
               : t.overview.refreshAll}
-          </button>
-          {/* The POLICY, beside the thing that measures against it. Shown to everyone and editable
-              by admins only — a non-admin reading what the bands are supposed to be is exactly the
-              use this has for them, and hiding it would leave the numbers on this page with no
-              stated target at all. */}
-          <button type="button" disabled={refreshingAll || refreshingRows.size > 0 || !!forcedPriceChecks.progress || !priceCheckAccounts.length}
-            title={priceCopy.forceAllHint}
-            onClick={() => {
-              const accounts = priceCheckAccounts.map((row) => ({ id: row.dynamic_portefeuille, name: row.name }));
-              priceChecks.beginRefresh(accounts.map((account) => account.id));
-              void forcedPriceChecks.run(accounts, priceCopy.forceAll, async () => {
-                invalidateOverviewCache();
-                await priceChecks.refreshMany(accounts.map((account) => account.id));
-                await loadOverview();
-              });
-            }}
-            className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-            {priceCopy.forceAll}
-          </button>
-          <button type="button" onClick={() => setShowBands(true)}
-            title={t.overview.allocationBandsHint}
-            className="inline-flex items-center gap-1.5 text-[13px] px-2.5 py-1 rounded-lg border border-neutral-700 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50 transition-colors">
-            {t.overview.allocationBands}
           </button>
           {/*  ONE BUTTON. It ran as two for a while — accounts here, model portfolios on a second
               control — which put an implementation rule (keep the two scans' error verdicts apart)
@@ -1184,20 +1054,18 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
       )}
 
       {rows && (
-        <div className="overflow-x-auto rounded-lg border border-neutral-800/40">
-          {/*  `overflow-x-auto`, NOT `overflow-auto`, and no max-height: the table grows to its
-              content and the PAGE scrolls it. The horizontal container has to stay — 17 columns
-              are wider than a phone, and the repo rule is that a dense table scrolls inside its
-              own box so the page never scrolls sideways. */}
-          <table className="w-full min-w-[80rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-10" /><col className="w-[28rem]" /><col /><col className="w-28" /><col className="w-36" /><col className="w-40" /><col className="w-12" /></colgroup>
-            <thead className="bg-card z-10 [&_th]:bg-card">
-              <tr className="text-fg-faint text-[12px] uppercase tracking-wide border-b border-neutral-800/40">
+        <div className="overflow-x-auto rounded-xl border border-neutral-800/40">
+          {/* Narrow fixed action/numeric columns, with the remaining width for names.
+              The table scrolls within this card on small screens. */}
+          <table className="w-full min-w-[40rem] table-fixed text-[13px] whitespace-nowrap">
+            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[10rem]" /></colgroup>
+            <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
+              <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
                     or re-sorted, which is the point — it is there to say "the 14th row", so two
                     people can talk about the same line. `text-right` so the digits align. */}
-                <th className="px-3 py-1.5 font-medium text-right w-8">#</th>
-                <th className="px-3 py-1.5 font-medium text-left" />{/* Analyse */}
+                <th className="px-2 py-2.5 font-medium text-right w-8">#</th>
+                <th className="px-2 py-2.5 font-medium text-left" />{/* Analyse */}
                 <SortTh label="Name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortTh label="AIRS YTD" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
@@ -1205,10 +1073,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <SortTh label="AIRS Current month" k="month" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD." />
-                <th className="px-3 py-1.5 text-left font-medium"><span className="sr-only">{priceCopy.column}</span></th>
-                {/* Rightmost, and unlabelled: a destructive action wants distance from the figures,
-                    not a heading advertising it. */}
-                <th className="px-3 py-1.5 font-medium text-right w-8" />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1216,27 +1080,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 const isOpen = open === r.dynamic_portefeuille;
                 return (
                   <Fragment key={r.dynamic_portefeuille}>
-                    <tr className="group transition-colors hover:bg-accent-500/10">
-                      <td className="px-3 py-1.5 text-right font-mono text-fg-faint tabular-nums">
+                    <tr className="group transition-colors hover:bg-accent-500/[0.04] focus-within:bg-accent-500/[0.04]">
+                      <td className="px-2 py-2.5 text-right font-mono text-fg-faint tabular-nums">
                         {rowNo + 1}
                       </td>
                       {/* Analyse, leftmost. Describes the FIXED portfolio (composition +
                           attribution), which is why it needs `fixed_portfolio_id` and an unlinked
                           row cannot offer it. stopPropagation so it does not also toggle the row. */}
-                      <td className="px-3 py-1.5 whitespace-nowrap">
-                        {/*  BOTH CONTROLS ARE SIZED HERE AND NOWHERE ELSE (2026-09-03, on
-                            request: "make the Analyse and Refresh button bigger"). They sit side
-                            by side under `items-stretch`, so the two MUST carry the same text size
-                            and padding — stretch equalises their HEIGHT, which means a size change
-                            to one silently pads the other to match instead of failing visibly.
-                            `text-[11px] px-1.5 py-0.5` → `px-2.5 py-1`, and `rounded` →
-                            `rounded-md` so they match the chip chrome the Analyse modal uses.
-                             THE SIZE ITSELF IS NO LONGER SET HERE ALONE — every explicit font
-                            size on this page went up a step the same day (see the note on the
-                            section below), so these carry `text-[13px]` with the rest of it.
-                             THE ROW GETS TALLER, and that is the accepted cost: the cell's own
-                            `py-1.5` no longer sets the row height, these do. */}
-                        <div className="flex items-stretch gap-1.5">
+                      <td className="px-2 py-2.5 whitespace-nowrap">
+                        <div className="flex flex-wrap items-stretch gap-1.5">
                           {canAnalyse(r) && (
                             <button
                               // A click can follow a hover by less than one animation frame, and a
@@ -1259,7 +1111,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               }}
                               onClick={(e) => { e.stopPropagation(); void openModal(r); }}
                               disabled={opening === r.dynamic_portefeuille}
-                              className="inline-flex items-center text-[13px] px-2.5 py-1 rounded-md border border-neutral-800/40 text-fg-subtle hover:bg-overlay/5 hover:text-fg disabled:opacity-50"
+                              className="inline-flex h-8 min-w-[4.5rem] items-center justify-center rounded-lg border border-accent-500/25 bg-accent-500/[0.06] px-2 text-[12px] font-medium text-accent-300 transition-colors hover:border-accent-500/50 hover:bg-accent-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/50 disabled:opacity-50"
                             >
                               {opening === r.dynamic_portefeuille ? '…' : 'Analyse'}
                             </button>
@@ -1310,7 +1162,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                                 // press, nothing moving, no way out — so while it runs there is
                                 // always something to press, and afterwards there is nothing left
                                 // to ask for.
-                                disabled={stopping || (!!forcedPriceChecks.progress && !busy)}
+                                disabled={stopping}
                                 title={stopping
                                   ? 'Cancelling — the account being downloaded finishes first.'
                                   : cancellable
@@ -1336,14 +1188,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                       </td>
                       {/*  THE THREE COLUMNS THAT ARE THE ANSWER ARE A SIZE UP FROM THE REST
                           (2026-09-03, on request). Name · YTD · Current month are what this page
-                          is for; the row number, the two action buttons and the delete are chrome
+                          is for; the row number and action buttons are chrome
                           around them. At one uniform `text-[13px]` the row read as six equal
                           things and the eye had to pick the important ones out every time.
                            ON THE CELL, so anything nested that sets its OWN size keeps it — the
                           expand caret, the AIRS-code hover, the freshness badge. A larger figure
                           beside its own small badge is the hierarchy; scaling the badge with it
                           would be the same flat row one step louder. */}
-                      <td className="px-3 py-1.5 text-[15px] text-fg whitespace-nowrap">
+                      <td className="px-2 py-2.5 text-[15px] font-medium text-fg whitespace-nowrap">
+                        <div className="flex min-w-0 items-center gap-1">
                         {/*  AIRS NAMES ONE PORTFOLIO THREE WAYS — our readable name, the Fixed
                             code and the Dynamic code — and printing all three ran them together
                             ("ToppenbergBeheer DefensiefTOPS_DEF_BEH_DYN · TOPS_DEF_BEH"), so the
@@ -1360,16 +1213,16 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                         {isAdmin ? (
                           <button type="button"
                             onClick={(e) => { e.stopPropagation(); void renameAccount(r); }}
-                            title={`AIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}\n\nClick to ${r.name_is_custom ? 'change or clear this name' : 'give this book a name'}.`}
-                            className="text-left hover:text-accent-300 hover:underline decoration-dotted underline-offset-2">
+                            title={`${r.name}\nAIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}\n\nClick to ${r.name_is_custom ? 'change or clear this name' : 'give this book a name'}.`}
+                            className="min-w-0 whitespace-normal break-words text-left hover:text-accent-300 hover:underline decoration-dotted underline-offset-2">
                             {r.name}
                             {r.name_is_custom && (
                               <span className="text-accent-400 text-[11px] leading-none ml-1 align-middle"></span>
                             )}
                           </button>
                         ) : (
-                          <span className="cursor-help"
-                            title={`AIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
+                          <span className="min-w-0 cursor-help whitespace-normal break-words"
+                            title={`${r.name}\nAIRS: ${r.dynamic_portefeuille}${r.fixed_name ? ` · ${r.fixed_name}` : ''}`}>
                             {r.name}
                           </span>
                         )}
@@ -1379,9 +1232,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                             figures are still real — they just do not all describe the same date,
                             and the badge names exactly which one is stale. */}
                         {(r.missing_reports?.length ?? 0) > 0 && (
-                          <span className="ml-1.5 text-[12px] text-warn-300"
+                          <span className="ml-1.5 max-w-[7.5rem] shrink-0 truncate text-[11px] text-warn-300"
                             title={`This account's last scan did not retrieve: ${r.missing_reports!
-                              .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — retry with the Refresh button on the left, or leave it to the daily scan.`}>
+                              .map((c) => REPORT_LABELS[c] ?? c).join(', ')}. Its other figures are from the newer scan, so the row mixes dates — use Refresh all, or leave it to the daily scan.`}>
                              {r.missing_reports!.map((c) => REPORT_LABELS[c] ?? c).join(', ')}
                           </span>
                         )}
@@ -1422,8 +1275,9 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                               ? 'name — from the Fixed portfolio matched to this book by name'
                               : 'name — from the Fixed portfolio this book is linked to')
                             : 'name — the AIRS book itself; no Fixed portfolio paired'} />
+                        </div>
                       </td>
-                      <td className={`px-3 py-1.5 text-[15px] text-right font-mono font-semibold ${tone(r.ytd_pct)}`}>
+                      <td className={`px-2 py-2.5 text-[15px] text-right font-mono font-semibold tabular-nums ${tone(r.ytd_pct)}`}>
                         {pct(r.ytd_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
                           staleReason={r.missing_reports?.includes('att')
@@ -1431,7 +1285,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           what="This account's return so far this year, as AIRS itself reports it."
                           note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
                       </td>
-                      <td className={`px-3 py-1.5 text-[15px] text-right font-mono ${tone(r.latest_month_pct)}`}>
+                      <td className={`px-2 py-2.5 text-[14px] text-right font-mono tabular-nums ${tone(r.latest_month_pct)}`}>
                         {pct(r.latest_month_pct)}
                         <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
                           staleReason={r.missing_reports?.includes('att')
@@ -1439,39 +1293,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           what="What this account returned in the most recent month AIRS has closed."
                           note="rendement — AIRS's return for the most recent month" />
                       </td>
-                      <td className="px-3 py-1.5">
-                        {canAnalyse(r) ? (() => {
-                          return <div className="flex items-center gap-1">
-                            <PriceCheckBadge state={priceChecks.checks[r.dynamic_portefeuille]}
-                              onClick={() => setOpenPriceCheck({ account: r.dynamic_portefeuille, showAll: false })} />
-                            <button type="button" title={priceCopy.viewPricesHint}
-                              onClick={(event) => { event.stopPropagation(); setOpenPriceCheck({ account: r.dynamic_portefeuille, showAll: true }); }}
-                              className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-fg-subtle opacity-0 transition-opacity hover:border-accent-500/50 hover:text-accent-300 focus:opacity-100 group-hover:opacity-100">
-                              {priceCopy.viewPrices}
-                            </button>
-                          </div>;
-                        })() : '—'}
-                      </td>
-                      <td className="px-3 py-1.5 text-right">
-                        {/*  stopPropagation — the row is the expand toggle, and a delete that also
-                            opened the detail would leave a confirm sitting over a panel loading
-                            data for a row about to disappear. */}
-                        {isAdmin && (
-                        <button type="button" disabled={deletingRows.has(r.dynamic_portefeuille)}
-                          onClick={(e) => { e.stopPropagation(); void deleteOne(r.dynamic_portefeuille); }}
-                          title="Delete this account's scraped rows (returns, holdings, mutations, model weights) so a refresh can be watched rebuilding them."
-                          aria-label={`Delete ${r.name}`}
-                          className={`${deletingRows.has(r.dynamic_portefeuille)
-                            ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'
-                            } text-fg-faint hover:text-neg-400 px-1`}>
-                          {deletingRows.has(r.dynamic_portefeuille) ? '\u2026' : '\u{1F5D1}'}
-                        </button>
-                        )}
-                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={7} className="px-3 py-3 bg-inset space-y-2">
+                        <td colSpan={5} className="px-3 py-3 bg-inset space-y-2">
                           {isAdmin && (
                             <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
                           )}
@@ -1502,16 +1327,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
             </tbody>
           </table>
         </div>
-      )}
-      {priceCheckPortfolio && (
-        <PriceCheckModal name={priceCheckPortfolio.name}
-          state={priceChecks.checks[priceCheckPortfolio.dynamic_portefeuille]}
-          refreshing={refreshingAll || !!forcedPriceChecks.progress || refreshingRows.has(priceCheckPortfolio.dynamic_portefeuille)}
-          showAll={openPriceCheck?.showAll}
-          recheckingIsins={recheckingPriceIsins}
-          onRecheckRow={(isin, name) => void recheckPriceRow(priceCheckPortfolio.dynamic_portefeuille, isin, name)}
-          onRetry={() => void refreshOne(priceCheckPortfolio.dynamic_portefeuille, priceCheckPortfolio.name)}
-          onClose={() => setOpenPriceCheck(null)} />
       )}
       {analyse && (
         //  Keyed by portfolio. The modal deliberately does NOT clear `data` when its request key
@@ -1582,7 +1397,7 @@ function SortTh({ label, k, sortKey, sortDir, onSort, align = 'left', title }: {
 }) {
   const active = sortKey === k;
   return (
-    <th className={'px-3 py-1.5 font-medium ' + (align === 'right' ? 'text-right' : 'text-left')}
+    <th scope="col" className={'px-2 py-2.5 font-medium ' + (align === 'right' ? 'text-right' : 'text-left')}
       title={title}>
       <button type="button" onClick={() => onSort(k)}
         className={'inline-flex items-center gap-1 hover:text-accent-400 transition-colors '

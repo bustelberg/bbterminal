@@ -87,22 +87,22 @@ export default function Page() {
 
   return (
     <CompactHelpProvider><div className="min-h-screen bg-page text-fg">
-      <div className="px-8 py-5 border-b border-neutral-800/40">
+      <div className="border-b border-neutral-800/40"><div className="mx-auto w-full max-w-[58rem] px-4 py-5 sm:px-8">
         <h1 className="text-xl font-semibold text-fg-strong">{t.page.title}</h1>
-      </div>
+      </div></div>
 
-      <div className="px-8 py-6 space-y-6">
+      <div className="mx-auto w-full max-w-[58rem] px-4 py-5 sm:px-8 sm:py-6 space-y-5">
         {/* The segmented control the rest of the app uses for a small, fixed set of named views
             (see the holdings table's "Weight returns by") — discrete choices, not a slider.
              NOT RENDERED AT ONE TAB. A segmented control with a single, permanently-pressed
             button is a control that cannot do anything, and a reader who presses it and sees
             nothing move learns to distrust the ones that work. It comes back on its own the
             moment `TAB_ORDER` grows — see the note there. */}
-        <div className="inline-flex rounded-lg border border-neutral-800/40 overflow-hidden text-xs">
+        <div className="inline-flex max-w-full overflow-x-auto rounded-lg border border-neutral-800/40 text-xs">
           {TAB_ORDER.map((k) => (
             <button key={k} type="button" onClick={() => select(k)} title={t.page.tabs[k].note}
               aria-pressed={tab === k}
-              className={`px-3 py-1.5 font-medium transition-colors ${tab === k
+              className={`shrink-0 px-3 py-1.5 font-medium transition-colors ${tab === k
                 ? 'bg-accent-600 text-white'
                 : 'text-fg-subtle hover:bg-overlay/5'}`}>
               {t.page.tabs[k].label}

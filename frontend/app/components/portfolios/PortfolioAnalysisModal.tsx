@@ -2593,14 +2593,7 @@ function PortfolioHoldings({ holdings, slices, asOf, note, bookName, benchmark, 
                       <span className="ml-2 normal-case tracking-normal text-fg-muted">
                         {part.rows.length}
                       </span>
-                      {/*  A SHARE OF THE CLASS, NOT OF THE BOOK — see `equityParts`. "38% of
-                          Stocks" is the question a division inside Stocks raises; "8% of
-                          everything" is a different one the Weight column already answers. */}
-                      {part.classPct != null && (
-                        <span className="ml-2 normal-case tracking-normal text-fg-faint">
-                          {part.classPct.toFixed(1)}% {copy.allocation.of} {copy.bucket(bucketLabel(g.bucket))}
-                        </span>
-                      )}
+
                     </td>
                   </tr>
                 )}
@@ -3444,8 +3437,8 @@ const BENCHMARKS = ['ACWI', 'SP500', 'AEX'] as const;
  *   Acwi, not sp500. These are GLOBAL, multi-currency books — the AIRS models hold European,
  *  US and Asian names — so an all-country index is the benchmark they are actually managed
  *  against; SP500 measured a global book against one country's large caps and charged the
- *  difference to the manager as alpha. It stays in the list because it is the reference everyone
- *  knows, but it is no longer the one you get without asking.
+ *  difference to the manager as alpha. The comparison remains fixed to ACWI here; the portfolio’s
+ *  policy allocation is applied separately.
  *
  *   ACWI's coverage is the lower of the two (see `benchmark_coverage_pct` below) — the modal
  *  says so on screen whenever it drops under 97%, which is why defaulting to it is safe: the
@@ -3453,8 +3446,7 @@ const BENCHMARKS = ['ACWI', 'SP500', 'AEX'] as const;
 const DEFAULT_BENCHMARK: string = BENCHMARKS[0];
 
 /**
- * The one class every control in this modal's header wears — Refresh, the benchmark select and
- * Close.
+ * Shared styling for the modal's Close control.
  *
  *  One constant, not three copies of the same classes. They had drifted into three sizes: the
  * buttons at `text-xs px-3 py-1.5` and the select at `text-[12px] px-2 py-1`, so the row read as
@@ -3517,7 +3509,7 @@ export default function PortfolioAnalysisModal({
   // (no AIRS book) and no id-based drill-downs (attribution / bucket detail are portfolio-only).
   const isBasket = !!basket;
   const reqKey = isBasket ? basket!.holdings.map((h) => `${h.isin}:${h.weight}`).join(',') : `id:${id}`;
-  const [benchmark, setBenchmark] = useState<string>(DEFAULT_BENCHMARK);
+  const benchmark = DEFAULT_BENCHMARK;
   // Where the PORTFOLIO numbers come from — FIXED, no toggle. A model portfolio uses the paired
   // AIRS book (its ACTUAL holdings, EUR weights and returns); a basket has no book, so it uses the
   // yfinance reconstruction. AIRS is the primary source, yfinance the fallback where we can price.
@@ -3909,14 +3901,6 @@ export default function PortfolioAnalysisModal({
             )}
           </div>
           <div className="flex max-w-full flex-wrap items-center gap-2">
-            <label className="flex items-center gap-1.5 text-[12px] text-fg-muted">
-              {copy.chrome.benchmark}
-              <select value={benchmark} aria-label={copy.chrome.benchmark}
-                onChange={(e) => { setData(null); setError(null); setBenchmark(e.target.value); }}
-                className={`${HEADER_CTL} font-mono w-[7rem] focus:border-accent-500`}>
-                {BENCHMARKS.map((b) => <option key={b} value={b}>{b}</option>)}
-              </select>
-            </label>
             <button type="button" onClick={onClose} className={HEADER_CTL}>
               {copy.actions.close}
             </button>

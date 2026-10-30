@@ -15,10 +15,12 @@ export function useForcePriceChecks() {
     try {
       const { done } = await startJob(`${API_URL}/api/airs/vermogen/price-checks/job`, title,
         { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accounts: accounts.map((account) => account.id) }) });
-      await done;
+      const job = await done;
       await onComplete();
+      return job.status === 'done';
     } catch (error) {
       startLocalJob(title, 'airs.price-checks.error', async () => { throw error; }, { cancellable: false });
+      return false;
     } finally {
       running.current = false;
       setProgress(null);

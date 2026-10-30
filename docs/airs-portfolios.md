@@ -63,12 +63,16 @@ saved results. Aligned histories are reused across views in a bounded memory cac
 Opening Risk never downloads or repairs price history. Missing history stays explicitly
 unavailable until source jobs or an explicit repair update the stored inputs.
 
-The dashboard reads persisted native-currency price checks from `airs_price_check` through the
-existing `airs_overview_payload` RPC. Loading the page or expanding holdings never refreshes Yahoo.
+`/airs-check` reads persisted native-currency price checks from `airs_price_check` through the
+existing `airs_overview_payload` RPC. It has the same user access as `/management-dashboard`
+and its own sidebar link. The dashboard no longer displays the price-check column or controls.
+Opening checks or viewing their holdings never refreshes Yahoo. Saved results reload every
+60 seconds and on window focus; explicit batch/account/instrument actions use the existing
+tracked refresh jobs. Group, search and attention filters scope the batch to visible accounts.
 The daily AIRS workflow saves checks after account/composition scraping and paired-model Yahoo
 pricing; manual account/full refreshes save them too. The check's own freshening step covers held
 instruments outside paired models. Failed checks retain the last successful result and timestamp,
-and are reported in the refresh job. Until the first successful refresh, the cell stays blank.
+and are reported in the refresh job. Accounts without a saved check are labelled explicitly.
 Migration `20261020130000_airs_price_check.sql` must be deployed before these writes run.
 
 > Split out of `CLAUDE.md` (2026-08-17) to keep the always-loaded file small. Content is verbatim; `CLAUDE.md` carries a one-line index entry pointing here.

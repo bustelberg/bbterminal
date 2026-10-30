@@ -46,7 +46,7 @@
 // admin-only: it is by definition the reader's own account.
 export const USER_ALLOWED_PATHS: readonly string[] = [
   '/market', '/etf-comparison',
-  '/', '/schedule', '/management-dashboard', '/research-dashboard', '/log-dashboard', '/momentum', '/debet-calculation', '/account', '/mfa', '/forbidden',
+  '/', '/schedule', '/management-dashboard', '/airs-check', '/research-dashboard', '/log-dashboard', '/momentum', '/debet-calculation', '/account', '/mfa', '/forbidden',
 ];
 
 /**
