@@ -287,7 +287,7 @@ function RunNowButton({ job, busy, label = 'Run now', title, size = 'md' }: {
         ? 'text-[11px] px-2 py-0.5'
         : 'text-xs px-2.5 py-1'}`}
     >
-      {busy ? 'Running…' : pending ? 'Starting…' : label}
+      {disabled ? 'Running...' : label}
     </button>
   );
 }

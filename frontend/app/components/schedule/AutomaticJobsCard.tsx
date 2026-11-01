@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { API_URL } from '../../../lib/apiUrl';
 import { traceError } from '../../../lib/debugTrace';
 import { usePollingFetch } from '../../../lib/hooks/usePollingFetch';
-import { cancelJob, startJob } from '../../../lib/stores/jobs';
+import { jobsStore, startJob } from '../../../lib/stores/jobs';
 import InfoTip from '../InfoTip';
 import {
   ago, headline, JOB_TONE, stamp, summaryLine, type JobRow, type JobsPayload,
@@ -133,7 +133,7 @@ export default function AutomaticJobsCard() {
 }
 
 /**
- * Run this job now, and stop it — one button, reporting into the shared toast stack.
+ * Run this job now, reporting into the shared toast stack where it can be cancelled.
  *
  *  The same body the scheduler runs. The endpoint dispatches to `scheduler.JOB_BODIES`, so this
  * cannot come to mean something different from what the nightly tick does.
@@ -148,50 +148,43 @@ export default function AutomaticJobsCard() {
  * nothing worth triggering, and the two pipeline jobs own a richer Run-now inside their panel.
  */
 function RunControl({ j }: { j: JobRow }) {
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [pending, setPending] = useState(false);
+  const running = jobsStore.use((state) => state.jobs.some(
+    (job) => job.kind === `scheduled.${j.id}` && job.status === 'running'));
+  const busy = pending || running;
   if (!j.runnable) return null;
 
   const run = async () => {
-    setBusy(true);
+    if (busy) return;
+    setPending(true);
     try {
-      const { id, done } = await startJob(
+      const { done } = await startJob(
         `${API_URL}/api/admin/scheduled-jobs/${encodeURIComponent(j.id)}/run`, j.label);
-      setJobId(id);
       await done;
     } catch (e) {
       traceError('jobs', `could not start ${j.id}`, e);
     } finally {
-      //  Cleared on any outcome — done, failed OR cancelled. Leaving the id set would strand the
-      // row on "Cancel" for a job that has already stopped.
-      setBusy(false);
-      setJobId(null);
+      setPending(false);
     }
   };
 
-  //  One button, two actions, flipping on the press — the same rule as the portfolio refresh:
-  // keyed on the job id it would wait a round-trip, and for that window the control would read
-  // "Run" over work already running, which is how a second job gets started by accident.
-  const stopping = busy && jobId === null;
   return (
     <button type="button"
       onClick={(e) => {
         e.stopPropagation();
-        if (busy && jobId) void cancelJob(jobId);
-        else if (!busy) void run();
+        void run();
       }}
-      disabled={stopping}
+      disabled={busy}
+      aria-busy={busy}
       title={busy
-        ? 'Stop this run. Cancellation is cooperative — it lands at the job’s next safe boundary '
-          + '(between accounts for the AIRS scan, between companies for the drift probe); the short '
-          + 'jobs have none and will simply finish. Everything already written is kept.'
+        ? 'This job is running. Follow progress or cancel it in the job toast.'
         : 'Run this job now, with the same body the scheduler runs. Progress appears in the toast '
           + 'at the bottom right.'}
       className={`cursor-pointer text-[11px] px-2 py-0.5 rounded border transition-colors
                   disabled:opacity-50 disabled:cursor-wait ${busy
         ? 'border-warn-500/40 text-warn-400 hover:bg-warn-500/10'
         : 'border-neutral-800/40 text-fg-subtle hover:text-accent-300 hover:border-accent-500/50'}`}>
-      {stopping ? 'Starting…' : busy ? 'Cancel' : 'Run now'}
+      {busy ? 'Running...' : 'Run now'}
     </button>
   );
 }

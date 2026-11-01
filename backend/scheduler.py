@@ -686,7 +686,8 @@ def start_job_now(job_id: str, *, triggered_by: str = "manual"):
     def _work(ctx) -> str:
         return _run_body(job_id, ctx, triggered_by=triggered_by)
 
-    return _jobs.start(f"scheduled.{job_id}", label, _work)
+    job, _reused = _jobs.start(f"scheduled.{job_id}", label, _work)
+    return job
 
 
 def job_health(now=None) -> dict:
