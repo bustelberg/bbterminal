@@ -1017,6 +1017,7 @@ def _save_holdings(portefeuille: str, as_of: str, holdings) -> int:
             # them: two statements of the same quantity are the cross-check.
             "cost_basis_local": h.cost_basis_local,
             "current_price_local": h.current_price_local,
+            "valuation_component": getattr(h, 'valuation_component', None),
             "airs_weight": h.airs_weight,
             "fund_result_eur": h.fund_result_eur,
             "fx_result_eur": h.fx_result_eur,

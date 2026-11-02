@@ -9895,6 +9895,8 @@ export interface components {
             } | null;
             /** Withdrawals Eur */
             withdrawals_eur?: number | null;
+            /** Ytd From */
+            ytd_from?: string | null;
             /** Ytd Pct */
             ytd_pct?: number | null;
         };

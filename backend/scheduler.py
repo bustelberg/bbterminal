@@ -1337,13 +1337,23 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False) ->
             trigger, len(stale), considered, latest, stale[0]["last_close"],
         )
         r = price_refresh.refresh_stale(isins=watched, stale_days=1)
-        if r["failed"] and raise_on_failure:
-            _require_complete(f"{r['failed']} watched instrument price refreshes failed", r)
         _log.warning(
             "[scheduler] asset price refresh (%s) done — %s moved, %s unchanged, %s failed",
             trigger, r["moved"], r["unchanged"], r["failed"],
         )
         detail = f"{r['moved']} moved, {r['unchanged']} unchanged, {r['failed']} failed"
+        remaining = r.get("remaining_stale", 0)
+        if remaining:
+            detail += f"; {remaining} still stale"
+            for result in r.get("results", []):
+                if result.get("still_stale"):
+                    _log.warning("[scheduler] asset price refresh (%s): %s (%s) still dated %s; expected %s — %s",
+                                 trigger, result["symbol"], result.get("isin"), result["latest_close"],
+                                 result["expected_close"], result.get("error") or result.get("reason") or "price advanced but remains behind")
+        # A request completing is not proof that prices became current. Keep the unresolved
+        # instruments in the durable receipt, including on startup, without crashing startup.
+        if r["failed"] or remaining or r.get("skipped"):
+            _require_complete(f"Watched instrument price refresh incomplete: {detail}", r)
         if proxies_refreshed is not None:
             detail += f"; {proxies_refreshed} Analyse benchmark proxy series refreshed"
         if nav_fallback["stored"]:
@@ -1351,6 +1361,7 @@ def _run_asset_price_refresh(trigger: str, *, raise_on_failure: bool = False) ->
         rec.done(detail,
                  considered=considered, stale=len(stale), moved=r["moved"],
                  unchanged=r["unchanged"], failed=r["failed"],
+                 remaining_stale=remaining, results=r.get("results", []),
                  price_backfilled=backfill["backfilled"],
                  nav_fallback_refreshed=nav_fallback["stored"],
                  analyse_benchmark_proxies_refreshed=proxies_refreshed)

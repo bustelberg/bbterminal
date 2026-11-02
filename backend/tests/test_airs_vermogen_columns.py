@@ -54,6 +54,36 @@ def _one(overrides: dict | None = None):
     return parse_airs_excel(_xls([row]))[0]
 
 
+@pytest.mark.parametrize('heading', ['Opgelopen rente', 'Rente', 'Accrued interest'])
+def test_component_heading_outside_name_column_is_preserved(heading):
+    principal = {**_ROW, 'Fondsomschrijving': '6,5% Rabobank Certificaten 14-perp.',
+                 'ISIN-code': 'XS1002121454', 'Huidige waarde  EUR': 19928.70}
+    interest = {**principal, 'Huidige waarde  EUR': 56}
+    rows = parse_airs_excel(_xls([principal, {'Valuta': heading}, {}, interest,
+                                 {'Valuta': 'Aandelen'}, _ROW]))
+    assert len(rows) == 3
+    assert [r.valuation_component for r in rows] == [None, 'accrued_interest', None]
+    assert rows[0].isin == rows[1].isin == 'XS1002121454'
+    assert rows[1].current_value_eur == 56
+
+
+def test_explicit_component_column_is_preserved_without_merging_source_rows():
+    rows = parse_airs_excel(_xls([{**_ROW, 'Rubriek': 'Obligaties'},
+                                 {**_ROW, 'Rubriek': 'Opgelopen rente'}]))
+    assert [r.valuation_component for r in rows] == ['security', 'accrued_interest']
+
+
+def test_component_survives_daily_holdings_storage(monkeypatch):
+    import airs_vermogen
+    from tests._fake_supabase import FakeSupabase
+    db = FakeSupabase({})
+    monkeypatch.setattr(airs_vermogen, 'supabase', db)
+    rows = parse_airs_excel(_xls([_ROW, {'Valuta': 'Opgelopen rente'},
+                                 {**_ROW, 'Huidige waarde  EUR': 56}]))
+    assert airs_vermogen._save_holdings('BOOK', '2026-10-30', rows) == 2
+    assert [r['valuation_component'] for r in db.tables['airs_holding']] == [None, 'accrued_interest']
+
+
 class TestAirsOwnColumnsAreCarried:
     """The six columns we used to drop on the floor."""
 

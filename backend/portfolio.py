@@ -82,6 +82,7 @@ class ParsedHolding:
     # Preserve fractional fund/share units for historical per-unit comparisons.
     # The legacy integer quantity remains unchanged for existing consumers.
     quantity_exact: Optional[float] = None
+    valuation_component: Optional[str] = None
 
 
 def _norm(name: object) -> str:
@@ -151,6 +152,11 @@ def _num(row: pd.Series, col: Optional[str]) -> Optional[float]:
     return float(v) if pd.notna(v) else None
 
 
+def _interest_label(label: str) -> bool:
+    return (label in {'rente', 'interest', 'opgelopen interest'}
+            or 'opgelopen rente' in label or 'accrued interest' in label)
+
+
 def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
     """
     Parse AIRS Excel export and compute YTD return in EUR per holding.
@@ -176,6 +182,7 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
     col_fx_result = _col(cols, "Valutaresultaat")
     col_result_pct = _col(cols, "Resultaat in %")
     col_isin = next((c for c in (_col(cols, h) for h in _ISIN_HEADERS) if c), None)
+    component_cols = [c for c in (_col(cols, h) for h in ("Categorie", "Rubriek", "Category", "Component")) if c]
 
     required = {
         "Fondsomschrijving": col_name,
@@ -194,16 +201,32 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
     total_current_eur = float(current_eur_series.sum())
 
     results: list[ParsedHolding] = []
+    component = None
     for _, row in df.iterrows():
         name = str(row.get(col_name, "")).strip()
-        if not name:
-            continue
-
         qty = pd.to_numeric(row.get(col_qty), errors="coerce") if col_qty else None
         ccy = str(row.get(col_ccy, "")).strip() if col_ccy else ""
 
         start_val = _num(row, col_start_eur)
         current_val = _num(row, col_current_eur)
+        # AIRS may repeat the security's name/ISIN in its accrued-interest section.
+        # Preserve the source label; position identity alone cannot distinguish those lines.
+        labels = [_norm(value) for value in row if isinstance(value, str)]
+        interest_heading = any(_interest_label(value) for value in labels)
+        if _isin(row, col_isin) is None and (
+                (start_val is None and current_val is None)
+                or (interest_heading and (qty is None or pd.isna(qty)))):
+            if labels:
+                component = 'accrued_interest' if interest_heading else None
+            continue
+        if not name or name.lower() == 'nan':
+            continue
+        row_component = component
+        for column in component_cols:
+            label = _norm(row.get(column, ''))
+            if label and label != 'nan':
+                row_component = 'accrued_interest' if _interest_label(label) else 'security'
+                break
 
         # Weight = current EUR value / total current EUR
         weight: Optional[float] = None
@@ -244,6 +267,7 @@ def parse_airs_excel(file_bytes: bytes) -> list[ParsedHolding]:
             fx_result_eur=_num(row, col_fx_result),
             airs_result_pct=_num(row, col_result_pct),
             quantity_exact=float(qty) if qty is not None and pd.notna(qty) else None,
+            valuation_component=row_component,
         ))
 
     return results

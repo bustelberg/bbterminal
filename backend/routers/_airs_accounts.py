@@ -171,6 +171,10 @@ def _year_perf() -> dict[str, dict]:
         # in hand rather than a filter on today's date (which a stale table would fail).
         year = max(str(r["periode"])[:4] for r in rs)
         rs = [r for r in rs if str(r["periode"]).startswith(year)]
+        # Same first-funded-month anchor as the AIRS return chart. Monthly observations
+        # establish a reporting month, not the exact day on which a book was funded.
+        funded_dates = [str(r['periode']) for r in rs if r.get('beginvermogen') or r.get('eindvermogen')]
+        ytd_from = min(funded_dates)[:7] + '-01' if funded_dates else None
         # Freshest row per month — see the double-count note above.
         per_month: dict[str, dict] = {}
         for r in sorted(rs, key=lambda r: str(r["periode"])):
@@ -184,6 +188,7 @@ def _year_perf() -> dict[str, dict]:
             "portefeuille": name,
             "periode": last["periode"],
             "months": len(months),
+            "ytd_from": ytd_from,
             "beginvermogen": first.get("beginvermogen"),   # the YEAR's opening
             "eindvermogen": last.get("eindvermogen"),
             "cumulatief_rendement": last.get("cumulatief_rendement"),
@@ -560,6 +565,7 @@ def list_accounts() -> list[dict]:
             #  AIRS'S own year return — the compounding of every month's `rendement`, and
             # flow-aware. Never `end/begin - 1`.
             "ytd_pct": r.get("cumulatief_rendement"),
+            "ytd_from": r.get('ytd_from'),
             #  The freshest row's `rendement` IS THE LATEST MONTH'S RETURN — NOT a rival YTD.
             # It was served as `value_ratio_pct` ("the naive value ratio... the wrong one"),
             # which mis-stated what it is: -8.37% is not a wrong answer for the year, it is the

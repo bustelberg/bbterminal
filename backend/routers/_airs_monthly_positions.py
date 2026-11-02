@@ -12,6 +12,35 @@ def _positive(value) -> bool:
     return isinstance(value, (float, int)) and math.isfinite(value) and value > 0
 
 
+def position_boundary(records: list[dict]) -> tuple[dict | None, str | None]:
+    """One comparable security mark; explicit interest components remain separate.
+
+    Unlabelled historical duplicate rows can be combined only when their EUR unit marks
+    agree to source cent rounding. Never identify the principal by picking the largest row.
+    """
+    security = [r for r in records if r.get('valuation_component') != 'accrued_interest']
+    if not security:
+        return None, 'marks_missing' if records else None
+    isins = {str(r['isin']).strip().upper() for r in security if r.get('isin')}
+    currencies = {str(r['currency']).strip().upper() for r in security if r.get('currency')}
+    if len(isins) > 1 or len(currencies) > 1:
+        return None, 'identity_changed'
+    if len(security) == 1:
+        return dict(security[0]), None
+    if not isins or any(not r.get('isin') for r in security):
+        return None, 'ambiguous_position'
+    first = security[0]
+    for record in security:
+        value, quantity = record.get('value_eur'), record.get('quantity')
+        if not _positive(quantity) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            return None, 'ambiguous_position'
+        if not math.isclose(value * first['quantity'], first['value_eur'] * quantity,
+                            rel_tol=0, abs_tol=.011 * (first['quantity'] + quantity)):
+            return None, 'ambiguous_position'
+    return {**first, 'value_eur': sum(r['value_eur'] for r in security),
+            'quantity': sum(r['quantity'] for r in security)}, None
+
+
 def position_performance(sections: dict, start: str, end: str) -> list[dict]:
     def data(key):
         section = sections.get(key) or {}
@@ -38,9 +67,16 @@ def position_performance(sections: dict, start: str, end: str) -> list[dict]:
         if name in transactions.get("unclassified_names", []) or transactions.get("unclassified_unassigned"):
             row["reason"] = "unclassified_activity"
             continue
-        if len(before) > 1 or len(after) > 1:
-            row["reason"] = "ambiguous_position"
+        first_record, first_error = position_boundary(before)
+        last_record, last_error = position_boundary(after)
+        if first_error or last_error:
+            row['reason'] = first_error or last_error
             continue
+        row['accrued_interest_opening_eur'] = sum(r.get('value_eur') or 0 for r in before if r.get('valuation_component') == 'accrued_interest')
+        row['accrued_interest_closing_eur'] = sum(r.get('value_eur') or 0 for r in after if r.get('valuation_component') == 'accrued_interest')
+        before = [first_record] if first_record is not None else []
+        after = [last_record] if last_record is not None else []
+        row['isin'] = next((r.get('isin') for r in before + after if r.get('isin')), None)
         if before and after and before[0].get("isin") and after[0].get("isin") and before[0]["isin"] != after[0]["isin"]:
             row["reason"] = "identity_changed"
             continue

@@ -263,3 +263,36 @@ def test_month_preparation_uses_saved_boundaries_and_explicitly_empty_transactio
     saved = db.tables["airs_monthly_report"][0]["report"]
     assert saved["positions"][0]["return_pct"] == pytest.approx(10)
     assert saved["reconciliation"]["status"] == "reconciled"
+
+
+@pytest.mark.parametrize('legacy_opening,correction', [(False, 0), (True, 0), (True, 1)])
+def test_daily_month_report_keeps_accrued_interest_out_of_security_price_return(monkeypatch, legacy_opening, correction):
+    from routers import _airs_monthly_report as monthly
+    holdings = []
+    for day, principal, interest in [('2026-09-30', 1000, 50), ('2026-10-29', 1100, 60)]:
+        common = dict(portefeuille='BOOK', as_of_date=day, holding_name='Rabo',
+                      isin='XS1002121454', currency='EUR')
+        holdings.extend([{**common, 'quantity': 1000, 'current_value_eur': principal},
+                         {**common, 'quantity': 1, 'current_value_eur': interest,
+                          'valuation_component': 'accrued_interest'}])
+    db = FakeSupabase({'airs_holding': holdings, 'airs_transactie_snapshot': [{
+        'portefeuille': 'BOOK', 'datum_van': '2026-01-01', 'datum_tot': '2026-10-30',
+        'columns': [], 'kinds': {}, 'rows': []}]})
+    if legacy_opening:
+        opening = [{'name': r['holding_name'], 'isin': r['isin'], 'currency': r['currency'],
+                    'quantity': r['quantity'], 'value_eur': r['current_value_eur'],
+                    'valuation_component': r.get('valuation_component')} for r in holdings[:2]]
+        db.tables['airs_monthly_report'] = [dict(portefeuille='BOOK', month='2026-10-01', report={
+            'sections': {'opening': {'status': 'ok', 'data': {'as_of': '2026-09-30', 'rows': opening}}}})]
+        for r in db.tables['airs_holding'][:2]:
+            r.pop('valuation_component', None)
+        db.tables['airs_holding'][0]['current_value_eur'] += correction
+    monkeypatch.setattr(D, 'supabase', db)
+    monkeypatch.setattr(monthly, '_monthly_rows', lambda *_: [dict(month='2026-10', periode='2026-10-29', rendement=10)])
+    D.prepare_month('BOOK', date(2026, 10, 30))
+    saved = db.tables['airs_monthly_report'][0]['report']
+    if correction:
+        assert saved['positions'][0]['return_pct'] is None
+    else:
+        assert saved['positions'][0]['return_pct'] == pytest.approx(10)
+        assert saved['positions'][0]['accrued_interest_closing_eur'] == 60

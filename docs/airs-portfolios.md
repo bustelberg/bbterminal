@@ -21,10 +21,24 @@ for model repricing; their actual instruments remain covered by account price re
 and price checks. A Fixed model with no dated composition is not applicable only after
 a successful scan today. Failed, unattempted and stale Fixed scans still fail the job.
 Pricing receipts retain every model outcome, including reasons for skips and failures.
+The overview's `Since` column carries `ytd_from`, the same first-funded-month
+anchor as the AIRS return chart, formatted as `1 January 2026`. It uses the year
+of the displayed AIRS return and ignores leading unfunded months; it does not claim
+an exact intra-month funding date. Migration `20261102010000_airs_overview_return_start.sql`
+adds it to the overview RPC. Older RPCs use one batched performance read during rollout.
 `dashboard_post_airs` then saves price checks, assembles current-month reports from
 stored dated valuations and transactions, prepares Analyse views, and records a
 per-portfolio freshness audit. Missing historical month-opening valuations remain
 explicitly incomplete; this workflow never backfills them with extra AIRS downloads.
+Monthly position returns compare dated AIRS valuations at the previous month-end
+and selected month-end, using the existing report date filters. Repeated names
+are not automatically ambiguous: same-ISIN/currency lots with compatible unit
+marks are combined. AIRS `Opgelopen rente`/`Rente` component labels are preserved
+through parsing, daily storage and monthly bundles, so accrued interest is excluded
+from the security's price return and reconciled once via AIRS's reported interest
+adjustment. Unlabelled conflicting historical rows request a month refresh rather
+than guessing the principal from its value. Apply migration
+`20261102000000_airs_holding_valuation_component.sql` before deploying these writers.
 The parent AIRS receipt retains failed pricing and post-AIRS receipts, including the
 nested freshness audit. Logs name the failing model or preparation stage and its cause.
 
@@ -35,6 +49,11 @@ Expand the job on `/schedule` to read these receipts. Partial failures are error
 not successful zero-row updates. The watchdog cannot initiate extra AIRS passes.
 Nested receipts are available for every job and open automatically for failed runs;
 the compact summary shows collection counts rather than `[object Object]`.
+Watched-price refresh receipts include each attempted ISIN/symbol, previous and
+resulting close dates, the market anchor and whether the series remains stale.
+An unchanged or partly advanced series is not proof of freshness: unresolved gaps
+fail the price job, including startup catch-up (which records the failure without
+preventing application startup). A null-price row does not count as a newer close.
 
 Production daily writers require `SUPABASE_DB_URL` or `DATABASE_URL` for a shared
 Postgres advisory lock. A durable run-history check limits automatic AIRS attempts

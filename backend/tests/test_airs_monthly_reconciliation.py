@@ -90,3 +90,19 @@ def test_cash_trading_movements_are_not_counted_twice():
     assert row['contribution_pp'] == 0
     assert row['return_pct'] is None
     assert check['status'] == 'reconciled'
+
+
+def test_accrued_interest_is_reconciled_once_as_airs_accounting_component():
+    positions, _, sections, perf = reconcile()
+    sections['opening']['data']['rows'].append(dict(name='Stock', isin='TEST', currency='EUR',
+        value_eur=50, quantity=1, valuation_component='accrued_interest'))
+    sections['closing']['data']['rows'].append(dict(name='Stock', isin='TEST', currency='EUR',
+        value_eur=60, quantity=1, valuation_component='accrued_interest'))
+    perf.update(beginvermogen=1050, eindvermogen=1160, beleggingsresultaat=110,
+                rendement=110 / 1050 * 100, mutatie_opgelopen_rente=10)
+    positions = position_performance(sections, '2026-10-01', '2026-10-23')
+    check = reconcile_positions(sections, perf, positions)
+    assert positions[0]['return_pct'] == 10
+    assert positions[0]['contribution_calculation']['result_eur'] == 100
+    assert check['status'] == 'reconciled'
+    assert check['difference_pp'] == pytest.approx(0)

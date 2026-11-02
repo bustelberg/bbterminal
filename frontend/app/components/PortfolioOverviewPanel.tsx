@@ -1059,7 +1059,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           {/* Narrow fixed action/numeric columns, with the remaining width for names.
               The table scrolls within this card on small screens. */}
           <table className="w-full min-w-[40rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /></colgroup>
+            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[12rem]" /></colgroup>
             <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
               <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1071,6 +1071,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <SortTh label="AIRS YTD" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
+                <th className="px-2 py-2.5 font-medium text-right"
+                  title="Start of the AIRS return reporting window, excluding months before the portfolio was funded.">Since</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1283,10 +1285,15 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           what="This account's return so far this year, as AIRS itself reports it."
                           note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
                       </td>
+                      <td className="px-2 py-2.5 text-right text-[13px] text-fg-muted">
+                        {r.ytd_from ? new Intl.DateTimeFormat('en-GB', {
+                          day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
+                        }).format(new Date(`${r.ytd_from}T00:00:00Z`)) : '—'}
+                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={4} className="px-3 py-3 bg-inset space-y-2">
+                        <td colSpan={5} className="px-3 py-3 bg-inset space-y-2">
                           {isAdmin && (
                             <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
                           )}

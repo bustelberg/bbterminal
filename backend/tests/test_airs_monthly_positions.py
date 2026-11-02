@@ -80,3 +80,40 @@ def test_sale_and_repurchase_do_not_claim_the_unheld_interval_as_a_return():
     row = result(sections([holding(1000)], [holding(1200)], trades))
     assert row['return_pct'] is None
     assert row['reason'] == 'holding_period_discontinuous'
+
+
+@pytest.mark.parametrize('interest_currency', ['EUR', 'USD'])
+def test_rabobank_principal_uses_dated_marks_and_keeps_accrued_interest_separate(interest_currency):
+    principal = {**holding(19928.70, 17000, '6,5% Rabobank Certificaten 14-perp.', 'XS1002121454'),
+                 'valuation_component': 'security'}
+    interest = {**principal, 'quantity': 1, 'value_eur': 56, 'currency': interest_currency,
+                'valuation_component': 'accrued_interest'}
+    row = result(sections([principal, interest],
+                          [{**interest, 'value_eur': 70}, {**principal, 'value_eur': 20128.70}]))
+    assert row['status'] == 'held'
+    assert row['return_pct'] == pytest.approx((20128.70 / 19928.70 - 1) * 100)
+    assert row['start_price_eur'] == pytest.approx(19928.70 / 17000)
+    assert row['accrued_interest_opening_eur'] == 56
+    assert row['accrued_interest_closing_eur'] == 70
+
+
+def test_coupon_accrual_reset_is_not_a_certificate_price_loss():
+    principal = {**holding(1000), 'valuation_component': 'security'}
+    interest = {**holding(50, 1), 'valuation_component': 'accrued_interest'}
+    row = result(sections([principal, interest], [principal, {**interest, 'value_eur': 0}]))
+    assert row['return_pct'] == 0
+
+
+def test_compatible_lots_merge_quantities_without_treating_purchases_as_return():
+    buy = dict(name='Stock', kind='buy', date='2026-10-10', quantity=5, amount_eur=525)
+    row = result(sections([holding(1000), holding(500, 5)],
+                          [holding(1100), holding(1100)], [buy]))
+    assert row['return_pct'] == pytest.approx(10)
+
+
+@pytest.mark.parametrize('extra', [holding(50, 1), holding(500, 5, isin='OTHER'),
+                                  {**holding(500, 5), 'currency': 'USD'}])
+def test_conflicting_duplicate_rows_are_never_resolved_by_largest_value(extra):
+    row = result(sections([holding(1000), extra], [holding(1100), extra]))
+    assert row['return_pct'] is None
+    assert row['reason'] in ('ambiguous_position', 'identity_changed')

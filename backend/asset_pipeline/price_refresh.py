@@ -560,12 +560,17 @@ def refresh_stale(
         stale = stale[:limit]
 
     moved = unchanged = failed = 0
+    results = []
     for i, r in enumerate(stale, 1):
         sym, aid, was = r["yahoo_symbol"], r["analysis_id"], r["last_close"]
+        outcome = {"isin": r.get("isin"), "symbol": sym, "analysis_id": aid,
+                   "previous_close": was, "latest_close": was, "expected_close": latest_all}
+        results.append(outcome)
         try:
             if store.extend_series(aid, sym, was) is None:
                 store.store_series(aid, sym, None)      # no COPY path: slow, correct, never wrong
         except YahooThrottled as e:
+            outcome.update(status="error", error=str(e), still_stale=True)
             failed += 1
             skipped += len(stale) - i
             if on_progress:
@@ -573,14 +578,20 @@ def refresh_stale(
             log.warning("[price_refresh] refresh paused; %d deferred: %s", skipped, e)
             break
         except Exception as e:  # noqa: BLE001
+            outcome.update(status="error", error=f"{type(e).__name__}: {e}", still_stale=True)
             failed += 1
             if on_progress:
                 on_progress(f"[{i}/{len(stale)}] {sym}: FAILED {type(e).__name__}: {e}")
             continue
 
         got = (supabase.table("asset_price").select("target_date").eq("analysis_id", aid)
+               .not_.is_("close", "null")
                .order("target_date", desc=True).limit(1).execute().data or [])
         now = got[0]["target_date"] if got else was
+        outcome.update(latest_close=now, status="moved" if now > was else "unchanged",
+                       still_stale=_days_between(latest_all, now) >= stale_days)
+        if now <= was:
+            outcome["reason"] = "No newer stored close after the Yahoo refresh"
         if now > was:
             moved += 1
             if on_progress:
@@ -593,4 +604,5 @@ def refresh_stale(
 
     return {"considered": considered, "stale": total_stale, "moved": moved,
             "unchanged": unchanged, "failed": failed, "skipped": skipped,
-            "global_latest": latest_all}
+            "global_latest": latest_all, "results": results,
+            "remaining_stale": sum(r["still_stale"] for r in results) + skipped}

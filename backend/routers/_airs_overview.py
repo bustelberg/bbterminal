@@ -215,6 +215,7 @@ def _list_overview_from_payload(payload: dict) -> list[dict]:
             "periode": a.get("periode"),
             "months": a.get("months"),
             "ytd_pct": a.get("ytd_pct"),
+            "ytd_from": a.get('ytd_from'),
             "latest_month_pct": a.get("latest_month_pct"),
             "price_result_eur": a.get("price_result_eur"),
             "income_eur": a.get("income_eur"),
@@ -236,6 +237,14 @@ def _list_overview_from_payload(payload: dict) -> list[dict]:
 def list_overview() -> list[dict]:
     """One row per AIRS Dynamic portfolio, from one database RPC where available."""
     if (payload := _overview_payload()) is not None:
+        # Support a rolling deployment before the RPC has acquired the new window field.
+        if any('ytd_from' not in account and account.get('ytd_pct') is not None
+               for account in payload['accounts']):
+            from ._airs_accounts import _year_perf
+            starts = _year_perf()
+            payload = {**payload, 'accounts': [
+                {**account, 'ytd_from': account.get('ytd_from', (starts.get(account['portefeuille']) or {}).get('ytd_from'))}
+                for account in payload['accounts']]}
         rows = _list_overview_from_payload(payload)
         checks = payload.get('price_checks') or {}
         for row in rows:
@@ -318,6 +327,7 @@ def _list_overview_legacy() -> list[dict]:
             "periode": a.get("periode"),
             "months": a.get("months"),
             "ytd_pct": a.get("ytd_pct"),
+            "ytd_from": a.get('ytd_from'),
             "latest_month_pct": a.get("latest_month_pct"),
             "price_result_eur": a.get("price_result_eur"),
             "income_eur": a.get("income_eur"),

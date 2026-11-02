@@ -210,6 +210,11 @@ def read_report(portefeuille: str, month: str, *, include_details: bool = True) 
         snapshot['reconciliation'] = reconcile_positions(snapshot.get('sections', {}), canonical, snapshot['positions'])
     has_errors = bool(bundle and ("positions" not in bundle.get("report", {}) or any(s.get("status") == "error" for s in
                       bundle.get("report", {}).get("sections", {}).values())))
+    # Earlier bundles discarded the AIRS component label. Offer a dated re-read when
+    # those source rows cannot safely be matched; a new calculation cannot recreate it.
+    if bundle:
+        has_errors = has_errors or any(row.get('reason') == 'ambiguous_position'
+                                      for row in bundle.get('report', {}).get('positions', []))
     years = {int(month[:4]), datetime.now(ZoneInfo("Europe/Amsterdam")).year}
     for table, column in (("airs_performance", "periode"), ("airs_monthly_report", "month"), ("airs_year_archive", "year")):
         offset = 0
@@ -291,6 +296,7 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
                 rows = parse_airs_excel(raw)
                 return {"as_of": valued, "requested_date": day, "rows": [
                     {"name": h.holding_name, "isin": h.isin, "currency": h.currency,
+                     "valuation_component": getattr(h, 'valuation_component', None),
                      "quantity": getattr(h, "quantity_exact", None) if getattr(h, "quantity_exact", None) is not None else h.quantity,
                      "value_eur": h.current_value_eur,
                      "weight_pct": h.airs_weight} for h in rows]}

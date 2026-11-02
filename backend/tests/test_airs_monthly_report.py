@@ -167,6 +167,45 @@ def test_collection_uses_exact_windows_and_never_overwrites_current_data(collect
     assert 'journal' not in saved
     assert 'ytd_return_pct' not in saved['closing']['data']['rows'][0]
     assert db.tables['airs_performance'] == [{'portefeuille': 'BOOK', 'periode': '2026-04-30'}]
+
+
+def test_filtered_rabobank_exports_keep_principal_and_interest_identifiable(collection, monkeypatch):
+    db, lock, calls, ctx = collection
+    monkeypatch.setattr('airs_transacties.realised_results', lambda _: SimpleNamespace(unreadable=None))
+    monkeypatch.setattr(airs_scanner, 'download_vermogensoverzicht_sync', lambda account, start, end: start.encode())
+    def parse(raw):
+        closing = raw == b'2026-04-30'
+        common = dict(holding_name='6,5% Rabobank Certificaten 14-perp.', isin='XS1002121454',
+                      currency='EUR', airs_weight=10)
+        return [SimpleNamespace(**common, quantity=1000, current_value_eur=1100 if closing else 1000,
+                                valuation_component='security'),
+                SimpleNamespace(**common, quantity=1, current_value_eur=60 if closing else 50,
+                                valuation_component='accrued_interest')]
+    monkeypatch.setattr(portfolio, 'parse_airs_excel', parse)
+    report.collect_report('BOOK', '2026-04', ctx)
+    saved = db.tables['airs_monthly_report'][0]['report']
+    assert saved['positions'][0]['return_pct'] == pytest.approx(10)
+    assert saved['sections']['opening']['data']['as_of'] == '2026-03-31'
+    assert saved['sections']['closing']['data']['as_of'] == '2026-04-30'
+    assert len(saved['sections']['closing']['data']['rows']) == 2
+
+
+def test_legacy_ambiguous_components_offer_a_dated_airs_refresh(monkeypatch):
+    principal = dict(name='Rabo', isin='XS1002121454', currency='EUR', quantity=1000, value_eur=1000)
+    interest = {**principal, 'quantity': 1, 'value_eur': 50}
+    snapshot = {'positions': [], 'sections': {
+        'opening': {'status': 'ok', 'data': {'as_of': '2026-03-31', 'rows': [principal, interest]}},
+        'closing': {'status': 'ok', 'data': {'as_of': '2026-04-30', 'rows': [principal, interest]}},
+        'transactions': {'status': 'ok', 'data': {'readable': True, 'activity': []}},
+    }}
+    db = FakeSupabase({'airs_account_roster': [{'portefeuille': 'BOOK'}],
+        'airs_monthly_report': [{'portefeuille': 'BOOK', 'month': '2026-04-01',
+        'datum_tot': '2026-04-30', 'fetched_at': '2026-11-01T00:00:00Z', 'report': snapshot}]})
+    monkeypatch.setattr(report, 'supabase', db)
+    result = report.read_report('BOOK', '2026-04')
+    assert result['snapshot']['positions'][0]['reason'] == 'ambiguous_position'
+    assert result['needs_refresh'] is True
+    assert db.writes == []
     assert all(w[1] == 'airs_monthly_report' for w in db.writes)
 
 

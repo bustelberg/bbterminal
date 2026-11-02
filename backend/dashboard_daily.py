@@ -113,6 +113,7 @@ def prepare_month(account: str, today=None) -> dict:
     from routers._airs_monthly_positions import position_performance
     from routers._airs_monthly_reconciliation import reconcile_positions
     from airs_vermogen import latest_completed_market_date
+    from collections import Counter
 
     today = today or datetime.now(ZoneInfo("Europe/Amsterdam")).date()
     # On the first weekend/New Year, the newest completed month can still be the previous one.
@@ -128,6 +129,9 @@ def prepare_month(account: str, today=None) -> dict:
     sections["performance"] = ({"status": "ok", "data": performance}
                                if performance and str(performance.get("periode", ""))[:10] == end
                                else {"status": "error", "data": None, "message": f"No AIRS return for {end}"})
+    saved = (supabase.table("airs_monthly_report").select("report")
+             .eq("portefeuille", account).eq("month", start).limit(1).execute().data or [])
+    saved_sections = ((saved[0].get('report') or {}).get('sections') or {}) if saved else {}
     for key, boundary in (("opening", opening), ("closing", end)):
         oldest = (datetime.fromisoformat(boundary) - timedelta(days=6)).date().isoformat()
         stored = (supabase.table("airs_holding").select("*").eq("portefeuille", account)
@@ -141,14 +145,26 @@ def prepare_month(account: str, today=None) -> dict:
                 sections[key] = {"status": "ok", "data": {
                     "as_of": mark, "requested_date": boundary,
                     "rows": [{"name": r["holding_name"], "isin": r.get("isin"), "currency": r.get("currency"),
+                              "valuation_component": r.get('valuation_component'),
                               "quantity": r.get("quantity"), "value_eur": r.get("current_value_eur"),
                               "weight_pct": r.get("airs_weight")} for r in stored if str(r["as_of_date"])[:10] == mark],
                 }}
+                previous = saved_sections.get(key) or {}
+                previous_data = previous.get('data') or {}
+                current_data = sections[key]['data']
+                fields = ('name', 'isin', 'currency', 'quantity', 'value_eur')
+                def signature(records):
+                    return Counter(tuple(record.get(field) for field in fields) for record in records)
+                # An explicitly loaded historical export may have component labels absent
+                # from older daily snapshots. Keep them only for exactly the same valuation.
+                if (previous.get('status') == 'ok' and previous_data.get('as_of') == mark
+                        and any(r.get('valuation_component') for r in previous_data.get('rows', []))
+                        and not any(r.get('valuation_component') for r in current_data['rows'])
+                        and signature(previous_data.get('rows', [])) == signature(current_data['rows'])):
+                    sections[key] = previous
         else:
             # An existing historical export can supply an opening before we began daily snapshots.
-            saved = (supabase.table("airs_monthly_report").select("report")
-                     .eq("portefeuille", account).eq("month", start).limit(1).execute().data or [])
-            previous = ((saved[0].get("report") or {}).get("sections") or {}).get(key) if saved else None
+            previous = saved_sections.get(key)
             sections[key] = previous if previous and key == "opening" else {
                 "status": "error", "data": None, "message": f"No stored AIRS valuation for {boundary}"}
     cached = rows("airs_transactie_snapshot", portefeuille=account)

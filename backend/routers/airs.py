@@ -4627,6 +4627,7 @@ class AirsPortfolioOverview(BaseModel):
     periode: str | None = None
     months: int | None = None
     ytd_pct: float | None = None
+    ytd_from: str | None = None
     latest_month_pct: float | None = None
     price_result_eur: float | None = None
     income_eur: float | None = None

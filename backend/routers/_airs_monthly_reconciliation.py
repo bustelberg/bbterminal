@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from math import isfinite
 
+from routers._airs_monthly_positions import position_boundary
+
 
 def _number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
@@ -58,11 +60,13 @@ def reconcile_positions(sections: dict, performance: dict | None, positions: lis
         if cash:
             row['is_cash'] = True
             row['return_pct'] = None
-        if len(a) > 1 or len(b) > 1:
+        opening_record, opening_error = position_boundary(a)
+        closing_record, closing_error = position_boundary(b)
+        if opening_error or closing_error:
             unknown = True
             continue
-        v0 = a[0]['value_eur'] if a else 0
-        v1 = b[0]['value_eur'] if b else 0
+        v0 = opening_record['value_eur'] if opening_record else 0
+        v1 = closing_record['value_eur'] if closing_record else 0
         row['opening_weight_pct'] = 100 * v0 / capital
         if cash:
             row['contribution_pp'] = 0.0

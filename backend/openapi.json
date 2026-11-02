@@ -2873,6 +2873,17 @@
             ],
             "title": "Withdrawals Eur"
           },
+          "ytd_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ytd From"
+          },
           "ytd_pct": {
             "anyOf": [
               {
