@@ -14,7 +14,32 @@ consume no quota reserve and do not fail a run. Vendor failures and interrupted 
 quota-deferred work still make the daily pass incomplete; their causes and counts
 remain in each scope's receipt.
 
-At 11:00 Amsterdam, `airs_vermogen_refresh` performs one forced account/model scan.
+At 11:00 Amsterdam, `airs_vermogen_refresh` performs one forced dashboard account/model scan.
+Manual Refresh all uses the same scope: the five Bustelberg, four Toppenberg, ten
+reviewed building blocks, Imagine Fund and two test TopSelecties (22 accounts today).
+`management_portfolios.py` shares this definition with the overview's collection map
+and existing reviewed JSON allowlists. AIRS discovery and catalogue storage remain
+complete; unrelated accounts are filtered before report downloads. A configured account
+is never discarded merely because it has fewer than five holdings. Force overrides
+freshness, not scope. Progress counts the accounts actually needing downloads.
+Account refresh order follows the dashboard: Bustelberg (2.0 Offensief, Offensief,
+Beperkt Offensief, Neutraal, Defensief), Toppenberg (Offensief through Defensief),
+alphabetical building blocks, Imagine Fund, then alphabetical test TopSelecties.
+Already-current accounts are omitted without changing the remaining order. Progress
+retains the group and readable portfolio name during each account's report downloads.
+Normal Refresh all validates saved price checks against their source fingerprint and
+Amsterdam day. Discovery-only roster updates do not invalidate comparisons; changes
+to holdings (including child books), prices, mappings, FX or reviewed configuration do.
+Current comparisons are skipped. Legacy/missing/outdated comparisons rebuild from stored
+prices without fetching Yahoo, sharing source reads across the batch before results are
+persisted. Each comparison/save reports progress and cancellation stops before the next
+comparison while keeping completed work. Force refresh and individual Force recheck can
+still fetch Yahoo. If source freshness cannot be verified, checks rebuild rather than
+claiming cached results are current. This optimisation requires no schema migration.
+Model composition downloads cover reviewed counterparts, paired models and recursive
+manual child links, not the whole catalogue. Price checks, paired-model pricing,
+monthly/Analyse preparation, year-end finalisation and freshness use the same dashboard
+scope. Generic acquisition helpers retain explicit support for a wider roster.
 Model repricing uses today's stored compositions rather than reading AIRS again.
 Dynamic/non-Fixed links have no model composition and are recorded as not applicable
 for model repricing; their actual instruments remain covered by account price refreshes

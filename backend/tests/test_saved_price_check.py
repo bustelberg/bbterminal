@@ -1,5 +1,113 @@
 from routers import _airs_price_check as checks
 from tests._fake_supabase import FakeSupabase
+import pytest
+
+
+def test_unchanged_price_checks_finish_without_resolution_or_yahoo(monkeypatch):
+    from datetime import datetime, timezone
+    fake = FakeSupabase({'airs_price_check': [{'portefeuille': 'A',
+        'checked_at': datetime.now(timezone.utc).isoformat(), 'result': {'input_version': 'v1', 'rows': []}}]})
+    monkeypatch.setattr(checks, 'supabase', fake)
+    monkeypatch.setattr(checks, '_price_check_version', lambda: 'v1')
+    monkeypatch.setattr(checks, '_checked_rows', lambda *a, **kw: (_ for _ in ()).throw(AssertionError('unchanged comparison')))
+    monkeypatch.setattr(checks, '_apply_symbol_overrides', lambda: (_ for _ in ()).throw(AssertionError('no Yahoo work')))
+    progress = []
+    result = checks.refresh_price_checks(['A'], freshen=False, only_if_changed=True,
+        on_step=lambda *step: progress.append(step))
+    assert result == {'saved': 0, 'skipped': 1, 'errors': {}}
+    assert 'already current' in progress[-1][2]
+    assert fake.writes == []
+
+
+def test_outdated_or_legacy_check_rebuilds_from_stored_prices_and_stamps_inputs(monkeypatch):
+    from datetime import datetime, timezone
+    fake = FakeSupabase({'airs_price_check': [{'portefeuille': 'A',
+        'checked_at': datetime.now(timezone.utc).isoformat(), 'result': {'rows': []}}]})
+    monkeypatch.setattr(checks, 'supabase', fake)
+    monkeypatch.setattr(checks, '_price_check_version', lambda: 'v2')
+    calls = []
+    monkeypatch.setattr(checks, '_checked_rows', lambda account, *, freshen: (
+        calls.append((account, freshen)) or {'as_of': '2026-10-31'}, [{'isin': 'TEST'}], []))
+    result = checks.refresh_price_checks(['A'], freshen=False, only_if_changed=True)
+    assert calls == [('A', False)]
+    assert result['saved'] == 1
+    assert fake.tables['airs_price_check'][0]['result']['input_version'] == 'v2'
+    # The next unchanged press reuses the just-created snapshot.
+    assert checks.refresh_price_checks(['A'], freshen=False, only_if_changed=True)['skipped'] == 1
+    assert calls == [('A', False)]
+
+
+@pytest.mark.parametrize('version,checked_at', [('v2', None), (None, None), ('v1', '2000-01-01T00:00:00Z')])
+def test_changed_unverified_or_old_sources_do_not_reuse_a_comparison(monkeypatch, version, checked_at):
+    from datetime import datetime, timezone
+    fake = FakeSupabase({'airs_price_check': [{'portefeuille': 'A',
+        'checked_at': checked_at or datetime.now(timezone.utc).isoformat(),
+        'result': {'input_version': 'v1', 'rows': []}}]})
+    monkeypatch.setattr(checks, 'supabase', fake)
+    monkeypatch.setattr(checks, '_price_check_version', lambda: version)
+    calls = []
+    monkeypatch.setattr(checks, '_checked_rows', lambda account, *, freshen: (
+        calls.append(freshen) or {}, [], []))
+    result = checks.refresh_price_checks(['A'], freshen=False, only_if_changed=True)
+    assert calls == [False]
+    assert result['saved'] == 1 and result['skipped'] == 0
+
+
+def test_source_fingerprint_includes_prices_and_children_but_not_discovery(monkeypatch):
+    from io import BytesIO
+    from common import pg
+    from routers import _prepared_analyse
+    from asset_pipeline import symbol_override, isin_alias
+    tables = []
+    state = {'stamp': b'v1', 'pins': {}}
+    monkeypatch.setattr(pg, '_run_copy', lambda sql, args: tables.extend(args[0]) or BytesIO(state['stamp']))
+    monkeypatch.setattr(_prepared_analyse, 'code_version', lambda: 'code')
+    monkeypatch.setattr(symbol_override, 'load_symbol_overrides', lambda: state['pins'])
+    monkeypatch.setattr(symbol_override, 'alias_price_override_isins', lambda: set())
+    monkeypatch.setattr(isin_alias, 'load_aliases', lambda: {})
+    first = checks._price_check_version()
+    assert first and first == checks._price_check_version()
+    assert 'airs_account_roster' not in tables
+    assert {'airs_holding', 'asset_price', 'asset_execution', 'airs_model_portfolio_link', 'fx_rate'} <= set(tables)
+    state['stamp'] = b'v2'
+    assert checks._price_check_version() != first
+    second = checks._price_check_version()
+    state['pins'] = {'TEST': 'NEW'}
+    assert checks._price_check_version() != second
+
+
+def test_batch_reuses_toppenberg_children_before_saving(monkeypatch):
+    from routers import _airs_holding_isin
+    fake = FakeSupabase({})
+    monkeypatch.setattr(checks, 'supabase', fake)
+    calls = []
+    def resolve(account, *, freshen, price_checks):
+        assert not freshen
+        # No comparisons have been written while shared source data is being read.
+        assert not fake.writes
+        calls.append(account)
+        rows = ([{'holding_name': 'Star Selection Index', 'isin': 'CERT'}] if account.startswith('TOPS_')
+                else [{'holding_name': 'Stock', 'isin': 'TEST'}])
+        return {'as_of': '2026-10-31', 'rows': rows}
+    monkeypatch.setattr(_airs_holding_isin, '_resolve_account_isins', resolve)
+    result = checks.refresh_price_checks(['TOPS_OFF_BEH_DYN', 'TOPS_NEU_BEH_DYN', 'StarTopSelectie OFF DYN'], freshen=False)
+    assert result['saved'] == 3
+    assert calls.count('StarTopSelectie OFF DYN') == 1
+
+
+def test_cancellation_saves_completed_comparison_and_stops_next_account(monkeypatch):
+    fake = FakeSupabase({})
+    monkeypatch.setattr(checks, 'supabase', fake)
+    calls, progress = [], []
+    monkeypatch.setattr(checks, '_checked_rows', lambda account, *, freshen: (
+        calls.append(account) or {'as_of': '2026-10-31'}, [], []))
+    result = checks.refresh_price_checks(['A', 'B'], freshen=False,
+        should_stop=lambda: bool(calls), on_step=lambda *step: progress.append(step))
+    assert calls == ['A']
+    assert result['cancelled']
+    assert result['saved'] == 1
+    assert fake.tables['airs_price_check'][0]['portefeuille'] == 'A'
+    assert progress[-1][0] < progress[-1][1]
 
 
 def test_saved_reads_do_not_resolve_or_refresh(monkeypatch):

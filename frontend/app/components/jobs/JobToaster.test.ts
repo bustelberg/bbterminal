@@ -62,6 +62,13 @@ describe('friendlyJobMessage', () => {
 });
 
 describe('friendly AIRS progress', () => {
+  it('keeps the group and current portfolio visible after each report', () => {
+    expect(friendlyJobMessage('Bustelberg portfolios · Bustelberg 2.0 Offensief · Rendement: ok — stored (0.3s)', 'en'))
+      .toBe('Bustelberg portfolios · Bustelberg 2.0 Offensief · The returns have been updated.');
+    expect(friendlyJobMessage('Toppenberg portfolios · Toppenberg Offensief · Vermogensoverzicht: failed — timeout', 'nl'))
+      .toBe('Toppenberg portfolios · Toppenberg Offensief · De portefeuilleposities konden niet worden bijgewerkt.');
+  });
+
   it('turns a technical report receipt into a plain progress update', () => {
     expect(friendlyJobMessage('Rendement: ok. stored (0.3s)', 'en'))
       .toBe('The returns have been updated.');

@@ -129,8 +129,9 @@ def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,
     if source_version('holdings') is None:
         return {**result, 'unavailable': True}
     if portfolio_ids is None and holdings:
+        from management_portfolios import is_dashboard_account
         portfolio_ids = sorted({int(row['model_portfolio_id']) for row in list_account_links()['accounts']
-                                if row.get('model_portfolio_id') is not None})
+                                if row.get('model_portfolio_id') is not None and is_dashboard_account(row.get('portefeuille'))})
     work = ([('acwi', 'acwi:ACWI', None, False)] if benchmark else [])
     if holdings:
         work += [('holdings', holdings_key(pid, 'ACWI', look), pid, look)

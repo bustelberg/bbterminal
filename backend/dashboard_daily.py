@@ -203,12 +203,13 @@ def prepare_month(account: str, today=None) -> dict:
             "errors": {key: value.get("message") for key, value in sections.items() if value["status"] == "error"}}
 
 
-def freshness(today=None) -> dict:
+def freshness(today=None, *, dashboard_only: bool = False) -> dict:
     """Read actual source dates and completeness; never repair or fetch a vendor."""
     from airs_vermogen import REPORTS, latest_completed_market_date
     from airs_portfolio_exclusions import is_excluded_portfolio
     from routers._airs_account_links import list_account_links
     from routers import _prepared_analyse as prepared
+    from management_portfolios import is_dashboard_account
 
     today = today or datetime.now(ZoneInfo("Europe/Amsterdam")).date()
     day = today.isoformat()
@@ -216,7 +217,8 @@ def freshness(today=None) -> dict:
     roster = rows("airs_account_roster", "portefeuille,last_seen_at,reports_at,reports_ok")
     discovered = max((str(r.get("last_seen_at") or "") for r in roster), default="")
     roster = [r for r in roster if str(r.get("last_seen_at") or "") == discovered
-              and not is_excluded_portfolio(r["portefeuille"])]
+              and not is_excluded_portfolio(r["portefeuille"])
+              and (not dashboard_only or is_dashboard_account(r['portefeuille']))]
     links = {r["portefeuille"]: r for r in list_account_links()["accounts"]}
     models = {r["id"]: r for r in rows("airs_model_portfolio", "id,portfolio_type,positions_scanned_at,positions_error")}
     checks = {r["portefeuille"]: r for r in rows("airs_price_check", "portefeuille,checked_at")}
@@ -234,7 +236,9 @@ def freshness(today=None) -> dict:
     sources, global_issues = {}, []
     pending_years = rows("airs_year_archive", kind="year_end")
     for receipt in pending_years:
-        if not is_excluded_portfolio(receipt["portefeuille"]) and not (receipt.get("payload") or {}).get("complete"):
+        if (not is_excluded_portfolio(receipt["portefeuille"])
+                and (not dashboard_only or is_dashboard_account(receipt['portefeuille']))
+                and not (receipt.get("payload") or {}).get("complete")):
             global_issues.append(f"{receipt['portefeuille']}: {receipt['year']} year-end archive incomplete")
     for job in ("asset_price_refresh", "benchmark_price_slice", "benchmark_fundamentals_fill", "fx_sync"):
         latest = (supabase.table("scheduled_job_run").select("status,started_at,detail,summary")

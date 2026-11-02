@@ -1110,7 +1110,7 @@ def _save_model_weights(portefeuille: str, van: str, tot: str) -> int:
 
 
 def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = False,
-                                   on_step=None, should_stop=None) -> dict:
+                                   on_step=None, should_stop=None, dashboard_only: bool = False) -> dict:
     """Discover → download → parse → store, for every live portfolio that NEEDS it. Serialized
     via `_LOCK` (a second trigger while one runs returns busy). Returns the final
     status dict. Call from a thread — it does blocking Playwright + DB work.
@@ -1118,7 +1118,9 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
      INCREMENTAL BY DEFAULT. Discovery always runs against AIRS — the live list is the point, and
     it is what refills an account somebody deleted — but an account whose last pass got all four
     reports within `AIRS_FRESH_HOURS` is skipped rather than re-downloaded (`accounts_to_scan`).
-    `force=True` scans every discovered account regardless.
+    `force=True` scans every account in the requested scope regardless of freshness.
+    Dashboard entry points set `dashboard_only=True`: retain full discovery/roster history,
+    then fetch only the reviewed dashboard collections and count actual downloads on the bar.
 
     `on_step(done, total, message)` and `should_stop()` are the JOB hooks — see
     `/api/airs/vermogen/refresh/job`. Both optional and both no-ops when absent, so the scheduler
@@ -1153,6 +1155,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             "detail": None,
             "triggered_by": triggered_by,
             "portfolios_found": 0,
+            "portfolios_discovered": 0,
+            "outside_dashboard": 0,
             "accounts_added": 0,
             "accounts_updated": 0,
             "accounts_up_to_date": 0,
@@ -1246,7 +1250,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # number means either a filter stopped applying or AIRS's own roster changed, and those need
         # opposite responses. The scraper's own "N Items in selectie" comparison, emitted just
         # above, says which.
-        if len(names) != _EXPECTED_ROSTER:
+        if len(names) != _EXPECTED_ROSTER and not dashboard_only:
             _emit("roster_unexpected", count=len(names), expected=_EXPECTED_ROSTER,
                   message=(f" EXPECTED {_EXPECTED_ROSTER} portfolios, got {len(names)}. If AIRS's "
                            f"own 'Items in selectie' above also says {len(names)}, the roster "
@@ -1262,6 +1266,16 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # unknown length (indeterminate bar); from this point the run knows it is 44 accounts, and
         # the planning reads below are seconds of database work that would otherwise be one more
         # silent gap between "AIRS lists 44 portfolios" and the first account.
+        if dashboard_only:
+            from management_portfolios import is_dashboard_account, dashboard_refresh_key, dashboard_progress_label
+            discovered = len(names)
+            names = sorted((name for name in names if is_dashboard_account(name)), key=dashboard_refresh_key)
+            _STATUS.update(portfolios_discovered=discovered, portfolios_found=len(names),
+                           outside_dashboard=discovered - len(names))
+            _emit('scope', message=f'{len(names)} dashboard portfolios selected; '
+                  f'{discovered - len(names)} other AIRS accounts outside scope')
+            if not names:
+                raise RuntimeError('AIRS discovery contained no configured dashboard portfolios')
         _say(0, len(names), f"planning — reading which of {len(names)} accounts are current…")
         verdicts = _roster_verdicts()
         known = set(verdicts)
@@ -1281,7 +1295,7 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         # `plan_bogus` event; the one line the page shows never mentioned them, so two thirds of the
         # fleet could go unread and the sentence still read as a report on all of it.
         skipped_bogus: list[str] = []
-        if not force:
+        if not force and not dashboard_only:
             try:
                 counts, _, _isin = _holding_counts()
                 #  The page's own two filters, in the same order — `list_accounts` drops an
@@ -1337,33 +1351,37 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         skipped_set = set(current)
         todo_set = set(todo)
         cancelled_at: str | None = None
-        for i, name in enumerate(names, 1):
+        scan_names = todo if dashboard_only else names
+        progress_total = len(scan_names)
+        _say(0, progress_total, f"{len(todo)} accounts to scan, {len(current)} already current")
+        for i, name in enumerate(scan_names, 1):
+            progress_name = dashboard_progress_label(name) if dashboard_only else name
             #  Before the account, not inside it — see the docstring. `break`, not `return`, so the
             # run still falls through to `_finish` below and records what it DID store; abandoning
             # here would leave `_STATUS["running"]` true for ever and the next press would read
             # "busy" against a job nobody is running.
             if should_stop is not None and should_stop():
                 cancelled_at = name
-                _emit("cancelled", i=i, n=len(names), account=name,
-                      message=f"[{i}/{len(names)}] cancelled before {name} — "
+                _emit("cancelled", i=i, n=progress_total, account=name,
+                      message=f"[{i}/{progress_total}] cancelled before {name} — "
                               f"{i - 1} account(s) already stored")
                 break
             #  THROUGH `_say`, NOT `on_step` DIRECTLY — it records the position so the per-report
             # lines `scan_one` emits underneath ("Vermogensoverzicht: ok — 31 holdings…") keep the
             # bar at 12/44 instead of resetting it to the 0/0 the pre-loop phases ran at.
-            _say(i, len(names), f"{i}/{len(names)}: {name}")
+            _say(i, progress_total, f"{i}/{progress_total}: {progress_name}")
             if name in skipped_set:
-                _emit("account_skipped", i=i, n=len(names), account=name,
-                      message=f"[{i}/{len(names)}] {name}: skipped — all reports current")
+                _emit("account_skipped", i=i, n=progress_total, account=name,
+                      message=f"[{i}/{progress_total}] {name}: skipped — all reports current")
                 continue
             if name not in todo_set:
-                _emit("account_skipped", i=i, n=len(names), account=name, reason="too_small",
-                      message=(f"[{i}/{len(names)}] {name}: skipped — under "
+                _emit("account_skipped", i=i, n=progress_total, account=name, reason="too_small",
+                      message=(f"[{i}/{progress_total}] {name}: skipped — under "
                                f"{MIN_REAL_HOLDINGS} holdings, not a portfolio"))
                 continue
-            _STATUS["message"] = f"{i}/{len(names)}: {name}…"
-            _emit("account_start", i=i, n=len(names), account=name,
-                  message=f"[{i}/{len(names)}] {name}")
+            _STATUS["message"] = f"{i}/{progress_total}: {progress_name}…"
+            _emit("account_start", i=i, n=progress_total, account=name,
+                  message=f"[{i}/{progress_total}] {progress_name}")
             #  The same `scan_one` THE PER-ROW REFRESH CALLS. Refresh-all IS refresh-one, N times
             # — see `scan_one` for why that had to stop being two implementations.
             res = scan_one(
@@ -1372,7 +1390,8 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
                 # shows WHICH report it is waiting on rather than just a name and a spinner.
                 on_report=lambda acct, report, status, detail: _emit(
                     "report", account=acct, report=report, status=status, detail=detail,
-                    message=f"    {report}: {status}{f' — {detail}' if detail else ''}"),
+                    message=(f'{progress_name} · ' if dashboard_only else '    ')
+                    + f"{report}: {status}{f' — {detail}' if detail else ''}"),
             )
             outcomes[name] = res["reports_ok"]
             if res.get("as_of") and (newest_as_of is None or res["as_of"] > newest_as_of):
@@ -1398,14 +1417,14 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
             # A fresh timestamp per account would make every account except the LAST look stale,
             # so 43 of 44 rows would silently drop out of the newest batch.
             _record_reports({name: res["reports_ok"]}, run_stamp)
-            _emit("account_done", i=i, n=len(names), account=name,
+            _emit("account_done", i=i, n=progress_total, account=name,
                   got=sorted(res["reports_ok"]), failed=[e["report"] for e in res["errors"]],
                   complete=len(res["reports_ok"]) == len(REPORTS),
-                  message=(f"  [{i}/{len(names)}] {name}: "
+                  message=(f"  [{i}/{progress_total}] {progress_name}: "
                            f"{len(res['reports_ok'])}/{len(REPORTS)} reports"
                            + (f", FAILED {[e['report'] for e in res['errors']]}"
                               if res["errors"] else "")))
-            _STATUS["message"] = f"{i}/{len(names)} done: {name}"
+            _STATUS["message"] = f"{i}/{progress_total} done: {progress_name}"
 
         #  One job, one subject — and the lesson outlived the case that taught it. This used to
         # download the CRM "Alle relaties" export inline as well: a different report about
@@ -1478,10 +1497,19 @@ def run_airs_vermogen_refresh_sync(triggered_by: str = "manual", force: bool = F
         if triggered_by != 'auto' and not cancelled_at:
             from routers._airs_price_check import refresh_price_checks  # noqa: PLC0415
             _emit('progress', message='Saving AIRS / Yahoo price checks')
-            _STATUS['price_checks'] = refresh_price_checks(names, should_stop=should_stop)
-            if _STATUS['price_checks']['errors']:
+            def _price_step(done, total, message):
+                _say(done, total, message)
+                _emit('price_check', message=message)
+            _STATUS['price_checks'] = refresh_price_checks(
+                names, should_stop=should_stop, freshen=force, only_if_changed=not force,
+                on_step=_price_step)
+            if _STATUS['price_checks'].get('cancelled') or (should_stop and should_stop()):
+                _STATUS.update(status='cancelled', cancelled_at='price checks',
+                               message='Cancelled during price checks; completed comparisons were saved')
+            elif _STATUS['price_checks']['errors']:
                 _STATUS['status'] = 'error'
                 _STATUS['message'] += '; some price checks could not be saved'
+            _STATUS['finished_at'] = datetime.now(timezone.utc).isoformat()
         return dict(_STATUS)
     finally:
         _STATUS["running"] = False

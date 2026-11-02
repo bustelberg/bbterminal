@@ -370,9 +370,11 @@ async def airs_model_portfolios_scan_job(force: bool = False):
             # model. Previously one unpaired book made the recovery scan download all ~58 fixed
             # models, which was both slow and why operators avoided the very action that healed
             # the missing pairings.
+            from management_portfolios import dashboard_model_rows
+            scoped = dashboard_model_rows(rows)
             missing_ids = (set() if force else
-                           store.unscanned_position_ids([row["id"] for row in rows]))
-            to_count = rows if force else [row for row in rows if row["id"] in missing_ids]
+                           store.unscanned_position_ids([row["id"] for row in scoped]))
+            to_count = scoped if force else [row for row in scoped if row["id"] in missing_ids]
             if not force:
                 ctx.progress(0, len(to_count),
                              f"{len(to_count)} model compositions missing — repairing those only…")
@@ -3973,7 +3975,7 @@ async def airs_vermogen_refresh(force: bool = False):
         return {"status": "busy", "message": "A refresh is already running"}
     threading.Thread(
         target=run_airs_vermogen_refresh_sync,
-        kwargs={"triggered_by": "manual-force" if force else "manual", "force": force},
+        kwargs={"triggered_by": "manual-force" if force else "manual", "force": force, "dashboard_only": True},
         daemon=True,
         name="airs-vermogen-manual",
     ).start()
@@ -4053,6 +4055,7 @@ async def airs_vermogen_refresh_job(force: bool = False):
         res = run_airs_vermogen_refresh_sync(
             triggered_by="manual-force" if force else "manual",
             force=force,
+            dashboard_only=True,
             on_step=lambda done, total, msg: ctx.progress(done, total, msg),
             #  `ctx.check()` RAISES to unwind a job; here we only need the FLAG, because the scan
             # has to run its own finalisation (write the status, release `_LOCK`) before returning.

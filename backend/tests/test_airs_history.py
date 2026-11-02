@@ -181,7 +181,7 @@ def test_incomplete_year_end_fails_post_job_and_still_runs_audit(monkeypatch):
     monkeypatch.setattr(_airs_accounts, "list_accounts", lambda: [])
     monkeypatch.setattr(_airs_price_check, "refresh_price_checks", lambda *args, **kwargs: {})
     monkeypatch.setattr(_prepared_analyse, "run_controlled", lambda **kwargs: {})
-    monkeypatch.setattr(history, "finalise_previous_year", lambda ctx: [{"portefeuille": "BOOK", "year": 2026, "errors": ["late valuation"]}])
+    monkeypatch.setattr(history, "finalise_previous_year", lambda ctx, **kw: [{"portefeuille": "BOOK", "year": 2026, "errors": ["late valuation"]}])
     audits = []
     monkeypatch.setattr(scheduler, "_run_body", lambda *args: audits.append(args[0]))
     with pytest.raises(dashboard_daily.IncompleteRefresh) as caught:

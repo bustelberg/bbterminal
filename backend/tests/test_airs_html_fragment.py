@@ -432,7 +432,7 @@ class TestBooksTooSmallToBePortfoliosAreNotRescanned:
         import airs_vermogen
 
         src = inspect.getsource(airs_vermogen.run_airs_vermogen_refresh_sync)
-        assert "if not force:" in src
+        assert "if not force and not dashboard_only:" in src
         assert "bogus_accounts(" in src
 
     def test_the_freshness_window_clears_a_daily_valuation(self):

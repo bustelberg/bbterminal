@@ -37,25 +37,26 @@ export function friendlyJobMessage(summary: string | null, lang: Lang): string |
   const plain = summary.replace(/\s(?:\u2014|\u2013)\s/g, '. ');
   // AIRS sends structured scraper receipts such as "Rendement: ok. stored (0.3s)". They are
   // useful in the job log, but a person watching Refresh all only needs to know what just changed.
-  const report = plain.match(/^(?:.+?\s+\u00b7\s+)?(Rendement|Vermogensoverzicht|Mutaties|Transacties|Model):\s*(ok|no_data|failed)(?:\..*)?$/i);
+  const report = plain.match(/^(?:(.+?)\s+\u00b7\s+)?(Rendement|Vermogensoverzicht|Mutaties|Transacties|Model):\s*(ok|no_data|failed)(?:\..*)?$/i);
   if (report) {
-    const key = report[1].toLowerCase();
-    const status = report[2].toLowerCase();
+    const context = report[1] ? `${report[1]} · ` : '';
+    const key = report[2].toLowerCase();
+    const status = report[3].toLowerCase();
     const en = {
       rendement: 'returns', vermogensoverzicht: 'portfolio holdings', mutaties: 'cash movements',
       transacties: 'transactions', model: 'model weights',
-    }[key] ?? report[1].toLowerCase();
+    }[key] ?? report[2].toLowerCase();
     const nl = {
       rendement: 'rendement', vermogensoverzicht: 'portefeuilleposities', mutaties: 'kasmutaties',
       transacties: 'transacties', model: 'modelwegingen',
-    }[key] ?? report[1].toLowerCase();
-    if (status === 'ok') return lang === 'nl' ? `De ${nl} zijn bijgewerkt.` : `The ${en} have been updated.`;
-    if (status === 'no_data') return lang === 'nl'
+    }[key] ?? report[2].toLowerCase();
+    if (status === 'ok') return context + (lang === 'nl' ? `De ${nl} zijn bijgewerkt.` : `The ${en} have been updated.`);
+    if (status === 'no_data') return context + (lang === 'nl'
       ? `AIRS heeft geen ${nl} voor deze portefeuille.`
-      : `AIRS has no ${en} for this portfolio.`;
-    return lang === 'nl'
+      : `AIRS has no ${en} for this portfolio.`);
+    return context + (lang === 'nl'
       ? `De ${nl} konden niet worden bijgewerkt.`
-      : `We could not update the ${en}.`;
+      : `We could not update the ${en}.`);
   }
   const cancelled = plain.match(/^cancelled before (.+?)\.\s*nothing was read\.?$/i);
   if (cancelled) {

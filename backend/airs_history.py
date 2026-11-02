@@ -18,7 +18,7 @@ def archive_source(db, account, start, end, kind, payload):
     }, on_conflict="portefeuille,year,kind").execute()
 
 
-def finalise_previous_year(ctx=None, today=None):
+def finalise_previous_year(ctx=None, today=None, *, dashboard_only=False):
     """Retry unfinished December bundles during the existing post-AIRS workflow.
 
     Historical exports never pass through writers of the live YTD caches. A
@@ -26,6 +26,7 @@ def finalise_previous_year(ctx=None, today=None):
     """
     from zoneinfo import ZoneInfo
     from deps import supabase
+    from management_portfolios import is_dashboard_account
 
     current = today or datetime.now(ZoneInfo("Europe/Amsterdam")).date()
     years = {current.year - 1}
@@ -35,17 +36,19 @@ def finalise_previous_year(ctx=None, today=None):
                 .eq("kind", "year_end").order("portefeuille").order("year")
                 .range(offset, offset + 999).execute().data or [])
         years.update(row["year"] for row in page if row["year"] < current.year
+                     and (not dashboard_only or is_dashboard_account(row['portefeuille']))
                      and not row.get("payload", {}).get("complete"))
         if len(page) < 1000:
             break
         offset += 1000
     results = []
     for year in sorted(years):
-        results.extend(_finalise_year(ctx, year))
+        results.extend(_finalise_year(ctx, year, dashboard_only=True) if dashboard_only
+                       else _finalise_year(ctx, year))
     return results
 
 
-def _finalise_year(ctx, year):
+def _finalise_year(ctx, year, *, dashboard_only=False):
     from deps import supabase
     from routers._airs_monthly_report import collect_report
     from airs_vermogen import _acquire_session, _LOCK, latest_completed_market_date
@@ -54,6 +57,7 @@ def _finalise_year(ctx, year):
     from airs_transacties import parse_transacties, realised_results
     from dataclasses import asdict
     from airs_portfolio_exclusions import is_excluded_portfolio
+    from management_portfolios import is_dashboard_account
 
     start, end = f"{year}-01-01", f"{year}-12-31"
     accounts = set()
@@ -66,7 +70,8 @@ def _finalise_year(ctx, year):
         if len(page) < 1000:
             break
         offset += 1000
-    accounts = sorted(account for account in accounts if not is_excluded_portfolio(account))
+    accounts = sorted(account for account in accounts if not is_excluded_portfolio(account)
+                      and (not dashboard_only or is_dashboard_account(account)))
     class Context:
         def check(self):
             if ctx is not None:

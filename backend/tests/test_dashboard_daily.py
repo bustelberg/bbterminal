@@ -65,8 +65,8 @@ def test_busy_airs_is_a_failed_attempt_without_a_model_scan(monkeypatch):
 def test_model_pricing_deduplicates_shared_models_and_surfaces_failures(monkeypatch):
     from routers import _airs_account_links as links, _airs_portfolio_refresh as refresh
     monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
-        {"portefeuille": "A", "model_portfolio_id": 1}, {"portefeuille": "B", "model_portfolio_id": 1},
-        {"portefeuille": "C", "model_portfolio_id": 2}]})
+        {"portefeuille": "BUS_Defensief_Dyn", "model_portfolio_id": 1}, {"portefeuille": "BUS_Neutraal_Dyn", "model_portfolio_id": 1},
+        {"portefeuille": "BUS_Offensief_Dyn", "model_portfolio_id": 2}]})
     calls = []
     def price(pid, emit, *, stored_composition):
         assert stored_composition
@@ -77,8 +77,8 @@ def test_model_pricing_deduplicates_shared_models_and_surfaces_failures(monkeypa
     monkeypatch.setattr(refresh, "refresh_portfolio", price)
     with pytest.raises(D.IncompleteRefresh) as caught:
         S._body_airs_model_prices()
-    assert calls == [1, 2]
-    assert caught.value.summary["failed_names"] == ["C"]
+    assert calls == [2, 1]  # Offensief before Neutraal, matching the dashboard refresh order.
+    assert caught.value.summary["failed_names"] == ["BUS_Offensief_Dyn"]
 
 
 @pytest.mark.parametrize("kind", ["normaal", "meervoudig"])
@@ -114,21 +114,21 @@ def test_empty_fixed_composition_is_only_not_applicable_after_successful_scan(mo
 def test_pricing_receipt_distinguishes_priced_and_not_applicable(monkeypatch):
     from routers import _airs_account_links as links, _airs_portfolio_refresh as refresh
     monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
-        {"portefeuille": "A", "model_portfolio_id": 1},
-        {"portefeuille": "B", "model_portfolio_id": 2}]})
+        {"portefeuille": "BUS_Defensief_Dyn", "model_portfolio_id": 1},
+        {"portefeuille": "BUS_Neutraal_Dyn", "model_portfolio_id": 2}]})
     monkeypatch.setattr(refresh, "refresh_portfolio", lambda pid, *a, **kw:
                         {"status": "skipped", "note": "no Fixed composition"} if pid == 1 else {})
     _, receipt = S._body_airs_model_prices()
     assert (receipt["priced"], receipt["skipped"], receipt["failed"]) == (1, 1, 0)
-    assert receipt["results"][0]["model_portfolio_id"] == 1
-    assert receipt["results"][0]["model_status"] == "skipped"
+    by_id = {r['model_portfolio_id']: r for r in receipt['results']}
+    assert by_id[1]["model_status"] == "skipped"
 
 
 def test_post_airs_keeps_nested_audit_receipt_and_logs_root_cause(monkeypatch, caplog):
     import airs_history
     from routers import _airs_accounts, _airs_price_check, _prepared_analyse
     monkeypatch.setattr(_airs_accounts, "list_accounts", lambda: [])
-    monkeypatch.setattr(airs_history, "finalise_previous_year", lambda ctx: [])
+    monkeypatch.setattr(airs_history, "finalise_previous_year", lambda ctx, **kw: [])
     monkeypatch.setattr(_airs_price_check, "refresh_price_checks", lambda *a, **kw: {})
     monkeypatch.setattr(_prepared_analyse, "run_controlled", lambda **kw: {})
     receipt = {"accounts": [{"portefeuille": "BOOK", "issues": ["missing close"]}]}
@@ -157,6 +157,7 @@ def test_freshness_requires_model_scan_only_for_fixed_links(monkeypatch, kind, n
 
 
 def test_daily_parent_retains_both_failed_child_receipts(monkeypatch):
+    monkeypatch.setattr('management_portfolios.dashboard_model_rows', lambda rows: rows)
     import airs_vermogen
     import airs_scanner
     from routers import _airs_portfolio_store as store

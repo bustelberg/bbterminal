@@ -1448,8 +1448,9 @@ def _maybe_kickstart_airs_models() -> None:
 
             rows = fetch_model_portfolios_sync(_quiet)
             store.save_portfolios(rows)
+            from management_portfolios import dashboard_model_rows
             count_model_portfolio_holdings_sync(
-                rows, _quiet,
+                dashboard_model_rows(rows), _quiet,
                 on_positions=store.save_positions,
                 on_error=store.save_positions_error,
             )
@@ -1979,6 +1980,7 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
     """
     from routers._airs_account_links import list_account_links  # noqa: PLC0415
     from routers._airs_portfolio_refresh import refresh_portfolio  # noqa: PLC0415
+    from management_portfolios import is_dashboard_account, dashboard_refresh_key, dashboard_progress_label
 
     step = _reporter(ctx)
     stop = (lambda: bool(getattr(ctx, "cancelled", False))) if ctx is not None else None
@@ -1987,7 +1989,7 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
     # and an account with no model has no composition to price — `refresh_portfolio_fully` would
     # report `absent` for every one of them and spend a request finding out.
     paired = {a["model_portfolio_id"]: a["portefeuille"] for a in list_account_links()["accounts"]
-              if a.get("model_portfolio_id") is not None and a.get("portefeuille")}
+              if a.get("model_portfolio_id") is not None and is_dashboard_account(a.get("portefeuille"))}
     if not paired:
         return "no paired model portfolios to price", {"portfolios": 0}
 
@@ -1995,11 +1997,11 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
 
     def _on_result(name: str, res: dict) -> None:
         done["n"] += 1
-        step(done["n"], len(paired), f"{name} — {res.get('model_status') or res.get('status')}")
+        step(done["n"], len(paired), f"{dashboard_progress_label(name)} — {res.get('model_status') or res.get('status')}")
 
     step(0, len(paired), f"pricing {len(paired)} model portfolio(s)")
     results = []
-    for pid, account in paired.items():
+    for pid, account in sorted(paired.items(), key=lambda item: dashboard_refresh_key(item[1])):
         if stop and stop():
             raise _Cancelled("stopped before model pricing")
         try:
@@ -2081,7 +2083,7 @@ def _body_airs_price_checks(ctx=None) -> tuple[str, dict]:
     # Do not rely on _freshen's per-process daily memo: noon may already have checked these
     # instruments before today's close existed. One batch also avoids the per-account fetch cap.
     prices = price_refresh.refresh_stale(isins=price_refresh.watched_isins(), stale_days=1)
-    result = refresh_price_checks(should_stop=stop)
+    result = refresh_price_checks(should_stop=stop, freshen=False, only_if_changed=True, on_step=step)
     result["prices"] = prices
     if stop and stop():
         raise _Cancelled("stopped automatic price checks; saved checks are kept")
@@ -2134,7 +2136,7 @@ def _body_dashboard_market(ctx=None) -> tuple[str, dict]:
 
 def _body_dashboard_freshness(ctx=None) -> tuple[str, dict]:
     from dashboard_daily import freshness
-    result = freshness()
+    result = freshness(dashboard_only=True)
     if result["incomplete"] or result["empty_roster"] or result["global_issues"]:
         _require_complete(f"Dashboard incomplete: {result['incomplete']}/{result['checked']} portfolios; see per-portfolio receipt", result)
     return f"All {result['checked']} dashboard portfolios current", result
@@ -2146,22 +2148,28 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
     from routers._airs_accounts import list_accounts
     from routers._airs_price_check import refresh_price_checks
     from routers._prepared_analyse import run_controlled
+    from management_portfolios import is_dashboard_account, dashboard_refresh_key
     summary, failures = {}, {}
     def stop():
         return _cancel_requested(ctx)
-    accounts = [row["portefeuille"] for row in list_accounts() if row.get("holdings")]
+    accounts = sorted((row["portefeuille"] for row in list_accounts()
+                       if row.get("holdings") and is_dashboard_account(row.get('portefeuille'))),
+                      key=dashboard_refresh_key)
     try:
-        summary["year_end"] = finalise_previous_year(ctx)
+        summary["year_end"] = finalise_previous_year(ctx, dashboard_only=True)
         if any(row["errors"] for row in summary["year_end"]):
             failures["year_end"] = summary["year_end"]
     except Exception as exc:
         failures["year_end"] = str(exc)
     try:
-        summary["checks"] = refresh_price_checks(accounts, should_stop=stop)
+        summary["checks"] = refresh_price_checks(accounts, should_stop=stop, freshen=False,
+                                               only_if_changed=True, on_step=_reporter(ctx))
         if summary["checks"].get("errors"):
             failures["checks"] = summary["checks"]["errors"]
     except Exception as exc:
         failures["checks"] = str(exc)
+    if stop():
+        raise _Cancelled('post-AIRS price checks cancelled; completed comparisons were saved')
     summary["monthly"] = []
     for index, account in enumerate(accounts):
         if stop():
@@ -2218,7 +2226,7 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             # so the bar restarts between them. A restarting bar reads as a failure unless the line
             # under it names the phase — hence the prefixes below.
             res = run_airs_vermogen_refresh_sync(
-                triggered_by="auto", force=True, should_stop=stop,
+                triggered_by="auto", force=True, should_stop=stop, dashboard_only=True,
                 on_step=lambda d, t, m: step(d, t, f"Accounts · {m}")) or {}
             if res.get("status") == "busy":
                 summary["session_busy"] = True
@@ -2306,8 +2314,10 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
                 if not rows:
                     raise RuntimeError("AIRS model discovery returned no portfolios")
                 store.save_portfolios(rows)
+                from management_portfolios import dashboard_model_rows
+                scoped_models = dashboard_model_rows(rows)
                 count_model_portfolio_holdings_sync(
-                    rows, _relay,
+                    scoped_models, _relay,
                     on_positions=store.save_positions,
                     on_error=lambda pid, error: (model_errors.append({"id": pid, "error": str(error)}),
                                                  store.save_positions_error(pid, error)),
@@ -2315,7 +2325,8 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
             finally:
                 _LOCK.release()
             _log.warning("[scheduler] airs model-portfolio scan: %d portfolio(s) stored", len(rows))
-            summary["models"] = len(rows)
+            summary["models"] = len(scoped_models)
+            summary['models_discovered'] = len(rows)
             if model_errors:
                 summary["model_errors"] = model_errors
                 failures.append(f"models: {len(model_errors)} compositions failed")

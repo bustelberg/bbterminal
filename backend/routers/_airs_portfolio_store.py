@@ -135,9 +135,9 @@ def unscanned_position_ids(portfolio_ids: list[int]) -> set[int]:
     if not portfolio_ids:
         return set()
     rows = (supabase.table("airs_model_portfolio")
-            .select("id,positions_scanned_at")
+            .select("id,positions_scanned_at,positions_error")
             .in_("id", portfolio_ids).execute().data or [])
-    return {int(row["id"]) for row in rows if not row.get("positions_scanned_at")}
+    return {int(row["id"]) for row in rows if not row.get("positions_scanned_at") or row.get('positions_error')}
 
 
 def load_portfolios() -> list[dict]:

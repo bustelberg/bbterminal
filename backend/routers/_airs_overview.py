@@ -37,18 +37,7 @@ from deps import supabase
 _log = logging.getLogger(__name__)
 
 
-_MANAGEMENT_GROUPS = {
-    "busdefensiefdyn": "bustelberg",
-    "busneutraaldyn": "bustelberg",
-    "busbepoffensiefdyn": "bustelberg",
-    "busoffensiefdyn": "bustelberg",
-    "busifdyn": "imagine_fund",
-    "bus20offdyn": "bustelberg",
-    "topsdefbehdyn": "toppenberg",
-    "topsneubehdyn": "toppenberg",
-    "topsbeoffbehdyn": "toppenberg",
-    "topsoffbehdyn": "toppenberg",
-}
+from management_portfolios import MANAGEMENT_GROUPS as _MANAGEMENT_GROUPS
 _SINGLE_RISK_PROFILE_ACCOUNTS = {
     "aitopselectieoffdyn",
     "aztopselectiedyn",

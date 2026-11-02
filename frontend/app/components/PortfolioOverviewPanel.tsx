@@ -771,10 +771,11 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
    */
   const live = useRef<ReturnType<typeof createLiveReload> | null>(null);
 
-  // A normal press refreshes what is missing or stale. Forcing every report and every fixed model
-  // on each press turns a quick check into 48 account downloads plus ~61 model XLS downloads.
+  // Both modes stay within the dashboard collections and their model dependencies.
+  // A normal press refreshes missing/stale reports; forcing re-reads everything in that scope.
   const refreshAll = async (force = false) => {
     if (refreshingAll) return;
+    setRefreshMsg(null);
     // See refreshOne: this run changes the source of every overview row.
     invalidateOverviewCache();
     setRefreshingAll(true);
@@ -1268,8 +1269,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                              model catalogue leaves a freshly refreshed account orange. */
                           fetchedAt={r.fetched_at}
                           what={r.fixed_name
-                            ? 'The name of this account, read from the model portfolio it is paired with.'
-                            : 'The name of this account, as AIRS itself calls it.'}
+                            ? `AIRS model portfolio: ${r.fixed_name}. AIRS account: ${r.dynamic_portefeuille}.`
+                            : `AIRS account: ${r.dynamic_portefeuille}.`}
                           note={r.fixed_name
                             ? (r.link_source === 'guess'
                               ? 'name — from the Fixed portfolio matched to this book by name'
