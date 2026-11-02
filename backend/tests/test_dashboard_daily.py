@@ -81,6 +81,106 @@ def test_model_pricing_deduplicates_shared_models_and_surfaces_failures(monkeypa
     assert caught.value.summary["failed_names"] == ["C"]
 
 
+@pytest.mark.parametrize("kind", ["normaal", "meervoudig"])
+def test_dynamic_link_does_not_require_a_fixed_composition(monkeypatch, kind):
+    from routers import _airs_portfolio_refresh as refresh
+    monkeypatch.setattr(refresh, "supabase", FakeSupabase({
+        "airs_model_portfolio": [{"id": 1, "portfolio_type": kind}],
+    }))
+    monkeypatch.setattr(refresh, "_instruments", lambda *_: pytest.fail("no model to price"))
+    result = refresh.refresh_portfolio(1, lambda *_a, **_k: None, stored_composition=True)
+    assert result["status"] == "skipped"
+
+
+@pytest.mark.parametrize("extra,expected", [
+    ({"positions_scanned_at": date.today().isoformat()}, None),
+    ({"positions_scanned_at": "2000-01-01"}, "not successfully scanned today"),
+    ({"positions_scanned_at": date.today().isoformat(), "positions_error": "download failed"}, "download failed"),
+    ({}, "no usable stored composition"),
+])
+def test_empty_fixed_composition_is_only_not_applicable_after_successful_scan(monkeypatch, extra, expected):
+    from routers import _airs_portfolio_refresh as refresh
+    monkeypatch.setattr(refresh, "supabase", FakeSupabase({
+        "airs_model_portfolio": [{"id": 1, "portfolio_type": "fixed (model)", **extra}],
+        "airs_model_portfolio_position": [],
+    }))
+    if expected:
+        with pytest.raises(RuntimeError, match=expected):
+            refresh.refresh_portfolio(1, lambda *_a, **_k: None, stored_composition=True)
+    else:
+        assert refresh.refresh_portfolio(1, lambda *_a, **_k: None, stored_composition=True)["status"] == "skipped"
+
+
+def test_pricing_receipt_distinguishes_priced_and_not_applicable(monkeypatch):
+    from routers import _airs_account_links as links, _airs_portfolio_refresh as refresh
+    monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
+        {"portefeuille": "A", "model_portfolio_id": 1},
+        {"portefeuille": "B", "model_portfolio_id": 2}]})
+    monkeypatch.setattr(refresh, "refresh_portfolio", lambda pid, *a, **kw:
+                        {"status": "skipped", "note": "no Fixed composition"} if pid == 1 else {})
+    _, receipt = S._body_airs_model_prices()
+    assert (receipt["priced"], receipt["skipped"], receipt["failed"]) == (1, 1, 0)
+    assert receipt["results"][0]["model_portfolio_id"] == 1
+    assert receipt["results"][0]["model_status"] == "skipped"
+
+
+def test_post_airs_keeps_nested_audit_receipt_and_logs_root_cause(monkeypatch, caplog):
+    import airs_history
+    from routers import _airs_accounts, _airs_price_check, _prepared_analyse
+    monkeypatch.setattr(_airs_accounts, "list_accounts", lambda: [])
+    monkeypatch.setattr(airs_history, "finalise_previous_year", lambda ctx: [])
+    monkeypatch.setattr(_airs_price_check, "refresh_price_checks", lambda *a, **kw: {})
+    monkeypatch.setattr(_prepared_analyse, "run_controlled", lambda **kw: {})
+    receipt = {"accounts": [{"portefeuille": "BOOK", "issues": ["missing close"]}]}
+    def audit(*a):
+        raise D.IncompleteRefresh("incomplete audit", receipt)
+    monkeypatch.setattr(S, "_run_body", audit)
+    with pytest.raises(D.IncompleteRefresh) as caught:
+        S._body_dashboard_post_airs()
+    assert caught.value.summary["errors"]["audit"]["receipt"] == receipt
+    assert "missing close" in caplog.text
+
+
+@pytest.mark.parametrize("kind,needs_scan", [("normaal", False), ("meervoudig", False), ("fixed (model)", True), (None, True)])
+def test_freshness_requires_model_scan_only_for_fixed_links(monkeypatch, kind, needs_scan):
+    from routers import _airs_account_links as links, _prepared_analyse as prepared
+    monkeypatch.setattr(D, "supabase", FakeSupabase({
+        "airs_account_roster": [{"portefeuille": "BOOK", "last_seen_at": "2026-10-30T10:00:00Z"}],
+        "airs_model_portfolio": [{"id": 1, "portfolio_type": kind}],
+    }))
+    monkeypatch.setattr(links, "list_account_links", lambda: {"accounts": [
+        {"portefeuille": "BOOK", "model_portfolio_id": 1}]})
+    monkeypatch.setattr(prepared, "read", lambda *_: (1, {}))
+    result = D.freshness(date(2026, 10, 30))
+    issues = result["accounts"][0]["issues"]
+    assert ("model composition not successfully scanned today" in issues) == needs_scan
+
+
+def test_daily_parent_retains_both_failed_child_receipts(monkeypatch):
+    import airs_vermogen
+    import airs_scanner
+    from routers import _airs_portfolio_store as store
+    monkeypatch.setattr(airs_vermogen, "run_airs_vermogen_refresh_sync", lambda **kw: {"status": "ok", "complete_accounts": 1})
+    monkeypatch.setattr(airs_vermogen, "_acquire_session", lambda *_: True)
+    monkeypatch.setattr(airs_vermogen, "_LOCK", SimpleNamespace(release=lambda: None))
+    monkeypatch.setattr(airs_scanner, "fetch_model_portfolios_sync", lambda *_: [{"id": 1}])
+    monkeypatch.setattr(airs_scanner, "count_model_portfolio_holdings_sync", lambda *a, **kw: None)
+    monkeypatch.setattr(store, "save_portfolios", lambda *_: None)
+    pricing = {"results": [{"portefeuille": "BOOK", "error": "missing FX"}]}
+    post = {"errors": {"BOOK": {"opening": "missing valuation"}}}
+    def price(*a):
+        raise D.IncompleteRefresh("pricing incomplete", pricing)
+    def prepare(*a):
+        raise D.IncompleteRefresh("post incomplete", post)
+    monkeypatch.setattr(S, "_body_airs_model_prices", price)
+    monkeypatch.setattr(S, "_run_body", prepare)
+    with pytest.raises(D.IncompleteRefresh) as caught:
+        S._body_airs_vermogen()
+    assert caught.value.summary["pricing"] == pricing
+    assert caught.value.summary["post_airs"] == post
+    assert len(caught.value.summary["errors"]) == 2
+
+
 def test_freshness_reads_actual_dates_and_reports_unmapped_coverage(monkeypatch):
     from routers import _airs_account_links as links, _prepared_analyse as prepared
     db = FakeSupabase({

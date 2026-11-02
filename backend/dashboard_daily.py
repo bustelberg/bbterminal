@@ -202,12 +202,13 @@ def freshness(today=None) -> dict:
     roster = [r for r in roster if str(r.get("last_seen_at") or "") == discovered
               and not is_excluded_portfolio(r["portefeuille"])]
     links = {r["portefeuille"]: r for r in list_account_links()["accounts"]}
-    models = {r["id"]: r for r in rows("airs_model_portfolio", "id,positions_scanned_at,positions_error")}
+    models = {r["id"]: r for r in rows("airs_model_portfolio", "id,portfolio_type,positions_scanned_at,positions_error")}
     checks = {r["portefeuille"]: r for r in rows("airs_price_check", "portefeuille,checked_at")}
     execution = {r["isin"]: r for r in rows("asset_execution", "isin,status,analysis_id,yahoo_symbol,currency")}
     assets = {r["analysis_id"]: r for r in rows("asset_analysis", "analysis_id,price_to")}
     fx_dates: dict[str, str] = {}
     from asset_pipeline.fx import SUBUNIT
+    from airs_scanner import has_fixed_model
     currencies = {SUBUNIT.get(r.get("currency"), (r.get("currency"), 1))[0] for r in execution.values()}
     for code in sorted(currencies - {None, "", "EUR"}):
         rate = (supabase.table("fx_rate").select("rate_date").eq("currency_code", code)
@@ -267,7 +268,9 @@ def freshness(today=None) -> dict:
         pid = (links.get(name) or {}).get("model_portfolio_id")
         if pid is not None:
             model = models.get(pid) or {}
-            if model.get("positions_error") or str(model.get("positions_scanned_at") or "")[:10] < day:
+            kind = model.get("portfolio_type")
+            needs_composition = not kind or has_fixed_model(kind)
+            if needs_composition and (model.get("positions_error") or str(model.get("positions_scanned_at") or "")[:10] < day):
                 issues.append("model composition not successfully scanned today")
             for look in (False, True):
                 if prepared.read("holdings", prepared.holdings_key(pid, "ACWI", look))[1] is None:

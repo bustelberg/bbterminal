@@ -8,19 +8,33 @@ prices/caps plus momentum, then the daily smart fundamentals check. Fundamentals
 prioritise dashboard holdings, deduplicate overlapping indices and fetch only due
 feeds within the regional budget. Child stages retain separate durable run records;
 they have no independent cron timer.
+Fundamentals outcomes use the shared fill's structured receipt: only successfully
+loaded companies count as filled. Subscription exclusions are reported as unavailable,
+consume no quota reserve and do not fail a run. Vendor failures and interrupted or
+quota-deferred work still make the daily pass incomplete; their causes and counts
+remain in each scope's receipt.
 
 At 11:00 Amsterdam, `airs_vermogen_refresh` performs one forced account/model scan.
 Model repricing uses today's stored compositions rather than reading AIRS again.
+Dynamic/non-Fixed links have no model composition and are recorded as not applicable
+for model repricing; their actual instruments remain covered by account price refreshes
+and price checks. A Fixed model with no dated composition is not applicable only after
+a successful scan today. Failed, unattempted and stale Fixed scans still fail the job.
+Pricing receipts retain every model outcome, including reasons for skips and failures.
 `dashboard_post_airs` then saves price checks, assembles current-month reports from
 stored dated valuations and transactions, prepares Analyse views, and records a
 per-portfolio freshness audit. Missing historical month-opening valuations remain
 explicitly incomplete; this workflow never backfills them with extra AIRS downloads.
+The parent AIRS receipt retains failed pricing and post-AIRS receipts, including the
+nested freshness audit. Logs name the failing model or preparation stage and its cause.
 
 `dashboard_freshness` also runs independently at 15:00 Amsterdam. Its structured
 receipt includes actual holding/return/price/FX dates, unmapped instruments, report
 completeness, monthly results, preparation availability and upstream job outcomes.
 Expand the job on `/schedule` to read these receipts. Partial failures are errors,
 not successful zero-row updates. The watchdog cannot initiate extra AIRS passes.
+Nested receipts are available for every job and open automatically for failed runs;
+the compact summary shows collection counts rather than `[object Object]`.
 
 Production daily writers require `SUPABASE_DB_URL` or `DATABASE_URL` for a shared
 Postgres advisory lock. A durable run-history check limits automatic AIRS attempts

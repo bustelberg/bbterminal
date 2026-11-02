@@ -930,8 +930,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
     const dir = sortDir === 'asc' ? 1 : -1;
     const val = (r: AirsPortfolioOverview): string | number | null => (
       sortKey === 'name' ? (r.name ?? '')
-        : sortKey === 'ytd' ? r.ytd_pct ?? null
-          : r.latest_month_pct ?? null);
+        : r.ytd_pct ?? null);
     return [...base].sort((a, b) => {
       const x = val(a), y = val(b);
       if (sortKey === 'name') {
@@ -1060,7 +1059,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
           {/* Narrow fixed action/numeric columns, with the remaining width for names.
               The table scrolls within this card on small screens. */}
           <table className="w-full min-w-[40rem] table-fixed text-[13px] whitespace-nowrap">
-            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /><col className="w-[10rem]" /></colgroup>
+            <colgroup><col className="w-9" /><col className="w-[5.5rem]" /><col /><col className="w-[7rem]" /></colgroup>
             <thead className="bg-elevated/70 [&_th]:bg-elevated/70">
               <tr className="text-fg-subtle text-[11px] uppercase tracking-wider border-b border-neutral-800/40">
                 {/*  A POSITION IN THE LIST, NOT AN ID. It renumbers when the list is filtered
@@ -1072,9 +1071,6 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                 <SortTh label="AIRS YTD" k="ytd" align="right"
                   sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
                   title="AIRS's own cumulatief_rendement for the year — each month's investment return compounded. It accounts for deposits and withdrawals, so it is not just (end value ÷ start value − 1)." />
-                <SortTh label="AIRS Current month" k="month" align="right"
-                  sortKey={sortKey} sortDir={sortDir} onSort={toggleSort}
-                  title="AIRS's rendement from its newest row — the current (latest) month, a different window from the year. Not a rival YTD." />
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-800/20">
@@ -1188,8 +1184,8 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           })()}
                         </div>
                       </td>
-                      {/*  THE THREE COLUMNS THAT ARE THE ANSWER ARE A SIZE UP FROM THE REST
-                          (2026-09-03, on request). Name · YTD · Current month are what this page
+                      {/*  THE MAIN COLUMNS ARE A SIZE UP FROM THE REST.
+                          Name · YTD are what this page
                           is for; the row number and action buttons are chrome
                           around them. At one uniform `text-[13px]` the row read as six equal
                           things and the eye had to pick the important ones out every time.
@@ -1287,18 +1283,10 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
                           what="This account's return so far this year, as AIRS itself reports it."
                           note="cumulatief_rendement — AIRS's own compounded year, net of deposit/withdrawal timing" />
                       </td>
-                      <td className={`px-2 py-2.5 text-[14px] text-right font-mono tabular-nums ${tone(r.latest_month_pct)}`}>
-                        {pct(r.latest_month_pct)}
-                        <Provenance source="airs_att" asOf={r.as_of} fetchedAt={r.fetched_at} kind="copied"
-                          staleReason={r.missing_reports?.includes('att')
-                            ? 'Rendement was missing from the latest AIRS scan' : undefined}
-                          what="What this account returned in the most recent month AIRS has closed."
-                          note="rendement — AIRS's return for the most recent month" />
-                      </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={5} className="px-3 py-3 bg-inset space-y-2">
+                        <td colSpan={4} className="px-3 py-3 bg-inset space-y-2">
                           {isAdmin && (
                             <PortfolioIdentityEditor row={r} onSaved={() => loadOverview()} />
                           )}
@@ -1389,7 +1377,7 @@ export default function PortfolioOverviewPanel({ collection }: { collection: Por
  *  For an ISIN-bearing row it is EDITABLE: an overlaid `<select>` lets a user pin the Class (or
  *  pick "Auto" to revert to the calculated one). The choice is persisted per ISIN and beats the
  *  calculation forever; an overridden badge wears a ring on its dot. Cash (no ISIN) is read-only. */
-type SortKey = 'name' | 'ytd' | 'month';
+type SortKey = 'name' | 'ytd';
 
 /** A sortable column heading. The arrow shows the ACTIVE column only — an indicator on every
  *  header tells the reader nothing about which one is in force. */

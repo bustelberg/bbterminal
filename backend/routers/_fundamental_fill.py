@@ -388,7 +388,7 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
                      prices: bool = False,
                      key_ratios: bool = False,
                      force: bool = False, limit: int = 0, only_due: bool = False,
-                     today: date | None = None) -> str:
+                     today: date | None = None, receipt: dict | None = None) -> str:
     """Fetch the GuruFocus feeds for `ids`, reporting through the job `ctx`. Returns the summary.
 
      `feeds="statements"` NARROWS **TWO** THINGS, AND NARROWING ONLY ONE IS A BUG. A fill makes
@@ -789,6 +789,14 @@ def fill_company_ids(ctx, label: str, ids: list[int], *, feeds: str = "statement
     coverage_note = (f"reported EPS {eps_covered}/{len(work)} · "
                      f"FCF/share {fcf_covered}/{len(work)}")
     ctx.emit("info", f"{label}: refresh receipt — {coverage_note}")
+    # Machine-readable outcome for scheduled callers. Subscription exclusions are expected;
+    # never infer a failed batch by searching its human-readable message for "unavailable".
+    if receipt is not None:
+        receipt.update(offered=offered, selected=len(todo), attempted=ok + failed,
+                       loaded=ok, failed=failed, unavailable=len(refused),
+                       deferred=max(0, len(work) - ok - failed), rows=rows, calls=calls,
+                       failure_samples=failure_samples, failure_reasons=failure_reasons,
+                       unavailable_samples=refusal_samples)
     if not work and refused:
         # A deliberate pre-flight refusal is an answer, not a successful zero-row refresh. This
         # is the common one-company shape for TSX/LSE/ASX holdings outside our GuruFocus plan.

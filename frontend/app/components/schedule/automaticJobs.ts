@@ -148,6 +148,14 @@ export function summaryLine(s: Record<string, unknown> | null | undefined): stri
   if (!s) return '';
   return Object.entries(s)
     .filter(([, v]) => v != null && !(Array.isArray(v) && !v.length))
-    .map(([k, v]) => `${k.replace(/_/g, ' ')} ${Array.isArray(v) ? v.join(', ') : String(v)}`)
+    .map(([k, v]) => {
+      const label = k.replace(/_/g, ' ');
+      if (Array.isArray(v)) {
+        const nested = v.some(item => item !== null && typeof item === 'object');
+        return `${label} ${nested ? `${v.length} entries` : v.join(', ')}`;
+      }
+      if (typeof v === 'object') return `${label} ${Object.keys(v as object).length} entries`;
+      return `${label} ${String(v)}`;
+    })
     .join(' · ');
 }

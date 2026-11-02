@@ -255,6 +255,17 @@ class TestTheCancelledCardSaysWhatHappened:
 
 
 class TestAnAllFailedFillIsAFailedJob:
+    def test_all_failed_fill_retains_structured_vendor_failure(self, rig, monkeypatch):
+        ctx = FakeCtx()
+        monkeypatch.setattr("routers._fundamental_backfill.ingest_company",
+                            _fake_ingest(rig, ctx, rows=0, error="GuruFocus returned no financial periods"))
+        receipt = {}
+        with pytest.raises(UserFacingJobError):
+            fill.fill_company_ids(ctx, "IDX", [1], feeds="smart", receipt=receipt)
+        assert receipt["loaded"] == 0
+        assert receipt["failed"] == receipt["attempted"] == 1
+        assert receipt["failure_samples"]
+
     def test_one_company_failure_raises_with_the_actual_reason(self, rig, monkeypatch):
         ctx = FakeCtx()
         monkeypatch.setattr(
@@ -291,6 +302,13 @@ class TestAnAllFailedFillIsAFailedJob:
 
 
 class TestAnUnavailableCompanyExplainsTheNoOp:
+    def test_subscription_exclusion_is_not_a_failed_fetch(self, rig, monkeypatch):
+        monkeypatch.setattr("routers._fundamental_backfill.eligible", lambda _: "outside our GuruFocus subscription")
+        receipt = {}
+        fill.fill_company_ids(FakeCtx(), "IDX", [1, 2], feeds="smart", receipt=receipt)
+        assert receipt["unavailable"] == 2
+        assert receipt["failed"] == receipt["loaded"] == receipt["calls"] == 0
+
     def test_subscription_reason_translates_exchange_to_country(self):
         from routers._fundamental_backfill import eligible
 

@@ -1797,9 +1797,11 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
     failed: list[str] = []
     n = len(_FUNDAMENTAL_INDICES)
     seen: set[int] = set()
+    receipts: dict[str, dict] = {}
     step(0, n, f"reading quota — usable above the {_FUNDAMENTALS_REGION_FLOOR}-call floor: {room}")
     from dashboard_daily import held_company_ids
     from routers._fundamental_backfill import smart_flags_bulk
+    from index_universe.acwi.exchange_map import is_gf_subscribed_exchange
     labels = ("Dashboard holdings", *_FUNDAMENTAL_INDICES)
     n = len(labels)
     for i, label in enumerate(labels, start=1):
@@ -1816,33 +1818,44 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
         except Exception as e:  # noqa: BLE001
             _log.warning("[benchmark_fundamentals] %s: could not read membership: %s: %s",
                          label, type(e).__name__, e)
-            failed.append(f"{label}: {type(e).__name__}")
+            failed.append(f"{label}: {type(e).__name__}: {e}")
             continue
         keep: list[int] = []
+        quota_deferred = 0
         for cid, exch in pairs:
             needed = sum(bool(value) for value in flags.get(cid, {}).values())
             if not needed:
                 continue
+            # The shared fill records subscription exclusions without vendor requests. They
+            # must not consume the regional reserve and defer companies we can actually fetch.
+            if not exch or not is_gf_subscribed_exchange(exch):
+                keep.append(cid)
+                continue
             region = _region_for_exchange(exch)
             if room.get(region, 0) < needed + 1:
                 deferred += 1
+                quota_deferred += 1
                 continue
             room[region] -= needed + 1
             keep.append(cid)
         if not keep:
-            _log.warning("[benchmark_fundamentals] %s: no quota left for any of its regions", label)
-            step(i, n, f"{label} — deferred, no quota left for any of its regions")
+            receipts[label] = {"loaded": 0, "quota_deferred": quota_deferred}
+            step(i, n, f"{label} — {quota_deferred} deferred by quota" if quota_deferred
+                 else f"{label} — no feeds due")
             continue
         try:
             step(i - 1, n, f"{label} — filling {len(keep)} constituent(s)…")
             # `smart` makes the weekly job evaluate each feed on its own cadence: filings wait for
             # a due period, while analyst estimates (which drive EGM growth) refresh when their
             # source check becomes stale. `only_due` would suppress that second path.
-            receipt = fill_company_ids(log_ctx, label, keep, feeds="smart")
-            if " failed" in receipt or "unavailable:" in receipt:
-                failed.append(f"{label}: {receipt}")
-            filled += len(keep)
-            step(i, n, f"{label} — {len(keep)} filled")
+            outcome: dict = {"quota_deferred": quota_deferred}
+            receipts[label] = outcome
+            message = fill_company_ids(log_ctx, label, keep, feeds="smart", receipt=outcome)
+            if outcome.get("failed"):
+                failed.append(f"{label}: {message}")
+            filled += outcome.get("loaded", 0)
+            deferred += outcome.get("deferred", 0)
+            step(i, n, message)
         except _Cancelled:
             # Cancellation is control flow, not an index failure.  Let
             # `_run_body` translate it to the registry's `JobCancelled` so
@@ -1852,16 +1865,21 @@ def _body_benchmark_fundamentals(ctx=None) -> tuple[str, dict]:
             raise _Cancelled(str(e)) from e
         except Exception as e:  # noqa: BLE001
             _log.warning("[benchmark_fundamentals] %s failed: %s: %s", label, type(e).__name__, e)
-            failed.append(f"{label}: {type(e).__name__}")
-            step(i, n, f"{label} — FAILED: {type(e).__name__}")
+            outcome = receipts.setdefault(label, {})
+            outcome["error"] = str(e)
+            filled += outcome.get("loaded", 0)
+            deferred += outcome.get("deferred", 0)
+            failed.append(f"{label}: {type(e).__name__}: {e}")
+            step(i, n, f"{label} — FAILED: {e}")
 
     msg = f"{filled} constituents filled"
     if deferred:
-        msg += (f" · {deferred} deferred to next quarter "
-                f"(region at the {_FUNDAMENTALS_REGION_FLOOR}-call floor)")
+        msg += f" · {deferred} deferred to a later daily pass (quota reserve or vendor interruption)"
     if failed:
         msg += f" · failed {', '.join(failed)}"
-    summary = {"filled": filled, "deferred": deferred, "failed": len(failed), "errors": failed}
+    summary = {"filled": filled, "deferred": deferred, "failed": len(failed), "errors": failed,
+               "unavailable": sum(r.get("unavailable", 0) for r in receipts.values()),
+               "results": receipts}
     if failed or deferred:
         _require_complete(msg, summary)
     return msg, summary
@@ -1976,18 +1994,25 @@ def _body_airs_model_prices(ctx=None) -> tuple[str, dict]:
         try:
             result = refresh_portfolio(pid, lambda kind, **kw: step(done["n"], len(paired), kw.get("message", "")),
                                        stored_composition=True)
-            results.append({"portefeuille": account, "model_status": "ok", "model": result})
+            results.append({"portefeuille": account, "model_portfolio_id": pid,
+                            "model_status": "skipped" if result.get("status") == "skipped" else "ok",
+                            "model": result})
         except Exception as exc:
-            results.append({"portefeuille": account, "model_status": "error", "error": str(exc)})
+            results.append({"portefeuille": account, "model_portfolio_id": pid,
+                            "model_status": "error", "error": str(exc)})
+            _log.exception("[scheduler] AIRS model pricing failed for %s (model %s): %s", account, pid, exc)
         _on_result(account, results[-1])
     ok = sum(1 for r in results if r.get("model_status") == "ok")
     bad = [r.get("portefeuille") for r in results if r.get("model_status") not in ("ok", "skipped")]
-    summary = {"portfolios": len(paired), "priced": ok, "failed": len(bad),
-               "failed_names": bad[:10]}
+    skipped = sum(r.get("model_status") == "skipped" for r in results)
+    summary = {"portfolios": len(paired), "priced": ok, "skipped": skipped, "failed": len(bad),
+               "failed_names": bad, "results": results}
     msg = f"{ok}/{len(paired)} model portfolio(s) repriced"
+    if skipped:
+        msg += f"; {skipped} without a Fixed composition (not applicable)"
     if bad:
         msg += f" — {len(bad)} FAILED: {', '.join(str(b) for b in bad[:5])}"
-        _require_complete(msg, {**summary, "results": results})
+        _require_complete(msg, summary)
     return msg, summary
 
 
@@ -2150,9 +2175,11 @@ def _body_dashboard_post_airs(ctx=None) -> tuple[str, dict]:
     try:
         _run_body("dashboard_freshness", ctx)
     except Exception as exc:
-        failures["audit"] = str(exc)
+        failures["audit"] = {"message": str(exc), "receipt": getattr(exc, "summary", None)}
     summary["errors"] = failures
     if failures:
+        for stage, reason in failures.items():
+            _log.error("[scheduler] Post-AIRS %s failed: %s", stage, reason)
         _require_complete("Post-AIRS preparation incomplete; see per-portfolio receipt", summary)
     return "Price checks, monthly reports and Analyse prepared; freshness verified", summary
 
@@ -2304,6 +2331,7 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
         except _Cancelled:
             raise
         except Exception as e:
+            summary["pricing"] = getattr(e, "summary", {"error": str(e)})
             failures.append(f"pricing: {type(e).__name__}: {e}")
             _log.exception(
                 "[scheduler] AIRS paired-model pricing failed: %s: %s", type(e).__name__, e,
@@ -2311,6 +2339,7 @@ def _body_airs_vermogen(ctx=None) -> tuple[str, dict]:
       try:
           _run_body("dashboard_post_airs", ctx)
       except Exception as exc:
+          summary["post_airs"] = getattr(exc, "summary", {"error": str(exc)})
           failures.append(f"post-AIRS: {exc}")
       if failures:
           _require_complete(" · ".join(failures)[:400], {**summary, "errors": failures})

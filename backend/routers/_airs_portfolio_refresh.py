@@ -392,14 +392,30 @@ def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None,
     started = time.time()
     emit("progress", message=f"[portfolio {portfolio_id}] refresh started")
     if stored_composition:
-        model = (supabase.table("airs_model_portfolio").select("positions_datum,positions_error,positions_scanned_at")
+        model = (supabase.table("airs_model_portfolio").select("portfolio_type,positions_datum,positions_error,positions_scanned_at")
                  .eq("id", portfolio_id).limit(1).execute().data or [])
-        if not model or not model[0].get("positions_datum") or model[0].get("positions_error"):
+        if not model:
+            raise RuntimeError(f"Model {portfolio_id} does not exist")
+        from airs_scanner import has_fixed_model
+        # Dynamic links are valid, but the scanner deliberately downloads compositions only
+        # for Fixed models. Their actual holdings are covered by the account price refresh.
+        kind = model[0].get("portfolio_type")
+        if kind and not has_fixed_model(kind):
+            return {"portfolio_id": portfolio_id, "status": "skipped",
+                    "note": "Dynamic portfolio has no Fixed composition to reprice"}
+        if model[0].get("positions_error"):
+            raise RuntimeError(f"Model {portfolio_id}: {model[0]['positions_error']}")
+        if not model[0].get("positions_scanned_at"):
             raise RuntimeError(f"Model {portfolio_id} has no usable stored composition")
         if str(model[0].get("positions_scanned_at") or "")[:10] < date.today().isoformat():
             raise RuntimeError(f"Model {portfolio_id} was not successfully scanned today")
         positions = (supabase.table("airs_model_portfolio_position").select("isin,fonds,percentage")
                      .eq("portfolio_id", portfolio_id).execute().data or [])
+        if not positions and not model[0].get("positions_datum"):
+            return {"portfolio_id": portfolio_id, "status": "skipped",
+                    "note": "Today's AIRS scan found no dated Fixed composition"}
+        if not model[0].get("positions_datum"):
+            raise RuntimeError(f"Model {portfolio_id} has holdings without a composition date")
         datum = model[0]["positions_datum"]
         comp = {"datum": datum, "previous_datum": datum, "rows": positions}
         emit("phase", phase="composition", message="1/5 Composition — using the completed daily AIRS scan")
@@ -409,7 +425,8 @@ def refresh_portfolio(portfolio_id: int, emit, wait: float | None = None,
     isins = sorted({r["isin"] for r in rows if r.get("isin")})
     if not isins:
         emit("progress", message="  no ISIN-bearing holdings — nothing to price")
-        return {"portfolio_id": portfolio_id, "note": "the composition has no instruments"}
+        return {"portfolio_id": portfolio_id, "status": "skipped",
+                "note": "the composition has no instruments"}
 
     anchor = ytd_anchor_for(comp["datum"])
     ex = _instruments(isins, emit)

@@ -2476,7 +2476,7 @@ def _variant_bands(name: str | None, omschrijving: str | None) -> dict:
 
     variant = portfolio_variant(name, omschrijving)
     if not variant:
-        _log.warning("[analysis] %r is not offered at a risk profile — no allocation bands drawn",
+        _log.debug("[analysis] %r is not offered at a risk profile — no allocation bands drawn",
                      name)
         return {"variant": None, "bands": [], "risk_profile_policy": None}
     bands = [b for b in load_bands()
