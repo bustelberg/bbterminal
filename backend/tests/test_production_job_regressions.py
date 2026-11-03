@@ -92,6 +92,21 @@ def test_daily_queue_pause_observes_shared_lease(monkeypatch, acquired, active):
     assert conn.execute.call_count == (2 if acquired else 1)
 
 
+def test_scheduled_fx_sync_stops_at_completed_market_day(monkeypatch):
+    import scheduler
+    import airs_vermogen
+    from momentum import data
+    from datetime import date
+    monkeypatch.setattr(airs_vermogen, 'latest_completed_market_date', lambda: '2026-11-02')
+    ends = []
+    def sync(db, currencies, start, end, **kwargs):
+        ends.append(end)
+        return {}
+    monkeypatch.setattr(data, 'sync_fx_rates_to_db', sync)
+    scheduler._body_fx_sync()
+    assert ends == [date(2026, 11, 2)]
+
+
 def test_completed_airs_boundary_does_not_request_today(monkeypatch):
     import airs_scanner
     import airs_vermogen as vermogen

@@ -1960,6 +1960,7 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
     than busy, and was reported as exactly that. The house rule is that a long job emits a first
     line BEFORE any work; a single blocking call is precisely the shape that forgets to."""
     from datetime import date as _date  # noqa: PLC0415
+    from airs_vermogen import latest_completed_market_date  # noqa: PLC0415
 
     from deps import supabase  # noqa: PLC0415
     from fx_rates import ECB_CURRENCIES, _USD_PEGS  # noqa: PLC0415
@@ -1992,7 +1993,7 @@ def _body_fx_sync(ctx=None) -> tuple[str, dict]:
         step(completed, len(currencies), message)
 
     status = sync_fx_rates_to_db(
-        supabase, currencies, _date(2000, 1, 1), _date.today(), on_progress=_progress,
+        supabase, currencies, _date(2000, 1, 1), _date.fromisoformat(latest_completed_market_date()), on_progress=_progress,
     )
     synced = sum(1 for s in status.values() if s.get("status") == "synced")
     errors = sum(1 for s in status.values() if s.get("status") == "error")
