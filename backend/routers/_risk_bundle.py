@@ -2,6 +2,31 @@
 from datetime import date
 import hashlib
 import json
+import time
+
+
+class _SourceChanged(Exception):
+    pass
+
+
+def _settle(ctx):
+    """Wait briefly for the shared source writer to settle, with cancellation checks."""
+    from jobs import UserFacingJobError
+    started = stable = time.monotonic()
+    from routers._risk_read import source_revision
+    revision = source_revision()
+    if ctx:
+        ctx.progress(0, 6, 'Waiting for the latest data…')
+    while time.monotonic() - started < 30:
+        if ctx:
+            ctx.check()
+        time.sleep(.25)
+        current = source_revision()
+        if current != revision or current[1] is None:
+            revision, stable = current, time.monotonic()
+        elif time.monotonic() - stable >= .5:
+            return
+    raise UserFacingJobError('Risk data is still updating. Please try again shortly.')
 
 
 def identity(holdings, policy):
@@ -13,12 +38,14 @@ def identity(holdings, policy):
 
 def read(holdings, policy):
     from routers import _prepared_analyse as prepared
-    return prepared.read('holdings', identity(holdings, policy))[1]
+    from routers._risk_read import source_revision
+    scope, _ = source_revision()
+    return prepared.read(scope, identity(holdings, policy))[1]
 
 
-def prepare(holdings, policy, ctx=None):
+def _prepare_once(holdings, policy, ctx=None):
     from routers import _prepared_analyse as prepared
-    from routers._risk_read import read as calculate
+    from routers._risk_read import read as calculate, source_revision
     from routers._active_share import compute_active_share
     from routers._portfolio_concentration import compute_concentration
     from routers._annual_portfolio_simulation import compute_simulation
@@ -26,7 +53,8 @@ def prepare(holdings, policy, ctx=None):
     from routers._portfolio_volatility import compute_volatility
     from routers._portfolio_drawdown import compute_drawdown
     from routers._tracking_error import MIN_PRELIMINARY_DAILY_OBS
-    version, code = prepared.source_version('holdings'), prepared.code_version()
+    scope, version = source_revision()
+    code = prepared.code_version()
     if version is None:
         raise RuntimeError('Risk storage is temporarily unavailable. Please try again shortly.')
     history = {'start_date': '2021-01-01', 'years': max(1, date.today().year - 2021 + 1)}
@@ -47,7 +75,7 @@ def prepare(holdings, policy, ctx=None):
     for index, (name, fn, args, kwargs) in enumerate(tasks):
         if ctx:
             ctx.check()
-            ctx.progress(index, len(tasks), 'Preparing portfolio risk…')
+            ctx.progress(index, len(tasks), 'Loading risk data…')
         answer = calculate(fn, *args, **kwargs)
         if name == 'volatility' and isinstance(answer, dict) and not answer.get('available'):
             daily = calculate(fn, holdings, 'ACWI', 'daily', **kwargs,
@@ -55,9 +83,24 @@ def prepare(holdings, policy, ctx=None):
             if daily.get('available'):
                 answer = daily
         views[name] = answer
+        if prepared.source_version(scope) != version or prepared.code_version() != code:
+            raise _SourceChanged()
     if ctx:
         ctx.check()
     if all(isinstance(answer, dict) for answer in views.values()):
-        if not prepared.save('holdings', identity(holdings, policy), {'views': views}, version, code):
-            raise RuntimeError('Portfolio data changed while preparing risk. Please try again.')
+        if not prepared.save(scope, identity(holdings, policy), {'views': views}, version, code):
+            raise _SourceChanged()
     return views
+
+
+def prepare(holdings, policy, ctx=None):
+    """Restart interrupted generations automatically; never publish mixed results."""
+    from jobs import UserFacingJobError
+    for attempt in range(3):
+        try:
+            return _prepare_once(holdings, policy, ctx)
+        except _SourceChanged:
+            if attempt == 2:
+                break
+            _settle(ctx)
+    raise UserFacingJobError('Risk data is still updating. Please try again shortly.')

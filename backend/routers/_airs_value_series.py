@@ -177,7 +177,7 @@ _WEIGHTED_BENCHMARK_LABEL = "Weighted benchmark return (YTD) €"
 
 
 def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
-                               dates: list[str]) -> dict:
+                               dates: list[str], *, read_only: bool = False) -> dict:
     """The scorecard's allocation benchmark, sampled on the book curve's dates.
 
     The weights are the reviewed Stocks/Bonds policy. Every invested sleeve must have a price at
@@ -193,7 +193,7 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
     from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
 
     sleeves = {
-        name: etf_return_series(proxy, anchor, dates)
+        name: etf_return_series(proxy, anchor, dates, **({'read_only': True} if read_only else {}))
         for name, proxy in _WEIGHTED_BENCHMARK_SLEEVES.items()
         if proxy
     }
@@ -246,10 +246,10 @@ def _weighted_benchmark_series(weights: dict[str, float], anchor: str,
 
 
 def value_series(portefeuille: str, benchmark_label: str | None = None,
-                 benchmark_weights: dict[str, float] | None = None) -> dict:
+                 benchmark_weights: dict[str, float] | None = None, *, returns_only: bool = False) -> dict:
     """`{points, flows, …}` — the book's value on every date we hold a snapshot for."""
-    rows = _page("airs_holding", "as_of_date,current_value_eur",
-                 eq={"portefeuille": portefeuille}, order="as_of_date")
+    rows = [] if returns_only else _page("airs_holding", "as_of_date,current_value_eur",
+                                        eq={"portefeuille": portefeuille}, order="as_of_date")
 
     by_date: dict[str, float] = defaultdict(float)
     counts: dict[str, int] = defaultdict(int)
@@ -311,12 +311,12 @@ def value_series(portefeuille: str, benchmark_label: str | None = None,
     benchmark: dict = {}
     if benchmark_weights and anchor and returns:
         benchmark = _weighted_benchmark_series(
-            benchmark_weights, anchor, [str(point["date"]) for point in returns])
+            benchmark_weights, anchor, [str(point["date"]) for point in returns], **({'read_only': True} if returns_only else {}))
     if not benchmark and benchmark_label and anchor and returns:
         from routers._benchmark_etf import etf_return_series  # noqa: PLC0415
 
         benchmark = etf_return_series(
-            benchmark_label, anchor, [str(point["date"]) for point in returns])
+            benchmark_label, anchor, [str(point["date"]) for point in returns], **({'read_only': True} if returns_only else {}))
     return {
         "portefeuille": portefeuille,
         "points": points,

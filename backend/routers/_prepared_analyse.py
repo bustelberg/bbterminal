@@ -110,8 +110,11 @@ def overview(payload: dict) -> dict:
               'book_portefeuille', 'book_note', 'benchmark', 'weight_basis', 'weight_note',
               'allocation', 'returns', 'holdings', 'variant', 'bands', 'risk_profile_policy',
               'looked_through_pct', 'opaque_pct', 'looked_through')
+    realised = payload.get('realised')
+    summary = {**{key: realised.get(key) for key in ('available', 'book_ytd_pct', 'reconciles')},
+               'positions': [deepcopy(row) for row in realised.get('positions', []) if row.get('closed_out')]} if realised else None
     return {**{key: deepcopy(payload[key]) for key in fields if key in payload},
-            'axes': [], 'book_holdings': [], 'realised': None, 'details_pending': True}
+            'axes': [], 'book_holdings': [], 'realised': summary, 'details_pending': True}
 
 
 def prepare(*, portfolio_ids: list[int] | None = None, benchmark: bool = True,

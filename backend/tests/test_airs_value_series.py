@@ -81,6 +81,30 @@ class TestTheValueIsTheSumOfWhatWeStored:
         assert sum(p["value_eur"] for p in out["points"]) == 1200.0
 
 
+def test_opening_curve_skips_holdings_history_and_vendor_refresh(store, monkeypatch):
+    from routers import _benchmark_etf as etf
+
+    m, seed = store
+    seed('airs_performance', [_perf('B', '2026-01-31', beginvermogen=100,
+                                 eindvermogen=105, cumulatief_rendement=5)])
+    page = m._page
+
+    def read(table, *args, **kwargs):
+        assert table != 'airs_holding', 'return chart needs no historical holding rows'
+        return page(table, *args, **kwargs)
+
+    def benchmark(_label, _anchor, _dates, *, read_only):
+        assert read_only
+        return {}
+
+    monkeypatch.setattr(m, '_page', read)
+    monkeypatch.setattr(etf, 'etf_return_series', benchmark)
+    result = m.value_series('B', 'SP500', returns_only=True)
+    assert result['return_pct'] == 5
+    assert result['returns'][-1]['date'] == '2026-01-31'
+    assert result['returns'][-1]['cum_pct'] == 5.0
+
+
 class TestTheFlowsTravelWithIt:
     def test_a_funding_is_reported_so_it_cannot_be_drawn_as_performance(self, store):
         m, seed = store

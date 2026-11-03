@@ -115,21 +115,48 @@ def test_benchmark_restores_numeric_asset_identity_keys(store, monkeypatch):
     assert A._benchmark_weights('ACWI', None)['issuer_by_asset'] == {42: 'issuer'}
 
 
-def test_opening_serves_complete_prepared_holdings_without_another_detail_request(store, monkeypatch):
+def test_opening_defers_prepared_holdings_but_keeps_sold_contributions(store, monkeypatch):
     from routers import _airs_portfolio_analysis as A, _analysis_cache as cache
     payload = {'portfolio_id': 1, 'benchmark': 'ACWI', 'returns': {'portfolio_ytd_pct': 3},
                'book_holdings': [{'name': 'Stock', 'weight_now_pct': 70}],
-               'realised': {'total': 2}, 'details_pending': False}
+               'realised': {'available': True, 'reconciles': True, 'book_ytd_pct': 3,
+                            'positions': [{'closed_out': True, 'contribution_pp': -1},
+                                          {'closed_out': False, 'contribution_pp': 4}]}, 'details_pending': False}
     assert P.save('holdings', P.holdings_key(1, 'ACWI', False), payload, 10, 'code-v1')
     monkeypatch.setattr(A, 'compute_portfolio_analysis', Mock(side_effect=AssertionError('recomputed')))
     monkeypatch.setattr(cache, 'fingerprint', Mock(side_effect=AssertionError('unnecessary fingerprint')))
     result = asyncio.run(A.compute_portfolio_analysis_async(
         1, 'ACWI', 'book', 'book', include_axes=False,
         overview_only=True, include_holding_risk=False))
-    assert result['book_holdings'] == payload['book_holdings']
-    assert result['realised'] == payload['realised']
-    assert result['details_pending'] is False
+    assert result['book_holdings'] == []
+    assert result['realised']['positions'] == [{'closed_out': True, 'contribution_pp': -1}]
+    assert result['realised']['reconciles'] is True
+    assert result['details_pending'] is True
     assert 'prepared_lookup' in result['timings_ms']
+
+
+def test_cold_opening_and_holdings_share_one_complete_calculation(store, monkeypatch):
+    from routers import _airs_portfolio_analysis as A, _analysis_cache as cache
+    monkeypatch.setattr(cache, 'fingerprint', lambda: 'cold-opening')
+    saved = {}
+    monkeypatch.setattr(cache, 'get', lambda key, _fp: saved.get(key))
+    monkeypatch.setattr(cache, 'put', lambda key, _fp, result: saved.update({key: result}))
+    payload = {'allocation': [{'contribution_pp': 1}], 'book_holdings': [{'name': 'Stock'}],
+               'realised': {'available': True, 'positions': [{'closed_out': True, 'contribution_pp': -1}]}}
+    calculate = Mock(return_value=payload)
+    monkeypatch.setattr(A, 'compute_portfolio_analysis', calculate)
+
+    async def run():
+        opening = await A.compute_portfolio_analysis_async(
+            1, 'ACWI', 'book', 'book', include_axes=False, overview_only=True, include_holding_risk=False)
+        assert opening['allocation'] == payload['allocation']
+        assert opening['realised']['positions'] == payload['realised']['positions']
+        assert opening['book_holdings'] == [] and opening['details_pending']
+        details = await A.compute_portfolio_analysis_async(
+            1, 'ACWI', 'book', 'book', include_axes=False, include_holding_risk=False)
+        assert details['book_holdings'] == payload['book_holdings']
+    asyncio.run(run())
+    calculate.assert_called_once()
 
 
 def test_process_code_is_frozen_but_live_config_changes_invalidate(monkeypatch, tmp_path):

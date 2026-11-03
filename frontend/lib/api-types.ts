@@ -13172,22 +13172,7 @@ export interface components {
             /** Ticker */
             ticker?: string | null;
         };
-        /**
-         * ModelPortfolioAnalysis
-         * @description A model portfolio's composition beside a benchmark's, on ONE set of buckets.
-         *
-         *     Both sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN — the
-         *     portfolio lives in the ISIN world and the benchmark in the `company` world, and putting two
-         *     different sector taxonomies in one chart invents differences that are not there. (All 493
-         *     SP500 members are present in `asset_grid` with a sector, so nothing is lost.)
-         *
-         *      FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's
-         *     listing tells you nothing about what it holds — 24 of the 26 held ETFs have a "sector" of
-         *     literally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and
-         *     quoted in EUR it still holds mostly USD assets. So every fund folds into "Unclassified" on ALL
-         *     THREE axes — a 40%-ETF portfolio shows a 40% Unclassified bar meaning "we cannot see inside
-         *     this", true and more useful than a confident wrong split.
-         */
+        /** ModelPortfolioAnalysis */
         ModelPortfolioAnalysis: {
             /**
              * Allocation
@@ -13308,6 +13293,10 @@ export interface components {
             /** Portfolio Id */
             portfolio_id?: number | null;
             realised?: components["schemas"]["RealisedBlock"] | null;
+            /** Return Series */
+            return_series?: {
+                [key: string]: unknown;
+            } | null;
             returns?: components["schemas"]["PortfolioAnalysisReturns"] | null;
             /** Risk Profile Policy */
             risk_profile_policy?: {
@@ -18469,7 +18458,9 @@ export interface operations {
     };
     airs_portfolio_risk_bundle_api_airs_portfolio_risk_bundle_post: {
         parameters: {
-            query?: never;
+            query?: {
+                prepare_if_missing?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;

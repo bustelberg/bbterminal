@@ -405,6 +405,7 @@ export async function attachRunningJobs() {
           id: string; kind: string; label: string; status: JobStatus;
         }[];
         for (const j of rows) {
+          if (j.kind === 'airs.risk-bundle') continue; // Analyse warms Risk silently; its panel owns loading/errors.
           if (j.status !== 'running') continue;   // finished ones are history, not a toast
           if (jobsStore.get().jobs.some((x) => x.id === j.id)) continue;
           void watchJob(j.id, j.label, 0, { kind: j.kind, label: j.label });

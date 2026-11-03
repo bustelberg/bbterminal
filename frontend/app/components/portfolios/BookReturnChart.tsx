@@ -34,17 +34,9 @@
  * says — over years. This is what the book actually returned, on the dates AIRS has valued it.
  * Different objects, which is why this sits at the top of the modal rather than beside it.
  *
- *  Its own request. The Analyse modal is ONE payload with no partial paint, so its wall clock is
- * the reader's wait; a chart nobody has scrolled to yet does not belong in it. This fetches itself,
- * exactly as the Risk panels do.
- *
- *  And fetching itself is why it needs `refreshSeq` (2026-09-03, reported: the chip read +3.44%
- * and the chart +3.05%). The two ARE one column of one table — that part was never wrong — but the
- * modal's Refresh re-runs the AIRS scrape, which writes a NEW `airs_performance` row, and only the
- * modal's own payload was re-read afterwards. This effect depended on `portfolioId` alone, so the
- * chart kept the response it fetched when the modal opened: the chip moved to the row the scrape
- * had just written and the chart still held the one before it. "By construction" is a claim about
- * the COLUMN, and it says nothing about WHEN each side last read it.
+ * Analyse supplies this series in its opening bundle, so chart and headline arrive together.
+ * Standalone callers may omit `series`; their fallback fetch follows `refreshSeq` so a new AIRS
+ * observation cannot leave the chart behind the headline.
  *
  *  It shares the scorecard's row, right of the excess tile, so its height is set against three
  * chips rather than against what a chart would like: 104px of plot, one line of chrome above and
@@ -159,14 +151,17 @@ export default function BookReturnChart(
     benchmark,
     benchmarkBlocks = [],
     policyWeights,
-  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; policyWeights?: Record<string, number> | null },
+    series,
+  }: { portfolioId: number; refreshSeq?: number; benchmark: string; benchmarkBlocks?: WeightedBenchmarkBlock[]; policyWeights?: Record<string, number> | null; series?: BookValueSeries | null },
 ) {
-  const [data, setData] = useState<BookValueSeries | null>(null);
+  const [loaded, setData] = useState<BookValueSeries | null>(null);
+  const data = series === undefined ? loaded : series;
   const [err, setErr] = useState<string | null>(null);
   const weights = weightedBenchmarkWeights(benchmarkBlocks, policyWeights);
   const weightsQuery = weights ? `&benchmark_weights=${encodeURIComponent(JSON.stringify(weights))}` : '';
 
   useEffect(() => {
+    if (series !== undefined) return;
     let alive = true;
     void (async () => {
       setData(null); setErr(null);
@@ -185,14 +180,14 @@ export default function BookReturnChart(
       }
     })();
     return () => { alive = false; };
-  }, [portfolioId, refreshSeq, benchmark, weightsQuery]);
+  }, [portfolioId, refreshSeq, benchmark, weightsQuery, series]);
 
   // Do not trust storage order for a charting rule. The server normally returns periods in date
   // order, but the latest observation must mean the latest DATE, never merely the final array
   // element (which could otherwise put a backfilled mid-month row back on the graph).
   const all = [...(data?.returns ?? [])].sort((a, b) => a.date.localeCompare(b.date));
-  if (err) return <p className="text-[12px] text-neg-300">{err}</p>;
-  if (!data) return <p className="text-[12px] text-fg-subtle">Loading the book’s return…</p>;
+  if (series === undefined && err) return <p className="text-[12px] text-neg-300">{err}</p>;
+  if (!data) return <p className="text-[12px] text-fg-subtle">{series === undefined ? 'Loading…' : 'No return available.'}</p>;
   //  The anchor alone is not a line. The server refuses to emit a lone pinned zero for exactly
   // that reason, so an empty series here means AIRS has published no return for this book yet —
   // or there is no book at all, which `reason` says.

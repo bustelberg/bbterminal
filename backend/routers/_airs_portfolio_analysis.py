@@ -4189,12 +4189,18 @@ async def compute_portfolio_analysis_async(portfolio_id: int,
         if prepared_revision is not None:
             prepared_code = prepared.code_version()
         if saved is not None:
-            # The prepared payload already contains the holdings. Do not throw them away and
-            # make the browser request the same snapshot again after painting the scorecard.
-            # Optional per-holding history is deliberately not part of this prepared payload.
-            opening = prepared.overview(saved) if overview_only and include_holding_risk else saved
+            # Serve the small opening bundle first, then the same prepared snapshot's Holdings
+            # after paint. Optional per-holding history is not part of this prepared payload.
+            opening = prepared.overview(saved) if overview_only else saved
             return {**opening,
                     'timings_ms': {'prepared_lookup': round((time.perf_counter() - started) * 1000)}}
+        if overview_only:
+            # A cold opening must still contain the ledger-backed allocation/sold contributions.
+            # Reuse the full detail cache for the following request rather than calculating twice.
+            full = await compute_portfolio_analysis_async(
+                portfolio_id, benchmark_label, weight_by, source, bucket_filter, look_through,
+                include_axes, overview_only=False, include_holding_risk=False)
+            return {**prepared.overview(full), 'timings_ms': full.get('timings_ms', {})}
     key = (portfolio_id, benchmark_label, weight_by, source, bucket_filter, look_through, include_axes,
            COMPOSITION_BASIS, overview_only, include_holding_risk, prepared_revision, prepared_code)
     # The fingerprint is a database read, so it goes to a thread like everything else here.

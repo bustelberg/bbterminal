@@ -3,22 +3,28 @@
 import { useContext, useEffect, useState } from 'react';
 import { RiskBundleContext } from './riskBundleContext';
 import { traceError } from '../../../lib/debugTrace';
-import { readGeneration } from '../../../lib/readCache';
+import { readGeneration, READ_TTL_MS } from '../../../lib/readCache';
 
 type Loaded<T> = { key: string; value: T };
-type Cached = { generation: number; value: unknown };
+type Cached = { generation: number; value: unknown; expiresAt: number };
 
 const results = new Map<string, Cached>();
+
+export function seedRiskResult(key: string, value: unknown, generation: number): void {
+  if (generation === readGeneration()) results.set(key, { generation, value, expiresAt: Date.now() + READ_TTL_MS });
+}
 
 function cached<T>(key: string): T | null {
   const hit = results.get(key);
   if (!hit) return null;
-  if (hit.generation !== readGeneration()) {
+  if (hit.generation !== readGeneration() || hit.expiresAt <= Date.now()) {
     results.delete(key);
     return null;
   }
   return hit.value as T;
 }
+
+export const readRiskResult = cached;
 
 /**
  * Parsed Risk answers, keyed by the exact URL and POST body.
@@ -58,7 +64,7 @@ export function useRiskResult<T>(key: string, load: () => Promise<T>, traceScope
     void load().then((value) => {
       if (cancelled) return;
       const answer = value as { available?: boolean };
-      if (answer?.available !== false) results.set(key, { generation: readGeneration(), value });
+      if (answer?.available !== false) seedRiskResult(key, value, readGeneration());
       setFailure(null);
       setLoaded({ key, value });
     }).catch((e: unknown) => {

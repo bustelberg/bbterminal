@@ -68,6 +68,55 @@ def test_prepared_integer_policy_matches_api_float_policy(cache):
     assert len(calls) == 1
 
 
+def test_immediate_source_revision_invalidates_memory_even_before_statistics_catch_up(cache, monkeypatch):
+    saved, calls = {}, []
+    def leg(key, load):
+        if key not in saved:
+            saved[key] = load()
+        return saved[key]
+    monkeypatch.setattr(C, 'leg', leg)
+    def compute():
+        calls.append(1)
+        return {'available': True, 'revision': cache.tables['analyse_source_revision'][0]['version']}
+    assert R.read(compute)['revision'] == 1
+    cache.tables['analyse_source_revision'][0]['version'] = 2
+    assert R.read(compute)['revision'] == 2
+    assert len(calls) == 2
+
+
+def test_shared_history_distinguishes_immediate_revisions_with_identical_statistics(monkeypatch):
+    monkeypatch.setattr(C, 'fingerprint', lambda: 'unchanged-pg-statistics')
+    calls = []
+    @R.shared_series
+    def build(holdings):
+        calls.append(1)
+        return len(calls)
+    repair = R.ALLOW_REPAIR.set(False)
+    revision = R.SOURCE_REVISION.set(100)
+    try:
+        assert build([]) == 1
+        R.SOURCE_REVISION.set(101)
+        assert build([]) == 2
+    finally:
+        R.SOURCE_REVISION.reset(revision)
+        R.ALLOW_REPAIR.reset(repair)
+
+
+def test_price_cache_does_not_reuse_old_prices_during_the_same_five_minute_bucket():
+    from routers._tracking_error import _risk_prices
+    loader = Mock(side_effect=[{'price': 100}, {'price': 110}])
+    revision = R.SOURCE_REVISION.set(200)
+    try:
+        assert _risk_prices(('A',), 6, '2026-11-03', 1, loader) == {'price': 100}
+        assert _risk_prices(('A',), 6, '2026-11-03', 1, loader) == {'price': 100}
+        R.SOURCE_REVISION.set(201)
+        assert _risk_prices(('A',), 6, '2026-11-03', 1, loader) == {'price': 110}
+        assert loader.call_count == 2
+    finally:
+        R.SOURCE_REVISION.reset(revision)
+        _risk_prices.cache_clear()
+
+
 def test_concurrent_cold_reads_compute_once(cache):
     entered, release = Event(), Event()
     calls = []

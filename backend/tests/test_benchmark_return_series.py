@@ -5,13 +5,19 @@ import pytest
 from tests._fake_supabase import FakeSupabase
 
 
-def test_proxy_curve_uses_the_portfolios_exact_dates_and_prior_market_closes(monkeypatch):
+@pytest.mark.parametrize('read_only', [False, True])
+def test_proxy_curve_uses_the_portfolios_exact_dates_and_prior_market_closes(monkeypatch, read_only):
     from routers import _benchmark_etf as etf
     from routers import _benchmark_index as index
 
-    monkeypatch.setattr(etf, "ensure_fresh", lambda _label: (7, ("2026-02-02", 120.0)))
+    def ensure(_label):
+        assert not read_only, 'opening bundle must not fetch vendor history'
+        return (7, ("2026-02-02", 120.0))
+    monkeypatch.setattr(etf, "ensure_fresh", ensure)
+    monkeypatch.setattr(etf, '_latest', lambda _bid: ("2026-02-02", 120.0))
     monkeypatch.setattr(etf, "_at_or_before", lambda _bid, _date: ("2025-12-31", 100.0))
-    monkeypatch.setattr(etf, "supabase", FakeSupabase(tables={"benchmark_price": [
+    monkeypatch.setattr(etf, "supabase", FakeSupabase(tables={
+        'benchmark': [{'benchmark_id': 7, 'ticker': etf.PROXY['SP500']}], "benchmark_price": [
         {"benchmark_id": 7, "target_date": "2025-12-31", "price": 100.0},
         {"benchmark_id": 7, "target_date": "2026-01-30", "price": 110.0},
         {"benchmark_id": 7, "target_date": "2026-02-02", "price": 120.0},
@@ -20,7 +26,7 @@ def test_proxy_curve_uses_the_portfolios_exact_dates_and_prior_market_closes(mon
     monkeypatch.setattr(index, "_rate", lambda *_args: 1.0)
 
     got = etf.etf_return_series(
-        "SP500", "2026-01-01", ["2026-01-01", "2026-01-31", "2026-02-02"])
+        "SP500", "2026-01-01", ["2026-01-01", "2026-01-31", "2026-02-02"], read_only=read_only)
 
     assert [p["date"] for p in got["points"]] == [
         "2026-01-01", "2026-01-31", "2026-02-02"]

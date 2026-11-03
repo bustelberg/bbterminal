@@ -1,5 +1,13 @@
 # AIRS model portfolios (/management-dashboard)
 
+Analyse silently preloads Performance's lightweight `monthly-report?month=…&include_details=false`
+response after the overview and Holdings paint. Its month tiles and Risk then prepare independently; no positions
+or full monthly reports are prefetched. Opening Performance reuses the completed or in-flight
+tile response, with a short, generation-aware cache. Clicking a month makes one
+`include_details=true` request for its AIRS return, benchmark, positions, contribution
+calculations, source dates and reconciliation together. Collapsing or revisiting a complete
+cached month adds no request. Explicit refresh/recovery replaces the selected response together.
+
 Monthly benchmark recovery: a month response reports `benchmark_needs_refresh` separately
 from missing AIRS position data. The UI never reuses a cached month with a missing applicable
 benchmark. It automatically runs `/accounts/{account}/monthly-benchmark/job`, then rereads
@@ -10,6 +18,13 @@ repairs shared sources once, and retains per-account failures in its durable job
 Missing provider data remains an explicit retryable failure, never a fabricated zero return.
 
 ## Prepared Risk tabs
+
+Analyse silently warms the exact current Risk request after its visible full holdings
+have painted. Risk's code chunk loads alongside it. The warmup and Risk panel share an
+in-flight promise and a parsed, generation-checked cache, so clicking Risk either reads
+the completed response immediately or joins the existing preparation. No generic job
+popup is opened, including on automatic running-job reattachment. Warmup failures stay
+off the Analyse view and are not cached; opening Risk can retry normally.
 
 Risk opens with one `/api/airs/portfolio/risk-bundle` POST for the exact displayed
 stock sleeve and policy. It returns Active Share, Correlation, Volatility, Drawdown,
@@ -22,6 +37,17 @@ The existing scheduled Analyse preparation writes a complete durable bundle afte
 measures finish. The bundle key includes canonical weights, identities, policy and
 history start; source revision, calculation day and calculation-code version must match.
 Publication checks the source revision again, so mixed generations are never displayed.
+If shared sources change during preparation, the worker stops that pass early, waits
+for a quiet source window and retries up to three passes. Per-result and shared-history
+memory caches include the immediate source revision, rather than relying only on delayed
+Postgres statistics. The UI follows a replacement preparation if publication is invalidated
+before readback. Continuous refreshes remain bounded and cancellable; no mixed result is
+stamped as current. The final read-only poll does not enqueue an unwatched job.
+Apply `20261103180000_risk_source_revision.sql` with this change. It adds a dedicated
+market/identity source revision, so unrelated AIRS account/report writes cannot invalidate
+Risk whose posted weights are unchanged. Market-price, FX, benchmark and identity updates
+still invalidate immediately. Before migration, the code safely falls back to the broader
+holdings revision and automatic retries; the migration is needed to eliminate unrelated churn.
 A cold request returns 202 with one deduplicated background preparation job; it never
 runs risk calculations on the HTTP read path. The client follows that job then rereads
 the complete bundle. Preparation uses saved prices only, preserving the existing
@@ -185,9 +211,13 @@ saved results. Aligned histories are reused across views in a bounded memory cac
 Opening Risk never downloads or repairs price history. Missing history stays explicitly
 unavailable until source jobs or an explicit repair update the stored inputs.
 
-Analyse opening requests disable optional holding-risk history and return the complete current
-prepared holdings payload when available, avoiding a second serial detail request. Cold misses
-still use the lightweight overview and deferred details. Hover/focus warms both modal code and
+Analyse opening requests disable optional holding-risk history and bundle allocation, scorecard,
+sold-position contributions and both return curves in one response. Curves read saved performance
+and benchmark prices without scanning historical holdings or calling vendors. Prepared snapshots
+also defer Holdings: after the opening overview paints, one detail response fills the table.
+If no prepared snapshot exists, one complete calculation supplies the opening contributions and
+is cached for the following Holdings request; this cold opening can take longer.
+Hover/focus warms both modal code and
 data; reopening can paint a completed client result within its existing 30-second lifetime.
 Saved risk-column preferences request their extra history after the holdings mount. Refresh and
 selection revisions remain separate cache keys; expired client results are never painted.

@@ -1575,6 +1575,7 @@ class RealisedBlock(BaseModel):
 
 
 class ModelPortfolioAnalysis(BaseModel):
+    return_series: dict | None = None
     """A model portfolio's composition beside a benchmark's, on ONE set of buckets.
 
     Both sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN — the
@@ -1722,9 +1723,16 @@ async def airs_model_portfolio_analysis(portfolio_id: int, benchmark: str = "SP5
     basis = weight_by if weight_by in ("model", "book") else "model"
     src = source if source in ("model", "book") else "book"
     bucket_filter = bucket if bucket in BUCKET_ORDER else None
-    return await compute_portfolio_analysis_async(
+    result = await compute_portfolio_analysis_async(
         portfolio_id, benchmark, basis, src, bucket_filter, look_through, include_axes,
         overview_only=overview_only, include_holding_risk=include_holding_risk)
+    if src == 'book' and not bucket_filter and not include_axes:
+        from routers._airs_value_series import value_series
+        account = result.get('book_portefeuille')
+        series = (await asyncio.to_thread(value_series, account, benchmark, result.get('risk_profile_policy'), returns_only=True)
+                  if account else {'returns': [], 'reason': 'No AIRS portfolio is linked.'})
+        result = {**result, 'return_series': series}
+    return result
 
 
 class HoldingTradeEffect(BaseModel):
@@ -2390,7 +2398,7 @@ class RiskBundleRequest(ActiveShareRequest):
 
 
 @router.post('/api/airs/portfolio/risk-bundle')
-async def airs_portfolio_risk_bundle(req: RiskBundleRequest):
+async def airs_portfolio_risk_bundle(req: RiskBundleRequest, prepare_if_missing: bool = True):
     """Read all prepared default Risk views; never calculate on the HTTP request."""
     from routers import _risk_bundle
     import jobs as job_registry
@@ -2403,6 +2411,10 @@ async def airs_portfolio_risk_bundle(req: RiskBundleRequest):
             _, _, _, catalogue, _ = await asyncio.to_thread(state, req.returns_account)
             saved = {**saved, 'views': {**saved['views'], 'returns-catalogue': catalogue}}
         return {'ready': True, **saved}
+
+    if not prepare_if_missing:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=202, content={'ready': False})
 
     def work(ctx):
         _risk_bundle.prepare(holdings, policy, ctx)

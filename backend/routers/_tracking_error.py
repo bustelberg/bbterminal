@@ -41,13 +41,21 @@ import re
 from functools import lru_cache
 from datetime import date, timedelta
 import time
-from routers._risk_read import ALLOW_REPAIR, shared_series
+from routers._risk_read import ALLOW_REPAIR, SOURCE_REVISION, shared_series
 
 
 @lru_cache(maxsize=16)
-def _risk_prices(isins: tuple[str, ...], years: int, day: str, generation: int, loader):
-    """One price snapshot shared by all historical risk views for five minutes."""
+def _risk_prices_cached(isins: tuple[str, ...], years: int, day: str, generation: int, revision, loader):
+    """One price snapshot per immediate source revision and five-minute bucket."""
     return loader(list(isins), years)
+
+
+def _risk_prices(isins: tuple[str, ...], years: int, day: str, generation: int, loader):
+    return _risk_prices_cached(isins, years, day, generation, SOURCE_REVISION.get(), loader)
+
+
+_risk_prices.cache_clear = _risk_prices_cached.cache_clear
+_risk_prices.cache_info = _risk_prices_cached.cache_info
 
 
 _FIXED_INCOME_NAME = re.compile(r"\b(perp|bond|obligat|coupon|treasur|gilt|bund|govie|"

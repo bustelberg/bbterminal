@@ -461,7 +461,7 @@ def etf_returns(label: str, starts: list[str]) -> dict[str, dict]:
     return out
 
 
-def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
+def etf_return_series(label: str, anchor: str, dates: list[str], *, read_only: bool = False) -> dict:
     """The proxy ETF's cumulative EUR return sampled on the caller's exact dates.
 
     The Analyse overview supplies AIRS's published dates. Each benchmark point uses the last ETF
@@ -471,8 +471,14 @@ def etf_return_series(label: str, anchor: str, dates: list[str]) -> dict:
     """
     from routers._benchmark_index import _fx_to_eur, _rate  # noqa: PLC0415
 
+    if label not in PROXY:
+        return {}
     wanted = sorted({str(d)[:10] for d in dates if d and str(d)[:10] >= anchor})
-    fresh = ensure_fresh(label)
+    if read_only:
+        stored = (supabase.table('benchmark').select('benchmark_id').eq('ticker', PROXY.get(label, label)).limit(1).execute().data or [])
+        fresh = (stored[0]['benchmark_id'], _latest(stored[0]['benchmark_id'])) if stored else None
+    else:
+        fresh = ensure_fresh(label)
     if not fresh or not wanted:
         return {}
     bid, _latest_mark = fresh

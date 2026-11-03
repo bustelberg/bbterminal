@@ -27,10 +27,13 @@ import {
 } from '../../../lib/provenance';
 import { trace, traceError } from '../../../lib/debugTrace';
 import { analysisDetailsKey, analysisRequestKey, loadPrefetchedAnalysis, readPrefetchedAnalysis } from '../../../lib/analysisPrefetch';
-import type { EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
+import type { BookValueSeries, EtfSectorAllocationResponse, ModelPortfolioAnalysis } from '../../../lib/types/api';
 import PanelDialog from './PanelDialog';
 import dynamic from 'next/dynamic';
 import type { ActiveShareHolding } from './ActiveSharePanel';
+import { riskBundleBody } from './riskBundleRequest';
+import { prefetchRiskBundle } from './riskBundle';
+import { prefetchPerformanceTiles } from './monthlyReportPrefetch';
 import AnalyseLoading from './AnalyseLoading';
 import {
   addCertificateSectorWeights, addEtfSectorWeights, certificateSectorLookThroughCount,
@@ -3858,6 +3861,33 @@ export default function PortfolioAnalysisModal({
   const sleeve = selected && selected !== 'Equity' ? selected : null;
 
   const riskWeightContext = airsRiskWeightContext(data?.book_holdings ?? [], lookThrough);
+  const performanceAccount = data && !data.details_pending && loadedFor === viewKey ? reportAccount ?? data.book_portefeuille : null;
+  useEffect(() => {
+    if (!performanceAccount) return;
+    let second = 0;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => {
+        prefetchPerformanceTiles(performanceAccount);
+        void import('./MonthlyReportPanel').catch(() => undefined);
+      });
+    });
+    return () => { window.cancelAnimationFrame(first); window.cancelAnimationFrame(second); };
+  }, [performanceAccount, viewKey]);
+  const warmRiskBody = data && !data.details_pending && loadedFor === viewKey
+    ? riskBundleBody(airsRiskHoldings(data.book_holdings ?? [], lookThrough), data.risk_profile_policy, reportAccount ?? data.book_portefeuille)
+    : null;
+  useEffect(() => {
+    if (!warmRiskBody) return;
+    let second = 0;
+    // Let Analyse paint its visible data first. Data and Risk's UI chunk then warm in parallel.
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => {
+        prefetchRiskBundle(warmRiskBody, name);
+        void import('./ActiveSharePanel').catch(() => undefined);
+      });
+    });
+    return () => { window.cancelAnimationFrame(first); window.cancelAnimationFrame(second); };
+  }, [warmRiskBody, name]);
 
   return (
     /*  THE BOOK'S FETCH TIME, FOR EVERY ⓘ IN HERE — this is what makes the modal and the row
@@ -4034,20 +4064,12 @@ export default function PortfolioAnalysisModal({
                         first version of it was gated on `sleeve` instead, which excludes Equity by
                         design and so drew the WHOLE BOOK's line beside a stocks-only tile. AIRS
                         reports a return for the account, not a slice.
-                         IT FETCHES ITSELF — see `BookReturnChart`. The modal is one payload with
-                        no partial paint, and its wall clock is the reader's wait.
-                         WHICH IS WHY `refreshSeq` HAS TO REACH IT. Fetching itself means it does not
-                        ride on the effect above, and Refresh re-runs the AIRS scrape — a new
-                        `airs_performance` row. Without this the chip re-read that row and the chart
-                        did not, so the two sat one scrape apart while both claimed to be the same
-                        column (reported 2026-09-03: +3.44% against +3.05%). Every self-fetching
-                        child of this modal owes the same dependency. */}
+                        The book curve arrives with the opening figures in the same bundle. */}
                     {!isBasket && id != null && (
                       <div className="col-start-1 row-start-3 w-full min-w-0 min-h-[15.5rem] sm:col-span-3 @[44rem]/overview:row-start-2">
-                        {/* `BookReturnChart` fetches independently and initially renders one line.
-                            Reserve the final chart card's plot/tooltip footprint here, before that
-                            request completes, so its arrival cannot move the scorecard above it. */}
+                        {/* Reserve the chart footprint alongside the scorecard. */}
                         <BookReturnChart portfolioId={id} refreshSeq={refreshSeq}
+                          series={source === 'book' ? ((data.return_series as BookValueSeries | null | undefined) ?? null) : undefined}
                           benchmark={benchmark}
                           policyWeights={data.risk_profile_policy}
                           benchmarkBlocks={(data.returns?.block_returns ?? []).filter(isScorecardBlock)} />

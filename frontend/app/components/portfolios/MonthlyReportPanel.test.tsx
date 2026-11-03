@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiFetch } from '../../../lib/apiFetch';
 import { startJob } from '../../../lib/stores/jobs';
 import MonthlyReportPanel from './MonthlyReportPanel';
+import { invalidateReadCache } from '../../../lib/readCache';
+import { loadPerformanceTiles } from './monthlyReportPrefetch';
 
 vi.mock('../../../lib/i18n', () => ({ useLang: () => ['en'] }));
 vi.mock('../../../lib/apiFetch', () => ({ apiFetch: vi.fn() }));
@@ -29,6 +31,7 @@ describe('AIRS monthly report', () => {
   let host: HTMLDivElement;
   beforeEach(() => {
     vi.resetAllMocks();
+    invalidateReadCache('monthly panel test');
     vi.setSystemTime(new Date('2026-10-26T12:00:00Z'));
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     host = document.createElement('div'); document.body.appendChild(host);
@@ -124,7 +127,8 @@ describe('AIRS monthly report', () => {
 
   it('keeps the month tiles mounted while another month loads without showing the previous positions', async () => {
     let resolveReport!: (response: Response) => void;
-    vi.mocked(apiFetch).mockResolvedValueOnce(new Response(JSON.stringify({ ...completeResponse(), snapshot: {
+    vi.mocked(apiFetch).mockResolvedValueOnce(new Response(JSON.stringify({ ...completeResponse(), snapshot: null })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...completeResponse(), snapshot: {
       ...completeResponse().snapshot, positions: [{ name: 'October only', return_pct: 1, status: 'held', contribution_calculation: null }],
     } }))).mockImplementationOnce(() => new Promise((resolve) => { resolveReport = resolve; }));
     await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
@@ -301,7 +305,7 @@ describe('AIRS monthly report', () => {
     await openOctober();
     expect(startJob).toHaveBeenCalledOnce();
     expect(host.textContent).toContain('Closing valuation could not be downloaded');
-    expect(apiFetch).toHaveBeenCalledTimes(3); // strip, saved detail, post-job result
+    expect(apiFetch).toHaveBeenCalledTimes(3); // tiles, selected month, post-job replacement
   });
 
   it('refreshes a stale saved report automatically, then displays the saved replacement', async () => {
@@ -313,7 +317,7 @@ describe('AIRS monthly report', () => {
     expect(startJob).not.toHaveBeenCalled();
     await openOctober();
     expect(startJob).toHaveBeenCalledOnce();
-    expect(apiFetch).toHaveBeenCalledTimes(3); // strip, saved detail, post-job result
+    expect(apiFetch).toHaveBeenCalledTimes(3); // tiles, selected month, post-job replacement
     expect(host.textContent).toContain('No positions were found');
     await openOctober();
     await openOctober();
@@ -340,20 +344,39 @@ describe('AIRS monthly report', () => {
     await selectSeptember();
     expect(apiFetch).toHaveBeenCalledTimes(2);
     await openOctober();
-    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(apiFetch).toHaveBeenCalledTimes(3); // first full October request, after tiles and September
+    await openOctober();
+    await openOctober();
+    expect(apiFetch).toHaveBeenCalledTimes(3);
     await selectSeptember();
-    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(apiFetch).toHaveBeenCalledTimes(3);
     expect(startJob).not.toHaveBeenCalled();
   });
 
-  it('loads only the month strip first, then reads saved positions before considering AIRS', async () => {
+  it('shows prefetched tiles immediately and fetches one complete report only after a tile click', async () => {
+    const report = completeResponse();
+    const full = { ...report,
+      weighted_benchmark: { '2026-10': { return_pct: 1.23, start_date: '2026-09-30', end_date: '2026-10-23', source: 'ETF' } },
+      snapshot: { ...report.snapshot, positions: [{ name: 'Sample stock', isin: 'TEST', status: 'held',
+        return_pct: 5, contribution_pp: 1, opening_weight_pct: 20,
+        start_date: '2026-09-30', end_date: '2026-10-23', contribution_calculation: null }] },
+    };
     vi.mocked(apiFetch).mockImplementation(async (url) => new Response(JSON.stringify(
-      String(url).includes('include_details=false') ? response() : completeResponse())));
+      String(url).includes('include_details=false') ? { ...full, snapshot: null } : full)));
+    await loadPerformanceTiles('BOOK', '2026-10');
     await act(async () => root.render(<MonthlyReportPanel portefeuille="BOOK" name="Client portfolio" />));
+    expect(apiFetch).toHaveBeenCalledOnce();
     expect(String(vi.mocked(apiFetch).mock.calls[0][0])).toContain('include_details=false');
+    expect(host.querySelector('#monthly-report-details')).toBeNull();
+    expect(host.textContent).toContain('Weighted benchmark · EUR +1.23%');
     expect(startJob).not.toHaveBeenCalled();
     await openOctober();
+    expect(apiFetch).toHaveBeenCalledTimes(2);
     expect(String(vi.mocked(apiFetch).mock.calls[1][0])).toContain('include_details=true');
+    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('Sample stock');
+    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+5.00%');
+    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+1.00pp');
+    expect(host.querySelector('#monthly-report-details')?.textContent).toContain('+1.23%');
     expect(startJob).not.toHaveBeenCalled();
     await openOctober();
     await openOctober();

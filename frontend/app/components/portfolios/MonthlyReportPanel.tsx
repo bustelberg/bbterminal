@@ -8,6 +8,7 @@ import { startJob } from '../../../lib/stores/jobs';
 import type { MonthlyPosition, MonthlyReport } from './monthlyReport';
 import { savedContributionCalculation, monthlyBenchmarkMissing } from './monthlyReport';
 import InfoTip from '../InfoTip';
+import { currentPerformanceMonth, loadPerformanceTiles, readPerformanceTiles } from './monthlyReportPrefetch';
 
 const box = 'rounded-xl border border-neutral-800/40 bg-elevated';
 const ctl = 'rounded-lg border border-neutral-700 bg-elevated px-3 py-2 text-xs text-fg-muted hover:border-accent-500/50 disabled:opacity-50';
@@ -19,11 +20,11 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const [lang] = useLang();
   const nl = lang === 'nl', locale = nl ? 'nl-NL' : 'en-GB';
   const text = (en: string, dutch: string) => nl ? dutch : en;
-  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit' }).format(new Date());
+  const today = currentPerformanceMonth();
   const [month, setMonth] = useState(today);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [report, setReport] = useState<MonthlyReport | null>(null);
-  const [pending, setPending] = useState(true);
+  const [report, setReport] = useState<MonthlyReport | null>(() => portefeuille ? readPerformanceTiles(portefeuille, today) : null);
+  const [pending, setPending] = useState(!report);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [jobError, setJobError] = useState<string | null>(null);
@@ -35,6 +36,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
   const [detailsHeight, setDetailsHeight] = useState(0);
   const detailsElement = useRef<HTMLDivElement>(null);
   const saved = useRef(new Map<string, MonthlyReport>());
+  const loadedRevision = useRef(report ? { account: portefeuille, month: today, revision: 0 } : null);
   const detailsRead = useRef(new Set<string>());
   const automaticAttempts = useRef(new Set<string>());
   const fetching = useRef(false);
@@ -47,23 +49,30 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
     setReport((previous) => previous?.portefeuille === portefeuille ? previous : null);
     const key = `${portefeuille}|${month}`;
     const cached = saved.current.get(key);
-    // The month strip needs only returns. Load positions when a month opens, and keep
-    // completed detail while this panel is mounted. Refresh explicitly clears this cache.
-    if (cached && !monthlyBenchmarkMissing(cached, month) && (!detailsOpen || (!cached.needs_refresh && !cached.warning && cached.snapshot?.positions
-      && cached.snapshot.positions.every((position) => Object.hasOwn(position, 'contribution_calculation'))))) {
+    // Tiles are warmed from Analyse. Only selecting a tile fetches its full report.
+    if (!detailsOpen && report?.portefeuille === portefeuille && report.month === month
+        && loadedRevision.current?.revision === reload && loadedRevision.current.account === portefeuille) {
+      setPending(false); return;
+    }
+    if (detailsOpen && cached && !monthlyBenchmarkMissing(cached, month) && !cached.needs_refresh && !cached.warning && cached.snapshot?.positions
+      && cached.snapshot.positions.every((position) => Object.hasOwn(position, 'contribution_calculation'))) {
       setReport(cached); setPending(false); return;
     }
-    void apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report?month=${month}&include_details=${detailsOpen}`,
+    const request = detailsOpen ? apiFetch(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/monthly-report?month=${month}&include_details=true`,
       { noReadCache: true, cache: 'no-store' }).then(async (res) => {
       if (!res.ok) { const body = await res.json().catch(() => ({})); throw new Error(body.detail ?? `HTTP ${res.status}`); }
       return res.json() as Promise<MonthlyReport>;
-    }).then((data) => { if (active) {
-      if (detailsOpen) detailsRead.current.add(key);
-      saved.current.set(key, data); setReport(data);
+    }) : loadPerformanceTiles(portefeuille, month, reload);
+    void request.then((data) => { if (active) {
+      if (detailsOpen) { detailsRead.current.add(key); saved.current.set(key, data); }
+      loadedRevision.current = { account: portefeuille, month, revision: reload };
+      setReport(data);
     } })
       .catch((err) => { if (active) setError(String(err.message ?? err)); })
       .finally(() => { if (active) setPending(false); });
     return () => { active = false; };
+    // report is retained for tiles while loading another month, not a request dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portefeuille, month, reload, today, detailsOpen]);
 
   const openMonth = (key: string) => {
@@ -94,8 +103,7 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
       || report.month !== month || report.portefeuille !== portefeuille) return;
     if (!report.needs_refresh && report.snapshot?.positions) return;
     const key = `${portefeuille}|${month}`;
-    // Opening a compact month strip must first read the saved detailed report;
-    // its absent snapshot does not mean AIRS needs to be scanned again.
+    // The complete saved month is read before deciding whether AIRS needs a refresh.
     if (!detailsRead.current.has(key)) return;
     // One automatic attempt per selected month. A partial/failed download must
     // not trigger a retry loop when its saved result is read back afterwards.
@@ -281,8 +289,8 @@ export default function MonthlyReportPanel({ portefeuille, name, overviewReturns
           </button>; })}
       </nav>
       <div data-month-detail-space style={detailsHeight ? { minHeight: detailsHeight } : undefined}>
-      {detailsOpen && <div ref={detailsElement} id="monthly-report-details" aria-busy={pending} className="min-h-80 space-y-4 border-t border-neutral-800/40 pt-5">
-        {!selectedReport ? <p role="status" className="text-sm text-fg-subtle">{monthLabel(month)} · {error ? text('Report could not be loaded.', 'Rapport kon niet worden geladen.') : text('Loading…', 'Laden…')}</p> : <>
+      {detailsOpen && <div ref={detailsElement} id="monthly-report-details" aria-busy={pending || busy || benchmarkBusy} className="min-h-80 space-y-4 border-t border-neutral-800/40 pt-5">
+        {pending || busy || benchmarkBusy ? <p role="status" className="text-sm text-fg-subtle">{text('Loading…', 'Laden…')}</p> : !selectedReport ? <p role="status" className="text-sm text-fg-subtle">{error ? text('Report could not be loaded.', 'Rapport kon niet worden geladen.') : text('Loading…', 'Laden…')}</p> : <>
         <div className="flex flex-wrap items-start justify-between gap-3"><div>
           <h3 className="text-lg font-medium capitalize text-fg-strong">{monthLabel(month)}</h3>
           <p className="mt-1 text-xs text-fg-subtle">{perf?.periode ? `${text('Through', 'T/m')} ${perf.periode}` : text('Return unavailable', 'Rendement ontbreekt')}{month === today ? ` · ${text('Month to date', 'Lopende maand')}` : ''}</p>

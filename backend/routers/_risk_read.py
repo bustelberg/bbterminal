@@ -11,9 +11,20 @@ from threading import RLock
 from index_universe.templates._cache import _LruTtlCache
 
 ALLOW_REPAIR = ContextVar('risk_allow_repair', default=True)
+SOURCE_REVISION = ContextVar('risk_source_revision', default=None)
 _locks = [RLock() for _ in range(32)]
 _series = _LruTtlCache(max_size=8, ttl_seconds=3600)
 log = logging.getLogger(__name__)
+
+
+def source_revision():
+    """Risk consumes posted weights and market data, not other accounts' AIRS writes."""
+    from routers import _prepared_analyse as prepared
+    revision = prepared.source_version('risk')
+    if revision is not None:
+        return 'risk', revision
+    # Safe rolling-deploy fallback until the risk-revision migration is applied.
+    return 'holdings', prepared.source_version('holdings')
 
 
 def _canonical(value):
@@ -39,27 +50,30 @@ def read(compute, *args, **kwargs):
     bound.apply_defaults()
     identity = json.dumps(_canonical(bound.arguments), sort_keys=True, separators=(',', ':'))
     key = 'risk:' + compute.__name__ + ':' + hashlib.sha256(identity.encode()).hexdigest()
+    scope, revision = source_revision()
 
     def load():
-        version, saved = prepared.read('holdings', key)
+        version, saved = prepared.read(scope, key)
         if saved is not None:
             return saved
         code = prepared.code_version()
         token = ALLOW_REPAIR.set(False)
+        revision_token = SOURCE_REVISION.set((scope, version))
         try:
             answer = compute(*args, **kwargs)
         finally:
             ALLOW_REPAIR.reset(token)
+            SOURCE_REVISION.reset(revision_token)
         if version is not None:
             try:
-                prepared.save('holdings', key, answer, version, code)
+                prepared.save(scope, key, answer, version, code)
             except Exception:
                 log.exception('Could not save prepared risk result %s', key)
         return answer
 
     # Collapse concurrent requests for the same result, including cold cache misses.
     with _locks[int(hashlib.sha256(key.encode()).hexdigest(), 16) % len(_locks)]:
-        return deepcopy(leg(('risk-result-v1', key, date.today().isoformat(), prepared.code_version()), load))
+        return deepcopy(leg(('risk-result-v2', key, scope, revision, date.today().isoformat(), prepared.code_version()), load))
 
 
 def shared_series(compute):
@@ -78,7 +92,7 @@ def shared_series(compute):
             version = fingerprint()
             if version is None:
                 return compute(*args, **kwargs)
-            full_key = (version, date.today().isoformat(), key)
+            full_key = (version, SOURCE_REVISION.get(), date.today().isoformat(), key)
             hit = _series.get(full_key)
             if hit is not None:
                 return hit

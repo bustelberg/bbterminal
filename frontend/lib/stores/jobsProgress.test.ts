@@ -1,8 +1,22 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { runSSE } from '../stream';
-import { jobsStore, watchJob, type JobProgress } from './jobs';
+import { apiFetch } from '../apiFetch';
+import { attachRunningJobs, jobsStore, watchJob, type JobProgress } from './jobs';
 
 vi.mock('../stream', () => ({ runSSE: vi.fn() }));
+vi.mock('../apiFetch', () => ({ apiFetch: vi.fn() }));
+
+it('does not turn silent Risk warmups into popups when running jobs are reattached', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(new Response(JSON.stringify([
+    { id: 'silent-risk', kind: 'airs.risk-bundle', label: 'risk-bundle:hash', status: 'running' },
+    { id: 'visible-refresh', kind: 'airs.refresh', label: 'Refresh', status: 'running' },
+  ])));
+  vi.mocked(runSSE).mockImplementation(async (_url, _init, onEvent) => { onEvent({ type: 'job', status: 'done' }); });
+  await attachRunningJobs();
+  expect(jobsStore.get().jobs.some((job) => job.id === 'silent-risk')).toBe(false);
+  expect(jobsStore.get().jobs.some((job) => job.id === 'visible-refresh')).toBe(true);
+  expect(runSSE).toHaveBeenCalledOnce();
+});
 
 afterEach(() => {
   jobsStore.set({ jobs: [] });

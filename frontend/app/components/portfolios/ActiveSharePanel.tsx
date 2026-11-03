@@ -42,6 +42,7 @@ import LoadingDots from './LoadingDots';
 import dynamic from 'next/dynamic';
 import type { AirsWeightComponent } from './AirsWeightCalculation';
 import { useRiskBundle } from './riskBundle';
+import { isDirectEquityStock, riskBundleBody } from './riskBundleRequest';
 import { RiskBundleContext } from './riskBundleContext';
 import CorrelationView from './CorrelationView';
 import VolatilityView from './VolatilityView';
@@ -84,13 +85,6 @@ export function holdingsOnRiskBasis(
       ? (holding.weight_start_pct ?? 0)
       : (holding.weight_now_pct ?? holding.weight_pct),
   }));
-}
-
-/** Keep fixed-income certificates out of every equity-risk request, even when AIRS labels one Equity. */
-function isDirectEquityStock(holding: ActiveShareHolding): boolean {
-  return !holding.is_fund
-    && (holding.bucket == null || holding.bucket === '' || holding.bucket === 'Equity')
-    && !/\b(etf|etp|etn|ucits|fund|fonds|certificate|certificaten|index|perp|bond|obligat|coupon|treasur|gilt|bund|govie|sovereign|floating\s*rate|frn|high\s*yield|fixed\s*income)\b|\d[.,]?\d*\s*%/i.test(holding.name ?? '');
 }
 
 /**  TWO DECIMALS ON EVERY NON-INTEGER, ACROSS ALL SIX VIEWS. One decimal read as false
@@ -219,11 +213,7 @@ export default function ActiveSharePanel({
 
   //  The body is the dependency, not an object identity. `holdings` is rebuilt on every render of
   // the parent, so depending on the array itself would refetch forever.
-  const activeBody = JSON.stringify({
-    holdings: weightedHoldings,
-    benchmark_weights: riskBenchmarkWeights,
-    returns_account: returnsAccount ?? portefeuille,
-  });
+  const activeBody = riskBundleBody(weightedHoldings, riskProfilePolicy, returnsAccount ?? portefeuille);
   const bundle = useRiskBundle(activeBody, portfolioName);
   const data = (bundle.views['active-share'] as ActiveShare | undefined) ?? null;
   const error = bundle.error;

@@ -11509,7 +11509,6 @@
         "type": "object"
       },
       "ModelPortfolioAnalysis": {
-        "description": "A model portfolio's composition beside a benchmark's, on ONE set of buckets.\n\nBoth sides are classified from `asset_grid`'s yfinance attributes, joined by ISIN \u2014 the\nportfolio lives in the ISIN world and the benchmark in the `company` world, and putting two\ndifferent sector taxonomies in one chart invents differences that are not there. (All 493\nSP500 members are present in `asset_grid` with a sector, so nothing is lost.)\n\n FUNDS ARE NOT LOOKED THROUGH, and the payload says so rather than pretending. An ETF's\nlisting tells you nothing about what it holds \u2014 24 of the 26 held ETFs have a \"sector\" of\nliterally `etf` or `Equity`; an Amsterdam-listed MSCI World ETF is not European exposure; and\nquoted in EUR it still holds mostly USD assets. So every fund folds into \"Unclassified\" on ALL\nTHREE axes \u2014 a 40%-ETF portfolio shows a 40% Unclassified bar meaning \"we cannot see inside\nthis\", true and more useful than a confident wrong split.",
         "properties": {
           "allocation": {
             "default": [],
@@ -11751,6 +11750,18 @@
                 "type": "null"
               }
             ]
+          },
+          "return_series": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Return Series"
           },
           "returns": {
             "anyOf": [
@@ -23372,6 +23383,18 @@
       "post": {
         "description": "Read all prepared default Risk views; never calculate on the HTTP request.",
         "operationId": "airs_portfolio_risk_bundle_api_airs_portfolio_risk_bundle_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "prepare_if_missing",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Prepare If Missing",
+              "type": "boolean"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
