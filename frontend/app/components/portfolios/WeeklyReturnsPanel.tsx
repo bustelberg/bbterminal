@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../../lib/apiFetch';
 import { API_URL } from '../../../lib/apiUrl';
 import { startJob } from '../../../lib/stores/jobs';
@@ -69,11 +69,11 @@ function InstrumentPicker({ options, selected, onSelect, nl }: {
   </div>;
 }
 
-function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
+function ReturnChart({ data, nl, scale }: { data: WeeklyReturns; nl: boolean; scale: number }) {
   const [active, setActive] = useState<number | null>(null);
   const chart = useMemo(() => {
     const bars = weeklyBars(data.selected?.weeks ?? []);
-    const limit = Math.max(1, ...bars.map((value) => Math.abs(value ?? 0))) * 1.1;
+    const limit = scale;
     const left = 65, right = 925, top = 25, bottom = 260;
     const mid = (top + bottom) / 2;
     const step = (right - left) / Math.max(1, bars.length);
@@ -121,12 +121,12 @@ function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
       {!bars.some((value) => value != null) && <text x="495" y="105" textAnchor="middle" fill="currentColor" fontSize="13">{nl ? 'Nog geen wekelijkse rendementen beschikbaar' : 'No weekly returns available yet'}</text>}
     </>;
     return { content, bars, labels, weekLabels: data.periods.map((period) => weekLabel(period.target_date)), left, right, step, top, bottom, mid, width, limit };
-  }, [data, nl]);
+  }, [data, nl, scale]);
   const { bars, labels, left, right, step, top, bottom, mid, width, limit } = chart;
   const activePeriod = active === null ? undefined : data.periods[active];
   const activeValue = active === null ? null : bars[active];
   const x = left + step * ((active ?? 0) + .5);
-  const tooltipX = Math.max(left, Math.min(right - 280, x - 140));
+  const tooltipX = Math.max(left, Math.min(right - 540, x - 270));
   const barY = mid - (activeValue ?? 0) / limit * (bottom - top) / 2;
   return <svg viewBox="0 0 960 320" role="img" aria-label={`${data.selected?.name ?? ''} · ${nl ? 'Wekelijkse koersveranderingen vanaf 1 januari 2026' : 'Weekly price changes from 1 January 2026'}`} className="w-full min-w-0 text-fg-subtle" onPointerLeave={() => setActive(null)}>
     {chart.content}
@@ -137,9 +137,9 @@ function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
         className={activeValue > 0 ? 'text-pos-300' : activeValue < 0 ? 'text-neg-300' : ''} />}
     </g>}
     {activePeriod && <g role="tooltip" pointerEvents="none">
-      <rect x={tooltipX} y="2" width="280" height="72" rx="8" className="fill-elevated stroke-current" strokeOpacity=".25" />
-      <text x={tooltipX + 14} y="24" fill="currentColor" fontSize="12">{chart.weekLabels[active!]}</text>
-      <text x={tooltipX + 14} y="53" fontSize={activeValue == null ? 13 : 22} fontWeight="600"
+      <rect x={tooltipX} y="2" width="540" height="100" rx="8" className="fill-elevated stroke-current" strokeOpacity=".25" />
+      <text x={tooltipX + 20} y="34" fill="currentColor" fontSize="24">{chart.weekLabels[active!]}</text>
+      <text x={tooltipX + 20} y="82" fontSize={activeValue == null ? 24 : 40} fontWeight="600"
         className={`fill-current ${activeValue != null && activeValue > 0 ? 'text-pos-300' : activeValue != null && activeValue < 0 ? 'text-neg-300' : ''}`}>
         {activeValue == null ? (labels[data.selected?.weeks[active!]?.status ?? ''] ?? '—') : percent(activeValue)}
       </text>
@@ -147,7 +147,9 @@ function ReturnChart({ data, nl }: { data: WeeklyReturns; nl: boolean }) {
   </svg>;
 }
 
-export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: string | null }) {
+function InstrumentReturnSlot({ portefeuille, scale, onData }: {
+  portefeuille: string; scale: number; onData: (data: WeeklyReturns | null) => void;
+}) {
   const [lang] = useLang();
   const nl = lang === 'nl';
   const [selection, setSelection] = useState<{ account: string; id: string } | null>(null);
@@ -158,8 +160,8 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
   const key = `${portefeuille}|${selectedId ?? ''}|${revision}`;
   const options = result && result.account === portefeuille ? result.data?.options ?? [] : [];
-  const chosen = options.find((item) => item.id === selectedId) ?? (selectedId ? undefined : options[0]);
-  const data = result?.key === key && !result.error ? result.data : undefined;
+  const chosen = options.find((item) => item.id === selectedId);
+  const data = selectedId && result?.key === key && !result.error ? result.data : undefined;
 
   useEffect(() => {
     if (!portefeuille) return;
@@ -171,7 +173,10 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
         const response = await apiFetch(url, { signal: controller.signal });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail ?? 'Could not load weekly returns');
-        if (active) setResult({ account: portefeuille, key, data: payload });
+        if (active) {
+          setResult({ account: portefeuille, key, data: payload });
+          onData(selectedId ? payload : null);
+        }
       } catch (error) {
         if (active) setResult((previous) => ({ account: portefeuille, key,
           data: previous?.account === portefeuille ? previous.data : undefined,
@@ -179,9 +184,11 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [key, portefeuille, selectedId]);
+  }, [key, portefeuille, selectedId, onData]);
 
   function choose(instrument: InstrumentOption) {
+    if (instrument.id === selectedId) return;
+    onData(null);
     if (portefeuille) setSelection({ account: portefeuille, id: instrument.id });
   }
 
@@ -202,17 +209,43 @@ export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: st
   }
 
   if (!portefeuille) return <p className="text-sm text-fg-muted">{nl ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
-  return <div className="space-y-4">
-    <div className="flex flex-wrap items-center gap-3">
+  return <div className="flex h-full min-h-0 min-w-0 flex-col rounded-xl border border-neutral-800/30 bg-elevated/30 p-3">
+    <div className="flex h-20 shrink-0 flex-col items-start gap-2">
       <InstrumentPicker options={options} selected={chosen} onSelect={choose} nl={nl} />
       <button type="button" disabled={busy || !chosen} onClick={() => void loadHistory()}
         className="rounded-lg border border-neutral-800/40 bg-elevated px-3 py-2 text-xs font-medium text-fg-muted hover:text-accent-300 disabled:opacity-50">
         {busy ? (nl ? 'Laden…' : 'Loading…') : (nl ? 'Ontbrekende geschiedenis laden' : 'Load missing history')}
       </button>
     </div>
-    {result?.key === key && result.error && <p role="alert" className="text-xs text-neg-300">{result.error}</p>}
-    {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
-    {data ? <ReturnChart data={data} nl={nl} /> : !(result?.key === key && result.error)
-      ? <p role="status" className="py-16 text-center text-xs text-fg-muted">{nl ? 'Rendementen laden…' : 'Loading returns…'}</p> : null}
+    <div className="h-9 shrink-0 overflow-y-auto">
+      {result?.key === key && result.error && <p role="alert" className="text-xs text-neg-300">{result.error}</p>}
+      {notice && notice.id === chosen?.id && <p role="alert" className="text-xs text-neg-300">{notice.text}</p>}
+    </div>
+    <div className="flex min-h-0 flex-1 items-center [&>svg]:h-full [&>svg]:w-full">
+      {data ? <ReturnChart data={data} nl={nl} scale={scale} /> : <svg viewBox="0 0 960 320" className="h-full w-full text-fg-subtle" role="img"
+        aria-label={nl ? 'Lege rendementsgrafiek' : 'Empty return chart'}>
+        <line x1="65" x2="925" y1="142.5" y2="142.5" stroke="currentColor" opacity=".4" />
+        <text x="56" y="146.5" textAnchor="end" fill="currentColor" fontSize="11">0%</text>
+        <text x="495" y="110" textAnchor="middle" fill="currentColor" fontSize="16">
+          {selectedId ? (nl ? 'Rendementen laden…' : 'Loading returns…') : (nl ? 'Kies een instrument' : 'Choose an instrument')}
+        </text>
+        <text x="65" y="292" fill="currentColor" fontSize="11">{nl ? '1 jan 2026' : '1 Jan 2026'}</text>
+      </svg>}
+    </div>
+  </div>;
+}
+
+export default function WeeklyReturnsPanel({ portefeuille }: { portefeuille?: string | null }) {
+  const [lang] = useLang();
+  const [first, setFirst] = useState<WeeklyReturns | null>(null);
+  const [second, setSecond] = useState<WeeklyReturns | null>(null);
+  const onFirst = useCallback((data: WeeklyReturns | null) => setFirst(data), []);
+  const onSecond = useCallback((data: WeeklyReturns | null) => setSecond(data), []);
+  const scale = Math.max(1, ...[first, second].flatMap((data) =>
+    weeklyBars(data?.selected?.weeks ?? []).map((value) => Math.abs(value ?? 0)))) * 1.1;
+  if (!portefeuille) return <p className="text-sm text-fg-muted">{lang === 'nl' ? 'Koppel een AIRS-portefeuille om rendementen te zien.' : 'Link an AIRS portfolio to see returns.'}</p>;
+  return <div className="grid h-full min-h-0 grid-cols-2 gap-3">
+    <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onFirst} />
+    <InstrumentReturnSlot portefeuille={portefeuille} scale={scale} onData={onSecond} />
   </div>;
 }
