@@ -297,6 +297,7 @@ def collect_report(portefeuille: str, month: str, ctx) -> str:
                 return {"as_of": valued, "requested_date": day, "rows": [
                     {"name": h.holding_name, "isin": h.isin, "currency": h.currency,
                      "valuation_component": getattr(h, 'valuation_component', None),
+                     "price_local": getattr(h, 'current_price_local', None),
                      "quantity": getattr(h, "quantity_exact", None) if getattr(h, "quantity_exact", None) is not None else h.quantity,
                      "value_eur": h.current_value_eur,
                      "weight_pct": h.airs_weight} for h in rows]}

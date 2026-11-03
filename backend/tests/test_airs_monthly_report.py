@@ -176,7 +176,7 @@ def test_filtered_rabobank_exports_keep_principal_and_interest_identifiable(coll
     def parse(raw):
         closing = raw == b'2026-04-30'
         common = dict(holding_name='6,5% Rabobank Certificaten 14-perp.', isin='XS1002121454',
-                      currency='EUR', airs_weight=10)
+                      currency='EUR', airs_weight=10, current_price_local=110 if closing else 100)
         return [SimpleNamespace(**common, quantity=1000, current_value_eur=1100 if closing else 1000,
                                 valuation_component='security'),
                 SimpleNamespace(**common, quantity=1, current_value_eur=60 if closing else 50,
@@ -188,6 +188,8 @@ def test_filtered_rabobank_exports_keep_principal_and_interest_identifiable(coll
     assert saved['sections']['opening']['data']['as_of'] == '2026-03-31'
     assert saved['sections']['closing']['data']['as_of'] == '2026-04-30'
     assert len(saved['sections']['closing']['data']['rows']) == 2
+    assert saved['sections']['opening']['data']['rows'][0]['price_local'] == 100
+    assert saved['sections']['closing']['data']['rows'][0]['price_local'] == 110
 
 
 def test_legacy_ambiguous_components_offer_a_dated_airs_refresh(monkeypatch):

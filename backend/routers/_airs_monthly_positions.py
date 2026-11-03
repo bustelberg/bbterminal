@@ -15,8 +15,9 @@ def _positive(value) -> bool:
 def position_boundary(records: list[dict]) -> tuple[dict | None, str | None]:
     """One comparable security mark; explicit interest components remain separate.
 
-    Unlabelled historical duplicate rows can be combined only when their EUR unit marks
-    agree to source cent rounding. Never identify the principal by picking the largest row.
+    Unlabelled duplicate rows require either a unique EUR valuation verified by
+    their common AIRS quote/quantity, or agreeing EUR unit marks for aggregation.
+    Never identify the principal by picking the largest row.
     """
     security = [r for r in records if r.get('valuation_component') != 'accrued_interest']
     if not security:
@@ -30,6 +31,17 @@ def position_boundary(records: list[dict]) -> tuple[dict | None, str | None]:
     if not isins or any(not r.get('isin') for r in security):
         return None, 'ambiguous_position'
     first = security[0]
+    # Some AIRS exports repeat the same quantity/quote on an unlabelled
+    # supplementary valuation line. Identify the principal by its reported quote,
+    # not by value ranking. EUR avoids guessing FX; /100 supports percentage quotes.
+    price, quantity = first.get('price_local'), first.get('quantity')
+    if (currencies == {'EUR'} and _positive(price) and _positive(quantity)
+            and all(r.get('price_local') == price and r.get('quantity') == quantity for r in security)):
+        verified = [r for r in security if isinstance(r.get('value_eur'), (int, float))
+                    and any(math.isclose(r['value_eur'], quantity * price * factor, rel_tol=0, abs_tol=.011)
+                            for factor in (1, .01))]
+        if len(verified) == 1:
+            return dict(verified[0]), None
     for record in security:
         value, quantity = record.get('value_eur'), record.get('quantity')
         if not _positive(quantity) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:

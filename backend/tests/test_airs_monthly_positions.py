@@ -104,6 +104,30 @@ def test_coupon_accrual_reset_is_not_a_certificate_price_loss():
     assert row['return_pct'] == 0
 
 
+def test_unlabelled_rabobank_duplicate_is_resolved_by_its_actual_percentage_quote():
+    principal = {**holding(33588.30, 30900, 'Rabobank', 'XS1002121454'), 'price_local': 108.70}
+    interest = {**principal, 'value_eur': 172.95}
+    row = result(sections([interest, principal], [{**principal, 'price_local': 109, 'value_eur': 33681},
+                                                {**interest, 'price_local': 109, 'value_eur': 184.11}]))
+    assert row['return_pct'] == pytest.approx((109 / 108.7 - 1) * 100)
+    assert row['start_price_eur'] == pytest.approx(1.087)
+
+
+@pytest.mark.parametrize('change', [{'price_local': None}, {'currency': 'USD'}, {'price_local': 99}])
+def test_quote_verification_cannot_guess_missing_fx_or_conflicting_quotes(change):
+    principal = {**holding(33588.30, 30900), 'price_local': 108.70}
+    interest = {**principal, 'value_eur': 172.95, **change}
+    row = result(sections([principal, interest], [principal, interest]))
+    assert row['return_pct'] is None
+
+
+def test_quote_verification_never_selects_a_largest_unverified_value():
+    principal = {**holding(100, 100), 'price_local': 100}
+    unrelated = {**principal, 'value_eur': 50000}
+    row = result(sections([unrelated, principal], [principal, unrelated]))
+    assert row['return_pct'] == 0
+
+
 def test_compatible_lots_merge_quantities_without_treating_purchases_as_return():
     buy = dict(name='Stock', kind='buy', date='2026-10-10', quantity=5, amount_eur=525)
     row = result(sections([holding(1000), holding(500, 5)],
