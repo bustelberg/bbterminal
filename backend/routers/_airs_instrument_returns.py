@@ -151,9 +151,9 @@ def collect(account, instrument_id, ctx):
         if not _acquire_session(30):
             raise RuntimeError('AIRS is busy with another refresh. Please try again shortly.')
         try:
+            ctx.progress(0, len(pending), f"{instrument['name']} · loading missing history")
             for index, target in enumerate(pending):
                 ctx.check()
-                ctx.progress(index, len(pending), f"{instrument['name']} · {target.isoformat()}")
                 entry = {'portefeuille': account, 'instrument_id': instrument_id,
                          'target_date': target.isoformat(), 'as_of_date': None, 'holdings': [], 'status': 'unavailable'}
                 for back in range(target.weekday() + 1):
@@ -181,6 +181,9 @@ def collect(account, instrument_id, ctx):
                 entry['checked_at'] = datetime.now(timezone.utc).isoformat()
                 supabase.table(TABLE).upsert(entry, on_conflict='portefeuille,instrument_id,target_date').execute()
                 saved += 1
+                # Publish progress only after the quote is committed, so clients
+                # can immediately reread this week's saved chart observation.
+                ctx.progress(index + 1, len(pending), f"{instrument['name']} · {target.isoformat()}")
                 ctx.emit('diagnostic', 'Instrument history checked', details={
                     'instrument_id': instrument_id, 'target': entry['target_date'],
                     'as_of': entry['as_of_date'], 'status': entry['status'],

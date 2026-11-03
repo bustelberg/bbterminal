@@ -152,6 +152,23 @@ def test_loader_saves_only_selected_instrument_and_never_refetches_known_history
     assert len(requests) == 3
 
 
+def test_progress_publishes_committed_observations_before_history_finishes(environment, loader):
+    ctx, _, _ = loader
+    updates = []
+
+    def progress(done, total, message):
+        if not done:
+            return
+        # A client rereading at each event must already see the saved quote.
+        result = returns.read('BOOK', 'A|EUR')
+        updates.append((done, len(environment.tables[returns.TABLE]),
+                        sum(cell['return_pct'] is not None for cell in result['selected']['weeks'])))
+
+    ctx.progress = progress
+    returns.collect('BOOK', 'A|EUR', ctx)
+    assert updates[:3] == [(1, 1, 0), (2, 2, 1), (3, 3, 3)]
+
+
 def test_instrument_repair_replaces_missing_quote_on_same_source_date(environment, loader):
     ctx, requests, _ = loader
     environment.tables['airs_weekly_holding_snapshot'] += [snapshot('2026-01-02', quote()), snapshot('2026-01-09', quote(price=None))]

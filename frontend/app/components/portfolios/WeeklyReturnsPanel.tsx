@@ -207,10 +207,10 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
   const [result, setResult] = useState<{ account: string; key: string; data?: WeeklyReturns; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ id: string; text: string } | null>(null);
-  const key = `${portefeuille}|${selectedId ?? ''}|${revision}`;
+  const key = `${portefeuille}|${selectedId ?? ''}`;
   const options = result && result.account === portefeuille ? result.data?.options ?? [] : [];
   const chosen = options.find((item) => item.id === selectedId);
-  const data = selectedId && result?.key === key && !result.error ? result.data : undefined;
+  const data = selectedId && result?.key === key ? result.data : undefined;
   const ytd = useMemo(() => periodReturn(data), [data]);
   const selectedReturn = useMemo(() => linked.window ? periodReturn(data, linked.window) : null, [data, linked.window]);
   const returnColor = (value: number | undefined) => value == null || value === 0 ? 'text-fg' : value > 0 ? 'text-pos-300' : 'text-neg-300';
@@ -225,7 +225,7 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     const url = `${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns${selectedId ? `?instrument_id=${encodeURIComponent(selectedId)}` : ''}`;
     void (async () => {
       try {
-        const response = await apiFetch(url, { signal: controller.signal });
+        const response = await apiFetch(url, { signal: controller.signal, noReadCache: revision > 0 });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.detail ?? 'Could not load weekly returns');
         if (active) {
@@ -234,12 +234,12 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
         }
       } catch (error) {
         if (active) setResult((previous) => ({ account: portefeuille, key,
-          data: previous?.account === portefeuille ? previous.data : undefined,
+          data: previous?.key === key ? previous.data : undefined,
           error: error instanceof Error ? error.message : String(error) }));
       }
     })();
     return () => { active = false; controller.abort(); };
-  }, [key, portefeuille, selectedId, onData]);
+  }, [key, portefeuille, selectedId, onData, revision]);
 
   function choose(instrument: InstrumentOption) {
     if (instrument.id === selectedId) return;
@@ -254,7 +254,9 @@ function InstrumentReturnSlot({ portefeuille, scale, onData, linked }: {
     setBusy(true); setNotice(null);
     try {
       const { done } = await startJob(`${API_URL}/api/airs/accounts/${encodeURIComponent(portefeuille)}/weekly-returns/job?instrument_id=${encodeURIComponent(instrument.id)}`,
-        `${instrument.name} · AIRS`);
+        `${instrument.name} · AIRS`, undefined, (progress) => {
+          if ((progress.done ?? 0) > 0) setRevision((value) => value + 1);
+        });
       const job = await done;
       invalidateReadCache('selected AIRS instrument history saved');
       setRevision((value) => value + 1);
